@@ -1,16 +1,30 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-const path = require("path");
+// Installed Hermes packages do not have an OpenClaw sibling. Keep the two
+// validators that cross the private broker boundary with this contract.
+const NAME_MAX_LENGTH = 19;
+const PROVIDER_NAME_MAX_LENGTH = 128;
+const NAME_VALID_PATTERN = /^(?!.*--)[a-z]([a-z0-9-]*[a-z0-9])?$/u;
+const PROVIDER_NAME_VALID_PATTERN = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 
-type SandboxNameValidators = {
-  isValidName: (value: unknown) => boolean;
-  isValidProviderName: (value: unknown) => boolean;
-};
+function isValidName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= NAME_MAX_LENGTH &&
+    NAME_VALID_PATTERN.test(value)
+  );
+}
 
-const { isValidName, isValidProviderName } = require(
-  path.join(__dirname, "../../nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs"),
-) as SandboxNameValidators;
+function isValidProviderName(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= PROVIDER_NAME_MAX_LENGTH &&
+    PROVIDER_NAME_VALID_PATTERN.test(value)
+  );
+}
 
 // One end-to-end deadline covers refresh-token exchange, agent-key minting,
 // and destination activation. The local client waits slightly longer so it

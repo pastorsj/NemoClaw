@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { remediateReviewedOpenClawPluginArchive } from "../scripts/lib/openclaw-npm-remediation.mts";
+import { remediateReviewedOpenClawPluginArchive } from "../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts";
 import { packReviewedNpmArchive } from "../scripts/lib/reviewed-npm-archive.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");

@@ -470,8 +470,15 @@ describe("stageCreateSandboxBuildContext", () => {
       recursive: true,
       filter: (source) => !["dist", "node_modules"].includes(path.basename(source)),
     });
-    fs.appendFileSync(path.join(installedPackage, "Dockerfile"), `\n# ${sentinel}\n`);
+    fs.appendFileSync(
+      path.join(installedPackage, "Dockerfile"),
+      `\nCOPY packages/nemoclaw-openclaw/runtime-helper.sh /tmp/runtime-helper.sh\n# ${sentinel}\n`,
+    );
     writeFixtureFile(installedPackage, "plugin/src/selected-package-sentinel.ts", sentinel);
+    writeFixtureFile(installedPackage, "runtime-helper.sh", "#!/bin/sh\necho selected\n");
+    writeFixtureFile(installedPackage, ".DS_Store", "ignored");
+    writeFixtureFile(installedPackage, "node_modules/ignored/index.js", "ignored");
+    writeFixtureFile(installedPackage, "runtime/__pycache__/ignored.pyc", "ignored");
     writeFixtureFile(
       installedPackage,
       ".nemoclaw-install.json",
@@ -501,5 +508,17 @@ describe("stageCreateSandboxBuildContext", () => {
         "utf8",
       ),
     ).toBe(sentinel);
+    const stagedPackage = path.join(
+      result.buildCtx,
+      "packages",
+      "nemoclaw-openclaw",
+    );
+    expect(fs.readFileSync(path.join(stagedPackage, "runtime-helper.sh"), "utf8")).toBe(
+      "#!/bin/sh\necho selected\n",
+    );
+    expect(fs.existsSync(path.join(stagedPackage, ".nemoclaw-install.json"))).toBe(false);
+    expect(fs.existsSync(path.join(stagedPackage, ".DS_Store"))).toBe(false);
+    expect(fs.existsSync(path.join(stagedPackage, "node_modules"))).toBe(false);
+    expect(fs.existsSync(path.join(stagedPackage, "runtime", "__pycache__"))).toBe(false);
   });
 });

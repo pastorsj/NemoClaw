@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFileSync } from "node:child_process";
-import { realpathSync, rmSync } from "node:fs";
+import { realpathSync, rmSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -115,6 +115,17 @@ describe("published harness packages", () => {
   ])("ships OpenClaw package artifact %s", (artifact) => {
     expect(packedPaths).toContain(`packages/nemoclaw-openclaw/${artifact}`);
   });
+
+  it.each(["scripts/backup-workspace.sh", "scripts/lib/openclaw-npm-remediation.mts"])(
+    "ships executable OpenClaw package helper %s",
+    (artifact) => {
+      expect(packedPaths).toContain(`packages/nemoclaw-openclaw/${artifact}`);
+      expect(openClawPackedPaths).toContain(artifact);
+      expect(
+        statSync(path.join(packagedRoot, "packages", "nemoclaw-openclaw", artifact)).mode & 0o111,
+      ).not.toBe(0);
+    },
+  );
 
   it.each([
     "Dockerfile",

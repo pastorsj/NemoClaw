@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
+import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
 
 export const SANDBOX_BUILD_CONTEXT_PREFIX = "nemoclaw-build-";
 export type SandboxBuildContextOrigin = "custom" | "generated";
@@ -23,6 +24,7 @@ export interface BuildContextStats {
 type BuildContextStatsFilter = (entryPath: string) => boolean;
 
 const MAX_REVIEWED_RUNTIME_ARTIFACT_BYTES = 8 * 1024 * 1024;
+const AGENT_RUNTIME_PACKAGE_IGNORES = new Set([".nemoclaw-install.json", ".DS_Store"]);
 
 function createBuildContextDir(tmpDir: string = os.tmpdir()): string {
   return fs.mkdtempSync(path.join(tmpDir, SANDBOX_BUILD_CONTEXT_PREFIX));
@@ -65,49 +67,28 @@ function copyReviewedRegularFileSync(
   }
 }
 
-function stageOpenClawRuntimeGraphs(sourceAgentDir: string, buildCtx: string): void {
-  const stagedAgentDir = path.join(buildCtx, "packages", "nemoclaw-openclaw");
-  fs.mkdirSync(stagedAgentDir, { recursive: true });
-  fs.copyFileSync(
-    path.join(sourceAgentDir, "state-lock-plan.json"),
-    path.join(stagedAgentDir, "state-lock-plan.json"),
-  );
-  fs.copyFileSync(path.join(sourceAgentDir, "start.sh"), path.join(stagedAgentDir, "start.sh"));
-  for (const fileName of ["policy-additions.yaml", "policy-permissive-default.yaml"]) {
-    fs.copyFileSync(path.join(sourceAgentDir, fileName), path.join(stagedAgentDir, fileName));
-  }
-  for (const runtimeName of [
-    "managed-image-messaging-runtime",
-    "mcporter-runtime",
-    "openclaw-runtime",
-    "wechat-runtime",
-  ]) {
-    const sourceDir = path.join(sourceAgentDir, runtimeName);
-    const stagedDir = path.join(stagedAgentDir, runtimeName);
-    fs.mkdirSync(stagedDir, { recursive: true });
-    for (const fileName of ["package.json", "package-lock.json"]) {
-      fs.copyFileSync(path.join(sourceDir, fileName), path.join(stagedDir, fileName));
-    }
-  }
-  fs.cpSync(
-    path.join(sourceAgentDir, "managed-image-messaging-runtime", "npm-cache-seed"),
-    path.join(stagedAgentDir, "managed-image-messaging-runtime", "npm-cache-seed"),
-    { mode: fs.constants.COPYFILE_FICLONE, recursive: true },
-  );
-  for (const directoryName of [
-    "model-specific-setup",
-    "openclaw-plugins",
-    "preloads",
-    "schemas",
-    "scripts",
-  ]) {
-    fs.cpSync(
-      path.join(sourceAgentDir, directoryName),
-      path.join(stagedAgentDir, directoryName),
-      { mode: fs.constants.COPYFILE_FICLONE, recursive: true },
-    );
-  }
-  normalizeReadModesForDockerCopy(path.join(buildCtx, "packages"));
+export function stageAgentRuntimePackage(sourcePackageDir: string, buildCtx: string): void {
+  const stagedPackageDir = path.join(buildCtx, "packages", path.basename(sourcePackageDir));
+  const includePackagePath = createCustomBuildContextFilter(sourcePackageDir);
+  fs.rmSync(stagedPackageDir, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(stagedPackageDir), { recursive: true });
+  fs.cpSync(sourcePackageDir, stagedPackageDir, {
+    mode: fs.constants.COPYFILE_FICLONE,
+    recursive: true,
+    filter: (sourcePath) => {
+      const metadata = fs.lstatSync(sourcePath);
+      if (metadata.isSymbolicLink() || (!metadata.isDirectory() && !metadata.isFile())) {
+        throw new Error(
+          `Agent runtime packages may contain only directories and regular files: ${sourcePath}`,
+        );
+      }
+      return (
+        !AGENT_RUNTIME_PACKAGE_IGNORES.has(path.basename(sourcePath)) &&
+        includePackagePath(sourcePath)
+      );
+    },
+  });
+  normalizeReadModesForDockerCopy(stagedPackageDir);
 }
 
 function stageMcpToolDiscoveryRuntime(rootDir: string, buildCtx: string): void {
@@ -186,11 +167,8 @@ function stageLegacySandboxBuildContext(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
-  stageOpenClawRuntimeGraphs(sourceAgentDir, buildCtx);
+  stageAgentRuntimePackage(sourceAgentDir, buildCtx);
   stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
-  fs.cpSync(path.join(sourceAgentDir, "plugin"), path.join(stagedAgentDir, "plugin"), {
-    recursive: true,
-  });
   fs.cpSync(path.join(rootDir, "nemoclaw-blueprint"), path.join(buildCtx, "nemoclaw-blueprint"), {
     recursive: true,
   });
@@ -210,10 +188,6 @@ function stageLegacySandboxBuildContext(
   );
   stageManagedStartupRuntimeSources(rootDir, buildCtx);
   normalizeReadModesForDockerCopy(path.join(buildCtx, "src"));
-  fs.rmSync(path.join(stagedAgentDir, "plugin", "node_modules"), {
-    recursive: true,
-    force: true,
-  });
   normalizeReadModesForDockerCopy(stagedAgentDir);
 
   return {
@@ -229,9 +203,7 @@ function stageOptimizedSandboxBuildContext(
 ): StagedBuildContext {
   const buildCtx = createBuildContextDir(tmpDir);
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
-  const sourcePluginDir = path.join(sourceAgentDir, "plugin");
   const stagedAgentDir = path.join(buildCtx, "packages", "nemoclaw-openclaw");
-  const stagedPluginDir = path.join(stagedAgentDir, "plugin");
   const sourceBlueprintDir = path.join(rootDir, "nemoclaw-blueprint");
   const stagedBlueprintDir = path.join(buildCtx, "nemoclaw-blueprint");
   const stagedCiDir = path.join(buildCtx, "ci");
@@ -245,7 +217,7 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
-  stageOpenClawRuntimeGraphs(sourceAgentDir, buildCtx);
+  stageAgentRuntimePackage(sourceAgentDir, buildCtx);
   stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
 
   fs.mkdirSync(stagedCiDir, { recursive: true });
@@ -254,20 +226,6 @@ function stageOptimizedSandboxBuildContext(
     path.join(stagedCiDir, "npm-audit-exceptions.json"),
   );
   normalizeReadModesForDockerCopy(stagedCiDir);
-
-  fs.mkdirSync(stagedPluginDir, { recursive: true });
-  for (const fileName of [
-    "package.json",
-    "package-lock.json",
-    "tsconfig.json",
-    "openclaw.plugin.json",
-  ]) {
-    fs.copyFileSync(path.join(sourcePluginDir, fileName), path.join(stagedPluginDir, fileName));
-  }
-  fs.cpSync(path.join(sourcePluginDir, "src"), path.join(stagedPluginDir, "src"), {
-    recursive: true,
-  });
-  normalizeReadModesForDockerCopy(stagedPluginDir);
 
   fs.mkdirSync(stagedBlueprintDir, { recursive: true });
   fs.copyFileSync(
@@ -386,10 +344,6 @@ function stageOptimizedSandboxBuildContext(
   fs.copyFileSync(
     path.join(rootDir, "scripts", "lib", "reviewed-npm-audit.mts"),
     path.join(stagedScriptsDir, "lib", "reviewed-npm-audit.mts"),
-  );
-  fs.copyFileSync(
-    path.join(rootDir, "scripts", "lib", "openclaw-npm-remediation.mts"),
-    path.join(stagedScriptsDir, "lib", "openclaw-npm-remediation.mts"),
   );
   normalizeReadModesForDockerCopy(stagedScriptsDir);
 

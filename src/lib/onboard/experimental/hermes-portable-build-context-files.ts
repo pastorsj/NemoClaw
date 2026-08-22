@@ -64,6 +64,10 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "nemoclaw-blueprint/model-specific-setup/schema.json", mode: "100644" },
   { path: "packages/nemoclaw-openclaw/policy-permissive-default.yaml", mode: "100644" },
   { path: "packages/nemoclaw-openclaw/policy-additions.yaml", mode: "100644" },
+  {
+    path: "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+    mode: "100755",
+  },
   { path: "nemoclaw-blueprint/policies/presets/brave.yaml", mode: "100644" },
   { path: "nemoclaw-blueprint/policies/presets/brew.yaml", mode: "100644" },
   { path: "nemoclaw-blueprint/policies/presets/claude-code.yaml", mode: "100644" },
@@ -108,7 +112,6 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "scripts/lib/corporate-ca-runtime.sh", mode: "100755" },
   { path: "scripts/lib/entrypoint-env-wrapper.sh", mode: "100755" },
   { path: "scripts/lib/gateway-supervisor.sh", mode: "100755" },
-  { path: "scripts/lib/openclaw-npm-remediation.mts", mode: "100755" },
   { path: "scripts/lib/patch-bundled-npm-ip-address.mts", mode: "100755" },
   { path: "scripts/lib/reviewed-npm-archive.mts", mode: "100755" },
   { path: "scripts/lib/sandbox-init.sh", mode: "100755" },

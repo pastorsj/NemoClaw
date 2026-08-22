@@ -409,16 +409,21 @@ function resolveLocalCandidate(
   // On failure, surface the captured stderr so the user still gets a
   // useful diagnostic.
   const buildResult = withLocalBuildHeartbeat(() =>
-    dockerBuild(options.dockerfilePath, imageRef, options.rootDir || ROOT, {
-      buildArgs: options.buildArgs,
+    dockerBuild(
+      options.dockerfilePath,
+      imageRef,
+      options.buildContextDir || options.rootDir || ROOT,
+      {
+        buildArgs: options.buildArgs,
 
-      labels: {
-        [SANDBOX_BASE_BUILD_PROVENANCE_LABEL]: createSandboxBaseImageBuildProvenance(options),
+        labels: {
+          [SANDBOX_BASE_BUILD_PROVENANCE_LABEL]: createSandboxBaseImageBuildProvenance(options),
+        },
+        quiet: true,
+        ignoreError: true,
+        suppressOutput: true,
       },
-      quiet: true,
-      ignoreError: true,
-      suppressOutput: true,
-    }),
+    ),
   );
   if (buildResult.error || buildResult.status !== 0) {
     const diagnostics = formatBuildFailureDiagnostics(buildResult);
@@ -468,8 +473,18 @@ export function resolveSandboxBaseImage(
   const override = options.envVar ? String(env[options.envVar] || "").trim() : "";
 
   if (!options.forceRefresh) {
-    const reused = reuseSandboxBaseImageResolutionHint(options, resolutionKey);
-    if (reused) return reused;
+    if (
+      options.requireLocalBuild === true &&
+      options.resolutionHint &&
+      options.resolutionHint.source !== "local"
+    ) {
+      addTraceEvent("nemoclaw.sandbox_base_image.cache_stale", {
+        reason: "local_build_required",
+      });
+    } else {
+      const reused = reuseSandboxBaseImageResolutionHint(options, resolutionKey);
+      if (reused) return reused;
+    }
   } else {
     addTraceEvent("nemoclaw.sandbox_base_image.force_refresh");
   }
@@ -534,6 +549,14 @@ export function resolveSandboxBaseImage(
           "resolved or validated, and no compatible local base image could be produced.",
       );
     };
+    if (options.requireLocalBuild === true) {
+      const local = resolveLocalCandidate(options);
+      if (local) return finish(local);
+      throw new SandboxBaseImageResolutionError(
+        `${options.label || "Sandbox base image"} requires a local build from the selected ` +
+          "agent runtime package, but no compatible local image could be produced.",
+      );
+    }
     if (baseImageInputsDirty(rootDir, env, inputPaths)) return resolveChangedInputs();
 
     if (preferPinnedRemoteRef && options.pinnedRemoteRef) {

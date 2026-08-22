@@ -20,7 +20,7 @@ import {
 } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { packReviewedNpmArchive } from "./reviewed-npm-archive.mts";
+import { packReviewedNpmArchive } from "../../../../scripts/lib/reviewed-npm-archive.mts";
 
 type JsonObject = Record<string, any>;
 

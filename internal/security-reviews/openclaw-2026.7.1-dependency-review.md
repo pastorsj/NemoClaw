@@ -304,7 +304,7 @@ The child-process probe confirms these results:
 - valid `uberctx-test` baggage remains available;
 - a valid Jaeger header produces the expected trace and span context.
 
-`scripts/lib/openclaw-npm-remediation.mts` verifies each original package and
+`packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts` verifies each original package and
 replacement package identities before it writes the archive. It rejects an
 upstream graph that no longer resolves the reviewed Axios, Jaeger,
 `brace-expansion`, `fast-uri`, `undici`, or `ip-address` source versions and

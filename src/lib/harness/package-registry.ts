@@ -366,6 +366,10 @@ function packageTreeDigest(rootDir: string): string {
   return hash.digest("hex");
 }
 
+export function harnessPackageContentDigest(rootDir: string): string {
+  return packageTreeDigest(rootDir);
+}
+
 function indexById(
   packages: readonly HarnessPackage[],
   source: string,

@@ -18,7 +18,7 @@ const MULTILINE_COPY_SOURCES = [
   "packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json",
   "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
   "scripts/lib/reviewed-npm-audit.mts",
-  "scripts/lib/openclaw-npm-remediation.mts",
+  "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
 ];
 
 describe("rebuild-openclaw old-base build context", () => {

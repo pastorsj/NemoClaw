@@ -40,8 +40,10 @@ export type ResolveBaseImageOptions = {
   imageName: string;
   dockerfilePath: string;
   inputPaths?: string[];
+  additionalInputFingerprint?: string;
 
   buildArgs?: Record<string, string>;
+  buildContextDir?: string;
   localTag: string;
   envVar?: string;
   label?: string;
@@ -55,6 +57,7 @@ export type ResolveBaseImageOptions = {
   validationDescription?: string;
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceRefresh?: boolean;
+  requireLocalBuild?: boolean;
   trustedLocalOverride?: TrustedLocalBaseImageOverride;
 };
 

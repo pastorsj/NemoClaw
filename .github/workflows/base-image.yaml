@@ -70,7 +70,7 @@ on:
       - "ci/reviewed-npm-audit.json"
       # Dockerfile.base validates min_openclaw_version from this file at build time.
       - "nemoclaw-blueprint/blueprint.yaml"
-      - "scripts/lib/openclaw-npm-remediation.mts"
+      - "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts"
       - "scripts/lib/reviewed-npm-audit.mts"
       - "scripts/security/build-native-security-packages.sh"
       - "scripts/security/build-perl-security-packages.sh"

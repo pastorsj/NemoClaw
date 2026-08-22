@@ -15,10 +15,11 @@ import {
   dockerTag,
 } from "../adapters/docker";
 import { CUA_SANDBOX_IMAGE_ENV, requireCuaSandboxImageRef } from "../cua/feature";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 import { encodeCorporateCaArg, resolveCorporateCa } from "../onboard/corporate-ca";
 import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
 import { ROOT } from "../runner";
-import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
+import { SANDBOX_BUILD_CONTEXT_PREFIX, stageAgentRuntimePackage } from "../sandbox/build-context";
 import {
   buildLocalBaseTag,
   createSandboxBaseImageBuildProvenance,
@@ -78,13 +79,18 @@ const HERMES_BASE_IMAGE_PROBE_GUARDS = [
 // pins and Docker-normalized platform manifest digests.
 const HERMES_OFFICIAL_BASE_DIGEST_REF =
   /^ghcr\.io\/nvidia\/nemoclaw\/hermes-sandbox-base@sha256:[0-9a-f]{64}$/;
-const HARNESS_BUILD_CONTEXT_IGNORES = new Set([
-  ".nemoclaw-install.json",
-  ".DS_Store",
-  ".git",
-  "__pycache__",
-  "node_modules",
-]);
+
+type AgentBasePackageAuthority = Readonly<{
+  additionalInputFingerprint?: string;
+  dockerfilePath: string;
+  packageDir: string | null;
+  requireLocalBuild: boolean;
+}>;
+
+type PreparedAgentBaseBuildContext = Readonly<{
+  buildContextDir?: string;
+  dockerfilePath: string;
+}>;
 
 export interface EnsureAgentBaseImageOptions {
   forceBaseImageRebuild?: boolean;
@@ -333,6 +339,8 @@ function createAgentBaseImageResolutionOptions(
   agent: AgentDefinition,
   dockerfilePath: string,
   options: EnsureAgentBaseImageOptions,
+  authority: AgentBasePackageAuthority,
+  buildContextDir?: string,
 ): ResolveBaseImageOptions {
   const imageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
   const validationOptions =
@@ -354,6 +362,11 @@ function createAgentBaseImageResolutionOptions(
     resolutionHint: options.resolutionHint,
     forceRefresh: options.forceBaseImageRefresh,
     rootDir: ROOT,
+    ...(buildContextDir ? { buildContextDir } : {}),
+    ...(authority.additionalInputFingerprint
+      ? { additionalInputFingerprint: authority.additionalInputFingerprint }
+      : {}),
+    ...(authority.requireLocalBuild ? { requireLocalBuild: true } : {}),
     pinnedRemoteRef,
     preferPinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
     ...validationOptions,
@@ -373,6 +386,8 @@ export function bindLocalAgentBaseImageToPinnedProvenance(
   const dockerfilePath = agent.dockerfileBasePath;
   const pinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent);
   if (!dockerfilePath || !pinnedRemoteRef) return null;
+  const authority = resolveAgentBasePackageAuthority(agent, dockerfilePath);
+  if (authority.requireLocalBuild) return null;
 
   const local = inspectLocalImageMetadata(imageRef);
   const pinned = inspectLocalImageMetadata(pinnedRemoteRef);
@@ -405,7 +420,7 @@ export function bindLocalAgentBaseImageToPinnedProvenance(
   const canonicalEnv = { ...process.env };
   delete canonicalEnv[getAgentSandboxBaseImageEnvVar(agent.name)];
   const resolutionOptions = {
-    ...createAgentBaseImageResolutionOptions(agent, dockerfilePath, {}),
+    ...createAgentBaseImageResolutionOptions(agent, authority.dockerfilePath, {}, authority),
     env: canonicalEnv,
   };
   const glibcVersion = getImageGlibcVersion(imageRef);
@@ -454,7 +469,13 @@ export function bindLocalAgentBaseImageHandoffToResolution(
   const temporaryHandoffImageId = parseTemporarySandboxBaseImageId(localImageName, handoffRef);
   const normalizedMetadataImageId = metadata.imageId.trim().toLowerCase();
   if (!baseDockerfile || metadata !== reusedResolutionHint) return null;
-  const resolutionOptions = createAgentBaseImageResolutionOptions(agent, baseDockerfile, {});
+  const authority = resolveAgentBasePackageAuthority(agent, baseDockerfile);
+  const resolutionOptions = createAgentBaseImageResolutionOptions(
+    agent,
+    authority.dockerfilePath,
+    {},
+    authority,
+  );
   const canonicalSourceImageId =
     parseTemporarySandboxBaseImageId(localImageName, sourceRef) === null
       ? parseContentAddressedSandboxBaseImageId(localImageName, sourceRef)
@@ -547,8 +568,7 @@ function localBaseImageBuildProvenance(options: ResolveBaseImageOptions): {
   };
 }
 
-/** Replace the bundled build-context copy with the package selected by loadAgent(). */
-function stageSelectedHarnessPackage(agent: AgentDefinition, buildCtx: string): void {
+function selectedAgentRuntimePackageDir(agent: AgentDefinition): string | null {
   const agentDir = typeof agent.agentDir === "string" ? path.resolve(agent.agentDir) : null;
   const dockerfilePath = agent.dockerfilePath ? path.resolve(agent.dockerfilePath) : null;
   const manifestPath =
@@ -560,19 +580,91 @@ function stageSelectedHarnessPackage(agent: AgentDefinition, buildCtx: string): 
     dockerfilePath !== path.join(agentDir, "Dockerfile") ||
     manifestPath !== path.join(agentDir, "manifest.yaml")
   ) {
-    return;
+    return null;
+  }
+  return agentDir;
+}
+
+function resolveAgentBasePackageAuthority(
+  agent: AgentDefinition,
+  dockerfilePath: string,
+): AgentBasePackageAuthority {
+  const resolvedDockerfilePath = path.resolve(dockerfilePath);
+  const packageDir = selectedAgentRuntimePackageDir(agent);
+  if (!packageDir || resolvedDockerfilePath !== path.join(packageDir, "Dockerfile.base")) {
+    return {
+      dockerfilePath: resolvedDockerfilePath,
+      packageDir: null,
+      requireLocalBuild: false,
+    };
   }
 
-  const stagedPackageDir = path.join(buildCtx, "packages", packageDirectoryName);
-  const includePackagePath = createCustomBuildContextFilter(agentDir);
-  fs.rmSync(stagedPackageDir, { recursive: true, force: true });
-  fs.mkdirSync(path.dirname(stagedPackageDir), { recursive: true });
-  fs.cpSync(agentDir, stagedPackageDir, {
-    recursive: true,
-    filter: (sourcePath) =>
-      !HARNESS_BUILD_CONTEXT_IGNORES.has(path.basename(sourcePath)) &&
-      includePackagePath(sourcePath),
-  });
+  const bundledPackageDir = path.join(ROOT, "packages", path.basename(packageDir));
+  if (packageDir === bundledPackageDir) {
+    return {
+      dockerfilePath: resolvedDockerfilePath,
+      packageDir,
+      requireLocalBuild: false,
+    };
+  }
+
+  const selectedDigest = harnessPackageContentDigest(packageDir);
+  if (
+    fs.existsSync(bundledPackageDir) &&
+    selectedDigest === harnessPackageContentDigest(bundledPackageDir)
+  ) {
+    return {
+      dockerfilePath: path.join(bundledPackageDir, "Dockerfile.base"),
+      packageDir,
+      requireLocalBuild: false,
+    };
+  }
+
+  return {
+    additionalInputFingerprint: selectedDigest,
+    dockerfilePath: resolvedDockerfilePath,
+    packageDir,
+    requireLocalBuild: true,
+  };
+}
+
+function prepareAgentBaseBuildContext(
+  authority: AgentBasePackageAuthority,
+): PreparedAgentBaseBuildContext {
+  if (!authority.requireLocalBuild || !authority.packageDir) {
+    return { dockerfilePath: authority.dockerfilePath };
+  }
+
+  const buildContextDir = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
+  try {
+    const includeBuildContextPath = createCustomBuildContextFilter(ROOT);
+    fs.cpSync(ROOT, buildContextDir, {
+      recursive: true,
+      filter: (sourcePath) =>
+        path.basename(sourcePath) !== ".claude" && includeBuildContextPath(sourcePath),
+    });
+    stageAgentRuntimePackage(authority.packageDir, buildContextDir);
+    return {
+      buildContextDir,
+      dockerfilePath: path.join(
+        buildContextDir,
+        "packages",
+        path.basename(authority.packageDir),
+        "Dockerfile.base",
+      ),
+    };
+  } catch (error) {
+    fs.rmSync(buildContextDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** Replace the bundled build-context copy with the package selected by loadAgent(). */
+function stageSelectedHarnessPackage(agent: AgentDefinition, buildCtx: string): void {
+  const agentDir = selectedAgentRuntimePackageDir(agent);
+  if (!agentDir) return;
+
+  stageAgentRuntimePackage(agentDir, buildCtx);
 }
 
 /**
@@ -586,13 +678,37 @@ export function ensureAgentBaseImage(
   if (agent.name === "nemocua") {
     return { imageTag: requireCuaSandboxImageRef(), built: false };
   }
-  const baseDockerfile = agent.dockerfileBasePath;
+  const manifestBaseDockerfile = agent.dockerfileBasePath;
 
-  if (!baseDockerfile) {
+  if (!manifestBaseDockerfile) {
     return { imageTag: null, built: false };
   }
 
-  const resolutionOptions = createAgentBaseImageResolutionOptions(agent, baseDockerfile, options);
+  const authority = resolveAgentBasePackageAuthority(agent, manifestBaseDockerfile);
+  const prepared = prepareAgentBaseBuildContext(authority);
+  try {
+    return ensureAgentBaseImageWithContext(agent, options, authority, prepared);
+  } finally {
+    if (prepared.buildContextDir) {
+      fs.rmSync(prepared.buildContextDir, { recursive: true, force: true });
+    }
+  }
+}
+
+function ensureAgentBaseImageWithContext(
+  agent: AgentDefinition,
+  options: EnsureAgentBaseImageOptions,
+  authority: AgentBasePackageAuthority,
+  prepared: PreparedAgentBaseBuildContext,
+): EnsureAgentBaseImageResult {
+  const baseDockerfile = prepared.dockerfilePath;
+  const resolutionOptions = createAgentBaseImageResolutionOptions(
+    agent,
+    baseDockerfile,
+    options,
+    authority,
+    prepared.buildContextDir,
+  );
   const baseImageName = resolutionOptions.imageName;
   const baseImageTag = `${baseImageName}:${SANDBOX_BASE_TAG}`;
   const overrideEnvVar = getAgentSandboxBaseImageEnvVar(agent.name);
@@ -615,13 +731,18 @@ export function ensureAgentBaseImage(
     const forceBuildTag = `nemoclaw-${agent.name}-sandbox-base-local:build-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
     const buildProvenance = localBaseImageBuildProvenance(resolutionOptions);
     console.log(`  Rebuilding ${agent.displayName} base image...`);
-    const buildResult = dockerBuild(baseDockerfile, forceBuildTag, ROOT, {
-      buildArgs: resolutionOptions.buildArgs,
+    const buildResult = dockerBuild(
+      baseDockerfile,
+      forceBuildTag,
+      resolutionOptions.buildContextDir || ROOT,
+      {
+        buildArgs: resolutionOptions.buildArgs,
 
-      ignoreError: true,
-      labels: buildProvenance.labels,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
+        ignoreError: true,
+        labels: buildProvenance.labels,
+        stdio: ["ignore", "inherit", "inherit"],
+      },
+    );
     if (buildResult.error || buildResult.status !== 0) {
       dockerRmi(forceBuildTag, { ignoreError: true, suppressOutput: true });
       const detail = buildResult.error
@@ -724,13 +845,18 @@ export function ensureAgentBaseImage(
   if (inspectResult?.status !== 0) {
     console.log(`  Building ${agent.displayName} base image (first time only)...`);
     const buildProvenance = localBaseImageBuildProvenance(resolutionOptions);
-    const buildResult = dockerBuild(baseDockerfile, baseImageTag, ROOT, {
-      buildArgs: resolutionOptions.buildArgs,
+    const buildResult = dockerBuild(
+      baseDockerfile,
+      baseImageTag,
+      resolutionOptions.buildContextDir || ROOT,
+      {
+        buildArgs: resolutionOptions.buildArgs,
 
-      ignoreError: true,
-      labels: buildProvenance.labels,
-      stdio: ["ignore", "inherit", "inherit"],
-    });
+        ignoreError: true,
+        labels: buildProvenance.labels,
+        stdio: ["ignore", "inherit", "inherit"],
+      },
+    );
     if (buildResult.error || buildResult.status !== 0) {
       const detail = buildResult.error
         ? `: ${buildResult.error.message}`

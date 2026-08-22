@@ -70,6 +70,7 @@ export function createSandboxBaseImageBuildProvenanceKey(options: ResolveBaseIma
     imageName: options.imageName,
     sourceRevisions: getSourceRevisionIds(rootDir, env),
     inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath, options.inputPaths),
+    additionalInputFingerprint: options.additionalInputFingerprint || null,
 
     buildArgsFingerprint: hashBuildArgs(options.buildArgs),
   };
@@ -95,12 +96,14 @@ export function createSandboxBaseImageResolutionKey(options: ResolveBaseImageOpt
     sourceTags: getSourceShortShaTags(rootDir, env),
     localTag: options.localTag,
     inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath, options.inputPaths),
+    additionalInputFingerprint: options.additionalInputFingerprint || null,
 
     buildArgsFingerprint: hashBuildArgs(options.buildArgs),
     platform: dockerPlatform(),
     requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
     minGlibcVersion: options.minGlibcVersion || OPENSHELL_SANDBOX_MIN_GLIBC,
     validationDescription: options.validationDescription || null,
+    requireLocalBuild: options.requireLocalBuild === true,
   };
   return crypto.createHash("sha256").update(JSON.stringify(material)).digest("hex");
 }

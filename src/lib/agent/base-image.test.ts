@@ -79,6 +79,21 @@ function writeFixture(root: string, relativePath: string, content: string): stri
   return filePath;
 }
 
+function copyInstalledHarnessPackage(agentName: string): string {
+  const packageDirectoryName = `nemoclaw-${agentName}`;
+  const installedPackageDir = path.join(tmpDir(), packageDirectoryName);
+  fs.cpSync(path.join(PACKAGES_DIR, packageDirectoryName), installedPackageDir, {
+    recursive: true,
+    filter: (sourcePath) =>
+      ![".DS_Store", ".git", "__pycache__", "node_modules"].includes(path.basename(sourcePath)),
+  });
+  fs.writeFileSync(
+    path.join(installedPackageDir, ".nemoclaw-install.json"),
+    '{"digest":"test-install-receipt"}\n',
+  );
+  return installedPackageDir;
+}
+
 // Read the agent names from the checked-in Dockerfiles so a base image that
 // starts consuming the corporate CA cannot ship without the build argument.
 const CORPORATE_CA_BASE_IMAGE_AGENTS = [AGENTS_DIR, PACKAGES_DIR].flatMap((root) =>
@@ -267,6 +282,80 @@ describe("agent base image provisioning", () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("keeps published base-image resolution for an unchanged installed package", () => {
+    const installedPackageDir = copyInstalledHarnessPackage("hermes");
+    const agent = makeAgent({
+      agentDir: installedPackageDir,
+      manifestPath: path.join(installedPackageDir, "manifest.yaml"),
+      dockerfilePath: path.join(installedPackageDir, "Dockerfile"),
+      dockerfileBasePath: path.join(installedPackageDir, "Dockerfile.base"),
+    });
+
+    withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock, root }) => {
+      ensureAgentBaseImage(agent);
+
+      const resolutionOptions = resolveSandboxBaseImageMock.mock.calls[0]?.[0];
+      expect(resolutionOptions).toEqual(
+        expect.objectContaining({
+          dockerfilePath: path.join(root, "packages", "nemoclaw-hermes", "Dockerfile.base"),
+          rootDir: root,
+        }),
+      );
+      expect(resolutionOptions).not.toHaveProperty("additionalInputFingerprint");
+      expect(resolutionOptions).not.toHaveProperty("buildContextDir");
+      expect(resolutionOptions).not.toHaveProperty("requireLocalBuild");
+    });
+  });
+
+  it(
+    "stages and fingerprints a changed installed package for a local base build",
+    () => {
+      const installedPackageDir = copyInstalledHarnessPackage("hermes");
+      const selectedBaseDockerfile = path.join(installedPackageDir, "Dockerfile.base");
+      fs.appendFileSync(selectedBaseDockerfile, "\n# selected package base\n");
+      const agent = makeAgent({
+        agentDir: installedPackageDir,
+        manifestPath: path.join(installedPackageDir, "manifest.yaml"),
+        dockerfilePath: path.join(installedPackageDir, "Dockerfile"),
+        dockerfileBasePath: selectedBaseDockerfile,
+      });
+      let stagedContext = "";
+
+      withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock }) => {
+        resolveSandboxBaseImageMock.mockImplementation((resolutionOptions) => {
+          expect(resolutionOptions).toEqual(
+            expect.objectContaining({
+              additionalInputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+              buildContextDir: expect.any(String),
+              requireLocalBuild: true,
+            }),
+          );
+          stagedContext = String(resolutionOptions.buildContextDir);
+          const stagedBaseDockerfile = path.join(
+            stagedContext,
+            "packages",
+            "nemoclaw-hermes",
+            "Dockerfile.base",
+          );
+          expect(resolutionOptions.dockerfilePath).toBe(stagedBaseDockerfile);
+          expect(fs.readFileSync(stagedBaseDockerfile, "utf8")).toContain(
+            "# selected package base",
+          );
+          return {
+            ref: "nemoclaw-hermes-sandbox-base-local:compatible",
+            digest: null,
+            source: "local",
+            glibcVersion: process.platform === "linux" ? "2.41" : null,
+          };
+        });
+
+        ensureAgentBaseImage(agent);
+        expect(fs.existsSync(stagedContext)).toBe(false);
+      });
+    },
+    testTimeout(20_000),
+  );
 
   it(
     "reuses a compatible resolved agent base image during normal onboarding",

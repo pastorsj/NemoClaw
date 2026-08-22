@@ -589,7 +589,7 @@ set -euo pipefail
 
 messaging_build_applier=${JSON.stringify(MESSAGING_BUILD_APPLIER)}
 reviewed_archive_helper=scripts/lib/reviewed-npm-archive.mts
-remediation_helper=scripts/lib/openclaw-npm-remediation.mts
+remediation_helper=packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
 openclaw_dockerfile=${JSON.stringify(OPENCLAW_DOCKERFILE)}
 openclaw_base_dockerfile=${JSON.stringify(OPENCLAW_BASE_DOCKERFILE)}
 
@@ -678,7 +678,7 @@ optional_plugin_block="$(sed -n '/# Install non-messaging OpenClaw plugins that 
 check_contains "$optional_plugin_block" '/scripts/lib/reviewed-npm-archive.mts' "optional plugin shared helper"
 check_contains "$optional_plugin_block" '--package-spec "$plugin_spec" --integrity "$expected_integrity"' "optional plugin reviewed identity"
 check_contains "$optional_plugin_block" '--tarball-url "$expected_tarball"' "optional plugin reviewed tarball"
-check_contains "$optional_plugin_block" '/scripts/lib/openclaw-npm-remediation.mts' "optional plugin remediation helper"
+check_contains "$optional_plugin_block" '/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts' "optional plugin remediation helper"
 check_contains "$optional_plugin_block" '"@openclaw/diagnostics-otel@2026.7.1")' "diagnostics remediation identity"
 check_contains "$optional_plugin_block" '--working-directory "$plugin_work_root"' "diagnostics remediation workspace"
 check_contains "$optional_plugin_block" 'if (!value.remediated || typeof value.archivePath !== "string")' "diagnostics remediation result guard"
@@ -694,7 +694,7 @@ check_not_contains "$optional_plugin_block" 'pack_reviewed_npm_tarball' "optiona
 	grep -Fq '["openclaw", "plugins", "install", \`npm-pack:\${packed.archivePath}\`]' "$messaging_build_applier"
 	grep -Fq 'rmSync(packed.rootDir, { recursive: true, force: true })' "$messaging_build_applier"
 	grep -Fq 'from "../../../../../scripts/lib/reviewed-npm-archive.mts"' "$messaging_build_applier"
-	grep -Fq 'from "../../../../../scripts/lib/openclaw-npm-remediation.mts"' "$messaging_build_applier"
+	grep -Fq 'from "../../../../../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts"' "$messaging_build_applier"
 	grep -Fq 'remediateReviewedOpenClawPluginArchive({' "$messaging_build_applier"
 	grep -Fq 'spawnSync(request.npmExecutable ?? "npm", args' "$reviewed_archive_helper"
 	grep -Fq '["view", request.packageSpec, "dist.integrity"]' "$reviewed_archive_helper"

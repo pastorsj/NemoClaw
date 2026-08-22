@@ -279,6 +279,11 @@ describe("sandbox build context staging", () => {
       );
     }
     writeFixture(
+      path.join("packages", "nemoclaw-openclaw", "scripts", "lib", "openclaw-npm-remediation.mts"),
+      "fixture\n",
+      0o700,
+    );
+    writeFixture(
       path.join("src", "lib", "messaging", "applier", "build", "messaging-build-applier.mts"),
     );
     writeFixture(
@@ -329,7 +334,6 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("scripts", "lib", "bundled-npm-package.mts"), "fixture\n", 0o700);
     writeFixture(path.join("scripts", "lib", "seed-reviewed-npm-cache.mts"), "fixture\n", 0o700);
     writeFixture(path.join("scripts", "lib", "reviewed-npm-audit.mts"), "fixture\n", 0o700);
-    writeFixture(path.join("scripts", "lib", "openclaw-npm-remediation.mts"), "fixture\n", 0o700);
     fs.chmodSync(path.join(sourceRoot, "scripts"), 0o700);
     fs.chmodSync(path.join(sourceRoot, "scripts", "lib"), 0o700);
   }
@@ -392,6 +396,29 @@ describe("sandbox build context staging", () => {
       fs.readFileSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "start.sh"), "utf8"),
     );
     expect((fs.statSync(startScript).mode & 0o777).toString(8)).toBe("755");
+
+    const remediationHelper = path.join(
+      buildCtx,
+      "packages",
+      "nemoclaw-openclaw",
+      "scripts",
+      "lib",
+      "openclaw-npm-remediation.mts",
+    );
+    expect(fs.readFileSync(remediationHelper, "utf8")).toBe(
+      fs.readFileSync(
+        path.join(
+          sourceRoot,
+          "packages",
+          "nemoclaw-openclaw",
+          "scripts",
+          "lib",
+          "openclaw-npm-remediation.mts",
+        ),
+        "utf8",
+      ),
+    );
+    expect((fs.statSync(remediationHelper).mode & 0o777).toString(8)).toBe("755");
 
     for (const fileName of ["policy-additions.yaml", "policy-permissive-default.yaml"]) {
       const stagedPolicy = path.join(buildCtx, "packages", "nemoclaw-openclaw", fileName);

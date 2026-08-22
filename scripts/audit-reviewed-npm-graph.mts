@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { remediateReviewedOpenClawPluginArchive } from "./lib/openclaw-npm-remediation.mts";
+import { remediateReviewedOpenClawPluginArchive } from "../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts";
 import {
   packReviewedNpmArchive,
   verifyInstalledNpmLock,

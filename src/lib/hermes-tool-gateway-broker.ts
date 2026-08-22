@@ -13,8 +13,27 @@ const { spawn, spawnSync } = require("child_process");
 const { ROOT, run, runCapture, runCaptureEx, validateName } = require("./runner");
 const { buildSubprocessEnv } = require("./subprocess-env");
 const { getCredsDir } = require("./credentials/store");
+const { resolveHarnessPackage } = require("./harness/package-registry");
 const oauth = require("./oauth-device-code");
 const onboardProviders = require("./onboard/providers");
+
+function resolveHermesToolGatewayRuntimePaths(env = process.env) {
+  const harnessPackage = resolveHarnessPackage("hermes", env);
+  if (!harnessPackage) {
+    throw new Error("Hermes harness package is unavailable");
+  }
+  const hostDir = path.join(harnessPackage.rootDir, "host");
+  return Object.freeze({
+    packageRoot: harnessPackage.rootDir,
+    hostDir,
+    script: path.join(hostDir, "tool-gateway-broker.ts"),
+    matrix: path.join(hostDir, "managed-tool-gateway-matrix.json"),
+    runtimeCredentials: path.join(hostDir, "runtime-refresh-credentials.ts"),
+    controlContract: path.join(hostDir, "tool-gateway-control-contract.ts"),
+  });
+}
+
+const HERMES_TOOL_GATEWAY_RUNTIME_PATHS = resolveHermesToolGatewayRuntimePaths();
 const {
   HERMES_CLONE_CONTROL_CLIENT_TIMEOUT_MS,
   HERMES_CLONE_CONTROL_STATUS_TIMEOUT_MS,
@@ -22,7 +41,7 @@ const {
   isValidControlRequestId,
   isValidProviderName,
   newControlDeadline,
-} = require(path.join(ROOT, "packages", "nemoclaw-hermes", "host", "tool-gateway-control-contract.ts"));
+} = require(HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract);
 
 const HERMES_TOOL_GATEWAY_REFRESH_CREDENTIAL_ENV = "NEMOCLAW_HERMES_TOOL_GATEWAY_REFRESH_TOKEN";
 const HERMES_TOOL_GATEWAY_PORT = 11436;
@@ -33,30 +52,11 @@ const HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH = path.join(
   getCredsDir(),
   "hermes-tool-gateway-broker.sock",
 );
-const HERMES_TOOL_GATEWAY_SCRIPT = path.join(
-  ROOT,
-  "packages", "nemoclaw-hermes",
-  "host",
-  "tool-gateway-broker.ts",
-);
-const HERMES_TOOL_GATEWAY_MATRIX_PATH = path.join(
-  ROOT,
-  "packages", "nemoclaw-hermes",
-  "host",
-  "managed-tool-gateway-matrix.json",
-);
-const HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH = path.join(
-  ROOT,
-  "packages", "nemoclaw-hermes",
-  "host",
-  "runtime-refresh-credentials.ts",
-);
-const HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH = path.join(
-  ROOT,
-  "packages", "nemoclaw-hermes",
-  "host",
-  "tool-gateway-control-contract.ts",
-);
+const HERMES_TOOL_GATEWAY_SCRIPT = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.script;
+const HERMES_TOOL_GATEWAY_MATRIX_PATH = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.matrix;
+const HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH =
+  HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeCredentials;
+const HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract;
 const HERMES_TOOL_GATEWAY_RUNTIME_MISMATCH_RECOVERY =
   "Reauthorize every managed-tool Hermes sandbox, then retry.";
 const HERMES_TOOL_GATEWAY_UNOWNED_LISTENER_RECOVERY =
@@ -778,8 +778,10 @@ function ensureHermesToolGatewayBroker(options = {}, deps = {}) {
   const desiredHash = brokerRuntimeHash();
   const hashMatches = readBrokerHash() === desiredHash;
   const pid = readPid();
-  const { owned: currentBrokerOwned, healthy: brokerHealthy } =
-    verifyHermesToolGatewayBroker(pid, deps);
+  const { owned: currentBrokerOwned, healthy: brokerHealthy } = verifyHermesToolGatewayBroker(
+    pid,
+    deps,
+  );
   const currentBrokerHealthy = currentBrokerOwned && brokerHealthy;
   // `/health` is unauthenticated on a fixed port, so reachability proves
   // liveness and never identity. Ownership comes only from a recorded pid that
@@ -930,6 +932,7 @@ function ensureHermesToolGatewayBrokerForSandboxEntry(entry, options = {}) {
 }
 
 module.exports = {
+  HERMES_TOOL_GATEWAY_RUNTIME_PATHS,
   HERMES_TOOL_GATEWAY_REFRESH_CREDENTIAL_ENV,
   HERMES_TOOL_GATEWAY_STATE_DIR,
   HERMES_TOOL_GATEWAY_PORT,

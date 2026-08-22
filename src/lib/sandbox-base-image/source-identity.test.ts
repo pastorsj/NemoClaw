@@ -81,7 +81,11 @@ function createGitFixture() {
     "FROM python:3.13\n",
   );
   writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
-  writeFixture(root, "scripts/lib/openclaw-npm-remediation.mts", "export const version = 1;\n");
+  writeFixture(
+    root,
+    "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+    "export const version = 1;\n",
+  );
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
   git(root, ["add", "."]);
   git(root, ["commit", "-m", "initial"]);
@@ -182,7 +186,7 @@ describe("sandbox base-image source identity", () => {
       "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
       "scripts/security/build-perl-security-packages.sh",
       "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
-      "scripts/lib/openclaw-npm-remediation.mts",
+      "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
       "scripts/lib/reviewed-npm-archive.mts",
       "scripts/lib/bundled-npm-package.mts",
       "scripts/patch-bundled-npm-brace-expansion.mts",
@@ -368,8 +372,12 @@ describe("sandbox base-image source identity", () => {
   it("detects committed npm remediation helper changes relative to origin/main", () => {
     const root = createGitFixture();
     git(root, ["switch", "-c", "feature"]);
-    writeFixture(root, "scripts/lib/openclaw-npm-remediation.mts", "export const version = 2;\n");
-    git(root, ["add", "scripts/lib/openclaw-npm-remediation.mts"]);
+    writeFixture(
+      root,
+      "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+      "export const version = 2;\n",
+    );
+    git(root, ["add", "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts"]);
     git(root, ["commit", "-m", "change remediation helper"]);
 
     expect(baseImageInputsDirty(root, gitEnv)).toBe(false);

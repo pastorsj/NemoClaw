@@ -96,7 +96,7 @@ Axios remediation and the diagnostics Jaeger remediation. See
 [`openclaw-2026.7.1-dependency-review.md`](./openclaw-2026.7.1-dependency-review.md)
 for the active source and validation boundary.
 
-`scripts/lib/openclaw-npm-remediation.mts` recognizes only eight exact reviewed identities: the E2E-only 2026.3.11 core archive, four retained 2026.6.10 identities, and three active 2026.7.1 identities.
+`packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts` recognizes only eight exact reviewed identities: the E2E-only 2026.3.11 core archive, four retained 2026.6.10 identities, and three active 2026.7.1 identities.
 It rejects an unexpected source dependency shape before it changes or installs an archive.
 The helper verifies every replacement package by exact registry SRI and tarball URL.
 It also rejects unsafe archive members before extraction and after repacking.

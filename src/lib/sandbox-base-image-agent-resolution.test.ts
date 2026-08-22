@@ -72,7 +72,8 @@ describe("agent-specific sandbox base-image resolution", () => {
     const options = resolutionOptions();
     const lockfile = path.join(
       process.cwd(),
-      "packages", "nemoclaw-langchain-deepagents-code",
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
       "requirements.lock",
     );
 
@@ -125,5 +126,56 @@ describe("agent-specific sandbox base-image resolution", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("deepagents-code==0.1.55"));
     expect(dockerMocks.build).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("builds a selected runtime package locally without trying published images", () => {
+    const options = resolutionOptions();
+    const buildContextDir = "/tmp/nemoclaw-selected-package-context";
+    const dockerfilePath = path.join(
+      buildContextDir,
+      "packages",
+      "nemoclaw-openclaw",
+      "Dockerfile.base",
+    );
+    dockerMocks.imageInspect.mockReturnValue({ status: 1 });
+    dockerMocks.build.mockReturnValue({ status: 0 });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      expect(
+        resolveSandboxBaseImage({
+          ...options,
+          additionalInputFingerprint: "a".repeat(64),
+          buildContextDir,
+          dockerfilePath,
+          env: {
+            ...options.env,
+            NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+          },
+          requireLocalBuild: true,
+        }),
+      ).toMatchObject({
+        ref: options.localTag,
+        digest: null,
+        source: "local",
+      });
+      expect(dockerMocks.build).toHaveBeenCalledWith(
+        dockerfilePath,
+        options.localTag,
+        buildContextDir,
+        expect.objectContaining({
+          labels: {
+            "com.nvidia.nemoclaw.base-build-provenance": expect.stringMatching(
+              /^[0-9a-f]{64}\.[0-9a-f]{64}$/,
+            ),
+          },
+        }),
+      );
+      expect(dockerMocks.pull).not.toHaveBeenCalled();
+      expect(sourceMocks.inputsDirty).not.toHaveBeenCalled();
+      expect(sourceMocks.inputsChanged).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

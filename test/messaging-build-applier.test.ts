@@ -25,14 +25,19 @@ const { remediateReviewedArchive } = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("../scripts/lib/openclaw-npm-remediation.mts", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("../scripts/lib/openclaw-npm-remediation.mts")>();
-  return {
-    ...original,
-    remediateReviewedOpenClawPluginArchive: remediateReviewedArchive,
-  };
-});
+vi.mock(
+  "../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import("../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts")
+      >();
+    return {
+      ...original,
+      remediateReviewedOpenClawPluginArchive: remediateReviewedArchive,
+    };
+  },
+);
 
 beforeEach(() => {
   vi.clearAllMocks();

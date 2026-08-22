@@ -473,7 +473,10 @@ function runInstallBlock(
       .replaceAll("/usr/local/lib", path.join(tmp, "usr-local-lib"))
       .replaceAll("/usr/local/bin", path.join(tmp, "usr-local-bin"))
       .replaceAll("/scripts/lib/reviewed-npm-archive.mts", REVIEWED_NPM_ARCHIVE_HELPER)
-      .replaceAll("/scripts/lib/openclaw-npm-remediation.mts", remediationHelper)
+      .replaceAll(
+        "/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+        remediationHelper,
+      )
       .replaceAll("/scripts/lib/reviewed-npm-audit.mts", auditHelper)
       .replaceAll("/scripts/npm-audit-exceptions.json", auditExceptionFile),
   ].join("\n");
@@ -651,7 +654,10 @@ function runOptionalOpenClawPluginBlock(
         "unset NEMOCLAW_REVIEWED_NPM_ARCHIVE_DIR;",
       )
       .replaceAll("/scripts/lib/reviewed-npm-archive.mts", REVIEWED_NPM_ARCHIVE_HELPER)
-      .replaceAll("/scripts/lib/openclaw-npm-remediation.mts", remediationFixture),
+      .replaceAll(
+        "/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+        remediationFixture,
+      ),
   ].join("\n");
   const scriptPath = path.join(tmp, "run.sh");
   fs.writeFileSync(scriptPath, script, { mode: 0o700 });
@@ -1828,7 +1834,14 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
           ),
         );
         const remediation = fs.readFileSync(
-          path.join(REPO_ROOT, "scripts", "lib", "openclaw-npm-remediation.mts"),
+          path.join(
+            REPO_ROOT,
+            "packages",
+            "nemoclaw-openclaw",
+            "scripts",
+            "lib",
+            "openclaw-npm-remediation.mts",
+          ),
           "utf-8",
         );
 

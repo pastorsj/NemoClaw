@@ -23,7 +23,10 @@ vi.mock("./source-identity", async (importOriginal) => ({
   getNearestVersionedBaseImageTags: sourceMocks.nearestTags,
 }));
 
-import { createSandboxBaseImageResolutionKey } from "./resolution-key";
+import {
+  createSandboxBaseImageBuildProvenanceKey,
+  createSandboxBaseImageResolutionKey,
+} from "./resolution-key";
 
 const roots: string[] = [];
 
@@ -81,6 +84,29 @@ describe("sandbox base-image resolution key", () => {
     });
 
     expect(second).not.toBe(first);
+  });
+
+  it("includes an installed package fingerprint in resolution and build provenance", () => {
+    const root = fixture();
+    const base = options(root);
+    const first = { ...base, additionalInputFingerprint: "a".repeat(64) };
+    const second = { ...base, additionalInputFingerprint: "b".repeat(64) };
+
+    expect(createSandboxBaseImageResolutionKey(second)).not.toBe(
+      createSandboxBaseImageResolutionKey(first),
+    );
+    expect(createSandboxBaseImageBuildProvenanceKey(second)).not.toBe(
+      createSandboxBaseImageBuildProvenanceKey(first),
+    );
+  });
+
+  it("isolates local-only package resolution from ordinary resolution", () => {
+    const root = fixture();
+    const base = options(root);
+
+    expect(createSandboxBaseImageResolutionKey({ ...base, requireLocalBuild: true })).not.toBe(
+      createSandboxBaseImageResolutionKey(base),
+    );
   });
 
   it("changes when a Dockerfile-copied runtime helper changes", () => {
