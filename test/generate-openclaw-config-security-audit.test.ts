@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildConfig } from "../scripts/generate-openclaw-config.mts";
+import { buildConfig } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 
 const BASE_ENV: Record<string, string> = {
   NEMOCLAW_MODEL: "test-model",

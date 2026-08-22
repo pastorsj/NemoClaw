@@ -27,7 +27,10 @@ const ENTRYPOINT_ENV_WRAPPER = join(
   import.meta.dirname,
   "../scripts/lib/entrypoint-env-wrapper.sh",
 );
-const RC_CLEAN_SCRIPT = join(import.meta.dirname, "../scripts/lib/clean_runtime_shell_env_shim.py");
+const RC_CLEAN_SCRIPT = join(
+  import.meta.dirname,
+  "../packages/nemoclaw-openclaw/scripts/lib/clean_runtime_shell_env_shim.py",
+);
 
 function rcShimWrapperHeader(): string {
   return `export NEMOCLAW_RC_CLEAN_SCRIPT=${JSON.stringify(RC_CLEAN_SCRIPT)}`;

@@ -14,6 +14,11 @@
     "noImplicitAny": false,
     "types": ["node"]
   },
-  "include": ["bin/**/*.js", "scripts/**/*.js", "test/**/*.js"],
-  "exclude": ["node_modules", "**/node_modules", "nemoclaw", "docs"]
+  "include": [
+    "bin/**/*.js",
+    "packages/nemoclaw-openclaw/preloads/**/*.js",
+    "scripts/**/*.js",
+    "test/**/*.js"
+  ],
+  "exclude": ["node_modules", "**/node_modules", "packages/nemoclaw-openclaw/plugin", "docs"]
 }

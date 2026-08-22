@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { main } from "../scripts/generate-openclaw-config.mts";
+import { main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import { dockerSpawnSync } from "../src/lib/adapters/docker/exec";
 
 const OPENCLAW_RUNTIME_IMAGE =

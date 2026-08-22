@@ -11,7 +11,7 @@ import {
   buildConfig,
   buildLocalOllamaSmallContextCompaction,
   buildManagedInferenceSafeguardCompaction,
-} from "../scripts/generate-openclaw-config.mts";
+} from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import { patchStagedDockerfile } from "../src/lib/onboard/dockerfile-patch";
 
 const tmpRoots: string[] = [];

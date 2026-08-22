@@ -15,7 +15,7 @@ import {
   MARKER,
   patchBundleMcpRuntimeText,
   patchOpenClawMcpReliability,
-} from "../scripts/patch-openclaw-mcp-reliability.mts";
+} from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts";
 
 const PATCH_SCRIPT = path.join(
   import.meta.dirname,

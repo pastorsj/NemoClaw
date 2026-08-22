@@ -13,7 +13,7 @@ import fs from "node:fs";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 
-import { isPrivateIp } from "../../../nemoclaw/src/blueprint/private-networks.ts";
+import { isPrivateIp } from "../../../packages/nemoclaw-openclaw/plugin/src/blueprint/private-networks.ts";
 import { listPresets } from "../../../src/lib/policy/index.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";

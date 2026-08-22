@@ -9,7 +9,7 @@ PRs touching these areas need tests before approval.
 |------|-----------|
 | Installer / bootstrap shell | `install.sh`, `setup.sh`, `brev-setup.sh`, `scripts/*.sh` |
 | Onboarding / host glue | `src/lib/onboard.ts`, `bin/nemoclaw.js`, `scripts/*.sh` |
-| Sandbox / policy / SSRF | `nemoclaw/src/blueprint/`, `nemoclaw-blueprint/`, policy presets |
+| Sandbox / policy / SSRF | `packages/nemoclaw-*/`, `nemoclaw-blueprint/`, policy presets |
 | Workflow / enforcement | `.github/workflows/`, prek hooks, DCO, signing, version/tag flows |
 | Credentials / inference / network | credential helpers, inference provider routing, approval flows |
 

@@ -8,7 +8,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(import.meta.dirname, "..");
-const CANONICAL_FIX = path.join(ROOT, "nemoclaw-blueprint", "scripts", "http-proxy-fix.js");
+const CANONICAL_FIX = path.join(
+  ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "preloads",
+  "http-proxy-fix.js",
+);
 const START_SCRIPT = path.join(ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 
 function extractShellFunction(source: string, name: string): string {

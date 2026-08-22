@@ -16,7 +16,7 @@ import { resultText } from "../fixtures/clients/command.ts";
 import { type E2ETargetFixtures, expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { OPENSHELL_V0106_QUALIFICATION } from "../fixtures/openshell-v0106-qualification.ts";
-import { REPO_ROOT } from "../fixtures/paths.ts";
+import { OPENCLAW_PLUGIN_RUNNER, REPO_ROOT } from "../fixtures/paths.ts";
 import { resolveVerifiedCloudflaredBinary } from "./cloudflared-prerequisite.ts";
 import {
   remapDnsRebindingHostname,
@@ -213,7 +213,7 @@ const originalLookup = dns.promises.lookup;
 dns.promises.lookup = ((hostname, options) => hostname === "rebinding.example.test"
   ? Promise.resolve([{ address: "93.184.216.34", family: 4 }])
   : originalLookup.call(dns.promises, hostname, options));
-const { main } = await import(${JSON.stringify(path.join(REPO_ROOT, "nemoclaw/src/blueprint/runner.ts"))});
+const { main } = await import(${JSON.stringify(OPENCLAW_PLUGIN_RUNNER)});
 await main(["apply"]);
 `;
 
@@ -589,7 +589,7 @@ async function runRuntimeIdentityE2EScenario(
   );
 
   const redactionValues = [...oauth.secretValues(), inferenceKey];
-  const runnerPath = path.join(REPO_ROOT, "nemoclaw/src/blueprint/runner.ts");
+  const runnerPath = OPENCLAW_PLUGIN_RUNNER;
   const tsxPath = path.join(REPO_ROOT, "node_modules/tsx/dist/cli.mjs");
   const runnerEnv = {
     ...openshellEnv,

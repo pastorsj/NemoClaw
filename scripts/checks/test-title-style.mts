@@ -25,7 +25,11 @@ export type TestTitleViolation = {
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const DEFAULT_SCAN_ROOTS = Object.freeze(["src", "test", "nemoclaw/src"]);
+const DEFAULT_SCAN_ROOTS = Object.freeze([
+  "src",
+  "test",
+  "packages/nemoclaw-openclaw/plugin/src",
+]);
 const TEST_FILE_PATTERN = /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/;
 const TEST_CALL_NAMES = new Set(["describe", "it", "test"]);
 const SKIP_DIRS = new Set([".git", ".venv", "coverage", "dist", "node_modules"]);

@@ -25,7 +25,7 @@ export type MockParityManifest = {
 const LIVE_TEST = /^test\/e2e\/live\/.+\.test\.ts$/u;
 const FAST_TESTS = [
   /^src\/.+\.test\.ts$/u,
-  /^nemoclaw\/src\/.+\.test\.ts$/u,
+  /^packages\/nemoclaw-openclaw\/plugin\/src\/.+\.test\.ts$/u,
   /^test\/e2e\/support\/.+\.test\.ts$/u,
   /^test\/(?!e2e\/|package-contract\/).+\.test\.(?:js|ts)$/u,
 ] as const;

@@ -20,7 +20,7 @@ import {
   resolveTrustedSnapshotSanitizerPythonPath,
   setSnapshotSanitizerPythonPathForTest,
   SnapshotSanitizerPrerequisiteError,
-} from "../../../nemoclaw/dist/shared/snapshot-sanitizer-boundary.cjs";
+} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/snapshot-sanitizer-boundary.cjs";
 import { sanitizeBackupDirectory } from "./sandbox.js";
 
 const testDirectories: string[] = [];

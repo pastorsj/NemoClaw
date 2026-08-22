@@ -137,7 +137,7 @@ describe("MCP tool discovery image contract", () => {
     {
       archiveCount: 85,
       label: "NemoClaw CLI",
-      lockfile: "nemoclaw/package-lock.json",
+      lockfile: "packages/nemoclaw-openclaw/plugin/package-lock.json",
       seedDirectory: "tools/mcp-tool-discovery-runtime/npm-cache-seed",
     },
   ])("pins every reachable $label lockfile archive for protected Linux x64 builds", (fixture) => {

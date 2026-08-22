@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { resolveHarnessPackage } from "../harness/package-registry";
 import type { PrivilegedExec, PrivilegedExecResult } from "./state-dir-lock";
 
 // OpenClaw's top-level config and trust anchor need a stronger transition than
@@ -17,10 +18,9 @@ export const OPENCLAW_CONFIG_PATH = `${OPENCLAW_CONFIG_DIR}/openclaw.json`;
 export const OPENCLAW_CONFIG_HASH_PATH = `${OPENCLAW_CONFIG_DIR}/.config-hash`;
 
 const CONTAINER_HELPER = "/usr/local/lib/nemoclaw/openclaw-config-guard.py";
-const HOST_HELPER = path.resolve(__dirname, "../../../scripts/openclaw-config-guard.py");
 const CONTAINER_TIMEOUT = ["timeout", "--signal=TERM", "--kill-after=5s", "5m"];
 // Must exceed STATE_DIR_GUARD_TIMEOUT_SECONDS (22m) in
-// scripts/openclaw-config-guard.py, which is the guard's whole-action budget
+// packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py, which is the guard's whole-action budget
 // for the unseal and its rollback together. The outer docker client timeout in
 // shields/index.ts must exceed this timeout plus its termination grace.
 const RECOVERY_CONTAINER_TIMEOUT = ["timeout", "--signal=TERM", "--kill-after=5s", "25m"];
@@ -340,7 +340,14 @@ let cachedHostHelper: string | null = null;
 
 function readHostHelper(): string {
   if (cachedHostHelper !== null) return cachedHostHelper;
-  cachedHostHelper = fs.readFileSync(HOST_HELPER, "utf-8");
+  const harnessPackage = resolveHarnessPackage("openclaw");
+  if (!harnessPackage) {
+    throw new Error("OpenClaw harness package is unavailable");
+  }
+  cachedHostHelper = fs.readFileSync(
+    path.join(harnessPackage.rootDir, "scripts", "openclaw-config-guard.py"),
+    "utf-8",
+  );
   return cachedHostHelper;
 }
 

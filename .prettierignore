@@ -1,8 +1,8 @@
 node_modules/
 dist/
 coverage/
-nemoclaw/node_modules/
-nemoclaw/dist/
+packages/nemoclaw-openclaw/plugin/node_modules/
+packages/nemoclaw-openclaw/plugin/dist/
 nemoclaw-blueprint/
 docs/_build/
 *.md

@@ -17,7 +17,7 @@
  *     OpenClaw tool-scope approvals without ever opening an SSH `connect`.
  *
  * Both surfaces apply the SAME narrow allowlist as the startup watcher
- * (`scripts/lib/openclaw_device_approval_policy.py`): the explicit `cli`,
+ * (`packages/nemoclaw-openclaw/scripts/lib/openclaw_device_approval_policy.py`): the explicit `cli`,
  * `openclaw-cli`, and `openclaw-control-ui` client identities, restricted to
  * operator.pairing/read/write scopes. A known mode alone is never sufficient;
  * unknown clients are ignored, never approved.
@@ -44,6 +44,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { shellQuote } from "../../core/shell-quote";
+import { resolveHarnessPackage } from "../../harness/package-registry";
 import { ROOT } from "../../state/paths";
 import {
   CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
@@ -93,13 +94,6 @@ export type AutoPairApprovalBudget = {
   approveTimeoutS?: number;
   timeoutMs?: number;
 };
-
-const AUTO_PAIR_POLICY_PATH = path.join(
-  ROOT,
-  "scripts",
-  "lib",
-  "openclaw_device_approval_policy.py",
-);
 
 export type AutoPairApprovalResult = {
   /** The sandbox-exec was issued (false only when the policy helper is absent). */
@@ -199,7 +193,17 @@ export function classifyAutoPairApprovalExecReceipt(
 
 export function readAutoPairApprovalPolicyModule(): string | null {
   try {
-    return readFileSync(AUTO_PAIR_POLICY_PATH, "utf-8");
+    const harnessPackage = resolveHarnessPackage("openclaw");
+    if (!harnessPackage) return null;
+    return readFileSync(
+      path.join(
+        harnessPackage.rootDir,
+        "scripts",
+        "lib",
+        "openclaw_device_approval_policy.py",
+      ),
+      "utf-8",
+    );
   } catch {
     // Best-effort: a packaging/layout regression must not block connect or
     // doctor. Build-context and package `files` coverage keep this helper

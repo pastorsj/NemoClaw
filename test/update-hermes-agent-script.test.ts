@@ -7,7 +7,14 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const SCRIPT = path.join(import.meta.dirname, "..", "scripts", "update-hermes-agent.sh");
+const SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "scripts",
+  "update-hermes-agent.sh",
+);
 const HERMES_BASE_DOCKERFILE = path.join(
   import.meta.dirname,
   "..",
@@ -59,11 +66,17 @@ function writeExecutable(file: string, body: string) {
   fs.writeFileSync(file, body, { mode: 0o755 });
 }
 
-describe("scripts/update-hermes-agent.sh", () => {
+describe("packages/nemoclaw-hermes/scripts/update-hermes-agent.sh", () => {
   it("pins rebuild overrides to the accepted full image-ID local tag family", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-update-rebuild-"));
     const repo = path.join(tmp, "repo");
-    const script = path.join(repo, "scripts", "update-hermes-agent.sh");
+    const script = path.join(
+      repo,
+      "packages",
+      "nemoclaw-hermes",
+      "scripts",
+      "update-hermes-agent.sh",
+    );
     const fakeBin = path.join(tmp, "bin");
     const dockerLog = path.join(tmp, "docker.log");
     const nemohermesLog = path.join(tmp, "nemohermes.log");

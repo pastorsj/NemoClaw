@@ -51,14 +51,14 @@ SYMBOL=$(<"$EVIDENCE_DIR/symbol.txt")
 
 # List commits whose diff changes the count of the reviewed symbol.
 git log "$REPORTED_VERSION".."$LATEST" -S"$SYMBOL" \
-  --reverse --oneline -- src/ bin/ nemoclaw/src/
+  --reverse --oneline -- Dockerfile Dockerfile.base src/ bin/ scripts/ nemoclaw/src/ agents/ packages/ nemoclaw-blueprint/
 
 # Optional subject narrowing after the pickaxe search.
 git log "$REPORTED_VERSION".."$LATEST" \
   --grep='remove\|delete\|drop\|deprecate' -i --oneline
 
 # Confirm that a selected candidate diff deletes the reviewed symbol.
-git show --format=fuller --patch <candidate-sha> -- src/ bin/ nemoclaw/src/ \
+git show --format=fuller --patch <candidate-sha> -- Dockerfile Dockerfile.base src/ bin/ scripts/ nemoclaw/src/ agents/ packages/ nemoclaw-blueprint/ \
   | grep -E '^-[^-]' \
   | grep -nF -- "$SYMBOL"
 ```
@@ -72,8 +72,8 @@ Save the reviewed symbol in `$EVIDENCE_DIR/symbol.txt` without interpolating it 
 ```bash
 SYMBOL=$(<"$EVIDENCE_DIR/symbol.txt")
 [ -n "$SYMBOL" ] || { echo "ERROR: reviewed symbol is empty"; exit 1; }
-git grep -n -e "$SYMBOL" "$REPORTED_VERSION" -- src/ bin/ nemoclaw/
-git grep -n -e "$SYMBOL" "$LATEST" -- src/ bin/ nemoclaw/
+git grep -n -e "$SYMBOL" "$REPORTED_VERSION" -- Dockerfile Dockerfile.base src/ bin/ scripts/ nemoclaw/src/ agents/ packages/ nemoclaw-blueprint/
+git grep -n -e "$SYMBOL" "$LATEST" -- Dockerfile Dockerfile.base src/ bin/ scripts/ nemoclaw/src/ agents/ packages/ nemoclaw-blueprint/
 ```
 
 Capture for evidence: both grep commands and their outputs. Locate the accepted decision or merged PR that defines the replacement before selecting `by-design`.
@@ -95,7 +95,7 @@ SYMPTOM_TWO=$(<"$EVIDENCE_DIR/symptom-keyword-2.redacted.txt")
 git grep -n \
   -e "$SYMPTOM_ONE" \
   -e "$SYMPTOM_TWO" \
-  "$LATEST" -- src/ nemoclaw/src/
+  "$LATEST" -- Dockerfile Dockerfile.base src/ scripts/ nemoclaw/src/ agents/ packages/ nemoclaw-blueprint/
 ```
 
 For #2168 the literal flag is `--dangerously-skip-permissions`, but the symptom is "sandbox created but not registered in CLI." Grepping for `register.*[Ss]andbox`, the readiness-gate / cleanup-failure path in `src/lib/onboard.ts` surfaces as a related-but-different way to produce an orphan sandbox.
@@ -107,7 +107,9 @@ If a related failure mode is found, the by-design comment MUST include a "What's
 Search the repo for tests that exercise the NEW intended workflow (the one that replaced the removed symbol). Citing them strengthens the comment from "trust me, it was removed" to "the new workflow is exercised by these tests."
 
 ```bash
-git grep -lnE "<new-workflow-keyword>" -- test/ nemoclaw/src/ 2>/dev/null | head -5
+git grep -nE "<new-workflow-keyword>" -- test/ nemoclaw/src/ agents/ packages/ 2>/dev/null \
+  | grep -E '(^|/)([^/:]+\.(test|spec)\.[cm]?[jt]sx?|test_[^/:]+\.py|[^/:]+_test\.py|[^/:]+-test\.sh|test-[^/:]+\.sh|e2e-[^/:]+\.sh):[0-9]+:' \
+  | head -5
 ```
 
 Cite at most three concrete test paths. If none exist, omit the section — do not invent paths.

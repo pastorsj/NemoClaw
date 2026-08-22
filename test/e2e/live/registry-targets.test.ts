@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { liveTargetTimeoutContract } from "../../../tools/e2e/onboard-timeout-contract.mts";
+import { resultText } from "../fixtures/clients/index.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { HOSTED_INFERENCE_SECRET } from "../fixtures/hosted-inference.ts";
 import { CLI_DIST_ENTRYPOINT, CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
@@ -14,6 +15,7 @@ import {
   readRegistrySandboxEntry,
 } from "../fixtures/phases/index.ts";
 import { listTargets, requireTargets } from "../registry/registry.ts";
+import { loadManifest } from "../registry/manifests.ts";
 import { liveTargetSupport, liveTargetTestTitle } from "../registry/runtime-support.ts";
 import { runE2eCloudExperimentalChecks } from "./cloud-experimental-checks.ts";
 import {
@@ -153,6 +155,14 @@ for (const [targetIndex, target] of listTargets().entries()) {
         );
       }
       progress.phase("prepare the target lifecycle prerequisites");
+      expect(runPlan.manifestPath, `target '${target.id}' is missing its manifest`).not.toBeNull();
+      const harnessId = loadManifest(path.join(REPO_ROOT, runPlan.manifestPath!)).document.spec
+        .onboarding.agent;
+      const harnessInstall = await host.nemoclaw(["harness", "install", harnessId], {
+        artifactName: "harness-package-install",
+        timeoutMs: 120_000,
+      });
+      expect(harnessInstall.exitCode, resultText(harnessInstall)).toBe(0);
       await (lifecycleProfile === "post-reboot-recovery"
         ? lifecycle.preparePostReboot()
         : Promise.resolve());
@@ -163,6 +173,10 @@ for (const [targetIndex, target] of listTargets().entries()) {
         ...(timeoutContract.commandTimeoutMs === undefined
           ? {}
           : { timeoutMs: timeoutContract.commandTimeoutMs }),
+      });
+      await host.expectHarnessInstalled(harnessId, {
+        artifactName: "harness-package",
+        timeoutMs: 120_000,
       });
 
       // Lifecycle phase runs between onboard and state-validation.

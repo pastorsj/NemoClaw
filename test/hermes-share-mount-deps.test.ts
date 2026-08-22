@@ -14,7 +14,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const HERMES_DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base");
 const HERMES_ARCHIVE_HELPER = path.join(
   ROOT,
-  "scripts",
+  "packages",
+  "nemoclaw-hermes",
   "checks",
   "download-hermes-source-archive.sh",
 );
@@ -497,23 +498,26 @@ describe("Hermes share mount package parity (#2947)", () => {
   it.each([
     { expectedChecksum: "0".repeat(64), name: "checksum mismatch" },
     { archiveReplacement: "checksum-valid malformed archive\n", name: "malformed archive" },
-  ])("does not retry a Hermes archive $name (#9815)", ({ archiveReplacement, expectedChecksum }) => {
-    const { calls, result, targetRoot, tmp } = runHermesArchiveLayer(
-      ["http:200"],
-      expectedChecksum,
-      archiveReplacement,
-    );
-    try {
-      expect(result.status).not.toBe(0);
-      expect(calls).toEqual(["curl http:200"]);
-      expect(result.stderr).toContain(
-        "Hermes archive download outcome=passed-first-attempt attempt=1/3",
+  ])(
+    "does not retry a Hermes archive $name (#9815)",
+    ({ archiveReplacement, expectedChecksum }) => {
+      const { calls, result, targetRoot, tmp } = runHermesArchiveLayer(
+        ["http:200"],
+        expectedChecksum,
+        archiveReplacement,
       );
-      expect(fs.existsSync(path.join(targetRoot, "pyproject.toml"))).toBe(false);
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  });
+      try {
+        expect(result.status).not.toBe(0);
+        expect(calls).toEqual(["curl http:200"]);
+        expect(result.stderr).toContain(
+          "Hermes archive download outcome=passed-first-attempt attempt=1/3",
+        );
+        expect(fs.existsSync(path.join(targetRoot, "pyproject.toml"))).toBe(false);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("requests gnupg, procps, e2fsprogs, and openssh-sftp-server from the Hermes base apt layer", () => {
     const dockerfile = fs.readFileSync(HERMES_DOCKERFILE_BASE, "utf-8");
@@ -677,7 +681,7 @@ describe("Hermes share mount package parity (#2947)", () => {
           'case "$#" in',
           '  1) [ "$1" = "--version" ] || exit 64 ;;',
           '  2) [ "$1" = "acp" ] && [ "$2" = "--check" ] || exit 64 ;;',
-          '  *) exit 64 ;;',
+          "  *) exit 64 ;;",
           "esac",
           "",
         ].join("\n"),

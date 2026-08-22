@@ -137,7 +137,7 @@ BOUNDARY_MANIFEST_NAME = "openshell-child-visible-credentials.v${overrides.herme
 if manifest.get("openshellVersion") != "${overrides.hermesTransactionExpectedVersion ?? openshellMax}":
     raise RuntimeError("invalid")
 `,
-    "scripts/update-hermes-agent.sh": `
+    "packages/nemoclaw-hermes/scripts/update-hermes-agent.sh": `
 "openshell-child-visible-credentials.v${overrides.hermesUpdateBoundaryVersion ?? openshellMax}.json"
 `,
     "packages/nemoclaw-openclaw/Dockerfile.base": `
@@ -162,7 +162,7 @@ ${openclawSelector(
     "packages/nemoclaw-openclaw/manifest.yaml": `
 expected_version: "${overrides.openclawManifestVersion ?? openclawVersion}"
 `,
-    "nemoclaw/package.json": JSON.stringify({
+    "packages/nemoclaw-openclaw/plugin/package.json": JSON.stringify({
       openclaw: {
         build: {
           openclawVersion: overrides.openclawPackageVersion ?? openclawVersion,

@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 const GATE = path.join(
   import.meta.dirname,
   "..",
+  "packages",
+  "nemoclaw-hermes",
   "scripts",
   "runtime-state-mutation-startup-gate.py",
 );

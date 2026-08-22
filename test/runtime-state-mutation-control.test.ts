@@ -8,6 +8,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 const CONTROLLER = path.join(
   import.meta.dirname,
   "..",
+  "packages",
+  "nemoclaw-hermes",
   "scripts",
   "runtime-state-mutation-control.py",
 );

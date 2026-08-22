@@ -11,7 +11,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import { safeTmpHelpers } from "./nemoclaw-start-gateway.test-helpers";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const NORMALIZER = path.join(ROOT, "scripts", "lib", "normalize_mutable_config_perms.py");
+const NORMALIZER = path.join(
+  ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "lib",
+  "normalize_mutable_config_perms.py",
+);
 const START_SCRIPT = path.join(ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 const temporaryRoots: string[] = [];
 

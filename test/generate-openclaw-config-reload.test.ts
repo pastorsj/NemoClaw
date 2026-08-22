@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Tests for the gateway.reload pin in scripts/generate-openclaw-config.mts
+// Tests for the gateway.reload pin in packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts
 // (#4710). The in-sandbox OpenClaw gateway must run with reload mode "hot":
 // in the default "hybrid" mode a restart-class config change makes the
 // gateway SIGUSR1-restart itself in-process, and a failed restart parks the
@@ -15,7 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildConfig, main } from "../scripts/generate-openclaw-config.mts";
+import { buildConfig, main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import { baseOpenClawGenerationEnv } from "./helpers/openclaw-env-fixture";
 
 /** Minimal env vars required for a valid config generation run. */

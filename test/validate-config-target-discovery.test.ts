@@ -56,7 +56,7 @@ describe("config validation target discovery", () => {
   it("discovers model-specific setup manifests", () => {
     expect(filesBySchema.get("nemoclaw-blueprint/model-specific-setup/schema.json") ?? []).toEqual(
       expect.arrayContaining([
-        "nemoclaw-blueprint/model-specific-setup/openclaw/kimi-k2.6-managed-inference.json",
+        "packages/nemoclaw-openclaw/model-specific-setup/openclaw/kimi-k2.6-managed-inference.json",
       ]),
     );
   });

@@ -16,7 +16,13 @@ const START_SCRIPT = path.join(
   "nemoclaw-openclaw",
   "start.sh",
 );
-const PRELOAD_SCRIPTS = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "scripts");
+const PRELOAD_SCRIPTS = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "preloads",
+);
 
 function runEmbeddedPreload(
   script: string,

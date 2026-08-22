@@ -5,7 +5,9 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const GUARD_PATH = path.resolve("scripts/openclaw-config-guard.py");
+const GUARD_PATH = path.resolve(
+  "packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py",
+);
 const STATE_GUARD_PATH = path.resolve("scripts/state-dir-guard.py");
 const PYTHON = process.platform === "win32" ? "python" : "python3";
 

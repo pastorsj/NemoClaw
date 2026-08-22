@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-const GUARD_PATH = path.resolve("scripts/openclaw-config-guard.py");
+const OPENCLAW_PACKAGE_ROOT = path.resolve("packages/nemoclaw-openclaw");
+const GUARD_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "scripts/openclaw-config-guard.py");
+const JSON5_MODULE_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "plugin/node_modules/json5");
 const fixtures: string[] = [];
 const RUN_AS_CURRENT_USER = String.raw`
 import importlib.util
@@ -314,7 +316,7 @@ function runGuard(
       env: {
         ...process.env,
         NEMOCLAW_TEST_NODE_PATH: trustedNodePath(configDir),
-        NEMOCLAW_TEST_JSON5_PATH: path.resolve("nemoclaw/node_modules/json5"),
+        NEMOCLAW_TEST_JSON5_PATH: JSON5_MODULE_PATH,
         ...env,
       },
       input,
@@ -1305,7 +1307,7 @@ describe("openclaw-config-guard", () => {
         env: {
           ...process.env,
           NEMOCLAW_TEST_NODE_PATH: trustedNodePath(configDir),
-          NEMOCLAW_TEST_JSON5_PATH: path.resolve("nemoclaw/node_modules/json5"),
+          NEMOCLAW_TEST_JSON5_PATH: JSON5_MODULE_PATH,
           NEMOCLAW_TEST_READY_FILE: ready,
         },
         stdio: "ignore",
@@ -1458,7 +1460,7 @@ PRODUCTION_CONFIG_DIR = ${JSON.stringify("__CONFIG_DIR__")}
 JOURNAL_PATH = ${JSON.stringify("__JOURNAL_PATH__")}
 MUTEX_PATH = ${JSON.stringify("__MUTEX_PATH__")}
 NODE_BINARY_PATH = ${JSON.stringify(trustedNodePath(configDir))}
-JSON5_MODULE_PATH = ${JSON.stringify(path.resolve("nemoclaw/node_modules/json5"))}
+JSON5_MODULE_PATH = ${JSON.stringify(JSON5_MODULE_PATH)}
 _production_identity = lambda: Identity(
     root_uid=os.getuid(), root_gid=os.getgid(),
     sandbox_uid=os.getuid(), sandbox_gid=os.getgid(),

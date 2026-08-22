@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("buildOnboardFlags --agent help (#5779)", () => {
-  it("includes installed agent runtime names in the --agent description when listAgents succeeds", () => {
+  it("includes available agent runtime names in the --agent description when listAgents succeeds", () => {
     setAgentRegistryReaderForTest(() => ["hermes", "langchain-deepagents-code", "openclaw"]);
 
     const flags = buildOnboardFlags();

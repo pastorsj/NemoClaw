@@ -357,6 +357,14 @@ test(
     });
     expect(help.exitCode, resultText(help)).toBe(0);
 
+    await host.expectHarnessInstalled("hermes", {
+      artifactName: "phase-2-hermes-harness",
+      cwd: REPO_ROOT,
+      env: commandEnv(),
+      redactionValues,
+      timeoutMs: 120_000,
+    });
+
     if (hermesDashboardE2eEnabled()) {
       expect(resultText(install)).toContain(
         "Deployment verified — gateway, dashboard, and inference route are healthy.",

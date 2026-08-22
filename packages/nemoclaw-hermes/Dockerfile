@@ -99,6 +99,7 @@ FROM scratch AS hermes-runtime-payload
 
 COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/dist/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
 COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
+COPY packages/nemoclaw-hermes/model-specific-setup/ /opt/nemoclaw-hermes-config/model-specific-setup/
 COPY scripts/lib/sandbox-init.sh /usr/local/lib/nemoclaw/sandbox-init.sh
 COPY scripts/lib/corporate-ca-runtime.sh /usr/local/lib/nemoclaw/corporate-ca-runtime.sh
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
@@ -126,12 +127,11 @@ COPY packages/nemoclaw-hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/
 COPY packages/nemoclaw-hermes/cron-restore-control.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py
 COPY src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
-COPY scripts/runtime-state-mutation-control.py /usr/local/lib/nemoclaw/runtime-state-mutation-control.py
-COPY scripts/runtime-state-mutation-startup-gate.py /usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py
-COPY scripts/runtime_state_mutation_hermes_publisher.py /usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py
+COPY packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py /usr/local/lib/nemoclaw/runtime-state-mutation-control.py
+COPY packages/nemoclaw-hermes/scripts/runtime-state-mutation-startup-gate.py /usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py
+COPY packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py /usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py
 COPY packages/nemoclaw-hermes/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
 COPY packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json /usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json
-COPY nemoclaw-blueprint/scripts/*.js /usr/local/lib/nemoclaw/preloads/
 
 FROM scratch AS hermes-wrapper-payload
 
@@ -495,12 +495,6 @@ RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-star
     && chmod 444 /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts \
     && chmod 444 /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
     && /opt/hermes/.venv/bin/python3 -I -c 'import runpy, yaml; assert yaml.safe_load("ready: true")["ready"] is True; runpy.run_path("/usr/local/lib/nemoclaw/runtime-state-mutation-control.py", run_name="nemoclaw_runtime_state_mutation_control_probe"); runpy.run_path("/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py", run_name="nemoclaw_runtime_state_mutation_publisher_probe"); runpy.run_path("/usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py", run_name="nemoclaw_runtime_state_mutation_gate_probe"); runpy.run_path("/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py", run_name="nemoclaw_runtime_config_guard_probe")' \
-    && if [ -d /usr/local/lib/nemoclaw/preloads ]; then \
-        chown -R 0:0 /usr/local/lib/nemoclaw/preloads \
-        && find /usr/local/lib/nemoclaw/preloads -type f -exec chmod 444 {} + \
-        && find /usr/local/lib/nemoclaw/preloads -type d -exec chmod 755 {} + \
-        ; \
-    fi \
     && chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && mkdir -p /etc/profile.d \
     && printf '%s\n' \
@@ -1445,7 +1439,6 @@ RUN check_metadata() { \
     && check_metadata /run/nemoclaw/runtime-state-mutation-startup 'root:root 711' \
     && check_metadata /usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json 'root:root 444' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-cron-restore-control.py 'root:root 700' \
-    && check_metadata /usr/local/lib/nemoclaw/preloads/sandbox-safety-net.js 'root:root 444' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-wrapper.py 'root:root 755' \
     && check_metadata /usr/local/lib/nemoclaw/validate-hermes-cli-adapter.py 'root:root 755' \
     && check_metadata /usr/local/share/nemoclaw/hermes-cli-adapter-v1.json 'root:root 444'

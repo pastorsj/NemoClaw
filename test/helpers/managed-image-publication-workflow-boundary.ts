@@ -18,7 +18,6 @@ const managedInputPaths = [
   "packages/**",
   "ci/npm-audit-exceptions.json",
   "ci/reviewed-npm-audit.json",
-  "nemoclaw/**",
   "nemoclaw-blueprint/**",
   "scripts/**",
   "src/lib/actions/sandbox/mcp-bridge-*.ts",

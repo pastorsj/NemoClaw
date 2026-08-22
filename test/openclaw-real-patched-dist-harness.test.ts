@@ -14,7 +14,13 @@ import { runRealOpenClawMcpStartRetryProof } from "./helpers/openclaw-real-mcp-s
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 const DOCKERFILE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
-const PATCH_OPENCLAW_CHAT_SEND = path.join(REPO_ROOT, "scripts", "patch-openclaw-chat-send.mts");
+const PATCH_OPENCLAW_CHAT_SEND = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "patch-openclaw-chat-send.mts",
+);
 const PATCH_OPENCLAW_ISSUE_4434_DIAGNOSTICS = path.join(
   REPO_ROOT,
   "scripts",
@@ -36,7 +42,13 @@ const PATCH_OPENCLAW_MCP_RELIABILITY = path.join(
   "scripts",
   "patch-openclaw-mcp-reliability.mts",
 );
-const OPENCLAW_VERSION_EXTRACTOR = path.join(REPO_ROOT, "scripts", "extract-semver.sh");
+const OPENCLAW_VERSION_EXTRACTOR = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "extract-semver.sh",
+);
 const REAL_OPENCLAW_NODE_ENV = "NEMOCLAW_REAL_OPENCLAW_NODE";
 // Focused patch scripts also scan the full generated dist. APFS cold-cache
 // reads can exceed one minute, so keep them bounded without using unit-fixture
@@ -772,7 +784,13 @@ describe.skipIf(process.env.NEMOCLAW_REAL_OPENCLAW_DIST_HARNESS !== "1")(
         await runRealOpenClawDeviceSelfApprovalProof({
           dist,
           nodeExecutable: nodeRuntime.executable,
-          patchScript: path.join(REPO_ROOT, "scripts", "patch-openclaw-device-self-approval.mts"),
+          patchScript: path.join(
+            REPO_ROOT,
+            "packages",
+            "nemoclaw-openclaw",
+            "scripts",
+            "patch-openclaw-device-self-approval.mts",
+          ),
           timeoutMs: PATCH_COMMAND_TIMEOUT_MS,
           tmp,
         });

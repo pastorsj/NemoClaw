@@ -3,7 +3,7 @@
 
 export const securityCoverageThresholds = {
   perFile: true,
-  "nemoclaw/src/blueprint/ssrf.ts": {
+  "packages/nemoclaw-openclaw/plugin/src/blueprint/ssrf.ts": {
     lines: 95,
     functions: 100,
     branches: 95,

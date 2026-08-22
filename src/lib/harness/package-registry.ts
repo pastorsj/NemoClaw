@@ -6,12 +6,22 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
 import { parseManifestRecord, readString } from "../agent/manifest-readers";
 
 const PACKAGE_DIRECTORY_PREFIX = "nemoclaw-";
+const INSTALL_RECEIPT_FILENAME = ".nemoclaw-install.json";
+const INSTALL_RECEIPT_MAX_BYTES = 4 * 1024;
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 const MANIFEST_MAX_BYTES = 256 * 1024;
+const REQUIRED_HARNESS_FILES = [
+  "Dockerfile",
+  "Dockerfile.base",
+  "start.sh",
+  "policy-additions.yaml",
+] as const;
 const HARNESS_ID = /^[a-z][a-z0-9-]{0,62}$/u;
+const SHA256_DIGEST = /^[a-f0-9]{64}$/u;
 const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/u;
 const PACKAGE_VERSION =
   /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/u;
@@ -30,6 +40,12 @@ export interface HarnessPackage {
 
 type JsonRecord = Record<string, unknown>;
 
+interface ExistingHarnessPackage {
+  readonly harnessPackage: HarnessPackage;
+  readonly contentDigest: string;
+  readonly installedDigest: string | null;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -43,34 +59,30 @@ function packageNameBase(packageName: string): string {
   return packageName.slice(packageName.lastIndexOf("/") + 1);
 }
 
-function assertCanonicalRelativePath(value: string, label: string): void {
-  const segments = value.split("/");
-  if (
-    value.length === 0 ||
-    value.includes("\\") ||
-    value.includes("\0") ||
-    path.posix.isAbsolute(value) ||
-    segments.some((segment) => segment === "" || segment === "." || segment === "..") ||
-    path.posix.normalize(value) !== value
-  ) {
-    throw new Error(`${label} must be a canonical relative path`);
-  }
-}
-
 function readBoundedRegularFile(filePath: string, label: string, maxBytes: number): string {
-  let metadata: fs.Stats;
+  let opened: ReturnType<typeof openRegularFileNoFollow>;
   try {
-    metadata = fs.lstatSync(filePath);
+    opened = openRegularFileNoFollow(filePath);
   } catch (error) {
     throw new Error(`${label} is unavailable: ${filePath}`, { cause: error });
   }
-  if (metadata.isSymbolicLink() || !metadata.isFile()) {
-    throw new Error(`${label} must be a regular file: ${filePath}`);
+  try {
+    let bytes: Buffer;
+    try {
+      bytes = opened.readBytes(maxBytes);
+    } catch (error) {
+      if (error instanceof RangeError) {
+        throw new Error(`${label} has an invalid size: ${filePath}`, { cause: error });
+      }
+      throw error;
+    }
+    if (bytes.length < 2) {
+      throw new Error(`${label} has an invalid size: ${filePath}`);
+    }
+    return bytes.toString("utf8");
+  } finally {
+    opened.close();
   }
-  if (metadata.size < 2 || metadata.size > maxBytes) {
-    throw new Error(`${label} has an invalid size: ${filePath}`);
-  }
-  return fs.readFileSync(filePath, "utf8");
 }
 
 function readPackageMetadata(packageJsonPath: string): JsonRecord {
@@ -93,6 +105,65 @@ function readPackageMetadata(packageJsonPath: string): JsonRecord {
   return value;
 }
 
+function installReceiptPath(rootDir: string): string {
+  return path.join(rootDir, INSTALL_RECEIPT_FILENAME);
+}
+
+function readInstallReceipt(rootDir: string): string | null {
+  const receiptPath = installReceiptPath(rootDir);
+  try {
+    fs.lstatSync(receiptPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+
+  let value: unknown;
+  try {
+    value = JSON.parse(
+      readBoundedRegularFile(
+        receiptPath,
+        "Harness installation receipt",
+        INSTALL_RECEIPT_MAX_BYTES,
+      ),
+    );
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new Error(`Harness installation receipt is not valid JSON: ${receiptPath}`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== 1 ||
+    typeof value.installedDigest !== "string" ||
+    !SHA256_DIGEST.test(value.installedDigest)
+  ) {
+    throw new Error(`Harness installation receipt is invalid: ${receiptPath}`);
+  }
+  return value.installedDigest;
+}
+
+function writeInstallReceipt(rootDir: string, digest: string): void {
+  const receiptPath = installReceiptPath(rootDir);
+  const temporaryPath = path.join(
+    rootDir,
+    `.nemoclaw-install-${process.pid}-${crypto.randomUUID()}.tmp`,
+  );
+  try {
+    fs.writeFileSync(temporaryPath, `${JSON.stringify({ installedDigest: digest })}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    fs.renameSync(temporaryPath, receiptPath);
+  } finally {
+    fs.rmSync(temporaryPath, { force: true });
+  }
+}
+
 function assertPackageRoot(rootDir: string): void {
   let metadata: fs.Stats;
   try {
@@ -102,6 +173,29 @@ function assertPackageRoot(rootDir: string): void {
   }
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new Error(`Harness package must be a regular directory, not a symlink: ${rootDir}`);
+  }
+}
+
+function assertRequiredHarnessFiles(rootDir: string): void {
+  for (const fileName of REQUIRED_HARNESS_FILES) {
+    const filePath = path.join(rootDir, fileName);
+    let metadata: fs.Stats;
+    try {
+      metadata = fs.lstatSync(filePath);
+    } catch (error) {
+      throw new Error(`Harness package is missing required file '${fileName}': ${rootDir}`, {
+        cause: error,
+      });
+    }
+    if (metadata.isSymbolicLink() || !metadata.isFile()) {
+      throw new Error(`Harness package file '${fileName}' must be a regular file: ${filePath}`);
+    }
+    if (metadata.size === 0) {
+      throw new Error(`Harness package file '${fileName}' must not be empty: ${filePath}`);
+    }
+    if (fileName === "start.sh" && (metadata.mode & 0o111) === 0) {
+      throw new Error(`Harness package start.sh must be executable: ${filePath}`);
+    }
   }
 }
 
@@ -133,10 +227,11 @@ function readHarnessPackage(rootDir: string, source: HarnessPackage["source"]): 
     );
   }
   const harnessManifest = nemoclaw.harnessManifest;
-  if (typeof harnessManifest !== "string") {
-    throw new Error(`Harness package must declare nemoclaw.harnessManifest: ${packageJsonPath}`);
+  if (harnessManifest !== "manifest.yaml") {
+    throw new Error(
+      `Harness package nemoclaw.harnessManifest must be 'manifest.yaml': ${packageJsonPath}`,
+    );
   }
-  assertCanonicalRelativePath(harnessManifest, "nemoclaw.harnessManifest");
 
   const manifestPath = path.join(rootDir, ...harnessManifest.split("/"));
   const relativeManifest = path.relative(rootDir, manifestPath);
@@ -165,6 +260,7 @@ function readHarnessPackage(rootDir: string, source: HarnessPackage["source"]): 
       `Harness package identity mismatch: directory, package name, and manifest must identify '${id}'`,
     );
   }
+  assertRequiredHarnessFiles(rootDir);
 
   return Object.freeze({
     id,
@@ -240,14 +336,32 @@ function visitPackageTree(
 function packageTreeDigest(rootDir: string): string {
   const hash = crypto.createHash("sha256");
   visitPackageTree(rootDir, (relativePath, metadata) => {
+    if (relativePath === INSTALL_RECEIPT_FILENAME) {
+      if (!metadata.isFile()) {
+        throw new Error(
+          `Harness installation receipt must be a regular file: ${path.join(rootDir, relativePath)}`,
+        );
+      }
+      return;
+    }
     const executable = (metadata.mode & 0o111) === 0 ? "0" : "1";
     if (metadata.isDirectory()) {
       hash.update(`d\0${relativePath}\0${executable}\0`);
       return;
     }
-    hash.update(`f\0${relativePath}\0${executable}\0${String(metadata.size)}\0`);
-    hash.update(fs.readFileSync(path.join(rootDir, ...relativePath.split("/"))));
-    hash.update("\0");
+    const filePath = path.join(rootDir, ...relativePath.split("/"));
+    const opened = openRegularFileNoFollow(filePath);
+    try {
+      const bytes = opened.readBytes(metadata.size);
+      if (bytes.length !== metadata.size) {
+        throw new Error(`Harness package file changed while it was read: ${filePath}`);
+      }
+      hash.update(`f\0${relativePath}\0${executable}\0${String(bytes.length)}\0`);
+      hash.update(bytes);
+      hash.update("\0");
+    } finally {
+      opened.close();
+    }
   });
   return hash.digest("hex");
 }
@@ -276,7 +390,12 @@ export function listHarnessPackages(env: NodeJS.ProcessEnv = process.env): Harne
   for (const [id, installedPackage] of installed) {
     const bundledPackage = bundled.get(id);
     if (!bundledPackage) continue;
-    if (packageTreeDigest(bundledPackage.rootDir) !== packageTreeDigest(installedPackage.rootDir)) {
+    const bundledDigest = packageTreeDigest(bundledPackage.rootDir);
+    const installedDigest = packageTreeDigest(installedPackage.rootDir);
+    if (
+      bundledDigest !== installedDigest &&
+      readInstallReceipt(installedPackage.rootDir) === null
+    ) {
       throw new Error(`Duplicate harness id '${id}' has different bundled and installed content`);
     }
     bundled.delete(id);
@@ -318,7 +437,10 @@ function assertInstallPathComponents(home: string, harnessRoot: string): void {
   }
 }
 
-function existingInstalledPackage(target: string, expected: HarnessPackage): HarnessPackage | null {
+function existingInstalledPackage(
+  target: string,
+  expected: HarnessPackage,
+): ExistingHarnessPackage | null {
   try {
     fs.lstatSync(target);
   } catch (error) {
@@ -326,13 +448,90 @@ function existingInstalledPackage(target: string, expected: HarnessPackage): Har
     throw error;
   }
   const installed = readHarnessPackage(target, "installed");
-  if (
-    installed.id !== expected.id ||
-    packageTreeDigest(installed.rootDir) !== packageTreeDigest(expected.rootDir)
-  ) {
+  if (installed.id !== expected.id) {
     throw new Error(`Installed harness '${expected.id}' differs from the bundled package`);
   }
-  return installed;
+  return {
+    harnessPackage: installed,
+    contentDigest: packageTreeDigest(installed.rootDir),
+    installedDigest: readInstallReceipt(installed.rootDir),
+  };
+}
+
+function assertSafeToReplace(
+  existing: ExistingHarnessPackage,
+  bundledDigest: string,
+): "identical" | "upgrade" {
+  if (existing.contentDigest === bundledDigest) return "identical";
+  if (existing.installedDigest === existing.contentDigest) return "upgrade";
+  throw new Error(
+    `Installed harness '${existing.harnessPackage.id}' differs from the bundled package and has local changes`,
+  );
+}
+
+function replaceInstalledPackage(
+  target: string,
+  stagedPackage: string,
+  expected: HarnessPackage,
+  bundledDigest: string,
+): HarnessPackage {
+  const previousDirectory = fs.mkdtempSync(
+    path.join(path.dirname(target), `.previous-${expected.id}-`),
+  );
+  fs.chmodSync(previousDirectory, 0o700);
+  const previousPackage = path.join(previousDirectory, path.basename(target));
+
+  let previousMoved = false;
+  let replacementPublished = false;
+  let preservePrevious = false;
+  try {
+    fs.renameSync(target, previousPackage);
+    previousMoved = true;
+    const moved = existingInstalledPackage(previousPackage, expected);
+    if (!moved || assertSafeToReplace(moved, bundledDigest) !== "upgrade") {
+      throw new Error(`Installed harness '${expected.id}' changed while it was being updated`);
+    }
+    fs.renameSync(stagedPackage, target);
+    replacementPublished = true;
+    const installed = existingInstalledPackage(target, expected);
+    if (
+      !installed ||
+      installed.contentDigest !== bundledDigest ||
+      installed.installedDigest !== bundledDigest
+    ) {
+      throw new Error(`Harness '${expected.id}' changed while its update was being committed`);
+    }
+    return installed.harnessPackage;
+  } catch (error) {
+    if (!previousMoved) throw error;
+    if (replacementPublished) {
+      try {
+        fs.renameSync(target, stagedPackage);
+      } catch (unpublishError) {
+        if ((unpublishError as NodeJS.ErrnoException).code !== "ENOENT") {
+          preservePrevious = true;
+          throw new Error(
+            `Harness '${expected.id}' could not be updated or restored; the previous package remains at ${previousPackage}`,
+            { cause: unpublishError },
+          );
+        }
+      }
+    }
+    try {
+      fs.renameSync(previousPackage, target);
+    } catch (restoreError) {
+      preservePrevious = true;
+      throw new Error(
+        `Harness '${expected.id}' could not be updated or restored; the previous package remains at ${previousPackage}`,
+        { cause: restoreError },
+      );
+    }
+    throw error;
+  } finally {
+    if (!preservePrevious) {
+      fs.rmSync(previousDirectory, { recursive: true, force: true });
+    }
+  }
 }
 
 export function installBundledHarness(
@@ -351,12 +550,20 @@ export function installBundledHarness(
   // Validate the complete source tree before copying. Package code is never
   // imported or executed by this registry.
   const expectedDigest = packageTreeDigest(bundled.rootDir);
+  if (fs.existsSync(installReceiptPath(bundled.rootDir))) {
+    throw new Error(`Bundled harness '${normalized}' contains reserved installation state`);
+  }
   const home = env.HOME?.trim() || os.homedir();
   const harnessRoot = installedPackagesRoot(env);
   assertInstallPathComponents(home, harnessRoot);
   const target = path.join(harnessRoot, `${PACKAGE_DIRECTORY_PREFIX}${bundled.id}`);
   const existing = existingInstalledPackage(target, bundled);
-  if (existing) return existing;
+  if (existing && assertSafeToReplace(existing, expectedDigest) === "identical") {
+    if (existing.installedDigest !== expectedDigest) {
+      writeInstallReceipt(existing.harnessPackage.rootDir, expectedDigest);
+    }
+    return readHarnessPackage(existing.harnessPackage.rootDir, "installed");
+  }
 
   const stagingRoot = fs.mkdtempSync(path.join(harnessRoot, `.install-${bundled.id}-`));
   fs.chmodSync(stagingRoot, 0o700);
@@ -371,6 +578,14 @@ export function installBundledHarness(
     if (packageTreeDigest(staged.rootDir) !== expectedDigest) {
       throw new Error(`Harness '${normalized}' changed while it was being installed`);
     }
+    writeInstallReceipt(staged.rootDir, expectedDigest);
+    if (readInstallReceipt(staged.rootDir) !== expectedDigest) {
+      throw new Error(`Harness '${normalized}' installation receipt could not be verified`);
+    }
+
+    if (existing) {
+      return replaceInstalledPackage(target, stagedPackage, bundled, expectedDigest);
+    }
     try {
       fs.renameSync(stagedPackage, target);
     } catch (error) {
@@ -381,7 +596,12 @@ export function installBundledHarness(
         throw error;
       }
       const raced = existingInstalledPackage(target, bundled);
-      if (raced) return raced;
+      if (raced && assertSafeToReplace(raced, expectedDigest) === "identical") {
+        if (raced.installedDigest !== expectedDigest) {
+          writeInstallReceipt(raced.harnessPackage.rootDir, expectedDigest);
+        }
+        return readHarnessPackage(raced.harnessPackage.rootDir, "installed");
+      }
       throw error;
     }
     return readHarnessPackage(target, "installed");

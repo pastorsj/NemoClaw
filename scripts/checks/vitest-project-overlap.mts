@@ -35,7 +35,11 @@ export type ProjectMembershipMismatch = {
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const TEST_CANDIDATE_ROOTS = ["src", "test", "nemoclaw/src"] as const;
+const TEST_CANDIDATE_ROOTS = [
+  "src",
+  "test",
+  "packages/nemoclaw-openclaw/plugin/src",
+] as const;
 const TEST_FILE_PATTERN = /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/;
 const SKIP_DIRECTORIES = new Set([".git", "node_modules"]);
 const INSTALLER_INTEGRATION_TESTS = new Set([
@@ -90,7 +94,7 @@ export function discoverVitestCandidates(repoRoot: string = REPO_ROOT): Set<stri
 export function expectedProjectForTestPath(file: string): ExpectedVitestProject | undefined {
   const normalized = normalizeRepoPath(file);
   if (normalized.startsWith("src/")) return "cli";
-  if (normalized.startsWith("nemoclaw/src/")) return "plugin";
+  if (normalized.startsWith("packages/nemoclaw-openclaw/plugin/src/")) return "plugin";
   if (INSTALLER_INTEGRATION_TESTS.has(normalized)) return "installer-integration";
   if (normalized.startsWith("test/package-contract/")) return "package-contract";
   if (normalized.startsWith("test/e2e/support/")) return "e2e-support";

@@ -100,7 +100,7 @@ function createFixture(): Fixture {
     "node_modules/.bin/tsc",
     "node_modules/.bin/prek",
     "node_modules/.bin/pi",
-    "nemoclaw/node_modules/.bin/tsc",
+    "packages/nemoclaw-openclaw/plugin/node_modules/.bin/tsc",
     "bin/nemoclaw.js",
   ]) {
     writeExecutable(path.join(repo, file));
@@ -148,7 +148,7 @@ fi`,
   echo "${globalRoot}"
 elif [ "\${FAKE_NPM_ROOT_INSTALL_FAIL:-}" = "1" ] && [ "\${1:-}" = "install" ]; then
   exit 1
-elif [ "\${FAKE_NPM_PLUGIN_INSTALL_FAIL:-}" = "1" ] && [ "\${1:-}" = "--prefix" ] && [ "\${2:-}" = "nemoclaw" ] && [ "\${3:-}" = "install" ]; then
+elif [ "\${FAKE_NPM_PLUGIN_INSTALL_FAIL:-}" = "1" ] && [ "\${1:-}" = "--prefix" ] && [ "\${2:-}" = "packages/nemoclaw-openclaw/plugin" ] && [ "\${3:-}" = "install" ]; then
   exit 1
 elif [ "\${FAKE_NPM_CLI_TYPECHECK_OOM:-}" = "1" ] && [ "\${1:-}" = "run" ] && [ "\${2:-}" = "typecheck:cli" ]; then
   printf '%s\\n' '<--- Last few GCs --->' >&2
@@ -545,7 +545,17 @@ describe("contributor environment doctor", () => {
 
   it("does not ask npm to download TypeScript when plugin dependencies are missing", () => {
     const fixture = createFixture();
-    fs.rmSync(path.join(fixture.repo, "nemoclaw", "node_modules", ".bin", "tsc"));
+    fs.rmSync(
+      path.join(
+        fixture.repo,
+        "packages",
+        "nemoclaw-openclaw",
+        "plugin",
+        "node_modules",
+        ".bin",
+        "tsc",
+      ),
+    );
 
     const result = runDoctor(fixture);
 
@@ -570,14 +580,24 @@ describe("contributor environment doctor", () => {
 
   it("reports an actionable heap-limit remedy when the plugin type check exhausts V8 memory", () => {
     const fixture = createFixture();
-    writeNodeHeapOomTool(path.join(fixture.repo, "nemoclaw", "node_modules", ".bin", "tsc"));
+    writeNodeHeapOomTool(
+      path.join(
+        fixture.repo,
+        "packages",
+        "nemoclaw-openclaw",
+        "plugin",
+        "node_modules",
+        ".bin",
+        "tsc",
+      ),
+    );
 
     const result = runDoctor(fixture);
 
     expect(result.status).toBe(1);
     expect(result.output).toContain("Plugin type check: ran out of Node.js heap");
     expect(result.output).toContain(
-      "Next: Run: NODE_OPTIONS=--max-old-space-size=5120 npm --prefix nemoclaw run build",
+      "Next: Run: NODE_OPTIONS=--max-old-space-size=5120 npm --prefix packages/nemoclaw-openclaw/plugin run build",
     );
     expect(result.output).not.toContain("Native stack trace");
   });
@@ -724,7 +744,7 @@ describe("contributor repository setup", () => {
     expect(result.output).toContain("Ready to create a feature branch.");
     const commands = readCommandLog(fixture);
     expect(commands).toContain("npm install --include=dev --ignore-scripts");
-    expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
+    expect(commands).toContain("npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts");
     expect(commands).not.toContain("uv sync");
     expect(commands).toContain("prek install");
     expect(commands).not.toContain("npm-link-or-shim");
@@ -739,7 +759,7 @@ describe("contributor repository setup", () => {
 
     const commands = readCommandLog(fixture);
     expect(commands).toContain("npm install --include=dev --ignore-scripts");
-    expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
+    expect(commands).toContain("npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts");
     expect(commands).not.toContain("uv sync");
     expect(commands).not.toContain("npm-link-or-shim");
     expect(commands).not.toContain("onboard");
@@ -756,7 +776,7 @@ describe("contributor repository setup", () => {
     expect(result.status).toBe(0);
     const commands = readCommandLog(fixture);
     expect(commands).toContain("npm install --include=dev --ignore-scripts");
-    expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
+    expect(commands).toContain("npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts");
   });
 
   it("stops before repository changes when a supported Python is missing", () => {
@@ -813,7 +833,7 @@ describe("contributor repository setup", () => {
     expect(result.status).toBe(1);
     expect(result.output).toContain("Setup stopped while attempting: Install plugin dependencies");
     const commands = readCommandLog(fixture);
-    expect(commands).toContain("npm --prefix nemoclaw install --include=dev --ignore-scripts");
+    expect(commands).toContain("npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts");
     expect(commands).not.toContain("uv sync");
   });
 
@@ -826,7 +846,7 @@ describe("contributor repository setup", () => {
     expect(result.output).toContain("Setup stopped while attempting: Install root dependencies");
     const commands = readCommandLog(fixture);
     expect(commands).toContain("npm install --include=dev --ignore-scripts");
-    expect(commands).not.toContain("npm --prefix nemoclaw install");
+    expect(commands).not.toContain("npm --prefix packages/nemoclaw-openclaw/plugin install");
   });
 
   it("stops CLI type-check setup failures with a heap-limit remedy instead of the V8 stack", () => {
@@ -847,21 +867,31 @@ describe("contributor repository setup", () => {
 
   it("stops plugin type-check setup failures with a heap-limit remedy instead of the V8 stack", () => {
     const fixture = createFixture();
-    writeNodeHeapOomTool(path.join(fixture.repo, "nemoclaw", "node_modules", ".bin", "tsc"));
+    writeNodeHeapOomTool(
+      path.join(
+        fixture.repo,
+        "packages",
+        "nemoclaw-openclaw",
+        "plugin",
+        "node_modules",
+        ".bin",
+        "tsc",
+      ),
+    );
 
     const result = runSetup(fixture);
 
     expect(result.status).toBe(1);
     expect(result.output).toContain("Node.js exhausted its V8 heap while running this type check.");
     expect(result.output).toContain(
-      "Next: Run: NODE_OPTIONS=--max-old-space-size=5120 npm --prefix nemoclaw run build",
+      "Next: Run: NODE_OPTIONS=--max-old-space-size=5120 npm --prefix packages/nemoclaw-openclaw/plugin run build",
     );
     expect(result.output).toContain(
       "Setup stopped while attempting: Type-check the plugin without emitting files",
     );
     expect(result.output).not.toContain("Native stack trace");
     const commands = readCommandLog(fixture);
-    expect(commands).toContain("npm --prefix nemoclaw run build");
+    expect(commands).toContain("npm --prefix packages/nemoclaw-openclaw/plugin run build");
     expect(commands).not.toContain("prek install");
   });
 

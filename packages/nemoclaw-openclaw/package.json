@@ -6,6 +6,7 @@
   "license": "Apache-2.0",
   "files": [
     "**/*",
+    "!plugin/node_modules/**",
     "!**/__pycache__/**",
     "!**/*.pyc"
   ],

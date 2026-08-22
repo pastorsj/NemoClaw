@@ -17,7 +17,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildConfig } from "../scripts/generate-openclaw-config.mts";
+import { buildConfig } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import {
   applyMessagingAgentRenderToObject,
   readMessagingBuildPlanFromEnv,

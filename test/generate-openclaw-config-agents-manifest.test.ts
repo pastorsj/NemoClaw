@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Agents-manifest extensions for scripts/generate-openclaw-config.mts.
+// Agents-manifest extensions for packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts.
 // Exercises the v1 `{agents,defaults?,main?}` payload shape that the YAML
 // loader emits: per-agent model + subagents OpenClaw-native fields,
 // agents.defaults bake, main-agent augmentation, and providers.models
@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildConfig, main } from "../scripts/generate-openclaw-config.mts";
+import { buildConfig, main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import {
   applyMessagingAgentRenderToObject,
   readMessagingBuildPlanFromEnv,

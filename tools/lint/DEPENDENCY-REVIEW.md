@@ -17,7 +17,7 @@
 NemoClaw executes this package only during contributor and CI lint checks.
 The package is a root development dependency and is not included in production artifacts.
 `npm pack --dry-run --json --ignore-scripts` omits the SonarJS package code.
-The locked npm cache seed generated from `nemoclaw/package-lock.json` also omits SonarJS.
+The locked npm cache seed generated from `packages/nemoclaw-openclaw/plugin/package-lock.json` also omits SonarJS.
 
 Review this dependency again if any of these facts change:
 

@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Mirror of src/lib/sandbox/hermes-upstream-header.ts. Kept in lockstep
-// because agents/ cannot import src/ from the Hermes Dockerfile context, and
-// src/ cannot import agents/ under tsconfig.src.json rootDir. The parity
-// test in src/lib/sandbox/hermes-upstream-header.parity.test.ts compares the
-// two helpers across fixtures and fails the build if they drift.
+// Mirror of src/lib/sandbox/hermes-upstream-header.ts. The CLI production
+// tsconfig excludes package source, while the Hermes image stages this package
+// config module under its own runtime path. The parity test in
+// src/lib/sandbox/hermes-upstream-header.parity.test.ts catches drift.
 
 const HEADER_VALUE_MAX_LENGTH = 128;
 

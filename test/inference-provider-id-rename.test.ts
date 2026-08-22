@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { readHermesBuildSettings } from "../packages/nemoclaw-hermes/config/build-env.ts";
-import { buildConfig } from "../scripts/generate-openclaw-config.mts";
+import { buildConfig } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import { patchStagedDockerfile } from "../src/lib/onboard/dockerfile-patch";
 
 const START_SCRIPT = path.join(

@@ -11,9 +11,9 @@ import {
   diagnosticPreview as canonicalDiagnosticPreview,
   isValidName as isCanonicalValidName,
   isValidProviderName as isCanonicalValidProviderName,
-} from "../../nemoclaw/dist/shared/sandbox-name.cjs";
+} from "../../packages/nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs";
 
-// sourceOfTruth: nemoclaw/src/shared/sandbox-name.cts
+// sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts
 // generatedBoundary: build:cli emits the canonical .cjs/.d.cts before this
 // module is compiled (mirrors src/lib/policy/merge.ts). Keep the name grammar
 // definition-free here so the CLI, the plugin, and CI share one rule and cannot

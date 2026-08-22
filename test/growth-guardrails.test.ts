@@ -144,15 +144,30 @@ describe("codebase growth guardrail test support", () => {
     ]);
   });
 
-  it("rejects a new if statement in a changed test file", async () => {
+  it.each([
+    "test/example.test.ts",
+    "packages/nemoclaw-openclaw/plugin/src/blueprint/example.test.ts",
+  ])("rejects a new if statement in changed test file %s", async (file) => {
     const diff = fixtureDiff(
-      [{ filename: "test/example.test.ts", status: "modified" }],
-      { "test/example.test.ts": "it('works', () => expect(ok).toBe(true));" },
-      { "test/example.test.ts": "it('works', () => { if (ok) expect(ok).toBe(true); });" },
+      [{ filename: file, status: "modified" }],
+      { [file]: "it('works', () => expect(ok).toBe(true));" },
+      { [file]: "it('works', () => { if (ok) expect(ok).toBe(true); });" },
     );
     expect(await conditionalGrowthViolations(diff)).toEqual([
-      "test/example.test.ts: 1 if statement(s), up from 0",
+      `${file}: 1 if statement(s), up from 0`,
     ]);
+  });
+
+  it("compares a moved plugin test with its previous source path", async () => {
+    const previous = "nemoclaw/src/blueprint/example.test.ts";
+    const current = "packages/nemoclaw-openclaw/plugin/src/blueprint/example.test.ts";
+    const source = "it('works', () => { if (ok) expect(ok).toBe(true); });";
+    const diff = fixtureDiff(
+      [{ filename: current, previous_filename: previous, status: "renamed" }],
+      { [previous]: source },
+      { [current]: source },
+    );
+    expect(await conditionalGrowthViolations(diff)).toEqual([]);
   });
 
   it("rejects a new loop in a changed test callback", async () => {
@@ -264,6 +279,16 @@ describe("codebase growth guardrail test support", () => {
       { filename: "new.ts", previous_filename: "old.ts", status: "renamed" },
       { filename: "added.ts", status: "added" },
     ]);
+  });
+
+  it("parses batched Git blobs and missing paths", () => {
+    const output = Buffer.from("0123456789abcdef blob 4\none\n\nmain:missing.ts missing\n");
+    expect(diffTestOnly.parseGitBatchOutput(["one.ts", "missing.ts"], output)).toEqual(
+      new Map([
+        ["one.ts", "one\n"],
+        ["missing.ts", null],
+      ]),
+    );
   });
 
   it("compares a main merge worktree with its MERGE_HEAD commit", () => {

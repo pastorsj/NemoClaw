@@ -34,7 +34,6 @@ on:
       - "packages/nemoclaw-openclaw/Dockerfile"
       - "agents/**"
       - "packages/**"
-      - "nemoclaw/**"
       - "nemoclaw-blueprint/**"
       - "scripts/**"
       - "test/e2e/live/managed-image-activation-e2e*.ts"

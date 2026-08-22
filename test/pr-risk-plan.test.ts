@@ -430,7 +430,7 @@ describe("deterministic PR risk plan", () => {
     "packages/nemoclaw-openclaw/Dockerfile",
     "packages/nemoclaw-hermes/Dockerfile",
     "ci/npm-audit-exceptions.json",
-    "nemoclaw/src/index.ts",
+    "packages/nemoclaw-openclaw/plugin/src/index.ts",
     "nemoclaw-blueprint/blueprint.yaml",
     "scripts/checks/build-protected-managed-images.sh",
     "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.ts",
@@ -775,6 +775,11 @@ describe("deterministic PR risk plan", () => {
       jobs: ["rebuild-openclaw", "state-backup-restore"],
     },
     {
+      file: "packages/nemoclaw-openclaw/plugin/src/blueprint/snapshot.ts",
+      family: "upgrade-rebuild",
+      jobs: ["rebuild-openclaw", "state-backup-restore"],
+    },
+    {
       file: "src/lib/actions/sandbox/agents/apply.ts",
       family: "shared-agent",
       jobs: ["full-e2e", "hermes-e2e"],
@@ -842,7 +847,7 @@ describe("deterministic PR risk plan", () => {
       jobs: ["inference-routing", "network-policy", "cloud-inference", "security-posture"],
     },
     {
-      file: "nemoclaw/src/blueprint/private-networks.ts",
+      file: "packages/nemoclaw-openclaw/plugin/src/blueprint/private-networks.ts",
       families: ["inference-policy", "credentials-security"],
       jobs: ["inference-routing", "network-policy", "cloud-inference", "security-posture"],
     },
@@ -908,7 +913,7 @@ describe("deterministic PR risk plan", () => {
   });
 
   it.each([
-    "nemoclaw/src/blueprint/runner.ts",
+    "packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts",
     "nemoclaw-blueprint/blueprint.yaml",
     "packages/nemoclaw-hermes/config/build.ts",
   ])("keeps the shared sandbox boundary in both agent and security floors: %s", (file) => {

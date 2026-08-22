@@ -138,7 +138,3 @@ package_registry:
   hosts:
     - registry.npmjs.org
   binary: /usr/local/bin/npm
-
-# ── Compatibility artifact locations ─────────────────────────────────
-_legacy_paths:
-  plugin: nemoclaw/

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { AgentDefinition } from "../agent/defs";
+import { loadAgent, type AgentDefinition } from "../agent/defs";
 import { isErrnoException } from "../core/errno";
 import {
   collectBuildContextStats,
@@ -180,9 +180,9 @@ export function stageCreateSandboxBuildContext(
       throw err;
     }
   } else {
-    build = (input.stageDefaultSandboxBuildContext ?? stageOptimizedSandboxBuildContext)(
-      input.root,
-    );
+    build = input.stageDefaultSandboxBuildContext
+      ? input.stageDefaultSandboxBuildContext(input.root)
+      : stageOptimizedSandboxBuildContext(input.root, undefined, loadAgent("openclaw").agentDir);
   }
 
   return {

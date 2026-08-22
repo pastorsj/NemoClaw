@@ -35,7 +35,6 @@ const REVIEWED_PATH_GLOBS = new Map<string, RegExp>([
   ],
   ["agents/**", /^agents\/.+$/u],
   ["packages/**", /^packages\/.+$/u],
-  ["nemoclaw/**", /^nemoclaw\/.+$/u],
   ["nemoclaw-blueprint/**", /^nemoclaw-blueprint\/.+$/u],
   ["scripts/**", /^scripts\/.+$/u],
   [

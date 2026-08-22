@@ -185,7 +185,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/validate-managed-base-index.test.ts"),
   },
   {
-    pattern: /(?:^|\/)scripts\/checks\/download-hermes-source-archive[.]sh$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/checks\/download-hermes-source-archive[.]sh$/,
     testsToRun: runTests(
       "test/hermes-share-mount-deps.test.ts",
       "test/managed-image-publication-workflow.test.ts",

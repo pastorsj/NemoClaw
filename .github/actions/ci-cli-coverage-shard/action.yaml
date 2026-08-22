@@ -58,7 +58,7 @@ runs:
         cache: npm
         cache-dependency-path: |
           package-lock.json
-          nemoclaw/package-lock.json
+          packages/nemoclaw-openclaw/plugin/package-lock.json
 
     - name: Install pinned Pi search tools
       shell: bash
@@ -139,7 +139,7 @@ runs:
 
     - name: Build TypeScript plugin
       shell: bash
-      run: cd nemoclaw && npm run build
+      run: npm --prefix packages/nemoclaw-openclaw/plugin run build
 
     - name: Build CLI for coverage shard
       shell: bash

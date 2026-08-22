@@ -19,7 +19,7 @@
   "include": ["src/**/*.ts"],
   "exclude": [
     "node_modules",
-    "nemoclaw",
+    "packages/nemoclaw-openclaw/plugin",
     "src/**/*.test.ts",
     "src/**/*-test-fixture.ts"
   ]

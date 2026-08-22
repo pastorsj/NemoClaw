@@ -398,6 +398,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
       USE_PREINSTALLED_LAUNCHABLE
         ? "the baked Launchable completes onboarding without installing from source"
         : "install.sh --non-interactive completes onboarding",
+      "the installed OpenClaw harness remains selectable for onboarding",
       "cold onboarding stays within the checked-in full-E2E performance budgets",
       "nemoclaw and openshell are installed and usable",
       "sandbox appears in list/status and has policy/inference configuration",
@@ -510,6 +511,14 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   expect(pathProbe.exitCode, resultText(pathProbe)).toBe(0);
   expect(pathProbe.stdout).toContain("nemoclaw");
   expect(pathProbe.stdout).toContain("openshell");
+
+  await host.expectHarnessInstalled("openclaw", {
+    artifactName: "phase-2-openclaw-harness",
+    cwd: REPO_ROOT,
+    env: env(),
+    redactionValues,
+    timeoutMs: 120_000,
+  });
 
   const list = await repoNemoclaw(host, ["list"], "phase-3-nemoclaw-list");
   expect(list.exitCode, resultText(list)).toBe(0);

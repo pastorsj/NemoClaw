@@ -91,9 +91,9 @@ describe("optimized build-context Dockerfile sources", () => {
     const directory = makeTemporaryDirectory();
     const dockerfilePath = writeDockerfile(
       directory,
-      "COPY nemoclaw-blueprint/scripts/*.js /usr/local/lib/nemoclaw/preloads/\n",
+      "COPY packages/nemoclaw-openclaw/preloads/*.js /usr/local/lib/nemoclaw/preloads/\n",
     );
-    const scriptsDirectory = path.join(directory, "nemoclaw-blueprint", "scripts");
+    const scriptsDirectory = path.join(directory, "packages", "nemoclaw-openclaw", "preloads");
     fs.mkdirSync(scriptsDirectory, { recursive: true });
 
     expect(missingDockerfileCopySources(dockerfilePath, directory)).toHaveLength(1);

@@ -98,6 +98,56 @@ export class HostCliClient {
     return result;
   }
 
+  async expectHarnessInstalled(
+    harnessId: string,
+    options: ShellProbeRunOptions = {},
+  ): Promise<{
+    list: ShellProbeResult;
+    agents: ShellProbeResult;
+  }> {
+    const artifactPrefix =
+      options.artifactName ?? `harness-${artifactLabel(harnessId)}`;
+    const sharedOptions = {
+      env: buildAvailabilityProbeEnv(),
+      ...options,
+    };
+    const list = await this.nemoclaw(["harness", "list"], {
+      ...sharedOptions,
+      artifactName: `${artifactPrefix}-list`,
+    });
+    assertExitZero(list, "nemoclaw harness list");
+    const listed = resultText(list)
+      .split(/\r?\n/u)
+      .map((line) => line.trim().split(/\s+/u))
+      .some(
+        (columns) =>
+          columns.length >= 3 &&
+          columns[0] === harnessId &&
+          columns.at(-1) === "installed",
+      );
+    if (!listed) {
+      throw new Error(
+        `nemoclaw harness list did not report '${harnessId}' as installed: ${resultText(list)}`,
+      );
+    }
+
+    const agents = await this.nemoclaw(["agents", "list"], {
+      ...sharedOptions,
+      artifactName: `${artifactPrefix}-agents`,
+    });
+    assertExitZero(agents, "nemoclaw agents list");
+    const selectable = resultText(agents)
+      .split(/\r?\n/u)
+      .some((line) => line.trim().split(/\s+/u)[0] === harnessId);
+    if (!selectable) {
+      throw new Error(
+        `nemoclaw agents list did not include '${harnessId}': ${resultText(agents)}`,
+      );
+    }
+
+    return { list, agents };
+  }
+
   async expectListed(
     sandboxName: string,
     options: ShellProbeRunOptions = {},

@@ -129,7 +129,6 @@ const MANAGED_IMAGE_MULTIARCH_CHILD_CREDENTIALS =
   /^src\/lib\/actions\/sandbox\/openshell-child-visible-credentials[.]v[^/]+[.]json$/u;
 const MANAGED_IMAGE_MULTIARCH_INPUT_PREFIXES = [
   "agents/",
-  "nemoclaw/",
   "nemoclaw-blueprint/",
   "packages/",
   "scripts/",
@@ -223,7 +222,7 @@ const E2E_CONTROL_PLANE_FILES = new Set([
 // Keep the explicit floor until a machine-readable security-owner catalog replaces it.
 const PRIVATE_NETWORK_BOUNDARY_FILES = new Set([
   "nemoclaw-blueprint/private-networks.yaml",
-  "nemoclaw/src/blueprint/private-networks.ts",
+  "packages/nemoclaw-openclaw/plugin/src/blueprint/private-networks.ts",
 ]);
 const POLICY_SECURITY_FILE = /^src\/lib\/(?:policy|shields)\//;
 // Ordinary tests do not raise the runtime floor. These files either define a live
@@ -380,7 +379,7 @@ export const RISK_RULES: readonly RiskRule[] = [
     ],
     matches: (file) =>
       (file.startsWith("src/") ||
-        file.startsWith("nemoclaw/") ||
+        file.startsWith("packages/nemoclaw-openclaw/plugin/") ||
         file.startsWith("scripts/") ||
         file.startsWith("nemoclaw-blueprint/")) &&
       MUTATION_FILE.test(file),
@@ -488,7 +487,7 @@ export const RISK_RULES: readonly RiskRule[] = [
       POLICY_SECURITY_FILE.test(file) ||
       PRIVATE_NETWORK_BOUNDARY_FILES.has(file) ||
       CREDENTIAL_SECURITY_FILE.test(file) ||
-      file.startsWith("nemoclaw/src/blueprint/ssrf"),
+      file.startsWith("packages/nemoclaw-openclaw/plugin/src/blueprint/ssrf"),
   },
   {
     id: "e2e-control-plane",
@@ -585,7 +584,7 @@ export const RISK_RULES: readonly RiskRule[] = [
       "blueprint state agrees with the runtime observed by both supported agents",
     ],
     matches: (file) =>
-      file.startsWith("nemoclaw/src/blueprint/") ||
+      file.startsWith("packages/nemoclaw-openclaw/plugin/src/blueprint/") ||
       file === "nemoclaw-blueprint/blueprint.yaml" ||
       file.startsWith("packages/nemoclaw-hermes/"),
   },

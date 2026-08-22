@@ -159,10 +159,10 @@ reviews:
     - path: "src/lib/sandbox/{config,privileged-exec}.ts"
       instructions: *security-boundary
 
-    - path: "nemoclaw/src/security/**"
+    - path: "packages/nemoclaw-openclaw/plugin/src/security/**"
       instructions: *security-boundary
 
-    - path: "nemoclaw/src/blueprint/ssrf.ts"
+    - path: "packages/nemoclaw-openclaw/plugin/src/blueprint/ssrf.ts"
       instructions: *security-boundary
 
     - path: "packages/nemoclaw-openclaw/Dockerfile*"
@@ -180,7 +180,7 @@ reviews:
     - path: "scripts/lib/sandbox-init.sh"
       instructions: *security-boundary
 
-    - path: "nemoclaw-blueprint/scripts/http-proxy-fix.js"
+    - path: "packages/nemoclaw-openclaw/preloads/http-proxy-fix.js"
       instructions: *security-boundary
 
     - path: "nemoclaw-blueprint/policies/**"

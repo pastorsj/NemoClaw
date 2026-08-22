@@ -13,11 +13,11 @@ import path from "node:path";
 import {
   createPrivateNetworkMatcher,
   parsePrivateNetworkDocument,
-} from "../../nemoclaw/dist/shared/private-networks-boundary.cjs";
+} from "../../packages/nemoclaw-openclaw/plugin/dist/shared/private-networks-boundary.cjs";
 import type {
   NetworkDocument,
   PrivateNetworkMatcher,
-} from "../../nemoclaw/dist/shared/private-networks-boundary.cjs";
+} from "../../packages/nemoclaw-openclaw/plugin/dist/shared/private-networks-boundary.cjs";
 
 import { ROOT } from "./runner";
 
@@ -29,7 +29,7 @@ export type {
   NameEntry,
   NetworkDocument,
   NetworkEntry,
-} from "../../nemoclaw/dist/shared/private-networks-boundary.cjs";
+} from "../../packages/nemoclaw-openclaw/plugin/dist/shared/private-networks-boundary.cjs";
 
 interface LoadedNetworks {
   networks: NetworkDocument;

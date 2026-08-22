@@ -450,7 +450,7 @@ function isWithinRoot(candidatePath: string, rootPath: string): boolean {
  * redirect reads or writes to an attacker-controlled directory.
  *
  * Mirrors the pattern from config-io.ts (PR #2290) and
- * nemoclaw/src/blueprint/snapshot.ts.
+ * packages/nemoclaw-openclaw/plugin/src/blueprint/snapshot.ts.
  */
 function rejectSymlinksOnPath(targetPath: string): void {
   const home = HOME_DIR;

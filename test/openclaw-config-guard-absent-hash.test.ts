@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-const GUARD_PATH = path.resolve("scripts/openclaw-config-guard.py");
+const GUARD_PATH = path.resolve(
+  "packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py",
+);
 const fixtures: string[] = [];
 
 const RUN_AS_CURRENT_USER = String.raw`
@@ -104,7 +106,9 @@ function runGuard(action: "lock" | "preflight" | "unlock", configDir: string, fa
       env: {
         ...process.env,
         NEMOCLAW_TEST_NODE_PATH: trustedNodePath(configDir),
-        NEMOCLAW_TEST_JSON5_PATH: path.resolve("nemoclaw/node_modules/json5"),
+        NEMOCLAW_TEST_JSON5_PATH: path.resolve(
+          "packages/nemoclaw-openclaw/plugin/node_modules/json5",
+        ),
       },
       maxBuffer: 32 * 1024 * 1024,
     },

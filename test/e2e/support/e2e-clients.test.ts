@@ -112,6 +112,81 @@ describe("E2E fixture clients", () => {
     ]);
   });
 
+  it("host client verifies one installed harness remains selectable", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue({
+      stdout:
+        "hermes  @nvidia/nemoclaw-hermes@0.1.0  installed\n" +
+        "openclaw  @nvidia/nemoclaw-openclaw@0.1.0  bundled\n",
+    });
+    runner.enqueue({ stdout: "hermes  Self-improving AI agent\nopenclaw  Gateway agent\n" });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await host.expectHarnessInstalled("hermes", {
+      artifactName: "phase-harness",
+      env: { PATH: "/test/bin" },
+      timeoutMs: 123_000,
+    });
+
+    expect(runner.calls).toEqual([
+      {
+        command: "nemoclaw",
+        args: ["harness", "list"],
+        options: {
+          artifactName: "phase-harness-list",
+          env: { PATH: "/test/bin" },
+          timeoutMs: 123_000,
+        },
+      },
+      {
+        command: "nemoclaw",
+        args: ["agents", "list"],
+        options: {
+          artifactName: "phase-harness-agents",
+          env: { PATH: "/test/bin" },
+          timeoutMs: 123_000,
+        },
+      },
+    ]);
+  });
+
+  it("host client stops harness verification after a list failure", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue({ exitCode: 1, stderr: "package validation failed" });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
+      "nemoclaw harness list failed: package validation failed",
+    );
+    expect(runner.calls.map((call) => call.args)).toEqual([
+      ["harness", "list"],
+    ]);
+  });
+
+  it("host client rejects a harness list that does not confirm installation", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue({ stdout: "hermes  @nvidia/nemoclaw-hermes@0.1.0  bundled\n" });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
+      "nemoclaw harness list did not report 'hermes' as installed",
+    );
+    expect(runner.calls.map((call) => call.args)).toEqual([
+      ["harness", "list"],
+    ]);
+  });
+
+  it("host client rejects an installed harness that onboarding cannot select", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue({ stdout: "hermes  @nvidia/nemoclaw-hermes@0.1.0  installed\n" });
+    runner.enqueue({ stdout: "openclaw  Gateway agent\n" });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
+      "nemoclaw agents list did not include 'hermes'",
+    );
+  });
+
   it.each([
     { exitCode: 0, expected: true, label: "available" },
     { exitCode: 1, expected: false, label: "missing" },

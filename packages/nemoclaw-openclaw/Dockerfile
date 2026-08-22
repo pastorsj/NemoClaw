@@ -28,13 +28,13 @@ ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=1000 \
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=20000 \
     NPM_CONFIG_FETCH_TIMEOUT=60000
-COPY nemoclaw/package.json nemoclaw/package-lock.json nemoclaw/tsconfig.json /opt/nemoclaw/
+COPY packages/nemoclaw-openclaw/plugin/package.json packages/nemoclaw-openclaw/plugin/package-lock.json packages/nemoclaw-openclaw/plugin/tsconfig.json /opt/nemoclaw/
 COPY tools/mcp-tool-discovery-runtime/npm-ci-locked.sh /opt/nemoclaw-build-tools/npm-ci-locked.sh
 COPY tools/mcp-tool-discovery-runtime/npm-cache-seed/ /opt/nemoclaw-build-tools/npm-cache-seed/
 WORKDIR /opt/nemoclaw
 RUN --network=default /opt/nemoclaw-build-tools/npm-ci-locked.sh \
     && rm -rf /opt/nemoclaw-build-tools/npm-cache-seed
-COPY nemoclaw/src/ /opt/nemoclaw/src/
+COPY packages/nemoclaw-openclaw/plugin/src/ /opt/nemoclaw/src/
 COPY scripts/checks/verify-openshell-policy-boundary-dependencies.mts /opt/nemoclaw-build-checks/
 RUN npm run build \
     && node --experimental-strip-types \
@@ -541,25 +541,26 @@ COPY scripts/patch-bundled-npm-tar.mts /scripts/patch-bundled-npm-tar.mts
 FROM scratch AS openclaw-plugin-payload
 
 COPY --from=builder /opt/nemoclaw/dist/ /opt/nemoclaw/dist/
-COPY nemoclaw/openclaw.plugin.json /opt/nemoclaw/
+COPY packages/nemoclaw-openclaw/plugin/openclaw.plugin.json /opt/nemoclaw/
 COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
+COPY packages/nemoclaw-openclaw/model-specific-setup/openclaw/ /opt/nemoclaw-blueprint/model-specific-setup/openclaw/
 COPY packages/nemoclaw-openclaw/policy-additions.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox.yaml
 COPY packages/nemoclaw-openclaw/policy-permissive-default.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml
 
 FROM scratch AS openclaw-patch-payload
 
-COPY scripts/patch-openclaw-tool-catalog.mts /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts
-COPY scripts/patch-openclaw-chat-send.mts /usr/local/lib/nemoclaw/patch-openclaw-chat-send.mts
-COPY scripts/patch-openclaw-mcp-npx.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-npx.mts
-COPY scripts/patch-openclaw-mcp-reliability.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts
-COPY scripts/patch-openclaw-mcp-tools-list-timeout.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts
-COPY scripts/patch-openclaw-issue-4434-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts
-COPY scripts/patch-openclaw-managed-transport-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-managed-transport-diagnostics.mts
-COPY scripts/patch-openclaw-device-self-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts
-COPY scripts/openclaw/patch-gateway-daemon-dialback.mts /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts
-COPY scripts/extract-semver.sh /usr/local/lib/nemoclaw/extract-semver
-COPY scripts/patch-openclaw-shared-state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts
-COPY scripts/verify-wechat-runtime-lock.mts /usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-tool-catalog.mts /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-chat-send.mts /usr/local/lib/nemoclaw/patch-openclaw-chat-send.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-npx.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-npx.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-issue-4434-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-managed-transport-diagnostics.mts
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts
+COPY packages/nemoclaw-openclaw/scripts/openclaw/patch-gateway-daemon-dialback.mts /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts
+COPY packages/nemoclaw-openclaw/scripts/extract-semver.sh /usr/local/lib/nemoclaw/extract-semver
+COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts
+COPY packages/nemoclaw-openclaw/scripts/verify-wechat-runtime-lock.mts /usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts
 
 FROM scratch AS openclaw-runtime-payload
 
@@ -568,27 +569,27 @@ COPY --chmod=0444 scripts/lib/corporate-ca-runtime.sh /usr/local/lib/nemoclaw/co
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY scripts/lib/gateway-supervisor.sh /usr/local/lib/nemoclaw/gateway-supervisor.sh
 COPY scripts/lib/sandbox-rlimits.sh /usr/local/lib/nemoclaw/sandbox-rlimits.sh
-COPY scripts/lib/openclaw_device_approval_policy.py /usr/local/lib/nemoclaw/openclaw_device_approval_policy.py
-COPY scripts/lib/clean_runtime_shell_env_shim.py /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py
-COPY scripts/lib/normalize_mutable_config_perms.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
+COPY packages/nemoclaw-openclaw/scripts/lib/openclaw_device_approval_policy.py /usr/local/lib/nemoclaw/openclaw_device_approval_policy.py
+COPY packages/nemoclaw-openclaw/scripts/lib/clean_runtime_shell_env_shim.py /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py
+COPY packages/nemoclaw-openclaw/scripts/lib/normalize_mutable_config_perms.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
 COPY packages/nemoclaw-openclaw/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
-COPY scripts/openclaw-config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
+COPY packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
 COPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
-COPY nemoclaw-blueprint/scripts/*.js /usr/local/lib/nemoclaw/preloads/
+COPY packages/nemoclaw-openclaw/preloads/*.js /usr/local/lib/nemoclaw/preloads/
 COPY --from=runtime-preload-builder /opt/nemoclaw-root/dist/lib/messaging/channels/ /usr/local/lib/nemoclaw/preloads-compiled-channels/
-COPY scripts/codex-acp-wrapper.sh /usr/local/bin/nemoclaw-codex-acp
-COPY scripts/generate-openclaw-config.mts /scripts/generate-openclaw-config.mts
-COPY scripts/validate-openclaw-tool-search.mts /scripts/validate-openclaw-tool-search.mts
+COPY packages/nemoclaw-openclaw/scripts/codex-acp-wrapper.sh /usr/local/bin/nemoclaw-codex-acp
+COPY packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts /scripts/generate-openclaw-config.mts
+COPY packages/nemoclaw-openclaw/scripts/validate-openclaw-tool-search.mts /scripts/validate-openclaw-tool-search.mts
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
-COPY nemoclaw-blueprint/openclaw-plugins/ /usr/local/share/nemoclaw/openclaw-plugins/
+COPY packages/nemoclaw-openclaw/openclaw-plugins/ /usr/local/share/nemoclaw/openclaw-plugins/
 COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/dist/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
 
 # Stage 3: Runtime image — pull cached base from GHCR
@@ -741,7 +742,7 @@ RUN set -eu; \
 
 # Install runtime dependencies before copying mutable build outputs so source
 # and blueprint changes keep the production dependency layer cached.
-COPY nemoclaw/package.json nemoclaw/package-lock.json /opt/nemoclaw/
+COPY packages/nemoclaw-openclaw/plugin/package.json packages/nemoclaw-openclaw/plugin/package-lock.json /opt/nemoclaw/
 COPY tools/mcp-tool-discovery-runtime/npm-ci-locked.sh /usr/local/lib/nemoclaw-build-tools/npm-ci-locked.sh
 COPY tools/mcp-tool-discovery-runtime/npm-cache-seed/ /usr/local/lib/nemoclaw-build-tools/npm-cache-seed/
 WORKDIR /opt/nemoclaw

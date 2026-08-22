@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Mirror of packages/nemoclaw-hermes/config/upstream-header.ts. Kept in lockstep because
-// src/ cannot import from agents/ under tsconfig.src.json rootDir, and the
-// Hermes agent build context (packages/nemoclaw-hermes/Dockerfile) cannot reach src/.
-// The two copies must be byte-for-byte equivalent in behaviour; the parity
-// test in src/lib/sandbox/hermes-upstream-header.parity.test.ts compares
-// their output across fixtures and fails the build if they drift.
+// Mirror of packages/nemoclaw-hermes/config/upstream-header.ts. The CLI
+// production tsconfig excludes package source, while the Hermes image stages
+// the package config module under its own runtime path. The two copies must be
+// equivalent in behavior; src/lib/sandbox/hermes-upstream-header.parity.test.ts
+// catches drift.
 
 const HEADER_VALUE_MAX_LENGTH = 128;
 

@@ -417,7 +417,7 @@ function Get-WslCheckoutSyncScript {
         "rm -rf $workdirLiteral"
         'rsync -a --no-owner --no-group --delete \'
         "  --exclude '/node_modules/' \"
-        "  --exclude '/nemoclaw/node_modules/' \"
+        "  --exclude '/packages/nemoclaw-openclaw/plugin/node_modules/' \"
         "  --exclude '/nemoclaw-blueprint/.venv/' \"
         "  $checkoutLiteral/ $workdirLiteral/"
         "git config --global --add safe.directory $workdirLiteral"

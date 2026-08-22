@@ -206,7 +206,10 @@ export function writeSourceCheckoutNpmStub(
     ? `printf '{"rewritten":true}\\n' > package-lock.json; `
     : "";
   const onboard = options.onboardLog
-    ? `printf '%s\\n' "$*" >> "$NEMOCLAW_ONBOARD_LOG"`
+    ? `if [ "$1" = "onboard" ]; then
+  printf '%s\\n' "$*" >> "$NEMOCLAW_ONBOARD_LOG"
+  exit 0
+fi`
     : `if [ "$1" = "onboard" ]; then exit 0; fi`;
   writeNpmStub(fakeBin, {
     installSnippet: `${commandLog}if [ "$1" = "pack" ]; then
@@ -221,6 +224,12 @@ if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
 if [ "$1" = "--version" ]; then echo "nemoclaw v0.1.0-test"; exit 0; fi
+if [ "$1" = "harness" ] && [ "\${2:-}" = "install" ]; then
+  if [ -n "\${NEMOCLAW_HARNESS_INSTALL_LOG:-}" ]; then
+    printf '%s\\n' "$*" >> "$NEMOCLAW_HARNESS_INSTALL_LOG"
+  fi
+  exit 0
+fi
 ${onboard}
 exit 0
 EOS
@@ -237,10 +246,35 @@ export function writeSourceCheckoutPackages(root: string): void {
     path.join(root, "package.json"),
     JSON.stringify({ name: "nemoclaw", version: "0.1.0" }, null, 2),
   );
-  fs.mkdirSync(path.join(root, "nemoclaw"), { recursive: true });
+  const pluginRoot = path.join(root, "packages", "nemoclaw-openclaw", "plugin");
+  fs.mkdirSync(pluginRoot, { recursive: true });
   fs.writeFileSync(
-    path.join(root, "nemoclaw", "package.json"),
+    path.join(pluginRoot, "package.json"),
     JSON.stringify({ name: "nemoclaw-plugin", version: "0.1.0" }, null, 2),
+  );
+}
+
+/** Writes the Git stub used by source-checkout installer fixtures. */
+export function writeSourceCheckoutGitStub(
+  fakeBin: string,
+  options: { commandLog?: boolean } = {},
+): void {
+  const commandLog = options.commandLog ? `printf '%s\\n' "$*" >> "$GIT_LOG_PATH"\n` : "";
+  writeExecutable(
+    path.join(fakeBin, "git"),
+    `#!/usr/bin/env bash
+${commandLog}if [ "\${1:-}" = "-c" ]; then
+  shift 2
+fi
+if [ "$1" = "clone" ]; then
+  target="\${@: -1}"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
+  echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
+  exit 0
+fi
+exit 0
+`,
   );
 }
 

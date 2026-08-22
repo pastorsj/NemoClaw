@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Functional test for GPT-5-family reply-budget compat in
-// scripts/generate-openclaw-config.mts.
+// packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts.
 //
 // Kept in its own focused file (rather than growing the already
 // budget-capped generate-openclaw-config.test.ts) so the gpt-5.4
@@ -13,7 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { main } from "../scripts/generate-openclaw-config.mts";
+import { main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import { resolveMaxTokensField } from "../src/lib/inference/max-tokens-field";
 import { baseOpenClawGenerationEnv, buildOpenClawTestEnv } from "./helpers/openclaw-env-fixture";
 

@@ -48,9 +48,11 @@ describe("defaulted dependent flag guard", () => {
 });
 
 describe("scanned source path selection", () => {
-  it("scans source TypeScript under src and nemoclaw/src", () => {
+  it("scans source TypeScript under src and the OpenClaw plugin", () => {
     expect(isScannedSourcePath("src/commands/sandbox/channels/status.ts")).toBe(true);
-    expect(isScannedSourcePath("nemoclaw/src/commands/example.ts")).toBe(true);
+    expect(
+      isScannedSourcePath("packages/nemoclaw-openclaw/plugin/src/commands/example.ts"),
+    ).toBe(true);
   });
 
   it("excludes tests, declarations, and paths outside the scan roots", () => {

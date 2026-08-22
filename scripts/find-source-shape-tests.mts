@@ -84,8 +84,8 @@ const SKIP_DIRS = new Set([
   "coverage",
   "dist",
   "docs/_build",
-  "nemoclaw/dist",
-  "nemoclaw/node_modules",
+  "packages/nemoclaw-openclaw/plugin/dist",
+  "packages/nemoclaw-openclaw/plugin/node_modules",
   "node_modules",
   "worktrees",
 ]);
@@ -551,7 +551,7 @@ function collectProductionConsumerNames(imports: readonly ImportBinding[]): Set<
         ({ path }) =>
           !isDeclarativeImportPath(path) &&
           !TEST_NAME_PATTERN.test(path) &&
-          /^(?:agents|bin|nemoclaw\/src|packages|scripts|src|tools)\//.test(path),
+          /^(?:agents|bin|packages|scripts|src|tools)\//.test(path),
       )
       .map(({ local }) => local),
   );

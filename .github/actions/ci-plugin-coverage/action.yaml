@@ -14,7 +14,7 @@ runs:
         cache: npm
         cache-dependency-path: |
           package-lock.json
-          nemoclaw/package-lock.json
+          packages/nemoclaw-openclaw/plugin/package-lock.json
 
     - name: Install dependencies
       shell: bash
@@ -29,8 +29,8 @@ runs:
           --coverage.reporter=json-summary \
           --coverage.reporter=cobertura \
           --coverage.reportsDirectory=coverage/plugin \
-          --coverage.include="nemoclaw/src/**/*.ts" \
-          --coverage.include="nemoclaw/src/**/*.cts" \
+          --coverage.include="packages/nemoclaw-openclaw/plugin/src/**/*.ts" \
+          --coverage.include="packages/nemoclaw-openclaw/plugin/src/**/*.cts" \
           --coverage.exclude="**/*.test.ts"
         npx tsx scripts/check-coverage-ratchet.mts coverage/plugin/coverage-summary.json ci/coverage-threshold-plugin.json "Plugin coverage"
 

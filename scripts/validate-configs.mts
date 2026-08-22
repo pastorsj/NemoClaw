@@ -87,8 +87,8 @@ function discoverTargets(): ConfigTarget[] {
       ],
     },
     {
-      schema: "schemas/openclaw-plugin.schema.json",
-      files: ["nemoclaw/openclaw.plugin.json"],
+      schema: "packages/nemoclaw-openclaw/schemas/openclaw-plugin.schema.json",
+      files: ["packages/nemoclaw-openclaw/plugin/openclaw.plugin.json"],
     },
     {
       schema: "schemas/router-pool-config.schema.json",
@@ -116,30 +116,34 @@ function discoverTargets(): ConfigTarget[] {
     sandboxPolicyTarget.files = [...policyFiles].sort();
   }
 
-  const modelSetupDir = join(REPO_ROOT, "nemoclaw-blueprint", "model-specific-setup");
-  try {
-    const modelSetupFiles: string[] = [];
-    const walkModelSetup = (dir: string): void => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const abs = join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walkModelSetup(abs);
-        } else if (entry.isFile() && entry.name.endsWith(".json") && entry.name !== "schema.json") {
-          modelSetupFiles.push(pathRelativeToRepo(abs));
-        }
+  const modelSetupFiles: string[] = [];
+  const walkModelSetup = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walkModelSetup(abs);
+      } else if (entry.isFile() && entry.name.endsWith(".json") && entry.name !== "schema.json") {
+        modelSetupFiles.push(pathRelativeToRepo(abs));
       }
-    };
-    walkModelSetup(modelSetupDir);
-    if (modelSetupFiles.length > 0) {
-      targets.push({
-        schema: "nemoclaw-blueprint/model-specific-setup/schema.json",
-        files: modelSetupFiles.sort(),
-      });
     }
-  } catch (err) {
-    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
-    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
-    // model-specific setup directory may not exist — not an error
+  };
+  for (const modelSetupDir of [
+    join(REPO_ROOT, "nemoclaw-blueprint", "model-specific-setup"),
+    join(REPO_ROOT, "packages", "nemoclaw-openclaw", "model-specific-setup"),
+    join(REPO_ROOT, "packages", "nemoclaw-hermes", "model-specific-setup"),
+  ]) {
+    try {
+      walkModelSetup(modelSetupDir);
+    } catch (err) {
+      const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    }
+  }
+  if (modelSetupFiles.length > 0) {
+    targets.push({
+      schema: "nemoclaw-blueprint/model-specific-setup/schema.json",
+      files: modelSetupFiles.sort(),
+    });
   }
 
   // Discover all preset YAML files dynamically.

@@ -19,7 +19,7 @@ const ALLOWED_TOP_KEYS = new Set<string>(["agents", "defaults", "main"]);
 const AGENT_DATA_ROOT = "/sandbox/.openclaw";
 
 // Defence-in-depth credential-name denylist: the authoritative reject lives
-// at the build-time validator (scripts/generate-openclaw-config.mts) which
+// at the build-time validator (packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts) which
 // only permits a small allowlist of nested keys. Even so, the host writes
 // `NEMOCLAW_EXTRA_AGENTS_JSON` and the Dockerfile patcher base64-bakes the
 // payload into `NEMOCLAW_EXTRA_AGENTS_JSON_B64` before the build runs. A
@@ -106,7 +106,7 @@ export interface AgentsManifestPayload {
 /**
  * Load and shallow-shape-check the agents manifest YAML. Heavy validation
  * (shape of each agent entry, model-ref/provider match, allowlists) lives
- * at the build-time validator in scripts/generate-openclaw-config.mts so
+ * at the build-time validator in packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts so
  * the build is the single source of truth for structured errors. We only
  * surface obvious early errors (missing file, top-level shape) and
  * auto-fill canonical workspace/agentDir paths from the agent id so the

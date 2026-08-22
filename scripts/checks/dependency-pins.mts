@@ -595,7 +595,11 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "packages/nemoclaw-hermes/mcp-config-transaction.py",
     failures,
   );
-  const updateHermesAgent = readText(rootDir, "scripts/update-hermes-agent.sh", failures);
+  const updateHermesAgent = readText(
+    rootDir,
+    "packages/nemoclaw-hermes/scripts/update-hermes-agent.sh",
+    failures,
+  );
   const credentialBoundarySource = readText(
     rootDir,
     `src/lib/actions/sandbox/openshell-child-visible-credentials.v${pins.openshell.maxVersion}.json`,
@@ -606,7 +610,11 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "src/lib/actions/sandbox/mcp-bridge-validation.ts",
     failures,
   );
-  const packageJsonSource = readText(rootDir, "nemoclaw/package.json", failures);
+  const packageJsonSource = readText(
+    rootDir,
+    "packages/nemoclaw-openclaw/plugin/package.json",
+    failures,
+  );
   const openshellVersion = readText(rootDir, "src/lib/onboard/openshell-version.ts", failures);
   const openshellInstall = readText(rootDir, "src/lib/onboard/openshell-install.ts", failures);
   const supervisorManifestDigests = readText(
@@ -645,7 +653,12 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "YAML",
     failures,
   );
-  const packageJson = parseMapping(packageJsonSource, "nemoclaw/package.json", "JSON", failures);
+  const packageJson = parseMapping(
+    packageJsonSource,
+    "packages/nemoclaw-openclaw/plugin/package.json",
+    "JSON",
+    failures,
+  );
   if (!openclawManifest || !hermesManifest || !credentialBoundary || !e2eWorkflow || !packageJson)
     return failures;
 

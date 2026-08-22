@@ -190,7 +190,6 @@ describe("base-image publication evidence", () => {
         "packages/**",
         "packages/nemoclaw-hermes/Dockerfile.base",
         "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
-        "nemoclaw/**",
         "nemoclaw-blueprint/**",
         "scripts/**",
         "src/lib/actions/sandbox/openshell-child-visible-credentials.v*.json",

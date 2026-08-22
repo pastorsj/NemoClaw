@@ -37,19 +37,19 @@ Total is clamped to `[0, 100]`.
 The skill needs to know which path to use with `git log "$REPORTED_VERSION".."$LATEST" -- <path>`. Apply in order and stop at the first non-empty path:
 
 1. **Stack trace / file path mentions in the issue body.** Grep the body for absolute paths under known install roots, then map to repo paths:
-   - `/usr/local/lib/nemoclaw/<rel>` → `<rel>` in repo (e.g., `scripts/generate-openclaw-config.py`)
+   - `/usr/local/lib/nemoclaw/<file>` → find the matching package-owned source (for example, `patch-openclaw-tool-catalog.mts` maps to `packages/nemoclaw-openclaw/scripts/patch-openclaw-tool-catalog.mts`)
    - `/usr/local/bin/nemoclaw*` → `bin/`
    - `~/.nemoclaw/<rel>` → most often runtime state, drop unless the bug is config-related → `src/lib/config/`
    - In-repo paths (e.g., `bin/lib/policies.js` mentioned literally) → use as-is
 2. **Canonical routing-label-to-directory map.** Pick the first match. Drop paths that do not exist at `$LATEST`.
    - `area: cli` → `bin/`, `src/commands/`, `src/lib/cli/`
-   - `area: sandbox` → `src/lib/sandbox/`, `nemoclaw/src/blueprint/`, `nemoclaw-blueprint/`
-   - `platform: container` or `area: packaging` → `Dockerfile`, `Dockerfile.base`, `scripts/install-openshell.sh`, `scripts/install.sh`
+   - `area: sandbox` → `src/lib/sandbox/`, `packages/`, `nemoclaw-blueprint/`
+   - `platform: container` or `area: packaging` → `packages/`, `scripts/install-openshell.sh`, `scripts/install.sh`
    - `area: install` or `area: onboarding` → `scripts/install.sh`, `src/lib/onboard/`
-   - `area: policy` → `nemoclaw-blueprint/policies/`, `nemoclaw/src/blueprint/`
+   - `area: policy` → `nemoclaw-blueprint/policies/`, package-owned `policy*.yaml`, `packages/nemoclaw-openclaw/plugin/src/blueprint/`
    - `area: messaging` → `src/lib/messaging/`
    - `integration: *` with no body path → skip the +25 signal; no generic integration directory owns every integration.
-3. **Title keywords.** "policy" → `nemoclaw-blueprint/policies/`, `nemoclaw/src/blueprint/`. "inference" → `docs/inference/` is docs-only; skip the +25 signal unless source 1 surfaces actual code paths.
+3. **Title keywords.** "policy" → `nemoclaw-blueprint/policies/`, package-owned `policy*.yaml`, `packages/nemoclaw-openclaw/plugin/src/blueprint/`. "inference" → `docs/inference/` is docs-only; skip the +25 signal unless source 1 surfaces actual code paths.
 
 If none of the above produces a path, skip the signal rather than guessing. A commit that merely touches the directory does not earn points. Inspect the diff and state how the changed behavior addresses the reproduced symptom.
 

@@ -93,7 +93,7 @@ npm_target_libc="glibc"
 [[ "$source_root" == /* && "$source_root" != *$'\n'* && -d "$source_root" && ! -L "$source_root" ]] || usage
 source_root="$(cd -- "$source_root" && pwd -P)"
 seed_helper="$source_root/scripts/checks/materialize-locked-npm-cache-seed.mts"
-source_lockfile="$source_root/nemoclaw/package-lock.json"
+source_lockfile="$source_root/packages/nemoclaw-openclaw/plugin/package-lock.json"
 source_seed_dir="$source_root/tools/mcp-tool-discovery-runtime/npm-cache-seed"
 source_mcp_lockfile="$source_root/tools/mcp-tool-discovery-runtime/package-lock.json"
 source_mcp_seed_dir="$source_root/tools/mcp-tool-discovery-runtime/mcp-runtime-npm-cache-seed"

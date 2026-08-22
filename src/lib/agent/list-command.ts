@@ -12,7 +12,7 @@ export function listAgentRuntimeEntries(): AgentRuntimeListEntry[] {
 export function renderAgentRuntimeList(
   entries: readonly AgentRuntimeListEntry[] = listAgentRuntimeEntries(),
 ): string {
-  if (entries.length === 0) return "No agent runtimes are installed.";
+  if (entries.length === 0) return "No agent runtimes are available.";
 
   const nameWidth = Math.max(...entries.map((entry) => entry.name.length));
   return entries

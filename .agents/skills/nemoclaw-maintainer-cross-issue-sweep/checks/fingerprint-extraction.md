@@ -65,7 +65,7 @@ Fingerprint JSON shape:
 ```json
 {
   "pr": 2851,
-  "files": ["src/lib/shields.ts", "Dockerfile.base"],
+  "files": ["src/lib/shields.ts", "packages/nemoclaw-openclaw/Dockerfile.base"],
   "symbols": ["normalize_mutable_config_perms", "applyStateDirLockMode"],
   "error_strings": ["EACCES on .openclaw"],
   "primary_issue": 2681

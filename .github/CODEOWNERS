@@ -9,10 +9,6 @@
 # ── Fallback: maintainers review anything not matched below ──
 *                                   @NVIDIA/nemoclaw-maintainer
 
-# ── CLI plugin (Node/TS) ──
-/nemoclaw/                          @NVIDIA/nemoclaw-maintainer
-/nemoclaw/src/onboard/              @NVIDIA/nemoclaw-engineer
-
 # ── Blueprint & sandbox policy (Python) ──
 /nemoclaw-blueprint/                @NVIDIA/nemoclaw-maintainer
 /nemoclaw-blueprint/policies/       @NVIDIA/nemoclaw-security
@@ -26,6 +22,11 @@
 # ── Container ──
 /Dockerfile                         @NVIDIA/nemoclaw-security @NVIDIA/nemoclaw-maintainer
 /packages/                          @NVIDIA/nemoclaw-security @NVIDIA/nemoclaw-maintainer
+
+# ── OpenClaw plugin (Node/TS) ──
+# Keep these entries after the broad packages rule because the last match wins.
+/packages/nemoclaw-openclaw/plugin/             @NVIDIA/nemoclaw-maintainer
+/packages/nemoclaw-openclaw/plugin/src/onboard/ @NVIDIA/nemoclaw-engineer
 
 # ── Docs ──
 /docs/                              @NVIDIA/nemoclaw-engineer

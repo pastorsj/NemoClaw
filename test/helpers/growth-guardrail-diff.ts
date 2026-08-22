@@ -43,13 +43,44 @@ function parseChangedFiles(source: string): PullRequestFile[] {
   return files;
 }
 
-function readGitFile(ref: string, file: string): string | null {
-  const result = spawnSync("git", ["show", `${ref}:${file}`], {
+function parseGitBatchOutput(
+  paths: readonly string[],
+  output: Buffer,
+): ReadonlyMap<string, string | null> {
+  const files = new Map<string, string | null>();
+  let offset = 0;
+  for (const file of paths) {
+    const headerEnd = output.indexOf(0x0a, offset);
+    if (headerEnd === -1) throw new Error(`git cat-file omitted the header for ${file}`);
+    const header = output.subarray(offset, headerEnd).toString("utf8");
+    offset = headerEnd + 1;
+    if (header.endsWith(" missing")) {
+      files.set(file, null);
+      continue;
+    }
+    const match = header.match(/^[0-9a-f]+ blob ([0-9]+)$/);
+    if (!match) throw new Error(`git cat-file returned an invalid header for ${file}: ${header}`);
+    const size = Number(match[1]);
+    const contentEnd = offset + size;
+    if (contentEnd >= output.length || output[contentEnd] !== 0x0a) {
+      throw new Error(`git cat-file returned truncated content for ${file}`);
+    }
+    files.set(file, output.subarray(offset, contentEnd).toString("utf8"));
+    offset = contentEnd + 1;
+  }
+  return files;
+}
+
+function readGitFiles(ref: string, paths: readonly string[]): ReadonlyMap<string, string | null> {
+  const uniquePaths = [...new Set(paths)];
+  if (uniquePaths.length === 0) return new Map();
+  const output = execFileSync("git", ["cat-file", "--batch"], {
     cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+    input: uniquePaths.map((file) => `${ref}:${file}\n`).join(""),
+    maxBuffer: 512 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "ignore"],
   });
-  return result.status === 0 ? result.stdout : null;
+  return parseGitBatchOutput(uniquePaths, output);
 }
 
 function readWorktreeFile(file: string): string | null {
@@ -130,7 +161,7 @@ function loadLocalDiff(): GrowthGuardrailDiff {
   return {
     files,
     async readBase(paths) {
-      return readFiles(paths, (file) => readGitFile(comparisonBase, file));
+      return readGitFiles(comparisonBase, paths);
     },
     async readHead(paths) {
       return readFiles(paths, readWorktreeFile);
@@ -173,4 +204,9 @@ export function loadGrowthGuardrailDiff(): Promise<GrowthGuardrailDiff> {
     : Promise.resolve(loadLocalDiff());
 }
 
-export const testOnly = { parseAncestorProbe, parseChangedFiles, selectLocalComparisonBase };
+export const testOnly = {
+  parseAncestorProbe,
+  parseChangedFiles,
+  parseGitBatchOutput,
+  selectLocalComparisonBase,
+};

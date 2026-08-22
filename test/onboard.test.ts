@@ -601,17 +601,26 @@ startGateway(null).catch((error) => {
       const { buildCtx, stagedDockerfile } = stageOptimizedSandboxBuildContext(repoRoot, tmpDir);
 
       expect(stagedDockerfile).toBe(path.join(buildCtx, "Dockerfile"));
-      expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "package-lock.json"))).toBe(true);
-      expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "src"))).toBe(true);
+      const stagedPlugin = path.join(buildCtx, "packages", "nemoclaw-openclaw", "plugin");
+      expect(fs.existsSync(path.join(stagedPlugin, "package-lock.json"))).toBe(true);
+      expect(fs.existsSync(path.join(stagedPlugin, "src"))).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", ".venv"))).toBe(false);
       expect(fs.existsSync(path.join(buildCtx, "packages", "nemoclaw-openclaw", "start.sh"))).toBe(
         true,
       );
-      expect(fs.existsSync(path.join(buildCtx, "scripts", "patch-openclaw-tool-catalog.mts"))).toBe(
-        true,
-      );
+      expect(
+        fs.existsSync(
+          path.join(
+            buildCtx,
+            "packages",
+            "nemoclaw-openclaw",
+            "scripts",
+            "patch-openclaw-tool-catalog.mts",
+          ),
+        ),
+      ).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "scripts", "setup.sh"))).toBe(false);
-      expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "node_modules"))).toBe(false);
+      expect(fs.existsSync(path.join(stagedPlugin, "node_modules"))).toBe(false);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

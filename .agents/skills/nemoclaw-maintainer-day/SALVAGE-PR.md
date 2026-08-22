@@ -59,7 +59,7 @@ Stop and report a conflict that can change behavior.
 
 ```bash
 npm test                          # root integration tests
-cd nemoclaw && npm test           # plugin tests
+npm --prefix packages/nemoclaw-openclaw/plugin test           # plugin tests
 npm run typecheck:cli             # CLI type check
 npm run check                     # broad repo-wide pre-commit and coverage baseline
 ```

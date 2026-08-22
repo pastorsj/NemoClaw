@@ -30,7 +30,7 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
     {
       group: "Getting Started",
       order: 1.6,
-      usage: "nemoclaw harness install <openclaw|hermes|langchain-deepagents-code>",
+      usage: "nemoclaw harness install <harness>",
       description: "Install a bundled harness package",
     },
   ],

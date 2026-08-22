@@ -35,16 +35,17 @@ function writeManagedSource(root: string, revision: string) {
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
   fs.mkdirSync(path.join(root, "dist", "lib", "onboard"), { recursive: true });
   fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
-  fs.mkdirSync(path.join(root, "nemoclaw", "dist"), { recursive: true });
-  fs.mkdirSync(path.join(root, "nemoclaw", "node_modules"), { recursive: true });
+  const pluginRoot = path.join(root, "packages", "nemoclaw-openclaw", "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "dist"), { recursive: true });
+  fs.mkdirSync(path.join(pluginRoot, "node_modules"), { recursive: true });
   fs.writeFileSync(path.join(root, ".fixture-revision"), revision);
   fs.writeFileSync(
     path.join(root, "package.json"),
     JSON.stringify({ name: "nemoclaw", dependencies: { openclaw: "2026.7.1" } }),
   );
   fs.writeFileSync(path.join(root, "package-lock.json"), COMMITTED_LOCKFILE);
-  fs.writeFileSync(path.join(root, "nemoclaw", "package.json"), '{"name":"nemoclaw-plugin"}');
-  fs.writeFileSync(path.join(root, "nemoclaw", "dist", "index.js"), "module.exports = {};\n");
+  fs.writeFileSync(path.join(pluginRoot, "package.json"), '{"name":"nemoclaw-plugin"}');
+  fs.writeFileSync(path.join(pluginRoot, "dist", "index.js"), "module.exports = {};\n");
   fs.writeFileSync(
     path.join(root, "dist", "lib", "onboard", "preflight.js"),
     "module.exports = {};\n",
@@ -147,10 +148,11 @@ case "\${1:-}" in
     node -e 'const assert = require("node:assert/strict"); const fs = require("node:fs"); assert.equal(fs.statSync(process.argv[1]).mode & 0o777, 0o700)' "$NEMOCLAW_STATE_ROOT"
     target="\${@: -1}"
     mkdir -p "$target/.git" "$target/bin" "$target/dist/lib/onboard" "$target/node_modules" \
-      "$target/nemoclaw/dist" "$target/nemoclaw/node_modules"
+      "$target/packages/nemoclaw-openclaw/plugin/dist" \
+      "$target/packages/nemoclaw-openclaw/plugin/node_modules"
     printf '%s' "$EXPECTED_REVISION" > "$target/.fixture-revision"
     printf '%s\n' '{"name":"nemoclaw","dependencies":{"openclaw":"2026.7.1"}}' > "$target/package.json"
-    printf '%s\n' '{"name":"nemoclaw-plugin"}' > "$target/nemoclaw/package.json"
+    printf '%s\n' '{"name":"nemoclaw-plugin"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
     printf '%s' "\${COMMITTED_LOCKFILE:-}" > "$target/package-lock.json"
     ;;
   describe) printf '%s\n' 'v0.0.99' ;;

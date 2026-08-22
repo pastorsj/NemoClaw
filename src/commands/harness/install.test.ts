@@ -41,7 +41,7 @@ describe("harness install oclif command", testTimeoutOptions(30_000), () => {
       await HarnessInstallCommand.run([id], rootDir);
 
       expect(mocks.installBundledHarness).toHaveBeenCalledWith(id);
-      expect(log).toHaveBeenCalledWith(`Harness ${id} is ready.`);
+      expect(log).toHaveBeenCalledWith(`Agent runtime package '${id}' is installed.`);
     },
   );
 
@@ -53,15 +53,21 @@ describe("harness install oclif command", testTimeoutOptions(30_000), () => {
 
     expect(mocks.installBundledHarness).toHaveBeenCalledTimes(2);
     expect(log.mock.calls).toEqual([
-      ["Harness openclaw is ready."],
-      ["Harness openclaw is ready."],
+      ["Agent runtime package 'openclaw' is installed."],
+      ["Agent runtime package 'openclaw' is installed."],
     ]);
   });
 
-  it("rejects an unknown harness before installation", async () => {
-    await expect(HarnessInstallCommand.run(["unknown"], rootDir)).rejects.toThrow(/unknown/i);
+  it("lets the package registry validate a discovered harness id", async () => {
+    mocks.installBundledHarness.mockImplementationOnce(() => {
+      throw new Error("Bundled harness 'unknown' was not found");
+    });
 
-    expect(mocks.installBundledHarness).not.toHaveBeenCalled();
+    await expect(HarnessInstallCommand.run(["unknown"], rootDir)).rejects.toThrow(
+      "Bundled harness 'unknown' was not found",
+    );
+
+    expect(mocks.installBundledHarness).toHaveBeenCalledWith("unknown");
   });
 
   it("requires a harness id before installation", async () => {

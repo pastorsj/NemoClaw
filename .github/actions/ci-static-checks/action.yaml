@@ -35,7 +35,7 @@ runs:
 
     - name: Validate sandbox payload lockfile
       shell: bash
-      run: npm --prefix nemoclaw ci --ignore-scripts --dry-run
+      run: npm --prefix packages/nemoclaw-openclaw/plugin ci --ignore-scripts --dry-run
 
     - name: Install dependencies
       shell: bash

@@ -16,7 +16,7 @@ import { withLocalNoProxy } from "./proxy/local-no-proxy";
  *
  * See: #1874
  *
- * NOTE: nemoclaw/src/lib/subprocess-env.ts is a mirror of this file for
+ * NOTE: packages/nemoclaw-openclaw/plugin/src/lib/subprocess-env.ts mirrors this file for
  * the plugin project. Keep them in sync.
  */
 

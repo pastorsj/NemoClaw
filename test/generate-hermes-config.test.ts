@@ -1280,12 +1280,18 @@ describe("packages/nemoclaw-hermes/generate-config.ts", () => {
     const sourceRegistryDir = path.join(
       import.meta.dirname,
       "..",
-      "nemoclaw-blueprint",
+      "packages",
+      "nemoclaw-hermes",
       "model-specific-setup",
     );
     const fixtureRoot = path.join(tmpDir, "script-relative-fixture");
     const fixtureScriptPath = copyConfigGeneratorFixture(fixtureRoot);
-    const registryDir = path.join(fixtureRoot, "nemoclaw-blueprint", "model-specific-setup");
+    const registryDir = path.join(
+      fixtureRoot,
+      "packages",
+      "nemoclaw-hermes",
+      "model-specific-setup",
+    );
     const manifestPath = path.join(
       registryDir,
       "hermes",

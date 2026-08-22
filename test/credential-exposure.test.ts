@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildSubprocessEnv as buildPluginSubprocessEnv,
   withLocalNoProxy as withPluginLocalNoProxy,
-} from "../nemoclaw/src/lib/subprocess-env";
+} from "../packages/nemoclaw-openclaw/plugin/src/lib/subprocess-env";
 import {
   buildSubprocessEnv as buildCliSubprocessEnv,
   withLocalNoProxy as withCliLocalNoProxy,

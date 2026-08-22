@@ -8,7 +8,7 @@ export default class AgentsListCommand extends NemoClawCommand {
   static id = "agents:list";
   static strict = true;
   static summary = "List available agent runtimes for onboard --agent";
-  static description = "List installed agent runtimes that can be selected with onboard --agent.";
+  static description = "List available agent runtimes that can be selected with onboard --agent.";
   static usage = ["agents list"];
   static examples = ["<%= config.bin %> agents list"];
   static flags = {};

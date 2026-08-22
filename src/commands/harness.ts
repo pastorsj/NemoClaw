@@ -8,7 +8,7 @@ export default class HarnessCommand extends NemoClawCommand {
   static strict = true;
   static summary = "Manage harness packages";
   static description = "List and install harness packages for NemoClaw onboarding.";
-  static usage = ["harness list", "harness install <openclaw|hermes|langchain-deepagents-code>"];
+  static usage = ["harness list", "harness install <harness>"];
   static examples = [
     "<%= config.bin %> harness list",
     "<%= config.bin %> harness install openclaw",
@@ -18,8 +18,6 @@ export default class HarnessCommand extends NemoClawCommand {
   public async run(): Promise<void> {
     await this.parse(HarnessCommand);
     this.log(`Usage: ${this.config.bin} harness list`);
-    this.log(
-      `       ${this.config.bin} harness install <openclaw|hermes|langchain-deepagents-code>`,
-    );
+    this.log(`       ${this.config.bin} harness install <harness>`);
   }
 }

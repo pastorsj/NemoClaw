@@ -245,7 +245,10 @@ print(json.dumps(proof))
 `;
 
 const GUARDS = [
-  ["OpenClaw", path.resolve("scripts/openclaw-config-guard.py")],
+  [
+    "OpenClaw",
+    path.resolve("packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py"),
+  ],
   ["Hermes", path.resolve("packages/nemoclaw-hermes/runtime-config-guard.py")],
 ] as const;
 

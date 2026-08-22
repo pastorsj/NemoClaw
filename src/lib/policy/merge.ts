@@ -5,11 +5,11 @@ import {
   parseOpenShellPolicy as parseCanonicalOpenShellPolicy,
   stripProviderComposedPolicies as stripCanonicalProviderComposedPolicies,
   withoutProviderComposedPolicies as withoutCanonicalProviderComposedPolicies,
-} from "../../../nemoclaw/dist/shared/openshell-policy-boundary.cjs";
+} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/openshell-policy-boundary.cjs";
 
 import type { JsonObject } from "../core/json-types";
 
-// sourceOfTruth: nemoclaw/src/shared/openshell-policy-boundary.cts
+// sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/openshell-policy-boundary.cts
 // generatedBoundary: build:cli emits the canonical .cjs/.d.cts before this
 // CommonJS wrapper is compiled. Keep this file implementation-free.
 export const parseOpenShellPolicy = parseCanonicalOpenShellPolicy;

@@ -17,7 +17,7 @@
 //      garbage input.
 //
 // Build must run before this test: `npm run build:cli` for the CLI side
-// and `npm run build` inside nemoclaw/ for the plugin side.
+// and the OpenClaw plugin build for the plugin side.
 
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
@@ -71,11 +71,11 @@ const cliHelper = loadHelper<NetworkHelper>(
   "`npm run build:cli`",
 );
 const pluginHelper = loadHelper<NetworkHelper>(
-  "../../nemoclaw/dist/blueprint/private-networks.js",
-  "`npm run build` inside nemoclaw/",
+  "../../packages/nemoclaw-openclaw/plugin/dist/blueprint/private-networks.js",
+  "`npm --prefix packages/nemoclaw-openclaw/plugin run build`",
 );
 const boundary = loadHelper<PrivateNetworkBoundary>(
-  "../../nemoclaw/dist/shared/private-networks-boundary.cjs",
+  "../../packages/nemoclaw-openclaw/plugin/dist/shared/private-networks-boundary.cjs",
   "`npm run build:cli`",
 );
 const sharedNetworks = cliHelper.getNetworkEntries();

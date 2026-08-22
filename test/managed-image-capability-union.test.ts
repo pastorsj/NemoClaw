@@ -11,7 +11,7 @@ import {
   MANAGED_IMAGE_HERMES_NEUTRAL_PLATFORMS,
   MANAGED_IMAGE_HERMES_SUPPORTED_PLATFORMS,
 } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
-import { MANAGED_IMAGE_OPENCLAW_MESSAGING_CAPABILITIES } from "../scripts/generate-openclaw-config.mts";
+import { MANAGED_IMAGE_OPENCLAW_MESSAGING_CAPABILITIES } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import {
   applyMessagingBuildPhase,
   collectManagedImageHermesUvPackages,

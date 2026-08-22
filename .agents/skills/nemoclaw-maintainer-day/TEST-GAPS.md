@@ -48,7 +48,7 @@ Do not use a test change to add a refactor that is not required.
 ## Step 5: Add Tests
 
 - Put CLI tests in `test/`.
-- Put plugin tests in `nemoclaw/src/`.
+- Put plugin tests in `packages/nemoclaw-openclaw/plugin/src/`.
 - Use TypeScript tests for TypeScript helpers.
 - Mock calls to external systems. Unit tests must not call external APIs.
 - For security paths, prove that the code denies the unsafe action.
@@ -57,7 +57,7 @@ Do not use a test change to add a refactor that is not required.
 
 ```bash
 npm test                          # root tests
-cd nemoclaw && npm test           # plugin tests
+npm --prefix packages/nemoclaw-openclaw/plugin test           # plugin tests
 npm run typecheck:cli
 npm run check                     # broad repo-wide pre-commit and coverage baseline
 ```

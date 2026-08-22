@@ -15,8 +15,9 @@ import { type CompositeAction, readYaml } from "./helpers/e2e-workflow-contract"
 
 const live = "test/e2e/live/example.test.ts";
 const fast = "test/e2e/support/example.test.ts";
+const pluginFast = "packages/nemoclaw-openclaw/plugin/src/blueprint/example.test.ts";
 const TAGGED_NEW_SOURCE = "// @module-tag e2e/credential-free\n";
-const exists = (file: string) => file === live || file === fast;
+const exists = (file: string) => file === live || file === fast || file === pluginFast;
 
 function manifest(entries: MockParityManifest["entries"]): MockParityManifest {
   return { version: 1, entries };
@@ -64,10 +65,10 @@ describe("changed live E2E mock parity", () => {
     expect(isMockParityRelevantSourceChange(null, TAGGED_NEW_SOURCE)).toBe(true);
   });
 
-  it("accepts a changed live E2E mapped to a fast PR test", () => {
+  it.each([fast, pluginFast])("accepts a changed live E2E mapped to fast PR test %s", (fastTest) => {
     expect(
       validateMockParity({
-        manifest: manifest([{ live, fast: [fast] }]),
+        manifest: manifest([{ live, fast: [fastTest] }]),
         changedFiles: [live],
         fileExists: exists,
       }),

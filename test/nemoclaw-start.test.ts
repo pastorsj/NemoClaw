@@ -10,12 +10,17 @@ import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
-const START_SCRIPT = path.join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
-const APPROVAL_POLICY_DIR = path.join(import.meta.dirname, "..", "scripts", "lib");
+const OPENCLAW_PACKAGE = path.join(import.meta.dirname, "../packages/nemoclaw-openclaw");
+const START_SCRIPT = path.join(OPENCLAW_PACKAGE, "start.sh");
+const APPROVAL_POLICY_DIR = path.join(OPENCLAW_PACKAGE, "scripts", "lib");
+const MUTABLE_CONFIG_NORMALIZER = path.join(
+  APPROVAL_POLICY_DIR,
+  "normalize_mutable_config_perms.py",
+);
 const INSTALLED_APPROVAL_POLICY = "/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py";
-const PRELOAD_SCRIPTS = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "scripts");
+const PRELOAD_SCRIPTS = path.join(OPENCLAW_PACKAGE, "preloads");
 const CHANNEL_RUNTIME_SCRIPTS = path.join(import.meta.dirname, "..", "src/lib/messaging/channels");
-const JSON5_MODULE = path.join(import.meta.dirname, "..", "nemoclaw", "node_modules", "json5");
+const JSON5_MODULE = path.join(OPENCLAW_PACKAGE, "plugin", "node_modules", "json5");
 
 function runtimeShellEnvBlock(src: string): string {
   const start = src.indexOf("write_runtime_shell_env() {");
@@ -2129,9 +2134,7 @@ exit 2
   }, 30_000);
 });
 
-// -------------------------------------------------------------------
 // NC-2227-01: Legacy migration behavior
-// -------------------------------------------------------------------
 describe("NC-2227-01: legacy migration behavior", () => {
   const src = fs.readFileSync(START_SCRIPT, "utf-8");
 
@@ -3842,13 +3845,6 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
       fs.writeFileSync(lastGoodPath, fixture.lastGoodContent);
     }
 
-    const helperPath = path.join(
-      import.meta.dirname,
-      "..",
-      "scripts",
-      "lib",
-      "normalize_mutable_config_perms.py",
-    );
     const helperFns = extractShellFunction("normalize_mutable_config_perms").replace(
       'local config_dir="/sandbox/.openclaw"',
       `local config_dir=${JSON.stringify(openclawDir)}`,
@@ -3860,7 +3856,7 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
     const wrapper = [
       "#!/usr/bin/env bash",
       "set -euo pipefail",
-      `export NEMOCLAW_MUTABLE_CONFIG_NORMALIZER=${JSON.stringify(helperPath)}`,
+      `export NEMOCLAW_MUTABLE_CONFIG_NORMALIZER=${JSON.stringify(MUTABLE_CONFIG_NORMALIZER)}`,
       `${extractShellFunction("resolve_mutable_config_normalizer")}\n${helperFns}`,
       fn,
       "recover_openclaw_config_if_empty",
@@ -4016,13 +4012,6 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
     fs.chmodSync(openclawDir, 0o2770);
     fs.chmodSync(path.join(openclawDir, "openclaw.json"), 0o660);
     fs.chmodSync(path.join(openclawDir, ".config-hash"), 0o660);
-    const helper = path.join(
-      import.meta.dirname,
-      "..",
-      "scripts",
-      "lib",
-      "normalize_mutable_config_perms.py",
-    );
     const harness = [
       "import importlib.util, os, sys",
       "spec = importlib.util.spec_from_file_location('normalizer', sys.argv[1])",
@@ -4045,7 +4034,7 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
         "-I",
         "-c",
         harness,
-        helper,
+        MUTABLE_CONFIG_NORMALIZER,
         openclawDir,
         process.execPath,
         options.json5Module ?? JSON5_MODULE,

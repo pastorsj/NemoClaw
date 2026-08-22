@@ -7,7 +7,14 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
-const POLICY_PATH = path.join(REPO_ROOT, "scripts", "lib", "openclaw_device_approval_policy.py");
+const POLICY_PATH = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "lib",
+  "openclaw_device_approval_policy.py",
+);
 
 function hasPython3(): boolean {
   return spawnSync("sh", ["-c", "command -v python3"], { stdio: "ignore" }).status === 0;

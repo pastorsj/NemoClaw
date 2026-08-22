@@ -11,7 +11,7 @@
 # (Python-based) instead of OpenClaw (Node-based).
 #
 # ── When to rebuild ─────────────────────────────────────────────
-#   1. Hermes version bump      — run scripts/update-hermes-agent.sh
+#   1. Hermes version bump      — run packages/nemoclaw-hermes/scripts/update-hermes-agent.sh
 #   2. New apt package needed   — add it to the apt-get install list
 #   3. util-linux upgrade       — update the pinned apt package version
 #   4. node:24-trixie-slim digest rot — update-docker-pin.sh updates all
@@ -65,7 +65,7 @@ COPY --from=perl-builder /out /tmp/nemoclaw-native-security
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Hermes version pinned for reproducibility. All four values below are
-# managed by scripts/update-hermes-agent.sh — HERMES_VERSION is the GitHub
+# managed by packages/nemoclaw-hermes/scripts/update-hermes-agent.sh — HERMES_VERSION is the GitHub
 # calver tag, HERMES_SEMVER the matching package version from the release's
 # pyproject.toml, HERMES_TARBALL_SHA256 the GitHub tarball checksum, and
 # HERMES_NPM_INTEGRITY the `npm view hermes-agent@<semver> dist.integrity`
@@ -441,7 +441,7 @@ RUN pip3 install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" \
 # RUN so their bytes never enter a published image layer.
 COPY packages/nemoclaw-hermes/security-dependencies.patch /tmp/hermes-security-dependencies.patch
 COPY packages/nemoclaw-hermes/whatsapp-proxy.patch /tmp/hermes-whatsapp-proxy.patch
-COPY scripts/checks/download-hermes-source-archive.sh /tmp/nemoclaw-download-hermes-source-archive.sh
+COPY packages/nemoclaw-hermes/checks/download-hermes-source-archive.sh /tmp/nemoclaw-download-hermes-source-archive.sh
 RUN mkdir -p /opt/hermes \
     && bash /tmp/nemoclaw-download-hermes-source-archive.sh "${HERMES_VERSION}" /tmp/hermes.tar.gz \
     && printf '%s  /tmp/hermes.tar.gz\n' "${HERMES_TARBALL_SHA256}" > /tmp/hermes.tar.gz.sha256 \

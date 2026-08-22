@@ -1277,7 +1277,7 @@ _PREEXISTING_SANDBOX_ORPHANED=false
 _LEGACY_MANAGED_RECOVERY_NAMES_JSON="[]"
 # OpenShell v0.0.106 routes sandbox and workspace identities through labels
 # capped at 19 characters. Keep this installer-only raw-registry preflight in
-# sync with NAME_MAX_LENGTH in nemoclaw/src/shared/sandbox-name.cts. The
+# sync with NAME_MAX_LENGTH in packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts. The
 # current CLI cannot be prepared safely until legacy names are checked.
 _OPENSHELL_SANDBOX_NAME_MAX_LENGTH=19
 # #5735: set when automatic recovery/upgrade of pre-existing sandboxes
@@ -2422,11 +2422,11 @@ is_reusable_managed_nemoclaw_install() {
   [[ "$current_revision" == "$expected_revision" ]] || return 1
   git -C "$source_root" diff --quiet --ignore-submodules -- || return 1
   git -C "$source_root" diff --cached --quiet --ignore-submodules -- || return 1
-  [[ -d "${source_root}/node_modules" && -d "${source_root}/nemoclaw/node_modules" ]] || return 1
+  [[ -d "${source_root}/node_modules" && -d "${source_root}/packages/nemoclaw-openclaw/plugin/node_modules" ]] || return 1
 
   identity_file="${source_root}/dist/build-identity.json"
   [[ -f "$identity_file" && -s "${source_root}/dist/lib/onboard/preflight.js" ]] || return 1
-  [[ -s "${source_root}/nemoclaw/dist/index.js" ]] || return 1
+  [[ -s "${source_root}/packages/nemoclaw-openclaw/plugin/dist/index.js" ]] || return 1
   identity_revision="$(json_string_field "$identity_file" sourceRevision)"
   identity_version="$(json_string_field "$identity_file" nemoclawVersion)"
   [[ "$identity_revision" == "$expected_revision" ]] || return 1
@@ -2510,7 +2510,7 @@ install_nemoclaw() {
     fi
     spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm install --ignore-scripts"
     spin "Building ${_CLI_DISPLAY} CLI modules" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm run --if-present build:cli"
-    spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\"/nemoclaw && npm ci --ignore-scripts && npm run build"
+    spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\"/packages/nemoclaw-openclaw/plugin && npm ci --ignore-scripts && npm run build"
     spin "Linking ${_CLI_DISPLAY} CLI" bash -c "cd \"$NEMOCLAW_SOURCE_ROOT\" && npm link --ignore-scripts"
 
     _NEMOCLAW_CLI_INSTALL_MODE=source
@@ -2557,7 +2557,7 @@ install_nemoclaw() {
       fi
       spin "Installing ${_CLI_DISPLAY} dependencies" bash -c "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
       spin "Building ${_CLI_DISPLAY} CLI modules" bash -c "cd \"$nemoclaw_src\" && npm run --if-present build:cli"
-      spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$nemoclaw_src\"/nemoclaw && npm ci --ignore-scripts && npm run build"
+      spin "Building ${_CLI_DISPLAY} plugin" bash -c "cd \"$nemoclaw_src\"/packages/nemoclaw-openclaw/plugin && npm ci --ignore-scripts && npm run build"
       spin "Linking ${_CLI_DISPLAY} CLI" bash -c "cd \"$nemoclaw_src\" && npm link --ignore-scripts"
       restore_managed_source_lockfile "$nemoclaw_src" \
         || warn "Could not restore package-lock.json in ${nemoclaw_src} — the next install re-clones that checkout instead of reusing it."
@@ -2697,6 +2697,21 @@ verify_nemoclaw() {
   printf '    Active PATH: %s\n' "${PATH:-(empty)}"
   warn "Try re-running:  curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash"
   error "Installation failed: ${_CLI_BIN} binary not found."
+}
+
+install_selected_harness() {
+  local selected_harness="${NEMOCLAW_AGENT:-openclaw}"
+  if [[ -z "$_CLI_PATH" ]]; then
+    error "Cannot install the ${_AGENT_PRODUCT} agent runtime package because the ${_CLI_DISPLAY} executable was not resolved."
+  fi
+  case "$selected_harness" in
+    pi | nemocua)
+      # Release candidates still live under agents/ and keep their existing
+      # gated onboarding path until they become bundled harness packages.
+      return 0
+      ;;
+  esac
+  "$_CLI_PATH" harness install "$selected_harness"
 }
 
 inspect_sandbox_registry_for_upgrade() {
@@ -5936,6 +5951,7 @@ install_nemoclaw_before_onboarding() {
   preinstall_backup_and_retire_legacy_gateway
   install_nemoclaw
   verify_nemoclaw
+  install_selected_harness
   require_reportable_openshell_version
 }
 

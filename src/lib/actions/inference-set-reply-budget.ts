@@ -7,7 +7,7 @@ import { isConfigObject } from "../security/credential-filter";
 // SOURCE_OF_TRUTH_REVIEW (Anthropic reply budget; gateway regression #4504,
 // OpenClaw 2026.6.10 adopted in #5595): OpenClaw rejects an Anthropic Messages
 // model without a positive maxTokens before sending the request. Onboarding's
-// canonical fallback lives in scripts/generate-openclaw-config.mts, but
+// canonical fallback lives in packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts, but
 // `inference set` creates and patches live provider namespaces without running
 // that generator. Preserve a valid target-model budget first, then the exact
 // active-primary budget, then the generator-aligned fallback. Regression proof

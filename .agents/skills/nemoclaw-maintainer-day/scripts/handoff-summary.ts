@@ -45,7 +45,8 @@ const AREA_LABELS: Record<string, RegExp[]> = {
   ],
   "Onboarding / host glue": [/^bin\/lib\/onboard\.js$/, /^bin\/.*\.js$/, /^src\/lib\/onboard\//],
   "Sandbox / policy / SSRF": [
-    /^nemoclaw\/src\/blueprint\//,
+    /^packages\/nemoclaw-[^/]+\//,
+    /^packages\/nemoclaw-openclaw\/plugin\/src\/blueprint\//,
     /^nemoclaw-blueprint\//,
     /policy/i,
     /ssrf/i,

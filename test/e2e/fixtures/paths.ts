@@ -8,3 +8,7 @@ export const E2E_ROOT = path.join(REPO_ROOT, "test", "e2e");
 export const LIVE_E2E_ROOT = path.join(E2E_ROOT, "live");
 export const CLI_ENTRYPOINT = path.join(REPO_ROOT, "bin", "nemoclaw.js");
 export const CLI_DIST_ENTRYPOINT = path.join(REPO_ROOT, "dist", "nemoclaw.js");
+export const OPENCLAW_PLUGIN_RUNNER = path.join(
+  REPO_ROOT,
+  "packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts",
+);

@@ -9,7 +9,9 @@ import type { PullRequestFile } from "./pr-blob-client";
 const BUDGET_FILE = "ci/test-file-size-budget.json";
 const FALLBACK_BUDGET = '{"defaultMaxLines":1500,"legacyMaxLines":{}}';
 const JAVASCRIPT_FILE_RE = /\.(?:cjs|js|mjs)$/;
-const TEST_FILE_RE = /^(?:test|src|nemoclaw\/src)\/.*\.(?:test|spec)\.(?:[cm]?[jt]s)$/;
+const TEST_FILE_RE =
+  /^(?:test|src|packages\/nemoclaw-openclaw\/plugin\/src)\/.*\.(?:test|spec)\.(?:[cm]?[jt]s)$/;
+const LEGACY_PLUGIN_TEST_FILE_RE = /^nemoclaw\/src\/.*\.(?:test|spec)\.(?:[cm]?[jt]s)$/;
 const ONBOARD_ENTRY = "src/lib/onboard.ts";
 
 type TestFileSizeBudget = {
@@ -71,7 +73,9 @@ function testChanges(files: readonly PullRequestFile[]): TestChange[] {
         TEST_FILE_RE.test(filename) || TEST_FILE_RE.test(previous_filename ?? ""),
     )
     .map((file) => ({
-      basePath: TEST_FILE_RE.test(file.previous_filename ?? "")
+      basePath:
+        TEST_FILE_RE.test(file.previous_filename ?? "") ||
+        LEGACY_PLUGIN_TEST_FILE_RE.test(file.previous_filename ?? "")
         ? (file.previous_filename as string)
         : file.filename,
       headPath:

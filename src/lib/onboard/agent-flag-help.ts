@@ -3,7 +3,7 @@
 
 import { formatAgentAliasSuffix } from "../agent/aliases";
 
-// Build the `--agent` flag help. Listing the installed agent runtimes inline
+// Build the `--agent` flag help. Listing the available agent runtimes inline
 // means users don't have to discover valid names by triggering an error (#5779).
 // Kept dependency-free so it stays trivially testable without the agent
 // registry / runner import chain.

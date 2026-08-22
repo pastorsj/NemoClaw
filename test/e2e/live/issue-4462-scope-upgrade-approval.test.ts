@@ -1403,7 +1403,7 @@ test("keeps issue 4462 scope-upgrade approval on the gateway path without an adm
   // #5324 command coverage (PRA-3): the operator scope-upgrade / approval
   // boundary is scope-keyed and command-agnostic, not per-command. Automatic
   // approval is bounded to {operator.pairing, operator.read, operator.write}
-  // (scripts/lib/openclaw_device_approval_policy.py `ALLOWED_SCOPES`), while
+  // (packages/nemoclaw-openclaw/scripts/lib/openclaw_device_approval_policy.py `ALLOWED_SCOPES`), while
   // operator.admin always requires a reviewed `devices approve`. The pending
   // request is selected by its requested scope + CLI/operator role, never by
   // command name (ADMIN_REQUEST_SELECTOR_PY in issue-4462-admin-approval-helper.ts).

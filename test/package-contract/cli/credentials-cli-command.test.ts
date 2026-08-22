@@ -3,10 +3,11 @@
 
 import { createRequire } from "node:module";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const require = createRequire(import.meta.url);
 const REPO_ROOT = path.join(import.meta.dirname, "../../..");
+const TEST_PATH = [path.dirname(process.execPath), "/usr/bin", "/bin"].join(path.delimiter);
 const TAVILY_PROFILE_PATH = path.join(
   REPO_ROOT,
   "nemoclaw-blueprint",
@@ -157,7 +158,12 @@ async function expectExitCode(action: () => Promise<unknown>, expectedCode: numb
   }
 }
 
+beforeEach(() => {
+  vi.stubEnv("PATH", TEST_PATH);
+});
+
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const modulePath of Object.values(COMMAND_PATHS)) {
     delete require.cache[modulePath];
   }

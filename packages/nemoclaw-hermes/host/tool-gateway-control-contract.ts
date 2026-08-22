@@ -9,7 +9,7 @@ type SandboxNameValidators = {
 };
 
 const { isValidName, isValidProviderName } = require(
-  path.join(__dirname, "../../../nemoclaw/dist/shared/sandbox-name.cjs"),
+  path.join(__dirname, "../../nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs"),
 ) as SandboxNameValidators;
 
 // One end-to-end deadline covers refresh-token exchange, agent-key minting,

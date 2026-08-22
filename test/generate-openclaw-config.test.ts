@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Functional tests for scripts/generate-openclaw-config.mts.
-// Runs the actual TypeScript script with controlled env vars and asserts on
-// the generated openclaw.json output.
+// Functional tests run the package script with controlled environment values
+// and assert on the generated openclaw.json output.
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -11,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildConfig, main } from "../scripts/generate-openclaw-config.mts";
+import { buildConfig, main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 import {
   applyMessagingAgentRenderToObject,
   applyMessagingBuildPhase,
@@ -20,7 +19,8 @@ import {
 import { baseOpenClawGenerationEnv, buildOpenClawTestEnv } from "./helpers/openclaw-env-fixture";
 import { withLegacyMessagingPlanEnvDirect } from "./messaging-plan-test-helper";
 
-const SCRIPT_PATH = path.join(import.meta.dirname, "..", "scripts", "generate-openclaw-config.mts");
+const OPENCLAW_PACKAGE = "packages/nemoclaw-openclaw";
+const SCRIPT_PATH = path.resolve(OPENCLAW_PACKAGE, "scripts/generate-openclaw-config.mts");
 const SCRIPT_ARGS = ["--experimental-strip-types", SCRIPT_PATH];
 
 /** Minimal env vars required for a valid config generation run. */

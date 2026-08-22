@@ -76,6 +76,7 @@ function findRegistryRoot(opts: ModelSetupDiscoveryOptions): string | null {
   }
 
   const roots = [
+    join(opts.scriptDir, "model-specific-setup"),
     "/opt/nemoclaw-blueprint/model-specific-setup",
     "/sandbox/.nemoclaw/blueprints/0.1.0/model-specific-setup",
     join(opts.scriptDir, "..", "..", "nemoclaw-blueprint", "model-specific-setup"),

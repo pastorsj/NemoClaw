@@ -36,7 +36,7 @@ const MAIN_AGENT_ID = "main";
 const PROTECTED_IDS = new Set<string>([MAIN_AGENT_ID]);
 
 // Mirrors the authoritative build-time gates in
-// scripts/generate-openclaw-config.mts. Live apply runs on the host before
+// packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts. Live apply runs on the host before
 // the in-sandbox OpenClaw CLI is invoked, so it cannot rely on the build-time
 // validator (which only runs at image-build time inside the container). The
 // gates below are the defensive subset that prevents the live add/delete

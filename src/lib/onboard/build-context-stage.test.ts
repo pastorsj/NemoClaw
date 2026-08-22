@@ -454,4 +454,52 @@ describe("stageCreateSandboxBuildContext", () => {
     expect(defaultResult.origin).toBe("generated");
     expect(stageDefaultSandboxBuildContext).toHaveBeenCalledWith("/repo");
   });
+
+  it("stages the selected installed OpenClaw package in the default build context", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../../..");
+    const home = makeTmpDir("nemoclaw-selected-openclaw-home-");
+    const installedPackage = path.join(
+      home,
+      ".nemoclaw",
+      "harnesses",
+      "nemoclaw-openclaw",
+    );
+    const bundledPackage = path.join(repoRoot, "packages", "nemoclaw-openclaw");
+    const sentinel = "selected-installed-openclaw-package";
+    fs.cpSync(bundledPackage, installedPackage, {
+      recursive: true,
+      filter: (source) => !["dist", "node_modules"].includes(path.basename(source)),
+    });
+    fs.appendFileSync(path.join(installedPackage, "Dockerfile"), `\n# ${sentinel}\n`);
+    writeFixtureFile(installedPackage, "plugin/src/selected-package-sentinel.ts", sentinel);
+    writeFixtureFile(
+      installedPackage,
+      ".nemoclaw-install.json",
+      `${JSON.stringify({ installedDigest: "0".repeat(64) })}\n`,
+    );
+    vi.stubEnv("HOME", home);
+
+    const result = stageCreateSandboxBuildContext({
+      root: repoRoot,
+      fromDockerfile: null,
+      agent: null,
+      createAgentSandbox: vi.fn(),
+    });
+    tmpDirs.push(result.buildCtx);
+
+    expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toContain(sentinel);
+    expect(
+      fs.readFileSync(
+        path.join(
+          result.buildCtx,
+          "packages",
+          "nemoclaw-openclaw",
+          "plugin",
+          "src",
+          "selected-package-sentinel.ts",
+        ),
+        "utf8",
+      ),
+    ).toBe(sentinel);
+  });
 });

@@ -66,12 +66,13 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const BUDGET_PATH = path.join(REPO_ROOT, "ci", "source-architecture-budget.json");
 const DEFAULT_SCAN_ROOTS = [
   "src",
-  "nemoclaw/src",
+  "packages/nemoclaw-openclaw/plugin/src",
+  "packages/nemoclaw-openclaw/preloads",
+  "packages/nemoclaw-openclaw/scripts",
   "packages/nemoclaw-hermes",
   "bin",
   "scripts",
   "tools",
-  "nemoclaw-blueprint/scripts",
 ] as const;
 const SOURCE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/;
 const TEST_FILE = /\.(?:test|spec)\.(?:[cm]?[jt]s|[jt]sx)$/;

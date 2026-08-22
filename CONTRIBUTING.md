@@ -17,7 +17,7 @@ We welcome many types of contributions:
 |---|---|
 | **Bug reports** | Confirmed bugs with reproduction steps — see [Before You Open an Issue](#before-you-open-an-issue) |
 | **Documentation fixes** | Typos, clarifications, and missing information in `docs/` |
-| **Tests** | New or improved test coverage in `test/` or `nemoclaw/test/` |
+| **Tests** | New or improved test coverage in `test/` or `packages/nemoclaw-openclaw/plugin/src/` |
 | **Feature proposals** | Proposals that state the problem and desired behavior before implementation |
 | **Integrations** | Support for new inference backends, providers, or tools |
 | **Examples** | Product-supported examples under `docs/`, or independent solutions routed through [Community Solutions](docs/resources/community-contributions.mdx) |
@@ -168,23 +168,22 @@ Use these commands when troubleshooting an individual setup step:
 
 ```bash
 npm install --include=dev --ignore-scripts
-npm --prefix nemoclaw install --include=dev --ignore-scripts
+npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts
 npm run build:cli
-npm --prefix nemoclaw run build
+npm --prefix packages/nemoclaw-openclaw/plugin run build
 npm run typecheck:cli
-npm --prefix nemoclaw run typecheck
+npm --prefix packages/nemoclaw-openclaw/plugin run typecheck
 ./node_modules/.bin/prek install
 ```
 
 ## Building
 
-The TypeScript plugin lives in `nemoclaw/` and compiles with `tsc`:
+The TypeScript plugin lives in `packages/nemoclaw-openclaw/plugin/` and compiles with `tsc`:
 
 ```bash
-cd nemoclaw
-npm run build        # one-time compile
-npm run dev          # watch mode
-npm run typecheck    # type-check production and test sources without emitting
+npm --prefix packages/nemoclaw-openclaw/plugin run build
+npm --prefix packages/nemoclaw-openclaw/plugin run dev
+npm --prefix packages/nemoclaw-openclaw/plugin run typecheck
 ```
 
 The CLI (`bin/`, `scripts/`) is type-checked separately:
@@ -195,11 +194,9 @@ npm run typecheck:cli   # or: npx tsc -p tsconfig.cli.json
 
 ### Local Development Testing
 
-After building, return to the repository root and explicitly expose the development CLI through the setup helper.
-If you followed the build step above, you are still inside `nemoclaw/` and must `cd ..` first:
+After building the plugin, expose the development CLI from the repository root:
 
 ```bash
-cd ..                                   # back to the repo root
 ./scripts/dev-setup.sh --expose-cli
 command -v nemoclaw                     # verify which executable is active
 nemoclaw --version                      # verify the development CLI runs
@@ -223,7 +220,7 @@ These are the primary npm scripts for day-to-day development:
 | `npm run checks` | Compatibility alias for `npm run checks:repository`; prints scope guidance before delegating |
 | `npm run format` | Auto-format added JavaScript and TypeScript files that Oxfmt does not exclude |
 | `npm run typecheck:cli` | Type-check the root TypeScript project using `tsconfig.cli.json` |
-| `npm --prefix nemoclaw run typecheck` | Type-check plugin production and test sources without emitting files |
+| `npm --prefix packages/nemoclaw-openclaw/plugin run typecheck` | Type-check plugin production and test sources without emitting files |
 | `npm test` | Build package artifacts and run every non-live Vitest project for broad changes |
 | `npm run test:spec` | Run every non-live test with hierarchical behavior-oriented output |
 | `npm run test:fast` | Clean `dist/` and run source CLI, plugin, and E2E-support tests |
@@ -237,7 +234,7 @@ These are the primary npm scripts for day-to-day development:
 | `npm run test:package` | Clean-build CLI/plugin artifacts and run compiled-package contracts |
 | `npm run test:live-e2e` | Opt into live E2E scenarios (mutates real external state) |
 | [`npm run bench`](scripts/bench/README.md) | Run the advisory inference and trace-backed value benchmark |
-| `cd nemoclaw && npm test` | Run plugin unit tests (Vitest) |
+| `npm --prefix packages/nemoclaw-openclaw/plugin test` | Run plugin unit tests (Vitest) |
 | `npm run docs` | Validate Fern documentation with the pinned Fern CLI version |
 | `npm run docs:live` | Serve Fern docs locally with auto-rebuild |
 | `npm run docs:preview:watch` | Publish branch-based Fern previews when docs files change |
@@ -493,7 +490,8 @@ The repository is organized as follows.
 
 | Path | Purpose |
 |------|---------|
-| `nemoclaw/` | TypeScript plugin (Commander CLI, OpenClaw extension) |
+| `packages/nemoclaw-*/` | In-tree agent runtime packages and their runtime-specific support files |
+| `packages/nemoclaw-openclaw/plugin/` | TypeScript OpenClaw plugin |
 | `nemoclaw-blueprint/` | Blueprint definition and network policies |
 | `bin/` | CLI entry point (`nemoclaw.js`) |
 | `scripts/` | Install helpers and automation scripts |

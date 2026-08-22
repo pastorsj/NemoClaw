@@ -31,12 +31,13 @@ Skills that write or review explanatory text must follow the shared [Documentati
 |------|----------|---------|
 | `bin/` | JavaScript (CJS) | CLI launcher (`nemoclaw.js`) and small compatibility helpers |
 | `src/lib/` | TypeScript | Core CLI logic: onboard, credentials, inference, policies, preflight, runner |
-| `nemoclaw/` | TypeScript | Plugin registering `/nemoclaw` TUI slash commands inside OpenClaw; `openclaw nemoclaw <cmd>` shell subcommand path is descoped |
-| `nemoclaw/src/blueprint/` | TypeScript | Runner, snapshot, SSRF validation, state management |
-| `nemoclaw/src/commands/` | TypeScript | Slash commands, migration state |
-| `nemoclaw/src/onboard/` | TypeScript | Onboarding config |
+| `packages/nemoclaw-*/` | TypeScript, Python, Bash, YAML | In-tree agent runtime packages: manifests, images, startup, policy, and runtime-specific support |
+| `packages/nemoclaw-openclaw/plugin/` | TypeScript | Plugin registering `/nemoclaw` TUI slash commands inside OpenClaw; `openclaw nemoclaw <cmd>` shell subcommand path is descoped |
+| `packages/nemoclaw-openclaw/plugin/src/blueprint/` | TypeScript | Runner, snapshot, SSRF validation, state management |
+| `packages/nemoclaw-openclaw/plugin/src/commands/` | TypeScript | Slash commands, migration state |
+| `packages/nemoclaw-openclaw/plugin/src/onboard/` | TypeScript | Onboarding config |
 | `nemoclaw-blueprint/` | YAML | Blueprint definition and network policies |
-| `nemoclaw-blueprint/model-specific-setup/` | JSON | Agent-scoped model/provider compatibility registry |
+| `nemoclaw-blueprint/model-specific-setup/` | JSON | Shared model/provider compatibility schema and registry guidance |
 | `scripts/` | Bash/JS/TS | Install helpers, setup, automation, E2E tooling |
 | `test/` | JavaScript (ESM) | Root-level integration tests (Vitest) |
 | `test/e2e/` | Bash/JS/TS | End-to-end tests, target registry, and live runner (see `test/e2e/README.md`) |
@@ -45,6 +46,7 @@ Skills that write or review explanatory text must follow the shared [Documentati
 
 Package-specific guides:
 
+- Agent runtime package contract: [`packages/README.md`](packages/README.md)
 - Messaging architecture and channel migration guidance: [`src/lib/messaging/AGENTS.md`](src/lib/messaging/AGENTS.md)
 
 ## Quick Reference
@@ -55,8 +57,8 @@ Package-specific guides:
 | Check contributor environment | `npm run dev:doctor` |
 | Expose development CLI | `./scripts/dev-setup.sh --expose-cli` |
 | Launch pinned coding agent | `npm run agent` |
-| Build plugin | `cd nemoclaw && npm run build` |
-| Watch mode | `cd nemoclaw && npm run dev` |
+| Build plugin | `npm --prefix packages/nemoclaw-openclaw/plugin run build` |
+| Watch mode | `npm --prefix packages/nemoclaw-openclaw/plugin run dev` |
 | Run all tests for broad changes | `npm test` |
 | Render behavior-oriented test tree | `npm run test:spec` |
 | Run fast source tests | `npm run test:fast` |
@@ -68,12 +70,12 @@ Package-specific guides:
 | Run package contracts | `npm run test:package` |
 | Run E2E support tests | `npx vitest run --project e2e-support` |
 | Run live E2E targets | `npm run test:live-e2e` |
-| Run plugin tests | `cd nemoclaw && npm test` |
+| Run plugin tests | `npm --prefix packages/nemoclaw-openclaw/plugin test` |
 | Validate a routine PR diff with `pre-commit`, `commit-msg`, and `pre-push` checks | `npm run validate:pr` |
 | Run the narrow custom repository checks used by lint and hooks | `npm run checks:repository` |
 | Run the broad repo-wide pre-commit and coverage baseline | `npm run check` |
 | Type-check CLI | `npm run typecheck:cli` |
-| Type-check plugin and plugin tests | `npm --prefix nemoclaw run typecheck` |
+| Type-check plugin and plugin tests | `npm --prefix packages/nemoclaw-openclaw/plugin run typecheck` |
 | Auto-format added JavaScript and TypeScript files that Oxfmt does not exclude | `npm run format` |
 | Build docs | `npm run docs` |
 | Serve docs locally | `npm run docs:live` |
@@ -82,12 +84,12 @@ Package-specific guides:
 
 ### Dual-Language Stack
 
-- **CLI and plugin**: TypeScript (`src/`, `nemoclaw/src/`) with a small CommonJS launcher in `bin/`; ESM in `test/`
+- **CLI and plugin**: TypeScript (`src/`, `packages/nemoclaw-openclaw/plugin/src/`) with a small CommonJS launcher in `bin/`; ESM in `test/`
 - **Blueprint**: YAML configuration (`nemoclaw-blueprint/`)
 - **Docs**: Fern MDX for user-facing pages, with Markdown routes exposed by Fern for AI documentation clients
 - **Tooling scripts**: Bash and Python
 
-The `bin/` directory uses CommonJS intentionally for the launcher and a few compatibility helpers so the CLI still has a stable executable entry point. The main CLI implementation lives in `src/` and compiles to `dist/`. The `nemoclaw/` plugin uses TypeScript and requires compilation.
+The `bin/` directory uses CommonJS intentionally for the launcher and a few compatibility helpers so the CLI still has a stable executable entry point. The main CLI implementation lives in `src/` and compiles to `dist/`. The OpenClaw plugin under `packages/nemoclaw-openclaw/plugin/` uses TypeScript and requires compilation.
 
 ### Testing Strategy
 
@@ -97,7 +99,7 @@ Tests are organized into disjoint Vitest projects defined in `vitest.config.ts`:
 2. **`integration`** — `test/**/*.test.{js,ts}` — root integration tests importing source; excludes the explicit lanes below
 3. **`installer-integration`** — installer tests that spawn real `install.sh` processes
 4. **`package-contract`** — `test/package-contract/**/*.test.ts` — the only non-live lane that imports compiled CLI/plugin artifacts
-5. **`plugin`** — `nemoclaw/src/**/*.test.ts` — plugin unit tests co-located with source
+5. **`plugin`** — `packages/nemoclaw-openclaw/plugin/src/**/*.test.ts` — plugin unit tests co-located with source
 6. **`e2e-support`** — fast tests for the E2E fixture/support layer; this project runs in the
    aggregate checks for code-changing PRs and code-changing pushes to `main`
 7. **`e2e-live`** — opt-in live targets that mutate real external state
@@ -121,7 +123,7 @@ NemoClaw isolates agents inside OpenShell sandboxes with:
 
 - Network policies (`nemoclaw-blueprint/policies/`) controlling egress
 - Credential sanitization to prevent leaks
-- SSRF validation (`nemoclaw/src/blueprint/ssrf.ts`)
+- SSRF validation (`packages/nemoclaw-openclaw/plugin/src/blueprint/ssrf.ts`)
 - Docker capability drops and process limits
 
 Security-sensitive code paths require extra test coverage.
@@ -161,10 +163,10 @@ For shell scripts use `#` comments. For Markdown use HTML comments.
 
 ### TypeScript
 
-- Oxlint lints plugin code in `nemoclaw/src/`. Oxfmt formats added plugin files that it does not exclude.
+- Oxlint lints plugin code in `packages/nemoclaw-openclaw/plugin/src/`. Oxfmt formats added plugin files that it does not exclude.
 - CLI type-checking via `tsconfig.cli.json`
-- Plugin production and test type-checking via `npm --prefix nemoclaw run typecheck`, using
-  `nemoclaw/tsconfig.json` and `nemoclaw/tsconfig.test.json`
+- Plugin production and test type-checking via `npm --prefix packages/nemoclaw-openclaw/plugin run typecheck`, using
+  `packages/nemoclaw-openclaw/plugin/tsconfig.json` and `packages/nemoclaw-openclaw/plugin/tsconfig.test.json`
 
 ### Shell Scripts
 
@@ -297,9 +299,9 @@ If the command trace contains no reviewer-request write, report the event as an 
 
 **Adding a plugin feature:**
 
-- Source: `nemoclaw/src/`
+- Source: `packages/nemoclaw-openclaw/plugin/src/`
 - Co-locate tests as `*.test.ts`
-- Build with `cd nemoclaw && npm run build`
+- Build with `npm --prefix packages/nemoclaw-openclaw/plugin run build`
 
 **Adding a network policy preset:**
 
@@ -308,9 +310,9 @@ If the command trace contains no reviewer-request write, report the event as an 
 
 **Adding model-specific sandbox compatibility:**
 
-- Add a declarative manifest under `nemoclaw-blueprint/model-specific-setup/<agent>/`
+- Add agent manifests under `packages/nemoclaw-<id>/model-specific-setup/<agent>/`; keep shared schema guidance under `nemoclaw-blueprint/model-specific-setup/`
 - Use one `agent` per manifest (`openclaw`, `hermes`, etc.); do not make shared multi-agent manifests
-- Put OpenClaw executable wrappers under `nemoclaw-blueprint/openclaw-plugins/`
+- Put OpenClaw executable wrappers under `packages/nemoclaw-openclaw/openclaw-plugins/`
 - Put Hermes executable wrappers under `packages/nemoclaw-hermes/`
 - Keep `packages/nemoclaw-hermes/generate-config.ts` as a thin build-time entrypoint; add Hermes env parsing, config construction, registry handling, and serialization under `packages/nemoclaw-hermes/config/`
 - Do not add Hermes behavior for an OpenClaw issue without a Hermes-specific repro or acceptance test
@@ -318,7 +320,7 @@ If the command trace contains no reviewer-request write, report the event as an 
 ### Gotchas
 
 - `npm install` at root triggers `prek install` which sets up git hooks. If hooks fail, check that `core.hooksPath` is unset: `git config --unset core.hooksPath`
-- The `nemoclaw/` subdirectory has its own `package.json` and `node_modules`.
+- The `packages/nemoclaw-openclaw/plugin/` subdirectory has its own `package.json` and `node_modules`.
   It is a separate npm project that shares the root Oxlint and Oxfmt configuration files.
 - SPDX headers are auto-inserted by pre-commit hooks; don't worry about adding them manually
 - Coverage thresholds are ratcheted in `ci/coverage-threshold-*.json` — new code should not decrease CLI or plugin coverage

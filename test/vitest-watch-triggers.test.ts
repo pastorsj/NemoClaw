@@ -67,7 +67,7 @@ const OPAQUE_INPUTS = [
   ".github/workflows/base-image.yaml",
   ".github/workflows/base-image-platform.yaml",
   "scripts/export-managed-base-image-contract.sh",
-  "scripts/checks/download-hermes-source-archive.sh",
+  "packages/nemoclaw-hermes/checks/download-hermes-source-archive.sh",
   "scripts/checks/validate-managed-base-index.sh",
   "scripts/e2e/sanitize-trace-timing.py",
   "test/e2e/manifests/openclaw-nvidia.yaml",
@@ -137,9 +137,9 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/inference/serving/resolver.test.ts",
       "test/managed-inference-catalog-compiler.test.ts",
     ]);
-    expect(
-      triggeredBy("internal/security-reviews/hermes-0.19.0-dependency-review.md"),
-    ).toEqual(["test/hermes-dependency-review.test.ts"]);
+    expect(triggeredBy("internal/security-reviews/hermes-0.19.0-dependency-review.md")).toEqual([
+      "test/hermes-dependency-review.test.ts",
+    ]);
     expect(triggeredBy(".github/actions/resolve-hermes-base-image/action.yaml")).toEqual([
       "test/base-image-resolver-helper.test.ts",
     ]);
@@ -157,7 +157,9 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/onboard/managed-startup-profile.test.ts",
       "test/hermes-mcp-runtime-capability.test.ts",
     ]);
-    expect(triggeredBy("scripts/checks/download-hermes-source-archive.sh")).toEqual([
+    expect(
+      triggeredBy("packages/nemoclaw-hermes/checks/download-hermes-source-archive.sh"),
+    ).toEqual([
       "test/hermes-share-mount-deps.test.ts",
       "test/managed-image-publication-workflow.test.ts",
     ]);

@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Functional tests for Gemini 3 managed-route compatibility in
-// scripts/generate-openclaw-config.mts.
+// packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { main } from "../scripts/generate-openclaw-config.mts";
+import { main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
 
 const BASE_ENV: Record<string, string> = {
   NEMOCLAW_MODEL: "test-model",

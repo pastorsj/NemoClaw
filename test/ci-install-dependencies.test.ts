@@ -34,7 +34,7 @@ describe("shared CI dependency installer", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(trace, "utf8").trim().split("\n")).toEqual([
       "ci --ignore-scripts",
-      "--prefix nemoclaw ci --ignore-scripts",
+      "--prefix packages/nemoclaw-openclaw/plugin ci --ignore-scripts",
     ]);
   });
 });

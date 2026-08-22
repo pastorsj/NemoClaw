@@ -18,8 +18,9 @@ const START_SCRIPT = path.join(
 const NEMOTRON_FIX_SOURCE = path.join(
   import.meta.dirname,
   "..",
-  "nemoclaw-blueprint",
-  "scripts",
+  "packages",
+  "nemoclaw-openclaw",
+  "preloads",
   "nemotron-inference-fix.js",
 );
 
@@ -655,7 +656,7 @@ send(JSON.stringify({
   tools: [{ type: 'function', function: { name: 'write_file', parameters: {} } }],
 }));
 // case 9: Ultra 550B with bare 'write'/'edit'/'notebook_edit' (mirrors
-// nemoclaw/src/index.ts:WRITE_TOOL_NAMES) — expect NO injection
+// packages/nemoclaw-openclaw/plugin/src/index.ts:WRITE_TOOL_NAMES) — expect NO injection
 send(JSON.stringify({
   model: 'nvidia/nemotron-3-ultra-550b-a55b',
   messages: [{ role: 'user', content: 'hi' }],

@@ -23,7 +23,14 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const guardPath = path.join(import.meta.dirname, "..", "scripts", "openclaw-config-guard.py");
+const guardPath = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "openclaw-config-guard.py",
+);
 
 // Loads the guard module, neutralizes the filesystem helpers _transition("lock")
 // delegates to (recording which ran), then exercises one scenario named by argv.

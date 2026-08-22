@@ -236,6 +236,7 @@ fix_npm_permissions() { record fix-npm-permissions; }
 preinstall_backup_and_retire_legacy_gateway() { record preinstall-backup; }
 install_nemoclaw() { record install-nemoclaw; }
 verify_nemoclaw() { record verify-nemoclaw; }
+install_selected_harness() { record install-selected-harness; }
 require_reportable_openshell_version() { record require-reportable-openshell-version; }
 command_exists() { return 1; }
 finalize_install() { record finalize-install; }
@@ -259,6 +260,7 @@ main --non-interactive --yes-i-accept-third-party-software
       "preinstall-backup",
       "install-nemoclaw",
       "verify-nemoclaw",
+      "install-selected-harness",
       "require-reportable-openshell-version",
       "step-3-Onboarding",
       "finalize-install",
@@ -472,5 +474,68 @@ main --non-interactive --yes-i-accept-third-party-software
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("Could not publish the qualification receipts");
     expect(fs.readdirSync(artifactDirectory)).toEqual([".concurrent-writer"]);
+  });
+});
+
+describe("installer agent runtime package selection", () => {
+  it.each([
+    { agent: undefined, expected: "openclaw", label: "the default agent runtime" },
+    { agent: "hermes", expected: "hermes", label: "an explicit agent runtime" },
+    {
+      agent: "langchain-deepagents-code",
+      expected: "langchain-deepagents-code",
+      label: "the terminal agent runtime",
+    },
+  ])("passes $label to harness install", ({ agent, expected }) => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-harness-install-");
+    const cli = path.join(fixtureRoot, "nemoclaw");
+    const argumentLog = path.join(fixtureRoot, "arguments.log");
+    writeExecutable(cli, '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$ARGUMENT_LOG"\n');
+    const environment: NodeJS.ProcessEnv = {
+      ARGUMENT_LOG: argumentLog,
+      CLI_UNDER_TEST: cli,
+      ...(agent ? { NEMOCLAW_AGENT: agent } : {}),
+    };
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+_CLI_PATH="$CLI_UNDER_TEST"
+install_selected_harness
+`,
+      environment,
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(fs.readFileSync(argumentLog, "utf-8").trim().split("\n")).toEqual([
+      "harness",
+      "install",
+      expected,
+    ]);
+  });
+
+  it.each(["pi", "nemocua"])("keeps the gated %s candidate on its existing path", (agent) => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-candidate-harness-install-");
+    const cli = path.join(fixtureRoot, "nemoclaw");
+    const invocationLog = path.join(fixtureRoot, "invoked");
+    writeExecutable(cli, '#!/usr/bin/env bash\nprintf "invoked\\n" >"$INVOCATION_LOG"\n');
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+_CLI_PATH="$CLI_UNDER_TEST"
+install_selected_harness
+`,
+      {
+        CLI_UNDER_TEST: cli,
+        INVOCATION_LOG: invocationLog,
+        NEMOCLAW_AGENT: agent,
+      },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(fs.existsSync(invocationLog)).toBe(false);
   });
 });

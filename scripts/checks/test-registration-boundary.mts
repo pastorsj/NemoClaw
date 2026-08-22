@@ -17,7 +17,7 @@ export type TestRegistrationViolation = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const DEFAULT_SCAN_ROOTS = Object.freeze([
   "bin",
-  "nemoclaw/src",
+  "packages/nemoclaw-openclaw/plugin/src",
   "scripts",
   "src",
   "test",

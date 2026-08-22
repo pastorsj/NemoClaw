@@ -8,7 +8,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 
-const GUARD_PATH = path.resolve("scripts/openclaw-config-guard.py");
+const GUARD_PATH = path.resolve(
+  "packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py",
+);
 const fixtures: string[] = [];
 const RUN_UNLOCK_AS_CURRENT_USER = String.raw`
 import importlib.util
@@ -88,7 +90,9 @@ it("rejects malformed JSON without mutating the idempotent mutable unlock postur
     env: {
       ...process.env,
       NEMOCLAW_TEST_NODE_PATH: nodePath,
-      NEMOCLAW_TEST_JSON5_PATH: fs.realpathSync(path.resolve("nemoclaw/node_modules/json5")),
+      NEMOCLAW_TEST_JSON5_PATH: fs.realpathSync(
+        path.resolve("packages/nemoclaw-openclaw/plugin/node_modules/json5"),
+      ),
     },
   });
   const lines = result.stdout

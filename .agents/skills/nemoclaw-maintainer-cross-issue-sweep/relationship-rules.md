@@ -24,7 +24,7 @@ Candidate issue #2810: "Telegram preset writes fail intermittently after sandbox
 Issue body cites: "EPERM on `.openclaw/credentials/telegram.json`"
 
 **Classification:** ADJACENT_FIX, high confidence
-**Direct evidence:** The PR changes permissions at `Dockerfile.base:97`. Issue line 14 reports an `EPERM` error in the same directory.
+**Direct evidence:** The PR changes permissions in `packages/nemoclaw-openclaw/Dockerfile.base`. Issue line 14 reports an `EPERM` error in the same directory.
 
 ### Example B — follow-on hardening on PR-introduced code
 

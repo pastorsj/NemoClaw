@@ -117,7 +117,7 @@ export default defineConfig({
       },
     },
     {
-      files: ["nemoclaw/src/**/*.ts"],
+      files: ["packages/nemoclaw-openclaw/plugin/src/**/*.ts"],
       rules: {
         "import/no-commonjs": "error",
         "no-unused-vars": "error",

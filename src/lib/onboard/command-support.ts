@@ -29,7 +29,7 @@ function prioritizeDefaultAgent(names: readonly string[]): string[] {
   });
 }
 
-// Resolve the installed agent runtimes for the `--agent` help, falling back to
+// Resolve the available agent runtimes for the `--agent` help, falling back to
 // the generic description if the agent registry can't be read (#5779). The
 // agent registry is loaded lazily via require (not a top-level import) so this
 // module — evaluated at command-class load via `static flags = ...` — does not

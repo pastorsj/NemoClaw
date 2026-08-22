@@ -10,7 +10,7 @@ import {
   INJECTED_DIAGNOSTIC_HELPER,
   MARKER,
   patchManagedTransportDiagnosticsText,
-} from "../scripts/patch-openclaw-managed-transport-diagnostics.mts";
+} from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts";
 
 /**
  * Mirrors the reviewed `openclaw@2026.7.1`

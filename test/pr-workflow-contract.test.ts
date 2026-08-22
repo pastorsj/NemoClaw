@@ -451,6 +451,24 @@ describe("pull request and main workflow contracts", () => {
     }
   });
 
+  it.each([
+    "packages/nemoclaw-openclaw/Dockerfile",
+    "packages/nemoclaw-openclaw/Dockerfile.base",
+  ])("runs repository checks for changes to %s", (file) => {
+    const result = spawnSync(
+      join(process.cwd(), "node_modules", ".bin", "prek"),
+      ["run", "repository-checks", "--dry-run", "--files", file],
+      {
+        cwd: process.cwd(),
+        encoding: "utf8",
+        env: { ...process.env, PREK_COLOR: "never" },
+      },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Dry Run");
+  });
+
   const coverageEntrypointCases = [
     {
       action: sharedActions.cliCoverageShard,

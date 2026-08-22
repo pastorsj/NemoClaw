@@ -653,7 +653,7 @@ jobs:
             openshell-policy-boundary.cjs \
             sandbox-name.cjs \
             snapshot-sanitizer-boundary.cjs; do
-            boundary_path="nemoclaw/dist/shared/$boundary"
+            boundary_path="packages/nemoclaw-openclaw/plugin/dist/shared/$boundary"
             [[ -f "$boundary_path" && ! -L "$boundary_path" && -s "$boundary_path" ]] ||
               { echo "::error::candidate CLI build shared module is missing or is not a nonempty regular file: $boundary"; exit 1; }
           done
@@ -686,7 +686,7 @@ jobs:
             --numeric-owner \
             -cf "$payload" \
             dist \
-            nemoclaw/dist/shared
+            packages/nemoclaw-openclaw/plugin/dist/shared
           payload_sha256="$(sha256sum "$payload" | awk '{print $1}')"
           source_tree="$(git rev-parse 'HEAD^{tree}')"
           lockfile_sha256="$(sha256sum package-lock.json | awk '{print $1}')"
@@ -3729,7 +3729,7 @@ jobs:
               ;;
           esac
           source_asset="${OPENSHELL_DEV_ASSET_DIR}/${asset}"
-          [[ -f "$source_asset" && ! -L "$source_asset" && "$destination" = /* && -d "$destination" && ! -L "$destination" ]] || exit 64
+          [[ -f "$source_asset" && ! -L "$source_asset" && "$destination" = /* && -d "$destination" && ! -L "$destination" ]]
           cp -- "$source_asset" "$destination/$asset"
           EOF
           cat >"$shim_dir/curl" <<'EOF'

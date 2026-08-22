@@ -889,7 +889,7 @@ function resolveRepoModule(importer: string, specifier: string): ResolvedRepoMod
 export function collectFastProjectEntries(repoRoot = REPO_ROOT): string[] {
   const acceptsFile = (absolutePath: string) =>
     isFastProjectTestPath(path.relative(repoRoot, absolutePath).split(path.sep).join("/"));
-  return ["src", "nemoclaw/src", "test"]
+  return ["src", "packages/nemoclaw-openclaw/plugin/src", "test"]
     .flatMap((root) => [...walk(path.join(repoRoot, root), acceptsFile)])
     .sort();
 }

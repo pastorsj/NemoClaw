@@ -41,6 +41,7 @@ describe("published harness packages", () => {
   let fixtureRoot: string;
   let packagedRoot: string;
   let packedPaths: ReadonlySet<string>;
+  let openClawPackedPaths: ReadonlySet<string>;
   let registry: HarnessRegistry;
   let environment: NodeJS.ProcessEnv;
 
@@ -49,6 +50,7 @@ describe("published harness packages", () => {
       prefix: "nemoclaw-harness-packages-",
       entries: [
         "agents",
+        "dist/lib/adapters/fs/regular-file.js",
         "dist/lib/agent/manifest-readers.js",
         "dist/lib/agent/state-file-restore-reader.js",
         "dist/lib/core/json-types.js",
@@ -69,6 +71,17 @@ describe("published harness packages", () => {
     ) as Array<{ files?: Array<{ path?: string }> }>;
     packedPaths = new Set(
       (report[0]?.files ?? [])
+        .map((entry) => entry.path)
+        .filter((entry): entry is string => typeof entry === "string"),
+    );
+    const openClawReport = JSON.parse(
+      execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+        cwd: path.join(fixtureRoot, "packages", "nemoclaw-openclaw"),
+        encoding: "utf8",
+      }),
+    ) as Array<{ files?: Array<{ path?: string }> }>;
+    openClawPackedPaths = new Set(
+      (openClawReport[0]?.files ?? [])
         .map((entry) => entry.path)
         .filter((entry): entry is string => typeof entry === "string"),
     );
@@ -123,6 +136,19 @@ describe("published harness packages", () => {
     expect(
       [...packedPaths].filter((packedPath) =>
         /(?:^|\/)__pycache__(?:\/|$)|\.pyc$/u.test(packedPath),
+      ),
+    ).toEqual([]);
+  });
+
+  it("omits OpenClaw plugin dependencies from both published packages", () => {
+    expect(
+      [...packedPaths].filter((packedPath) =>
+        packedPath.startsWith("packages/nemoclaw-openclaw/plugin/node_modules/"),
+      ),
+    ).toEqual([]);
+    expect(
+      [...openClawPackedPaths].filter((packedPath) =>
+        packedPath.startsWith("plugin/node_modules/"),
       ),
     ).toEqual([]);
   });

@@ -64,13 +64,15 @@ vi.mock("../../../agent/defs", () => ({
 vi.mock("../../../shields/audit", () => ({
   readRecentShieldsAutoRestore: vi.fn(() => ({ kind: "none" })),
 }));
-vi.mock("../../../../../nemoclaw/src/onboard/config.js", () => ({
+vi.mock("../../../../../packages/nemoclaw-openclaw/plugin/src/onboard/config.js", () => ({
   loadOnboardConfig: vi.fn(() => null),
   describeOnboardEndpoint: vi.fn(() => "build.nvidia.com"),
   describeOnboardProvider: vi.fn(() => "NVIDIA Endpoint API"),
 }));
 
-import registerPlugin, { type OpenClawPluginApi } from "../../../../../nemoclaw/src/index";
+import registerPlugin, {
+  type OpenClawPluginApi,
+} from "../../../../../packages/nemoclaw-openclaw/plugin/src/index";
 import { buildOpenshellExecArgs } from "../exec";
 import {
   type AgentNonJsonPassthroughDeps,

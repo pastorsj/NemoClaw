@@ -40,8 +40,8 @@ For guidance on choosing between the agent CLIs and the underlying `openshell` C
 <AgentOnly variant="openclaw">
 
 Use `$$nemoclaw` for the OpenClaw variant.
-OpenClaw is the default agent for `$$nemoclaw onboard` unless you select another installed agent with `--agent <name>` or set `NEMOCLAW_AGENT=<name>`.
-Run `$$nemoclaw agents list` to see the installed agent names; for example, use `hermes` for Hermes or `langchain-deepagents-code` for LangChain Deep Agents Code.
+OpenClaw is the default agent for `$$nemoclaw onboard` unless you select another available agent runtime with `--agent <name>` or set `NEMOCLAW_AGENT=<name>`.
+Run `$$nemoclaw agents list` to see the available agent runtime names; for example, use `hermes` for Hermes or `langchain-deepagents-code` for LangChain Deep Agents Code.
 OpenClaw-specific sections below describe the `/nemoclaw` slash command, the OpenClaw dashboard URL, the OpenClaw gateway token, and OpenClaw config paths under `/sandbox/.openclaw`.
 
 </AgentOnly>
@@ -238,9 +238,9 @@ For capability IDs, evidence bounds, and compatibility guidance, refer to [Syste
 
 ### `$$nemoclaw agents list`
 
-List the installed agent runtimes that can be selected with `$$nemoclaw onboard --agent <name>`.
+List the available agent runtimes that can be selected with `$$nemoclaw onboard --agent <name>`.
 Use this global command when you need valid runtime names before creating or recreating a sandbox.
-It lists runtime names with the descriptions from their installed manifests.
+It lists runtime names with the descriptions from their agent manifests.
 
 ```bash
 $$nemoclaw agents list
@@ -267,10 +267,11 @@ $$nemoclaw harness list
 The source is `bundled` for a package shipped with NemoClaw.
 The source is `installed` for a user-scoped copy under `~/.nemoclaw/harnesses`.
 
-### `$$nemoclaw harness install <openclaw|hermes|langchain-deepagents-code>`
+### `$$nemoclaw harness install <harness>`
 
 Install one bundled harness package into `~/.nemoclaw/harnesses`.
 Bundled harnesses remain available before installation, so existing onboarding commands do not change.
+The NemoClaw installer installs the selected package before it starts onboarding.
 The install does not execute package code, create a sandbox, or request credentials.
 
 ```bash
@@ -279,7 +280,12 @@ $$nemoclaw harness list
 ```
 
 The installation succeeds when the same package is already present.
-It stops without replacing the installed directory when that directory differs from the bundled package.
+The receipt tracks regular package files and executable bits, except entries named `.git`, `.DS_Store`, `node_modules`, or `__pycache__`.
+Changes in those ignored entries do not prevent an upgrade and are removed when replacement succeeds.
+NemoClaw replaces an installed copy when bundled content has changed only if the receipt-tracked content still matches its installation receipt.
+If replacement fails before verification, NemoClaw attempts to restore the prior package.
+If restoration also fails, NemoClaw stops and reports the retained prior-package path.
+NemoClaw stops without replacement when receipt-tracked content has local changes.
 After installation, `$$nemoclaw harness list` reports the selected harness source as `installed`.
 
 ### `$$nemoclaw profiles list`
@@ -834,8 +840,8 @@ Consecutive hyphens (`--`) are not allowed.
 The CLI rejects names that do not match these rules.
 It also prints a `Try: <suggested-slug>` recovery line whenever it can derive a valid lowercase, hyphen-separated form from the input, so passing `--name MyAssistant` reports `Try: myassistant`.
 Names that match global CLI commands (`status`, `list`, `debug`, etc.) are rejected to avoid routing conflicts.
-Use `--agent <name>` to target a specific installed agent profile during onboarding.
-The `$$nemoclaw onboard --help` output lists installed runtime names inline, and `$$nemoclaw agents list` shows the same runtimes with manifest descriptions.
+Use `--agent <name>` to target a specific available agent runtime during onboarding.
+The `$$nemoclaw onboard --help` output lists available runtime names inline, and `$$nemoclaw agents list` shows the same runtimes with manifest descriptions.
 
 <AgentOnly variant="openclaw">
 

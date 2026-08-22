@@ -14,7 +14,7 @@ runs:
         cache: npm
         cache-dependency-path: |
           package-lock.json
-          nemoclaw/package-lock.json
+          packages/nemoclaw-openclaw/plugin/package-lock.json
 
     - name: Install dependencies
       shell: bash
@@ -22,7 +22,7 @@ runs:
 
     - name: Build TypeScript plugin
       shell: bash
-      run: cd nemoclaw && npm run build
+      run: npm --prefix packages/nemoclaw-openclaw/plugin run build
 
     - name: Build CLI TypeScript modules
       shell: bash
@@ -38,7 +38,7 @@ runs:
 
     - name: Typecheck plugin
       shell: bash
-      run: npm --prefix nemoclaw run typecheck
+      run: npm --prefix packages/nemoclaw-openclaw/plugin run typecheck
 
     - name: Typecheck JavaScript config
       shell: bash

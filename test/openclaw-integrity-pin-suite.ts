@@ -40,7 +40,13 @@ const REVIEWED_NPM_ARCHIVE_HELPER = path.join(
   "lib",
   "reviewed-npm-archive.mts",
 );
-const OPENCLAW_VERSION_EXTRACTOR = path.join(REPO_ROOT, "scripts", "extract-semver.sh");
+const OPENCLAW_VERSION_EXTRACTOR = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "extract-semver.sh",
+);
 const REVIEWED_NPM_AUDIT_HELPER = path.join(REPO_ROOT, "scripts", "lib", "reviewed-npm-audit.mts");
 const UNPINNED_OPENCLAW_VERSION = "2026.7.2";
 const PINNED_OPENCLAW_VERSION = "2026.7.1";
@@ -53,7 +59,13 @@ const OPENCLAW_RUNTIME_LOCKFILE = path.join(
   "openclaw-runtime",
   "package-lock.json",
 );
-const NEMOCLAW_PLUGIN_LOCKFILE = path.join(REPO_ROOT, "nemoclaw", "package-lock.json");
+const NEMOCLAW_PLUGIN_LOCKFILE = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "plugin",
+  "package-lock.json",
+);
 const NEMOCLAW_NPM_CACHE_SEED_MANIFEST = path.join(
   REPO_ROOT,
   "tools",
@@ -724,9 +736,15 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
         expect(reviewNote).toContain("claiming `openclaw-pipeline-runtime` inbound proof");
         expect(reviewNote).toContain("imports `dist/extensions/telegram/test-api.js`");
         expect(reviewNote).toContain("gateway/upstream reporting layer");
-        expect(reviewNote).toContain("scripts/patch-openclaw-issue-4434-diagnostics.mts");
-        expect(reviewNote).toContain("scripts/patch-openclaw-device-self-approval.mts");
-        expect(reviewNote).toContain("scripts/patch-openclaw-shared-state-permissions.mts");
+        expect(reviewNote).toContain(
+          "packages/nemoclaw-openclaw/scripts/patch-openclaw-issue-4434-diagnostics.mts",
+        );
+        expect(reviewNote).toContain(
+          "packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts",
+        );
+        expect(reviewNote).toContain(
+          "packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts",
+        );
         expect(reviewNote).toContain("Gateway Startup Migration Compatibility");
         expect(reviewNote).toContain("HOME=/sandbox");
         expect(reviewNote).toContain("approveDevicePairing");
@@ -738,7 +756,10 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
 
       it("keeps NemoClaw's direct tar dependency above the reviewed advisory floor", () => {
         const packageJson = JSON.parse(
-          fs.readFileSync(path.join(REPO_ROOT, "nemoclaw", "package.json"), "utf-8"),
+          fs.readFileSync(
+            path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "plugin", "package.json"),
+            "utf-8",
+          ),
         ) as { dependencies?: Record<string, string> };
         const packageLockSource = fs.readFileSync(NEMOCLAW_PLUGIN_LOCKFILE);
         const packageLock = JSON.parse(packageLockSource.toString("utf-8")) as {

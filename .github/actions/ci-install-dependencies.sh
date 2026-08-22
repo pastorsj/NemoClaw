@@ -5,4 +5,4 @@
 set -euo pipefail
 
 npm ci --ignore-scripts
-npm --prefix nemoclaw ci --ignore-scripts
+npm --prefix packages/nemoclaw-openclaw/plugin ci --ignore-scripts

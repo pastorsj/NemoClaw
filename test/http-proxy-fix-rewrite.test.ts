@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Behavioural tests for the FORWARD-mode → CONNECT-tunnel rewrite in
-// nemoclaw-blueprint/scripts/http-proxy-fix.js.
+// packages/nemoclaw-openclaw/preloads/http-proxy-fix.js.
 //
 // The wrapper is a NODE_OPTIONS=--require preload installed at sandbox boot.
 // In-process we exercise it by clearing the require cache, setting the env
@@ -25,8 +25,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const FIX_PATH = path.resolve(
   import.meta.dirname,
   "..",
-  "nemoclaw-blueprint",
-  "scripts",
+  "packages",
+  "nemoclaw-openclaw",
+  "preloads",
   "http-proxy-fix.js",
 );
 

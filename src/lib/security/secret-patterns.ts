@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// sourceOfTruth: nemoclaw/src/shared/credential-filter-boundary.cts
+// sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/credential-filter-boundary.cts
 // generatedBoundary: build:cli emits the canonical .cjs/.d.cts before this
 // module is compiled. Keep this compatibility import path implementation-free.
 export {
@@ -12,4 +12,4 @@ export {
   SECRET_PATTERNS,
   STRUCTURED_TOKEN_PATTERNS,
   TOKEN_PREFIX_PATTERNS,
-} from "../../../nemoclaw/dist/shared/credential-filter-boundary.cjs";
+} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/credential-filter-boundary.cjs";

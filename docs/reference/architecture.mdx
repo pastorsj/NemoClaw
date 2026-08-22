@@ -196,11 +196,15 @@ For the DGX Spark-specific variant of this topology (cgroup v2, aarch64, unified
 
 NemoClaw integrates with each supported agent through a runtime layer that adapts the agent to OpenShell-managed providers, policies, and sandbox state.
 The concrete files differ by agent because each runtime has its own plugin system, config format, state layout, and startup command.
+Each standard runtime layer is stored under `packages/nemoclaw-<id>/` with its agent manifest, image files, startup script, and baseline policy.
+`$$nemoclaw harness install <harness>` copies one bundled package to `~/.nemoclaw/harnesses` without executing package code.
+Onboarding uses the installed copy when present and keeps the existing bundled choices available.
+The host CLI continues to own command parsing, credentials, OpenShell lifecycle operations, and shared messaging channels.
 
 | Agent | Integration files | Runtime behavior |
 |---|---|---|
 <AgentOnly variant="openclaw">
-| OpenClaw | `nemoclaw/openclaw.plugin.json`, `nemoclaw/src/runtime-context.ts`, and the TypeScript package under `nemoclaw/src/` | Registers the `/nemoclaw` slash command, adds the NemoClaw inference provider, and injects sandbox and policy context into OpenClaw turns. |
+| OpenClaw | `packages/nemoclaw-openclaw/plugin/openclaw.plugin.json`, `packages/nemoclaw-openclaw/plugin/src/runtime-context.ts`, and the TypeScript package under `packages/nemoclaw-openclaw/plugin/src/` | Registers the `/nemoclaw` slash command, adds the NemoClaw inference provider, and injects sandbox and policy context into OpenClaw turns. |
 </AgentOnly>
 <AgentOnly variant="hermes">
 | Hermes | `packages/nemoclaw-hermes/manifest.yaml`, `packages/nemoclaw-hermes/plugin/plugin.yaml`, `packages/nemoclaw-hermes/generate-config.ts`, `packages/nemoclaw-hermes/config/`, and `packages/nemoclaw-hermes/start.sh` | Declares the Hermes agent contract, installs the NemoClaw Hermes plugin, writes `/sandbox/.hermes/config.yaml` and `/sandbox/.hermes/.env`, and launches `hermes gateway run` behind the OpenShell proxy. |
@@ -211,9 +215,9 @@ The concrete files differ by agent because each runtime has its own plugin syste
 
 <AgentOnly variant="openclaw">
 The OpenClaw integration is a thin TypeScript plugin that runs in-process with the OpenClaw gateway inside the sandbox.
-Its durable entry points are `nemoclaw/src/index.ts`, `nemoclaw/src/runtime-context.ts`, and `nemoclaw/openclaw.plugin.json`.
-The `nemoclaw/src/commands/` directory contains in-sandbox `/nemoclaw` command handlers and migration helpers.
-The `nemoclaw/src/blueprint/` directory contains runner, state, snapshot, SSRF, and private-network validation code.
+Its durable entry points are `packages/nemoclaw-openclaw/plugin/src/index.ts`, `packages/nemoclaw-openclaw/plugin/src/runtime-context.ts`, and `packages/nemoclaw-openclaw/plugin/openclaw.plugin.json`.
+The `packages/nemoclaw-openclaw/plugin/src/commands/` directory contains in-sandbox `/nemoclaw` command handlers and migration helpers.
+The `packages/nemoclaw-openclaw/plugin/src/blueprint/` directory contains runner, state, snapshot, SSRF, and private-network validation code.
 
 Before an OpenClaw turn starts, the plugin prepends a short system-context block with the active sandbox name, sandbox phase, network policy summary, and filesystem policy summary.
 This guidance stays out of the visible chat transcript.
@@ -242,7 +246,7 @@ The blueprint defines the sandbox shape, default policies, and inference profile
 ```text
 nemoclaw-blueprint/
 ├── blueprint.yaml                  Manifest: version, profiles, compatibility
-├── model-specific-setup/           Agent-scoped model/provider compatibility manifests
+├── model-specific-setup/           Shared compatibility schema and registry guidance
 ├── router/                         Model Router config and routing engine
 ├── policies/
 │   └── presets/                    Shared policy presets
@@ -267,10 +271,10 @@ Deep Agents keeps its agent-owned image, config generator, entrypoint, wrappers,
 The default Deep Agents policy starts from `packages/nemoclaw-langchain-deepagents-code/policy-additions.yaml`.
 </AgentOnly>
 
-The current blueprint runner implementation lives in the `nemoclaw/` TypeScript package:
+The current blueprint runner implementation lives in the OpenClaw package's TypeScript plugin:
 
 ```text
-nemoclaw/src/blueprint/
+packages/nemoclaw-openclaw/plugin/src/blueprint/
 ├── runner.ts                       CLI runner: plan / apply / status / rollback
 ├── ssrf.ts                         SSRF endpoint validation (IP + DNS checks)
 ├── private-networks.ts             Shared private-network block list loader for SSRF checks
@@ -354,7 +358,8 @@ When you select the Model Router provider, the OpenShell gateway routes to a hos
 The router selects from the configured pool, then calls the upstream NVIDIA endpoint with the credential held outside the sandbox.
 
 Some model and provider combinations need agent-specific compatibility setup.
-NemoClaw keeps those declarations under `nemoclaw-blueprint/model-specific-setup/<agent>/` so fixes for each supported agent can be tested and reviewed independently.
+NemoClaw keeps those declarations under `packages/nemoclaw-<id>/model-specific-setup/<agent>/` so each agent runtime owns its compatibility behavior.
+The shared schema and registry guidance remain under `nemoclaw-blueprint/model-specific-setup/`.
 
 ### Managed Inference Catalog
 

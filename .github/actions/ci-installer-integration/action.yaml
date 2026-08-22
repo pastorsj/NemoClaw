@@ -14,7 +14,7 @@ runs:
         cache: npm
         cache-dependency-path: |
           package-lock.json
-          nemoclaw/package-lock.json
+          packages/nemoclaw-openclaw/plugin/package-lock.json
 
     - name: Install dependencies
       shell: bash
@@ -24,7 +24,7 @@ runs:
       shell: bash
       run: |
         npm run build:cli
-        cd nemoclaw && npm run build
+        npm --prefix packages/nemoclaw-openclaw/plugin run build
 
     - name: Run installer integration tests
       shell: bash

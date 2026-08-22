@@ -37,7 +37,7 @@ before those targets run; local runners must provide it themselves.
 
 The candidate CLI comes from the source commit that an E2E run tests.
 The `generate-matrix` job builds it once.
-The job publishes root `dist/` and `nemoclaw/dist/shared/` in one content-addressed artifact.
+The job publishes root `dist/` and `packages/nemoclaw-openclaw/plugin/dist/shared/` in one content-addressed artifact.
 The boundary validator derives artifact consumers from jobs that use the pinned preparation action.
 It excludes `generate-matrix` and the no-build and trusted-build jobs in `E2E_JOB_POLICY`.
 Each selected consumer restores the artifact instead of running `npm run build:cli`.
@@ -70,19 +70,20 @@ The action requires the candidate checkout SHA, repository, workflow SHA, and ru
 The producer attempt must not be newer than the consumer attempt.
 The action downloads the artifact by immutable ID and sets digest mismatch handling to `error`.
 
-Before the action restores root `dist/` and `nemoclaw/dist/shared/` into the workspace, it verifies these conditions:
+Before the action restores root `dist/` and `packages/nemoclaw-openclaw/plugin/dist/shared/` into the workspace, it verifies these conditions:
 
 - The upload digest is present and well formed.
 - The candidate SHA matches the expected commit.
 - The manifest matches the source, workflow run, toolchain contract, and payload.
-- The archive contains no path traversal, links, special files, or files outside root `dist/` and `nemoclaw/dist/shared/`.
-- Neither root `dist/` nor `nemoclaw/dist/` already exists, including as a dangling symbolic link.
-- The candidate checkout's `nemoclaw/` path is a directory and is not a symbolic link.
+- The archive contains no path traversal, links, special files, or files outside root `dist/` and `packages/nemoclaw-openclaw/plugin/dist/shared/`.
+- Neither root `dist/` nor `packages/nemoclaw-openclaw/plugin/dist/` already exists, including as a dangling symbolic link.
+- The candidate checkout's `packages/`, `packages/nemoclaw-openclaw/`, and
+  `packages/nemoclaw-openclaw/plugin/` paths are directories and are not symbolic links.
 - The CLI entry point and required shared modules are nonempty regular files.
 - The staged `dist/build-identity.json` names the candidate commit SHA.
 
 If a pre-restore check fails, the action stops before it adds either directory to the workspace.
-After the checks pass, the action restores root `dist/` and `nemoclaw/dist/shared/`, then runs `bin/nemoclaw.js --version`.
+After the checks pass, the action restores root `dist/` and `packages/nemoclaw-openclaw/plugin/dist/shared/`, then runs `bin/nemoclaw.js --version`.
 If the version command fails, the action stops before the live test runs.
 This boundary keeps candidate source separate from the trusted workflow implementation.
 

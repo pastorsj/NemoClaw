@@ -41,6 +41,7 @@ const LOCAL_COPY_SOURCES = [
   "packages/nemoclaw-hermes/image-build-probes.py",
   "packages/nemoclaw-hermes/managed_policy.py",
   "packages/nemoclaw-hermes/mcp-config-transaction.py",
+  "packages/nemoclaw-hermes/model-specific-setup/",
   "packages/nemoclaw-hermes/patch-cron-execution-runtime.py",
   "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
   "packages/nemoclaw-hermes/patch-discord-recovery-permissions.py",
@@ -54,6 +55,9 @@ const LOCAL_COPY_SOURCES = [
   "packages/nemoclaw-hermes/plugin/",
   "packages/nemoclaw-hermes/runtime-config-guard.py",
   "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
+  "packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py",
+  "packages/nemoclaw-hermes/scripts/runtime-state-mutation-startup-gate.py",
+  "packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py",
   "packages/nemoclaw-hermes/security-dependencies.patch",
   "packages/nemoclaw-hermes/seed-dashboard-config.py",
   "packages/nemoclaw-hermes/start.sh",
@@ -61,7 +65,6 @@ const LOCAL_COPY_SOURCES = [
   "packages/nemoclaw-hermes/validate-cli-adapter.py",
   "packages/nemoclaw-hermes/validate-env-secret-boundary.py",
   "nemoclaw-blueprint/",
-  "nemoclaw-blueprint/scripts/*.js",
   "scripts/gateway-control.sh",
   "scripts/lib/bundled-npm-package.mts",
   "scripts/lib/corporate-ca-runtime.sh",
@@ -78,9 +81,6 @@ const LOCAL_COPY_SOURCES = [
   "scripts/managed-startup-hold.sh",
   "scripts/patch-bundled-npm-brace-expansion.mts",
   "scripts/patch-bundled-npm-tar.mts",
-  "scripts/runtime-state-mutation-control.py",
-  "scripts/runtime-state-mutation-startup-gate.py",
-  "scripts/runtime_state_mutation_hermes_publisher.py",
   "scripts/state-dir-guard.py",
   "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
   "src/lib/hermes-managed-route.ts",
@@ -233,9 +233,6 @@ function isIgnoredCachePath(relativePath: string): boolean {
 
 function sourceTokenMatches(relativePath: string, token: string): boolean {
   if (token.endsWith("/")) return relativePath.startsWith(token);
-  if (token === "nemoclaw-blueprint/scripts/*.js") {
-    return /^nemoclaw-blueprint\/scripts\/[^/]+\.js$/u.test(relativePath);
-  }
   return relativePath === token;
 }
 
@@ -644,12 +641,6 @@ function captureSourceEntries(
   for (const token of LOCAL_COPY_SOURCES) {
     if (token.endsWith("/")) {
       visit(token.slice(0, -1));
-    } else if (token === "nemoclaw-blueprint/scripts/*.js") {
-      for (const relativePath of [...selected]
-        .filter((entry) => sourceTokenMatches(entry, token))
-        .sort()) {
-        if (!entries.some((entry) => entry.relativePath === relativePath)) visit(relativePath);
-      }
     } else if (!entries.some((entry) => entry.relativePath === token)) {
       visit(token);
     }

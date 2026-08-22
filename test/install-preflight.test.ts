@@ -17,6 +17,7 @@ import {
   type InstallerCheckout,
   writeInstallerLinkNpmStub,
   writeNpmStub,
+  writeSourceCheckoutGitStub,
   writeSourceCheckoutNpmStub,
   writeSourceCheckoutPackages,
 } from "./helpers/installer-run-fixture";
@@ -195,23 +196,7 @@ exit 99
 `,
     );
 
-    writeExecutable(
-      path.join(fakeBin, "git"),
-      `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$GIT_LOG_PATH"
-if [ "\${1:-}" = "-c" ]; then
-  shift 2
-fi
-if [ "$1" = "clone" ]; then
-  target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
-  echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
-  exit 0
-fi
-exit 0
-`,
-    );
+    writeSourceCheckoutGitStub(fakeBin, { commandLog: true });
 
     writeInstallerLinkNpmStub(fakeBin, { createCli: true, cliVersion: "0.1.0-test" });
 
@@ -258,22 +243,7 @@ exit 99
 `,
     );
 
-    writeExecutable(
-      path.join(fakeBin, "git"),
-      `#!/usr/bin/env bash
-if [ "\${1:-}" = "-c" ]; then
-  shift 2
-fi
-if [ "$1" = "clone" ]; then
-  target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
-  echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
-  exit 0
-fi
-exit 0
-`,
-    );
+    writeSourceCheckoutGitStub(fakeBin);
 
     writeInstallerLinkNpmStub(fakeBin, { createCli: false });
 
@@ -457,7 +427,13 @@ exit 89
     writeSourceCheckoutNpmStub(fakeBin, { commandLog: true, rewriteRootLockfile: true });
 
     writeSourceCheckoutPackages(tmp);
-    const payloadLockPath = path.join(tmp, "nemoclaw", "package-lock.json");
+    const payloadLockPath = path.join(
+      tmp,
+      "packages",
+      "nemoclaw-openclaw",
+      "plugin",
+      "package-lock.json",
+    );
     fs.writeFileSync(payloadLockPath, "payload lock sentinel\n");
     fs.mkdirSync(path.join(tmp, "nemoclaw-blueprint", "router", "llm-router"), {
       recursive: true,
@@ -497,9 +473,7 @@ exit 89
     expect(gitCalls).not.toMatch(/submodule/);
   });
 
-  it("source-checkout: installs OpenShell when missing from PATH (#3989)", {
-    timeout: 20000,
-  }, () => {
+  it("source-checkout: installs OpenShell when missing from PATH (#3989)", () => {
       const {
         root: tmp,
         binDir: fakeBin,
@@ -546,11 +520,9 @@ exit 0
       expect(result.status).toBe(0);
       expect(fs.existsSync(openshellLog)).toBe(true);
       expect(fs.readFileSync(openshellLog, "utf-8")).toMatch(/install-openshell\.sh invoked/);
-  });
+  }, 20_000);
 
-  it("source-checkout: skips OpenShell install when openshell is already on PATH (#3989)", {
-    timeout: 20000,
-  }, () => {
+  it("source-checkout: skips OpenShell install when openshell is already on PATH (#3989)", () => {
       const {
         root: tmp,
         binDir: fakeBin,
@@ -602,7 +574,7 @@ exit 0
 
       expect(result.status).toBe(0);
       expect(fs.existsSync(openshellLog)).toBe(false);
-  });
+  }, 20_000);
 
   it("auto-resumes an interrupted onboarding session after Ubuntu 26.04 installer preflight (#3245)", () => {
     const {
@@ -847,7 +819,9 @@ exit 0
     ["the gateway is externally supervised", "externally-supervised", true, 1, false],
     ["gateway lifecycle authority is invalid", "invalid", true, 1, false],
     ["storage remediation is unavailable", "nemoclaw-managed", false, 1, false],
-  ] as const)("applies installer storage admission when %s", (_context, gatewayMode, storageRemediationAvailable, status, onboardRan) => {
+  ] as const)(
+    "applies installer storage admission when %s",
+    (_context, gatewayMode, storageRemediationAvailable, status, onboardRan) => {
       const fixture = runStorageRemediationInstallerPreflight({
         gatewayMode,
         onboardModuleDir: INSTALLER_ONBOARD_MODULE_DIR,
@@ -858,10 +832,11 @@ exit 0
       expect(fixture.onboardRan).toBe(onboardRan);
       expect(fixture.output).not.toMatch(/unsafe|injected/);
       expect(fixture.output.includes("Host preflight found issues")).toBe(!onboardRan);
-      expect(fixture.output.includes("Admission finding IDs: host.docker.storage_incompatible")).toBe(
-        !onboardRan,
-      );
-  });
+      expect(
+        fixture.output.includes("Admission finding IDs: host.docker.storage_incompatible"),
+      ).toBe(!onboardRan);
+    },
+  );
 
   it("rejects Podman through canonical installer admission (#7411)", () => {
     const {
@@ -870,6 +845,7 @@ exit 0
       prefixDir: prefix,
     } = installerCheckout("nemoclaw-install-podman-warning-");
     const onboardLog = path.join(tmp, "onboard.log");
+    const harnessInstallLog = path.join(tmp, "harness-install.log");
 
     writeNodeStub(fakeBin);
     writeOpenShellOkStub(fakeBin, "0.0.22");
@@ -897,6 +873,7 @@ exit 0
         PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
         NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+        NEMOCLAW_HARNESS_INSTALL_LOG: harnessInstallLog,
         NPM_PREFIX: prefix,
         NEMOCLAW_ONBOARD_LOG: onboardLog,
       },
@@ -907,6 +884,7 @@ exit 0
     expect(output).toMatch(/Host preflight found issues that will prevent onboarding right now\./);
     expect(output).toMatch(/Detected container runtime: podman/);
     expect(output).toMatch(/Skipping onboarding until the host prerequisites above are fixed\./);
+    expect(fs.readFileSync(harnessInstallLog, "utf-8")).toBe("harness install openclaw\n");
     expect(fs.existsSync(onboardLog)).toBe(false);
   });
 
@@ -986,22 +964,7 @@ exit 0
     } = installerCheckout("nemoclaw-install-spin-fail-");
 
     writeNodeStub(fakeBin);
-    writeExecutable(
-      path.join(fakeBin, "git"),
-      `#!/usr/bin/env bash
-if [ "\${1:-}" = "-c" ]; then
-  shift 2
-fi
-if [ "$1" = "clone" ]; then
-  target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
-  echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
-  exit 0
-fi
-exit 0
-`,
-    );
+    writeSourceCheckoutGitStub(fakeBin);
     writeNpmStub(fakeBin, {
       installSnippet: `if [ "$1" = "pack" ]; then
   echo "ENOTFOUND simulated network error" >&2
@@ -1067,9 +1030,9 @@ if [ "\${1:-}" = "-C" ]; then
 fi
 if [ "$1" = "init" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw" "$target/scripts"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin" "$target/scripts"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   cat > "$target/scripts/install-openshell.sh" <<'EOS'
 #!/usr/bin/env bash
 exit 0
@@ -1166,9 +1129,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0
@@ -1391,9 +1354,10 @@ exit 0`,
         2,
       ),
     );
-    fs.mkdirSync(path.join(tmp, "nemoclaw"), { recursive: true });
+    const pluginRoot = path.join(tmp, "packages", "nemoclaw-openclaw", "plugin");
+    fs.mkdirSync(pluginRoot, { recursive: true });
     fs.writeFileSync(
-      path.join(tmp, "nemoclaw", "package.json"),
+      path.join(pluginRoot, "package.json"),
       JSON.stringify({ name: "nemoclaw-plugin", version: "0.1.0" }, null, 2),
     );
 
@@ -1452,9 +1416,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.5.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0`,
@@ -2359,9 +2323,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.5.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0`,
@@ -2406,9 +2370,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.2.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.2.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.2.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0`,
@@ -2591,9 +2555,9 @@ if [ "\${1:-}" = "-C" ]; then
 fi
 if [ "$1" = "init" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw" "$target/bin/lib" "$target/scripts"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin" "$target/bin/lib" "$target/scripts"
   echo '{"name":"nemoclaw","version":"0.5.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   cat > "$target/bin/lib/usage-notice.js" <<'EOS'
 #!/usr/bin/env node
 process.exit(0)

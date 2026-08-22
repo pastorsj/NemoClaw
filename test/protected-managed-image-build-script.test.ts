@@ -150,7 +150,8 @@ function completeImportedCache(cacheRoot: string): void {
 }
 
 function completeSourceBoundary(sourceRoot: string): void {
-  mkdirSync(path.join(sourceRoot, "nemoclaw"), { recursive: true });
+  const pluginRoot = path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin");
+  mkdirSync(pluginRoot, { recursive: true });
   mkdirSync(path.join(sourceRoot, "scripts", "checks"), { recursive: true });
   mkdirSync(path.join(sourceRoot, "tools", "mcp-tool-discovery-runtime", "npm-cache-seed"), {
     recursive: true,
@@ -168,7 +169,7 @@ function completeSourceBoundary(sourceRoot: string): void {
     ),
     { recursive: true },
   );
-  writeFileSync(path.join(sourceRoot, "nemoclaw", "package-lock.json"), "{}\n", "utf8");
+  writeFileSync(path.join(pluginRoot, "package-lock.json"), "{}\n", "utf8");
   writeFileSync(
     path.join(sourceRoot, "tools", "mcp-tool-discovery-runtime", "package-lock.json"),
     "{}\n",
@@ -356,7 +357,7 @@ describe("protected managed-image build-cache boundary", () => {
     });
 
     expect(readFileSync(seedLog, "utf8")).toContain(
-      `materialize-locked-npm-cache-seed.mts export --lockfile ${REPO_ROOT}/nemoclaw/package-lock.json --output ${realpathSync(cacheRoot)}/npm-cache-seed`,
+      `materialize-locked-npm-cache-seed.mts export --lockfile ${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/package-lock.json --output ${realpathSync(cacheRoot)}/npm-cache-seed`,
     );
     expect(existsSync(path.join(cacheRoot, "npm-cache-seed", "manifest.json"))).toBe(true);
     expect(readFileSync(seedLog, "utf8")).toContain(
@@ -498,7 +499,7 @@ describe("protected managed-image build-cache boundary", () => {
       "--no-cache",
     );
     expect(readFileSync(seedLog, "utf8")).toContain(
-      `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/nemoclaw/package-lock.json --seed ${realpathSync(cacheRoot)}/npm-cache-seed`,
+      `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/package-lock.json --seed ${realpathSync(cacheRoot)}/npm-cache-seed`,
     );
     expect(readFileSync(seedLog, "utf8")).toContain(
       `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/tools/mcp-tool-discovery-runtime/package-lock.json --seed ${realpathSync(cacheRoot)}/mcp-runtime-npm-cache-seed`,

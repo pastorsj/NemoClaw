@@ -332,7 +332,7 @@ npm run build:cli 2>&1 | tail -3
 info "CLI built"
 
 info "Building TypeScript plugin..."
-cd "$NEMOCLAW_CLONE_DIR/nemoclaw"
+cd "$NEMOCLAW_CLONE_DIR/packages/nemoclaw-openclaw/plugin"
 npm install --ignore-scripts 2>&1 | tail -3
 npm run build 2>&1 | tail -3
 cd "$NEMOCLAW_CLONE_DIR"

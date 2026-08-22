@@ -18,7 +18,7 @@ import {
   patchOpenClawSharedStatePermissions,
   patchOpenClawStateDbText,
   patchOpenClawStateMigrationText,
-} from "../scripts/patch-openclaw-shared-state-permissions.mts";
+} from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts";
 import { restoreEnv } from "./helpers/env-test-helpers";
 
 const PATCH_SCRIPT = path.join(

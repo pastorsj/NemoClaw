@@ -165,9 +165,9 @@ let managedHermesVolume = recreate ? {
 // Route the root CLI's generated shared-boundary import back to its canonical
 // .cts source so this test cannot pass only because a local dist tree exists.
 const canonicalSandboxNameSource =
-  ${source("nemoclaw/src/shared/sandbox-name.cts")};
+  ${source("packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts")};
 const generatedSandboxName =
-  ${source("nemoclaw/dist/shared/sandbox-name.cjs")};
+  ${source("packages/nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs")};
 const resolveFilename = Module._resolveFilename;
 Module._extensions[".cts"] = Module._extensions[".ts"];
 Module._resolveFilename = function(request, parent, isMain, options) {

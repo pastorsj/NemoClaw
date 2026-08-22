@@ -16,7 +16,7 @@ import {
   patchGatewayToolTargetText,
   patchOpenClawGatewayDaemonDialback,
   TOOL_TARGET_MARKER,
-} from "../scripts/openclaw/patch-gateway-daemon-dialback.mts";
+} from "../packages/nemoclaw-openclaw/scripts/openclaw/patch-gateway-daemon-dialback.mts";
 import { restoreEnv } from "./helpers/env-test-helpers";
 
 const PATCH_SCRIPT = path.join(

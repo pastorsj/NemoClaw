@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { MARKER } from "../scripts/patch-openclaw-tool-catalog.mts";
+import { MARKER } from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-tool-catalog.mts";
 
 const PATCH_SCRIPT = path.join(
   import.meta.dirname,

@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { defineConfig, defineProject } from "vitest/config";
 
-import pluginVitestProjectOptions from "./nemoclaw/vitest.project";
+import pluginVitestProjectOptions from "./packages/nemoclaw-openclaw/plugin/vitest.project";
 import { shouldRunLiveE2E } from "./test/e2e/fixtures/live-project-gate.ts";
 import { CliCoverageSequencer } from "./test/helpers/cli-coverage-sequencer";
 import { resolveIntegrationProjectScheduling } from "./test/helpers/integration-project-scheduling";
@@ -20,19 +20,23 @@ import { vitestWatchTriggerPatterns } from "./test/helpers/vitest-watch-triggers
 const { isCi, silent } = resolveVitestFeedback();
 const LIVE_E2E_PROJECT_TIMEOUT_MS = 30 * 60 * 1000;
 const runLiveE2E = shouldRunLiveE2E();
-const canonicalBannerBoundary = path.resolve("nemoclaw/src/shared/banner-boundary.cts");
+const canonicalBannerBoundary = path.resolve(
+  "packages/nemoclaw-openclaw/plugin/src/shared/banner-boundary.cts",
+);
 const canonicalCredentialFilterBoundary = path.resolve(
-  "nemoclaw/src/shared/credential-filter-boundary.cts",
+  "packages/nemoclaw-openclaw/plugin/src/shared/credential-filter-boundary.cts",
 );
 const canonicalOpenShellPolicyBoundary = path.resolve(
-  "nemoclaw/src/shared/openshell-policy-boundary.cts",
+  "packages/nemoclaw-openclaw/plugin/src/shared/openshell-policy-boundary.cts",
 );
 const canonicalPrivateNetworksBoundary = path.resolve(
-  "nemoclaw/src/shared/private-networks-boundary.cts",
+  "packages/nemoclaw-openclaw/plugin/src/shared/private-networks-boundary.cts",
 );
-const canonicalSandboxName = path.resolve("nemoclaw/src/shared/sandbox-name.cts");
+const canonicalSandboxName = path.resolve(
+  "packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts",
+);
 const canonicalSnapshotSanitizerBoundary = path.resolve(
-  "nemoclaw/src/shared/snapshot-sanitizer-boundary.cts",
+  "packages/nemoclaw-openclaw/plugin/src/shared/snapshot-sanitizer-boundary.cts",
 );
 // Map the generated shared .cjs specifiers back to their .cts source so
 // source-mode test projects exercise the single source of truth rather than a
@@ -295,7 +299,12 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts", "bin/**/*.js", "nemoclaw/src/**/*.ts", "nemoclaw/src/**/*.cts"],
+      include: [
+        "src/**/*.ts",
+        "bin/**/*.js",
+        "packages/nemoclaw-openclaw/plugin/src/**/*.ts",
+        "packages/nemoclaw-openclaw/plugin/src/**/*.cts",
+      ],
       exclude: ["**/*.test.ts", "dist/**"],
       reporter: ["text-summary", "json-summary"],
       thresholds: resolveVitestCoverageThresholds(process.argv.slice(2)),

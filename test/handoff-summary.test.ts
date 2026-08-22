@@ -51,7 +51,8 @@ describe("release handoff summary", () => {
         [
           "install.sh",
           "src/lib/onboard/machine/runner.ts",
-          "nemoclaw/src/blueprint/ssrf.ts",
+          "packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts",
+          "packages/nemoclaw-openclaw/start.sh",
           ".github/workflows/e2e.yaml",
           "src/lib/inference/client.ts",
           "docs/changelog/2026-08-17.mdx",
@@ -80,7 +81,7 @@ describe("release handoff summary", () => {
       targetVersion: "v1.2.3",
       candidateCommit: candidate,
       commitCount: 2,
-      riskyFileCount: 5,
+      riskyFileCount: 6,
       riskyAreas: [
         "Installer / bootstrap",
         "Onboarding / host glue",
@@ -99,7 +100,7 @@ describe("release handoff summary", () => {
 
     const markdown = renderHandoffMarkdown(summary);
     expect(markdown).toContain(`- Candidate: \`${candidate}\``);
-    expect(markdown).toContain("- Risky files detected: 5");
+    expect(markdown).toContain("- Risky files detected: 6");
     expect(markdown).toContain("## Documentation coverage");
     expect(markdown).toContain("- Maintainer decision: TODO_RELEASE_BRIEF");
     expectMarkdownList(markdown, summary.riskyAreas);
