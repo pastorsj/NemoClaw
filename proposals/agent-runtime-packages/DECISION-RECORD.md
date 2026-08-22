@@ -11,9 +11,10 @@ record.
 
 ## Revision binding
 
-- Proposal revision: Pending — use the signed commit that contains this decision packet,
-  `README.md`, `TECHNICAL-PLAN.md`, `RFC-RECONCILIATION.md`, the three candidate ledgers,
-  `DISPOSITION-LEDGER.md`, and `ARCHITECTURE-BASELINE.json`.
+- Proposal revision: `e8e89ffd05a696e7476325c331d4e050a4264353` — signed commit under review. This
+  revision contains this decision packet, `README.md`, `TECHNICAL-PLAN.md`,
+  `RFC-RECONCILIATION.md`, the three candidate ledgers, `DISPOSITION-LEDGER.md`, and
+  `ARCHITECTURE-BASELINE.json`.
 - Repository source baseline: `a5486894c45140259d822625e74d1ccdfce807ee`.
 - Architecture baseline SHA-256:
   `ff4c0177cbc6fa69d800a39de403925ab28c57b921c3a18ebfa40e515e7dd6fd`.
@@ -90,7 +91,6 @@ proposal revision rather than treating an individual aligned row as approval.
   accepted.
 - The validation owner, Brev cost authority, artifact retention policy, incident response, and
   external handoff authority are unassigned.
-- The signed proposal revision is not recorded.
 
 ## Acceptance transcription fields
 
