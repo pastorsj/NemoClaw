@@ -36,7 +36,7 @@ import {
   inspectDescriptorSnapshotRoot,
   installDescriptorSnapshotFile,
   scanDescriptorSnapshot,
-} from "../shared/snapshot-sanitizer-boundary.cjs";
+} from "#nemoclaw-shared/snapshot-sanitizer-boundary.cjs";
 
 const SANDBOX_MIGRATION_DIR = "/sandbox/.nemoclaw/migration";
 const SNAPSHOT_VERSION = 3;

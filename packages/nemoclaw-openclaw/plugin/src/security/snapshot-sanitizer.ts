@@ -13,7 +13,7 @@ import {
   type SnapshotSanitizationAction,
   type SnapshotScannedFile,
   scanDescriptorSnapshot,
-} from "../shared/snapshot-sanitizer-boundary.cjs";
+} from "#nemoclaw-shared/snapshot-sanitizer-boundary.cjs";
 import {
   CREDENTIAL_PLACEHOLDER,
   CREDENTIAL_SENSITIVE_BASENAMES,

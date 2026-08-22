@@ -7,6 +7,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { harnessPackageContentDigest, installBundledHarness } from "../harness/package-registry";
+import { getEffectiveSandboxAgent } from "./sandbox-agent";
 import { agentSupportsWebSearch, agentSupportsWebSearchProvider } from "./web-search-support";
 
 const tmpRoots: string[] = [];
@@ -101,7 +103,7 @@ describe("agentSupportsWebSearch", () => {
     expect(agentSupportsWebSearch({ name: "openclaw" }, override, root)).toBe(true);
   });
 
-  it("falls back to the agent Dockerfile and then the bundled OpenClaw Dockerfile", () => {
+  it("uses the bundled OpenClaw Dockerfile only when no selected path exists", () => {
     const root = tmpRoot();
     const agentDockerfile = writeDockerfile(root, "FROM scratch\n", "Agentfile");
     writeDockerfile(
@@ -116,7 +118,33 @@ describe("agentSupportsWebSearch", () => {
     const missingDockerfile = path.join(root, "missing-dockerfile");
     expect(
       agentSupportsWebSearch({ name: "openclaw", dockerfilePath: missingDockerfile }, null, root),
-    ).toBe(true);
+    ).toBe(false);
+    expect(
+      agentSupportsWebSearchProvider(
+        { name: "openclaw", dockerfilePath: missingDockerfile },
+        "brave",
+        null,
+        root,
+      ),
+    ).toBe(false);
+    expect(agentSupportsWebSearch({ name: "openclaw" }, null, root)).toBe(true);
+  });
+
+  it("probes the installed OpenClaw package for the default agent", () => {
+    const home = tmpRoot();
+    const environment = { HOME: home };
+    const installed = installBundledHarness("openclaw", environment);
+    const dockerfile = path.join(installed.rootDir, "Dockerfile");
+    fs.writeFileSync(dockerfile, "FROM scratch\n");
+    fs.writeFileSync(
+      path.join(installed.rootDir, ".nemoclaw-install.json"),
+      `${JSON.stringify({ installedDigest: harnessPackageContentDigest(installed.rootDir) })}\n`,
+    );
+
+    const effectiveAgent = getEffectiveSandboxAgent(null, environment);
+    expect(effectiveAgent.dockerfilePath).toBe(dockerfile);
+    expect(agentSupportsWebSearch(effectiveAgent)).toBe(false);
+    expect(agentSupportsWebSearchProvider(effectiveAgent, "brave")).toBe(false);
   });
 
   it("returns false when no candidate declares the web-search ARG", () => {

@@ -100,7 +100,7 @@ vi.mock("../security/snapshot-sanitizer.js", async () =>
   ),
 );
 
-vi.mock("../shared/snapshot-sanitizer-boundary.cjs", () => {
+vi.mock("#nemoclaw-shared/snapshot-sanitizer-boundary.cjs", () => {
   const identity = {
     dev: "1",
     ino: "2",

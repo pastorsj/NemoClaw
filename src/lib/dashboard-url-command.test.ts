@@ -183,6 +183,28 @@ describe("dashboard-url command helpers", () => {
     expect(sinks.err).toEqual([]);
   });
 
+  it("uses the selected OpenClaw manifest from the persisted null registry encoding", () => {
+    const sinks = makeSinks();
+    const fetchToken = vi.fn(() => "should-not-fetch");
+    const getAgentDashboardAuth = vi.fn(() => "session" as const);
+
+    runDashboardUrlCommand(
+      "alpha",
+      { quiet: true },
+      {
+        fetchToken,
+        getSandbox: () => ({ agent: null, dashboardPort: 19123 }),
+        getAgentDashboardAuth,
+        log: sinks.log,
+        error: sinks.error,
+      },
+    );
+
+    expect(getAgentDashboardAuth).toHaveBeenCalledWith("openclaw");
+    expect(fetchToken).not.toHaveBeenCalled();
+    expect(sinks.out).toEqual(["http://127.0.0.1:19123/"]);
+  });
+
   it("fetches a token for non-OpenClaw agents with token-auth dashboards", () => {
     const sinks = makeSinks();
     const fetchToken = vi.fn(() => "agent-token");
@@ -222,6 +244,27 @@ describe("dashboard-url command helpers", () => {
     expect(sinks.out).toEqual([]);
   });
 
+  it("fails when persisted OpenClaw dashboard metadata cannot be resolved", () => {
+    const sinks = makeSinks();
+    const fetchToken = vi.fn(() => "agent-token");
+
+    expect(() =>
+      runDashboardUrlCommand(
+        "alpha",
+        { quiet: true },
+        {
+          fetchToken,
+          getSandbox: () => ({ agent: null, dashboardPort: 19123 }),
+          getAgentDashboardAuth: () => null,
+          log: sinks.log,
+          error: sinks.error,
+        },
+      ),
+    ).toThrow(/Could not resolve dashboard metadata for agent 'openclaw'/);
+    expect(fetchToken).not.toHaveBeenCalled();
+    expect(sinks.out).toEqual([]);
+  });
+
   it("explains terminal-runtime sandboxes have no dashboard instead of a token error (#5727)", () => {
     const sinks = makeSinks();
     const fetchToken = vi.fn(() => null);
@@ -242,6 +285,32 @@ describe("dashboard-url command helpers", () => {
         },
       ),
     ).toThrow(/terminal runtime \(LangChain Deep Agents Code\) and does not have a dashboard/);
+    expect(fetchToken).not.toHaveBeenCalled();
+    expect(sinks.out).toEqual([]);
+  });
+
+  it("uses the selected OpenClaw manifest terminal runtime contract from persisted state", () => {
+    const sinks = makeSinks();
+    const fetchToken = vi.fn(() => null);
+    const getAgentRuntimeInfo = vi.fn(() => ({
+      kind: "terminal" as const,
+      displayName: "Installed OpenClaw",
+    }));
+
+    expect(() =>
+      runDashboardUrlCommand(
+        "alpha",
+        { quiet: false },
+        {
+          fetchToken,
+          getSandbox: () => ({ agent: null, dashboardPort: 19123 }),
+          getAgentRuntimeInfo,
+          log: sinks.log,
+          error: sinks.error,
+        },
+      ),
+    ).toThrow(/terminal runtime \(Installed OpenClaw\) and does not have a dashboard/);
+    expect(getAgentRuntimeInfo).toHaveBeenCalledWith("openclaw");
     expect(fetchToken).not.toHaveBeenCalled();
     expect(sinks.out).toEqual([]);
   });

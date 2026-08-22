@@ -94,6 +94,7 @@ const {
 const {
   agentSupportsWebSearch,
   agentSupportsWebSearchProvider,
+  bindAgentWebSearchSupport,
 }: typeof import("./onboard/web-search-support") = require("./onboard/web-search-support");
 const onboardDashboard: typeof import("./onboard/dashboard") = require("./onboard/dashboard");
 const dashboardRuntime: typeof import("./onboard/dashboard-runtime") = require("./onboard/dashboard-runtime");
@@ -2804,7 +2805,6 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
   const restorePortableEnvScope = () => portableEnvScope?.restore();
   // Secure removal remains gated on successful migration of every staged legacy credential.
   let stagedLegacyKeys: string[] = [];
-
   let onboardTrace: ReturnType<typeof onboardTracing.startOnboardTrace> = {
     collector: null,
     span: null,
@@ -2917,7 +2917,6 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         );
         process.exit(1);
       }
-
       registerIncompleteOnboardExitHandlerForSession(onboardSession, () => completed || preserveIncompleteSession);
       const agent = await selectOnboardAgent({
         agentFlag: opts.agent,
@@ -2925,6 +2924,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         resume,
         canPrompt: !cannotPrompt,
       });
+      const effectiveAgent = sandboxAgent.getEffectiveSandboxAgent(agent);
       const recordedSandboxName =
         session?.steps?.sandbox?.status === "complete" ? session?.sandboxName || null : null;
       const checkpointedSandboxName = onboardSessionBootstrap.getCheckpointedSandboxName(
@@ -3249,8 +3249,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
             checkGatewayRouteCompatibility,
             withGatewayRouteMutationLock: gatewayRouteMutationLock.withGatewayRouteMutationLock,
             resolvePath: preparedDcodeRuntime.resolveDockerfileProbePath,
-            agentSupportsWebSearch,
-            agentSupportsWebSearchProvider,
+            ...bindAgentWebSearchSupport(effectiveAgent),
             ...{ note, cliName },
             updateSession: onboardSession.updateSession,
             getStoredMessagingChannelConfig,
@@ -3339,6 +3338,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         import("./verify-deployment").VerifyDeploymentResult
       >({
         branchState: agent ? "agent_setup" : "openclaw",
+        finalizationAgent: effectiveAgent,
         authoritativePolicyTier:
           opts.authoritativeResumeConfig === true ? (opts.policyTier ?? null) : undefined,
         agentSetupDeps: {
@@ -3417,7 +3417,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
           removeLegacyCredentialsFile,
           cleanupStaleHostFiles,
           getChatUiUrl: () => process.env.CHAT_UI_URL || `http://127.0.0.1:${DASHBOARD_PORT}`,
-          buildVerifyChain: (chatUiUrl, name) => buildAgentVerifyChain(chatUiUrl, name, agent),
+          buildVerifyChain: (url, name) => buildAgentVerifyChain(url, name, effectiveAgent),
           verifyDeployment: async (name, chain) => {
             const verifyDeploymentModule: typeof import("./verify-deployment") = require("./verify-deployment");
             return verifyDeploymentModule.verifyDeployment(

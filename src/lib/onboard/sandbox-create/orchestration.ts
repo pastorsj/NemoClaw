@@ -4,6 +4,7 @@
 import type { SandboxCreateOrchestrationRuntime } from "../../onboard";
 import { HERMES_PORTABLE_OPENSHELL_VERSION } from "../../adapters/openshell/resolve-shared";
 import type { AgentDefinition } from "../../agent/defs";
+import { bundledHarnessPackageContentDigest } from "../../harness/package-registry";
 import type { WebSearchConfig } from "../../inference/web-search";
 import type { BackupResult } from "../../state/sandbox";
 import type { SandboxEntry } from "../../state/registry";
@@ -335,6 +336,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       effectiveAgent.dockerfilePath ??
       effectiveAgent.legacyPaths?.dockerfile ??
       path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
+    const bundledHarnessPackageDigest = bundledHarnessPackageContentDigest(requestedAgentName);
     enabledChannels = filterEnabledChannelsByAgent(enabledChannels, agent);
     const effectiveSandboxGpuConfig =
       sandboxGpuConfig ?? resolveSandboxGpuConfig(gpu, { flag: null, device: null });
@@ -367,7 +369,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     const resolvedCreateIntent = preparedCreateIntent.intent;
     const messagingCapabilities = preparedCreateIntent.messagingCapabilities;
     const manageDashboard = sandboxGpuCreateFlow.shouldManageHermesPortableDashboard(
-      dashboardRuntime.shouldManageDashboardForAgent(agent),
+      dashboardRuntime.shouldManageDashboardForAgent(effectiveAgent),
       agent,
     );
     const isManagedDcodeAgent = usesManagedDcodeIdentity(agent?.name, fromDockerfile);
@@ -387,7 +389,10 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         controlUiPort,
         chatUiUrlEnv: process.env.CHAT_UI_URL,
         persistedPort: registry.getSandbox(sandboxName)?.dashboardPort ?? null,
-        agentForwardPort: dashboardRuntime.getAgentPrimaryForwardPort(agent, DASHBOARD_PORT),
+        agentForwardPort: dashboardRuntime.getAgentPrimaryForwardPort(
+          effectiveAgent,
+          DASHBOARD_PORT,
+        ),
         defaultPort: DASHBOARD_PORT,
         forwardListOutput: runCaptureOpenshell(["forward", "list"], { ignoreError: true }),
         warn: (message: string) => console.warn(message),
@@ -508,6 +513,8 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         legacyDockerfilePath,
         customDockerfilePath:
           fromDockerfile ?? (preparedBuildContext ? preparedBuildContext.stagedDockerfile : null),
+        selectedHarnessPackageDigest: effectiveAgent.packageContentDigest,
+        bundledHarnessPackageDigest,
         rootDir: ROOT,
         model,
         provider,
@@ -935,7 +942,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
                 ? preparedSandboxWorkload.source.dockerfilePath
                 : "",
             launchInput: {
-              agent,
+              agent: effectiveAgent,
               observabilityEnabled: false,
               chatUiUrl: "",
               sandboxName,
@@ -1017,7 +1024,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
               discloseInitialSandboxPolicy,
             },
             launchInput: {
-              agent,
+              agent: effectiveAgent,
               observabilityEnabled: createIntent?.observabilityEnabled === true,
               chatUiUrl,
               sandboxName,

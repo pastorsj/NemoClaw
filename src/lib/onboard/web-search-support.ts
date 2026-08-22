@@ -22,31 +22,24 @@ export type WebSearchAgent =
  * the config generator has no code path to emit a web search block — so offering
  * the web-search prompt would mislead the user.
  *
- * Fall back to the bundled OpenClaw Dockerfile when the agent-specific one
- * doesn't exist.
+ * Use the bundled OpenClaw Dockerfile only when no selected path was supplied.
+ * A selected path is authoritative and fails closed when it cannot be read.
  */
 export function agentSupportsWebSearch(
   agent: WebSearchAgent,
   dockerfilePathOverride: string | null = null,
   rootDir = ROOT,
 ): boolean {
-  const candidates = [
-    dockerfilePathOverride,
-    agent?.dockerfilePath,
-    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
-  ].filter(
-    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
-  );
-
-  for (const dockerfilePath of candidates) {
-    try {
-      const content = fs.readFileSync(dockerfilePath, "utf-8");
-      return /^\s*ARG\s+NEMOCLAW_WEB_SEARCH_ENABLED=/m.test(content);
-    } catch {
-      // Try the next candidate; custom Dockerfile paths can disappear between resume runs.
-    }
+  const dockerfilePath =
+    dockerfilePathOverride ||
+    agent?.dockerfilePath ||
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile");
+  try {
+    const content = fs.readFileSync(dockerfilePath, "utf-8");
+    return /^\s*ARG\s+NEMOCLAW_WEB_SEARCH_ENABLED=/m.test(content);
+  } catch {
+    return false;
   }
-  return false;
 }
 
 /**
@@ -65,23 +58,33 @@ export function agentSupportsWebSearchProvider(
   // OpenClaw-only until Hermes ships a compatible Brave backend.
   if (agent?.name?.trim().toLowerCase() === "hermes" && provider !== "tavily") return false;
 
-  const candidates = [
-    dockerfilePathOverride,
-    agent?.dockerfilePath,
-    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
-  ].filter(
-    (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
-  );
-
-  for (const dockerfilePath of candidates) {
-    try {
-      const content = fs.readFileSync(dockerfilePath, "utf-8");
-      const enabled = /^\s*ARG\s+NEMOCLAW_WEB_SEARCH_ENABLED=/m.test(content);
-      if (!enabled) return false;
-      return provider === "brave" || /^\s*ARG\s+NEMOCLAW_WEB_SEARCH_PROVIDER=/m.test(content);
-    } catch {
-      // Try the next candidate; custom Dockerfile paths can disappear between resume runs.
-    }
+  const dockerfilePath =
+    dockerfilePathOverride ||
+    agent?.dockerfilePath ||
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile");
+  try {
+    const content = fs.readFileSync(dockerfilePath, "utf-8");
+    const enabled = /^\s*ARG\s+NEMOCLAW_WEB_SEARCH_ENABLED=/m.test(content);
+    if (!enabled) return false;
+    return provider === "brave" || /^\s*ARG\s+NEMOCLAW_WEB_SEARCH_PROVIDER=/m.test(content);
+  } catch {
+    return false;
   }
-  return false;
+}
+
+/** Use one resolved package-backed agent for all web-search capability probes. */
+export function bindAgentWebSearchSupport(agent: WebSearchAgent) {
+  return {
+    agentSupportsWebSearch: (
+      _agent: WebSearchAgent,
+      dockerfilePathOverride: string | null = null,
+      rootDir = ROOT,
+    ) => agentSupportsWebSearch(agent, dockerfilePathOverride, rootDir),
+    agentSupportsWebSearchProvider: (
+      _agent: WebSearchAgent,
+      provider: WebSearchProvider,
+      dockerfilePathOverride: string | null = null,
+      rootDir = ROOT,
+    ) => agentSupportsWebSearchProvider(agent, provider, dockerfilePathOverride, rootDir),
+  };
 }

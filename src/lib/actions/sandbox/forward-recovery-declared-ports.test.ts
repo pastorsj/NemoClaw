@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   captureOpenshell: vi.fn(),
   runOpenshell: vi.fn((_args: string[], _options?: unknown) => ({ status: 0 })),
   getSessionAgent: vi.fn(),
+  getHealthProbeUrl: vi.fn(),
   getSandbox: vi.fn(),
   getHermesDashboardRecoveryConfig: vi.fn(() => null),
   isLocalForwardReachable: vi.fn(() => true),
@@ -20,6 +21,7 @@ vi.mock("../../adapters/openshell/runtime", () => ({
 
 vi.mock("../../agent/runtime", () => ({
   getSessionAgent: mocks.getSessionAgent,
+  getHealthProbeUrl: mocks.getHealthProbeUrl,
   hasGatewayRuntime: () => true,
 }));
 
@@ -52,6 +54,7 @@ beforeEach(() => {
   mocks.isLocalForwardReachable.mockReturnValue(true);
   mocks.getHermesDashboardRecoveryConfig.mockReturnValue(null);
   mocks.getSessionAgent.mockReturnValue(HERMES_AGENT);
+  mocks.getHealthProbeUrl.mockReturnValue("http://127.0.0.1:8642/health");
 });
 
 describe("ensureDeclaredAgentForwardPortsHealthy", () => {
@@ -105,5 +108,17 @@ describe("ensureDeclaredAgentForwardPortsHealthy", () => {
     const { ensureDeclaredAgentForwardPortsHealthy } = await import("./forward-recovery");
     expect(ensureDeclaredAgentForwardPortsHealthy("beta", 18789)).toBe(true);
     expect(mocks.runOpenshell).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveSandboxHealthProbeUrl", () => {
+  it("uses the recorded OpenClaw dashboard port with the manifest health path", async () => {
+    mocks.getSessionAgent.mockReturnValue({ name: "openclaw", forwardPort: 18789 });
+    mocks.getHealthProbeUrl.mockReturnValue("http://127.0.0.1:18789/health");
+    mocks.getSandbox.mockReturnValue({ agent: null, dashboardPort: 18790 });
+
+    const { resolveSandboxHealthProbeUrl } = await import("./forward-recovery");
+
+    expect(resolveSandboxHealthProbeUrl("alpha")).toBe("http://127.0.0.1:18790/health");
   });
 });

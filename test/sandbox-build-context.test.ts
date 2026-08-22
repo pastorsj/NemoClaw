@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { dockerSpawnSync } from "../src/lib/adapters/docker/exec";
 import { createAgentSandbox } from "../src/lib/agent/base-image";
 import type { AgentDefinition } from "../src/lib/agent/defs";
@@ -189,16 +189,11 @@ describe("sandbox build context staging", () => {
       0o600,
     );
     fs.chmodSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin"), 0o700);
-    fs.chmodSync(
-      path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin", "src"),
-      0o700,
-    );
+    fs.chmodSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin", "src"), 0o700);
     writeFixture(path.join("nemoclaw-blueprint", "blueprint.yaml"));
     writeFixture(path.join("nemoclaw-blueprint", "policies", "presets", "fixture.yaml"));
     writeFixture(path.join("nemoclaw-blueprint", "model-specific-setup", "schema.json"), "{}\n");
-    writeFixture(
-      path.join("packages", "nemoclaw-openclaw", "preloads", "http-proxy-fix.js"),
-    );
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "preloads", "http-proxy-fix.js"));
     writeFixture(
       path.join(
         "packages",
@@ -232,12 +227,7 @@ describe("sandbox build context staging", () => {
       0o600,
     );
     writeFixture(
-      path.join(
-        "packages",
-        "nemoclaw-openclaw",
-        "schemas",
-        "openclaw-plugin.schema.json",
-      ),
+      path.join("packages", "nemoclaw-openclaw", "schemas", "openclaw-plugin.schema.json"),
       "{}\n",
       0o600,
     );
@@ -274,9 +264,7 @@ describe("sandbox build context staging", () => {
       "clean_runtime_shell_env_shim.py",
       "normalize_mutable_config_perms.py",
     ]) {
-      writeFixture(
-        path.join("packages", "nemoclaw-openclaw", "scripts", "lib", fileName),
-      );
+      writeFixture(path.join("packages", "nemoclaw-openclaw", "scripts", "lib", fileName));
     }
     writeFixture(
       path.join("packages", "nemoclaw-openclaw", "scripts", "lib", "openclaw-npm-remediation.mts"),
@@ -285,6 +273,11 @@ describe("sandbox build context staging", () => {
     );
     writeFixture(
       path.join("src", "lib", "messaging", "applier", "build", "messaging-build-applier.mts"),
+    );
+    writeFixture(
+      path.join("src", "lib", "messaging", "applier", "build", "openclaw-npm-remediation.mts"),
+      "fixture\n",
+      0o700,
     );
     writeFixture(
       path.join("src", "lib", "messaging", "channels", "fixture", "hooks", "example.ts"),
@@ -352,12 +345,7 @@ describe("sandbox build context staging", () => {
   }
 
   function expectStagedNemoclawModes(buildCtx: string) {
-    const stagedNemoclaw = path.join(
-      buildCtx,
-      "packages",
-      "nemoclaw-openclaw",
-      "plugin",
-    );
+    const stagedNemoclaw = path.join(buildCtx, "packages", "nemoclaw-openclaw", "plugin");
     const stagedSrc = path.join(stagedNemoclaw, "src");
     const stagedPackageJson = path.join(stagedNemoclaw, "package.json");
     const stagedIndexTs = path.join(stagedSrc, "index.ts");
@@ -685,6 +673,42 @@ describe("sandbox build context staging", () => {
     }
   });
 
+  it.each([
+    ["optimized", stageOptimizedSandboxBuildContext],
+    ["legacy", stageLegacySandboxBuildContext],
+  ])("%s staging rejects a changing runtime package and removes its context", (_name, stage) => {
+    const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-context-source-"));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-context-snapshot-"));
+    const sourceAgentDir = path.join(sourceRoot, "packages", "nemoclaw-openclaw");
+    const sourceDockerfile = path.join(sourceAgentDir, "Dockerfile");
+    const originalCpSync = fs.cpSync;
+
+    try {
+      writeBuildContextFixture(sourceRoot);
+      const copySpy = vi
+        .spyOn(fs, "cpSync")
+        .mockImplementationOnce(((source, destination, options) => {
+          expect(path.resolve(String(source))).toBe(sourceAgentDir);
+          fs.writeFileSync(sourceDockerfile, "FROM changed-during-staging\n");
+          return originalCpSync(source, destination, options);
+        }) as typeof fs.cpSync)
+        .mockImplementation(originalCpSync);
+      try {
+        const entriesBefore = fs.readdirSync(tmpDir);
+        expect(() => stage(sourceRoot, tmpDir)).toThrow(
+          "Selected harness package changed while it was being staged",
+        );
+        expect(copySpy).toHaveBeenCalled();
+        expect(fs.readdirSync(tmpDir)).toEqual(entriesBefore);
+      } finally {
+        copySpy.mockRestore();
+      }
+    } finally {
+      fs.rmSync(sourceRoot, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("optimized staging makes copied nemoclaw plugin sources world-readable", () => {
     const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-context-source-"));
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-context-nemoclaw-mode-"));
@@ -841,23 +865,10 @@ describe("sandbox build context staging", () => {
       fs.rmSync(reviewedArtifact);
       fs.symlinkSync(outsideTarget, reviewedArtifact);
 
+      const stagedDirectoriesBefore = fs.readdirSync(tmpDir);
       expect(() => stageOptimizedSandboxBuildContext(sourceRoot, tmpDir)).toThrow();
       expect(fs.readFileSync(outsideTarget, "utf8")).toBe(outsideContents);
-      const stagedDirectories = fs.readdirSync(tmpDir);
-      expect(stagedDirectories).toHaveLength(1);
-      expect(
-        fs.existsSync(
-          path.join(
-            tmpDir,
-            stagedDirectories[0],
-            "tools",
-            "mcp-tool-discovery-runtime",
-            "reviewed-runtime-bundle",
-            "mcp-tool-discovery",
-            "THIRD_PARTY_LICENSES.txt",
-          ),
-        ),
-      ).toBe(false);
+      expect(fs.readdirSync(tmpDir)).toEqual(stagedDirectoriesBefore);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -931,9 +942,7 @@ describe("sandbox build context staging", () => {
             path.join(buildCtx, "nemoclaw-blueprint", "policies", "presets", "github.yaml"),
           ),
         ).toBe(true);
-        expect(
-          fs.existsSync(packagePayload("preloads", "http-proxy-fix.js")),
-        ).toBe(true);
+        expect(fs.existsSync(packagePayload("preloads", "http-proxy-fix.js"))).toBe(true);
         expect(
           fs.existsSync(
             path.join(
@@ -943,6 +952,19 @@ describe("sandbox build context staging", () => {
               "openclaw-plugins",
               "kimi-inference-compat",
               "openclaw.plugin.json",
+            ),
+          ),
+        ).toBe(true);
+        expect(
+          fs.existsSync(
+            path.join(
+              buildCtx,
+              "src",
+              "lib",
+              "messaging",
+              "applier",
+              "build",
+              "openclaw-npm-remediation.mts",
             ),
           ),
         ).toBe(true);
@@ -1003,12 +1025,10 @@ describe("sandbox build context staging", () => {
         ).toBe(true);
         expect(fs.existsSync(packagePayload("scripts", "openclaw-config-guard.py"))).toBe(true);
         expect(fs.existsSync(packagePayload("scripts", "codex-acp-wrapper.sh"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "generate-openclaw-config.mts"))).toBe(
+        expect(fs.existsSync(packagePayload("scripts", "generate-openclaw-config.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("scripts", "validate-openclaw-tool-search.mts"))).toBe(
           true,
         );
-        expect(
-          fs.existsSync(packagePayload("scripts", "validate-openclaw-tool-search.mts")),
-        ).toBe(true);
         expect(
           fs.existsSync(
             path.join(
@@ -1028,9 +1048,7 @@ describe("sandbox build context staging", () => {
           ),
         ).toBe(true);
         expect(
-          fs.existsSync(
-            packagePayload("scripts", "lib", "openclaw_device_approval_policy.py"),
-          ),
+          fs.existsSync(packagePayload("scripts", "lib", "openclaw_device_approval_policy.py")),
         ).toBe(true);
         expect(
           fs.existsSync(packagePayload("scripts", "lib", "clean_runtime_shell_env_shim.py")),
@@ -1038,30 +1056,20 @@ describe("sandbox build context staging", () => {
         expect(
           fs.existsSync(packagePayload("scripts", "lib", "normalize_mutable_config_perms.py")),
         ).toBe(true);
-        expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-tool-catalog.mts")),
-        ).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-chat-send.mts"))).toBe(
+        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-tool-catalog.mts"))).toBe(
           true,
         );
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-chat-send.js"))).toBe(
-          false,
-        );
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-npx.mts"))).toBe(
+        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-chat-send.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-chat-send.js"))).toBe(false);
+        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-npx.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-reliability.mts"))).toBe(
           true,
         );
         expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-reliability.mts")),
+          fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-tools-list-timeout.mts")),
         ).toBe(true);
         expect(
-          fs.existsSync(
-            packagePayload("scripts", "patch-openclaw-mcp-tools-list-timeout.mts"),
-          ),
-        ).toBe(true);
-        expect(
-          fs.existsSync(
-            packagePayload("scripts", "patch-openclaw-issue-4434-diagnostics.mts"),
-          ),
+          fs.existsSync(packagePayload("scripts", "patch-openclaw-issue-4434-diagnostics.mts")),
         ).toBe(true);
         expect(
           fs.existsSync(
@@ -1072,14 +1080,10 @@ describe("sandbox build context staging", () => {
           fs.existsSync(packagePayload("scripts", "patch-openclaw-device-self-approval.mts")),
         ).toBe(true);
         expect(
-          fs.existsSync(
-            packagePayload("scripts", "openclaw", "patch-gateway-daemon-dialback.mts"),
-          ),
+          fs.existsSync(packagePayload("scripts", "openclaw", "patch-gateway-daemon-dialback.mts")),
         ).toBe(true);
         expect(
-          fs.existsSync(
-            packagePayload("scripts", "patch-openclaw-shared-state-permissions.mts"),
-          ),
+          fs.existsSync(packagePayload("scripts", "patch-openclaw-shared-state-permissions.mts")),
         ).toBe(true);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "patch-bundled-npm-tar.mts"))).toBe(
           true,

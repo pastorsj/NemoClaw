@@ -24,6 +24,7 @@ export type Agent = { name: string };
 type WebSearchConfig = NonNullable<OnboardFlowContext["webSearchConfig"]>;
 
 export type RecorderOverrides = {
+  finalizationAgent?: Agent | null;
   loadSession?: () => Session | null;
   updateSession?: (mutator: (session: Session) => Session | void) => Session;
   recordStepSkipped?: (stepName: string) => Promise<Session>;
@@ -183,6 +184,9 @@ export function createPhases(
     VerifyDeploymentResult
   >({
     branchState,
+    ...(recorders.finalizationAgent !== undefined
+      ? { finalizationAgent: recorders.finalizationAgent }
+      : {}),
     agentSetupDeps: {
       handleAgentSetup: vi.fn(async () => {
         order.push("agent-setup");

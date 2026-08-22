@@ -82,16 +82,9 @@ describe("stopAgentForwardPortsForStop", () => {
     );
   });
 
-  it("skips OpenClaw or agents without declared forwards", () => {
+  it("skips agents without declared forwards", () => {
     const resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
     const runOpenshell = vi.fn();
-
-    stopAgentForwardPortsForStop("openclaw-sandbox", {
-      getRegisteredAgent: () => null,
-      getSandbox: () => ({ agent: "openclaw", gatewayPort: 8080 }),
-      resolveOpenshell,
-      runOpenshell,
-    });
 
     stopAgentForwardPortsForStop("empty-agent", {
       getRegisteredAgent: () => ({ displayName: "Empty Agent", forward_ports: [] }),
@@ -102,6 +95,29 @@ describe("stopAgentForwardPortsForStop", () => {
 
     expect(resolveOpenshell).not.toHaveBeenCalled();
     expect(runOpenshell).not.toHaveBeenCalled();
+  });
+
+  it("stops installed OpenClaw manifest and recorded dashboard forwards", () => {
+    const runOpenshell = vi.fn();
+
+    stopAgentForwardPortsForStop("openclaw-sandbox", {
+      getRegisteredAgent: () => ({ displayName: "OpenClaw", forward_ports: [19123] }),
+      getSandbox: () => ({ agent: null, dashboardPort: 19124, gatewayPort: 8080 }),
+      resolveOpenshell: () => "/usr/local/bin/openshell",
+      runOpenshell,
+      runCaptureOpenshell: () =>
+        forwardList([
+          { sandbox: "openclaw-sandbox", port: 19123 },
+          { sandbox: "openclaw-sandbox", port: 19124 },
+        ]),
+      confirmPortReleased: () => true,
+    });
+
+    expect(runOpenshell).toHaveBeenCalledTimes(2);
+    expect(runOpenshell).toHaveBeenCalledWith(
+      ["forward", "stop", "19123", "openclaw-sandbox", "--gateway", "nemoclaw"],
+      expect.any(Object),
+    );
   });
 
   it("leaves forwards alone when OpenShell reports a different owner", () => {
@@ -230,29 +246,28 @@ describe("stopAgentForwardPortsForStop", () => {
     );
   });
 
-  it.each([
-    "../escape",
-    "bad name",
-    "--gateway",
-  ])("rejects malformed sandbox name %j before registry or OpenShell access", (sandboxName) => {
-    const getSandbox = vi.fn();
-    const resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
-    const runCaptureOpenshell = vi.fn();
-    const runOpenshell = vi.fn();
-    const warn = vi.fn<(message: string) => void>();
+  it.each(["../escape", "bad name", "--gateway"])(
+    "rejects malformed sandbox name %j before registry or OpenShell access",
+    (sandboxName) => {
+      const getSandbox = vi.fn();
+      const resolveOpenshell = vi.fn(() => "/usr/local/bin/openshell");
+      const runCaptureOpenshell = vi.fn();
+      const runOpenshell = vi.fn();
+      const warn = vi.fn<(message: string) => void>();
 
-    stopAgentForwardPortsForStop(sandboxName, {
-      getSandbox,
-      resolveOpenshell,
-      runCaptureOpenshell,
-      runOpenshell,
-      warn,
-    });
+      stopAgentForwardPortsForStop(sandboxName, {
+        getSandbox,
+        resolveOpenshell,
+        runCaptureOpenshell,
+        runOpenshell,
+        warn,
+      });
 
-    expect(getSandbox).not.toHaveBeenCalled();
-    expect(resolveOpenshell).not.toHaveBeenCalled();
-    expect(runCaptureOpenshell).not.toHaveBeenCalled();
-    expect(runOpenshell).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("Invalid sandbox name"));
-  });
+      expect(getSandbox).not.toHaveBeenCalled();
+      expect(resolveOpenshell).not.toHaveBeenCalled();
+      expect(runCaptureOpenshell).not.toHaveBeenCalled();
+      expect(runOpenshell).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Invalid sandbox name"));
+    },
+  );
 });

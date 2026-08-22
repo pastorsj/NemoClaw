@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// sourceOfTruth: These are the canonical blueprint sandbox and provider name
+// sourceOfTruth: These are the core-owned sandbox and provider name
 // grammars. Sandbox names use NemoClaw's OpenShell-compatible label subset;
 // provider names mirror the existing NemoClaw provider contract. This module
-// is compiled to generated .cjs/.d.cts files by build:cli before both the
-// plugin and root CLI are built.
+// is compiled to reviewed .cjs/.d.cts artifacts for the root CLI and plugin.
 // consumers: The ESM plugin runner and migration snapshot under
 // packages/nemoclaw-openclaw/plugin/src/blueprint/ import the generated
-// .cjs directly; the root CLI re-exports the sandbox constants through
+// package-local .cjs artifact; the root CLI re-exports the sandbox constants through
 // src/lib/name-validation.ts (mirroring src/lib/policy/merge.ts). Keeping one
 // sandbox definition prevents the leading-char drift already observed between
 // src/lib/name-validation.ts and the copies in mcp-bridge-validation.ts /

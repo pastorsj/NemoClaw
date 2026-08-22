@@ -33,6 +33,7 @@ import {
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     name: "agent",
+    packageContentDigest: null,
     displayName: "Agent",
     healthProbe: { url: "http://127.0.0.1:19000/", port: 19000, timeout_seconds: 5 },
     forwardPort: 19000,

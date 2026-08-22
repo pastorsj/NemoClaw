@@ -3,9 +3,12 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { TextDecoder } from "node:util";
 
+import { harnessPackageContentDigest } from "../../harness/package-registry";
+import { stageAgentRuntimePackage } from "../../sandbox/build-context";
 import {
   renderHermesPortableDockerfileBuildSettings,
   type HermesPortableDockerfileBuildSettings,
@@ -28,6 +31,8 @@ const OPEN_READ_FLAGS =
   (typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0);
 const SOURCE_DOCKERFILE_RELATIVE_PATH = "packages/nemoclaw-hermes/Dockerfile" as const;
 const CONTEXT_DOCKERFILE_RELATIVE_PATH = "Dockerfile" as const;
+const HERMES_PACKAGE_RELATIVE_PATH = "packages/nemoclaw-hermes" as const;
+const PORTABLE_SOURCE_OVERLAY_PREFIX = "nemoclaw-hermes-portable-source-";
 
 const LOCAL_COPY_SOURCES = [
   "packages/nemoclaw-hermes/build-mcp-digest.py",
@@ -64,7 +69,6 @@ const LOCAL_COPY_SOURCES = [
   "packages/nemoclaw-hermes/state-lock-plan.json",
   "packages/nemoclaw-hermes/validate-cli-adapter.py",
   "packages/nemoclaw-hermes/validate-env-secret-boundary.py",
-  "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
   "nemoclaw-blueprint/",
   "scripts/gateway-control.sh",
   "scripts/lib/bundled-npm-package.mts",
@@ -709,6 +713,7 @@ function renderContextEntries(
 function capture(
   rootPath: string,
   settings: HermesPortableBuildContextSettings,
+  directoryAuthority?: readonly DirectoryEvidence[],
 ): {
   readonly authority: HermesPortableBuildContextAuthority;
   readonly sourceEntries: readonly SourceEntry[];
@@ -717,7 +722,7 @@ function capture(
   if (!path.isAbsolute(rootPath) || fs.realpathSync(rootPath) !== rootPath)
     fail("source root is invalid");
   const revision = captureSourceRevision(rootPath);
-  const sourceDirectoryChain = captureDirectoryChain(rootPath);
+  const sourceDirectoryChain = directoryAuthority ?? captureDirectoryChain(rootPath);
   const tracked = new Map(
     HERMES_PORTABLE_BUILD_CONTEXT_FILES.map((entry) => [entry.path, entry.mode] as const),
   );
@@ -733,6 +738,28 @@ function capture(
     sourceEntries,
     contextEntries,
   };
+}
+
+function capturePrivateOverlayRoot(rootPath: string): readonly DirectoryEvidence[] {
+  const stat = fs.lstatSync(rootPath, { bigint: true });
+  if (
+    !stat.isDirectory() ||
+    stat.isSymbolicLink() ||
+    stat.uid !== currentUid() ||
+    (stat.mode & 0o777n) !== 0o700n ||
+    fs.realpathSync(rootPath) !== rootPath
+  ) {
+    fail("private source overlay is unsafe");
+  }
+  return [
+    {
+      pathSha256: digest(rootPath),
+      device: String(stat.dev),
+      inode: String(stat.ino),
+      mode: String(stat.mode),
+      ownerUid: String(stat.uid),
+    },
+  ];
 }
 
 function contextPaths(
@@ -1360,14 +1387,13 @@ function retireContext(
   return true;
 }
 
-/** Capture the exact shipped Hermes build inputs without creating filesystem state. */
-export function createHermesPortableBuildContextPlan(
+function buildContextPlan(
   rootPath: string,
-  settings: HermesPortableBuildContextSettings,
+  captureCurrent: () => ReturnType<typeof capture>,
 ): HermesPortableBuildContextPlan {
-  const captured = capture(rootPath, settings);
+  const captured = captureCurrent();
   const assertCurrentSource = (): void => {
-    const current = capture(rootPath, settings);
+    const current = captureCurrent();
     if (JSON.stringify(current.authority) !== JSON.stringify(captured.authority)) {
       fail("source authority changed after reservation");
     }
@@ -1382,4 +1408,178 @@ export function createHermesPortableBuildContextPlan(
     },
     retire: (input) => retireContext(captured.contextEntries, captured.authority, input),
   };
+}
+
+/** Capture the exact shipped Hermes build inputs without creating filesystem state. */
+export function createHermesPortableBuildContextPlan(
+  rootPath: string,
+  settings: HermesPortableBuildContextSettings,
+): HermesPortableBuildContextPlan {
+  return buildContextPlan(rootPath, () => capture(rootPath, settings));
+}
+
+function createHermesPortableOverlayBuildContextPlan(
+  rootPath: string,
+  settings: HermesPortableBuildContextSettings,
+): HermesPortableBuildContextPlan {
+  return buildContextPlan(rootPath, () =>
+    capture(rootPath, settings, capturePrivateOverlayRoot(rootPath)),
+  );
+}
+
+function copyPortableSharedSourceEntry(
+  rootPath: string,
+  overlayRoot: string,
+  entry: (typeof HERMES_PORTABLE_BUILD_CONTEXT_FILES)[number],
+): void {
+  const target = path.join(overlayRoot, entry.path);
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o755 });
+  if (entry.mode === "160000") {
+    const source = path.join(rootPath, entry.path);
+    const stat = fs.lstatSync(source, { bigint: true });
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      stableDirectoryMembers(source, entry.path).length !== 0
+    ) {
+      fail(`source submodule directory is unsafe: ${entry.path}`);
+    }
+    fs.mkdirSync(target, { mode: 0o755 });
+    return;
+  }
+  const source = readSourceFile(rootPath, entry.path, entry.mode);
+  fs.writeFileSync(target, source.bytes!, {
+    flag: "wx",
+    mode: entry.mode === "100755" ? 0o755 : 0o644,
+  });
+}
+
+function stagePortableSourceOverlay(
+  rootPath: string,
+  packageRoot: string,
+  overlayRoot: string,
+): void {
+  HERMES_PORTABLE_BUILD_CONTEXT_FILES.filter(
+    (entry) => !entry.path.startsWith(`${HERMES_PACKAGE_RELATIVE_PATH}/`),
+  ).forEach((entry) => copyPortableSharedSourceEntry(rootPath, overlayRoot, entry));
+  stageAgentRuntimePackage(packageRoot, overlayRoot);
+  HERMES_PORTABLE_BUILD_CONTEXT_FILES.filter(
+    (entry) => entry.mode !== "160000" && entry.path.startsWith(`${HERMES_PACKAGE_RELATIVE_PATH}/`),
+  ).forEach((entry) =>
+    fs.chmodSync(path.join(overlayRoot, entry.path), entry.mode === "100755" ? 0o755 : 0o644),
+  );
+}
+
+function selectedPackagePlan(
+  rootPath: string,
+  packageRoot: string,
+  overlayRoot: string,
+  settings: HermesPortableBuildContextSettings,
+  expectedPackageDigest: string,
+): HermesPortableBuildContextPlan {
+  const checkoutAuthority = capture(rootPath, settings).authority;
+  const assertCheckoutSource = (): void => {
+    switch (
+      JSON.stringify(capture(rootPath, settings).authority) === JSON.stringify(checkoutAuthority)
+    ) {
+      case false:
+        fail("shared source changed after reservation");
+    }
+  };
+  const revision = captureSourceRevision(rootPath);
+  const sourceDirectoryChain = captureDirectoryChain(rootPath);
+  const packageDigest = harnessPackageContentDigest(packageRoot);
+  if (packageDigest !== expectedPackageDigest) {
+    fail("selected package no longer matches its loaded manifest");
+  }
+  stagePortableSourceOverlay(rootPath, packageRoot, overlayRoot);
+  assertCheckoutSource();
+  const stagedPackageRoot = path.join(overlayRoot, HERMES_PACKAGE_RELATIVE_PATH);
+  if (
+    harnessPackageContentDigest(packageRoot) !== packageDigest ||
+    harnessPackageContentDigest(stagedPackageRoot) !== packageDigest
+  ) {
+    fail("selected package changed while staging");
+  }
+  fs.writeFileSync(path.join(overlayRoot, ".source-revision"), `${revision.revision}\n`, {
+    flag: "wx",
+    mode: 0o600,
+  });
+  const overlayPlan = createHermesPortableOverlayBuildContextPlan(overlayRoot, settings);
+  const assertCurrentSource = (): void => {
+    overlayPlan.assertCurrentSource();
+    assertCheckoutSource();
+    if (harnessPackageContentDigest(packageRoot) !== packageDigest) {
+      fail("selected package changed after reservation");
+    }
+  };
+  const authority = {
+    ...overlayPlan.authority,
+    sourceRevision: revision.revision,
+    sourceManifestSha256: canonicalDigest({
+      revision,
+      sourceDirectoryChain,
+      checkoutSourceManifestSha256: checkoutAuthority.sourceManifestSha256,
+      selectedPackagePathSha256: digest(packageRoot),
+      selectedPackageSha256: packageDigest,
+      contextManifestSha256: overlayPlan.authority.contextManifestSha256,
+    }),
+  };
+  return {
+    ...overlayPlan,
+    authority,
+    sourceDockerfilePath: path.join(packageRoot, "Dockerfile"),
+    assertCurrentSource,
+    materialize: (input) => {
+      assertCurrentSource();
+      return overlayPlan.materialize(input);
+    },
+  };
+}
+
+/** Run one portable operation with the Hermes package selected by onboarding. */
+export async function withHermesPortableBuildContextPlan<T>(
+  rootPath: string,
+  packageRoot: string,
+  settings: HermesPortableBuildContextSettings,
+  operation: (plan: HermesPortableBuildContextPlan) => Promise<T>,
+  expectedPackageDigest?: string | null,
+): Promise<T> {
+  const bundledPackageRoot = path.join(rootPath, HERMES_PACKAGE_RELATIVE_PATH);
+  if (path.resolve(packageRoot) === bundledPackageRoot) {
+    const packageDigest = harnessPackageContentDigest(bundledPackageRoot);
+    if (expectedPackageDigest && packageDigest !== expectedPackageDigest) {
+      fail("selected package no longer matches its loaded manifest");
+    }
+    const plan = createHermesPortableBuildContextPlan(rootPath, settings);
+    if (harnessPackageContentDigest(bundledPackageRoot) !== packageDigest) {
+      fail("selected package changed while reserving its build context");
+    }
+    return operation(plan);
+  }
+  const selectedPackageRoot = path.resolve(packageRoot);
+  const selectedPackageStat = fs.lstatSync(selectedPackageRoot);
+  if (
+    path.basename(selectedPackageRoot) !== path.basename(HERMES_PACKAGE_RELATIVE_PATH) ||
+    selectedPackageStat.isSymbolicLink() ||
+    !selectedPackageStat.isDirectory()
+  ) {
+    fail("selected package root is invalid");
+  }
+  const overlayPath = fs.mkdtempSync(path.join(os.tmpdir(), PORTABLE_SOURCE_OVERLAY_PREFIX));
+  try {
+    const overlayRoot = fs.realpathSync(overlayPath);
+    fs.chmodSync(overlayRoot, 0o700);
+    return await operation(
+      selectedPackagePlan(
+        rootPath,
+        selectedPackageRoot,
+        overlayRoot,
+        settings,
+        expectedPackageDigest ?? harnessPackageContentDigest(selectedPackageRoot),
+      ),
+    );
+  } finally {
+    fs.rmSync(overlayPath, { recursive: true, force: true });
+  }
 }

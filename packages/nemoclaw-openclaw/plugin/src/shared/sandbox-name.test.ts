@@ -15,7 +15,7 @@ import {
   PROVIDER_NAME_ALLOWED_FORMAT,
   PROVIDER_NAME_MAX_LENGTH,
   PROVIDER_NAME_VALID_PATTERN,
-} from "./sandbox-name.cjs";
+} from "#nemoclaw-shared/sandbox-name.cjs";
 
 const REJECTED_DIAGNOSTIC_CASES: ReadonlyArray<readonly [string, string, string]> = [
   ["line feed and workflow command", "bad\n::error::forged", '"bad\\u000a::error::forged"'],

@@ -22,7 +22,7 @@ import { listSnapshots, pruneSnapshots } from "../blueprint/snapshot-management.
 import type { PluginLogger } from "../index.js";
 import * as credentialFilter from "../security/credential-filter.js";
 import * as snapshotSanitizer from "../security/snapshot-sanitizer.js";
-import * as snapshotBoundary from "../shared/snapshot-sanitizer-boundary.cjs";
+import * as snapshotBoundary from "#nemoclaw-shared/snapshot-sanitizer-boundary.cjs";
 import {
   cleanupSnapshotBundle,
   createSnapshotBundle,

@@ -64,10 +64,6 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "nemoclaw-blueprint/model-specific-setup/schema.json", mode: "100644" },
   { path: "packages/nemoclaw-openclaw/policy-permissive-default.yaml", mode: "100644" },
   { path: "packages/nemoclaw-openclaw/policy-additions.yaml", mode: "100644" },
-  {
-    path: "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
-    mode: "100755",
-  },
   { path: "nemoclaw-blueprint/policies/presets/brave.yaml", mode: "100644" },
   { path: "nemoclaw-blueprint/policies/presets/brew.yaml", mode: "100644" },
   { path: "nemoclaw-blueprint/policies/presets/claude-code.yaml", mode: "100644" },
@@ -131,6 +127,7 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "src/lib/messaging/AGENTS.md", mode: "100644" },
   { path: "src/lib/messaging/applier/agent-config.ts", mode: "100644" },
   { path: "src/lib/messaging/applier/build/messaging-build-applier.mts", mode: "100755" },
+  { path: "src/lib/messaging/applier/build/openclaw-npm-remediation.mts", mode: "100755" },
   { path: "src/lib/messaging/applier/conflict-detection-entry.test.ts", mode: "100644" },
   { path: "src/lib/messaging/applier/conflict-detection-multi-credential.test.ts", mode: "100644" },
   { path: "src/lib/messaging/applier/conflict-detection-overlap.test.ts", mode: "100644" },

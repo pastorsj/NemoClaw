@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// Core-owned OpenShell policy parsing shared by the CLI and agent runtime packages.
+
 import YAML from "yaml";
 
 export type OpenShellPolicyMapping = Record<string, unknown>;
@@ -49,8 +51,9 @@ function parseYaml(source: string, invalidMessage: string): unknown {
 
 // sourceOfTruth: This is the only implementation of the OpenShell
 // metadata/YAML parse boundary and provider-composed policy filter.
-// consumers: The root CommonJS CLI consumes the generated .cjs through its
-// typed wrapper; the ESM plugin runner imports that same generated .cjs.
+// consumers: The root CommonJS CLI consumes its generated .cjs through a typed
+// wrapper; the ESM plugin runner imports a package-local artifact compiled from
+// this source.
 // invalidState: `policy get --base` can return metadata-only, diagnostic, or
 // malformed YAML output that must never be mistaken for an empty policy.
 // sourceBoundary: OpenShell owns command output; this parser owns the trusted

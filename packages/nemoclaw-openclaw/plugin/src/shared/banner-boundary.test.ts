@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { renderBox } from "./banner-boundary.cjs";
+import { renderBox } from "#nemoclaw-shared/banner-boundary.cjs";
 
 // Direct contract test for the one shared renderer (replaced the two per-package parity suites).
 describe("renderBox", () => {

@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import * as sandboxNameContractModule from "../../packages/nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs";
+import * as sandboxNameContractModule from "../../src/lib/shared/sandbox-name.cts";
 
 const sandboxNameContract = (
   "default" in sandboxNameContractModule && sandboxNameContractModule.default
     ? sandboxNameContractModule.default
     : sandboxNameContractModule
-) as typeof import("../../packages/nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs");
+) as typeof import("../../src/lib/shared/sandbox-name.cts");
 const { NAME_ALLOWED_FORMAT, isValidName } = sandboxNameContract;
 
 type WorkflowRecord = Record<string, unknown>;

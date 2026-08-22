@@ -18,6 +18,7 @@ import {
   candidateQualificationEnvironment,
 } from "./candidate-test-fixture";
 import YAML from "yaml";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 
 import {
   AGENTS_DIR,
@@ -195,9 +196,10 @@ describe("agent definitions", () => {
   it.each(STANDARD_HARNESS_PACKAGES)(
     "loads $name from its harness package manifest",
     ({ name, directory }) => {
-      expect(loadAgent(name, STANDARD_HARNESS_ENV).manifestPath).toBe(
-        path.resolve(AGENTS_DIR, "..", "packages", directory, "manifest.yaml"),
-      );
+      const packageRoot = path.resolve(AGENTS_DIR, "..", "packages", directory);
+      const agent = loadAgent(name, STANDARD_HARNESS_ENV);
+      expect(agent.manifestPath).toBe(path.join(packageRoot, "manifest.yaml"));
+      expect(agent.packageContentDigest).toBe(harnessPackageContentDigest(packageRoot));
     },
   );
 

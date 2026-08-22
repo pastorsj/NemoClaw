@@ -5,11 +5,17 @@ import { isDeepStrictEqual } from "node:util";
 import { readCandidateQualificationReceipt } from "../../agent/candidate";
 import { cloneAndDeepFreeze } from "../../core/immutable";
 import { getVersion } from "../../core/version";
+import {
+  bundledHarnessPackageContentDigest,
+  harnessPackageContentDigest,
+  resolveHarnessPackage,
+} from "../../harness/package-registry";
 import type { SandboxEntry } from "../../state/registry/types";
 import { cloneSandboxWorkloadReceipt } from "../../state/registry/workload";
 import type { ResolvedCorporateCa } from "../corporate-ca-types";
 import {
   isCandidateManagedImageAgent,
+  isShippedManagedImageAgent,
   MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
   type ManagedImageAgent,
@@ -139,6 +145,9 @@ export async function prepareManagedWorkloadRebuildHandoff(
   const authority = readManagedWorkloadAuthority(entry);
   if (!authority) return null;
   requireProviderBoundAuthority(authority, options.runtime, options.provider);
+  const selectedPackage = isShippedManagedImageAgent(authority.agent)
+    ? resolveHarnessPackage(authority.agent)
+    : null;
 
   let replacement: PreparedSandboxWorkloadSource;
   if (isCandidateManagedImageAgent(authority.agent)) {
@@ -197,6 +206,10 @@ export async function prepareManagedWorkloadRebuildHandoff(
         runtime: options.runtime,
         version: options.version ?? getVersion(),
         policy: "require-managed",
+        selectedHarnessPackageDigest: selectedPackage
+          ? harnessPackageContentDigest(selectedPackage.rootDir)
+          : null,
+        bundledHarnessPackageDigest: bundledHarnessPackageContentDigest(authority.agent),
         ...(liveCatalog
           ? {
               catalogPath: liveCatalog.path,

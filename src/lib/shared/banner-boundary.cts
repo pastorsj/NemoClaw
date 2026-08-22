@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// sourceOfTruth: This is the one implementation of the terminal banner box
-// renderer. It is compiled to generated .cjs/.d.cts files by build:cli before
-// both the plugin and root CLI are built.
+// sourceOfTruth: This is the core-owned implementation of the terminal banner
+// box renderer. The root CLI and package build compile it into their own
+// reviewed .cjs/.d.cts artifacts.
 // consumers: The root CLI re-exports renderBox through src/lib/cli/banner.ts
 // for src/lib/tunnel/services.ts; the ESM plugin re-exports it through
 // packages/nemoclaw-openclaw/plugin/src/banner.ts for the plugin entry point. Keeping one renderer
@@ -12,7 +12,7 @@
 // truncates the box. It does not escape terminal control sequences.
 // regressionTest: packages/nemoclaw-openclaw/plugin/src/shared/banner-boundary.test.ts covers the
 // renderer directly; test/package-contract/banner-boundary.test.ts proves both
-// built package wrappers resolve to this one generated function.
+// built package wrappers resolve to artifacts compiled from this source.
 // removalCondition: remove only when a single package renders the banner.
 
 /** A banner content row; null renders as a blank separator row. */

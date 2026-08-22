@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// Core-owned snapshot traversal shared by the CLI and agent runtime packages.
+
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";

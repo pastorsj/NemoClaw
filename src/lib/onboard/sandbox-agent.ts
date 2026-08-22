@@ -71,8 +71,9 @@ export function getSandboxPromptDefault(agent: AgentDefinition | null | undefine
 
 export function getEffectiveSandboxAgent(
   agent: AgentDefinition | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
 ): AgentDefinition {
-  return agent || loadAgent("openclaw");
+  return agent || loadAgent("openclaw", env);
 }
 
 export function getAgentInferenceProviderOptions(

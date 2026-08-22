@@ -28,6 +28,7 @@ import {
   isBackToSelection,
 } from "./credential-navigation";
 import { exitOnboardFromPrompt } from "./prompt-helpers";
+import { getEffectiveSandboxAgent } from "./sandbox-agent";
 import type { ValidationFailureLike } from "./types";
 import { agentSupportsWebSearch, agentSupportsWebSearchProvider } from "./web-search-support";
 import { verifyWebSearchInsideSandbox as verifyWebSearchInsideSandboxWithDeps } from "./web-search-verify";
@@ -446,23 +447,26 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     agent: AgentDefinition | null = null,
     dockerfilePathOverride: string | null = null,
   ): Promise<WebSearchConfig | null> {
-    if (!agentSupportsWebSearch(agent, dockerfilePathOverride, ROOT)) {
-      deps.note(
-        `  Web search is not yet supported by ${agent?.displayName ?? "this agent"}. Skipping.`,
-      );
+    const capabilityAgent = getEffectiveSandboxAgent(agent, env);
+    if (!agentSupportsWebSearch(capabilityAgent, dockerfilePathOverride, ROOT)) {
+      deps.note(`  Web search is not yet supported by ${capabilityAgent.displayName}. Skipping.`);
       return null;
     }
 
     existingConfig = normalizeWebSearchConfig(existingConfig);
 
     if (deps.isNonInteractive()) {
-      return configureNonInteractiveWebSearch(existingConfig, agent, dockerfilePathOverride);
+      return configureNonInteractiveWebSearch(
+        existingConfig,
+        capabilityAgent,
+        dockerfilePathOverride,
+      );
     }
 
     if (existingConfig) return normalizeWebSearchConfig(existingConfig);
 
     const supportedProviders = WEB_SEARCH_PROVIDERS.filter((provider) =>
-      providerIsSupported(provider, agent, dockerfilePathOverride),
+      providerIsSupported(provider, capabilityAgent, dockerfilePathOverride),
     );
     while (true) {
       const provider = await promptWebSearchProvider(supportedProviders);

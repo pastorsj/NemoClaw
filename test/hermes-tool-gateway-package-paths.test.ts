@@ -12,7 +12,7 @@ import { installBundledHarness } from "../src/lib/harness/package-registry";
 import {
   isValidName as isCanonicalName,
   isValidProviderName as isCanonicalProviderName,
-} from "../packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts";
+} from "../src/lib/shared/sandbox-name.cts";
 
 type HermesToolGatewayRuntimePaths = Readonly<{
   packageRoot: string;

@@ -3,7 +3,7 @@
 
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import type { ConfigValue } from "./credential-filter-boundary.cjs";
+import type { ConfigValue } from "#nemoclaw-shared/credential-filter-boundary.cjs";
 
 import {
   CONTEXT_PATTERNS,
@@ -20,7 +20,7 @@ import {
   STRUCTURED_TOKEN_PATTERNS,
   TOKEN_PREFIX_PATTERNS,
   valueLooksLikeSecret,
-} from "./credential-filter-boundary.cjs";
+} from "#nemoclaw-shared/credential-filter-boundary.cjs";
 
 function asConfigValue(value: ConfigValue): ConfigValue {
   return value;

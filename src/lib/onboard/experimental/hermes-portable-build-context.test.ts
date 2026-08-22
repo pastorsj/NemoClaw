@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 import { ROOT } from "../../runner";
-import { createHermesPortableBuildContextPlan } from "./hermes-portable-build-context";
+import {
+  createHermesPortableBuildContextPlan,
+  withHermesPortableBuildContextPlan,
+} from "./hermes-portable-build-context";
 import { HERMES_PORTABLE_BUILD_CONTEXT_FILES } from "./hermes-portable-build-context-files";
 
 const TRANSACTION_ID = "11111111-1111-4111-8111-111111111111";
@@ -123,7 +126,9 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
         ),
       ),
     ).toBe(true);
-    expect(fs.existsSync(path.join(inferredContext, "packages/nemoclaw-hermes/Dockerfile"))).toBe(false);
+    expect(fs.existsSync(path.join(inferredContext, "packages/nemoclaw-hermes/Dockerfile"))).toBe(
+      false,
+    );
     expect(plan.authority.sourceRevision).toMatch(/^[a-f0-9]{40,64}$/u);
     expect(plan.authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
     const stagedDockerfile = fs.readFileSync(first.dockerfilePath, "utf8");
@@ -153,7 +158,9 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
       ),
     ).toBe(true);
     expect(
-      fs.existsSync(path.join(first.buildContextPath, "packages/nemoclaw-hermes/plugin/__pycache__")),
+      fs.existsSync(
+        path.join(first.buildContextPath, "packages/nemoclaw-hermes/plugin/__pycache__"),
+      ),
     ).toBe(false);
 
     const reused = plan.materialize(contextInput());
@@ -289,6 +296,122 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
     expect(plan.authority.sourceRevision).toBe("b".repeat(40));
     expect(plan.authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("stages and pins the Dockerfile and helper from the selected installed Hermes package", async () => {
+    const source = primaryCloneFixture();
+    const installedPackage = path.join(
+      stateDir,
+      "home",
+      ".nemoclaw",
+      "harnesses",
+      "nemoclaw-hermes",
+    );
+    fs.mkdirSync(path.dirname(installedPackage), { recursive: true, mode: 0o700 });
+    fs.cpSync(path.join(ROOT, "packages", "nemoclaw-hermes"), installedPackage, {
+      recursive: true,
+    });
+    const dockerfileMarker = "# selected-installed-hermes-dockerfile";
+    const helperMarker = "# selected-installed-hermes-helper";
+    fs.appendFileSync(path.join(installedPackage, "Dockerfile"), `\n${dockerfileMarker}\n`);
+    fs.appendFileSync(path.join(installedPackage, "build-mcp-digest.py"), `\n${helperMarker}\n`);
+    const selectedHelper = fs.readFileSync(path.join(installedPackage, "build-mcp-digest.py"));
+
+    const result = await withHermesPortableBuildContextPlan(
+      source,
+      installedPackage,
+      BUILD_SETTINGS,
+      async (plan) => {
+        const staged = plan.materialize(contextInput());
+        const captured = {
+          authority: plan.authority,
+          sourceDockerfilePath: plan.sourceDockerfilePath,
+          dockerfile: fs.readFileSync(staged.dockerfilePath, "utf8"),
+          helper: fs.readFileSync(
+            path.join(staged.buildContextPath, "packages/nemoclaw-hermes/build-mcp-digest.py"),
+            "utf8",
+          ),
+        };
+        fs.appendFileSync(
+          path.join(installedPackage, "build-mcp-digest.py"),
+          "\n# changed-after-reservation\n",
+        );
+        expect(() => plan.assertCurrentSource()).toThrow(
+          "selected package changed after reservation",
+        );
+        fs.writeFileSync(path.join(installedPackage, "build-mcp-digest.py"), selectedHelper);
+        plan.assertCurrentSource();
+        expect(plan.retire(contextInput())).toBe(true);
+        return captured;
+      },
+    );
+    const resumedAuthority = await withHermesPortableBuildContextPlan(
+      source,
+      installedPackage,
+      BUILD_SETTINGS,
+      async (plan) => plan.authority,
+    );
+
+    expect(resumedAuthority).toEqual(result.authority);
+    expect(result.sourceDockerfilePath).toBe(path.join(installedPackage, "Dockerfile"));
+    expect(result.dockerfile).toContain(dockerfileMarker);
+    expect(result.helper).toContain(helperMarker);
+  });
+
+  it("rejects a shared checkout input changed after an installed package is staged", async () => {
+    const source = primaryCloneFixture();
+    const installedPackage = path.join(stateDir, "installed", "nemoclaw-hermes");
+    fs.mkdirSync(path.dirname(installedPackage), { recursive: true, mode: 0o700 });
+    fs.cpSync(path.join(ROOT, "packages", "nemoclaw-hermes"), installedPackage, {
+      recursive: true,
+    });
+
+    await withHermesPortableBuildContextPlan(
+      source,
+      installedPackage,
+      BUILD_SETTINGS,
+      async (plan) => {
+        fs.appendFileSync(
+          path.join(source, "nemoclaw-blueprint", "blueprint.yaml"),
+          "\n# changed-after-reservation\n",
+        );
+
+        expect(() => plan.assertCurrentSource()).toThrow("shared source changed after reservation");
+      },
+    );
+  });
+
+  it("admits a private overlay beneath a real 01777 shared temporary directory", async () => {
+    const sharedTemp = path.join(stateDir, "shared-temp");
+    const installedPackage = path.join(stateDir, "installed", "nemoclaw-hermes");
+    fs.mkdirSync(sharedTemp, { mode: 0o1777 });
+    fs.chmodSync(sharedTemp, 0o1777);
+    fs.mkdirSync(path.dirname(installedPackage), { recursive: true, mode: 0o700 });
+    fs.cpSync(path.join(ROOT, "packages", "nemoclaw-hermes"), installedPackage, {
+      recursive: true,
+    });
+    vi.restoreAllMocks();
+    vi.stubEnv("TMPDIR", sharedTemp);
+
+    try {
+      const authority = await withHermesPortableBuildContextPlan(
+        ROOT,
+        installedPackage,
+        BUILD_SETTINGS,
+        async (plan) => {
+          const overlayMembers = fs.readdirSync(sharedTemp);
+          expect(overlayMembers).toHaveLength(1);
+          expect(fs.lstatSync(path.join(sharedTemp, overlayMembers[0]!)).mode & 0o777).toBe(0o700);
+          return plan.authority;
+        },
+      );
+
+      expect(fs.lstatSync(sharedTemp).mode & 0o7777).toBe(0o1777);
+      expect(authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+      expect(fs.readdirSync(sharedTemp)).toEqual([]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("accepts a private installer checkout created under umask 077 (#9203)", () => {

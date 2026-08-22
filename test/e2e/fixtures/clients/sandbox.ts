@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import * as importedSandboxNameContract from "../../../../packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts";
+import * as importedSandboxNameContract from "../../../../src/lib/shared/sandbox-name.cts";
 import { buildAvailabilityProbeEnv } from "../availability-env.ts";
 import type { ShellProbeResult, ShellProbeRunOptions } from "../shell-probe.ts";
 import { trustedShellCommand } from "../shell-probe.ts";
@@ -17,7 +17,7 @@ const sandboxNameContract = (
   "default" in importedSandboxNameContract && importedSandboxNameContract.default
     ? importedSandboxNameContract.default
     : importedSandboxNameContract
-) as typeof import("../../../../packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts");
+) as typeof import("../../../../src/lib/shared/sandbox-name.cts");
 const { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } = sandboxNameContract;
 
 const SANDBOX_ALREADY_ABSENT =

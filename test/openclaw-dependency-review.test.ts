@@ -75,12 +75,7 @@ const MCP_TOOLS_LIST_TIMEOUT_PATCH = path.join(
   "scripts",
   "patch-openclaw-mcp-tools-list-timeout.mts",
 );
-const OPENCLAW_DOCKERFILE = path.join(
-  REPO_ROOT,
-  "packages",
-  "nemoclaw-openclaw",
-  "Dockerfile",
-);
+const OPENCLAW_DOCKERFILE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
 const OPENCLAW_BASE_DOCKERFILE = path.join(
   REPO_ROOT,
   "packages",
@@ -198,7 +193,9 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
     const troubleshooting = readFileSync(MCP_TROUBLESHOOTING, "utf-8");
 
     expect(review).toContain("## Transient Remote MCP Startup Recovery");
-    expect(review).toContain("packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts");
+    expect(review).toContain(
+      "packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts",
+    );
     expect(review).toContain(
       'identifies its target by the `"openclaw-bundle-mcp"` client identity',
     );
@@ -224,7 +221,9 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
     const review = readFileSync(ACTIVE_DEPENDENCY_REVIEW, "utf-8");
 
     expect(review).toContain("## Managed Outbound Transport Diagnostics");
-    expect(review).toContain("packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts");
+    expect(review).toContain(
+      "packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts",
+    );
     expect(review).toContain("The sibling SSE transport boundary is deliberately left unwrapped.");
     expect(review).toContain("Failure-only by default.");
     expect(review).toContain("`NEMOCLAW_MCP_SHADOW_DIAGNOSTICS=1`");
@@ -276,7 +275,9 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
     const troubleshooting = readFileSync(MCP_TROUBLESHOOTING, "utf-8");
 
     expect(review).toContain("## Bounded MCP Tool Discovery Timeout");
-    expect(review).toContain("packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts");
+    expect(review).toContain(
+      "packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts",
+    );
     expect(review).toContain("OpenClaw `2026.7.1` gives `tools/list` 1,500 ms");
     expect(review).toContain("from 1,500 through 10,000 ms");
     expect(review).toContain("only for catalog `tools/list` requests");
@@ -590,6 +591,7 @@ set -euo pipefail
 messaging_build_applier=${JSON.stringify(MESSAGING_BUILD_APPLIER)}
 reviewed_archive_helper=scripts/lib/reviewed-npm-archive.mts
 remediation_helper=packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
+messaging_remediation_adapter=src/lib/messaging/applier/build/openclaw-npm-remediation.mts
 openclaw_dockerfile=${JSON.stringify(OPENCLAW_DOCKERFILE)}
 openclaw_base_dockerfile=${JSON.stringify(OPENCLAW_BASE_DOCKERFILE)}
 
@@ -694,8 +696,11 @@ check_not_contains "$optional_plugin_block" 'pack_reviewed_npm_tarball' "optiona
 	grep -Fq '["openclaw", "plugins", "install", \`npm-pack:\${packed.archivePath}\`]' "$messaging_build_applier"
 	grep -Fq 'rmSync(packed.rootDir, { recursive: true, force: true })' "$messaging_build_applier"
 	grep -Fq 'from "../../../../../scripts/lib/reviewed-npm-archive.mts"' "$messaging_build_applier"
-	grep -Fq 'from "../../../../../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts"' "$messaging_build_applier"
+	grep -Fq 'from "./openclaw-npm-remediation.mts"' "$messaging_build_applier"
 	grep -Fq 'remediateReviewedOpenClawPluginArchive({' "$messaging_build_applier"
+	grep -Fq '../../../../../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts' "$messaging_remediation_adapter"
+	grep -Fq 'spawnSync(' "$messaging_remediation_adapter"
+	grep -Fq 'result.status !== 0' "$messaging_remediation_adapter"
 	grep -Fq 'spawnSync(request.npmExecutable ?? "npm", args' "$reviewed_archive_helper"
 	grep -Fq '["view", request.packageSpec, "dist.integrity"]' "$reviewed_archive_helper"
 	grep -Fq '["view", request.packageSpec, "dist.tarball"]' "$reviewed_archive_helper"

@@ -9,7 +9,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { DASHBOARD_PORT } from "../core/ports";
 import { isCuaEnabled, requireCuaEnabled } from "../cua/feature";
-import { listHarnessPackages, resolveHarnessPackage } from "../harness/package-registry";
+import {
+  harnessPackageContentDigest,
+  listHarnessPackages,
+  resolveHarnessPackage,
+} from "../harness/package-registry";
 import { ROOT } from "../runner";
 import {
   formatAgentAliasSuffix,
@@ -171,8 +175,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
   if (name === "nemocua") requireCuaEnabled(env);
   requireCandidateAgentSelectable(name, env);
   const harnessPackage = resolveHarnessPackage(name, env);
-  const manifestPath =
-    harnessPackage?.manifestPath ?? path.join(AGENTS_DIR, name, "manifest.yaml");
+  const manifestPath = harnessPackage?.manifestPath ?? path.join(AGENTS_DIR, name, "manifest.yaml");
   const cached = _cache.get(manifestPath);
   if (cached) return cached;
 
@@ -180,6 +183,9 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
     throw new Error(`Agent '${name}' not found: ${manifestPath}`);
   }
 
+  const packageDigestBefore = harnessPackage
+    ? harnessPackageContentDigest(harnessPackage.rootDir)
+    : null;
   const raw = loadManifestRecord(manifestPath);
   const agentDir = path.dirname(manifestPath);
   const manifestName = readString(raw, "name") ?? name;
@@ -218,6 +224,12 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
   const phoneHomeHosts = readStringArray(raw, "phone_home_hosts");
   const legacyPathConfig = readStringMap(raw, "_legacy_paths");
   const dashboardUi = readDashboardUi(raw);
+  const packageContentDigest = harnessPackage
+    ? harnessPackageContentDigest(harnessPackage.rootDir)
+    : null;
+  if (packageContentDigest !== packageDigestBefore) {
+    throw new Error(`Harness package '${name}' changed while its manifest was loaded`);
+  }
 
   const agent: AgentDefinition = {
     ...raw,
@@ -243,6 +255,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
     _legacy_paths: legacyPathConfig,
     agentDir,
     manifestPath,
+    packageContentDigest,
 
     get displayName(): string {
       return displayName ?? manifestName;

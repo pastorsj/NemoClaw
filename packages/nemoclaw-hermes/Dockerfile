@@ -93,7 +93,6 @@ COPY packages/nemoclaw-hermes/host/managed-tool-gateway-matrix.json /opt/nemocla
 COPY src/lib/hermes-managed-route.ts /src/lib/hermes-managed-route.ts
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
-COPY packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
 
 FROM scratch AS hermes-runtime-payload
 
@@ -401,7 +400,6 @@ RUN find /opt/nemoclaw-hermes-config -type d -exec chmod 755 {} + \
     && find /opt/nemoclaw-hermes-config -type f -exec chmod 444 {} + \
     && chmod 444 /src/lib/hermes-managed-route.ts /src/lib/tool-disclosure.ts \
     && chmod 444 /scripts/lib/reviewed-npm-archive.mts /scripts/lib/bundled-npm-package.mts \
-        /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
         /scripts/patch-bundled-npm-brace-expansion.mts /scripts/lib/patch-bundled-npm-ip-address.mts \
         /scripts/patch-bundled-npm-tar.mts \
     && chmod -R a+rX /src/lib/messaging

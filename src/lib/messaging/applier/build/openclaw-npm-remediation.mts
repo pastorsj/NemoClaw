@@ -1,0 +1,81 @@
+#!/usr/bin/env -S node --experimental-strip-types
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+
+type RemediationRequest = Readonly<{
+  archivePath: string;
+  env?: NodeJS.ProcessEnv;
+  packageSpec: string;
+  workingDirectory: string;
+}>;
+
+export type RemediatedArchive = Readonly<
+  | {
+      archivePath: string;
+      integrity: string;
+      remediated: false;
+    }
+  | {
+      archivePath: string;
+      integrity: string;
+      metadataIntegrity: string;
+      remediated: true;
+      treeIntegrity: string;
+    }
+>;
+
+const OPENCLAW_REMEDIATION_HELPER = resolve(
+  import.meta.dirname,
+  "../../../../../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+);
+
+function parseRemediationResult(output: string): RemediatedArchive {
+  const result = JSON.parse(output) as Partial<RemediatedArchive>;
+  if (
+    !result ||
+    typeof result !== "object" ||
+    typeof result.archivePath !== "string" ||
+    typeof result.integrity !== "string" ||
+    typeof result.remediated !== "boolean" ||
+    (result.remediated &&
+      (typeof result.metadataIntegrity !== "string" || typeof result.treeIntegrity !== "string"))
+  ) {
+    throw new Error("OpenClaw npm remediation helper returned an invalid result");
+  }
+  return result as RemediatedArchive;
+}
+
+/** Run the package-owned remediation from the shared messaging build boundary. */
+export function remediateReviewedOpenClawPluginArchive(
+  request: RemediationRequest,
+): RemediatedArchive {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      OPENCLAW_REMEDIATION_HELPER,
+      "--archive",
+      resolve(request.archivePath),
+      "--package-spec",
+      request.packageSpec,
+      "--working-directory",
+      resolve(request.workingDirectory),
+    ],
+    {
+      encoding: "utf8",
+      env: { ...process.env, ...request.env },
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `OpenClaw npm remediation helper exited with status ${String(result.status ?? "unknown")}: ${result.stderr.trim()}`,
+    );
+  }
+  return parseRemediationResult(result.stdout);
+}

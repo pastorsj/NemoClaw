@@ -19,7 +19,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { remediateReviewedOpenClawPluginArchive } from "../../../../../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts";
+import { remediateReviewedOpenClawPluginArchive } from "./openclaw-npm-remediation.mts";
 import { packReviewedNpmArchive } from "../../../../../scripts/lib/reviewed-npm-archive.mts";
 import { discordManifest } from "../../channels/discord/manifest.ts";
 import { googlechatManifest } from "../../channels/googlechat/manifest.ts";

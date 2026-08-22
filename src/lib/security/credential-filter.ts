@@ -19,11 +19,8 @@ import {
   isConfigValue,
   sanitizeEnvFileContent,
   stripCredentials,
-} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/credential-filter-boundary.cjs";
-import type {
-  ConfigObject,
-  ConfigValue,
-} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/credential-filter-boundary.cjs";
+} from "../shared/credential-filter-boundary.cts";
+import type { ConfigObject, ConfigValue } from "../shared/credential-filter-boundary.cts";
 
 export {
   CREDENTIAL_PLACEHOLDER,
@@ -36,11 +33,8 @@ export {
   sanitizeEnvFileContent,
   stripCredentials,
   valueLooksLikeSecret,
-} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/credential-filter-boundary.cjs";
-export type {
-  ConfigObject,
-  ConfigValue,
-} from "../../../packages/nemoclaw-openclaw/plugin/dist/shared/credential-filter-boundary.cjs";
+} from "../shared/credential-filter-boundary.cts";
+export type { ConfigObject, ConfigValue } from "../shared/credential-filter-boundary.cts";
 
 function parseJson<T>(text: string): T {
   return JSON.parse(text);

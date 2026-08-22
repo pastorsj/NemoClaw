@@ -20,23 +20,19 @@ import { vitestWatchTriggerPatterns } from "./test/helpers/vitest-watch-triggers
 const { isCi, silent } = resolveVitestFeedback();
 const LIVE_E2E_PROJECT_TIMEOUT_MS = 30 * 60 * 1000;
 const runLiveE2E = shouldRunLiveE2E();
-const canonicalBannerBoundary = path.resolve(
-  "packages/nemoclaw-openclaw/plugin/src/shared/banner-boundary.cts",
-);
+const canonicalBannerBoundary = path.resolve("src/lib/shared/banner-boundary.cts");
 const canonicalCredentialFilterBoundary = path.resolve(
-  "packages/nemoclaw-openclaw/plugin/src/shared/credential-filter-boundary.cts",
+  "src/lib/shared/credential-filter-boundary.cts",
 );
 const canonicalOpenShellPolicyBoundary = path.resolve(
-  "packages/nemoclaw-openclaw/plugin/src/shared/openshell-policy-boundary.cts",
+  "src/lib/shared/openshell-policy-boundary.cts",
 );
 const canonicalPrivateNetworksBoundary = path.resolve(
-  "packages/nemoclaw-openclaw/plugin/src/shared/private-networks-boundary.cts",
+  "src/lib/shared/private-networks-boundary.cts",
 );
-const canonicalSandboxName = path.resolve(
-  "packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts",
-);
+const canonicalSandboxName = path.resolve("src/lib/shared/sandbox-name.cts");
 const canonicalSnapshotSanitizerBoundary = path.resolve(
-  "packages/nemoclaw-openclaw/plugin/src/shared/snapshot-sanitizer-boundary.cts",
+  "src/lib/shared/snapshot-sanitizer-boundary.cts",
 );
 // Map the generated shared .cjs specifiers back to their .cts source so
 // source-mode test projects exercise the single source of truth rather than a

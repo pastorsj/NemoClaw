@@ -1397,6 +1397,10 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     displayName: "Backup: restores workspace files and memory",
     agentRuntime: "openclaw",
     environmentOrInferenceEndpoint: "Ubuntu; NVIDIA hosted inference",
+    owningPaths: [
+      "scripts/backup-workspace.sh",
+      "packages/nemoclaw-openclaw/scripts/backup-workspace.sh",
+    ],
     profile: "nvidia-inference",
     timeoutMinutes: 60,
     installMode: "credential-free",

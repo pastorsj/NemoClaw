@@ -17,11 +17,11 @@ import { testTimeout } from "./helpers/timeouts";
 import { withLegacyMessagingPlanEnvDirect } from "./messaging-plan-test-helper";
 
 vi.mock(
-  "../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+  "../src/lib/messaging/applier/build/openclaw-npm-remediation.mts",
   async (importOriginal) => {
     const original =
       await importOriginal<
-        typeof import("../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts")
+        typeof import("../src/lib/messaging/applier/build/openclaw-npm-remediation.mts")
       >();
     return {
       ...original,
@@ -97,7 +97,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
     try {
       [
         ...dockerfile.matchAll(
-          /^COPY (src\/lib\/messaging\/|scripts\/lib\/reviewed-npm-archive\.mts|packages\/nemoclaw-openclaw\/scripts\/lib\/openclaw-npm-remediation\.mts) (\/\S+)$/gm,
+          /^COPY (src\/lib\/messaging\/|scripts\/lib\/reviewed-npm-archive\.mts) (\/\S+)$/gm,
         ),
       ].forEach((copy) => {
         const source = copy[1] ?? "";
@@ -124,6 +124,51 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
         { encoding: "utf8", timeout: 10_000 },
       );
       expect(result.status, result.stderr).toBe(0);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("delegates OpenClaw plugin remediation to the OpenClaw package", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-messaging-remediation-adapter-"));
+    const archivePath = path.join(root, "plugin.tgz");
+    fs.writeFileSync(archivePath, "reviewed plugin archive");
+    const adapterPath = path.join(
+      REPO_ROOT,
+      "src",
+      "lib",
+      "messaging",
+      "applier",
+      "build",
+      "openclaw-npm-remediation.mts",
+    );
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          "--input-type=module",
+          "--eval",
+          [
+            `const adapter = await import(${JSON.stringify(pathToFileURL(adapterPath).href)});`,
+            "const result = adapter.remediateReviewedOpenClawPluginArchive({",
+            "  archivePath: process.argv[1],",
+            "  packageSpec: '@openclaw/whatsapp@2026.7.1',",
+            "  workingDirectory: process.argv[2],",
+            "});",
+            "process.stdout.write(JSON.stringify(result));",
+          ].join("\n"),
+          archivePath,
+          root,
+        ],
+        { encoding: "utf8", timeout: 10_000 },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        archivePath,
+        integrity: expect.stringMatching(/^sha512-/),
+        remediated: false,
+      });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

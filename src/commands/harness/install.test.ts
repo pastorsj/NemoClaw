@@ -6,10 +6,12 @@ import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 
 const mocks = vi.hoisted(() => ({
   installBundledHarness: vi.fn(),
+  refreshInstalledBundledHarnesses: vi.fn(),
 }));
 
 vi.mock("../../lib/harness/package-registry", () => ({
   installBundledHarness: mocks.installBundledHarness,
+  refreshInstalledBundledHarnesses: mocks.refreshInstalledBundledHarnesses,
 }));
 
 import HarnessInstallCommand from "./install";
@@ -27,6 +29,7 @@ describe("harness install oclif command", testTimeoutOptions(30_000), () => {
       manifestPath: `/tmp/${id}/manifest.yaml`,
       source: "installed",
     }));
+    mocks.refreshInstalledBundledHarnesses.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -68,11 +71,55 @@ describe("harness install oclif command", testTimeoutOptions(30_000), () => {
     );
 
     expect(mocks.installBundledHarness).toHaveBeenCalledWith("unknown");
+    expect(mocks.refreshInstalledBundledHarnesses).not.toHaveBeenCalled();
   });
 
   it("requires a harness id before installation", async () => {
     await expect(HarnessInstallCommand.run([], rootDir)).rejects.toThrow(/harness/i);
 
     expect(mocks.installBundledHarness).not.toHaveBeenCalled();
+  });
+
+  it("refreshes only packages that were already installed when no harness is selected", async () => {
+    const openclaw = mocks.installBundledHarness("openclaw");
+    mocks.installBundledHarness.mockClear();
+    mocks.refreshInstalledBundledHarnesses.mockReturnValue([openclaw]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await HarnessInstallCommand.run(["--refresh-installed"], rootDir);
+
+    expect(mocks.installBundledHarness).not.toHaveBeenCalled();
+    expect(mocks.refreshInstalledBundledHarnesses).toHaveBeenCalledWith(process.env);
+    expect(log.mock.calls).toEqual([["Agent runtime package 'openclaw' is installed."]]);
+  });
+
+  it("refreshes existing bundled packages and installs a missing selection once", async () => {
+    const hermes = mocks.installBundledHarness("hermes");
+    mocks.installBundledHarness.mockClear();
+    mocks.refreshInstalledBundledHarnesses.mockReturnValue([hermes]);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await HarnessInstallCommand.run(["openclaw", "--refresh-installed"], rootDir);
+
+    expect(mocks.installBundledHarness).toHaveBeenCalledTimes(1);
+    expect(mocks.installBundledHarness).toHaveBeenCalledWith("openclaw");
+    expect(mocks.refreshInstalledBundledHarnesses).toHaveBeenCalledWith(process.env, "openclaw");
+    expect(log.mock.calls).toEqual([
+      ["Agent runtime package 'openclaw' is installed."],
+      ["Agent runtime package 'hermes' is installed."],
+    ]);
+  });
+
+  it("reports the selected install before another installed package blocks refresh", async () => {
+    mocks.refreshInstalledBundledHarnesses.mockImplementationOnce(() => {
+      throw new Error("Installed harness 'hermes' has local changes");
+    });
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      HarnessInstallCommand.run(["openclaw", "--refresh-installed"], rootDir),
+    ).rejects.toThrow("Installed harness 'hermes' has local changes");
+
+    expect(log.mock.calls).toEqual([["Agent runtime package 'openclaw' is installed."]]);
   });
 });

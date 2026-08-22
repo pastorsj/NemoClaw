@@ -6,6 +6,9 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "imports": {
+    "#nemoclaw-shared/*": "./dist/shared/*"
+  },
   "openclaw": {
     "extensions": [
       "./dist/index.js"
@@ -19,14 +22,14 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsc -p tsconfig.shared.json && tsc",
+    "dev": "tsc -p tsconfig.shared.json && tsc --watch",
     "test": "vitest run --config vitest.config.ts",
     "lint": "oxlint src && oxlint --config ../../../oxlint.type-aware.config.ts src",
     "lint:fix": "oxlint --fix src && oxlint --config ../../../oxlint.type-aware.config.ts src",
     "format": "npm --prefix ../../.. run format",
     "format:check": "npm --prefix ../../.. run format:check",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.shared.json && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
     "check": "npm run lint && npm run format:check && npm run typecheck",
     "clean": "rm -rf dist/"
   },

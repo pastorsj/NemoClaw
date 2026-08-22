@@ -1,16 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { withAgentBasePackageBuildContext } from "../agent/base-image";
 import { ROOT } from "../runner";
 import {
   buildLocalBaseTag,
-  defaultOpenclawBaseDockerfile,
   resolveSandboxBaseImage,
   OPENCLAW_SANDBOX_BASE_IMAGE as SANDBOX_BASE_IMAGE,
   type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import { sandboxBaseImageHasSecurityInventory } from "../sandbox-base-image/security-inventory";
 import { getInstalledOpenshellVersion } from "./openshell-version";
+import { getEffectiveSandboxAgent } from "./sandbox-agent";
 
 /**
  * Reject a published or cached OpenClaw base that predates the immutable
@@ -32,6 +33,7 @@ export function pullAndResolveBaseImageDigest(
     requireOpenshellSandboxAbi?: boolean;
     resolutionHint?: SandboxBaseImageResolutionMetadata | null;
     forceRefresh?: boolean;
+    stagedPackageDir?: string;
   } = {},
 ): {
   digest: string | null;
@@ -40,19 +42,31 @@ export function pullAndResolveBaseImageDigest(
   glibcVersion?: string | null;
   metadata?: SandboxBaseImageResolutionMetadata;
 } | null {
-  return resolveSandboxBaseImage({
-    imageName: SANDBOX_BASE_IMAGE,
-    dockerfilePath: defaultOpenclawBaseDockerfile(ROOT),
-    localTag: buildLocalBaseTag("nemoclaw-sandbox-base-local", ROOT),
-    envVar: "NEMOCLAW_SANDBOX_BASE_IMAGE_REF",
-    label: "OpenClaw sandbox base image",
-    requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
-    validateImage: openClawBaseImageHasSecurityInventory,
-    validationDescription: "the immutable security package inventory",
-    resolutionHint: options.resolutionHint,
-    forceRefresh: options.forceRefresh,
-    rootDir: ROOT,
-  });
+  return withAgentBasePackageBuildContext(
+    getEffectiveSandboxAgent(null),
+    (packageContext) =>
+      resolveSandboxBaseImage({
+        imageName: SANDBOX_BASE_IMAGE,
+        dockerfilePath: packageContext.dockerfilePath,
+        localTag: buildLocalBaseTag("nemoclaw-sandbox-base-local", ROOT),
+        envVar: "NEMOCLAW_SANDBOX_BASE_IMAGE_REF",
+        label: "OpenClaw sandbox base image",
+        requireOpenshellSandboxAbi: options.requireOpenshellSandboxAbi === true,
+        validateImage: openClawBaseImageHasSecurityInventory,
+        validationDescription: "the immutable security package inventory",
+        resolutionHint: options.resolutionHint,
+        forceRefresh: options.forceRefresh,
+        rootDir: ROOT,
+        ...(packageContext.buildContextDir
+          ? { buildContextDir: packageContext.buildContextDir }
+          : {}),
+        ...(packageContext.additionalInputFingerprint
+          ? { additionalInputFingerprint: packageContext.additionalInputFingerprint }
+          : {}),
+        ...(packageContext.requireLocalBuild ? { requireLocalBuild: true } : {}),
+      }),
+    options.stagedPackageDir ? { packageSnapshotDir: options.stagedPackageDir } : {},
+  );
 }
 
 export function getStableGatewayImageRef(versionOutput: string | null = null): string | null {

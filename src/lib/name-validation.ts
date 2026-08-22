@@ -11,13 +11,11 @@ import {
   diagnosticPreview as canonicalDiagnosticPreview,
   isValidName as isCanonicalValidName,
   isValidProviderName as isCanonicalValidProviderName,
-} from "../../packages/nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs";
+} from "./shared/sandbox-name.cts";
 
-// sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts
-// generatedBoundary: build:cli emits the canonical .cjs/.d.cts before this
-// module is compiled (mirrors src/lib/policy/merge.ts). Keep the name grammar
-// definition-free here so the CLI, the plugin, and CI share one rule and cannot
-// drift.
+// sourceOfTruth: src/lib/shared/sandbox-name.cts
+// Keep the name grammar definition-free here so the CLI, agent runtime
+// packages, and CI share one rule and cannot drift.
 export const NAME_MAX_LENGTH = CANONICAL_NAME_MAX_LENGTH;
 export const NAME_ALLOWED_FORMAT = CANONICAL_NAME_ALLOWED_FORMAT;
 export const NAME_VALID_PATTERN = CANONICAL_NAME_VALID_PATTERN;

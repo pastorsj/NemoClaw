@@ -414,18 +414,24 @@ moduleRuntime._resolveFilename = function resolveSourceFilename(request, parent,
   } catch (error) {
     const parentFilename = parent?.filename ? path.resolve(parent.filename) : "";
     const sourceRoot = path.join(repoRoot, "src") + path.sep;
-    if (request.startsWith(".") && request.endsWith(".js") && parentFilename) {
-      const sourceRequest = `${request.slice(0, -3)}.ts`;
-      const sourceCandidate = path.resolve(path.dirname(parentFilename), sourceRequest);
-      if (sourceCandidate.startsWith(sourceRoot) && fs.existsSync(sourceCandidate)) {
-        return resolveFilename.call(this, sourceRequest, parent, isMain, options);
+    if (request.startsWith(".") && parentFilename) {
+      for (const [outputExtension, sourceExtension] of [
+        [".cjs", ".cts"],
+        [".js", ".ts"],
+      ] as const) {
+        if (!request.endsWith(outputExtension)) continue;
+        const sourceRequest = `${request.slice(0, -outputExtension.length)}${sourceExtension}`;
+        const sourceCandidate = path.resolve(path.dirname(parentFilename), sourceRequest);
+        if (sourceCandidate.startsWith(sourceRoot) && fs.existsSync(sourceCandidate)) {
+          return resolveFilename.call(this, sourceRequest, parent, isMain, options);
+        }
       }
     }
     throw error;
   }
 };
 
-moduleRuntime._extensions[".ts"] = (module, filename) => {
+const compileTypeScriptModule = (module: CommonJsModule, filename: string): void => {
   const compileStart = nowMs();
   stats.files += 1;
   const source = fs.readFileSync(filename, "utf8");
@@ -434,3 +440,5 @@ moduleRuntime._extensions[".ts"] = (module, filename) => {
   stats.compileMs += nowMs() - compileStart;
   module._compile(outputText, filename);
 };
+moduleRuntime._extensions[".ts"] = compileTypeScriptModule;
+moduleRuntime._extensions[".cts"] = compileTypeScriptModule;

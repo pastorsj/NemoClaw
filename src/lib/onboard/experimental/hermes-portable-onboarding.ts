@@ -79,10 +79,10 @@ import {
   type HermesPortableReceiptSnapshot,
 } from "./hermes-portable-receipt";
 import {
-  createHermesPortableBuildContextPlan,
   type HermesPortableBuildContextSettings,
   type HermesPortableBuildContextPlan,
   type HermesPortableStagedBuildContext,
+  withHermesPortableBuildContextPlan,
 } from "./hermes-portable-build-context";
 
 export type HermesPortableSandboxObservation =
@@ -1272,73 +1272,84 @@ export async function runHermesPortableOnboardingFromOnboard<T>(
   const podmanSourceEnv =
     portableEnvironmentScope.createHermesPortablePodmanSourceEnvironment(runtimeAuthority);
   const scopedCreateArgv = scopeHermesPortableCreateGatewayArgv(createArgv, gatewayName);
-  const buildContext = createHermesPortableBuildContextPlan(sourceRoot, buildContextSettings);
-  const executablePath = scopedCreateArgv[0];
-  if (!executablePath) fail("create command has no OpenShell executable authority");
-  const commandEnv = createHermesPortableChildEnvironment(childEnv, runtimeAuthority);
-  const openshellExecutableAuthority = captureHermesPortableOpenShellExecutableAuthority(
-    executablePath,
-    commandEnv,
-    childEnv,
-  );
-  const assertOpenShellExecutableAuthority = (): void => {
-    assertHermesPortableOpenShellExecutableAuthority(
-      openshellExecutableAuthority,
-      commandEnv,
-      childEnv,
-    );
-  };
-  const captureOpenShell = createHermesPortableOpenShellCapture(
-    openshellArgv,
-    childEnv,
-    runtimeAuthority,
-    openshellExecutableAuthority,
-  );
-  const readyRunner = createHermesPortableReadyRunner(sandboxName, gatewayName, captureOpenShell);
-  return runHermesPortableOnboardingTransaction(
-    {
-      sandboxName,
-      gatewayName,
-      lifecycleGeneration,
-      runtimeAuthority,
-      openshellExecutableAuthority,
-      stateDir: defaultPortableDemoStateDir(process.env),
-      createArgv: scopedCreateArgv,
-      createPolicyPath,
-      ...(createPolicySourceBytes ? { createPolicySourceBytes } : {}),
-      buildContext,
-      startup,
-      inferenceRouteReservation,
-    },
-    {
-      withLifecycleLock,
-      capturePodmanExecutableAuthority: (socketAuthority) =>
-        captureHermesPortablePodmanExecutableAuthority(
-          socketAuthority,
+  return withHermesPortableBuildContextPlan(
+    sourceRoot,
+    startup.agent.agentDir,
+    buildContextSettings,
+    async (buildContext) => {
+      const executablePath = scopedCreateArgv[0];
+      if (!executablePath) fail("create command has no OpenShell executable authority");
+      const commandEnv = createHermesPortableChildEnvironment(childEnv, runtimeAuthority);
+      const openshellExecutableAuthority = captureHermesPortableOpenShellExecutableAuthority(
+        executablePath,
+        commandEnv,
+        childEnv,
+      );
+      const assertOpenShellExecutableAuthority = (): void => {
+        assertHermesPortableOpenShellExecutableAuthority(
+          openshellExecutableAuthority,
+          commandEnv,
+          childEnv,
+        );
+      };
+      const captureOpenShell = createHermesPortableOpenShellCapture(
+        openshellArgv,
+        childEnv,
+        runtimeAuthority,
+        openshellExecutableAuthority,
+      );
+      const readyRunner = createHermesPortableReadyRunner(
+        sandboxName,
+        gatewayName,
+        captureOpenShell,
+      );
+      return runHermesPortableOnboardingTransaction(
+        {
+          sandboxName,
+          gatewayName,
+          lifecycleGeneration,
           runtimeAuthority,
-          podmanSourceEnv,
-        ),
-      container: (socketAuthority, podmanAuthority) =>
-        createHermesPortableContainerDeps(
-          socketAuthority,
-          runtimeAuthority,
-          podmanAuthority,
-          podmanSourceEnv,
-        ),
-      assertOpenShellExecutableAuthority: () => assertOpenShellExecutableAuthority(),
-      capturePolicy: captureOpenShell,
-      observeSandbox: () =>
-        observeHermesPortableSandbox(sandboxName, gatewayName, captureOpenShell),
-      createSandbox: (argv, buildContextPath) =>
-        createSandbox(
-          argv,
-          createHermesPortableReadyCapture(sandboxName, gatewayName, captureOpenShell),
-          readyRunner,
-          buildContextPath,
-        ),
-      readRegistry,
-      registerSandbox,
-      ...(cleanupTemporaryPolicy ? { cleanupTemporaryPolicy } : {}),
+          openshellExecutableAuthority,
+          stateDir: defaultPortableDemoStateDir(process.env),
+          createArgv: scopedCreateArgv,
+          createPolicyPath,
+          ...(createPolicySourceBytes ? { createPolicySourceBytes } : {}),
+          buildContext,
+          startup,
+          inferenceRouteReservation,
+        },
+        {
+          withLifecycleLock,
+          capturePodmanExecutableAuthority: (socketAuthority) =>
+            captureHermesPortablePodmanExecutableAuthority(
+              socketAuthority,
+              runtimeAuthority,
+              podmanSourceEnv,
+            ),
+          container: (socketAuthority, podmanAuthority) =>
+            createHermesPortableContainerDeps(
+              socketAuthority,
+              runtimeAuthority,
+              podmanAuthority,
+              podmanSourceEnv,
+            ),
+          assertOpenShellExecutableAuthority: () => assertOpenShellExecutableAuthority(),
+          capturePolicy: captureOpenShell,
+          observeSandbox: () =>
+            observeHermesPortableSandbox(sandboxName, gatewayName, captureOpenShell),
+          createSandbox: (argv, buildContextPath) =>
+            createSandbox(
+              argv,
+              createHermesPortableReadyCapture(sandboxName, gatewayName, captureOpenShell),
+              readyRunner,
+              buildContextPath,
+            ),
+          readRegistry,
+          registerSandbox,
+          ...(cleanupTemporaryPolicy ? { cleanupTemporaryPolicy } : {}),
+        },
+      );
     },
+    startup.agent.packageContentDigest,
   );
 }

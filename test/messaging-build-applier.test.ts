@@ -26,11 +26,11 @@ const { remediateReviewedArchive } = vi.hoisted(() => ({
 }));
 
 vi.mock(
-  "../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+  "../src/lib/messaging/applier/build/openclaw-npm-remediation.mts",
   async (importOriginal) => {
     const original =
       await importOriginal<
-        typeof import("../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts")
+        typeof import("../src/lib/messaging/applier/build/openclaw-npm-remediation.mts")
       >();
     return {
       ...original,
@@ -887,35 +887,33 @@ describe("messaging-build-applier.mts: agent-install", () => {
     }
   });
 
-  it.each(
+  it.each([
     [
-        [
-          "@openclaw/discord@2026.7.1",
-          "https://registry.npmjs.org/@openclaw/discord/-/discord-2026.7.1.tgz",
-          "discord-2026.7.1.tgz",
-        ],
-        [
-          "@tencent-weixin/openclaw-weixin@2.4.3",
-          "https://registry.npmjs.org/@tencent-weixin/openclaw-weixin/-/openclaw-weixin-2.4.3.tgz",
-          "openclaw-weixin-2.4.3.tgz",
-        ],
-        [
-          "@openclaw/slack@2026.7.1",
-          "https://registry.npmjs.org/@openclaw/slack/-/slack-2026.7.1.tgz",
-          "slack-2026.7.1.tgz",
-        ],
-        [
-          "@openclaw/whatsapp@2026.7.1",
-          "https://registry.npmjs.org/@openclaw/whatsapp/-/whatsapp-2026.7.1.tgz",
-          "whatsapp-2026.7.1.tgz",
-        ],
-        [
-          "@openclaw/msteams@2026.7.1",
-          "https://registry.npmjs.org/@openclaw/msteams/-/msteams-2026.7.1.tgz",
-          "msteams-2026.7.1.tgz",
-        ],
-    ] as const,
-  )(
+      "@openclaw/discord@2026.7.1",
+      "https://registry.npmjs.org/@openclaw/discord/-/discord-2026.7.1.tgz",
+      "discord-2026.7.1.tgz",
+    ],
+    [
+      "@tencent-weixin/openclaw-weixin@2.4.3",
+      "https://registry.npmjs.org/@tencent-weixin/openclaw-weixin/-/openclaw-weixin-2.4.3.tgz",
+      "openclaw-weixin-2.4.3.tgz",
+    ],
+    [
+      "@openclaw/slack@2026.7.1",
+      "https://registry.npmjs.org/@openclaw/slack/-/slack-2026.7.1.tgz",
+      "slack-2026.7.1.tgz",
+    ],
+    [
+      "@openclaw/whatsapp@2026.7.1",
+      "https://registry.npmjs.org/@openclaw/whatsapp/-/whatsapp-2026.7.1.tgz",
+      "whatsapp-2026.7.1.tgz",
+    ],
+    [
+      "@openclaw/msteams@2026.7.1",
+      "https://registry.npmjs.org/@openclaw/msteams/-/msteams-2026.7.1.tgz",
+      "msteams-2026.7.1.tgz",
+    ],
+  ] as const)(
     "runs pinned installs during agent-install without doctor env injection [case %#]",
     async (packageSpec, tarballUrl, archiveName) => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-message-plugins-"));

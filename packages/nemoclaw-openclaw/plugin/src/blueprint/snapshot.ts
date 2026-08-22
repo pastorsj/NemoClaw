@@ -26,7 +26,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 
 import { execa } from "execa";
 
-import * as importedSandboxName from "../shared/sandbox-name.cjs";
+import * as importedSandboxName from "#nemoclaw-shared/sandbox-name.cjs";
 import { compactUtcTimestamp, reserveSnapshotDir } from "./snapshot-directory.js";
 
 const HOME = homedir();
@@ -34,7 +34,7 @@ const OPENCLAW_DIR = join(HOME, ".openclaw");
 const NEMOCLAW_DIR = join(HOME, ".nemoclaw");
 const SNAPSHOTS_DIR = join(NEMOCLAW_DIR, "snapshots");
 
-// sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts
+// sourceOfTruth: src/lib/shared/sandbox-name.cts
 const sourceOrGeneratedSandboxName = importedSandboxName as typeof importedSandboxName & {
   default?: typeof importedSandboxName;
 };

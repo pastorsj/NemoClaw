@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// Core-owned private-network matching shared by the CLI and agent runtime packages.
+
 import { BlockList, isIP } from "node:net";
 
 import YAML from "yaml";

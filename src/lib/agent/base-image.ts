@@ -88,14 +88,27 @@ type AgentBasePackageAuthority = Readonly<{
 }>;
 
 type PreparedAgentBaseBuildContext = Readonly<{
+  additionalInputFingerprint?: string;
   buildContextDir?: string;
   dockerfilePath: string;
+}>;
+
+export type AgentBasePackageBuildContext = Readonly<{
+  additionalInputFingerprint?: string;
+  buildContextDir?: string;
+  dockerfilePath: string;
+  requireLocalBuild: boolean;
+}>;
+
+type AgentBasePackageBuildContextOptions = Readonly<{
+  packageSnapshotDir?: string;
 }>;
 
 export interface EnsureAgentBaseImageOptions {
   forceBaseImageRebuild?: boolean;
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceBaseImageRefresh?: boolean;
+  packageSnapshotDir?: string;
 }
 
 export interface CreateAgentSandboxOptions extends EnsureAgentBaseImageOptions {
@@ -588,9 +601,28 @@ function selectedAgentRuntimePackageDir(agent: AgentDefinition): string | null {
 function resolveAgentBasePackageAuthority(
   agent: AgentDefinition,
   dockerfilePath: string,
+  packageSnapshotDir?: string,
 ): AgentBasePackageAuthority {
-  const resolvedDockerfilePath = path.resolve(dockerfilePath);
-  const packageDir = selectedAgentRuntimePackageDir(agent);
+  const selectedPackageDir = selectedAgentRuntimePackageDir(agent);
+  const packageDir = packageSnapshotDir ? path.resolve(packageSnapshotDir) : selectedPackageDir;
+  const resolvedDockerfilePath = packageSnapshotDir
+    ? path.join(path.resolve(packageSnapshotDir), "Dockerfile.base")
+    : path.resolve(dockerfilePath);
+  if (packageSnapshotDir && packageDir) {
+    const snapshot = fs.lstatSync(packageDir);
+    if (
+      !selectedPackageDir ||
+      path.basename(packageDir) !== `nemoclaw-${agent.name}` ||
+      snapshot.isSymbolicLink() ||
+      !snapshot.isDirectory()
+    ) {
+      throw new Error("Selected harness package snapshot is invalid");
+    }
+  }
+  const expectedPackageDigest = selectedPackageDir ? agent.packageContentDigest : null;
+  if (selectedPackageDir && !expectedPackageDigest) {
+    throw new Error(`Selected harness package '${agent.name}' has no loaded content digest`);
+  }
   if (!packageDir || resolvedDockerfilePath !== path.join(packageDir, "Dockerfile.base")) {
     return {
       dockerfilePath: resolvedDockerfilePath,
@@ -599,6 +631,10 @@ function resolveAgentBasePackageAuthority(
     };
   }
 
+  const selectedDigest = harnessPackageContentDigest(packageDir);
+  if (selectedDigest !== expectedPackageDigest) {
+    throw new Error(`Selected harness package '${agent.name}' no longer matches its manifest`);
+  }
   const bundledPackageDir = path.join(ROOT, "packages", path.basename(packageDir));
   if (packageDir === bundledPackageDir) {
     return {
@@ -607,8 +643,6 @@ function resolveAgentBasePackageAuthority(
       requireLocalBuild: false,
     };
   }
-
-  const selectedDigest = harnessPackageContentDigest(packageDir);
   if (
     fs.existsSync(bundledPackageDir) &&
     selectedDigest === harnessPackageContentDigest(bundledPackageDir)
@@ -643,15 +677,19 @@ function prepareAgentBaseBuildContext(
       filter: (sourcePath) =>
         path.basename(sourcePath) !== ".claude" && includeBuildContextPath(sourcePath),
     });
-    stageAgentRuntimePackage(authority.packageDir, buildContextDir);
-    return {
+    const stagedPackageDir = stageAgentRuntimePackage(
+      authority.packageDir,
       buildContextDir,
-      dockerfilePath: path.join(
-        buildContextDir,
-        "packages",
-        path.basename(authority.packageDir),
-        "Dockerfile.base",
-      ),
+      authority.additionalInputFingerprint,
+    );
+    const stagedDigest = harnessPackageContentDigest(stagedPackageDir);
+    if (stagedDigest !== authority.additionalInputFingerprint) {
+      throw new Error("Selected harness package changed while it was being staged");
+    }
+    return {
+      additionalInputFingerprint: stagedDigest,
+      buildContextDir,
+      dockerfilePath: path.join(stagedPackageDir, "Dockerfile.base"),
     };
   } catch (error) {
     fs.rmSync(buildContextDir, { recursive: true, force: true });
@@ -659,12 +697,47 @@ function prepareAgentBaseBuildContext(
   }
 }
 
-/** Replace the bundled build-context copy with the package selected by loadAgent(). */
-function stageSelectedHarnessPackage(agent: AgentDefinition, buildCtx: string): void {
-  const agentDir = selectedAgentRuntimePackageDir(agent);
-  if (!agentDir) return;
+/** Run with the base Dockerfile and package bytes selected for this agent. */
+export function withAgentBasePackageBuildContext<T>(
+  agent: AgentDefinition,
+  runWithContext: (context: AgentBasePackageBuildContext) => T,
+  options: AgentBasePackageBuildContextOptions = {},
+): T {
+  const baseDockerfile = agent.dockerfileBasePath;
+  if (!baseDockerfile) {
+    throw new Error(`${agent.displayName} is missing a sandbox base Dockerfile`);
+  }
 
-  stageAgentRuntimePackage(agentDir, buildCtx);
+  const authority = resolveAgentBasePackageAuthority(
+    agent,
+    baseDockerfile,
+    options.packageSnapshotDir,
+  );
+  const prepared = prepareAgentBaseBuildContext(authority);
+  try {
+    return runWithContext({
+      dockerfilePath: prepared.dockerfilePath,
+      requireLocalBuild: authority.requireLocalBuild,
+      ...(prepared.buildContextDir ? { buildContextDir: prepared.buildContextDir } : {}),
+      ...(prepared.additionalInputFingerprint
+        ? { additionalInputFingerprint: prepared.additionalInputFingerprint }
+        : {}),
+    });
+  } finally {
+    if (prepared.buildContextDir) {
+      fs.rmSync(prepared.buildContextDir, { recursive: true, force: true });
+    }
+  }
+}
+
+/** Replace the bundled build-context copy with the package selected by loadAgent(). */
+function stageSelectedHarnessPackage(agent: AgentDefinition, buildCtx: string): string | null {
+  const agentDir = selectedAgentRuntimePackageDir(agent);
+  if (!agentDir) return null;
+  if (!agent.packageContentDigest) {
+    throw new Error(`Selected harness package '${agent.name}' has no loaded content digest`);
+  }
+  return stageAgentRuntimePackage(agentDir, buildCtx, agent.packageContentDigest);
 }
 
 /**
@@ -684,7 +757,11 @@ export function ensureAgentBaseImage(
     return { imageTag: null, built: false };
   }
 
-  const authority = resolveAgentBasePackageAuthority(agent, manifestBaseDockerfile);
+  const authority = resolveAgentBasePackageAuthority(
+    agent,
+    manifestBaseDockerfile,
+    options.packageSnapshotDir,
+  );
   const prepared = prepareAgentBaseBuildContext(authority);
   try {
     return ensureAgentBaseImageWithContext(agent, options, authority, prepared);
@@ -702,11 +779,14 @@ function ensureAgentBaseImageWithContext(
   prepared: PreparedAgentBaseBuildContext,
 ): EnsureAgentBaseImageResult {
   const baseDockerfile = prepared.dockerfilePath;
+  const preparedAuthority = prepared.additionalInputFingerprint
+    ? { ...authority, additionalInputFingerprint: prepared.additionalInputFingerprint }
+    : authority;
   const resolutionOptions = createAgentBaseImageResolutionOptions(
     agent,
     baseDockerfile,
     options,
-    authority,
+    preparedAuthority,
     prepared.buildContextDir,
   );
   const baseImageName = resolutionOptions.imageName;
@@ -893,22 +973,33 @@ export function createAgentSandbox(
   }
 
   const { rootDir = ROOT, ...baseImageOptions } = options;
-  const { imageTag: baseImageRef, resolutionMetadata } = ensureAgentBaseImage(
-    agent,
-    baseImageOptions,
-  );
   const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
+  let resolutionMetadata: SandboxBaseImageResolutionMetadata | undefined;
   try {
+    let stagedAgentDir: string | null = null;
     if (agent.name !== "nemocua") {
       const shouldIncludeBuildContextPath = createCustomBuildContextFilter(rootDir);
       fs.cpSync(rootDir, buildCtx, {
         recursive: true,
         filter: (src) => path.basename(src) !== ".claude" && shouldIncludeBuildContextPath(src),
       });
-      stageSelectedHarnessPackage(agent, buildCtx);
+      stagedAgentDir = stageSelectedHarnessPackage(agent, buildCtx);
     }
-    fs.copyFileSync(agentDockerfile, stagedDockerfile);
+    const stagedPackageDigest = stagedAgentDir ? harnessPackageContentDigest(stagedAgentDir) : null;
+    const baseImage = ensureAgentBaseImage(agent, {
+      ...baseImageOptions,
+      ...(stagedAgentDir ? { packageSnapshotDir: stagedAgentDir } : {}),
+    });
+    const baseImageRef = baseImage.imageTag;
+    resolutionMetadata = baseImage.resolutionMetadata;
+    if (stagedAgentDir && harnessPackageContentDigest(stagedAgentDir) !== stagedPackageDigest) {
+      throw new Error("Selected harness package snapshot changed during base image resolution");
+    }
+    fs.copyFileSync(
+      stagedAgentDir ? path.join(stagedAgentDir, "Dockerfile") : agentDockerfile,
+      stagedDockerfile,
+    );
     if (baseImageRef) {
       const dockerfile = fs.readFileSync(stagedDockerfile, "utf8");
       fs.writeFileSync(

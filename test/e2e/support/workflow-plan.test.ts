@@ -656,6 +656,20 @@ describe("E2E workflow plan", () => {
   });
 
   it.each([
+    "scripts/backup-workspace.sh",
+    "packages/nemoclaw-openclaw/scripts/backup-workspace.sh",
+  ])("selects backup restore coverage when a backup script changes: %s", (changedFile) => {
+    const plan = buildE2eWorkflowPlan({}, { changedFiles: [changedFile] });
+
+    expect(catalogueTargetsForChangedFiles([changedFile]).map((target) => target.id)).toEqual([
+      "state-backup-restore",
+    ]);
+    expect(plan.catalogueMatrices["nvidia-inference"].map((row) => row.id)).toContain(
+      "state-backup-restore",
+    );
+  });
+
+  it.each([
     "test/e2e/live/openclaw-agent-assertion.ts",
     "test/e2e/live/personal-egress-live-proof.ts",
   ])("selects both Personal stock proof owners when a shared helper changes: %s", (changedFile) => {

@@ -23,8 +23,8 @@ import YAML from "yaml";
 import { DASHBOARD_PORT } from "../lib/ports.js";
 import { buildSubprocessEnv } from "../lib/subprocess-env.js";
 import { isPlainObject, type UnknownRecord } from "../shared/object-record.js";
-import * as importedOpenShellPolicyBoundary from "../shared/openshell-policy-boundary.cjs";
-import * as importedSandboxName from "../shared/sandbox-name.cjs";
+import * as importedOpenShellPolicyBoundary from "#nemoclaw-shared/openshell-policy-boundary.cjs";
+import * as importedSandboxName from "#nemoclaw-shared/sandbox-name.cjs";
 import {
   attachRuntimeIdentity,
   buildRuntimeIdentityPlan,
@@ -56,7 +56,7 @@ const sourceOrGeneratedOpenShellPolicyBoundary =
 const { parseOpenShellPolicy, withoutProviderComposedPolicies } =
   sourceOrGeneratedOpenShellPolicyBoundary.default ?? sourceOrGeneratedOpenShellPolicyBoundary;
 
-// sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts
+// sourceOfTruth: src/lib/shared/sandbox-name.cts
 const sourceOrGeneratedSandboxName = importedSandboxName as typeof importedSandboxName & {
   default?: typeof importedSandboxName;
 };
@@ -492,7 +492,7 @@ interface RouterConfig {
 const DEFAULT_ROUTER_PORT = 4000;
 
 function mergePolicyAdditions(currentPolicyRaw: string, additions: PolicyAdditions): string {
-  // sourceOfTruth: packages/nemoclaw-openclaw/plugin/src/shared/openshell-policy-boundary.cts
+  // sourceOfTruth: src/lib/shared/openshell-policy-boundary.cts
   const current = parseOpenShellPolicy(currentPolicyRaw).policy;
   const existingNetworkPolicies = current.network_policies ?? {};
   const output: UnknownRecord = {};

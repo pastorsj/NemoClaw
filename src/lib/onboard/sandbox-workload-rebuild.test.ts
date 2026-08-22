@@ -271,46 +271,49 @@ afterEach(() => {
 });
 
 describe("managed workload rebuild preflight", () => {
-  it.each(
-    AGENTS,
-  )("prepares exact current-release authority for %s without a Dockerfile fallback", async (agent) => {
-    const prepare = vi.fn(async () => replacement(agent));
-    managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
+  it.each(AGENTS)(
+    "prepares exact current-release authority for %s without a Dockerfile fallback",
+    async (agent) => {
+      const prepare = vi.fn(async () => replacement(agent));
+      managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
 
-    const handoff = await prepareManagedWorkloadRebuildHandoff(entry(agent), {
-      runtime: runtime(),
-      provider: provider(),
-      version: "0.0.100",
-    });
+      const handoff = await prepareManagedWorkloadRebuildHandoff(entry(agent), {
+        runtime: runtime(),
+        provider: provider(),
+        version: "0.0.100",
+      });
 
-    expect(handoff).toMatchObject({
-      schemaVersion: 1,
-      providerId: "mxc",
-      agent,
-      previousReceipt: {
-        kind: "managed-image",
-        platform: "linux/amd64",
-        release: "v0.0.99",
-      },
-      replacement: {
-        source: {
+      expect(handoff).toMatchObject({
+        schemaVersion: 1,
+        providerId: "mxc",
+        agent,
+        previousReceipt: {
           kind: "managed-image",
-          contract: { agent, platform: "linux/amd64" },
+          platform: "linux/amd64",
+          release: "v0.0.99",
         },
-        release: "v0.0.100",
-      },
-    });
-    expect(prepare).toHaveBeenCalledWith({
-      agentName: agent,
-      legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
-      runtime: runtime(),
-      version: "0.0.100",
-      policy: "require-managed",
-    });
-    expect(Object.isFrozen(handoff)).toBe(true);
-    expect(Object.isFrozen(handoff?.previousProfile.proxy)).toBe(true);
-    expect(Object.isFrozen(handoff?.replacement.source.contract.source)).toBe(true);
-  });
+        replacement: {
+          source: {
+            kind: "managed-image",
+            contract: { agent, platform: "linux/amd64" },
+          },
+          release: "v0.0.100",
+        },
+      });
+      expect(prepare).toHaveBeenCalledWith({
+        agentName: agent,
+        legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
+        runtime: runtime(),
+        version: "0.0.100",
+        policy: "require-managed",
+        selectedHarnessPackageDigest: expect.any(String),
+        bundledHarnessPackageDigest: expect.any(String),
+      });
+      expect(Object.isFrozen(handoff)).toBe(true);
+      expect(Object.isFrozen(handoff?.previousProfile.proxy)).toBe(true);
+      expect(Object.isFrozen(handoff?.replacement.source.contract.source)).toBe(true);
+    },
+  );
 
   it("retains the live qualification revision during rebuild preflight (#9385)", async () => {
     const prepare = vi.fn(async () => replacement("langchain-deepagents-code"));
@@ -331,6 +334,8 @@ describe("managed workload rebuild preflight", () => {
       version: "0.0.100",
       policy: "require-managed",
       catalogRevision: "a".repeat(40),
+      selectedHarnessPackageDigest: expect.any(String),
+      bundledHarnessPackageDigest: expect.any(String),
     });
   });
 
@@ -360,6 +365,8 @@ describe("managed workload rebuild preflight", () => {
         policy: "require-managed",
         catalogPath,
         expectedCatalogRevision: "a".repeat(40),
+        selectedHarnessPackageDigest: expect.any(String),
+        bundledHarnessPackageDigest: expect.any(String),
       });
     } finally {
       fs.rmSync(fixtureRoot, { force: true, recursive: true });
@@ -425,6 +432,8 @@ describe("managed workload rebuild preflight", () => {
       runtime: runtime(),
       version: "0.0.100",
       policy: "require-managed",
+      selectedHarnessPackageDigest: expect.any(String),
+      bundledHarnessPackageDigest: expect.any(String),
     });
   });
 
@@ -498,18 +507,21 @@ describe("managed workload rebuild preflight", () => {
       provider("mxc", { authorizesRebuild: false }),
       /does not authorize 'rebuild'/u,
     ],
-  ] as const)("rejects %s drift before catalog resolution", async (_label, row, target, selected, error) => {
-    const prepare = vi.fn();
-    managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
+  ] as const)(
+    "rejects %s drift before catalog resolution",
+    async (_label, row, target, selected, error) => {
+      const prepare = vi.fn();
+      managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = prepare;
 
-    await expect(
-      prepareManagedWorkloadRebuildHandoff(row, {
-        runtime: target,
-        provider: selected,
-      }),
-    ).rejects.toThrow(error);
-    expect(prepare).not.toHaveBeenCalled();
-  });
+      await expect(
+        prepareManagedWorkloadRebuildHandoff(row, {
+          runtime: target,
+          provider: selected,
+        }),
+      ).rejects.toThrow(error);
+      expect(prepare).not.toHaveBeenCalled();
+    },
+  );
 
   it("revalidates retained profile and receipt authority against the live row", async () => {
     managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = vi.fn(async () =>

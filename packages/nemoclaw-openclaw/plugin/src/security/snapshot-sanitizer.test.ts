@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   resolveTrustedSnapshotSanitizerPythonPath,
   setSnapshotSanitizerPythonPathForTest,
-} from "../shared/snapshot-sanitizer-boundary.cjs";
+} from "#nemoclaw-shared/snapshot-sanitizer-boundary.cjs";
 import { sanitizeMigrationDirectory, sanitizeOpenClawConfigFile } from "./snapshot-sanitizer.js";
 
 const temporaryRoots: string[] = [];

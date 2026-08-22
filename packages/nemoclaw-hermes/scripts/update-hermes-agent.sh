@@ -14,13 +14,11 @@
 #      HERMES_NPM_INTEGRITY ARGs (and the calver comment) in
 #      packages/nemoclaw-hermes/Dockerfile.base.
 #   5. Rewrites expected_version in packages/nemoclaw-hermes/manifest.yaml.
-#   6. With --update-installed-copies, scans installer-managed locations
-#      (~/.nemoclaw, ~/.hermes, and $NEMOCLAW_SOURCE_ROOT) for saved copies of
-#      the Hermes Dockerfiles and manifests. `nemohermes onboard --resume` /
-#      `rebuild` build from the installed clone (default ~/.nemoclaw/source),
-#      not this checkout, so a stale copy there would silently rebuild the old
-#      Hermes. Copies already pinned to the target release are left alone; stale
-#      ones are re-pinned.
+#   6. With --update-installed-copies, verifies the receipt-managed Hermes
+#      harness package and scans legacy installed-source locations (~/.nemoclaw,
+#      ~/.hermes, and $NEMOCLAW_SOURCE_ROOT) for saved Dockerfiles and manifests.
+#      Stale legacy copies are re-pinned. Receipt-managed packages are refreshed
+#      only through `nemoclaw harness install hermes`.
 #
 # With --build it then force-rebuilds the base image with --no-cache so the
 # new tarball is actually downloaded instead of served from Docker layer
@@ -87,13 +85,12 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-for tool in curl python3 npm sha256sum tar sed realpath; do
+for tool in curl node python3 npm sha256sum tar sed realpath; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "ERROR: required tool not found: $tool" >&2
     exit 1
   }
 done
-
 gh_api() {
   local url="$1"
   local -a auth=()
@@ -126,9 +123,14 @@ path_is_under_root() {
 safe_installed_dockerfile() {
   local root="$1"
   local file="$2"
-  local root_real file_real checkout_real links
+  local root_real file_real checkout_real links receipt
   if [[ -L "$root" ]]; then
     echo "SKIP unsafe installed-copy root ${root}: symlink roots are not rewritten" >&2
+    return 1
+  fi
+  receipt="$(dirname "$file")/.nemoclaw-install.json"
+  if [[ -e "$receipt" || -L "$receipt" ]]; then
+    echo "SKIP receipt-managed harness package ${file}: refresh it with nemoclaw harness install" >&2
     return 1
   fi
   if [[ -L "$file" || ! -f "$file" ]]; then
@@ -172,6 +174,77 @@ discover_installed_dockerfiles() {
       done
   done \
     | sort -u
+}
+
+harness_package_digest() {
+  [[ -x "${REPO_ROOT}/node_modules/.bin/tsx" ]] || {
+    echo "ERROR: install repository dependencies before verifying harness packages" >&2
+    return 1
+  }
+  "${REPO_ROOT}/node_modules/.bin/tsx" \
+    "${REPO_ROOT}/scripts/lib/harness-package-digest.mts" "$1"
+}
+
+receipt_managed_harness_package_digest() {
+  [[ -x "${REPO_ROOT}/node_modules/.bin/tsx" ]] || {
+    echo "ERROR: install repository dependencies before verifying harness packages" >&2
+    return 1
+  }
+  "${REPO_ROOT}/node_modules/.bin/tsx" \
+    "${REPO_ROOT}/scripts/lib/harness-package-digest.mts" --verify-receipt "$1"
+}
+
+verify_receipt_managed_hermes_package() {
+  local expected_tag="$1"
+  local expected_semver="$2"
+  local package_root="${HOME}/.nemoclaw/harnesses/nemoclaw-hermes"
+  local receipt="${package_root}/.nemoclaw-install.json"
+  local dockerfile_base="${package_root}/Dockerfile.base"
+  local manifest="${package_root}/manifest.yaml"
+  local installed_tag installed_semver installed_digest bundled_digest
+  local bundled_root="${REPO_ROOT}/packages/nemoclaw-hermes"
+
+  if [[ ! -e "$receipt" && ! -L "$receipt" ]]; then
+    return 0
+  fi
+  if [[ -L "$package_root" || ! -d "$package_root" || -L "$receipt" || ! -f "$receipt" ]]; then
+    echo "INVALID: receipt-managed Hermes harness package is not a regular package at ${package_root}." >&2
+    return 1
+  fi
+  if [[ -L "$dockerfile_base" || ! -f "$dockerfile_base" || -L "$manifest" || ! -f "$manifest" ]]; then
+    echo "INVALID: receipt-managed Hermes harness package is missing its regular Dockerfile.base or manifest.yaml." >&2
+    return 1
+  fi
+
+  local receipt_status=0
+  installed_digest="$(receipt_managed_harness_package_digest "$package_root")" || receipt_status=$?
+  if [[ "$receipt_status" == 3 ]]; then
+    echo "INVALID: receipt-managed Hermes harness package content differs from its installation receipt." >&2
+    echo "Refresh it with: nemoclaw harness install hermes" >&2
+    return 1
+  fi
+  if [[ "$receipt_status" != 0 ]]; then
+    echo "INVALID: receipt-managed Hermes harness package has an invalid installation receipt or package content." >&2
+    return 1
+  fi
+  bundled_digest="$(harness_package_digest "$bundled_root")" || {
+    echo "INVALID: bundled Hermes harness package content could not be verified." >&2
+    return 1
+  }
+  if [[ "$installed_digest" != "$bundled_digest" ]]; then
+    echo "STALE: receipt-managed Hermes harness package content differs from this NemoClaw build." >&2
+    echo "Refresh it with: nemoclaw harness install hermes" >&2
+    return 1
+  fi
+
+  installed_tag="$(pinned_tag_of "$dockerfile_base")"
+  installed_semver="$(sed -n 's|^expected_version: "\(.*\)"|\1|p' "$manifest" | head -1)"
+  if [[ "$installed_tag" != "$expected_tag" || "$installed_semver" != "$expected_semver" ]]; then
+    echo "STALE: receipt-managed Hermes harness package pins ${installed_tag:-<unknown>} / ${installed_semver:-<unknown>}, expected ${expected_tag} / ${expected_semver}." >&2
+    echo "Refresh it with: nemoclaw harness install hermes" >&2
+    return 1
+  fi
+  echo "OK: receipt-managed Hermes harness package pins ${expected_tag} / ${expected_semver}."
 }
 
 # Saved installed copies are only safe to rewrite when they already carry the
@@ -294,6 +367,7 @@ if [[ "$CHECK_ONLY" == 1 ]]; then
     status=1
   fi
   if [[ "$UPDATE_INSTALLED_COPIES" == 1 ]]; then
+    verify_receipt_managed_hermes_package "$CURRENT_TAG" "$CURRENT_SEMVER" || status=1
     while IFS= read -r installed_df; do
       [[ -n "$installed_df" ]] || continue
       schema_error="$(installed_copy_schema_error "$installed_df")" || {
@@ -388,11 +462,13 @@ echo "  ${DOCKERFILE_BASE#"${REPO_ROOT}"/}: HERMES_VERSION=${TAG}, HERMES_SEMVER
 echo "  ${MANIFEST#"${REPO_ROOT}"/}: expected_version=\"${SEMVER}\""
 
 # ---------------------------------------------------------------------------
-# Bring saved installed copies (~/.nemoclaw, ~/.hermes) along, so an
-# onboard --resume / rebuild that builds from the installed clone does not
-# silently use the previous release. Copies already pinned to the target
-# release are left untouched.
+# Verify a receipt-managed harness package, then bring legacy installed-source
+# copies (~/.nemoclaw, ~/.hermes) along. Receipt-managed content is never
+# rewritten here; `nemoclaw harness install hermes` owns that transaction.
 # ---------------------------------------------------------------------------
+if [[ "$UPDATE_INSTALLED_COPIES" == 1 || "$DO_BUILD" == 1 ]]; then
+  verify_receipt_managed_hermes_package "$TAG" "$SEMVER" || exit 1
+fi
 if [[ "$UPDATE_INSTALLED_COPIES" == 1 ]]; then
   while IFS= read -r installed_df; do
     [[ -n "$installed_df" ]] || continue

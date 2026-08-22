@@ -38,12 +38,27 @@ export interface HarnessPackage {
   readonly source: "bundled" | "installed";
 }
 
+export class HarnessPackageReceiptMismatchError extends Error {}
+
 type JsonRecord = Record<string, unknown>;
 
 interface ExistingHarnessPackage {
-  readonly harnessPackage: HarnessPackage;
+  readonly id: string;
+  readonly rootDir: string;
+  readonly harnessPackage: HarnessPackage | null;
   readonly contentDigest: string;
   readonly installedDigest: string | null;
+}
+
+interface InstallDirectoryAuthority {
+  readonly path: string;
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
+interface InstallPathAuthority {
+  readonly stateRoot: InstallDirectoryAuthority;
+  readonly harnessRoot: InstallDirectoryAuthority;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -199,7 +214,10 @@ function assertRequiredHarnessFiles(rootDir: string): void {
   }
 }
 
-function readHarnessPackage(rootDir: string, source: HarnessPackage["source"]): HarnessPackage {
+function readHarnessPackageMetadata(
+  rootDir: string,
+  source: HarnessPackage["source"],
+): HarnessPackage {
   assertPackageRoot(rootDir);
   const directoryName = path.basename(rootDir);
   if (!directoryName.startsWith(PACKAGE_DIRECTORY_PREFIX)) {
@@ -260,8 +278,6 @@ function readHarnessPackage(rootDir: string, source: HarnessPackage["source"]): 
       `Harness package identity mismatch: directory, package name, and manifest must identify '${id}'`,
     );
   }
-  assertRequiredHarnessFiles(rootDir);
-
   return Object.freeze({
     id,
     packageName,
@@ -270,6 +286,12 @@ function readHarnessPackage(rootDir: string, source: HarnessPackage["source"]): 
     manifestPath,
     source,
   });
+}
+
+function readHarnessPackage(rootDir: string, source: HarnessPackage["source"]): HarnessPackage {
+  const harnessPackage = readHarnessPackageMetadata(rootDir, source);
+  assertRequiredHarnessFiles(rootDir);
+  return harnessPackage;
 }
 
 function scanPackageRoot(packagesRoot: string, source: HarnessPackage["source"]): HarnessPackage[] {
@@ -308,16 +330,40 @@ function ignoredTreeEntry(name: string): boolean {
 
 function visitPackageTree(
   rootDir: string,
-  visitor: (relativePath: string, metadata: fs.Stats) => void,
+  visitor: (relativePath: string, metadata: fs.BigIntStats) => void,
 ): void {
+  const assertUnchanged = (
+    absolutePath: string,
+    before: fs.BigIntStats,
+    expectedType: "directory" | "file",
+  ): void => {
+    const after = fs.lstatSync(absolutePath, { bigint: true });
+    const typeMatches = expectedType === "directory" ? after.isDirectory() : after.isFile();
+    if (
+      after.isSymbolicLink() ||
+      !typeMatches ||
+      before.dev !== after.dev ||
+      before.ino !== after.ino ||
+      before.mode !== after.mode ||
+      before.size !== after.size ||
+      before.mtimeNs !== after.mtimeNs ||
+      before.ctimeNs !== after.ctimeNs
+    ) {
+      throw new Error(`Harness package tree changed while it was read: ${absolutePath}`);
+    }
+  };
   const walk = (directory: string, prefix: string): void => {
+    const directoryBefore = fs.lstatSync(directory, { bigint: true });
+    if (directoryBefore.isSymbolicLink() || !directoryBefore.isDirectory()) {
+      throw new Error(`Harness packages may contain only regular directories: ${directory}`);
+    }
     for (const entry of fs
       .readdirSync(directory, { withFileTypes: true })
       .sort((left, right) => left.name.localeCompare(right.name))) {
       if (ignoredTreeEntry(entry.name)) continue;
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const absolutePath = path.join(directory, entry.name);
-      const metadata = fs.lstatSync(absolutePath);
+      const metadata = fs.lstatSync(absolutePath, { bigint: true });
       if (metadata.isSymbolicLink()) {
         throw new Error(`Harness packages may not contain symbolic links: ${absolutePath}`);
       }
@@ -327,8 +373,14 @@ function visitPackageTree(
         );
       }
       visitor(relativePath, metadata);
-      if (metadata.isDirectory()) walk(absolutePath, relativePath);
+      if (metadata.isDirectory()) {
+        walk(absolutePath, relativePath);
+        assertUnchanged(absolutePath, metadata, "directory");
+      } else {
+        assertUnchanged(absolutePath, metadata, "file");
+      }
     }
+    assertUnchanged(directory, directoryBefore, "directory");
   };
   walk(rootDir, "");
 }
@@ -344,7 +396,7 @@ function packageTreeDigest(rootDir: string): string {
       }
       return;
     }
-    const executable = (metadata.mode & 0o111) === 0 ? "0" : "1";
+    const executable = (metadata.mode & 0o111n) === 0n ? "0" : "1";
     if (metadata.isDirectory()) {
       hash.update(`d\0${relativePath}\0${executable}\0`);
       return;
@@ -352,8 +404,12 @@ function packageTreeDigest(rootDir: string): string {
     const filePath = path.join(rootDir, ...relativePath.split("/"));
     const opened = openRegularFileNoFollow(filePath);
     try {
-      const bytes = opened.readBytes(metadata.size);
-      if (bytes.length !== metadata.size) {
+      const fileSize = Number(metadata.size);
+      if (!Number.isSafeInteger(fileSize)) {
+        throw new Error(`Harness package file is too large to hash: ${filePath}`);
+      }
+      const bytes = opened.readBytes(fileSize);
+      if (bytes.length !== fileSize) {
         throw new Error(`Harness package file changed while it was read: ${filePath}`);
       }
       hash.update(`f\0${relativePath}\0${executable}\0${String(bytes.length)}\0`);
@@ -368,6 +424,29 @@ function packageTreeDigest(rootDir: string): string {
 
 export function harnessPackageContentDigest(rootDir: string): string {
   return packageTreeDigest(rootDir);
+}
+
+export function bundledHarnessPackageContentDigest(id: string): string | null {
+  const harnessPackage = scanPackageRoot(BUNDLED_PACKAGES_ROOT, "bundled").find(
+    (candidate) => candidate.id === id,
+  );
+  return harnessPackage ? packageTreeDigest(harnessPackage.rootDir) : null;
+}
+
+/** Verify a complete installed package and return the digest bound by its receipt. */
+export function verifyHarnessPackageInstallReceipt(rootDir: string): string {
+  readHarnessPackage(rootDir, "installed");
+  const installedDigest = readInstallReceipt(rootDir);
+  if (!installedDigest) {
+    throw new Error(`Harness installation receipt is missing: ${installReceiptPath(rootDir)}`);
+  }
+  const contentDigest = packageTreeDigest(rootDir);
+  if (contentDigest !== installedDigest) {
+    throw new HarnessPackageReceiptMismatchError(
+      `Harness installation receipt does not match package content: ${rootDir}`,
+    );
+  }
+  return contentDigest;
 }
 
 function indexById(
@@ -419,7 +498,109 @@ export function resolveHarnessPackage(
   return listHarnessPackages(env).find((entry) => entry.id === normalized) ?? null;
 }
 
-function assertInstallPathComponents(home: string, harnessRoot: string): void {
+/** Refresh installed packages that are still bundled by this NemoClaw build. */
+export function refreshInstalledBundledHarnesses(
+  env: NodeJS.ProcessEnv = process.env,
+  excludedId: string | null = null,
+): HarnessPackage[] {
+  const installedRoot = installedPackagesRoot(env);
+  const candidates = scanPackageRoot(BUNDLED_PACKAGES_ROOT, "bundled")
+    .filter((entry) => entry.id !== excludedId)
+    .filter((entry) => {
+      try {
+        fs.lstatSync(path.join(installedRoot, `${PACKAGE_DIRECTORY_PREFIX}${entry.id}`));
+        return true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+        throw error;
+      }
+    });
+  for (const candidate of candidates) {
+    const existing = existingInstalledPackage(
+      path.join(installedRoot, `${PACKAGE_DIRECTORY_PREFIX}${candidate.id}`),
+      candidate,
+    );
+    if (!existing) {
+      throw new Error(`Installed harness '${candidate.id}' changed before refresh`);
+    }
+    assertSafeToReplace(existing, packageTreeDigest(candidate.rootDir));
+  }
+  return candidates.map((entry) => installBundledHarness(entry.id, env));
+}
+
+function secureInstallDirectory(candidate: string): InstallDirectoryAuthority {
+  if (typeof fs.constants.O_DIRECTORY !== "number" || typeof fs.constants.O_NOFOLLOW !== "number") {
+    throw new Error("Secure harness installation requires O_DIRECTORY and O_NOFOLLOW");
+  }
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(
+      candidate,
+      fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW,
+    );
+  } catch (error) {
+    throw new Error(`Harness installation path must be a regular directory: ${candidate}`, {
+      cause: error,
+    });
+  }
+  try {
+    const opened = fs.fstatSync(descriptor, { bigint: true });
+    if (!opened.isDirectory()) {
+      throw new Error(`Harness installation path must be a regular directory: ${candidate}`);
+    }
+    fs.fchmodSync(descriptor, 0o700);
+    const secured = fs.fstatSync(descriptor, { bigint: true });
+    const current = fs.lstatSync(candidate, { bigint: true });
+    if (
+      current.isSymbolicLink() ||
+      !current.isDirectory() ||
+      secured.dev !== current.dev ||
+      secured.ino !== current.ino ||
+      (secured.mode & 0o777n) !== 0o700n ||
+      (current.mode & 0o777n) !== 0o700n
+    ) {
+      throw new Error(`Harness installation directory changed during validation: ${candidate}`);
+    }
+    return { path: candidate, device: secured.dev, inode: secured.ino };
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function assertInstallDirectoryAuthority(authority: InstallDirectoryAuthority): void {
+  let current: fs.BigIntStats;
+  try {
+    current = fs.lstatSync(authority.path, { bigint: true });
+  } catch (error) {
+    throw new Error(`Harness installation directory changed: ${authority.path}`, {
+      cause: error,
+    });
+  }
+  if (
+    current.isSymbolicLink() ||
+    !current.isDirectory() ||
+    current.dev !== authority.device ||
+    current.ino !== authority.inode ||
+    (current.mode & 0o777n) !== 0o700n
+  ) {
+    throw new Error(`Harness installation directory changed: ${authority.path}`);
+  }
+}
+
+function assertInstallPathAuthority(authority: InstallPathAuthority): void {
+  assertInstallDirectoryAuthority(authority.stateRoot);
+  assertInstallDirectoryAuthority(authority.harnessRoot);
+}
+
+function assertInstallOperationAuthority(
+  authority: InstallPathAuthority,
+  ...operationDirectories: readonly InstallDirectoryAuthority[]
+): void {
+  assertInstallPathAuthority(authority);
+  operationDirectories.forEach(assertInstallDirectoryAuthority);
+}
+
+function assertInstallPathComponents(home: string, harnessRoot: string): InstallPathAuthority {
   const stateRoot = path.dirname(harnessRoot);
   for (const candidate of [stateRoot, harnessRoot]) {
     try {
@@ -432,13 +613,19 @@ function assertInstallPathComponents(home: string, harnessRoot: string): void {
     }
   }
   fs.mkdirSync(harnessRoot, { recursive: true, mode: 0o700 });
-  fs.chmodSync(stateRoot, 0o700);
-  fs.chmodSync(harnessRoot, 0o700);
 
   const relative = path.relative(path.resolve(home), path.resolve(harnessRoot));
   if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error("Harness installation root must be inside the selected home directory");
   }
+  const stateRootAuthority = secureInstallDirectory(stateRoot);
+  assertInstallDirectoryAuthority(stateRootAuthority);
+  const authority = {
+    stateRoot: stateRootAuthority,
+    harnessRoot: secureInstallDirectory(harnessRoot),
+  };
+  assertInstallPathAuthority(authority);
+  return authority;
 }
 
 function existingInstalledPackage(
@@ -451,11 +638,36 @@ function existingInstalledPackage(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-  const installed = readHarnessPackage(target, "installed");
+  assertPackageRoot(target);
+  let installed: HarnessPackage;
+  try {
+    installed = readHarnessPackage(target, "installed");
+  } catch (validationError) {
+    const legacyPackage = readHarnessPackageMetadata(target, "installed");
+    if (legacyPackage.id !== expected.id) throw validationError;
+    const installedDigest = readInstallReceipt(target);
+    if (installedDigest === null) throw validationError;
+    const contentDigest = packageTreeDigest(target);
+    if (installedDigest !== contentDigest) {
+      throw new Error(
+        `Installed harness '${expected.id}' differs from the bundled package and has local changes`,
+        { cause: validationError },
+      );
+    }
+    return {
+      id: legacyPackage.id,
+      rootDir: target,
+      harnessPackage: null,
+      contentDigest,
+      installedDigest,
+    };
+  }
   if (installed.id !== expected.id) {
     throw new Error(`Installed harness '${expected.id}' differs from the bundled package`);
   }
   return {
+    id: installed.id,
+    rootDir: installed.rootDir,
     harnessPackage: installed,
     contentDigest: packageTreeDigest(installed.rootDir),
     installedDigest: readInstallReceipt(installed.rootDir),
@@ -469,7 +681,7 @@ function assertSafeToReplace(
   if (existing.contentDigest === bundledDigest) return "identical";
   if (existing.installedDigest === existing.contentDigest) return "upgrade";
   throw new Error(
-    `Installed harness '${existing.harnessPackage.id}' differs from the bundled package and has local changes`,
+    `Installed harness '${existing.id}' differs from the bundled package and has local changes`,
   );
 }
 
@@ -478,39 +690,68 @@ function replaceInstalledPackage(
   stagedPackage: string,
   expected: HarnessPackage,
   bundledDigest: string,
+  installAuthority: InstallPathAuthority,
+  stagingAuthority: InstallDirectoryAuthority,
 ): HarnessPackage {
+  assertInstallOperationAuthority(installAuthority, stagingAuthority);
   const previousDirectory = fs.mkdtempSync(
     path.join(path.dirname(target), `.previous-${expected.id}-`),
   );
-  fs.chmodSync(previousDirectory, 0o700);
+  assertInstallOperationAuthority(installAuthority, stagingAuthority);
+  const previousAuthority = secureInstallDirectory(previousDirectory);
   const previousPackage = path.join(previousDirectory, path.basename(target));
 
   let previousMoved = false;
   let replacementPublished = false;
   let preservePrevious = false;
+  let publishedAuthority: InstallDirectoryAuthority | null = null;
   try {
+    assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
     fs.renameSync(target, previousPackage);
     previousMoved = true;
+    assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
     const moved = existingInstalledPackage(previousPackage, expected);
-    if (!moved || assertSafeToReplace(moved, bundledDigest) !== "upgrade") {
+    if (!moved) {
       throw new Error(`Installed harness '${expected.id}' changed while it was being updated`);
     }
+    assertSafeToReplace(moved, bundledDigest);
+    assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
+    const stagedPackageAuthority = secureInstallDirectory(stagedPackage);
+    assertInstallOperationAuthority(
+      installAuthority,
+      stagingAuthority,
+      previousAuthority,
+      stagedPackageAuthority,
+    );
     fs.renameSync(stagedPackage, target);
+    publishedAuthority = { ...stagedPackageAuthority, path: target };
     replacementPublished = true;
-    const installed = existingInstalledPackage(target, expected);
+    assertInstallOperationAuthority(
+      installAuthority,
+      stagingAuthority,
+      previousAuthority,
+      publishedAuthority,
+    );
+    const installed = readHarnessPackage(target, "installed");
     if (
-      !installed ||
-      installed.contentDigest !== bundledDigest ||
-      installed.installedDigest !== bundledDigest
+      packageTreeDigest(installed.rootDir) !== bundledDigest ||
+      readInstallReceipt(installed.rootDir) !== bundledDigest
     ) {
       throw new Error(`Harness '${expected.id}' changed while its update was being committed`);
     }
-    return installed.harnessPackage;
+    return installed;
   } catch (error) {
     if (!previousMoved) throw error;
     if (replacementPublished) {
       try {
+        assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
+        if (!publishedAuthority) {
+          throw new Error(`Harness '${expected.id}' published without directory authority`);
+        }
+        assertInstallDirectoryAuthority(publishedAuthority);
         fs.renameSync(target, stagedPackage);
+        replacementPublished = false;
+        assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
       } catch (unpublishError) {
         if ((unpublishError as NodeJS.ErrnoException).code !== "ENOENT") {
           preservePrevious = true;
@@ -522,17 +763,43 @@ function replaceInstalledPackage(
       }
     }
     try {
+      assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
       fs.renameSync(previousPackage, target);
+      previousMoved = false;
+      assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
     } catch (restoreError) {
-      preservePrevious = true;
-      throw new Error(
-        `Harness '${expected.id}' could not be updated or restored; the previous package remains at ${previousPackage}`,
-        { cause: restoreError },
-      );
+      preservePrevious = previousMoved;
+      switch (previousMoved) {
+        case true:
+          throw new Error(
+            `Harness '${expected.id}' could not be updated or restored; the previous package remains at ${previousPackage}`,
+            { cause: restoreError },
+          );
+        default:
+          throw new Error(
+            `Harness '${expected.id}' restored the previous package, but its installation directory changed`,
+            { cause: restoreError },
+          );
+      }
     }
     throw error;
   } finally {
     if (!preservePrevious) {
+      assertInstallOperationAuthority(installAuthority, stagingAuthority, previousAuthority);
+      if (replacementPublished) {
+        try {
+          if (!publishedAuthority) {
+            throw new Error(`Harness '${expected.id}' published without directory authority`);
+          }
+          assertInstallDirectoryAuthority(publishedAuthority);
+        } catch (cleanupAuthorityError) {
+          preservePrevious = true;
+          throw new Error(
+            `Harness '${expected.id}' changed before update cleanup; the previous package remains at ${previousPackage}`,
+            { cause: cleanupAuthorityError },
+          );
+        }
+      }
       fs.rmSync(previousDirectory, { recursive: true, force: true });
     }
   }
@@ -559,40 +826,87 @@ export function installBundledHarness(
   }
   const home = env.HOME?.trim() || os.homedir();
   const harnessRoot = installedPackagesRoot(env);
-  assertInstallPathComponents(home, harnessRoot);
+  const installAuthority = assertInstallPathComponents(home, harnessRoot);
   const target = path.join(harnessRoot, `${PACKAGE_DIRECTORY_PREFIX}${bundled.id}`);
+  assertInstallPathAuthority(installAuthority);
   const existing = existingInstalledPackage(target, bundled);
-  if (existing && assertSafeToReplace(existing, expectedDigest) === "identical") {
-    if (existing.installedDigest !== expectedDigest) {
-      writeInstallReceipt(existing.harnessPackage.rootDir, expectedDigest);
+  if (
+    existing &&
+    assertSafeToReplace(existing, expectedDigest) === "identical" &&
+    existing.installedDigest === expectedDigest
+  ) {
+    if (!existing.harnessPackage) {
+      throw new Error(`Installed harness '${normalized}' could not be validated`);
     }
-    return readHarnessPackage(existing.harnessPackage.rootDir, "installed");
+    return readHarnessPackage(existing.rootDir, "installed");
   }
 
+  assertInstallPathAuthority(installAuthority);
   const stagingRoot = fs.mkdtempSync(path.join(harnessRoot, `.install-${bundled.id}-`));
-  fs.chmodSync(stagingRoot, 0o700);
+  assertInstallPathAuthority(installAuthority);
+  const stagingAuthority = secureInstallDirectory(stagingRoot);
   const stagedPackage = path.join(stagingRoot, path.basename(target));
+  let operationError: unknown = null;
+  let newPublishedAuthority: InstallDirectoryAuthority | null = null;
   try {
+    assertInstallOperationAuthority(installAuthority, stagingAuthority);
     fs.cpSync(bundled.rootDir, stagedPackage, {
       recursive: true,
       dereference: false,
       filter: (sourcePath) => !ignoredTreeEntry(path.basename(sourcePath)),
     });
+    assertInstallOperationAuthority(installAuthority, stagingAuthority);
     const staged = readHarnessPackage(stagedPackage, "installed");
     if (packageTreeDigest(staged.rootDir) !== expectedDigest) {
       throw new Error(`Harness '${normalized}' changed while it was being installed`);
     }
     writeInstallReceipt(staged.rootDir, expectedDigest);
+    assertInstallOperationAuthority(installAuthority, stagingAuthority);
     if (readInstallReceipt(staged.rootDir) !== expectedDigest) {
       throw new Error(`Harness '${normalized}' installation receipt could not be verified`);
     }
 
     if (existing) {
-      return replaceInstalledPackage(target, stagedPackage, bundled, expectedDigest);
+      return replaceInstalledPackage(
+        target,
+        stagedPackage,
+        bundled,
+        expectedDigest,
+        installAuthority,
+        stagingAuthority,
+      );
     }
     try {
+      assertInstallOperationAuthority(installAuthority, stagingAuthority);
+      const stagedPackageAuthority = secureInstallDirectory(stagedPackage);
+      assertInstallOperationAuthority(installAuthority, stagingAuthority, stagedPackageAuthority);
       fs.renameSync(stagedPackage, target);
+      newPublishedAuthority = { ...stagedPackageAuthority, path: target };
+      assertInstallOperationAuthority(installAuthority, stagingAuthority, newPublishedAuthority);
+      const installed = readHarnessPackage(target, "installed");
+      if (
+        packageTreeDigest(installed.rootDir) !== expectedDigest ||
+        readInstallReceipt(installed.rootDir) !== expectedDigest
+      ) {
+        throw new Error(`Harness '${normalized}' changed while its installation was committed`);
+      }
+      assertInstallDirectoryAuthority(newPublishedAuthority);
+      return installed;
     } catch (error) {
+      if (newPublishedAuthority) {
+        try {
+          assertInstallDirectoryAuthority(newPublishedAuthority);
+          fs.renameSync(target, stagedPackage);
+          newPublishedAuthority = null;
+        } catch (unpublishError) {
+          newPublishedAuthority = null;
+          throw new Error(
+            `Harness '${normalized}' could not be installed or safely removed from ${target}`,
+            { cause: unpublishError },
+          );
+        }
+        throw error;
+      }
       if (
         (error as NodeJS.ErrnoException).code !== "EEXIST" &&
         (error as NodeJS.ErrnoException).code !== "ENOTEMPTY"
@@ -601,15 +915,34 @@ export function installBundledHarness(
       }
       const raced = existingInstalledPackage(target, bundled);
       if (raced && assertSafeToReplace(raced, expectedDigest) === "identical") {
-        if (raced.installedDigest !== expectedDigest) {
-          writeInstallReceipt(raced.harnessPackage.rootDir, expectedDigest);
+        if (!raced.harnessPackage) {
+          throw new Error(`Installed harness '${normalized}' could not be validated`);
         }
-        return readHarnessPackage(raced.harnessPackage.rootDir, "installed");
+        if (raced.installedDigest !== expectedDigest) {
+          throw new Error(`Installed harness '${normalized}' changed before it was committed`);
+        }
+        return readHarnessPackage(raced.rootDir, "installed");
       }
       throw error;
     }
-    return readHarnessPackage(target, "installed");
+  } catch (error) {
+    operationError = error;
+    throw error;
   } finally {
-    fs.rmSync(stagingRoot, { recursive: true, force: true });
+    try {
+      assertInstallOperationAuthority(installAuthority, stagingAuthority);
+      if (newPublishedAuthority) assertInstallDirectoryAuthority(newPublishedAuthority);
+      fs.rmSync(stagingRoot, { recursive: true, force: true });
+    } catch (cleanupError) {
+      switch (operationError === null) {
+        case true:
+          throw cleanupError;
+        default:
+          throw new AggregateError(
+            [operationError, cleanupError],
+            `${operationError instanceof Error ? operationError.message : String(operationError)}; staging cleanup was refused because ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+          );
+      }
+    }
   }
 }

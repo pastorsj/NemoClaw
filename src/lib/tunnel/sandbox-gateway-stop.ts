@@ -85,7 +85,7 @@ export function stopSandboxChannels(sandboxName: string, deps: SandboxGatewaySto
   }
 
   const agentDisplayName = (deps.getAgentDisplayName ?? agentRuntime.getAgentDisplayName)(agent);
-  if (agent) {
+  if (agent && agent.name !== "openclaw") {
     info(
       `${agentDisplayName} gateway is managed by the sandbox; ` +
         "leaving it running while host forwards stop.",

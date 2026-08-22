@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 
 import YAML from "yaml";
 
-import * as policyBoundaryModule from "../../../packages/nemoclaw-openclaw/plugin/src/shared/openshell-policy-boundary.cts";
+import * as policyBoundaryModule from "../../../src/lib/shared/openshell-policy-boundary.cts";
 
 const policyBoundary = (
   "default" in policyBoundaryModule ? policyBoundaryModule.default : policyBoundaryModule

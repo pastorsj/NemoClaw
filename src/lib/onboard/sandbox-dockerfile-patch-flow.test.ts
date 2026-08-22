@@ -95,6 +95,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
       requireOpenshellSandboxAbi: true,
       resolutionHint: resolutionMetadata,
+      stagedPackageDir: "/tmp/packages/nemoclaw-openclaw",
     });
     expect(patchStagedDockerfile.mock.calls[0]?.[11]).toEqual({
       agentName: "openclaw",

@@ -116,6 +116,35 @@ function waitForFile(filename: string, timeoutMs = 2_000): void {
 }
 
 describe("source require loader", () => {
+  it("resolves compiled CommonJS specifiers to core .cts sources", () => {
+    const nameValidationPath = path.join(REPO_ROOT, "src", "lib", "name-validation.ts");
+    const sandboxNameBoundaryPath = path.join(
+      REPO_ROOT,
+      "src",
+      "lib",
+      "shared",
+      "sandbox-name.cts",
+    );
+    trackCacheArtifacts(fs.realpathSync(nameValidationPath));
+    trackCacheArtifacts(fs.realpathSync(sandboxNameBoundaryPath));
+
+    const script = `
+require(${JSON.stringify(SOURCE_REQUIRE_HOOK)});
+const validation = require(${JSON.stringify(nameValidationPath)});
+if (!validation.isValidName("valid-name") || validation.isValidName("../invalid")) process.exitCode = 7;
+`;
+    const result = spawnSync(process.execPath, ["-e", script], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NODE_OPTIONS: nodeOptionsWithoutSourceLoader(process.env.NODE_OPTIONS),
+      },
+      timeout: 10_000,
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+  });
+
   it("emits opt-in cache statistics and reuses a cross-process cache entry (#6237)", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-source-require-"));
     roots.push(root);

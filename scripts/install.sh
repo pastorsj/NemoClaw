@@ -1277,7 +1277,7 @@ _PREEXISTING_SANDBOX_ORPHANED=false
 _LEGACY_MANAGED_RECOVERY_NAMES_JSON="[]"
 # OpenShell v0.0.106 routes sandbox and workspace identities through labels
 # capped at 19 characters. Keep this installer-only raw-registry preflight in
-# sync with NAME_MAX_LENGTH in packages/nemoclaw-openclaw/plugin/src/shared/sandbox-name.cts. The
+# sync with NAME_MAX_LENGTH in src/lib/shared/sandbox-name.cts. The
 # current CLI cannot be prepared safely until legacy names are checked.
 _OPENSHELL_SANDBOX_NAME_MAX_LENGTH=19
 # #5735: set when automatic recovery/upgrade of pre-existing sandboxes
@@ -2707,11 +2707,13 @@ install_selected_harness() {
   case "$selected_harness" in
     pi | nemocua)
       # Release candidates still live under agents/ and keep their existing
-      # gated onboarding path until they become bundled harness packages.
+      # gated onboarding path until they become bundled harness packages. Keep
+      # previously installed bundled packages aligned without installing one.
+      "$_CLI_PATH" harness install --refresh-installed
       return 0
       ;;
   esac
-  "$_CLI_PATH" harness install "$selected_harness"
+  "$_CLI_PATH" harness install "$selected_harness" --refresh-installed
 }
 
 inspect_sandbox_registry_for_upgrade() {

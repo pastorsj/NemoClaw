@@ -180,6 +180,46 @@ describe("sandbox workload preparation", () => {
     },
   );
 
+  it("uses the selected package Dockerfile when its bytes differ from the managed image package", async () => {
+    const resolveCatalog = vi.fn(async () => CATALOG);
+    const prepared = await prepareSandboxWorkloadSource(
+      {
+        ...input("openclaw"),
+        runtime: { ...runtime(), managedImageSelectionPolicy: "prefer-managed" },
+        selectedHarnessPackageDigest: "a".repeat(64),
+        bundledHarnessPackageDigest: "b".repeat(64),
+      },
+      { resolveCatalog },
+    );
+
+    expect(resolveCatalog).not.toHaveBeenCalled();
+    expect(prepared).toEqual({
+      source: {
+        kind: "legacy-dockerfile",
+        dockerfilePath: REPOSITORY_DOCKERFILE_PATHS.openclaw,
+        reason: "contract-unavailable",
+      },
+      release: null,
+      fallbackDiagnostic: expect.stringContaining("selected harness package 'openclaw' differs"),
+    });
+  });
+
+  it("fails before catalog access when a divergent package requires a managed image", async () => {
+    const resolveCatalog = vi.fn(async () => CATALOG);
+
+    await expect(
+      prepareSandboxWorkloadSource(
+        {
+          ...input("hermes"),
+          selectedHarnessPackageDigest: "a".repeat(64),
+          bundledHarnessPackageDigest: "b".repeat(64),
+        },
+        { resolveCatalog },
+      ),
+    ).rejects.toThrow("selected harness package 'hermes' differs");
+    expect(resolveCatalog).not.toHaveBeenCalled();
+  });
+
   it("passes an immutable qualification revision to catalog resolution (#9385)", async () => {
     const resolveCatalog = vi.fn(async () => CATALOG);
 
@@ -261,6 +301,8 @@ describe("sandbox workload preparation", () => {
       {
         ...input("openclaw"),
         customDockerfilePath: "/workspace/CustomDockerfile",
+        selectedHarnessPackageDigest: "a".repeat(64),
+        bundledHarnessPackageDigest: "b".repeat(64),
       },
       { resolveCatalog },
     );

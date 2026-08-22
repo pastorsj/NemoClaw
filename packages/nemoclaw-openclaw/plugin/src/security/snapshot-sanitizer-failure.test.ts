@@ -25,7 +25,7 @@ import {
   type SnapshotFileIdentity,
   scanDescriptorSnapshot,
   setSnapshotSanitizerPythonPathForTest,
-} from "../shared/snapshot-sanitizer-boundary.cjs";
+} from "#nemoclaw-shared/snapshot-sanitizer-boundary.cjs";
 import { sanitizeMigrationDirectory, sanitizeOpenClawConfigFile } from "./snapshot-sanitizer.js";
 
 const roots: string[] = [];
@@ -61,6 +61,29 @@ function writePythonWrapper(lines: readonly string[]): string {
   chmodSync(wrapper, 0o755);
   setSnapshotSanitizerPythonPathForTest(wrapper);
   return wrapper;
+}
+
+function writePausedPythonWrapper(
+  python: string,
+  markerPath: string,
+  pauseAfter: string,
+  concurrentLines: readonly string[],
+): string {
+  const patchSource = [
+    "import sys",
+    "source, needle, marker = sys.argv[1:]",
+    "assert source.count(needle) == 1",
+    `injected = needle + "\\n        open(" + repr(marker) + ", 'w').close()\\n        __import__('time').sleep(1)"`,
+    "sys.stdout.write(source.replace(needle, injected))",
+  ].join("; ");
+  return writePythonWrapper([
+    "(",
+    ...concurrentLines,
+    ") &",
+    `patched_source="$(${shellQuote(python)} -c ${shellQuote(patchSource)} "$3" ${shellQuote(pauseAfter)} ${shellQuote(markerPath)})"`,
+    'set -- "$1" "$2" "$patched_source" "$4" "$5"',
+    `exec ${shellQuote(python)} "$@"`,
+  ]);
 }
 
 function requireTrustedPython(): string {
@@ -218,14 +241,10 @@ describe("migration snapshot sanitizer fallbacks", () => {
       const root = inspectDescriptorSnapshotRoot(rootPath);
       expect(root).not.toBeNull();
       const python = requireTrustedPython();
-      writePythonWrapper([
-        `if [ "\${4-}" = install ]; then`,
-        "  (",
-        ...boundedShellWait(`[ ! -s ${shellQuote(targetPath)} ]`),
+      const markerPath = path.join(makeRoot(), "target-opened");
+      writePausedPythonWrapper(python, markerPath, "        opened = os.fstat(target_fd)", [
+        ...boundedShellWait(`[ ! -e ${shellQuote(markerPath)} ]`),
         `    ln ${shellQuote(targetPath)} ${shellQuote(aliasPath)}`,
-        "  ) &",
-        "fi",
-        `exec ${shellQuote(python)} "$@"`,
       ]);
 
       expect(
@@ -249,21 +268,18 @@ describe("migration snapshot sanitizer fallbacks", () => {
       const root = inspectDescriptorSnapshotRoot(rootPath);
       expect(root).not.toBeNull();
       const python = requireTrustedPython();
-      writePythonWrapper([
-        `if [ "\${4-}" = install ]; then`,
-        "  (",
-        ...boundedShellWait(`[ ! -s ${shellQuote(targetPath)} ]`),
-        `    ln ${shellQuote(targetPath)} ${shellQuote(aliasPath)}`,
-        ...boundedShellWait(
-          `[ "$(wc -c < ${shellQuote(aliasPath)})" -lt ${String(LARGE_INSTALL_CONTENT.length)} ]`,
-          "sleep 0.001",
-        ),
-        `    printf M | dd of=${shellQuote(aliasPath)} bs=1 count=1 conv=notrunc 2>/dev/null`,
-        `    rm ${shellQuote(aliasPath)}`,
-        "  ) &",
-        "fi",
-        `exec ${shellQuote(python)} "$@"`,
-      ]);
+      const markerPath = path.join(makeRoot(), "verified-before");
+      writePausedPythonWrapper(
+        python,
+        markerPath,
+        "        verified_before = os.fstat(target_fd)",
+        [
+          ...boundedShellWait(`[ ! -e ${shellQuote(markerPath)} ]`),
+          `    ln ${shellQuote(targetPath)} ${shellQuote(aliasPath)}`,
+          `    printf M | dd of=${shellQuote(aliasPath)} bs=1 count=1 conv=notrunc 2>/dev/null`,
+          `    rm ${shellQuote(aliasPath)}`,
+        ],
+      );
 
       expect(
         installDescriptorSnapshotFile(

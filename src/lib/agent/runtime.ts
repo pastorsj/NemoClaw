@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Agent-specific runtime logic — called from nemoclaw.ts when the active
-// sandbox uses a non-OpenClaw agent. Reads the agent from the onboard session
-// and provides agent-aware health probes, recovery scripts, and display names.
-// When the session agent is openclaw (or absent), all functions return
-// defaults that match the hardcoded OpenClaw values on main.
+// Agent-specific runtime logic. Runtime commands resolve the sandbox registry
+// identity before they use manifest-owned paths, probes, commands, or labels.
+// The legacy null registry encoding resolves the selected OpenClaw manifest.
+// Only entirely absent registry and session state keeps hardcoded defaults.
+// A present recorded identity must resolve to its selected manifest.
 
 import { DASHBOARD_PORT } from "../core/ports";
 import * as onboardSession from "../state/onboard-session";
@@ -30,21 +30,17 @@ export {
  * Resolve the agent for a sandbox. Checks the per-sandbox registry first
  * (so status/connect/recovery use the right agent even when multiple
  * sandboxes exist), then falls back to the global onboard session.
- * Returns the loaded agent definition for non-OpenClaw agents, or null.
+ * Returns null only when registry and session state are both absent. A legacy
+ * null identity means OpenClaw. Any present identity fails closed when its
+ * selected manifest is unavailable.
  */
 export function getSessionAgent(sandboxName?: string): AgentDefinition | null {
-  try {
-    if (sandboxName) {
-      const sb = registry.getSandbox(sandboxName);
-      if (sb) return getRegisteredAgent(sb);
-    }
-    const session = onboardSession.loadSession();
-    const name = session?.agent || "openclaw";
-    if (name === "openclaw") return null;
-    return loadAgent(name);
-  } catch {
-    return null;
+  if (sandboxName) {
+    const sandbox = registry.getSandbox(sandboxName);
+    if (sandbox) return requireRecordedAgent(sandbox, `sandbox '${sandboxName}'`, "openclaw");
   }
+  const session = onboardSession.loadSession();
+  return session ? requireRecordedAgent(session, "onboard session", "openclaw") : null;
 }
 
 /**
@@ -53,22 +49,41 @@ export function getSessionAgent(sandboxName?: string): AgentDefinition | null {
  * before allowing its value to become a filesystem path component in loadAgent().
  */
 export function getRegisteredAgent(source: RegisteredAgentSource): AgentDefinition | null {
-  const name = source?.agent;
-  if (!name || name === "openclaw") return null;
+  if (!source) return null;
+  const name = source.agent ?? "openclaw";
+  if (typeof name !== "string" || name.length === 0) return null;
   try {
     if (!listAgents().includes(name)) return null;
-    return loadAgent(name);
+    const agent = loadAgent(name);
+    return agent.name === name ? agent : null;
   } catch {
     return null;
   }
 }
 
+function requireRecordedAgent(
+  source: RegisteredAgentSource,
+  sourceLabel: string,
+  legacyAgentName?: string,
+): AgentDefinition | null {
+  const name: unknown = source?.agent;
+  if (name !== null && name !== undefined && typeof name !== "string") {
+    throw new Error(`Cannot resolve the recorded agent identity from ${sourceLabel}.`);
+  }
+  const recordedName = name === null || name === undefined ? legacyAgentName : name;
+  if (recordedName === undefined) return null;
+  const agent = getRegisteredAgent({ agent: recordedName });
+  if (agent) return agent;
+  throw new Error(
+    `Cannot resolve the recorded agent identity ${JSON.stringify(recordedName)} from ${sourceLabel}.`,
+  );
+}
+
 /**
  * Resolve the trusted manifest command used for an interactive agent handoff.
- * OpenClaw remains `null` in getSessionAgent because its recovery behavior uses
- * legacy defaults, but launch and connect hints still load its repository-owned
- * manifest here. The historical OpenClaw fallback is used only when that
- * manifest is genuinely unavailable.
+ * Legacy state can still supply null for OpenClaw. Launch and connect hints
+ * load its selected manifest when possible and otherwise use the historical
+ * interactive command.
  */
 export function getInteractiveAgentCommand(
   agent: AgentDefinition | null,

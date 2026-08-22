@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+// Core-owned credential filtering shared by the CLI and agent runtime packages.
+
 function frozenPatterns(patterns: RegExp[]): readonly RegExp[] {
   return Object.freeze(patterns);
 }

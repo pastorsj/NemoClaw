@@ -474,106 +474,106 @@ exit 89
   });
 
   it("source-checkout: installs OpenShell when missing from PATH (#3989)", () => {
-      const {
-        root: tmp,
-        binDir: fakeBin,
-        prefixDir: prefix,
-      } = installerCheckout("nemoclaw-install-source-osh-");
-      const npmLog = path.join(tmp, "npm.log");
-      const openshellLog = path.join(tmp, "install-openshell.log");
-      fs.mkdirSync(path.join(tmp, ".git"));
+    const {
+      root: tmp,
+      binDir: fakeBin,
+      prefixDir: prefix,
+    } = installerCheckout("nemoclaw-install-source-osh-");
+    const npmLog = path.join(tmp, "npm.log");
+    const openshellLog = path.join(tmp, "install-openshell.log");
+    fs.mkdirSync(path.join(tmp, ".git"));
 
-      writeNodeStub(fakeBin);
-      writeDockerOkStub(fakeBin);
-      writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
+    writeNodeStub(fakeBin);
+    writeDockerOkStub(fakeBin);
+    writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
 
-      writeSourceCheckoutPackages(tmp);
+    writeSourceCheckoutPackages(tmp);
 
-      fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-      writeExecutable(
-        path.join(tmp, "scripts", "install-openshell.sh"),
-        `#!/usr/bin/env bash
+    fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
+    writeExecutable(
+      path.join(tmp, "scripts", "install-openshell.sh"),
+      `#!/usr/bin/env bash
 printf 'install-openshell.sh invoked\\n' >> "$INSTALL_OPENSHELL_LOG"
 exit 0
 `,
-      );
-      fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
-      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
-      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
+    );
+    fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
+    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
 
-      const result = spawnSync("bash", [INSTALLER], {
-        cwd: tmp,
-        encoding: "utf-8",
-        env: {
-          ...process.env,
-          HOME: tmp,
-          PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
-          NEMOCLAW_NON_INTERACTIVE: "1",
-          NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-          NEMOCLAW_REPO_ROOT: tmp,
-          NPM_PREFIX: prefix,
-          NPM_LOG_PATH: npmLog,
-          INSTALL_OPENSHELL_LOG: openshellLog,
-        },
-      });
+    const result = spawnSync("bash", [INSTALLER], {
+      cwd: tmp,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: tmp,
+        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        NEMOCLAW_NON_INTERACTIVE: "1",
+        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+        NEMOCLAW_REPO_ROOT: tmp,
+        NPM_PREFIX: prefix,
+        NPM_LOG_PATH: npmLog,
+        INSTALL_OPENSHELL_LOG: openshellLog,
+      },
+    });
 
-      expect(result.status).toBe(0);
-      expect(fs.existsSync(openshellLog)).toBe(true);
-      expect(fs.readFileSync(openshellLog, "utf-8")).toMatch(/install-openshell\.sh invoked/);
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(openshellLog)).toBe(true);
+    expect(fs.readFileSync(openshellLog, "utf-8")).toMatch(/install-openshell\.sh invoked/);
   }, 20_000);
 
   it("source-checkout: skips OpenShell install when openshell is already on PATH (#3989)", () => {
-      const {
-        root: tmp,
-        binDir: fakeBin,
-        prefixDir: prefix,
-      } = installerCheckout("nemoclaw-install-source-osh-skip-");
-      const npmLog = path.join(tmp, "npm.log");
-      const openshellLog = path.join(tmp, "install-openshell.log");
-      fs.mkdirSync(path.join(tmp, ".git"));
+    const {
+      root: tmp,
+      binDir: fakeBin,
+      prefixDir: prefix,
+    } = installerCheckout("nemoclaw-install-source-osh-skip-");
+    const npmLog = path.join(tmp, "npm.log");
+    const openshellLog = path.join(tmp, "install-openshell.log");
+    fs.mkdirSync(path.join(tmp, ".git"));
 
-      writeNodeStub(fakeBin);
-      writeExecutable(
-        path.join(fakeBin, "openshell"),
-        `#!/usr/bin/env bash
+    writeNodeStub(fakeBin);
+    writeExecutable(
+      path.join(fakeBin, "openshell"),
+      `#!/usr/bin/env bash
 if [ "$1" = "--version" ]; then echo "openshell 0.0.39"; exit 0; fi
 exit 0
 `,
-      );
-      writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
+    );
+    writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
 
-      writeSourceCheckoutPackages(tmp);
+    writeSourceCheckoutPackages(tmp);
 
-      fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-      writeExecutable(
-        path.join(tmp, "scripts", "install-openshell.sh"),
-        `#!/usr/bin/env bash
+    fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
+    writeExecutable(
+      path.join(tmp, "scripts", "install-openshell.sh"),
+      `#!/usr/bin/env bash
 printf 'install-openshell.sh invoked\\n' >> "$INSTALL_OPENSHELL_LOG"
 exit 0
 `,
-      );
-      fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
-      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
-      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
+    );
+    fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
+    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
 
-      const result = spawnSync("bash", [INSTALLER], {
-        cwd: tmp,
-        encoding: "utf-8",
-        env: {
-          ...process.env,
-          HOME: tmp,
-          PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
-          NEMOCLAW_NON_INTERACTIVE: "1",
-          NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-          NEMOCLAW_REPO_ROOT: tmp,
-          NPM_PREFIX: prefix,
-          NPM_LOG_PATH: npmLog,
-          INSTALL_OPENSHELL_LOG: openshellLog,
-        },
-      });
+    const result = spawnSync("bash", [INSTALLER], {
+      cwd: tmp,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: tmp,
+        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        NEMOCLAW_NON_INTERACTIVE: "1",
+        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+        NEMOCLAW_REPO_ROOT: tmp,
+        NPM_PREFIX: prefix,
+        NPM_LOG_PATH: npmLog,
+        INSTALL_OPENSHELL_LOG: openshellLog,
+      },
+    });
 
-      expect(result.status).toBe(0);
-      expect(fs.existsSync(openshellLog)).toBe(false);
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(openshellLog)).toBe(false);
   }, 20_000);
 
   it("auto-resumes an interrupted onboarding session after Ubuntu 26.04 installer preflight (#3245)", () => {
@@ -884,7 +884,7 @@ exit 0
     expect(output).toMatch(/Host preflight found issues that will prevent onboarding right now\./);
     expect(output).toMatch(/Detected container runtime: podman/);
     expect(output).toMatch(/Skipping onboarding until the host prerequisites above are fixed\./);
-    expect(fs.readFileSync(harnessInstallLog, "utf-8")).toBe("harness install openclaw\n");
+    expect(fs.readFileSync(harnessInstallLog, "utf-8")).toContain("openclaw --refresh-installed");
     expect(fs.existsSync(onboardLog)).toBe(false);
   });
 

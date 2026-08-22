@@ -11,6 +11,7 @@ import type { AgentDefinition } from "./defs";
 export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     name: "test-agent",
+    packageContentDigest: null,
     displayName: "Test Agent",
     binary_path: "/usr/local/bin/test-agent",
     gateway_command: "test-agent gateway run",

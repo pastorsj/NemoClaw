@@ -1,14 +1,66 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as onboardSession from "../state/onboard-session";
+import * as registry from "../state/registry";
 import type { AgentDefinition } from "./defs";
 // Import source directly so tests cannot pass against a stale build.
-import { buildRecoveryScript, getRegisteredAgent } from "./runtime";
+import {
+  buildRecoveryScript,
+  getAgentDisplayName,
+  getGatewayCommand,
+  getHealthProbeUrl,
+  getRegisteredAgent,
+  getSessionAgent,
+} from "./runtime";
+
+const temporaryHomes: string[] = [];
+
+function temporaryHome(): string {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agent-runtime-"));
+  temporaryHomes.push(home);
+  return home;
+}
+
+function writeInstalledOpenClaw(home: string, manifest: string): void {
+  const root = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-openclaw");
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({
+      name: "@nvidia/nemoclaw-openclaw",
+      version: "9.8.7",
+      nemoclaw: { harnessManifest: "manifest.yaml" },
+    }),
+  );
+  fs.writeFileSync(path.join(root, "manifest.yaml"), manifest);
+  fs.writeFileSync(path.join(root, "Dockerfile"), "FROM scratch\n");
+  fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
+  fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
+  fs.writeFileSync(
+    path.join(root, ".nemoclaw-install.json"),
+    `${JSON.stringify({ installedDigest: "0".repeat(64) })}\n`,
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  while (temporaryHomes.length > 0) {
+    fs.rmSync(temporaryHomes.pop()!, { recursive: true, force: true });
+  }
+});
 
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     name: "test-agent",
+    packageContentDigest: null,
     displayName: "Test Agent",
     binary_path: "/usr/local/bin/test-agent",
     gateway_command: "test-agent gateway run",
@@ -78,10 +130,17 @@ const hermesAgent = makeAgent({
 });
 
 describe("getRegisteredAgent", () => {
-  it("does not invent an agent when the target registry row is absent or OpenClaw", () => {
+  it("does not invent an agent when the target registry row records no identity", () => {
     expect(getRegisteredAgent(null)).toBeNull();
-    expect(getRegisteredAgent({})).toBeNull();
-    expect(getRegisteredAgent({ agent: "openclaw" })).toBeNull();
+  });
+
+  it("loads OpenClaw for legacy registry rows that omit or null the agent identity", () => {
+    expect(getRegisteredAgent({})?.name).toBe("openclaw");
+    expect(getRegisteredAgent({ agent: null })?.name).toBe("openclaw");
+  });
+
+  it("loads the OpenClaw agent manifest recorded by the registry row", () => {
+    expect(getRegisteredAgent({ agent: "openclaw" })?.name).toBe("openclaw");
   });
 
   it("loads only the agent named by the supplied registry row", () => {
@@ -92,13 +151,114 @@ describe("getRegisteredAgent", () => {
     expect(getRegisteredAgent({ agent: "missing-agent" })).toBeNull();
   });
 
-  it.each([
-    "../openclaw",
-    "/tmp/agent",
-    "hermes/../openclaw",
-    "hermes\\openclaw",
-  ])("fails closed for path-like persisted agent name %j", (agent) => {
-    expect(getRegisteredAgent({ agent })).toBeNull();
+  it.each(["../openclaw", "/tmp/agent", "hermes/../openclaw", "hermes\\openclaw"])(
+    "fails closed for path-like persisted agent name %j",
+    (agent) => {
+      expect(getRegisteredAgent({ agent })).toBeNull();
+    },
+  );
+});
+
+describe("getSessionAgent", () => {
+  it("resolves the selected OpenClaw manifest from the legacy null registry encoding", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: null });
+
+    expect(getSessionAgent("alpha")?.name).toBe("openclaw");
+  });
+
+  it("resolves the selected OpenClaw manifest from a legacy row without an agent field", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha" });
+
+    expect(getSessionAgent("alpha")?.name).toBe("openclaw");
+  });
+
+  it("keeps absent registry and session state compatible with legacy OpenClaw state", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(null);
+
+    expect(getSessionAgent("alpha")).toBeNull();
+  });
+
+  it("rejects an unknown identity recorded for a sandbox", () => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      agent: "missing-agent",
+    });
+
+    expect(() => getSessionAgent("alpha")).toThrow(
+      "Cannot resolve the recorded agent identity \"missing-agent\" from sandbox 'alpha'.",
+    );
+  });
+
+  it("rejects a selected OpenClaw package whose agent manifest is malformed", () => {
+    const home = temporaryHome();
+    writeInstalledOpenClaw(
+      home,
+      ["name: openclaw", "runtime:", "  kind: unsupported"].join("\n") + "\n",
+    );
+    vi.stubEnv("HOME", home);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: null });
+
+    expect(() => getSessionAgent("alpha")).toThrow(
+      "Cannot resolve the recorded agent identity \"openclaw\" from sandbox 'alpha'.",
+    );
+  });
+
+  it("uses the selected installed OpenClaw manifest for runtime behavior", () => {
+    const home = temporaryHome();
+    writeInstalledOpenClaw(
+      home,
+      [
+        "name: openclaw",
+        'display_name: "Installed OpenClaw"',
+        "binary_path: /usr/local/bin/installed-openclaw",
+        'version_command: "installed-openclaw version"',
+        'gateway_command: "installed-openclaw serve"',
+        "runtime:",
+        "  kind: gateway",
+        '  interactive_command: "installed-openclaw tui"',
+        "health_probe:",
+        '  url: "http://localhost:19123/installed-health"',
+        "  port: 19123",
+        "  timeout_seconds: 12",
+        "dashboard:",
+        "  kind: ui",
+        '  label: "Installed dashboard"',
+        '  path: "/installed"',
+        '  health_path: "/installed-health"',
+        "  auth: session",
+        "forward_ports:",
+        "  - 19123",
+        "config:",
+        "  dir: /sandbox/.installed-openclaw",
+        "  config_file: installed.json",
+        "  format: json",
+      ].join("\n") + "\n",
+    );
+    vi.stubEnv("HOME", home);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: null });
+
+    const agent = getSessionAgent("alpha");
+
+    expect(agent).not.toBeNull();
+    expect(agent).toMatchObject({
+      name: "openclaw",
+      runtime: { kind: "gateway", interactive_command: "installed-openclaw tui" },
+      configPaths: {
+        dir: "/sandbox/.installed-openclaw",
+        configFile: "installed.json",
+        format: "json",
+      },
+      dashboard: {
+        auth: "session",
+        healthPath: "/installed-health",
+        label: "Installed dashboard",
+        path: "/installed",
+      },
+    });
+    expect(getHealthProbeUrl(agent)).toBe("http://localhost:19123/installed-health");
+    expect(getGatewayCommand(agent)).toBe("installed-openclaw serve");
+    expect(getAgentDisplayName(agent)).toBe("Installed OpenClaw");
   });
 });
 

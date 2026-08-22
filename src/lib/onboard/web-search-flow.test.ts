@@ -36,6 +36,31 @@ function helpers(overrides: Record<string, unknown> = {}) {
   });
 }
 
+function writeInstalledOpenClawPackage(home: string, dockerfile: string): void {
+  const packageRoot = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-openclaw");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(packageRoot, "package.json"),
+    `${JSON.stringify({
+      name: "@nvidia/nemoclaw-openclaw",
+      version: "9.9.9",
+      nemoclaw: { harnessManifest: "manifest.yaml" },
+    })}\n`,
+  );
+  fs.writeFileSync(
+    path.join(packageRoot, "manifest.yaml"),
+    "name: openclaw\ndisplay_name: OpenClaw\n",
+  );
+  fs.writeFileSync(path.join(packageRoot, "Dockerfile"), dockerfile);
+  fs.writeFileSync(path.join(packageRoot, "Dockerfile.base"), "FROM scratch\n");
+  fs.writeFileSync(path.join(packageRoot, "policy-additions.yaml"), "version: 1\n");
+  fs.writeFileSync(path.join(packageRoot, "start.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  fs.writeFileSync(
+    path.join(packageRoot, ".nemoclaw-install.json"),
+    `${JSON.stringify({ installedDigest: "a".repeat(64) })}\n`,
+  );
+}
+
 describe("Brave key prompt empty-input escape (#6025)", () => {
   it("surfaces the back/exit hint on empty input and loops instead of dead-ending", async () => {
     const errors: string[] = [];
@@ -106,36 +131,39 @@ describe("web search provider validation", () => {
   it.each([
     ["brave", "brv-secret", "X-Subscription-Token: brv-secret"],
     ["tavily", "tvly-secret", "Authorization: Bearer tvly-secret"],
-  ] as const)("keeps the %s key out of curl argv in a temporary 0600 config", (provider, apiKey, header) => {
-    let configPath = "";
-    vi.mocked(runCurlProbe).mockImplementationOnce((args, options) => {
-      configPath = String(options?.trustedConfigFiles?.[0] ?? "");
-      expect(configPath).not.toBe("");
-      expect(args.join(" ")).not.toContain(apiKey);
-      expect(args).toContain(configPath);
-      const configFd = fs.openSync(
-        configPath,
-        fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
-      );
-      try {
-        expect(fs.fstatSync(configFd).mode & 0o777).toBe(0o600);
-        expect(fs.readFileSync(configFd, "utf8")).toContain(header);
-      } finally {
-        fs.closeSync(configFd);
-      }
-      return {
-        ok: true,
-        httpStatus: 200,
-        curlStatus: 0,
-        body: "{}",
-        stderr: "",
-        message: "ok",
-      };
-    });
+  ] as const)(
+    "keeps the %s key out of curl argv in a temporary 0600 config",
+    (provider, apiKey, header) => {
+      let configPath = "";
+      vi.mocked(runCurlProbe).mockImplementationOnce((args, options) => {
+        configPath = String(options?.trustedConfigFiles?.[0] ?? "");
+        expect(configPath).not.toBe("");
+        expect(args.join(" ")).not.toContain(apiKey);
+        expect(args).toContain(configPath);
+        const configFd = fs.openSync(
+          configPath,
+          fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
+        );
+        try {
+          expect(fs.fstatSync(configFd).mode & 0o777).toBe(0o600);
+          expect(fs.readFileSync(configFd, "utf8")).toContain(header);
+        } finally {
+          fs.closeSync(configFd);
+        }
+        return {
+          ok: true,
+          httpStatus: 200,
+          curlStatus: 0,
+          body: "{}",
+          stderr: "",
+          message: "ok",
+        };
+      });
 
-    expect(helpers().validateWebSearchApiKey(provider, apiKey).ok).toBe(true);
-    expect(fs.existsSync(configPath)).toBe(false);
-  });
+      expect(helpers().validateWebSearchApiKey(provider, apiKey).ok).toBe(true);
+      expect(fs.existsSync(configPath)).toBe(false);
+    },
+  );
 
   it("uses a POST JSON probe for Tavily", () => {
     helpers().validateTavilySearchApiKey("tvly-secret");
@@ -184,6 +212,24 @@ describe("web search provider selection", () => {
     const env = { BRAVE_API_KEY: "brv-key", TAVILY_API_KEY: "tvly-key" };
 
     expect(helpers({ env }).resolveNonInteractiveWebSearchProvider()).toBe("brave");
+  });
+
+  it("uses the installed OpenClaw Dockerfile for default-agent capability checks", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-installed-openclaw-search-"));
+    writeInstalledOpenClawPackage(home, "FROM scratch\n");
+    const notes: string[] = [];
+
+    try {
+      await expect(
+        helpers({
+          env: { HOME: home, BRAVE_API_KEY: "brv-key" },
+          note: (message: string) => notes.push(message),
+        }).configureWebSearch(),
+      ).resolves.toBeNull();
+      expect(notes).toContain("  Web search is not yet supported by OpenClaw. Skipping.");
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("selects supported Tavily implicitly for Hermes when both credentials exist", async () => {

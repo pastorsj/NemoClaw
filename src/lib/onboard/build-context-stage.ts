@@ -180,9 +180,17 @@ export function stageCreateSandboxBuildContext(
       throw err;
     }
   } else {
-    build = input.stageDefaultSandboxBuildContext
-      ? input.stageDefaultSandboxBuildContext(input.root)
-      : stageOptimizedSandboxBuildContext(input.root, undefined, loadAgent("openclaw").agentDir);
+    if (input.stageDefaultSandboxBuildContext) {
+      build = input.stageDefaultSandboxBuildContext(input.root);
+    } else {
+      const openClaw = loadAgent("openclaw");
+      build = stageOptimizedSandboxBuildContext(
+        input.root,
+        undefined,
+        openClaw.agentDir,
+        openClaw.packageContentDigest ?? undefined,
+      );
+    }
   }
 
   return {

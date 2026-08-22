@@ -88,7 +88,7 @@ function resolveAgentDashboardAuth(
   agentName: string | null,
   deps: Pick<DashboardUrlCommandDeps, "getAgentDashboardAuth">,
 ): DashboardAuth | null {
-  if (!agentName || agentName === "openclaw") return "url_token";
+  if (!agentName) return "url_token";
   if (deps.getAgentDashboardAuth) {
     return deps.getAgentDashboardAuth(agentName);
   }
@@ -109,7 +109,7 @@ function resolveTerminalRuntime(
   agentName: string | null,
   deps: Pick<DashboardUrlCommandDeps, "getAgentRuntimeInfo">,
 ): { displayName: string } | null {
-  if (!agentName || agentName === "openclaw") return null;
+  if (!agentName) return null;
   if (deps.getAgentRuntimeInfo) {
     const info = deps.getAgentRuntimeInfo(agentName);
     return info && info.kind === "terminal" ? { displayName: info.displayName } : null;
@@ -150,7 +150,10 @@ export function runDashboardUrlCommand(
     }
   }
 
-  const agent = sandbox?.agent ?? null;
+  // A persisted null is the compatibility encoding for an OpenClaw sandbox.
+  // Keep a missing registry row distinct so older callers without registry
+  // authority retain the historical token-dashboard fallback.
+  const agent = sandbox ? (sandbox.agent ?? "openclaw") : null;
 
   // Terminal-runtime sandboxes (e.g. Deep Agents Code) have no dashboard by
   // design. Say so plainly instead of failing later with a token error that
@@ -163,7 +166,7 @@ export function runDashboardUrlCommand(
   }
 
   const dashboardAuth = resolveAgentDashboardAuth(agent, deps);
-  if (agent && agent !== "openclaw" && !dashboardAuth) {
+  if (agent && !dashboardAuth) {
     dashboardUrlFail(
       `  Could not resolve dashboard metadata for agent '${agent}' in sandbox '${sandboxName}'.`,
     );

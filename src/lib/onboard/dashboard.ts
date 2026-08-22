@@ -179,19 +179,33 @@ function getRunningForwardPorts(forwardListOutput: string | null | undefined): s
   return [...ports];
 }
 
-function findOpenclawJsonPath(dir: string): string | null {
+function findDownloadedConfigPath(dir: string, fileName: string): string | null {
   if (!fs.existsSync(dir)) return null;
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const entryPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      const found: string | null = findOpenclawJsonPath(entryPath);
+      const found: string | null = findDownloadedConfigPath(entryPath, fileName);
       if (found) return found;
-    } else if (entry.name === "openclaw.json") {
+    } else if (entry.name === fileName) {
       return entryPath;
     }
   }
   return null;
+}
+
+function usesLegacyOpenClawReadySummary(agent: AgentDefinition | null): boolean {
+  if (!agent) return true;
+  return (
+    agent.name === "openclaw" &&
+    agent.displayName === "OpenClaw" &&
+    agent.forwardPort === DASHBOARD_PORT &&
+    agent.dashboard.kind === "ui" &&
+    agent.dashboard.label === "UI" &&
+    agent.dashboard.path === "/" &&
+    agent.dashboard.healthPath === "/health" &&
+    agent.dashboard.auth === "url_token"
+  );
 }
 
 function dashboardUrlForDisplay(url: string, deps: OnboardDashboardDeps): string {
@@ -463,7 +477,9 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
    */
   function ensureFinalizationDashboardForward(sandboxName: string): number {
     const envUrl = process.env.CHAT_UI_URL;
-    const persistedPort = envUrl ? null : getPersistedDashboardPort(sandboxName, deps.listSandboxes);
+    const persistedPort = envUrl
+      ? null
+      : getPersistedDashboardPort(sandboxName, deps.listSandboxes);
     const requestedUrl =
       envUrl || (persistedPort === null ? undefined : `http://127.0.0.1:${String(persistedPort)}`);
     const actualPort = ensureDashboardForward(
@@ -516,13 +532,16 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
   function fetchGatewayAuthTokenFromSandbox(sandboxName: string): string | null {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-token-"));
     try {
+      const { resolveAgentConfig } =
+        require("../sandbox/agent-config") as typeof import("../sandbox/agent-config");
+      const configPath = resolveAgentConfig(sandboxName).configPath;
       const destDir = `${tmpDir}${path.sep}`;
-      const result = deps.runOpenshell(
-        ["sandbox", "download", sandboxName, "/sandbox/.openclaw/openclaw.json", destDir],
-        { ignoreError: true, stdio: ["ignore", "ignore", "ignore"] },
-      );
+      const result = deps.runOpenshell(["sandbox", "download", sandboxName, configPath, destDir], {
+        ignoreError: true,
+        stdio: ["ignore", "ignore", "ignore"],
+      });
       if (result.status !== 0) return null;
-      const jsonPath = findOpenclawJsonPath(tmpDir);
+      const jsonPath = findDownloadedConfigPath(tmpDir, path.posix.basename(configPath));
       if (!jsonPath) return null;
       const cfg = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
       const token = cfg && cfg.gateway && cfg.gateway.auth && cfg.gateway.auth.token;
@@ -605,7 +624,7 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
       console.log(`  NIM:      ${nimLabel}`);
     }
     console.log("");
-    if (agent) {
+    if (agent && !usesLegacyOpenClawReadySummary(agent)) {
       console.log("  Access");
       console.log("");
       deps.printAgentDashboardUi(sandboxName, token, agent, {

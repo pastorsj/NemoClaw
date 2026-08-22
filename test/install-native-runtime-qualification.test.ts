@@ -425,7 +425,13 @@ main --non-interactive --yes-i-accept-third-party-software
     expect(fs.statSync(path.join(artifactDirectory, "installer.sh")).size).toBeLessThanOrEqual(
       524288,
     );
-    expect(receiptNames.filter((name) => name.endsWith(".json")).every((receiptName) => fs.statSync(path.join(artifactDirectory, receiptName)).size <= 4096)).toBe(true);
+    expect(
+      receiptNames
+        .filter((name) => name.endsWith(".json"))
+        .every(
+          (receiptName) => fs.statSync(path.join(artifactDirectory, receiptName)).size <= 4096,
+        ),
+    ).toBe(true);
     expect(
       JSON.parse(fs.readFileSync(path.join(artifactDirectory, "invocation.json"), "utf-8")),
     ).toMatchObject({
@@ -512,30 +518,38 @@ install_selected_harness
       "harness",
       "install",
       expected,
+      "--refresh-installed",
     ]);
   });
 
-  it.each(["pi", "nemocua"])("keeps the gated %s candidate on its existing path", (agent) => {
-    const fixtureRoot = temporaryDirectory("nemoclaw-candidate-harness-install-");
-    const cli = path.join(fixtureRoot, "nemoclaw");
-    const invocationLog = path.join(fixtureRoot, "invoked");
-    writeExecutable(cli, '#!/usr/bin/env bash\nprintf "invoked\\n" >"$INVOCATION_LOG"\n');
+  it.each(["pi", "nemocua"])(
+    "keeps the gated %s candidate on its path while refreshing installed packages",
+    (agent) => {
+      const fixtureRoot = temporaryDirectory("nemoclaw-candidate-harness-install-");
+      const cli = path.join(fixtureRoot, "nemoclaw");
+      const invocationLog = path.join(fixtureRoot, "invoked");
+      writeExecutable(cli, '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$INVOCATION_LOG"\n');
 
-    const result = phaseHarness(
-      `
+      const result = phaseHarness(
+        `
 set -euo pipefail
 source "$INSTALLER_UNDER_TEST"
 _CLI_PATH="$CLI_UNDER_TEST"
 install_selected_harness
 `,
-      {
-        CLI_UNDER_TEST: cli,
-        INVOCATION_LOG: invocationLog,
-        NEMOCLAW_AGENT: agent,
-      },
-    );
+        {
+          CLI_UNDER_TEST: cli,
+          INVOCATION_LOG: invocationLog,
+          NEMOCLAW_AGENT: agent,
+        },
+      );
 
-    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
-    expect(fs.existsSync(invocationLog)).toBe(false);
-  });
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+      expect(fs.readFileSync(invocationLog, "utf8").trim().split("\n")).toEqual([
+        "harness",
+        "install",
+        "--refresh-installed",
+      ]);
+    },
+  );
 });

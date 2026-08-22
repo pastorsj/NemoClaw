@@ -31,6 +31,8 @@ export interface FinalOnboardFlowPhaseOptions<
   VerificationResult = unknown,
 > {
   branchState: "agent_setup" | "openclaw";
+  /** Manifest authority used only after the branch-specific setup completes. */
+  finalizationAgent?: Context["agent"];
   authoritativePolicyTier?: string | null;
   agentSetupDeps: AgentSetupStateOptions<Context["agent"]>["deps"];
   policiesDeps: PoliciesStateOptions<Context["agent"], WebSearchConfig>["deps"];
@@ -116,12 +118,15 @@ export function createFinalOnboardFlowPhases<
   const finalizationPhase = createFinalizationPhase<Context>(async (context) => {
     assertSandboxCreatedContext(context, "finalization");
     const webSearchEnabled = options.finalization.webSearchEnabled(context.webSearchConfig);
+    const finalizationAgent = Object.hasOwn(options, "finalizationAgent")
+      ? options.finalizationAgent
+      : context.agent;
     const finalizationResult = await handleFinalizationState({
       sandboxName: context.sandboxName,
       model: context.model,
       provider: context.provider,
       nimContainer: context.nimContainer,
-      agent: context.agent,
+      agent: finalizationAgent,
       hermesAuthMethod: context.hermesAuthMethod,
       hermesToolGateways: context.hermesToolGateways,
       stagedLegacyKeys: options.finalization.stagedLegacyKeys,
@@ -140,12 +145,15 @@ export function createFinalOnboardFlowPhases<
   const postVerifyPhase = createPostVerifyPhase<Context>(async (context) => {
     assertSandboxCreatedContext(context, "post verification");
     const webSearchEnabled = options.finalization.webSearchEnabled(context.webSearchConfig);
+    const finalizationAgent = Object.hasOwn(options, "finalizationAgent")
+      ? options.finalizationAgent
+      : context.agent;
     const postVerifyResult = await handlePostVerifyState({
       sandboxName: context.sandboxName,
       model: context.model,
       provider: context.provider,
       nimContainer: context.nimContainer,
-      agent: context.agent,
+      agent: finalizationAgent,
       hermesAuthMethod: context.hermesAuthMethod,
       hermesToolGateways: context.hermesToolGateways,
       stagedLegacyKeys: options.finalization.stagedLegacyKeys,

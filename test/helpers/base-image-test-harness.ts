@@ -78,6 +78,7 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
     legacyPaths: null,
     agentDir: "/repo/root/packages/nemoclaw-hermes",
     manifestPath: "/repo/root/packages/nemoclaw-hermes/manifest.yaml",
+    packageContentDigest: null,
     ...overrides,
   };
 }

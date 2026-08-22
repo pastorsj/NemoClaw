@@ -45,6 +45,8 @@ export interface PrepareSandboxWorkloadSourceInput {
   readonly catalogPath?: string | null;
   readonly expectedCatalogRevision?: string | null;
   readonly catalogRevision?: string | null;
+  readonly selectedHarnessPackageDigest?: string | null;
+  readonly bundledHarnessPackageDigest?: string | null;
   /** Contract from the repository-accepted candidate qualification receipt. */
   readonly acceptedCandidateContract?: ManagedImageContractV1 | null;
 }
@@ -274,6 +276,17 @@ export async function prepareSandboxWorkloadSource(
   dependencies: PrepareSandboxWorkloadSourceDependencies = {},
 ): Promise<PreparedSandboxWorkloadSource> {
   const policy = input.policy ?? input.runtime.managedImageSelectionPolicy;
+  if (
+    input.customDockerfilePath == null &&
+    input.selectedHarnessPackageDigest &&
+    input.bundledHarnessPackageDigest &&
+    input.selectedHarnessPackageDigest !== input.bundledHarnessPackageDigest
+  ) {
+    return unavailableResult(
+      input,
+      `selected harness package '${input.agentName}' differs from the package used by this NemoClaw build`,
+    );
+  }
   const acceptedCandidateContract = isCandidateManagedImageAgent(input.agentName)
     ? (input.acceptedCandidateContract ?? null)
     : null;

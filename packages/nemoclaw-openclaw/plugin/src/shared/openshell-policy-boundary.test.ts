@@ -8,7 +8,7 @@ import {
   parseOpenShellPolicy,
   stripProviderComposedPolicies,
   withoutProviderComposedPolicies,
-} from "./openshell-policy-boundary.cjs";
+} from "#nemoclaw-shared/openshell-policy-boundary.cjs";
 
 type PolicyDecision = "accepted" | "rejected";
 

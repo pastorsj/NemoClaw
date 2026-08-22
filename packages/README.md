@@ -24,15 +24,17 @@ Its `package.json` must contain these fields:
 
 ```json
 {
-  "name": "@nvidia/nemoclaw-<id>",
+  "name": "@scope/nemoclaw-<id>",
   "version": "1.2.3",
   "nemoclaw": { "harnessManifest": "manifest.yaml" }
 }
 ```
 
-The manifest must be `manifest.yaml` at the package root. The package directory, npm package name,
-and manifest `name` must use the same ID.
-The registry rejects symbolic links and invalid package metadata in receipt-tracked content.
+The package name can be scoped or unscoped, but its basename must be `nemoclaw-<id>`.
+The manifest must be `manifest.yaml` at the package root. The package directory, package-name
+basename, and manifest `name` must use the same ID.
+The registry rejects symbolic links, and normal discovery rejects invalid package metadata.
+A refresh can replace an older receipt-managed package when its tracked content matches its receipt.
 Receipt tracking ignores entries named `.git`, `.DS_Store`, `node_modules`, and `__pycache__`.
 It reads package data but does not import a package module.
 

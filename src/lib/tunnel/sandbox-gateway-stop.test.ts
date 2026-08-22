@@ -188,6 +188,22 @@ describe("stopSandboxChannels", () => {
     );
   });
 
+  it("stops a portable OpenClaw gateway recorded with an explicit identity", () => {
+    const h = harness();
+    h.getSandbox.mockReturnValue(sandbox({ agent: "openclaw" }));
+    h.getRegisteredAgent.mockReturnValue(
+      registeredAgent({ name: "openclaw", displayName: "OpenClaw" }),
+    );
+    h.runDocker
+      .mockReturnValueOnce(spawnResult(0, "pod/my-sandbox-0\n"))
+      .mockReturnValueOnce(spawnResult(0));
+
+    stopSandboxChannels("my-sandbox", h.deps);
+
+    expect(h.runDocker).toHaveBeenCalledTimes(2);
+    expect(h.info).toHaveBeenCalledWith("OpenClaw gateway stopped inside sandbox.");
+  });
+
   it("does not treat a terminal agent command as a gateway process", () => {
     const h = harness();
     const terminal = registeredAgent({

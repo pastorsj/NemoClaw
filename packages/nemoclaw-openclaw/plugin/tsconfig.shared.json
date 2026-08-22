@@ -1,16 +1,17 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "rootDir": "src"
+    "outDir": "dist/shared",
+    "rootDir": "../../../src/lib/shared",
+    "rootDirs": ["../../../src/lib/shared"]
   },
   "include": [
-    "src/shared/banner-boundary.cts",
-    "src/shared/credential-filter-boundary.cts",
-    "src/shared/openshell-policy-boundary.cts",
-    "src/shared/private-networks-boundary.cts",
-    "src/shared/sandbox-name.cts",
-    "src/shared/snapshot-sanitizer-boundary.cts"
+    "../../../src/lib/shared/banner-boundary.cts",
+    "../../../src/lib/shared/credential-filter-boundary.cts",
+    "../../../src/lib/shared/openshell-policy-boundary.cts",
+    "../../../src/lib/shared/private-networks-boundary.cts",
+    "../../../src/lib/shared/sandbox-name.cts",
+    "../../../src/lib/shared/snapshot-sanitizer-boundary.cts"
   ],
   "exclude": ["node_modules", "dist"]
 }

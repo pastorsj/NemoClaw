@@ -125,6 +125,8 @@ export interface CreateManagedWorkloadOnboardRuntimeInput {
   readonly agentName: string;
   readonly legacyDockerfilePath: string;
   readonly customDockerfilePath: string | null;
+  readonly selectedHarnessPackageDigest: string | null;
+  readonly bundledHarnessPackageDigest: string | null;
   readonly rootDir: string;
   readonly model: string;
   readonly provider: string;
@@ -241,6 +243,8 @@ export function createManagedWorkloadOnboardRuntime(
           runtime: runtimeCapabilities,
           version: getVersion({ rootDir: input.rootDir }),
           catalogPath: input.tempManagedRuntimeCatalog ?? liveCatalog?.path ?? null,
+          selectedHarnessPackageDigest: input.selectedHarnessPackageDigest,
+          bundledHarnessPackageDigest: input.bundledHarnessPackageDigest,
           ...(liveCatalog ? { expectedCatalogRevision: liveCatalog.revision } : {}),
           ...(catalogRevision ? { catalogRevision } : {}),
           acceptedCandidateContract: isCandidateAgent(input.agentName)

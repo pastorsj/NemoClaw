@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeAgent, withMockedDocker } from "../../../test/helpers/base-image-test-harness";
 import { testTimeout } from "../../../test/helpers/timeouts";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 import { tmpDir, writeCa } from "../onboard/__test-helpers__/corporate-ca-fixtures";
 import {
   createSandboxBaseImageBuildProvenanceKey,
@@ -213,6 +214,7 @@ describe("agent base image provisioning", () => {
               manifestPath: selectedManifest,
               dockerfileBasePath: null,
               dockerfilePath: selectedDockerfile,
+              packageContentDigest: harnessPackageContentDigest(selectedPackageDir),
             }),
             { rootDir: root },
           );
@@ -242,6 +244,59 @@ describe("agent base image provisioning", () => {
       }
     },
   );
+
+  it("uses one selected package snapshot for the package and root Dockerfile", () => {
+    const root = tmpDir();
+    const selectedPackageDir = path.join(tmpDir(), "nemoclaw-hermes");
+    writeFixture(root, "packages/nemoclaw-hermes/Dockerfile", "FROM bundled\n");
+    const selectedDockerfile = writeFixture(selectedPackageDir, "Dockerfile", "FROM selected\n");
+    const selectedManifest = writeFixture(selectedPackageDir, "manifest.yaml", "name: hermes\n");
+    writeFixture(selectedPackageDir, "start.sh", "selected start\n");
+    const originalCopyFileSync = fs.copyFileSync;
+    const copySpy = vi
+      .spyOn(fs, "copyFileSync")
+      .mockImplementationOnce(((source, destination, mode) => {
+        fs.writeFileSync(selectedDockerfile, "FROM refreshed\n");
+        return originalCopyFileSync(source, destination, mode);
+      }) as typeof fs.copyFileSync)
+      .mockImplementation(originalCopyFileSync);
+    let buildContext = root;
+
+    try {
+      withMockedDocker(({ createAgentSandbox }) => {
+        const result = createAgentSandbox(
+          makeAgent({
+            agentDir: selectedPackageDir,
+            manifestPath: selectedManifest,
+            dockerfileBasePath: null,
+            dockerfilePath: selectedDockerfile,
+            packageContentDigest: harnessPackageContentDigest(selectedPackageDir),
+          }),
+          { rootDir: root },
+        );
+        buildContext = result.buildCtx;
+        const stagedPackageDockerfile = path.join(
+          buildContext,
+          "packages",
+          "nemoclaw-hermes",
+          "Dockerfile",
+        );
+
+        expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toBe("FROM selected\n");
+        expect(fs.readFileSync(stagedPackageDockerfile, "utf8")).toBe("FROM selected\n");
+        expect(fs.readFileSync(selectedDockerfile, "utf8")).toBe("FROM refreshed\n");
+        expect(copySpy).toHaveBeenNthCalledWith(
+          1,
+          stagedPackageDockerfile,
+          result.stagedDockerfile,
+        );
+      });
+    } finally {
+      copySpy.mockRestore();
+      fs.rmSync(buildContext, { recursive: true, force: true });
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it("leaves the bundled package unchanged for a legacy agent directory", () => {
     const root = tmpDir();
@@ -290,6 +345,7 @@ describe("agent base image provisioning", () => {
       manifestPath: path.join(installedPackageDir, "manifest.yaml"),
       dockerfilePath: path.join(installedPackageDir, "Dockerfile"),
       dockerfileBasePath: path.join(installedPackageDir, "Dockerfile.base"),
+      packageContentDigest: harnessPackageContentDigest(installedPackageDir),
     });
 
     withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock, root }) => {
@@ -319,40 +375,52 @@ describe("agent base image provisioning", () => {
         manifestPath: path.join(installedPackageDir, "manifest.yaml"),
         dockerfilePath: path.join(installedPackageDir, "Dockerfile"),
         dockerfileBasePath: selectedBaseDockerfile,
+        packageContentDigest: harnessPackageContentDigest(installedPackageDir),
       });
       let stagedContext = "";
+      const originalCpSync = fs.cpSync;
+      const copySpy = vi
+        .spyOn(fs, "cpSync")
+        .mockImplementationOnce((_source, destination) => {
+          fs.mkdirSync(destination.toString(), { recursive: true });
+        })
+        .mockImplementation(originalCpSync);
 
-      withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock }) => {
-        resolveSandboxBaseImageMock.mockImplementation((resolutionOptions) => {
-          expect(resolutionOptions).toEqual(
-            expect.objectContaining({
-              additionalInputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
-              buildContextDir: expect.any(String),
-              requireLocalBuild: true,
-            }),
-          );
-          stagedContext = String(resolutionOptions.buildContextDir);
-          const stagedBaseDockerfile = path.join(
-            stagedContext,
-            "packages",
-            "nemoclaw-hermes",
-            "Dockerfile.base",
-          );
-          expect(resolutionOptions.dockerfilePath).toBe(stagedBaseDockerfile);
-          expect(fs.readFileSync(stagedBaseDockerfile, "utf8")).toContain(
-            "# selected package base",
-          );
-          return {
-            ref: "nemoclaw-hermes-sandbox-base-local:compatible",
-            digest: null,
-            source: "local",
-            glibcVersion: process.platform === "linux" ? "2.41" : null,
-          };
+      try {
+        withMockedDocker(({ ensureAgentBaseImage, resolveSandboxBaseImageMock }) => {
+          resolveSandboxBaseImageMock.mockImplementation((resolutionOptions) => {
+            expect(resolutionOptions).toEqual(
+              expect.objectContaining({
+                additionalInputFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/),
+                buildContextDir: expect.any(String),
+                requireLocalBuild: true,
+              }),
+            );
+            stagedContext = String(resolutionOptions.buildContextDir);
+            const stagedBaseDockerfile = path.join(
+              stagedContext,
+              "packages",
+              "nemoclaw-hermes",
+              "Dockerfile.base",
+            );
+            expect(resolutionOptions.dockerfilePath).toBe(stagedBaseDockerfile);
+            expect(fs.readFileSync(stagedBaseDockerfile, "utf8")).toContain(
+              "# selected package base",
+            );
+            return {
+              ref: "nemoclaw-hermes-sandbox-base-local:compatible",
+              digest: null,
+              source: "local",
+              glibcVersion: process.platform === "linux" ? "2.41" : null,
+            };
+          });
+
+          ensureAgentBaseImage(agent);
+          expect(fs.existsSync(stagedContext)).toBe(false);
         });
-
-        ensureAgentBaseImage(agent);
-        expect(fs.existsSync(stagedContext)).toBe(false);
-      });
+      } finally {
+        copySpy.mockRestore();
+      }
     },
     testTimeout(20_000),
   );
