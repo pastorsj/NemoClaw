@@ -46,7 +46,7 @@ The roadmap first records the supported scope and freezes current behavior. It t
 **Plans**: 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md - Reconcile the proposal into decision-ready architecture choices.
+- [x] 01-01-PLAN.md - Reconcile the proposal into decision-ready architecture choices.
 - [ ] 01-02-PLAN.md - Capture the compatibility and persisted-state baseline.
 - [ ] 01-03-PLAN.md - Complete the extraction disposition ledger.
 - [ ] 01-04-PLAN.md - Record ownership, threat boundaries, validation, and maintainer acceptance.
@@ -227,7 +227,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |---|---:|---|---|
-| 1. Scope and Behavior Baseline | 0/4 | Not started | - |
+| 1. Scope and Behavior Baseline | 1/4 | In Progress | - |
 | 2. Explicit Runtime Identity | 0/3 | Not started | - |
 | 3. Package and Controller Foundation | 0/8 | Not started | - |
 | 4. Deep Agents Code Pilot | 0/4 | Not started | - |
