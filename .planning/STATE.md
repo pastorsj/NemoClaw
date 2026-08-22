@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-03-PLAN.md
-last_updated: "2026-08-22T13:09:19.939Z"
-last_activity: 2026-08-22
+stopped_at: Awaiting repository-owned maintainer acceptance at 01-04 Task 3
+last_updated: "2026-08-22T13:13:36.115Z"
+last_activity: 2026-08-22 - Completed Plan 01-04 Tasks 1-2 and reached the repository-owned maintainer acceptance checkpoint.
 progress:
   total_phases: 10
   completed_phases: 0
@@ -30,8 +30,8 @@ See: `.planning/PROJECT.md` (updated 2026-08-22)
 
 Phase: 1 of 10 (Scope and Behavior Baseline)
 Plan: 3 of 4 in current phase
-Status: Extraction inventory recorded; ownership and repository acceptance remain
-Last activity: 2026-08-22 - Closed GSD Plan 01-03 against the exact extraction, architecture, and privileged-action evidence.
+Status: Plan 01-04 is paused at the repository-owned maintainer acceptance checkpoint
+Last activity: 2026-08-22 - Bound the decision packet to signed proposal revision `e8e89ffd05a696e7476325c331d4e050a4264353`; acceptance and accountable ownership remain.
 
 Progress: [█░░░░░░░░░] 6%
 
@@ -72,6 +72,10 @@ Decisions are recorded in `.planning/PROJECT.md` and phase `CONTEXT.md` files.
 - Obtain a repository-owned accepted design decision before Phase 2 or package
   implementation begins.
 
+- Have an authorized NemoClaw maintainer accept exact proposal revision
+  `e8e89ffd05a696e7476325c331d4e050a4264353` with reason and placement, one accountable
+  maintainer, and the validation plan.
+
 - Assign the accountable product, package, security, release, compatibility, state, artifact, and
   E2E owners named in the decision packet.
 
@@ -101,6 +105,6 @@ Decisions are recorded in `.planning/PROJECT.md` and phase `CONTEXT.md` files.
 
 ## Session Continuity
 
-Last session: 2026-08-22T13:09:19.930Z
-Stopped at: Completed 01-03-PLAN.md
+Last session: 2026-08-22T13:13:36.101Z
+Stopped at: Awaiting repository-owned maintainer acceptance at 01-04 Task 3
 Resume file: .planning/phases/01-scope-and-behavior-baseline/01-04-PLAN.md
