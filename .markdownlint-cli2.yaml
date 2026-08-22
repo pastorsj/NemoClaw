@@ -31,5 +31,7 @@ config:
 
 ignores:
   - "node_modules/**"
+  # GSD plans are machine-oriented YAML/XML workflow inputs stored with .md names.
+  - ".planning/**"
   # Generated catalog export, including signer-produced skill-card.md files.
   - "skills/**"
