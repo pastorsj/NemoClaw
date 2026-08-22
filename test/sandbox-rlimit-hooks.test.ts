@@ -589,7 +589,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
     }
   });
 
-  it("stale Hermes base replay preserves effective connect-shell rlimit hooks", () => {
+  it("stale Hermes base replay removes OpenClaw preloads and preserves effective connect-shell rlimit hooks", () => {
     const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-rlimit-hooks-"));
     const localLib = path.join(tmp, "lib");
@@ -772,12 +772,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expectSystemRlimitHookEnforcesLimits(profileHook);
       expectSystemRlimitHookEnforcesLimits(bashrc);
       expectSystemRlimitHookIsSilentWhenVerificationFails(bashrc, rlimitLib);
-      const hardenedDir = fs.statSync(preloadDir);
-      const hardenedSafetyNet = fs.statSync(safetyNet);
-      const hardenedCiaoGuard = fs.statSync(ciaoGuard);
-      expect(hardenedDir.mode & 0o777).toBe(0o755);
-      expect(hardenedSafetyNet.mode & 0o777).toBe(0o444);
-      expect(hardenedCiaoGuard.mode & 0o777).toBe(0o444);
+      expect(fs.existsSync(preloadDir)).toBe(false);
       expect(fs.statSync(discordRecoveryPatcher).mode & 0o777).toBe(0o755);
       expect(fs.statSync(profilePolicyPatcher).mode & 0o777).toBe(0o755);
       expect(fs.statSync(langfuseCredentialPatcher).mode & 0o777).toBe(0o444);
@@ -789,12 +784,6 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expect(fs.statSync(stateLockPlan).mode & 0o777).toBe(0o444);
       expect(fs.statSync(runtimeStateMutationCapability).mode & 0o777).toBe(0o444);
       expect(fs.statSync(hermesCronRestoreControl).mode & 0o777).toBe(0o700);
-      expect(hardenedDir.uid).toBe(fixtureOwner.uid);
-      expect(hardenedDir.gid).toBe(fixtureOwner.gid);
-      expect(hardenedSafetyNet.uid).toBe(fixtureOwner.uid);
-      expect(hardenedSafetyNet.gid).toBe(fixtureOwner.gid);
-      expect(hardenedCiaoGuard.uid).toBe(fixtureOwner.uid);
-      expect(hardenedCiaoGuard.gid).toBe(fixtureOwner.gid);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

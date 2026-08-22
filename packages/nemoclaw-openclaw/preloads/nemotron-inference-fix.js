@@ -463,7 +463,9 @@
   function addChunk(chunks, chunk, encoding) {
     if (chunk == null) return;
     if (typeof chunk === "string") {
-      var chunkEncoding = typeof encoding === "string" ? encoding : undefined;
+      var chunkEncoding = /** @type {BufferEncoding | undefined} */ (
+        typeof encoding === "string" ? encoding : undefined
+      );
       chunks.push(Buffer.from(chunk, chunkEncoding));
     } else {
       chunks.push(Buffer.from(chunk));
@@ -484,7 +486,10 @@
   }
 
   function wrapFetch() {
-    if (typeof globalThis.fetch !== "function" || globalThis.fetch.__nemoclawInferenceFix) {
+    if (
+      typeof globalThis.fetch !== "function" ||
+      /** @type {{ __nemoclawInferenceFix?: boolean }} */ (globalThis.fetch).__nemoclawInferenceFix
+    ) {
       return;
     }
 

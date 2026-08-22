@@ -84,7 +84,7 @@
     process.on("uncaughtException", function (err, origin) {
       if (
         err &&
-        err.code === "ERR_SYSTEM_ERROR" &&
+        /** @type {NodeJS.ErrnoException} */ (err).code === "ERR_SYSTEM_ERROR" &&
         String(err.message || "").indexOf("uv_interface_addresses") !== -1
       ) {
         process.stderr.write(

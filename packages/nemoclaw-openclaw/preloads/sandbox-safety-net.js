@@ -119,6 +119,10 @@
   });
 
   process.on("unhandledRejection", function (reason, promise) {
+    var rejection =
+      reason && (typeof reason === "object" || typeof reason === "function")
+        ? /** @type {{ message?: string, stack?: string }} */ (reason)
+        : {};
     var benign = classifyBenignRejection(reason);
     if (benign) {
       try {
@@ -126,7 +130,7 @@
           "[sandbox-safety-net] unhandledRejection [known-benign: " +
             benign +
             "]: " +
-            (reason && reason.message ? reason.message : String(reason)) +
+            (rejection.message || String(reason)) +
             "\n",
         );
       } catch (_) {}
@@ -135,7 +139,7 @@
     try {
       process.stderr.write(
         "[sandbox-safety-net] unhandledRejection [UNKNOWN PATTERN \u2014 please diagnose]: " +
-          (reason && reason.stack ? reason.stack : String(reason)) +
+          (rejection.stack || String(reason)) +
           " \u2014 gateway continues\n",
       );
     } catch (_) {}
