@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Gateway serving watchdog coverage for scripts/nemoclaw-start.sh (#4710,
+// Gateway serving watchdog coverage for packages/nemoclaw-openclaw/start.sh (#4710,
 // #7377). The OpenClaw gateway can stop serving while its process stays alive
 // (a failed in-process SIGUSR1 restart parks it with no usable listener), and
 // the #2757 respawn loop only sees process exit. The watchdog must recognize

@@ -4,7 +4,7 @@
 #
 # NemoClaw sandbox entrypoint for Hermes Agent.
 #
-# Mirrors scripts/nemoclaw-start.sh (OpenClaw) but launches `hermes gateway
+# Mirrors packages/nemoclaw-openclaw/start.sh (OpenClaw) but launches `hermes gateway
 # start` instead of `openclaw gateway run`. Key differences:
 #   - No device-pairing auto-pair watcher (Hermes has no browser pairing)
 #   - Config is YAML (config.yaml + .env) not JSON (openclaw.json)
@@ -145,7 +145,7 @@ unset -f nemoclaw_normalize_entrypoint_env_wrapper
 
 # ── Source shared sandbox initialisation library ─────────────────
 # Single source of truth for security-sensitive primitives shared with
-# scripts/nemoclaw-start.sh (OpenClaw). Ref: #2277
+# packages/nemoclaw-openclaw/start.sh (OpenClaw). Ref: #2277
 # Installed location (container): /usr/local/lib/nemoclaw/sandbox-init.sh
 # Dev fallback: scripts/lib/sandbox-init.sh relative to this script.
 _SANDBOX_INIT="/usr/local/lib/nemoclaw/sandbox-init.sh"
@@ -226,7 +226,7 @@ exec > >(tee -a "$_START_LOG") 2> >(tee -a "$_START_LOG" >&2)
 drop_capabilities /usr/local/bin/nemoclaw-start "$@"
 
 NEMOCLAW_CMD=("$@")
-NEMOCLAW_RUNTIME_STATE_MUTATION_RETRY_ARGV=("${NEMOCLAW_CMD[@]}")
+NEMOCLAW_RUNTIME_STATE_MUTATION_RETRY_ARGV=("$@")
 
 _chat_ui_url_port() {
   [ -n "${CHAT_UI_URL:-}" ] || return 1

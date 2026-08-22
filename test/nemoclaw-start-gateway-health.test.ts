@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Gateway-health coverage for scripts/nemoclaw-start.sh (#4503, #4710):
+// Gateway-health coverage for packages/nemoclaw-openclaw/start.sh (#4503, #4710):
 // the Docker HEALTHCHECK marker invariants and the supervised gateway
 // lifecycle. The serving watchdog that recovers an alive-but-not-serving
 // gateway is covered in test/gateway-serving-watchdog.test.ts. Marker tests
@@ -53,8 +53,8 @@ function gatewayLaunchBlock(src: string, kind: "non-root" | "root", gatewayLog: 
       : "# Start the gateway as the 'gateway' user.";
   const start = src.indexOf(startMarker);
   const end = src.indexOf('SANDBOX_WAIT_PID="$GATEWAY_PID"', start);
-  expect(start, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(-1);
-  expect(end, `Expected ${kind} gateway launch block in scripts/nemoclaw-start.sh`).not.toBe(-1);
+  expect(start, `Expected ${kind} gateway launch block in packages/nemoclaw-openclaw/start.sh`).not.toBe(-1);
+  expect(end, `Expected ${kind} gateway launch block in packages/nemoclaw-openclaw/start.sh`).not.toBe(-1);
   return src.slice(start, src.indexOf("\n", end)).replaceAll("/tmp/gateway.log", gatewayLog);
 }
 
@@ -690,10 +690,10 @@ describe("respawn loop pidfile refresh (#4710)", () => {
   function respawnLoop(src: string, kind: "non-root" | "root"): string {
     const first = src.indexOf("RESPAWN_TIMES=()");
     const start = kind === "non-root" ? first : src.indexOf("RESPAWN_TIMES=()", first + 1);
-    expect(start, `Expected ${kind} respawn loop in scripts/nemoclaw-start.sh`).not.toBe(-1);
+    expect(start, `Expected ${kind} respawn loop in packages/nemoclaw-openclaw/start.sh`).not.toBe(-1);
     const endToken = kind === "non-root" ? "\n  done" : "\ndone";
     const end = src.indexOf(endToken, start);
-    expect(end, `Expected ${kind} respawn loop terminator in scripts/nemoclaw-start.sh`).not.toBe(
+    expect(end, `Expected ${kind} respawn loop terminator in packages/nemoclaw-openclaw/start.sh`).not.toBe(
       -1,
     );
     return src.slice(start, end + endToken.length);

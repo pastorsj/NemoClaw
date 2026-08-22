@@ -399,7 +399,7 @@ describe("deterministic PR risk plan", () => {
     const managedImageInputs = [
       activation,
       ".github/workflows/managed-images.yaml",
-      "Dockerfile",
+      "packages/nemoclaw-openclaw/Dockerfile",
       "packages/nemoclaw-hermes/Dockerfile",
       "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
       "scripts/checks/run-managed-image-direct-e2e.ts",
@@ -427,7 +427,7 @@ describe("deterministic PR risk plan", () => {
   it.each([
     ".github/workflows/managed-images.yaml",
     ".dockerignore",
-    "Dockerfile",
+    "packages/nemoclaw-openclaw/Dockerfile",
     "packages/nemoclaw-hermes/Dockerfile",
     "ci/npm-audit-exceptions.json",
     "nemoclaw/src/index.ts",
@@ -811,9 +811,9 @@ describe("deterministic PR risk plan", () => {
     expect(riskPlanRequiredJobIds(result)).toEqual(expect.arrayContaining(jobs));
   });
 
-  it("selects cold full E2E for repository-root OpenClaw image changes (#6660)", () => {
-    const rootImage = plan("Dockerfile");
-    const adjacentImage = plan("Dockerfile.base");
+  it("selects cold full E2E for packaged OpenClaw image changes (#6660)", () => {
+    const rootImage = plan("packages/nemoclaw-openclaw/Dockerfile");
+    const adjacentImage = plan("packages/nemoclaw-openclaw/Dockerfile.base");
 
     expect(rootImage.families.map((family) => family.id)).toEqual([
       "platform-install",
@@ -825,8 +825,14 @@ describe("deterministic PR risk plan", () => {
       "full-e2e",
       "managed-image-multiarch-startup",
     ]);
-    expect(adjacentImage.families.map((family) => family.id)).toEqual(["platform-install"]);
-    expect(riskPlanRequiredJobIds(adjacentImage)).toEqual(["cloud-onboard"]);
+    expect(adjacentImage.families.map((family) => family.id)).toEqual([
+      "platform-install",
+      "managed-image-multiarch",
+    ]);
+    expect(riskPlanRequiredJobIds(adjacentImage)).toEqual([
+      "cloud-onboard",
+      "managed-image-multiarch-startup",
+    ]);
   });
 
   it.each([

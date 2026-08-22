@@ -49,7 +49,7 @@ const TEMP_FILE_PREFIX = "nemoclaw-permissive-runtime";
  *
  * Background (#3942, #3957, #3168): OpenShell refuses to remove a
  * `filesystem_policy.read_only` or `filesystem_policy.read_write` entry
- * on a live sandbox. The static `openclaw-sandbox-permissive.yaml`
+ * on a live sandbox. The static OpenClaw permissive policy
  * baseline does not see runtime-injected paths — `/proc` on GPU
  * sandboxes, `/opt/hermes` on Hermes, `/home/linuxbrew` on post-#3913
  * OpenClaw, and any future agent- or feature-specific enrichment. Each

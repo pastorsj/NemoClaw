@@ -24,7 +24,7 @@ const PYTHON_PATCH = path.join(
   "python3.13-htmlparser-cve-2026-15308.patch",
 );
 const BASE_DOCKERFILES = [
-  path.join(ROOT, "Dockerfile.base"),
+  path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
   path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base"),
   path.join(ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile.base"),
 ] as const;

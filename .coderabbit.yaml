@@ -165,7 +165,7 @@ reviews:
     - path: "nemoclaw/src/blueprint/ssrf.ts"
       instructions: *security-boundary
 
-    - path: "Dockerfile*"
+    - path: "packages/nemoclaw-openclaw/Dockerfile*"
       instructions: *security-boundary
 
     - path: "agents/**"
@@ -174,7 +174,7 @@ reviews:
     - path: "packages/**"
       instructions: *security-boundary
 
-    - path: "scripts/nemoclaw-start.sh"
+    - path: "packages/nemoclaw-openclaw/start.sh"
       instructions: *security-boundary
 
     - path: "scripts/lib/sandbox-init.sh"

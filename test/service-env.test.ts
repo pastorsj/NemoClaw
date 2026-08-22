@@ -22,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 
-const NEMOCLAW_START_SCRIPT = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+const NEMOCLAW_START_SCRIPT = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 const ENTRYPOINT_ENV_WRAPPER = join(
   import.meta.dirname,
   "../scripts/lib/entrypoint-env-wrapper.sh",
@@ -39,7 +39,7 @@ function extractRuntimeShellEnvSnippet() {
   const end = src.indexOf("# cleanup_on_signal", start);
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
-      "Failed to extract write_runtime_shell_env from scripts/nemoclaw-start.sh — " +
+      "Failed to extract write_runtime_shell_env from packages/nemoclaw-openclaw/start.sh — " +
         "the runtime shell env function may have been moved or renamed",
     );
   }
@@ -58,7 +58,7 @@ function extractOpenClawBootstrapEnvSnippet() {
   );
   const extractionFailure =
     "Failed to extract OpenClaw bootstrap environment normalization from " +
-    "scripts/nemoclaw-start.sh";
+    "packages/nemoclaw-openclaw/start.sh";
   expect(entrypointStart, extractionFailure).not.toBe(-1);
   expect(entrypointEnd, extractionFailure).toBeGreaterThan(entrypointStart);
   expect(environmentStart, extractionFailure).not.toBe(-1);
@@ -75,7 +75,7 @@ function extractRuntimeShellEnvShimSnippet() {
   const end = src.indexOf("# ── Legacy layout migration", start);
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
-      "Failed to extract ensure_runtime_shell_env_shim from scripts/nemoclaw-start.sh — " +
+      "Failed to extract ensure_runtime_shell_env_shim from packages/nemoclaw-openclaw/start.sh — " +
         "the rc shim helper may have been moved or renamed",
     );
   }
@@ -90,7 +90,7 @@ function extractToolRedirectsSnippet() {
   const end = src.indexOf(endMarker, loop);
   if (start === -1 || loop === -1 || end === -1 || end <= loop) {
     throw new Error(
-      "Failed to extract _TOOL_REDIRECTS from scripts/nemoclaw-start.sh — " +
+      "Failed to extract _TOOL_REDIRECTS from packages/nemoclaw-openclaw/start.sh — " +
         "the array may have been moved or renamed",
     );
   }
@@ -104,7 +104,7 @@ function extractProxyVarsSnippet() {
   const end = src.indexOf(endMarker, start);
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
-      "Failed to extract proxy configuration from scripts/nemoclaw-start.sh — " +
+      "Failed to extract proxy configuration from packages/nemoclaw-openclaw/start.sh — " +
         "the PROXY_HOST..no_proxy block may have been moved or renamed",
     );
   }
@@ -212,7 +212,7 @@ describe("service environment", () => {
     const sandboxInitSource = `source ${JSON.stringify(join(import.meta.dirname, "../scripts/lib/sandbox-init.sh"))}`;
 
     it("entrypoint exports GIT_SSL_CAINFO when SSL_CERT_FILE points to a real file", () => {
-      const scriptPath = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+      const scriptPath = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
       const src = readFileSync(scriptPath, "utf-8");
       const start = src.indexOf("# Git TLS CA bundle fix");
       const end = src.indexOf("# HTTP library + NODE_USE_ENV_PROXY", start);
@@ -344,7 +344,7 @@ describe("service environment", () => {
       const start = src.indexOf("_TOOL_REDIRECTS=(");
       const end = src.indexOf("done", src.indexOf("for _redir", start));
       if (start === -1 || end === -1 || end <= start) {
-        throw new Error("Failed to extract _TOOL_REDIRECTS block from scripts/nemoclaw-start.sh");
+        throw new Error("Failed to extract _TOOL_REDIRECTS block from packages/nemoclaw-openclaw/start.sh");
       }
       const block = `${src.slice(start, end)}done`;
       const tmpFile = join(tmpdir(), `nemoclaw-tool-redirects-npm-online-${process.pid}.sh`);
@@ -422,7 +422,7 @@ describe("service environment", () => {
     ])(
       "entrypoint pre-creates redirected dirs and restricts GNUPGHOME permissions [$scenario]",
       ({ scenario }) => {
-        const scriptPath = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+        const scriptPath = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
         const src = readFileSync(scriptPath, "utf-8");
         const start = src.indexOf("# Pre-create redirected directories");
         const end = src.indexOf("# ── Drop unnecessary Linux capabilities", start);

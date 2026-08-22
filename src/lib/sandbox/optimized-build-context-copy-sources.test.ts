@@ -36,7 +36,7 @@ describe("optimized build-context Dockerfile sources", () => {
   });
 
   it(
-    "accepts every direct COPY source from the root Dockerfile in the optimized context",
+    "accepts every direct COPY source from the OpenClaw Dockerfile in the optimized context",
     () => {
       checkOptimizedBuildContextCopySources(path.resolve(import.meta.dirname, "../../.."));
     },

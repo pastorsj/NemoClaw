@@ -32,7 +32,7 @@ export const baseImagePublishers = [
   {
     agent: "openclaw",
     displayName: "OpenClaw",
-    dockerfile: "Dockerfile.base",
+    dockerfile: "packages/nemoclaw-openclaw/Dockerfile.base",
     image: "nvidia/nemoclaw/sandbox-base",
     job: "build-and-push-openclaw",
     amd64Job: "build-openclaw-amd64",

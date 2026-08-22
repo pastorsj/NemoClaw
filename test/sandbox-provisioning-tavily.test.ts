@@ -11,7 +11,7 @@ import {
   runLoggedDockerShell,
 } from "./helpers/dockerfile-run-shell";
 
-const DOCKERFILE = path.join(import.meta.dirname, "..", "Dockerfile");
+const DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 
 function runPluginInstallBlock(
   functionDefinition: string,

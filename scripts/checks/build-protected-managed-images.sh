@@ -460,7 +460,7 @@ build_agent() {
 
 build_agent \
   openclaw \
-  Dockerfile \
+  packages/nemoclaw-openclaw/Dockerfile \
   "$openclaw_base"
 build_agent \
   hermes \

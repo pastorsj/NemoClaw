@@ -10,7 +10,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-export const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+export const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 // Heredoc-aware extractor. The reconcile harness's naive /^}/m regex stops at
 // the first column-0 "}", which for refresh_openclaw_provider_placeholders is
@@ -20,7 +26,7 @@ export const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nem
 export function extractShellFunction(src: string, name: string): string {
   const lines = src.split("\n");
   const start = lines.findIndex((line) => line.startsWith(`${name}() {`));
-  if (start < 0) throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+  if (start < 0) throw new Error(`Expected ${name} in packages/nemoclaw-openclaw/start.sh`);
   let heredocTerminator: string | null = null;
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i];
@@ -35,7 +41,7 @@ export function extractShellFunction(src: string, name: string): string {
     }
     if (line === "}") return lines.slice(start, i + 1).join("\n");
   }
-  throw new Error(`Expected a top-level close for ${name} in scripts/nemoclaw-start.sh`);
+  throw new Error(`Expected a top-level close for ${name} in packages/nemoclaw-openclaw/start.sh`);
 }
 
 export interface RunResult {

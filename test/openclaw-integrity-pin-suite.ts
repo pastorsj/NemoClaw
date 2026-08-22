@@ -12,8 +12,8 @@ import { createBuiltInChannelManifestRegistry } from "../src/lib/messaging";
 import { reviewedOpenClawPluginIntegrityByPackageSpec } from "../src/lib/messaging/applier/build/messaging-build-applier.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
-const DOCKERFILE = path.join(REPO_ROOT, "Dockerfile");
-const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
+const DOCKERFILE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
+const DOCKERFILE_BASE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const PRODUCTION_DOCKERFILES = [
   DOCKERFILE,
   DOCKERFILE_BASE,

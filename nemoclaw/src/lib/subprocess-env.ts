@@ -82,7 +82,7 @@ export function isSubprocessEnvNameAllowed(name: string): boolean {
  * inference traffic off the host proxy chain.
  *
  * The sandbox runtime's own NO_PROXY is set later by
- * `scripts/nemoclaw-start.sh` against the OpenShell L7 proxy address and
+ * `packages/nemoclaw-openclaw/start.sh` against the OpenShell L7 proxy address and
  * intentionally does not include `inference.local`, which is orthogonal
  * to this seed and unaffected by the augmentation.
  *

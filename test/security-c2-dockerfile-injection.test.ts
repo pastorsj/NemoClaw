@@ -16,7 +16,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { dockerfileInstructions } from "../src/lib/onboard/dockerfile-tool-disclosure-contract";
 
-const DOCKERFILE = path.join(import.meta.dirname, "..", "Dockerfile");
+const DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 
 function runNode(src: string, env: Record<string, string | undefined> = {}) {
   return spawnSync("node", ["-e", src], {

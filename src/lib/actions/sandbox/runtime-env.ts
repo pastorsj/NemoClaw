@@ -11,7 +11,7 @@ const SANDBOX_RUNTIME_ENV_FILE = "/tmp/nemoclaw-proxy-env.sh";
 //     every general command inherit it, so diagnostics can print it accidentally
 //     and OpenClaw can select gateway-token auth instead of local device auth.
 //   - Source boundary: the runtime env file is a single shared trusted file;
-//     splitting it per-consumer lives in scripts/nemoclaw-start.sh, not here.
+//     splitting it per-consumer lives in packages/nemoclaw-openclaw/start.sh, not here.
 //     This wrapper therefore removes the token from the child environment after
 //     sourcing. The file remains sandbox-readable by design, so this guard is
 //     not a secrecy boundary against a command that deliberately re-reads it.

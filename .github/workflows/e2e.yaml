@@ -3729,7 +3729,7 @@ jobs:
               ;;
           esac
           source_asset="${OPENSHELL_DEV_ASSET_DIR}/${asset}"
-          [[ -f "$source_asset" && ! -L "$source_asset" && "$destination" = /* && -d "$destination" && ! -L "$destination" ]]
+          [[ -f "$source_asset" && ! -L "$source_asset" && "$destination" = /* && -d "$destination" && ! -L "$destination" ]] || exit 64
           cp -- "$source_asset" "$destination/$asset"
           EOF
           cat >"$shim_dir/curl" <<'EOF'

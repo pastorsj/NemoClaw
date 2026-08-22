@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const DOCKERFILE = path.join(import.meta.dirname, "..", "..", "Dockerfile");
+const DOCKERFILE = path.join(import.meta.dirname, "..", "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 const OPENCLAW_VERSION_EXTRACTOR = path.join(
   import.meta.dirname,
   "..",

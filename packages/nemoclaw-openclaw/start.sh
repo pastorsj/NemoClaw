@@ -48,7 +48,7 @@ export NODE_OPTIONS="--dns-result-order=ipv4first"
 _NEMOCLAW_ENTRYPOINT_ENV_WRAPPER="/usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh"
 if [ ! -f "$_NEMOCLAW_ENTRYPOINT_ENV_WRAPPER" ]; then
   _NEMOCLAW_ENTRYPOINT_SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  _NEMOCLAW_ENTRYPOINT_ENV_WRAPPER="${_NEMOCLAW_ENTRYPOINT_SOURCE_DIR}/lib/entrypoint-env-wrapper.sh"
+  _NEMOCLAW_ENTRYPOINT_ENV_WRAPPER="${_NEMOCLAW_ENTRYPOINT_SOURCE_DIR}/../../scripts/lib/entrypoint-env-wrapper.sh"
   unset _NEMOCLAW_ENTRYPOINT_SOURCE_DIR
 fi
 if [ ! -f "$_NEMOCLAW_ENTRYPOINT_ENV_WRAPPER" ]; then
@@ -147,17 +147,17 @@ exec > >(tee -a "$_START_LOG" >&3) 2> >(tee -a "$_START_LOG" >&4)
 # Single source of truth for security-sensitive primitives shared with
 # packages/nemoclaw-hermes/start.sh. Ref: https://github.com/NVIDIA/NemoClaw/issues/2277
 # Installed location (container): /usr/local/lib/nemoclaw/sandbox-init.sh
-# Dev fallback: scripts/lib/sandbox-init.sh relative to this script.
+# Dev fallback: scripts/lib/sandbox-init.sh relative to this package.
 _SANDBOX_INIT="/usr/local/lib/nemoclaw/sandbox-init.sh"
 if [ ! -f "$_SANDBOX_INIT" ]; then
-  _SANDBOX_INIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sandbox-init.sh"
+  _SANDBOX_INIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/lib/sandbox-init.sh"
 fi
 # shellcheck source=scripts/lib/sandbox-init.sh
 source "$_SANDBOX_INIT"
 
 _GATEWAY_SUPERVISOR="/usr/local/lib/nemoclaw/gateway-supervisor.sh"
 if [ ! -f "$_GATEWAY_SUPERVISOR" ]; then
-  _GATEWAY_SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gateway-supervisor.sh"
+  _GATEWAY_SUPERVISOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/lib/gateway-supervisor.sh"
 fi
 # shellcheck source=scripts/lib/gateway-supervisor.sh
 source "$_GATEWAY_SUPERVISOR"
@@ -468,7 +468,7 @@ export OPENCLAW_GATEWAY_PORT="$_DASHBOARD_PORT"
 # WebSocket upgrade dies with `1006 abnormal closure (no close frame)` and
 # nothing reaches the gateway log. The gateway listens on 0.0.0.0 and the
 # eth0 address is allowlisted in the base sandbox policy
-# (openclaw_gateway_dialback in openclaw-sandbox.yaml), so the same dial
+# (openclaw_gateway_dialback in policy-additions.yaml), so the same dial
 # works from both enforced and unenforced contexts. Falls back to loopback
 # when no interface address is detectable (the pre-fix behavior). Override
 # with NEMOCLAW_GATEWAY_WS_HOST.
@@ -553,7 +553,7 @@ resolve_mutable_config_normalizer() {
     printf '%s\n' "scripts/lib/normalize_mutable_config_perms.py"
     return 0
   fi
-  normalizer="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/normalize_mutable_config_perms.py"
+  normalizer="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/lib/normalize_mutable_config_perms.py"
   if [ -f "$normalizer" ]; then
     printf '%s\n' "$normalizer"
     return 0
@@ -3212,7 +3212,7 @@ export no_proxy="$_NO_PROXY_VAL"
 _NEMOCLAW_CORPORATE_CA_FILE="/usr/local/share/nemoclaw/corporate-ca.pem"
 _NEMOCLAW_CORPORATE_CA_HELPER="/usr/local/lib/nemoclaw/corporate-ca-runtime.sh"
 if [ ! -f "$_NEMOCLAW_CORPORATE_CA_HELPER" ]; then
-  _NEMOCLAW_CORPORATE_CA_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/corporate-ca-runtime.sh"
+  _NEMOCLAW_CORPORATE_CA_HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/lib/corporate-ca-runtime.sh"
 fi
 if [ ! -f "$_NEMOCLAW_CORPORATE_CA_HELPER" ] || [ -L "$_NEMOCLAW_CORPORATE_CA_HELPER" ]; then
   echo "[nemoclaw] required corporate CA runtime helper is missing or unsafe" >&2
@@ -4122,13 +4122,13 @@ ensure_runtime_shell_env_shim() {
   # helper is missing — i.e. running the unit-test wrappers against the
   # repository tree, where the script lives at scripts/lib/ instead.
   # The final fallback resolves the script relative to nemoclaw-start.sh so
-  # `bash scripts/nemoclaw-start.sh` works out-of-the-box for ad-hoc dev runs.
+  # `bash packages/nemoclaw-openclaw/start.sh` works out-of-the-box for ad-hoc dev runs.
   local clean_script="/usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py"
   if [ ! -f "$clean_script" ]; then
     if [ -n "${NEMOCLAW_RC_CLEAN_SCRIPT:-}" ] && [ -f "${NEMOCLAW_RC_CLEAN_SCRIPT}" ]; then
       clean_script="${NEMOCLAW_RC_CLEAN_SCRIPT}"
     else
-      clean_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/clean_runtime_shell_env_shim.py"
+      clean_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../scripts/lib/clean_runtime_shell_env_shim.py"
     fi
   fi
 

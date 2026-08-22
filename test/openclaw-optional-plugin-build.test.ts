@@ -15,7 +15,7 @@ const BRAVE_TARBALL =
   "https://registry.npmjs.org/@openclaw/brave-plugin/-/brave-plugin-2026.7.1.tgz";
 
 it("pins Brave web-search and preserves its placeholder during build-time doctor", () => {
-  const dockerfile = fs.readFileSync(path.join(ROOT, "Dockerfile"), "utf-8");
+  const dockerfile = fs.readFileSync(path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile"), "utf-8");
   const start = dockerfile.indexOf("# Install non-messaging OpenClaw plugins");
   const command = dockerfile
     .slice(start)

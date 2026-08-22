@@ -6,7 +6,7 @@ import path from "node:path";
 import { REPO_ROOT } from "./paths.ts";
 
 const LEGACY_DOCKERFILE_BY_AGENT = {
-  openclaw: "Dockerfile",
+  openclaw: "packages/nemoclaw-openclaw/Dockerfile",
   hermes: "packages/nemoclaw-hermes/Dockerfile",
   "langchain-deepagents-code": "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 } as const;

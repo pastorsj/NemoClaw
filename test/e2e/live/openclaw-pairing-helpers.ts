@@ -341,7 +341,7 @@ NODE
 // localized fake API port and proxy environment because those values are injected
 // by the Vitest harness before the probe opens direct Node socket/http clients.
 // Invalid state: a malformed fake port or proxy env, or a proxy destination other
-// than the NemoClaw/OpenShell gateway proxy emitted by scripts/nemoclaw-start.sh,
+// than the NemoClaw/OpenShell gateway proxy emitted by packages/nemoclaw-openclaw/start.sh,
 // would otherwise hide the real pairing failure behind a low-level network error
 // or route the fake Slack websocket through an unexpected host. Source-fix
 // constraint: do not change global sandbox proxy generation for this probe; fail

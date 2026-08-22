@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(process.cwd(), "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(process.cwd(), "packages", "nemoclaw-openclaw", "start.sh");
 
 function sourceBlock(source: string, startMarker: string, endMarker: string): string {
   const start = source.indexOf(startMarker);

@@ -12,11 +12,18 @@ import { readHermesBuildSettings } from "../packages/nemoclaw-hermes/config/buil
 import { buildConfig } from "../scripts/generate-openclaw-config.mts";
 import { patchStagedDockerfile } from "../src/lib/onboard/dockerfile-patch";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 const SECRET_BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
+  "packages",
+  "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 
@@ -51,7 +58,7 @@ function stageDockerfile(providerArgLine: string): string {
 }
 
 const MANAGED_DOCKERFILES = [
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ];
@@ -83,16 +90,17 @@ describe("inference provider route identifier rename (#7177)", () => {
     expect(patched).toContain("ARG NEMOCLAW_PROVIDER_KEY=inference");
   });
 
-  it.each(
-    MANAGED_DOCKERFILES,
-  )("declares the non-secret route identifier and no secret-shaped name in %s", (relative) => {
-    const source = fs.readFileSync(path.join(process.cwd(), relative), "utf-8");
-    expect(source).toMatch(/^ARG NEMOCLAW_INFERENCE_PROVIDER_ID=/m);
-    expect(source).toMatch(
-      /^\s*NEMOCLAW_INFERENCE_PROVIDER_ID=\$\{NEMOCLAW_INFERENCE_PROVIDER_ID\}/m,
-    );
-    expect(source).not.toContain("NEMOCLAW_PROVIDER_KEY");
-  });
+  it.each(MANAGED_DOCKERFILES)(
+    "declares the non-secret route identifier and no secret-shaped name in %s",
+    (relative) => {
+      const source = fs.readFileSync(path.join(process.cwd(), relative), "utf-8");
+      expect(source).toMatch(/^ARG NEMOCLAW_INFERENCE_PROVIDER_ID=/m);
+      expect(source).toMatch(
+        /^\s*NEMOCLAW_INFERENCE_PROVIDER_ID=\$\{NEMOCLAW_INFERENCE_PROVIDER_ID\}/m,
+      );
+      expect(source).not.toContain("NEMOCLAW_PROVIDER_KEY");
+    },
+  );
 
   it("reads the route identifier from NEMOCLAW_INFERENCE_PROVIDER_ID", () => {
     const settings = readHermesBuildSettings({

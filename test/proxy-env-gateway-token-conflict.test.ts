@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Behavioral contract for the OPENCLAW_GATEWAY_TOKEN trust-anchor reconcile
-// block emitted into /tmp/nemoclaw-proxy-env.sh by scripts/nemoclaw-start.sh.
+// block emitted into /tmp/nemoclaw-proxy-env.sh by packages/nemoclaw-openclaw/start.sh.
 // Exercises the actual generated file under POSIX sh and Bash. Regression: a
 // blind assignment aborted sourcing with the shell's raw readonly error when
 // the sourcing shell had already pinned OPENCLAW_GATEWAY_TOKEN readonly to a
@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
-const OPENCLAW_START = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+const OPENCLAW_START = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 const WRITE_RUNTIME_SHELL_ENV = extractShellFunctionFromSource(
   readFileSync(OPENCLAW_START, "utf-8"),
   "write_runtime_shell_env",

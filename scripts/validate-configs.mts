@@ -82,8 +82,8 @@ function discoverTargets(): ConfigTarget[] {
     {
       schema: "schemas/sandbox-policy.schema.json",
       files: [
-        "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
-        "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
+        "packages/nemoclaw-openclaw/policy-additions.yaml",
+        "packages/nemoclaw-openclaw/policy-permissive-default.yaml",
       ],
     },
     {

@@ -156,7 +156,7 @@ jobs:
           BASE_IMAGE: ${{ env.BASE_IMAGE }}
         run: |
           set -euo pipefail
-          build_args=(--build-arg "BASE_IMAGE=${BASE_IMAGE}")
+          build_args=(-f packages/nemoclaw-openclaw/Dockerfile --build-arg "BASE_IMAGE=${BASE_IMAGE}")
           scripts/check-production-build-args.sh "${build_args[@]}"
           docker build "${build_args[@]}" -t nemoclaw-production .
 
@@ -201,7 +201,7 @@ jobs:
           BASE_IMAGE: ${{ env.BASE_IMAGE }}
         run: |
           set -euo pipefail
-          build_args=(--build-arg "BASE_IMAGE=${BASE_IMAGE}")
+          build_args=(-f packages/nemoclaw-openclaw/Dockerfile --build-arg "BASE_IMAGE=${BASE_IMAGE}")
           scripts/check-production-build-args.sh "${build_args[@]}"
           docker build "${build_args[@]}" -t nemoclaw-production-arm64 .
 

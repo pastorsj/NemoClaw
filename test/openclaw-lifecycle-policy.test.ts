@@ -48,8 +48,8 @@ function explicitLifecycleScripts(block) {
   return scripts.sort((left, right) => left.packageSpec.localeCompare(right.packageSpec));
 }
 
-const dockerfile = fs.readFileSync("Dockerfile", "utf8");
-const dockerfileBase = fs.readFileSync("Dockerfile.base", "utf8");
+const dockerfile = fs.readFileSync("packages/nemoclaw-openclaw/Dockerfile", "utf8");
+const dockerfileBase = fs.readFileSync("packages/nemoclaw-openclaw/Dockerfile.base", "utf8");
 const messagingApplier = fs.readFileSync(
   "src/lib/messaging/applier/build/messaging-build-applier.mts",
   "utf8",

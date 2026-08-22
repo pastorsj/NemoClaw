@@ -14,12 +14,18 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 /** Slice a brace-balanced (no nested braces) shell function out of the source. */
 function extractFunction(src: string, name: string): string {
   const start = src.indexOf(`${name}() {`);
-  if (start === -1) throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+  if (start === -1) throw new Error(`Expected ${name} in packages/nemoclaw-openclaw/start.sh`);
   const end = src.indexOf("\n}", start);
   if (end === -1) throw new Error(`Expected closing brace for ${name}`);
   return src.slice(start, end + 2);
@@ -29,7 +35,7 @@ function safeTmpHelpers(src: string): string {
   const start = src.indexOf("_nemoclaw_safe_replace_tmp_file() {");
   const end = src.indexOf("_START_LOG=", start);
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Expected safe temp helpers in scripts/nemoclaw-start.sh");
+    throw new Error("Expected safe temp helpers in packages/nemoclaw-openclaw/start.sh");
   }
   return src.slice(start, end);
 }

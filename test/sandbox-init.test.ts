@@ -760,7 +760,10 @@ EOF
   });
 
   describe("entrypoints call harden_resource_limits", () => {
-    const entrypoints = ["../scripts/nemoclaw-start.sh", "../packages/nemoclaw-hermes/start.sh"];
+    const entrypoints = [
+      "../packages/nemoclaw-openclaw/start.sh",
+      "../packages/nemoclaw-hermes/start.sh",
+    ];
 
     // Both entrypoints must delegate RLIMIT hardening to the shared helper and
     // must no longer carry the pre-#4527 raw inline `ulimit -Su 512` block.
@@ -1022,19 +1025,24 @@ EOF
 
   describe("both entrypoints source the shared library", () => {
     it("nemoclaw-start.sh sources sandbox-init.sh", () => {
-      const src = readFileSync(join(import.meta.dirname, "../scripts/nemoclaw-start.sh"), "utf-8");
+      const src = readFileSync(
+        join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh"),
+        "utf-8",
+      );
       const start = src.indexOf("_SANDBOX_INIT=");
       // Bound the source block at the harden_resource_limits call line itself
       // (executable, stable) rather than a free-text comment that may be reworded.
       const hardenCallFromStart = src.slice(start).match(/^\s*harden_resource_limits\s*$/m);
       const end = hardenCallFromStart ? start + (hardenCallFromStart.index ?? 0) : -1;
       if (start === -1 || end === -1 || end <= start) {
-        throw new Error("Expected sandbox-init source block in scripts/nemoclaw-start.sh");
+        throw new Error(
+          "Expected sandbox-init source block in packages/nemoclaw-openclaw/start.sh",
+        );
       }
 
       const workDir = mkdtempSync(join(tmpdir(), "nemoclaw-start-source-init-"));
-      const scriptDir = join(workDir, "scripts");
-      const libDir = join(scriptDir, "lib");
+      const packageDir = join(workDir, "packages", "nemoclaw-openclaw");
+      const libDir = join(workDir, "scripts", "lib");
       mkdirSync(libDir, { recursive: true });
       writeFileSync(
         join(libDir, "sandbox-init.sh"),
@@ -1044,7 +1052,8 @@ EOF
         join(libDir, "gateway-supervisor.sh"),
         "export NEMOCLAW_TEST_GATEWAY_SUPERVISOR_LOADED=1\n",
       );
-      const wrapperPath = join(scriptDir, "nemoclaw-start.sh");
+      const wrapperPath = join(packageDir, "start.sh");
+      mkdirSync(packageDir, { recursive: true });
       writeFileSync(
         wrapperPath,
         [

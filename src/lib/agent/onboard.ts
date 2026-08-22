@@ -153,12 +153,9 @@ export function resolveAgent({
   return loadAgent(name);
 }
 
-/**
- * Get the agent-specific network policy path, or null to use the default.
- */
-export function getAgentPolicyPath(agent: AgentDefinition): string | null {
-  if (agent.name === "openclaw") return null;
-  return requireAgentPolicyAdditionsPath(agent);
+/** Get the selected agent package's reviewed network policy path. */
+export function getAgentPolicyPath(agent: AgentDefinition | null): string {
+  return requireAgentPolicyAdditionsPath(agent ?? loadAgent("openclaw"));
 }
 
 /**

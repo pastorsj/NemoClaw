@@ -31,7 +31,7 @@ on:
       - ".dockerignore"
       # Complete managed-image inputs. Keep these reviewed families synchronized
       # with tools/e2e/base-image-publication.mts.
-      - "Dockerfile"
+      - "packages/nemoclaw-openclaw/Dockerfile"
       - "agents/**"
       - "packages/**"
       - "nemoclaw/**"
@@ -51,7 +51,7 @@ on:
       - "src/lib/tool-disclosure.ts"
       - "tools/mcp-tool-discovery-runtime/**"
       - "tsconfig.runtime-preloads.json"
-      - "Dockerfile.base"
+      - "packages/nemoclaw-openclaw/Dockerfile.base"
       - "packages/nemoclaw-openclaw/openclaw-runtime/package.json"
       - "packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json"
       - "scripts/lib/reviewed-npm-archive.mts"
@@ -137,7 +137,7 @@ jobs:
       arch: amd64
       platform: linux/amd64
       runner: ubuntu-24.04
-      dockerfile: Dockerfile.base
+      dockerfile: packages/nemoclaw-openclaw/Dockerfile.base
       image: nvidia/nemoclaw/sandbox-base
       openclaw-version: ${{ inputs.openclaw_version }}
     secrets:
@@ -157,7 +157,7 @@ jobs:
       arch: arm64
       platform: linux/arm64
       runner: ubuntu-24.04-arm
-      dockerfile: Dockerfile.base
+      dockerfile: packages/nemoclaw-openclaw/Dockerfile.base
       image: nvidia/nemoclaw/sandbox-base
       openclaw-version: ${{ inputs.openclaw_version }}
     secrets:

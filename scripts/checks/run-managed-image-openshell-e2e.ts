@@ -70,7 +70,7 @@ const MODEL = "nvidia/nemotron-3-ultra-550b-a55b";
 const GATEWAY_PORT = 8080;
 const IMMUTABLE_MANIFEST_REFERENCE_RE = /^([^\s@]+)@(sha256:[a-f0-9]{64})$/u;
 const MANAGED_AGENT_BASE_POLICIES: Record<ShippedManagedImageAgent, readonly string[]> = {
-  openclaw: ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
+  openclaw: ["packages", "nemoclaw-openclaw", "policy-additions.yaml"],
   hermes: ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
   "langchain-deepagents-code": ["packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"],
 };

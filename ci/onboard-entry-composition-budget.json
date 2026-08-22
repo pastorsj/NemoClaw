@@ -13,8 +13,7 @@
   "policy": {
     "createOnboardPolicyApplication.getRecordedPolicyTier": 1,
     "preflightAuthoritativeRebuildTarget": 1,
-    "runOnboard": 5,
-    "sandboxCreateIntentResolver.getAgentPolicyPath": 1
+    "runOnboard": 5
   },
   "provider": {
     "handleNimLocalSelection": 36,

@@ -2313,7 +2313,7 @@ resolve_openclaw_version() {
   local package_json dockerfile_base resolved_version
 
   package_json="${install_dir}/package.json"
-  dockerfile_base="${install_dir}/Dockerfile.base"
+  dockerfile_base="${install_dir}/packages/nemoclaw-openclaw/Dockerfile.base"
 
   if [[ -f "$package_json" ]]; then
     resolved_version="$(

@@ -287,7 +287,7 @@ function dockerArgs(relativePath: string): Set<string> {
 }
 
 const STOCK_DOCKER_ARGS = {
-  openclaw: dockerArgs(path.join(process.cwd(), "Dockerfile")),
+  openclaw: dockerArgs(path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile")),
   hermes: dockerArgs(path.join(process.cwd(), "packages/nemoclaw-hermes/Dockerfile")),
   "langchain-deepagents-code": dockerArgs(
     path.join(process.cwd(), "packages/nemoclaw-langchain-deepagents-code/Dockerfile"),
@@ -313,7 +313,7 @@ const STOCK_RUNTIME_INPUTS = new Set(
   ]).map((match) => match[1] as string),
 );
 const OPENCLAW_AUTO_PAIR_CONSUMER_INPUTS = new Set(
-  readFileSync(path.join(process.cwd(), "scripts/nemoclaw-start.sh"), "utf8").match(
+  readFileSync(path.join(process.cwd(), "packages/nemoclaw-openclaw/start.sh"), "utf8").match(
     /\bNEMOCLAW_AUTO_PAIR_[A-Z0-9_]+\b/gu,
   ) ?? [],
 );

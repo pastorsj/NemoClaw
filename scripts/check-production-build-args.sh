@@ -13,8 +13,8 @@ readonly legacy_fixture_key="NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW"
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly repo_root
 readonly -a production_dockerfiles=(
-  "${repo_root}/Dockerfile"
-  "${repo_root}/Dockerfile.base"
+  "${repo_root}/packages/nemoclaw-openclaw/Dockerfile"
+  "${repo_root}/packages/nemoclaw-openclaw/Dockerfile.base"
   "${repo_root}/packages/nemoclaw-hermes/Dockerfile"
   "${repo_root}/packages/nemoclaw-hermes/Dockerfile.base"
   "${repo_root}/packages/nemoclaw-langchain-deepagents-code/Dockerfile"

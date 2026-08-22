@@ -19,7 +19,7 @@ describe("rebuildSandbox flow: recovery", () => {
   installRebuildFlowTestHooks();
 
   it("uses marked manifest provenance when the custom-image registry baseline is missing (#6108)", async () => {
-    const customDockerfile = path.join(process.cwd(), "Dockerfile");
+    const customDockerfile = path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile");
     const recoveryManifest = {
       ...makePreparedRecoveryManifest(),
       reconcileOpenClawImagePluginProvenance: true,

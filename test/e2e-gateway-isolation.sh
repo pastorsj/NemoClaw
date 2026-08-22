@@ -40,7 +40,7 @@ if docker image inspect "$IMAGE" >/dev/null 2>&1; then
 else
   info "Building sandbox image..."
   BUILD_LOG="$(mktemp)"
-  if ! docker build -t "$IMAGE" "$REPO_DIR" >"$BUILD_LOG" 2>&1; then
+  if ! docker build -f "$REPO_DIR/packages/nemoclaw-openclaw/Dockerfile" -t "$IMAGE" "$REPO_DIR" >"$BUILD_LOG" 2>&1; then
     tail -40 "$BUILD_LOG"
     fail "Docker build failed (last 40 lines above)"
     exit 1

@@ -142,7 +142,7 @@ const LOG_FOUND_PREFIX = "FOUND:";
 
 // Regex the awk filter uses to detect a new gateway launch. Tracks both
 // the initial-launch line and the respawn line written by
-// `scripts/nemoclaw-start.sh` (search for "openclaw gateway launched" and
+// `packages/nemoclaw-openclaw/start.sh` (search for "openclaw gateway launched" and
 // "respawning" in that file). Whenever the awk pass sees this marker, it
 // drops everything accumulated so far — the result is the slice of the
 // log file written since the most recent boot. Without this, stale

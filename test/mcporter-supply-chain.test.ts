@@ -17,7 +17,7 @@ const dependencyReview = fs.readFileSync(
 );
 const dockerfiles = ["Dockerfile.base", "Dockerfile"].map((name) => ({
   name,
-  contents: fs.readFileSync(path.join(repoRoot, name), "utf8"),
+  contents: fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-openclaw", name), "utf8"),
 }));
 const expectedVersion = "0.7.3";
 const expectedIntegrity =

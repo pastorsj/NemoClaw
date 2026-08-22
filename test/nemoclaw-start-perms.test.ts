@@ -7,7 +7,13 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 const NORMALIZER_SCRIPT = path.join(
   import.meta.dirname,
   "..",
@@ -23,7 +29,7 @@ function extractShellFunction(name: string): string {
   const body =
     match?.[1] ??
     (() => {
-      throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+      throw new Error(`Expected ${name} in packages/nemoclaw-openclaw/start.sh`);
     })();
   return `${name}() {${body}\n}`;
 }
@@ -171,7 +177,17 @@ describe("nemoclaw-start config guard output permissions", () => {
         expect(fs.statSync(privateDir).uid).toBe(0);
         const remainingOutput = spawnSync(
           "sudo",
-          ["-n", "/usr/bin/find", privateDir, "-mindepth", "1", "-maxdepth", "1", "-print", "-quit"],
+          [
+            "-n",
+            "/usr/bin/find",
+            privateDir,
+            "-mindepth",
+            "1",
+            "-maxdepth",
+            "1",
+            "-print",
+            "-quit",
+          ],
           { encoding: "utf-8" },
         );
         expect(remainingOutput.status, remainingOutput.stderr).toBe(0);

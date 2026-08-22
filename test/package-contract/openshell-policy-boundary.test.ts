@@ -372,7 +372,7 @@ process.stdout.write("validated");
       auditOpenShellPolicyBoundaryDependencies('const dependency = "yaml"; require(dependency);'),
     ).toThrow(/non-literal module load/);
 
-    const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
+    const dockerfile = fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"), "utf8");
     expect(dockerfile).toContain("verify-openshell-policy-boundary-dependencies.mts");
     expect(dockerfile).toContain("dist/shared/openshell-policy-boundary.cjs");
   });

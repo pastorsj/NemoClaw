@@ -8,7 +8,13 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 const NEMOTRON_FIX_SOURCE = path.join(
   import.meta.dirname,
   "..",
@@ -21,7 +27,7 @@ function extractStartScriptHeredoc(src, marker) {
   const heredoc = src.match(new RegExp(`<<'${marker}'\\n([\\s\\S]*?)\\n${marker}`));
   if (heredoc) return heredoc[1];
   if (marker === "NEMOTRON_FIX_EOF") return fs.readFileSync(NEMOTRON_FIX_SOURCE, "utf-8");
-  throw new Error(`Expected ${marker} heredoc in scripts/nemoclaw-start.sh`);
+  throw new Error(`Expected ${marker} heredoc in packages/nemoclaw-openclaw/start.sh`);
 }
 
 function extractShellFunction(source, name) {
@@ -44,7 +50,7 @@ describe("NVIDIA endpoint inference fix preload (#1193, #2051, #4063)", () => {
     const end = src.indexOf("# mDNS / ciao network interface guard", start);
     if (start === -1 || end === -1 || end <= start) {
       throw new Error(
-        "Expected NVIDIA endpoint preload entrypoint block in scripts/nemoclaw-start.sh",
+        "Expected NVIDIA endpoint preload entrypoint block in packages/nemoclaw-openclaw/start.sh",
       );
     }
     const block = src

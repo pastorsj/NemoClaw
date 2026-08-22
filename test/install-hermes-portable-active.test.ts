@@ -210,9 +210,9 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
       const selection = normalizeInferenceSelection(producedReservation);
       const basePolicyPath = path.join(
         curlPipeCheckout,
-        "nemoclaw-blueprint",
-        "policies",
-        "openclaw-sandbox.yaml",
+        "packages",
+        "nemoclaw-openclaw",
+        "policy-additions.yaml",
       );
       const sandboxGpuConfig = resolveSandboxGpuConfig(null, { env: {} });
       const intent = resolveSandboxCreateIntent({

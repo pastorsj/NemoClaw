@@ -9,8 +9,8 @@ import { describe, expect, it } from "vitest";
 import { dockerRunCommandBetween, runLoggedDockerShell } from "./helpers/dockerfile-run-shell";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const DOCKERFILE = path.join(ROOT, "Dockerfile");
-const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
+const DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
+const DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const PI_DOCKERFILE_BASE = path.join(ROOT, "agents", "pi", "Dockerfile.base");
 const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 const DCODE_DOCKERFILE_BASE = path.join(

@@ -92,7 +92,7 @@ type GuardedProductionBuildContract = {
 
 const GUARDED_PRODUCTION_BUILD_CONTRACTS: readonly GuardedProductionBuildContract[] = [
   {
-    args: '--build-arg "BASE_IMAGE=${BASE_IMAGE}"',
+    args: '-f packages/nemoclaw-openclaw/Dockerfile --build-arg "BASE_IMAGE=${BASE_IMAGE}"',
     envName: "BASE_IMAGE",
     jobName: "build-sandbox-images",
     label: "OpenClaw production image",
@@ -109,7 +109,7 @@ const GUARDED_PRODUCTION_BUILD_CONTRACTS: readonly GuardedProductionBuildContrac
     target: "nemoclaw-hermes-production",
   },
   {
-    args: '--build-arg "BASE_IMAGE=${BASE_IMAGE}"',
+    args: '-f packages/nemoclaw-openclaw/Dockerfile --build-arg "BASE_IMAGE=${BASE_IMAGE}"',
     envName: "BASE_IMAGE",
     jobName: "build-sandbox-images-arm64",
     label: "OpenClaw arm64 production image",
@@ -259,7 +259,7 @@ function validateCanonicalAuth(errors: string[], auth: SandboxImagesWorkflowStep
     `if printf '%s' "\${DOCKERHUB_TOKEN}" | timeout 30s docker login docker.io --username "\${DOCKERHUB_USERNAME}" --password-stdin; then`,
     "if ((attempt < login_attempts)); then",
     'sleep "${retry_seconds}"',
-    'Docker Hub login failed after ${login_attempts} attempts',
+    "Docker Hub login failed after ${login_attempts} attempts",
   ];
   for (const fragment of requiredFragments) {
     if (!run.includes(fragment)) {
@@ -519,6 +519,7 @@ function validateMessagingPlanBoundaryBuild(
     "set -euo pipefail",
     `node --experimental-strip-types scripts/check-messaging-plan-image-boundary.mts plan ${options.agent}`,
     `--build-arg \"${options.baseArgName}=\${${options.baseEnvName}}\"`,
+    ...(options.agent === "openclaw" ? ["-f packages/nemoclaw-openclaw/Dockerfile"] : []),
     '--build-arg "NEMOCLAW_MESSAGING_PLAN_B64=${messaging_plan_b64}"',
     'scripts/check-production-build-args.sh "${build_args[@]}"',
     `docker build \"\${build_args[@]}\" -t ${options.target} .`,

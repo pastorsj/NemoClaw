@@ -338,7 +338,7 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
         'test ! -e "$install_cache"',
       ],
   )("keeps the image cache trusted and deletes the sandbox-writable copy [%s]", (fragment) => {
-    const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
+    const dockerfile = fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"), "utf8");
 
     expect(dockerfile).toContain(fragment);
 

@@ -10,7 +10,7 @@ import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 const APPROVAL_POLICY_DIR = path.join(import.meta.dirname, "..", "scripts", "lib");
 const INSTALLED_APPROVAL_POLICY = "/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py";
 const PRELOAD_SCRIPTS = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "scripts");
@@ -212,7 +212,7 @@ ${script}`,
 function startScriptLine(src: string, needle: string): string {
   const start = src.indexOf(needle);
   if (start === -1) {
-    throw new Error(`Expected line containing ${needle} in scripts/nemoclaw-start.sh`);
+    throw new Error(`Expected line containing ${needle} in OpenClaw start.sh`);
   }
   const end = src.indexOf("\n", start);
   return src.slice(start, end === -1 ? undefined : end);
@@ -223,7 +223,7 @@ function nonRootIntegrityGateBlock(src: string): string {
   const start = src.indexOf('if [ "$(id -u)" -ne 0 ]; then', marker);
   const end = src.indexOf("  apply_model_override", start);
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Expected non-root integrity gate in scripts/nemoclaw-start.sh");
+    throw new Error("Expected non-root integrity gate in OpenClaw start.sh");
   }
   return `${src.slice(start, end)}fi\n`;
 }
@@ -235,7 +235,7 @@ function rootIntegrityGateBlock(src: string): string {
     rootStart,
   );
   if (rootStart === -1 || verifyStart === -1) {
-    throw new Error("Expected root integrity check in scripts/nemoclaw-start.sh");
+    throw new Error("Expected root integrity check in OpenClaw start.sh");
   }
   const lineEnd = src.indexOf("\n", verifyStart);
   return src.slice(verifyStart, lineEnd === -1 ? undefined : lineEnd);
@@ -320,7 +320,6 @@ describe("nemoclaw-start non-root fallback", () => {
     expect(result.stderr).not.toContain("#token=");
     expect(result.stderr).not.toContain(token);
   });
-
 
   it("runs runtime preloads and scans before explicit non-root commands", () => {
     const src = fs.readFileSync(START_SCRIPT, "utf-8");
@@ -408,46 +407,47 @@ describe("nemoclaw-start non-root fallback", () => {
     expect(result.stdout).not.toContain("true");
   });
 
-  it.each(
-    ["workspace", "memory", "credentials", "flows", "telegram", "media"],
-  )("repairs writable OpenClaw state directories in non-root mode [%s]", (dir) => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
-    const match = src.match(/fix_openclaw_ownership\(\) \{([\s\S]*?)^\s*\}/m);
-    if (!match) {
-      throw new Error("Expected fix_openclaw_ownership in scripts/nemoclaw-start.sh");
-    }
-    const fn = `fix_openclaw_ownership() {${match[1]}\n}`;
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-ownership-"));
-    const openclawDir = path.join(tmpDir, ".openclaw");
-    const scriptPath = path.join(tmpDir, "run.sh");
-    fs.mkdirSync(openclawDir, { recursive: true });
-    fs.writeFileSync(path.join(openclawDir, "openclaw.json"), "{}\n", { mode: 0o644 });
-    fs.writeFileSync(path.join(openclawDir, ".config-hash"), "hash\n", { mode: 0o644 });
-    fs.writeFileSync(
-      scriptPath,
-      ["#!/usr/bin/env bash", "set -euo pipefail", fn, "fix_openclaw_ownership"].join("\n"),
-      { mode: 0o700 },
-    );
-    try {
-      const result = spawnSync("bash", [scriptPath], {
-        encoding: "utf-8",
-        timeout: 5000,
-        env: { ...process.env, HOME: tmpDir },
-      });
-      expect(result.status).toBe(0);
-      expect(fs.statSync(path.join(openclawDir, dir)).isDirectory()).toBe(true);
-      expect((fs.statSync(openclawDir).mode & 0o777).toString(8)).toBe("770");
-      expect(fs.statSync(openclawDir).mode & 0o2000).toBe(0o2000);
-      expect((fs.statSync(path.join(openclawDir, "openclaw.json")).mode & 0o777).toString(8)).toBe(
-        "660",
+  it.each(["workspace", "memory", "credentials", "flows", "telegram", "media"])(
+    "repairs writable OpenClaw state directories in non-root mode [%s]",
+    (dir) => {
+      const src = fs.readFileSync(START_SCRIPT, "utf-8");
+      const match = src.match(/fix_openclaw_ownership\(\) \{([\s\S]*?)^\s*\}/m);
+      if (!match) {
+        throw new Error("Expected fix_openclaw_ownership in packages/nemoclaw-openclaw/start.sh");
+      }
+      const fn = `fix_openclaw_ownership() {${match[1]}\n}`;
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-ownership-"));
+      const openclawDir = path.join(tmpDir, ".openclaw");
+      const scriptPath = path.join(tmpDir, "run.sh");
+      fs.mkdirSync(openclawDir, { recursive: true });
+      fs.writeFileSync(path.join(openclawDir, "openclaw.json"), "{}\n", { mode: 0o644 });
+      fs.writeFileSync(path.join(openclawDir, ".config-hash"), "hash\n", { mode: 0o644 });
+      fs.writeFileSync(
+        scriptPath,
+        ["#!/usr/bin/env bash", "set -euo pipefail", fn, "fix_openclaw_ownership"].join("\n"),
+        { mode: 0o700 },
       );
-      expect((fs.statSync(path.join(openclawDir, ".config-hash")).mode & 0o777).toString(8)).toBe(
-        "660",
-      );
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
+      try {
+        const result = spawnSync("bash", [scriptPath], {
+          encoding: "utf-8",
+          timeout: 5000,
+          env: { ...process.env, HOME: tmpDir },
+        });
+        expect(result.status).toBe(0);
+        expect(fs.statSync(path.join(openclawDir, dir)).isDirectory()).toBe(true);
+        expect((fs.statSync(openclawDir).mode & 0o777).toString(8)).toBe("770");
+        expect(fs.statSync(openclawDir).mode & 0o2000).toBe(0o2000);
+        expect(
+          (fs.statSync(path.join(openclawDir, "openclaw.json")).mode & 0o777).toString(8),
+        ).toBe("660");
+        expect((fs.statSync(path.join(openclawDir, ".config-hash")).mode & 0o777).toString(8)).toBe(
+          "660",
+        );
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe("nemoclaw-start gateway token export (#1114)", () => {
@@ -981,7 +981,7 @@ describe("runtime model override (#759)", () => {
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
     if (!match) {
-      throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+      throw new Error(`Expected ${name} in OpenClaw start.sh`);
     }
     return `${name}() {${match[1]}\n}`;
   }
@@ -1142,7 +1142,7 @@ describe("runtime CORS origin override (#719)", () => {
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
     if (!match) {
-      throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+      throw new Error(`Expected ${name} in OpenClaw start.sh`);
     }
     return `${name}() {${match[1]}\n}`;
   }
@@ -2264,9 +2264,7 @@ describe("NC-2227-01: legacy migration behavior", () => {
     }
   });
 
-  it.each(
-    ["workspace-existing", "workspace-main", "workspace-alpha", "workspace-beta"],
-  )(
+  it.each(["workspace-existing", "workspace-main", "workspace-alpha", "workspace-beta"])(
     "provisions only canonical workspace paths from OpenClaw config [%s]",
     (name) => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-workspaces-"));
@@ -3141,15 +3139,13 @@ describe("provider placeholder refresh (#4251)", () => {
     );
   });
 
-  it.each(
-    [
-        "GITHUB_TOKEN",
-        "AWS_SECRET_ACCESS_KEY",
-        "NPM_TOKEN",
-        "KUBECONFIG",
-        "NEMOCLAW_EXTRA_PLACEHOLDER_KEYS",
-      ],
-  )(
+  it.each([
+    "GITHUB_TOKEN",
+    "AWS_SECRET_ACCESS_KEY",
+    "NPM_TOKEN",
+    "KUBECONFIG",
+    "NEMOCLAW_EXTRA_PLACEHOLDER_KEYS",
+  ])(
     "refuses arbitrary host secret names that do not extend a discovered provider envKey inside the sandbox [%s]",
     (blocked) => {
       // Defence-in-depth: even if an operator clobbers NEMOCLAW_EXTRA_PLACEHOLDER_KEYS
@@ -3328,7 +3324,7 @@ describe("Telegram diagnostics (#2766)", () => {
         : "# Start the gateway as the 'gateway' user.";
     const end = src.indexOf(endMarker, start);
     if (start === -1 || end === -1 || end <= start) {
-      throw new Error(`Expected ${kind} pre-gateway setup block in scripts/nemoclaw-start.sh`);
+      throw new Error(`Expected ${kind} pre-gateway setup block in OpenClaw start.sh`);
     }
     const block = src
       .slice(start, end)
@@ -3816,7 +3812,7 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
     if (!match) {
-      throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+      throw new Error(`Expected ${name} in OpenClaw start.sh`);
     }
     return `${name}() {${match[1]}\n}`;
   }
@@ -4581,7 +4577,7 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
     const writeRuntimeStart = src.indexOf("write_runtime_shell_env() {");
     const writeRuntimeEnd = src.indexOf("\nensure_runtime_shell_env_shim() {", writeRuntimeStart);
     if (writeRuntimeStart === -1 || writeRuntimeEnd === -1) {
-      throw new Error("expected write_runtime_shell_env in scripts/nemoclaw-start.sh");
+      throw new Error("expected write_runtime_shell_env in OpenClaw start.sh");
     }
     const writeRuntimeEnv = src
       .slice(writeRuntimeStart, writeRuntimeEnd)

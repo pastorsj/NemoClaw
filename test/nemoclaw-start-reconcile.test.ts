@@ -7,7 +7,13 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 interface RunReconcileOptions {
   /**
@@ -34,7 +40,7 @@ describe("agent identity reconciliation with provider (#3175)", () => {
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
     if (!match) {
-      throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+      throw new Error(`Expected ${name} in packages/nemoclaw-openclaw/start.sh`);
     }
     return `${name}() {${match[1]}\n}`;
   }

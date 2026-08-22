@@ -385,7 +385,9 @@ describe("complete managed-image publication workflow", () => {
       "openclaw",
     ]);
     expect(matrix.every(({ base_alias }) => base_alias?.endsWith(":latest"))).toBe(true);
-    expect(matrixByAgent.get("openclaw")?.base_dockerfile).toBe("Dockerfile.base");
+    expect(matrixByAgent.get("openclaw")?.base_dockerfile).toBe(
+      "packages/nemoclaw-openclaw/Dockerfile.base",
+    );
     expect(matrixByAgent.get("hermes")?.base_dockerfile).toBe("packages/nemoclaw-hermes/Dockerfile.base");
     expect(matrixByAgent.get("langchain-deepagents-code")?.base_dockerfile).toBe(
       "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
@@ -757,7 +759,7 @@ fi
           ...process.env,
           ALIAS_RAW: aliasRaw,
           BASE_ALIAS: "ghcr.io/nvidia/nemoclaw/sandbox-base:latest",
-          BASE_DOCKERFILE: "Dockerfile.base",
+          BASE_DOCKERFILE: "packages/nemoclaw-openclaw/Dockerfile.base",
           BASE_REPOSITORY: "ghcr.io/nvidia/nemoclaw/sandbox-base",
           BASE_SHA: spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim(),
           CANDIDATE_SHA: spawnSync("git", ["rev-parse", "HEAD"], {
@@ -815,7 +817,7 @@ fi
         agent: "openclaw",
         arch: "amd64",
         display_name: "OpenClaw",
-        dockerfile: "Dockerfile",
+        dockerfile: "packages/nemoclaw-openclaw/Dockerfile",
         base_image: "nvidia/nemoclaw/sandbox-base",
         image: "nvidia/nemoclaw/openclaw-sandbox",
         platform: "linux/amd64",
@@ -827,7 +829,7 @@ fi
         agent: "openclaw",
         arch: "arm64",
         display_name: "OpenClaw",
-        dockerfile: "Dockerfile",
+        dockerfile: "packages/nemoclaw-openclaw/Dockerfile",
         base_image: "nvidia/nemoclaw/sandbox-base",
         image: "nvidia/nemoclaw/openclaw-sandbox",
         platform: "linux/arm64",

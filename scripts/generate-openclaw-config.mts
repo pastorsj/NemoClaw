@@ -707,7 +707,7 @@ const MAIN_AGENT_ENTRY: Readonly<JsonObject> = Object.freeze({
 });
 const AGENT_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 // Secondary agent paths must live under the canonical state dir
-// (/sandbox/.openclaw/). The runtime startup script (scripts/nemoclaw-start.sh
+// (/sandbox/.openclaw/). The runtime startup script (packages/nemoclaw-openclaw/start.sh
 // :: provision_agent_workspaces) discovers /sandbox/.openclaw/workspace-* and
 // chowns them sandbox:sandbox on first boot. The legacy /sandbox/.openclaw-data
 // path is migrated away on start, so it cannot host live agent state.

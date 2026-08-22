@@ -49,7 +49,7 @@ Candidate issue #4187: "Allow opt-in error suppression for sandbox config writes
 
 ### Example B — partial-fix gap (evidence by omission)
 
-PR #2700 changed 5 env-var validations from `return 1` to `return 0` in `scripts/nemoclaw-start.sh`.
+PR #2700 changed 5 env-var validations from `return 1` to `return 0` in `packages/nemoclaw-openclaw/start.sh`.
 Candidate issue #2762: "PR #2700 changed validations... However... NEMOCLAW_CONTEXT_WINDOW and NEMOCLAW_MAX_TOKENS with invalid values still cause the container to exit with code 1."
 
 **Classification:** CONTRADICTING, high confidence (boosted by reverse-link)

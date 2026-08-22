@@ -79,7 +79,7 @@ function runtime(driverName = "docker"): SandboxWorkloadRuntimeCapabilities {
 const REPOSITORY_DOCKERFILE_PATHS: Readonly<Record<string, string>> = {
   hermes: "packages/nemoclaw-hermes/Dockerfile",
   "langchain-deepagents-code": "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
-  openclaw: "Dockerfile",
+  openclaw: "packages/nemoclaw-openclaw/Dockerfile",
 };
 
 function repositoryDockerfilePath(agentName: string): string {

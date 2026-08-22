@@ -114,7 +114,7 @@ const MANAGED_IMAGE_MULTIARCH_INPUTS = new Set([
   PROTECTED_MANAGED_IMAGE_ACTIVATION_PATH,
   ".dockerignore",
   ".github/workflows/managed-images.yaml",
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "ci/npm-audit-exceptions.json",
   "src/lib/core/json-types.ts",
   "src/lib/core/ports.ts",
@@ -467,10 +467,10 @@ export const RISK_RULES: readonly RiskRule[] = [
     tier: 3,
     requiredJobs: ["full-e2e"],
     invariants: [
-      "the repository-root image builds through the same cold path exercised by supported hosts",
+      "the packaged OpenClaw image builds through the same cold path exercised by supported hosts",
       "the resulting OpenClaw sandbox becomes ready and completes a real first turn",
     ],
-    matches: (file) => file === "Dockerfile",
+    matches: (file) => file === "packages/nemoclaw-openclaw/Dockerfile",
   },
   {
     id: "credentials-security",

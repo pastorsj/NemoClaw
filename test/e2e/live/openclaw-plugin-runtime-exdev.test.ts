@@ -119,10 +119,11 @@ const EXDEV_TMPFS_DRIVER_CONFIG = JSON.stringify({
     mounts: [EXDEV_TMPFS_MOUNT_CONFIG],
   },
 });
+const OPENCLAW_PACKAGE_DIR = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw");
 const STOCK_OPENCLAW_POLICY_PATHS = [
-  path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "policy-permissive.yaml"),
-  path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
-  path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
+  path.join(OPENCLAW_PACKAGE_DIR, "policy-permissive.yaml"),
+  path.join(OPENCLAW_PACKAGE_DIR, "policy-additions.yaml"),
+  path.join(OPENCLAW_PACKAGE_DIR, "policy-permissive-default.yaml"),
 ] as const;
 validateSandboxName(SANDBOX_NAME);
 process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
@@ -339,7 +340,9 @@ test(
           (marker) => `${DELEGATED_CAPABILITY_COMMENT_PREFIX}${marker}`,
         ),
       );
-      expect(REQUIRED_OPENSHELL_MCP_FEATURES.every((marker) => wrapperSource.split(marker).length === 2)).toBe(true);
+      expect(
+        REQUIRED_OPENSHELL_MCP_FEATURES.every((marker) => wrapperSource.split(marker).length === 2),
+      ).toBe(true);
       expect(components).toEqual({
         cli: fs.realpathSync(delegate),
         gateway: fs.realpathSync(gateway),
@@ -499,7 +502,7 @@ function createCustomPluginDockerfile(
   context: CustomPluginBuildContext,
   fixture: OpenClawPluginRuntimeExdevFixture,
 ): string {
-  const sourceDockerfile = path.join(context.sourceRoot, "Dockerfile");
+  const sourceDockerfile = path.join(context.sourceRoot, "packages/nemoclaw-openclaw/Dockerfile");
   const source = fs.readFileSync(sourceDockerfile, "utf8");
   const baseImageAnchor = "ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/sandbox-base:latest\n";
   const builderImageRef =

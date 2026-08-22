@@ -55,7 +55,7 @@ const NEAREST_RELEASE_REF = `${IMAGE_NAME}:v0.0.78`;
 function resolutionOptions() {
   return {
     imageName: IMAGE_NAME,
-    dockerfilePath: path.join(process.cwd(), "Dockerfile.base"),
+    dockerfilePath: path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile.base"),
     localTag: LOCAL_TAG,
     rootDir: process.cwd(),
     env: {

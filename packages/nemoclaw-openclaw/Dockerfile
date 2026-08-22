@@ -5,7 +5,7 @@
 # expensive, rarely-changing layers (apt, setpriv, users, openclaw CLI).
 #
 # For local builds without GHCR access, build the base first:
-#   docker build -f Dockerfile.base -t ghcr.io/nvidia/nemoclaw/sandbox-base:latest .
+#   docker build -f packages/nemoclaw-openclaw/Dockerfile.base -t ghcr.io/nvidia/nemoclaw/sandbox-base:latest .
 
 # Global ARG — must be declared before the first FROM to be visible
 # to all FROM directives. Can be overridden via --build-arg.
@@ -543,6 +543,8 @@ FROM scratch AS openclaw-plugin-payload
 COPY --from=builder /opt/nemoclaw/dist/ /opt/nemoclaw/dist/
 COPY nemoclaw/openclaw.plugin.json /opt/nemoclaw/
 COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
+COPY packages/nemoclaw-openclaw/policy-additions.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox.yaml
+COPY packages/nemoclaw-openclaw/policy-permissive-default.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml
 
 FROM scratch AS openclaw-patch-payload
 
@@ -573,7 +575,7 @@ COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
 COPY packages/nemoclaw-openclaw/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
 COPY scripts/openclaw-config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
-COPY scripts/nemoclaw-start.sh /usr/local/bin/nemoclaw-start
+COPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
@@ -1766,7 +1768,7 @@ USER sandbox
 # (running as 'gateway' user). The token file location depends on startup mode:
 #   Root mode:     /run/nemoclaw/gateway-token (gateway:gateway 0400)
 #   Non-root mode: $XDG_RUNTIME_DIR/nemoclaw/gateway-token (sandbox:sandbox 0400)
-# See: scripts/nemoclaw-start.sh generate_gateway_token()
+# See: packages/nemoclaw-openclaw/start.sh generate_gateway_token()
 #
 # Config is mutable by default (group-writable sandbox:sandbox). Immutability
 # is opt-in via `shields up` (DAC 444 root:root + chattr +i).
@@ -2353,7 +2355,7 @@ RUN check_metadata() { \
 #      container is the one running the OpenClaw gateway:
 #        a. If nemoclaw-start launched the gateway in this container it
 #           drops the /tmp/nemoclaw-gateway-local marker (see
-#           scripts/nemoclaw-start.sh). The gateway is local but its port
+#           packages/nemoclaw-openclaw/start.sh). The gateway is local but its port
 #           may be forwarded out of this namespace (#3975), so confirm the
 #           gateway came up: the process is still alive (pgrep
 #           --ignore-ancestors) AND the gateway log is non-empty. A

@@ -46,7 +46,7 @@ const IMAGE_NAME = "ghcr.io/nvidia/nemoclaw/sandbox-base";
 function resolutionOptions() {
   return {
     imageName: IMAGE_NAME,
-    dockerfilePath: path.join(process.cwd(), "Dockerfile.base"),
+    dockerfilePath: path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile.base"),
     localTag: "nemoclaw-sandbox-base-local:test",
     rootDir: process.cwd(),
     env: {

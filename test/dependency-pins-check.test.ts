@@ -140,7 +140,7 @@ if manifest.get("openshellVersion") != "${overrides.hermesTransactionExpectedVer
     "scripts/update-hermes-agent.sh": `
 "openshell-child-visible-credentials.v${overrides.hermesUpdateBoundaryVersion ?? openshellMax}.json"
 `,
-    "Dockerfile.base": `
+    "packages/nemoclaw-openclaw/Dockerfile.base": `
 ARG OPENCLAW_VERSION=${openclawVersion}
 ARG ${openclawArg}_INTEGRITY=${openclawIntegrity}
 ARG ${openclawArg}_TARBALL=${openclawTarball}
@@ -150,7 +150,7 @@ ${openclawSelector(
 )}
 ${overrides.dockerfileBaseExtra ?? ""}
 `,
-    Dockerfile: `
+    "packages/nemoclaw-openclaw/Dockerfile": `
 ARG OPENCLAW_VERSION=${overrides.openclawDockerfileVersion ?? openclawVersion}
 ARG ${openclawArg}_INTEGRITY=${overrides.openclawDockerfileIntegrity ?? openclawIntegrity}
 ARG ${openclawArg}_TARBALL=${overrides.openclawDockerfileTarball ?? openclawTarball}

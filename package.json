@@ -122,7 +122,6 @@
     "schemas/sandbox-policy.schema.json",
     "scripts/",
     "docs/resources/local-credential-form.html",
-    "Dockerfile",
     ".dockerignore",
     "!**/__pycache__/**",
     "!**/*.pyc"

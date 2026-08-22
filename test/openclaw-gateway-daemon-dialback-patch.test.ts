@@ -26,7 +26,7 @@ const PATCH_SCRIPT = path.join(
   "openclaw",
   "patch-gateway-daemon-dialback.mts",
 );
-const DOCKERFILE = path.join(import.meta.dirname, "..", "Dockerfile");
+const DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 
 const CALL_CONTEXT_SOURCE = [
   "function trimToUndefined(value) { return value?.trim() || undefined; }",

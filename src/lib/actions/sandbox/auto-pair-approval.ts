@@ -4,7 +4,7 @@
 /**
  * Shared, bounded OpenClaw device-scope approval pass.
  *
- * The in-sandbox auto-pair watcher (`scripts/nemoclaw-start.sh`) keeps
+ * The in-sandbox auto-pair watcher (`packages/nemoclaw-openclaw/start.sh`) keeps
  * approving allowlisted scope upgrades in slow-mode for hours after startup.
  * This host-side pass is the defense-in-depth recovery for the cases where the
  * watcher has exited (deadline reached), crashed, or was contended away by a

@@ -103,9 +103,12 @@ describe("sandbox build context staging", () => {
       fs.chmodSync(target, mode);
     }
 
-    writeFixture("Dockerfile");
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "Dockerfile"));
     writeFixture("tsconfig.runtime-preloads.json", "{}\n");
     writeFixture(path.join("packages", "nemoclaw-openclaw", "state-lock-plan.json"), "{}\n");
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "start.sh"), "#!/bin/sh\n", 0o755);
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "policy-additions.yaml"));
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"));
     writeFixture(
       path.join("ci", "npm-audit-exceptions.json"),
       `${JSON.stringify({ schemaVersion: 1, exceptions: [] })}\n`,
@@ -125,7 +128,8 @@ describe("sandbox build context staging", () => {
     }
     writeFixture(
       path.join(
-        "packages", "nemoclaw-openclaw",
+        "packages",
+        "nemoclaw-openclaw",
         "managed-image-messaging-runtime",
         "npm-cache-seed",
         ".gitkeep",
@@ -182,7 +186,7 @@ describe("sandbox build context staging", () => {
     fs.chmodSync(path.join(sourceRoot, "nemoclaw"), 0o700);
     fs.chmodSync(path.join(sourceRoot, "nemoclaw", "src"), 0o700);
     writeFixture(path.join("nemoclaw-blueprint", "blueprint.yaml"));
-    writeFixture(path.join("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"));
+    writeFixture(path.join("nemoclaw-blueprint", "policies", "presets", "fixture.yaml"));
     writeFixture(path.join("nemoclaw-blueprint", "scripts", "http-proxy-fix.js"));
     writeFixture(
       path.join(
@@ -210,7 +214,6 @@ describe("sandbox build context staging", () => {
     );
     fs.chmodSync(path.join(sourceRoot, "nemoclaw-blueprint", "model-specific-setup"), 0o700);
     fs.chmodSync(blueprintManifestDir, 0o700);
-    writeFixture(path.join("scripts", "nemoclaw-start.sh"));
     writeFixture(path.join("scripts", "managed-startup-hold.sh"));
     writeFixture(path.join("scripts", "managed-bootstrap-entrypoint.c"));
     writeFixture(path.join("scripts", "managed-bootstrap-trampoline.sh"));
@@ -325,6 +328,20 @@ describe("sandbox build context staging", () => {
   }
 
   function expectStagedOpenClawRuntimeGraphs(buildCtx: string, sourceRoot: string) {
+    const startScript = path.join(buildCtx, "packages", "nemoclaw-openclaw", "start.sh");
+    expect(fs.readFileSync(startScript, "utf8")).toBe(
+      fs.readFileSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "start.sh"), "utf8"),
+    );
+    expect((fs.statSync(startScript).mode & 0o777).toString(8)).toBe("755");
+
+    for (const fileName of ["policy-additions.yaml", "policy-permissive-default.yaml"]) {
+      const stagedPolicy = path.join(buildCtx, "packages", "nemoclaw-openclaw", fileName);
+      expect(fs.readFileSync(stagedPolicy, "utf8")).toBe(
+        fs.readFileSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", fileName), "utf8"),
+      );
+      expect((fs.statSync(stagedPolicy).mode & 0o777).toString(8)).toBe("644");
+    }
+
     for (const runtimeName of ["mcporter-runtime", "openclaw-runtime", "wechat-runtime"]) {
       const runtimeDir = path.join(buildCtx, "packages", "nemoclaw-openclaw", runtimeName);
       expect(fs.readdirSync(runtimeDir).sort()).toEqual(["package-lock.json", "package.json"]);
@@ -346,7 +363,8 @@ describe("sandbox build context staging", () => {
 
     const managedRuntimeDir = path.join(
       buildCtx,
-      "packages", "nemoclaw-openclaw",
+      "packages",
+      "nemoclaw-openclaw",
       "managed-image-messaging-runtime",
     );
     expect(fs.readdirSync(managedRuntimeDir).sort()).toEqual([
@@ -357,7 +375,13 @@ describe("sandbox build context staging", () => {
     for (const fileName of ["package.json", "package-lock.json"]) {
       expect(fs.readFileSync(path.join(managedRuntimeDir, fileName), "utf8")).toBe(
         fs.readFileSync(
-          path.join(sourceRoot, "packages", "nemoclaw-openclaw", "managed-image-messaging-runtime", fileName),
+          path.join(
+            sourceRoot,
+            "packages",
+            "nemoclaw-openclaw",
+            "managed-image-messaging-runtime",
+            fileName,
+          ),
           "utf8",
         ),
       );
@@ -368,7 +392,8 @@ describe("sandbox build context staging", () => {
       fs.readFileSync(
         path.join(
           sourceRoot,
-          "packages", "nemoclaw-openclaw",
+          "packages",
+          "nemoclaw-openclaw",
           "managed-image-messaging-runtime",
           "npm-cache-seed",
           ".gitkeep",
@@ -815,7 +840,7 @@ describe("sandbox build context staging", () => {
         );
         expect(
           fs.existsSync(
-            path.join(buildCtx, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+            path.join(buildCtx, "nemoclaw-blueprint", "policies", "presets", "github.yaml"),
           ),
         ).toBe(true);
         expect(
@@ -865,7 +890,9 @@ describe("sandbox build context staging", () => {
             ),
           ),
         ).toBe(true);
-        expect(fs.existsSync(path.join(buildCtx, "scripts", "nemoclaw-start.sh"))).toBe(true);
+        expect(
+          fs.existsSync(path.join(buildCtx, "packages", "nemoclaw-openclaw", "start.sh")),
+        ).toBe(true);
         expect(
           fs.existsSync(path.join(buildCtx, "scripts", "managed-bootstrap-entrypoint.c")),
         ).toBe(true);
@@ -878,7 +905,9 @@ describe("sandbox build context staging", () => {
         );
         expect(fs.existsSync(path.join(buildCtx, "scripts", "state-dir-guard.py"))).toBe(true);
         expect(
-          fs.existsSync(path.join(buildCtx, "packages", "nemoclaw-openclaw", "state-lock-plan.json")),
+          fs.existsSync(
+            path.join(buildCtx, "packages", "nemoclaw-openclaw", "state-lock-plan.json"),
+          ),
         ).toBe(true);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "openclaw-config-guard.py"))).toBe(
           true,
@@ -1017,10 +1046,12 @@ describe("sandbox build context staging", () => {
       const hermesBuild = createAgentSandbox(hermesAgent, { rootDir: repoRoot });
 
       try {
-        ([
-          ["openclaw", stageOptimizedSandboxBuildContext(repoRoot, tmpDir)],
-          ["hermes", hermesBuild],
-        ] as const).forEach(([name, staged]) => {
+        (
+          [
+            ["openclaw", stageOptimizedSandboxBuildContext(repoRoot, tmpDir)],
+            ["hermes", hermesBuild],
+          ] as const
+        ).forEach(([name, staged]) => {
           const { buildCtx, stagedDockerfile } = staged;
           expect(fs.readFileSync(stagedDockerfile, "utf8")).toContain(
             REVIEWED_RUNTIME_LICENSE_COPY,

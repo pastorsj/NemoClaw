@@ -78,8 +78,8 @@ function readPreparedPolicy(prepared: {
 describe("initial sandbox policy real preset merge", () => {
   const managedImagePolicyPathsByAgent = {
     openclaw: [
-      ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
-      ["nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"],
+      ["packages", "nemoclaw-openclaw", "policy-additions.yaml"],
+      ["packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"],
       ["packages", "nemoclaw-openclaw", "policy-permissive.yaml"],
     ],
     hermes: [
@@ -141,7 +141,7 @@ describe("initial sandbox policy real preset merge", () => {
 
   it.each([
     {
-      path: ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
+      path: ["packages", "nemoclaw-openclaw", "policy-additions.yaml"],
       agent: "openclaw",
     },
     { path: ["packages", "nemoclaw-hermes", "policy-additions.yaml"], agent: "hermes" },
@@ -244,7 +244,7 @@ describe("initial sandbox policy real preset merge", () => {
 
   it("lets the OpenClaw Discord bot manage its own application commands (#7298)", () => {
     const prepared = prepareInitialSandboxCreatePolicy(
-      repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+      repoPath("packages", "nemoclaw-openclaw", "policy-additions.yaml"),
       [],
       { agentName: "openclaw", additionalPresets: ["discord"] },
     );
@@ -309,12 +309,12 @@ describe("initial sandbox policy real preset merge", () => {
   );
 
   it.each([
-    "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
+    "packages/nemoclaw-openclaw/policy-permissive-default.yaml",
     "packages/nemoclaw-openclaw/policy-permissive.yaml",
   ])("preserves baseline writable paths in effective OpenClaw permissive policy %s", (policy) => {
     const baseline = readPreparedPolicy(
       prepareInitialSandboxCreatePolicy(
-        repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+        repoPath("packages", "nemoclaw-openclaw", "policy-additions.yaml"),
         [],
         { agentName: "openclaw" },
       ),
@@ -334,7 +334,7 @@ describe("initial sandbox policy real preset merge", () => {
   it.each(
     [
       {
-        path: repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
+        path: repoPath("packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"),
         agent: "openclaw",
       },
       { path: repoPath("packages", "nemoclaw-hermes", "policy-permissive.yaml"), agent: "hermes" },
@@ -469,12 +469,12 @@ describe("initial sandbox policy real preset merge", () => {
   it.each([
     {
       label: "restricted OpenClaw policy",
-      path: ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
+      path: ["packages", "nemoclaw-openclaw", "policy-additions.yaml"],
       agent: "openclaw",
     },
     {
       label: "permissive OpenClaw blueprint policy",
-      path: ["nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"],
+      path: ["packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"],
       agent: "openclaw",
     },
     {
@@ -516,7 +516,7 @@ describe("initial sandbox policy real preset merge", () => {
   );
 
   it("keeps the Restricted OpenClaw npm baseline inspected and GET-only (#8497)", () => {
-    const baselinePath = repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+    const baselinePath = repoPath("packages", "nemoclaw-openclaw", "policy-additions.yaml");
     const reviewed = YAML.parse(fs.readFileSync(baselinePath, "utf-8")) as PolicyDocument;
     const effective = readPreparedPolicy(
       prepareInitialSandboxCreatePolicy(baselinePath, [], {
@@ -537,7 +537,7 @@ describe("initial sandbox policy real preset merge", () => {
   it("composes default OpenClaw package and pricing routes without v0.0.99 ambiguity (#8497)", () => {
     const effective = readPreparedPolicy(
       prepareInitialSandboxCreatePolicy(
-        repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+        repoPath("packages", "nemoclaw-openclaw", "policy-additions.yaml"),
         [],
         {
           agentName: "openclaw",

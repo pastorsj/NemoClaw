@@ -3,9 +3,8 @@
 #
 # Agent manifest for OpenClaw.
 # Declares the integration contract between NemoClaw and the sandboxed agent.
-# This documents the current (default) agent — artifacts still live at root
-# level for backward compatibility. Phase 3 of the multi-agent plan will
-# move them here.
+# This documents the current default agent and owns its image, startup, and
+# baseline policy artifacts.
 
 name: openclaw
 display_name: "OpenClaw"
@@ -16,7 +15,7 @@ license: Apache-2.0
 homepage: "https://openclaw.ai"
 
 # ── Binary & process ────────────────────────────────────────────
-install_method: npm  # npm install -g openclaw@<version>
+install_method: npm # npm install -g openclaw@<version>
 binary_path: /usr/local/bin/openclaw
 version_command: "openclaw --version"
 expected_version: "2026.7.1"
@@ -121,7 +120,7 @@ web_auth_method: device_pairing
 # ── Inference ───────────────────────────────────────────────────
 inference:
   provider_type: gateway_managed
-  proxy_support: explicit  # configured in openclaw.json providers block
+  proxy_support: explicit # configured in openclaw.json providers block
 
 # ── MCP server support ───────────────────────────────────────────
 mcp:
@@ -140,11 +139,6 @@ package_registry:
     - registry.npmjs.org
   binary: /usr/local/bin/npm
 
-# ── Current artifact locations ─────────────────────────────────
-# These will move into packages/nemoclaw-openclaw/ in Phase 3.
+# ── Compatibility artifact locations ─────────────────────────────────
 _legacy_paths:
-  dockerfile_base: Dockerfile.base
-  dockerfile: Dockerfile
-  start_script: scripts/nemoclaw-start.sh
-  policy: nemoclaw-blueprint/policies/openclaw-sandbox.yaml
   plugin: nemoclaw/

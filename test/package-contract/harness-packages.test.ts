@@ -92,6 +92,27 @@ describe("published harness packages", () => {
     expect(packedPaths).toContain(`${packageRoot}/${harness.runtimeFile}`);
   });
 
+  it.each([
+    "Dockerfile",
+    "Dockerfile.base",
+    "start.sh",
+    "policy-additions.yaml",
+    "policy-permissive.yaml",
+    "policy-permissive-default.yaml",
+  ])("ships OpenClaw package artifact %s", (artifact) => {
+    expect(packedPaths).toContain(`packages/nemoclaw-openclaw/${artifact}`);
+  });
+
+  it.each([
+    "Dockerfile",
+    "Dockerfile.base",
+    "scripts/nemoclaw-start.sh",
+    "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+    "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
+  ])("omits former OpenClaw path %s", (legacyPath) => {
+    expect(packedPaths).not.toContain(legacyPath);
+  });
+
   it.each(HARNESSES)("omits the legacy agents/$id package tree", ({ id }) => {
     expect([...packedPaths].some((packedPath) => packedPath.startsWith(`agents/${id}/`))).toBe(
       false,

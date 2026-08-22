@@ -44,15 +44,22 @@ it("builds a changed PR base locally and fails closed on comparison errors", () 
   runGit("init", "--quiet");
   runGit("config", "user.name", "NemoClaw Test");
   runGit("config", "user.email", "nemoclaw-test@example.invalid");
-  fs.writeFileSync(path.join(temporaryRoot, "Dockerfile.base"), "FROM scratch\n");
-  runGit("add", "Dockerfile.base");
+  const baseDockerfile = path.join(
+    temporaryRoot,
+    "packages",
+    "nemoclaw-openclaw",
+    "Dockerfile.base",
+  );
+  fs.mkdirSync(path.dirname(baseDockerfile), { recursive: true });
+  fs.writeFileSync(baseDockerfile, "FROM scratch\n");
+  runGit("add", "packages/nemoclaw-openclaw/Dockerfile.base");
   runGit("commit", "--quiet", "-m", "test: add base");
   const baseSha = runGit("rev-parse", "HEAD");
   fs.writeFileSync(
-    path.join(temporaryRoot, "Dockerfile.base"),
+    baseDockerfile,
     "FROM scratch\nLABEL test=changed\n",
   );
-  runGit("add", "Dockerfile.base");
+  runGit("add", "packages/nemoclaw-openclaw/Dockerfile.base");
   runGit("commit", "--quiet", "-m", "test: change base");
   const candidateSha = runGit("rev-parse", "HEAD");
   fs.writeFileSync(
@@ -88,7 +95,7 @@ exit 90
   const environment = {
     ...process.env,
     BASE_ALIAS: "ghcr.io/nvidia/nemoclaw/sandbox-base:latest",
-    BASE_DOCKERFILE: "Dockerfile.base",
+    BASE_DOCKERFILE: "packages/nemoclaw-openclaw/Dockerfile.base",
     BASE_REPOSITORY: "ghcr.io/nvidia/nemoclaw/sandbox-base",
     BASE_SHA: baseSha,
     CANDIDATE_SHA: candidateSha,
@@ -113,7 +120,7 @@ exit 90
     );
     const dockerCommands = fs.readFileSync(dockerLog, "utf8");
     expect(dockerCommands).toContain(
-      `buildx build --platform linux/amd64 --provenance=false --sbom=false --file Dockerfile.base --tag nemoclaw-managed-pr/openclaw-base:test --output type=docker,dest=${temporaryRoot}/pr-base.docker.tar --output type=oci,dest=${temporaryRoot}/pr-base.oci.tar .`,
+      `buildx build --platform linux/amd64 --provenance=false --sbom=false --file packages/nemoclaw-openclaw/Dockerfile.base --tag nemoclaw-managed-pr/openclaw-base:test --output type=docker,dest=${temporaryRoot}/pr-base.docker.tar --output type=oci,dest=${temporaryRoot}/pr-base.oci.tar .`,
     );
     expect(dockerCommands).toContain(`load --input ${temporaryRoot}/pr-base.docker.tar`);
     expect(dockerCommands).not.toContain("imagetools inspect");

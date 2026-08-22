@@ -19,6 +19,7 @@ function tmpRoot(): string {
 
 function writeDockerfile(dir: string, content: string, fileName = "Dockerfile"): string {
   const filePath = path.join(dir, fileName);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, "utf-8");
   return filePath;
 }
@@ -100,10 +101,14 @@ describe("agentSupportsWebSearch", () => {
     expect(agentSupportsWebSearch({ name: "openclaw" }, override, root)).toBe(true);
   });
 
-  it("falls back to the agent Dockerfile and then the root Dockerfile", () => {
+  it("falls back to the agent Dockerfile and then the bundled OpenClaw Dockerfile", () => {
     const root = tmpRoot();
     const agentDockerfile = writeDockerfile(root, "FROM scratch\n", "Agentfile");
-    writeDockerfile(root, "ARG NEMOCLAW_WEB_SEARCH_ENABLED=1\n");
+    writeDockerfile(
+      root,
+      "ARG NEMOCLAW_WEB_SEARCH_ENABLED=1\n",
+      "packages/nemoclaw-openclaw/Dockerfile",
+    );
 
     expect(
       agentSupportsWebSearch({ name: "openclaw", dockerfilePath: agentDockerfile }, null, root),
@@ -116,7 +121,7 @@ describe("agentSupportsWebSearch", () => {
 
   it("returns false when no candidate declares the web-search ARG", () => {
     const root = tmpRoot();
-    writeDockerfile(root, "FROM scratch\n");
+    writeDockerfile(root, "FROM scratch\n", "packages/nemoclaw-openclaw/Dockerfile");
 
     expect(agentSupportsWebSearch({ name: "openclaw" }, null, root)).toBe(false);
   });

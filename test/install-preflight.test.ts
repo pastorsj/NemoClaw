@@ -97,8 +97,6 @@ run_onboard < "$PROMPT_INPUT_FILE"
   return { result, onboardLog };
 }
 
-// ---------------------------------------------------------------------------
-
 describe("installer runtime preflight", { timeout: 90_000 }, () => {
   it("attempts nvm upgrade when system Node.js is below minimum version", () => {
     const checkout = installerCheckout("nemoclaw-install-preflight-");
@@ -502,108 +500,108 @@ exit 89
   it("source-checkout: installs OpenShell when missing from PATH (#3989)", {
     timeout: 20000,
   }, () => {
-    const {
-      root: tmp,
-      binDir: fakeBin,
-      prefixDir: prefix,
-    } = installerCheckout("nemoclaw-install-source-osh-");
-    const npmLog = path.join(tmp, "npm.log");
-    const openshellLog = path.join(tmp, "install-openshell.log");
-    fs.mkdirSync(path.join(tmp, ".git"));
+      const {
+        root: tmp,
+        binDir: fakeBin,
+        prefixDir: prefix,
+      } = installerCheckout("nemoclaw-install-source-osh-");
+      const npmLog = path.join(tmp, "npm.log");
+      const openshellLog = path.join(tmp, "install-openshell.log");
+      fs.mkdirSync(path.join(tmp, ".git"));
 
-    writeNodeStub(fakeBin);
-    writeDockerOkStub(fakeBin);
-    writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
+      writeNodeStub(fakeBin);
+      writeDockerOkStub(fakeBin);
+      writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
 
-    writeSourceCheckoutPackages(tmp);
+      writeSourceCheckoutPackages(tmp);
 
-    fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-    writeExecutable(
-      path.join(tmp, "scripts", "install-openshell.sh"),
-      `#!/usr/bin/env bash
+      fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
+      writeExecutable(
+        path.join(tmp, "scripts", "install-openshell.sh"),
+        `#!/usr/bin/env bash
 printf 'install-openshell.sh invoked\\n' >> "$INSTALL_OPENSHELL_LOG"
 exit 0
 `,
-    );
-    fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
-    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
+      );
+      fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
+      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
+      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
 
-    const result = spawnSync("bash", [INSTALLER], {
-      cwd: tmp,
-      encoding: "utf-8",
-      env: {
-        ...process.env,
-        HOME: tmp,
-        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
-        NEMOCLAW_NON_INTERACTIVE: "1",
-        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-        NEMOCLAW_REPO_ROOT: tmp,
-        NPM_PREFIX: prefix,
-        NPM_LOG_PATH: npmLog,
-        INSTALL_OPENSHELL_LOG: openshellLog,
-      },
-    });
+      const result = spawnSync("bash", [INSTALLER], {
+        cwd: tmp,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          HOME: tmp,
+          PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+          NEMOCLAW_NON_INTERACTIVE: "1",
+          NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+          NEMOCLAW_REPO_ROOT: tmp,
+          NPM_PREFIX: prefix,
+          NPM_LOG_PATH: npmLog,
+          INSTALL_OPENSHELL_LOG: openshellLog,
+        },
+      });
 
-    expect(result.status).toBe(0);
-    expect(fs.existsSync(openshellLog)).toBe(true);
-    expect(fs.readFileSync(openshellLog, "utf-8")).toMatch(/install-openshell\.sh invoked/);
+      expect(result.status).toBe(0);
+      expect(fs.existsSync(openshellLog)).toBe(true);
+      expect(fs.readFileSync(openshellLog, "utf-8")).toMatch(/install-openshell\.sh invoked/);
   });
 
   it("source-checkout: skips OpenShell install when openshell is already on PATH (#3989)", {
     timeout: 20000,
   }, () => {
-    const {
-      root: tmp,
-      binDir: fakeBin,
-      prefixDir: prefix,
-    } = installerCheckout("nemoclaw-install-source-osh-skip-");
-    const npmLog = path.join(tmp, "npm.log");
-    const openshellLog = path.join(tmp, "install-openshell.log");
-    fs.mkdirSync(path.join(tmp, ".git"));
+      const {
+        root: tmp,
+        binDir: fakeBin,
+        prefixDir: prefix,
+      } = installerCheckout("nemoclaw-install-source-osh-skip-");
+      const npmLog = path.join(tmp, "npm.log");
+      const openshellLog = path.join(tmp, "install-openshell.log");
+      fs.mkdirSync(path.join(tmp, ".git"));
 
-    writeNodeStub(fakeBin);
-    writeExecutable(
-      path.join(fakeBin, "openshell"),
-      `#!/usr/bin/env bash
+      writeNodeStub(fakeBin);
+      writeExecutable(
+        path.join(fakeBin, "openshell"),
+        `#!/usr/bin/env bash
 if [ "$1" = "--version" ]; then echo "openshell 0.0.39"; exit 0; fi
 exit 0
 `,
-    );
-    writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
+      );
+      writeSourceCheckoutNpmStub(fakeBin, { commandLog: true });
 
-    writeSourceCheckoutPackages(tmp);
+      writeSourceCheckoutPackages(tmp);
 
-    fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
-    writeExecutable(
-      path.join(tmp, "scripts", "install-openshell.sh"),
-      `#!/usr/bin/env bash
+      fs.mkdirSync(path.join(tmp, "scripts"), { recursive: true });
+      writeExecutable(
+        path.join(tmp, "scripts", "install-openshell.sh"),
+        `#!/usr/bin/env bash
 printf 'install-openshell.sh invoked\\n' >> "$INSTALL_OPENSHELL_LOG"
 exit 0
 `,
-    );
-    fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
-    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
-    fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
+      );
+      fs.mkdirSync(path.join(tmp, "bin", "lib"), { recursive: true });
+      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.js"), "process.exit(0);\n");
+      fs.writeFileSync(path.join(tmp, "bin", "lib", "usage-notice.json"), "{}\n");
 
-    const result = spawnSync("bash", [INSTALLER], {
-      cwd: tmp,
-      encoding: "utf-8",
-      env: {
-        ...process.env,
-        HOME: tmp,
-        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
-        NEMOCLAW_NON_INTERACTIVE: "1",
-        NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-        NEMOCLAW_REPO_ROOT: tmp,
-        NPM_PREFIX: prefix,
-        NPM_LOG_PATH: npmLog,
-        INSTALL_OPENSHELL_LOG: openshellLog,
-      },
-    });
+      const result = spawnSync("bash", [INSTALLER], {
+        cwd: tmp,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          HOME: tmp,
+          PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+          NEMOCLAW_NON_INTERACTIVE: "1",
+          NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+          NEMOCLAW_REPO_ROOT: tmp,
+          NPM_PREFIX: prefix,
+          NPM_LOG_PATH: npmLog,
+          INSTALL_OPENSHELL_LOG: openshellLog,
+        },
+      });
 
-    expect(result.status).toBe(0);
-    expect(fs.existsSync(openshellLog)).toBe(false);
+      expect(result.status).toBe(0);
+      expect(fs.existsSync(openshellLog)).toBe(false);
   });
 
   it("auto-resumes an interrupted onboarding session after Ubuntu 26.04 installer preflight (#3245)", () => {
@@ -850,19 +848,19 @@ exit 0
     ["gateway lifecycle authority is invalid", "invalid", true, 1, false],
     ["storage remediation is unavailable", "nemoclaw-managed", false, 1, false],
   ] as const)("applies installer storage admission when %s", (_context, gatewayMode, storageRemediationAvailable, status, onboardRan) => {
-    const fixture = runStorageRemediationInstallerPreflight({
-      gatewayMode,
-      onboardModuleDir: INSTALLER_ONBOARD_MODULE_DIR,
-      readinessModuleDir: INSTALLER_READINESS_MODULE_DIR,
-      storageRemediationAvailable,
-    });
-    expect(fixture.result.status, fixture.output).toBe(status);
-    expect(fixture.onboardRan).toBe(onboardRan);
-    expect(fixture.output).not.toMatch(/unsafe|injected/);
-    expect(fixture.output.includes("Host preflight found issues")).toBe(!onboardRan);
-    expect(fixture.output.includes("Admission finding IDs: host.docker.storage_incompatible")).toBe(
-      !onboardRan,
-    );
+      const fixture = runStorageRemediationInstallerPreflight({
+        gatewayMode,
+        onboardModuleDir: INSTALLER_ONBOARD_MODULE_DIR,
+        readinessModuleDir: INSTALLER_READINESS_MODULE_DIR,
+        storageRemediationAvailable,
+      });
+      expect(fixture.result.status, fixture.output).toBe(status);
+      expect(fixture.onboardRan).toBe(onboardRan);
+      expect(fixture.output).not.toMatch(/unsafe|injected/);
+      expect(fixture.output.includes("Host preflight found issues")).toBe(!onboardRan);
+      expect(fixture.output.includes("Admission finding IDs: host.docker.storage_incompatible")).toBe(
+        !onboardRan,
+      );
   });
 
   it("rejects Podman through canonical installer admission (#7411)", () => {
@@ -1769,7 +1767,9 @@ exit 1
   it("resolve_openclaw_version: falls back to Dockerfile.base when package.json omits it", () => {
     const { root: tmp } = installerCheckout("nemoclaw-openclaw-version-");
     fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "fixture" }));
-    fs.writeFileSync(path.join(tmp, "Dockerfile.base"), "ARG OPENCLAW_VERSION=1.2.3\n");
+    const dockerfileBase = path.join(tmp, "packages/nemoclaw-openclaw/Dockerfile.base");
+    fs.mkdirSync(path.dirname(dockerfileBase), { recursive: true });
+    fs.writeFileSync(dockerfileBase, "ARG OPENCLAW_VERSION=1.2.3\n");
     const r = callInstallerFn(`resolve_openclaw_version ${JSON.stringify(tmp)}`);
     expect(r.stdout.trim()).toBe("1.2.3");
   });

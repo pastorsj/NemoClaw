@@ -79,7 +79,7 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-from-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
+    const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"), "utf8");
     const generator =
       "RUN NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 node --experimental-strip-types /scripts/generate-openclaw-config.mts";
     const proxyPatch = 'RUN python3 -c "\\\n';
@@ -131,7 +131,7 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-stock-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    fs.copyFileSync(path.join(process.cwd(), "Dockerfile"), dockerfile);
+    fs.copyFileSync(path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"), dockerfile);
 
     try {
       const result = patchStagedDockerfile(dockerfile, "test-model", "http://127.0.0.1:18789");
@@ -146,7 +146,7 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-mutated-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    const checkedInDockerfile = fs.readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
+    const checkedInDockerfile = fs.readFileSync(path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"), "utf8");
     const mutatedDockerfile = checkedInDockerfile.replace(
       '"vim-common=2:9.2.0858-1"',
       '"vim-common=2:9.2.0857-1"',
@@ -168,7 +168,7 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-metadata-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
+    const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"), "utf8");
     const metadataTail =
       "    && check_metadata /usr/local/lib/nemoclaw/preloads/sandbox-safety-net.js 'root:root:644'";
     const mutatedDockerfile = stockDockerfile.replace(

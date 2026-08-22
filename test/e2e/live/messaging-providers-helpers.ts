@@ -28,9 +28,9 @@ export { CLI_ENTRYPOINT, expectExitZero, REPO_ROOT };
 
 export const BASE_POLICY = path.join(
   REPO_ROOT,
-  "nemoclaw-blueprint",
-  "policies",
-  "openclaw-sandbox.yaml",
+  "packages",
+  "nemoclaw-openclaw",
+  "policy-additions.yaml",
 );
 export const FAKE_LIB_DIR = path.join(REPO_ROOT, "test", "e2e", "lib");
 export const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? `e2e-msg-${process.pid}`;

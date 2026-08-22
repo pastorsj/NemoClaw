@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Verifies direct COPY sources from the root Dockerfile in the optimized build context. */
+/** Verifies direct OpenClaw Dockerfile COPY sources in the optimized build context. */
 
 import fs from "node:fs";
 import os from "node:os";

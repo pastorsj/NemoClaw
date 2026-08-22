@@ -4,7 +4,7 @@
 #
 # Shared sandbox entrypoint primitives for NemoClaw agent types.
 #
-# Sourced by scripts/nemoclaw-start.sh (OpenClaw) and packages/nemoclaw-hermes/start.sh
+# Sourced by packages/nemoclaw-openclaw/start.sh (OpenClaw) and packages/nemoclaw-hermes/start.sh
 # (Hermes) to provide a single source of truth for security-sensitive
 # initialisation functions. Prevents drift between entrypoints — every
 # security fix applied here protects both agents automatically.
@@ -457,11 +457,11 @@ report_residual_capabilities() {
 # `exec "${STEP_DOWN_PREFIX_SANDBOX[@]}" "${NEMOCLAW_CMD[@]}"` with an unset
 # array — which would expand to nothing and run NEMOCLAW_CMD as root (privesc
 # regression).
-# shellcheck disable=SC2034  # consumed by scripts/nemoclaw-start.sh and packages/nemoclaw-hermes/start.sh
+# shellcheck disable=SC2034  # consumed by packages/nemoclaw-openclaw/start.sh and packages/nemoclaw-hermes/start.sh
 STEP_DOWN_PREFIX_SANDBOX=(
   /bin/sh -c 'echo "[SECURITY] setpriv unavailable: refusing to execute a root privilege transition" >&2; exit 1' --
 )
-# shellcheck disable=SC2034  # consumed by scripts/nemoclaw-start.sh and packages/nemoclaw-hermes/start.sh
+# shellcheck disable=SC2034  # consumed by packages/nemoclaw-openclaw/start.sh and packages/nemoclaw-hermes/start.sh
 STEP_DOWN_PREFIX_GATEWAY=(
   /bin/sh -c 'echo "[SECURITY] setpriv unavailable: refusing to execute a root privilege transition" >&2; exit 1' --
 )

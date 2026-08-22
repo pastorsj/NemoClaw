@@ -74,8 +74,12 @@ function createGitFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-base-image-test-"));
   tmpRoots.push(root);
   git(root, ["init", "-b", "main"]);
-  writeFixture(root, "Dockerfile.base", "FROM node:22\n");
-  writeFixture(root, "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base", "FROM python:3.13\n");
+  writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
+  writeFixture(
+    root,
+    "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
+    "FROM python:3.13\n",
+  );
   writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
   writeFixture(root, "scripts/lib/openclaw-npm-remediation.mts", "export const version = 1;\n");
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
@@ -92,7 +96,7 @@ function createGitFixtureWithRemoteOnlyBaseRef() {
 
   git(remote, ["init", "--bare"]);
   git(root, ["init", "-b", "main"]);
-  writeFixture(root, "Dockerfile.base", "FROM node:22\n");
+  writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
   writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
   git(root, ["add", "."]);
@@ -167,11 +171,11 @@ describe("sandbox base-image source identity", () => {
       normalizeBaseImageInputPaths(root, [
         agentDockerfile,
         path.join(root, agentDockerfile),
-        "Dockerfile.base",
+        "packages/nemoclaw-openclaw/Dockerfile.base",
         "../outside/Dockerfile.base",
       ]),
     ).toEqual([
-      "Dockerfile.base",
+      "packages/nemoclaw-openclaw/Dockerfile.base",
       "nemoclaw-blueprint/blueprint.yaml",
       "scripts/lib/sandbox-rlimits.sh",
       "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
@@ -349,8 +353,12 @@ describe("sandbox base-image source identity", () => {
   it("detects committed Dockerfile.base changes relative to origin/main", () => {
     const root = createGitFixture();
     git(root, ["switch", "-c", "feature"]);
-    writeFixture(root, "Dockerfile.base", "FROM node:22\nRUN echo changed\n");
-    git(root, ["add", "Dockerfile.base"]);
+    writeFixture(
+      root,
+      "packages/nemoclaw-openclaw/Dockerfile.base",
+      "FROM node:22\nRUN echo changed\n",
+    );
+    git(root, ["add", "packages/nemoclaw-openclaw/Dockerfile.base"]);
     git(root, ["commit", "-m", "change base"]);
 
     expect(baseImageInputsDirty(root, gitEnv)).toBe(false);
@@ -397,8 +405,12 @@ describe("sandbox base-image source identity", () => {
   it("fetches the base ref before deciding detached dispatch checkouts can use latest", () => {
     const root = createGitFixtureWithRemoteOnlyBaseRef();
     git(root, ["switch", "-c", "feature"]);
-    writeFixture(root, "Dockerfile.base", "FROM node:22\nRUN echo changed\n");
-    git(root, ["add", "Dockerfile.base"]);
+    writeFixture(
+      root,
+      "packages/nemoclaw-openclaw/Dockerfile.base",
+      "FROM node:22\nRUN echo changed\n",
+    );
+    git(root, ["add", "packages/nemoclaw-openclaw/Dockerfile.base"]);
     git(root, ["commit", "-m", "change base"]);
 
     expect(git(root, ["rev-parse", "--verify", "origin/main"]).length).toBeGreaterThan(0);
@@ -437,7 +449,7 @@ describe("sandbox base-image source identity", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-base-image-no-base-ref-"));
     tmpRoots.push(root);
     git(root, ["init", "-b", "feature"]);
-    writeFixture(root, "Dockerfile.base", "FROM node:22\n");
+    writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
     writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
     git(root, ["add", "."]);
     git(root, ["commit", "-m", "initial"]);
@@ -480,7 +492,10 @@ describe("sandbox base-image source identity", () => {
 
   it("detects committed agent Dockerfile.base changes when an agent base path is supplied", () => {
     const root = createGitFixture();
-    const agentBase = path.join(root, "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base");
+    const agentBase = path.join(
+      root,
+      "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
+    );
     git(root, ["switch", "-c", "feature"]);
     writeFixture(
       root,
@@ -520,12 +535,16 @@ describe("sandbox base-image source identity", () => {
 
   it("detects uncommitted Dockerfile.base changes", () => {
     const root = createGitFixture();
-    writeFixture(root, "Dockerfile.base", "FROM node:22\nRUN echo dirty\n");
+    writeFixture(
+      root,
+      "packages/nemoclaw-openclaw/Dockerfile.base",
+      "FROM node:22\nRUN echo dirty\n",
+    );
 
     expect(baseImageInputsDirty(root, gitEnv)).toBe(true);
     expect(baseImageInputsChangedSinceMain(root, gitEnv)).toBe(true);
 
-    git(root, ["add", "Dockerfile.base"]);
+    git(root, ["add", "packages/nemoclaw-openclaw/Dockerfile.base"]);
     expect(baseImageInputsDirty(root, gitEnv)).toBe(true);
   });
 });

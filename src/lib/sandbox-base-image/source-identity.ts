@@ -8,7 +8,7 @@ import path from "node:path";
 import { ROOT } from "../runner";
 
 export const BASE_IMAGE_INPUT_PATHS = [
-  "Dockerfile.base",
+  "packages/nemoclaw-openclaw/Dockerfile.base",
   "nemoclaw-blueprint/blueprint.yaml",
   "scripts/lib/sandbox-rlimits.sh",
   "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
@@ -394,5 +394,5 @@ export function buildLocalBaseTag(prefix: string, rootDir = ROOT, env = process.
 }
 
 export function defaultOpenclawBaseDockerfile(rootDir = ROOT): string {
-  return path.join(rootDir, "Dockerfile.base");
+  return path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 }

@@ -1668,7 +1668,6 @@ const createSandboxWithBaseImageResolution =
     sandboxCreateOrchestrationRuntime,
   );
 
-
 const { createSandbox, createSandboxWithTemporaryManagedRuntime } =
   agentOnboard.createHermesApiPortScopedSandboxEntryPoints({
     createBaseImageResolutionContext: () =>
@@ -2548,8 +2547,8 @@ const sandboxCreateIntentResolver = sandboxCreateIntentResolution.createSandboxC
     getMessagingChannelForEnvKey,
   },
   filterEnabledChannelsByAgent,
-  defaultPolicyPath: path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
-  getAgentPolicyPath: (agent) => (agent ? agentOnboard.getAgentPolicyPath(agent) : null),
+  defaultPolicyPath: path.join(ROOT, "packages", "nemoclaw-openclaw", "policy-additions.yaml"),
+  getAgentPolicyPath: agentOnboard.getAgentPolicyPath,
   resolveGpuPlan: (config) =>
     dockerGpuSandboxCreate.resolveProfileGpuCreatePlan(config, isLinuxDockerDriverGatewayEnabled()),
   appendResourceCreateArgs: (args, resourceProfile) =>
@@ -3308,7 +3307,6 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
                   hermesApiPortReservationScope,
                   ...createArgs,
                 ),
-
               ),
             ),
             updateSandboxRegistry: (name, updates) => registry.updateSandbox(name, updates),

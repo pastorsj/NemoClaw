@@ -604,7 +604,9 @@ startGateway(null).catch((error) => {
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "package-lock.json"))).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw", "src"))).toBe(true);
       expect(fs.existsSync(path.join(buildCtx, "nemoclaw-blueprint", ".venv"))).toBe(false);
-      expect(fs.existsSync(path.join(buildCtx, "scripts", "nemoclaw-start.sh"))).toBe(true);
+      expect(fs.existsSync(path.join(buildCtx, "packages", "nemoclaw-openclaw", "start.sh"))).toBe(
+        true,
+      );
       expect(fs.existsSync(path.join(buildCtx, "scripts", "patch-openclaw-tool-catalog.mts"))).toBe(
         true,
       );

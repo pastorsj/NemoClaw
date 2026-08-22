@@ -34,8 +34,8 @@ describe("config validation target discovery", () => {
   it("includes every binary-scoped sandbox policy family", () => {
     expect(sandboxPolicyFiles).toEqual(
       expect.arrayContaining([
-        "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
-        "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
+        "packages/nemoclaw-openclaw/policy-additions.yaml",
+        "packages/nemoclaw-openclaw/policy-permissive-default.yaml",
         "agents/nemocua/policy-additions.yaml",
         "agents/pi/policy-additions.yaml",
         "packages/nemoclaw-hermes/policy-additions.yaml",

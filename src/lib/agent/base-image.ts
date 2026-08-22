@@ -78,6 +78,13 @@ const HERMES_BASE_IMAGE_PROBE_GUARDS = [
 // pins and Docker-normalized platform manifest digests.
 const HERMES_OFFICIAL_BASE_DIGEST_REF =
   /^ghcr\.io\/nvidia\/nemoclaw\/hermes-sandbox-base@sha256:[0-9a-f]{64}$/;
+const HARNESS_BUILD_CONTEXT_IGNORES = new Set([
+  ".nemoclaw-install.json",
+  ".DS_Store",
+  ".git",
+  "__pycache__",
+  "node_modules",
+]);
 
 export interface EnsureAgentBaseImageOptions {
   forceBaseImageRebuild?: boolean;
@@ -540,6 +547,34 @@ function localBaseImageBuildProvenance(options: ResolveBaseImageOptions): {
   };
 }
 
+/** Replace the bundled build-context copy with the package selected by loadAgent(). */
+function stageSelectedHarnessPackage(agent: AgentDefinition, buildCtx: string): void {
+  const agentDir = typeof agent.agentDir === "string" ? path.resolve(agent.agentDir) : null;
+  const dockerfilePath = agent.dockerfilePath ? path.resolve(agent.dockerfilePath) : null;
+  const manifestPath =
+    typeof agent.manifestPath === "string" ? path.resolve(agent.manifestPath) : null;
+  const packageDirectoryName = `nemoclaw-${agent.name}`;
+  if (
+    !agentDir ||
+    path.basename(agentDir) !== packageDirectoryName ||
+    dockerfilePath !== path.join(agentDir, "Dockerfile") ||
+    manifestPath !== path.join(agentDir, "manifest.yaml")
+  ) {
+    return;
+  }
+
+  const stagedPackageDir = path.join(buildCtx, "packages", packageDirectoryName);
+  const includePackagePath = createCustomBuildContextFilter(agentDir);
+  fs.rmSync(stagedPackageDir, { recursive: true, force: true });
+  fs.mkdirSync(path.dirname(stagedPackageDir), { recursive: true });
+  fs.cpSync(agentDir, stagedPackageDir, {
+    recursive: true,
+    filter: (sourcePath) =>
+      !HARNESS_BUILD_CONTEXT_IGNORES.has(path.basename(sourcePath)) &&
+      includePackagePath(sourcePath),
+  });
+}
+
 /**
  * Ensure the agent-specific sandbox base image exists locally.
  * Rebuild callers can force this so local Dockerfile.base edits are applied.
@@ -745,6 +780,7 @@ export function createAgentSandbox(
         recursive: true,
         filter: (src) => path.basename(src) !== ".claude" && shouldIncludeBuildContextPath(src),
       });
+      stageSelectedHarnessPackage(agent, buildCtx);
     }
     fs.copyFileSync(agentDockerfile, stagedDockerfile);
     if (baseImageRef) {

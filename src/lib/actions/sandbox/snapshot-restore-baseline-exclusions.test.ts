@@ -12,7 +12,7 @@ describe("runSandboxSnapshot restore: baseline exclusions", () => {
   it("uses the OpenClaw baseline in the shared fixture when the agent is absent", () => {
     const openClawBaseline = {
       agent: "openclaw",
-      policyPath: "/repo/nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+      policyPath: "/repo/packages/nemoclaw-openclaw/policy-additions.yaml",
       content: "version: 1\nnetwork_policies: {}\n",
     };
 

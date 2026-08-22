@@ -7,13 +7,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 function extractShellFunction(src: string, name: string): string {
   const header = `${name}() {`;
   const start = src.indexOf(header);
   if (start === -1) {
-    throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+    throw new Error(`Expected ${name} in packages/nemoclaw-openclaw/start.sh`);
   }
   const bodyStart = start + header.length;
   const lines = src.slice(bodyStart).split(/(?<=\n)/);
@@ -24,7 +30,7 @@ function extractShellFunction(src: string, name: string): string {
     }
     offset += line.length;
   }
-  throw new Error(`Expected closing brace for ${name} in scripts/nemoclaw-start.sh`);
+  throw new Error(`Expected closing brace for ${name} in packages/nemoclaw-openclaw/start.sh`);
 }
 
 // Extract the post-gateway-start plugin-refresh block from the production
@@ -37,7 +43,7 @@ function extractRefreshBlock(): string {
   const end = src.indexOf("SANDBOX_WAIT_PID=", start);
   if (start === -1 || end === -1 || end <= start) {
     throw new Error(
-      "Expected plugin-refresh + PID-tracking block between start_auto_pair and SANDBOX_WAIT_PID in scripts/nemoclaw-start.sh",
+      "Expected plugin-refresh + PID-tracking block between start_auto_pair and SANDBOX_WAIT_PID in packages/nemoclaw-openclaw/start.sh",
     );
   }
   return [

@@ -35,7 +35,7 @@ import { describe, expect, it } from "vitest";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../src/lib/name-validation.js";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
-const START_SCRIPT = path.join(REPO_ROOT, "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 
 // Opt-in container E2E: drives the EXACT reporter workflow against the real
 // sandbox base image — the image's own /etc/profile.d + /etc/bash.bashrc hooks
@@ -70,7 +70,7 @@ function extractHintStanza(src: string): string {
   // short-circuit to a throwing helper when the markers are missing/reordered.
   const fail = (): never => {
     throw new Error(
-      "Expected nemoclaw-policy-denial-hint begin/end markers in scripts/nemoclaw-start.sh",
+      "Expected nemoclaw-policy-denial-hint begin/end markers in packages/nemoclaw-openclaw/start.sh",
     );
   };
   const markersPresent = begin >= 0 && end > begin;
@@ -385,7 +385,7 @@ describe("sandbox policy-denial logs breadcrumb (#5978)", () => {
         "    c, _ = s.accept(); threading.Thread(target=handle, args=(c,), daemon=True).start()",
         "PY",
         "python3 /tmp/deny-proxy.py & sleep 1",
-        "awk '/# nemoclaw-policy-denial-hint begin/{f=1} f{print} /# nemoclaw-policy-denial-hint end/{f=0}' /work/scripts/nemoclaw-start.sh > /tmp/stanza.sh",
+        "awk '/# nemoclaw-policy-denial-hint begin/{f=1} f{print} /# nemoclaw-policy-denial-hint end/{f=0}' /work/packages/nemoclaw-openclaw/start.sh > /tmp/stanza.sh",
         "{ echo 'export OPENSHELL_SANDBOX=qa-5978'; echo 'export HTTPS_PROXY=http://127.0.0.1:8888'; cat /tmp/stanza.sh; } > /tmp/nemoclaw-proxy-env.sh",
         "chmod 444 /tmp/nemoclaw-proxy-env.sh",
         // Interactive connect session: the breadcrumb prints once at login, then

@@ -12,7 +12,13 @@ import { describe, expect, it } from "vitest";
 const requireForTest = createRequire(import.meta.url);
 const YAML = requireForTest("yaml");
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 const startScriptSource = fs.readFileSync(START_SCRIPT, "utf-8");
 
@@ -563,7 +569,7 @@ describe("gateway dial-back base policy", () => {
   }
 
   function dialbackEndpoints(): Array<Record<string, unknown>> {
-    const policy = loadYaml("nemoclaw-blueprint/policies/openclaw-sandbox.yaml");
+    const policy = loadYaml("packages/nemoclaw-openclaw/policy-additions.yaml");
     const networkPolicies = policy.network_policies as Record<string, unknown> | undefined;
     const dialback = networkPolicies?.openclaw_gateway_dialback as
       | { endpoints?: Array<Record<string, unknown>> }

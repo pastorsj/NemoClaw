@@ -10,7 +10,7 @@ import { resolveLiveE2eWorkloadSourceEnv } from "../fixtures/workload-source-env
 
 describe("live E2E workload source environment", () => {
   it.each([
-    ["openclaw", "Dockerfile"],
+    ["openclaw", "packages/nemoclaw-openclaw/Dockerfile"],
     ["hermes", "packages/nemoclaw-hermes/Dockerfile"],
     ["langchain-deepagents-code", "packages/nemoclaw-langchain-deepagents-code/Dockerfile"],
   ])("honors the explicit legacy-Dockerfile source for %s", (agent, dockerfile) => {

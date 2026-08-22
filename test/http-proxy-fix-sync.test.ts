@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(import.meta.dirname, "..");
 const CANONICAL_FIX = path.join(ROOT, "nemoclaw-blueprint", "scripts", "http-proxy-fix.js");
-const START_SCRIPT = path.join(ROOT, "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 
 function extractShellFunction(source: string, name: string): string {
   const header = `${name}() {`;
@@ -30,7 +30,9 @@ describe("http-proxy-fix preload sync (#2109)", () => {
       start,
     );
     if (start === -1 || end === -1 || end <= start) {
-      throw new Error("Expected HTTP proxy fix entrypoint block in scripts/nemoclaw-start.sh");
+      throw new Error(
+        "Expected HTTP proxy fix entrypoint block in packages/nemoclaw-openclaw/start.sh",
+      );
     }
 
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-http-proxy-fix-"));

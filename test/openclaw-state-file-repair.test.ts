@@ -8,7 +8,7 @@ import path from "node:path";
 import { expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const DOCKERFILE = path.join(ROOT, "Dockerfile");
+const DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
 
 function openclawStateRepairCommand(): string {
   const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");

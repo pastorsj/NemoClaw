@@ -16,7 +16,7 @@ import { type ShellProbe, trustedShellCommand } from "../fixtures/shell-probe.ts
 // It intentionally does not require a WhatsApp account, phone scan, sandbox,
 // Docker, or NVIDIA_INFERENCE_API_KEY: the contract is the renderer boundary.
 
-const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
+const DOCKERFILE_BASE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const PRELOAD_SOURCE = path.join(
   REPO_ROOT,
   "src",

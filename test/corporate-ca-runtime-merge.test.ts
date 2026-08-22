@@ -3,7 +3,7 @@
 //
 // Runtime behavior of the corporate-proxy CA merge (#6210) in the sandbox
 // entrypoints. Exercises the actual shell blocks extracted from
-// scripts/nemoclaw-start.sh and packages/nemoclaw-hermes/start.sh, not a re-implementation.
+// packages/nemoclaw-openclaw/start.sh and packages/nemoclaw-hermes/start.sh, not a re-implementation.
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,7 +16,7 @@ import {
   sliceBlock,
 } from "./helpers/corporate-ca-support";
 
-const OPENCLAW_START = join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+const OPENCLAW_START = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 const HERMES_START = join(import.meta.dirname, "../packages/nemoclaw-hermes/start.sh");
 
 const OPENSHELL_PEM = "-----BEGIN CERTIFICATE-----\nOPENSHELL-ROOT\n-----END CERTIFICATE-----\n";

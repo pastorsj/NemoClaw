@@ -42,7 +42,7 @@ interface ReviewedOpenClawPackage {
 }
 
 function reviewedOpenClawPackage(): ReviewedOpenClawPackage {
-  const dockerfile = fs.readFileSync(path.join(REPO_ROOT, "Dockerfile"), "utf-8");
+  const dockerfile = fs.readFileSync(path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile"), "utf-8");
   const version = dockerfile.match(/^ARG OPENCLAW_VERSION=([^\s]+)/m)?.[1];
   assert.ok(version, "Dockerfile is missing ARG OPENCLAW_VERSION");
   const pinKey = version.replaceAll(".", "_");

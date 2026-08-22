@@ -148,7 +148,11 @@ function deriveDependencyPins(rootDir: string = REPO_ROOT): {
 } {
   const failures: string[] = [];
   const blueprintSource = readText(rootDir, "nemoclaw-blueprint/blueprint.yaml", failures);
-  const dockerfileBase = readText(rootDir, "Dockerfile.base", failures);
+  const dockerfileBase = readText(
+    rootDir,
+    "packages/nemoclaw-openclaw/Dockerfile.base",
+    failures,
+  );
   const hermesDockerfileBase = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile.base", failures);
   if (failures.length > 0) return { failures, pins: null };
 
@@ -584,7 +588,7 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
   );
   const openclawManifestSource = readText(rootDir, "packages/nemoclaw-openclaw/manifest.yaml", failures);
   const hermesManifestSource = readText(rootDir, "packages/nemoclaw-hermes/manifest.yaml", failures);
-  const dockerfile = readText(rootDir, "Dockerfile", failures);
+  const dockerfile = readText(rootDir, "packages/nemoclaw-openclaw/Dockerfile", failures);
   const hermesDockerfile = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile", failures);
   const hermesMcpConfigTransaction = readText(
     rootDir,

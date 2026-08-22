@@ -39,9 +39,9 @@ import {
 
 const PERMISSIVE_POLICY = path.join(
   REPO_ROOT,
-  "nemoclaw-blueprint",
-  "policies",
-  "openclaw-sandbox-permissive.yaml",
+  "packages",
+  "nemoclaw-openclaw",
+  "policy-permissive-default.yaml",
 );
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-net-policy";
 const SUPPRESSION_SANDBOX_NAME =

@@ -67,7 +67,7 @@ const HERMES_RESTORED_POLICY = YAML.stringify({
   network_policies: { nous_research: HERMES_BASELINE_ENTRY },
 });
 const OPENCLAW_BASELINE_ENTRY = getBaselineEntry(
-  fs.readFileSync("nemoclaw-blueprint/policies/openclaw-sandbox.yaml", "utf8"),
+  fs.readFileSync("packages/nemoclaw-openclaw/policy-additions.yaml", "utf8"),
   "managed_inference",
 );
 const OPENCLAW_BASELINE_DIGEST = digestBaselineEntry(OPENCLAW_BASELINE_ENTRY!);

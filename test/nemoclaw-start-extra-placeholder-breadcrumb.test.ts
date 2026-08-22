@@ -14,7 +14,7 @@ import {
 // breadcrumb). That lane runs on an ephemeral Brev instance and never gates PR
 // CI, so this mocked shell-unit pins the same three properties against the real
 // `refresh_openclaw_provider_placeholders` body extracted from
-// scripts/nemoclaw-start.sh:
+// packages/nemoclaw-openclaw/start.sh:
 //   X4a/X4b — each accepted extra key becomes a canonical
 //     openshell:resolve:env:<KEY> placeholder, and distinct extra keys resolve
 //     to distinct placeholders.

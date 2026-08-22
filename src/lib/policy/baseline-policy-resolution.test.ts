@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as agentDefs from "../agent/defs";
 import { ROOT } from "../runner";
 import * as registry from "../state/registry";
-import { resolveSandboxBaselinePolicy } from "./index";
+import { resolvePermissivePolicyPath, resolveSandboxBaselinePolicy } from "./index";
 
 const tempDirs: string[] = [];
 
@@ -41,9 +41,36 @@ describe("sandbox baseline policy resolution (#7194)", () => {
     const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent");
 
     expect(resolveSandboxBaselinePolicy("alpha")?.policyPath).toBe(
-      path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+      path.join(ROOT, "packages", "nemoclaw-openclaw", "policy-additions.yaml"),
     );
-    expect(loadAgentSpy).not.toHaveBeenCalled();
+    expect(loadAgentSpy).toHaveBeenCalledWith("openclaw");
+  });
+
+  it("uses the selected installed OpenClaw baseline", () => {
+    const policyPath = writePolicy(
+      fs.readFileSync(
+        path.join(ROOT, "packages", "nemoclaw-openclaw", "policy-additions.yaml"),
+        "utf8",
+      ),
+    );
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: null } as never);
+    vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
+      name: "openclaw",
+      policyAdditionsPath: policyPath,
+    } as never);
+
+    expect(resolveSandboxBaselinePolicy("alpha")?.policyPath).toBe(policyPath);
+  });
+
+  it("uses the selected installed OpenClaw default permissive policy", () => {
+    const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-installed-openclaw-"));
+    tempDirs.push(agentDir);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: null } as never);
+    vi.spyOn(agentDefs, "loadAgent").mockReturnValue({ name: "openclaw", agentDir } as never);
+
+    expect(resolvePermissivePolicyPath("alpha")).toBe(
+      path.join(agentDir, "policy-permissive-default.yaml"),
+    );
   });
 
   it.each([

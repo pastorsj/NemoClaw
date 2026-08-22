@@ -9,7 +9,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { extractShellFunctionFromSource } from "./support/shell-function-extractor.ts";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 const PRELOAD_SCRIPTS = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "scripts");
 
 function runEmbeddedPreload(

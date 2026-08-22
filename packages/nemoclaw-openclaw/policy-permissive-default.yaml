@@ -13,7 +13,7 @@
 version: 1
 
 filesystem_policy:
-  # Filesystem section mirrors the default policy (openclaw-sandbox.yaml).
+  # Filesystem section mirrors the default OpenClaw policy.
   # OpenShell rejects include_workdir changes and filesystem path removals on
   # live sandboxes.
   include_workdir: true
@@ -60,7 +60,7 @@ network_policies:
       - { path: "/**" }
 
   # ── Managed inference route ──────────────────────────────────────────
-  # Mirror of the `managed_inference` block in openclaw-sandbox.yaml.
+  # Mirror of the default policy's `managed_inference` block.
   # `inference.local` is the OpenShell gateway's internal virtual hostname;
   # the gateway proxies it to the configured provider. OpenShell currently
   # applies an implicit allow for this route when a managed inference

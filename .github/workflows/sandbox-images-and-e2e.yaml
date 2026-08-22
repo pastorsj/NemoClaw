@@ -92,7 +92,7 @@ jobs:
           BASE_IMAGE: ${{ env.BASE_IMAGE }}
         run: |
           set -euo pipefail
-          build_args=(--build-arg "BASE_IMAGE=${BASE_IMAGE}")
+          build_args=(-f packages/nemoclaw-openclaw/Dockerfile --build-arg "BASE_IMAGE=${BASE_IMAGE}")
           scripts/check-production-build-args.sh "${build_args[@]}"
           docker build "${build_args[@]}" -t nemoclaw-production .
 
@@ -368,6 +368,7 @@ jobs:
           set -euo pipefail
           messaging_plan_b64="$(node --experimental-strip-types scripts/check-messaging-plan-image-boundary.mts plan openclaw)"
           build_args=(
+            -f packages/nemoclaw-openclaw/Dockerfile
             --build-arg "BASE_IMAGE=${BASE_IMAGE}"
             --build-arg "NEMOCLAW_MESSAGING_PLAN_B64=${messaging_plan_b64}"
           )
@@ -488,7 +489,7 @@ jobs:
           BASE_IMAGE: ${{ env.BASE_IMAGE }}
         run: |
           set -euo pipefail
-          build_args=(--build-arg "BASE_IMAGE=${BASE_IMAGE}")
+          build_args=(-f packages/nemoclaw-openclaw/Dockerfile --build-arg "BASE_IMAGE=${BASE_IMAGE}")
           scripts/check-production-build-args.sh "${build_args[@]}"
           docker build "${build_args[@]}" -t nemoclaw-production-arm64 .
 

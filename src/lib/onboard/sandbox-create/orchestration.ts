@@ -334,7 +334,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     const legacyDockerfilePath =
       effectiveAgent.dockerfilePath ??
       effectiveAgent.legacyPaths?.dockerfile ??
-      path.join(ROOT, "Dockerfile");
+      path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
     enabledChannels = filterEnabledChannelsByAgent(enabledChannels, agent);
     const effectiveSandboxGpuConfig =
       sandboxGpuConfig ?? resolveSandboxGpuConfig(gpu, { flag: null, device: null });

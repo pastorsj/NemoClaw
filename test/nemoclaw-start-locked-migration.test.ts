@@ -10,7 +10,13 @@ import { describe, expect, it } from "vitest";
 
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 describe("legacy migration with Shields active", () => {
   const source = fs.readFileSync(START_SCRIPT, "utf-8");
@@ -100,26 +106,29 @@ migrate_legacy_layout ${JSON.stringify(configDir)} ${JSON.stringify(dataDir)} op
       error: "canonical state-dir guard refused",
       expectedCalls: 2,
     },
-  ])("keeps the legacy data retryable when the canonical $guard guard refuses relock (#8006)", (testCase) => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-migrate-relock-fail-"));
-    const configDir = path.join(tempDir, ".openclaw");
-    const dataDir = path.join(tempDir, ".openclaw-data");
-    const relockLog = path.join(tempDir, "relock.log");
-    fs.mkdirSync(configDir);
-    fs.mkdirSync(path.join(dataDir, "skills"), { recursive: true });
+  ])(
+    "keeps the legacy data retryable when the canonical $guard guard refuses relock (#8006)",
+    (testCase) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-migrate-relock-fail-"));
+      const configDir = path.join(tempDir, ".openclaw");
+      const dataDir = path.join(tempDir, ".openclaw-data");
+      const relockLog = path.join(tempDir, "relock.log");
+      fs.mkdirSync(configDir);
+      fs.mkdirSync(path.join(dataDir, "skills"), { recursive: true });
 
-    try {
-      const result = runLockedMigration(configDir, dataDir, relockLog, testCase.options);
+      try {
+        const result = runLockedMigration(configDir, dataDir, relockLog, testCase.options);
 
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(testCase.error);
-      expect(fs.readFileSync(relockLog, "utf-8").trim().split("\n")).toHaveLength(
-        testCase.expectedCalls,
-      );
-      expect(fs.existsSync(dataDir)).toBe(true);
-      expect(fs.existsSync(path.join(configDir, ".migration-complete"))).toBe(false);
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain(testCase.error);
+        expect(fs.readFileSync(relockLog, "utf-8").trim().split("\n")).toHaveLength(
+          testCase.expectedCalls,
+        );
+        expect(fs.existsSync(dataDir)).toBe(true);
+        expect(fs.existsSync(path.join(configDir, ".migration-complete"))).toBe(false);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
 });

@@ -73,6 +73,10 @@ function stageOpenClawRuntimeGraphs(rootDir: string, buildCtx: string): void {
     path.join(sourceAgentDir, "state-lock-plan.json"),
     path.join(stagedAgentDir, "state-lock-plan.json"),
   );
+  fs.copyFileSync(path.join(sourceAgentDir, "start.sh"), path.join(stagedAgentDir, "start.sh"));
+  for (const fileName of ["policy-additions.yaml", "policy-permissive-default.yaml"]) {
+    fs.copyFileSync(path.join(sourceAgentDir, fileName), path.join(stagedAgentDir, fileName));
+  }
   for (const runtimeName of [
     "managed-image-messaging-runtime",
     "mcporter-runtime",
@@ -160,7 +164,10 @@ function stageLegacySandboxBuildContext(
   tmpDir: string = os.tmpdir(),
 ): StagedBuildContext {
   const buildCtx = createBuildContextDir(tmpDir);
-  fs.copyFileSync(path.join(rootDir, "Dockerfile"), path.join(buildCtx, "Dockerfile"));
+  fs.copyFileSync(
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
+    path.join(buildCtx, "Dockerfile"),
+  );
   fs.copyFileSync(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
@@ -214,7 +221,10 @@ function stageOptimizedSandboxBuildContext(
   const stagedCiDir = path.join(buildCtx, "ci");
   const stagedScriptsDir = path.join(buildCtx, "scripts");
 
-  fs.copyFileSync(path.join(rootDir, "Dockerfile"), stagedDockerfile);
+  fs.copyFileSync(
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
+    stagedDockerfile,
+  );
   fs.copyFileSync(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
@@ -279,10 +289,6 @@ function stageOptimizedSandboxBuildContext(
   fs.copyFileSync(
     path.join(rootDir, "scripts", "checks", "materialize-locked-npm-cache-seed.mts"),
     path.join(stagedScriptsDir, "checks", "materialize-locked-npm-cache-seed.mts"),
-  );
-  fs.copyFileSync(
-    path.join(rootDir, "scripts", "nemoclaw-start.sh"),
-    path.join(stagedScriptsDir, "nemoclaw-start.sh"),
   );
   fs.copyFileSync(
     path.join(rootDir, "scripts", "managed-startup-hold.sh"),

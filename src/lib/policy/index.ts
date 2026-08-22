@@ -1472,9 +1472,13 @@ function resolveAgentBaselinePolicy(
 ): { agent: string; policyPath: string; content: string } | null {
   const resolvedAgent = agentName || "openclaw";
   const usesOpenClawBaseline = !agentName || agentName === "openclaw";
-  const policyPath = usesOpenClawBaseline
-    ? path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml")
-    : requireAgentPolicyAdditionsPath(loadAgent(resolvedAgent));
+  let policyPath: string;
+  try {
+    policyPath = requireAgentPolicyAdditionsPath(loadAgent(resolvedAgent));
+  } catch (error) {
+    if (!usesOpenClawBaseline) throw error;
+    return null;
+  }
   let content: string;
   try {
     content = fs.readFileSync(policyPath, "utf-8");
@@ -2880,9 +2884,9 @@ async function selectFromList(
 
 const PERMISSIVE_POLICY_PATH = path.join(
   ROOT,
-  "nemoclaw-blueprint",
-  "policies",
-  "openclaw-sandbox-permissive.yaml",
+  "packages",
+  "nemoclaw-openclaw",
+  "policy-permissive-default.yaml",
 );
 
 /**
@@ -2905,7 +2909,8 @@ function resolvePermissivePolicyPath(sandboxName: string): string {
   } catch {
     // Fall through to global permissive policy
   }
-  return PERMISSIVE_POLICY_PATH;
+  const openClaw = loadAgent("openclaw");
+  return path.join(openClaw.agentDir, "policy-permissive-default.yaml");
 }
 
 function applyPermissivePolicy(sandboxName: string): void {

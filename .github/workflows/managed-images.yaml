@@ -34,7 +34,7 @@ on:
       - ".github/actions/ci-reviewed-npm-audit/**"
       - ".github/workflows/managed-images.yaml"
       - ".dockerignore"
-      - "Dockerfile"
+      - "packages/nemoclaw-openclaw/Dockerfile"
       - "agents/**"
       - "packages/**"
       - "ci/npm-audit-exceptions.json"
@@ -392,8 +392,8 @@ jobs:
         include:
           - agent: openclaw
             display_name: OpenClaw
-            dockerfile: Dockerfile
-            base_dockerfile: Dockerfile.base
+            dockerfile: packages/nemoclaw-openclaw/Dockerfile
+            base_dockerfile: packages/nemoclaw-openclaw/Dockerfile.base
             base_alias: ghcr.io/nvidia/nemoclaw/sandbox-base:latest
             base_repository: ghcr.io/nvidia/nemoclaw/sandbox-base
             image: nemoclaw-managed-pr/openclaw
@@ -1542,7 +1542,7 @@ jobs:
           - agent: openclaw
             arch: amd64
             display_name: OpenClaw
-            dockerfile: Dockerfile
+            dockerfile: packages/nemoclaw-openclaw/Dockerfile
             base_image: nvidia/nemoclaw/sandbox-base
             image: nvidia/nemoclaw/openclaw-sandbox
             platform: linux/amd64
@@ -1552,7 +1552,7 @@ jobs:
           - agent: openclaw
             arch: arm64
             display_name: OpenClaw
-            dockerfile: Dockerfile
+            dockerfile: packages/nemoclaw-openclaw/Dockerfile
             base_image: nvidia/nemoclaw/sandbox-base
             image: nvidia/nemoclaw/openclaw-sandbox
             platform: linux/arm64

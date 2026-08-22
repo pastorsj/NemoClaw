@@ -13,8 +13,8 @@ import {
   runFetchGuardPatchBlock,
 } from "./helpers/fetch-guard-patch-harness";
 
-const DOCKERFILE = path.join(import.meta.dirname, "..", "Dockerfile");
-const DOCKERFILE_BASE = path.join(import.meta.dirname, "..", "Dockerfile.base");
+const DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile");
+const DOCKERFILE_BASE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const BLUEPRINT = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "blueprint.yaml");
 const REVIEWED_NPM_AUDIT_HELPER = path.join(
   import.meta.dirname,

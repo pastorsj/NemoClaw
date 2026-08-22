@@ -72,6 +72,13 @@ function readManifestExpectedVersion(agentName: string, agentDir: string): strin
   return expectedVersion ?? "";
 }
 
+function writeFixture(root: string, relativePath: string, content: string): string {
+  const filePath = path.join(root, ...relativePath.split("/"));
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+  return filePath;
+}
+
 // Read the agent names from the checked-in Dockerfiles so a base image that
 // starts consuming the corporate CA cannot ship without the build argument.
 const CORPORATE_CA_BASE_IMAGE_AGENTS = [AGENTS_DIR, PACKAGES_DIR].flatMap((root) =>
@@ -147,6 +154,112 @@ describe("agent base image provisioning", () => {
         expect(fs.existsSync(path.join(result.buildCtx, "unrelated-sentinel.txt"))).toBe(false);
         expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toContain(
           "ARG BASE_IMAGE=nemocua-scenario:staged",
+        );
+      });
+    } finally {
+      fs.rmSync(buildContext, { recursive: true, force: true });
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["openclaw", "hermes", "langchain-deepagents-code"])(
+    "stages the selected %s harness package over bundled files",
+    (agentName) => {
+      const root = tmpDir();
+      const packageDirectoryName = `nemoclaw-${agentName}`;
+      const bundledPackageDir = path.join(root, "packages", packageDirectoryName);
+      const selectedPackageDir = path.join(tmpDir(), packageDirectoryName);
+      writeFixture(root, "repository-sentinel.txt", "repository file");
+      writeFixture(bundledPackageDir, "Dockerfile", "FROM bundled\n");
+      writeFixture(bundledPackageDir, "start.sh", "bundled start\n");
+      writeFixture(bundledPackageDir, "bundled-only.txt", "must be removed\n");
+      const selectedDockerfile = writeFixture(selectedPackageDir, "Dockerfile", "FROM selected\n");
+      const selectedManifest = writeFixture(
+        selectedPackageDir,
+        "manifest.yaml",
+        `name: ${agentName}\n`,
+      );
+      writeFixture(selectedPackageDir, "start.sh", "selected start\n");
+      writeFixture(selectedPackageDir, "selected-only.txt", "selected package\n");
+      writeFixture(selectedPackageDir, ".nemoclaw-install.json", '{"digest":"receipt"}\n');
+      writeFixture(selectedPackageDir, ".DS_Store", "ignored\n");
+      writeFixture(selectedPackageDir, ".git/config", "ignored\n");
+      writeFixture(selectedPackageDir, "node_modules/cache/index.js", "ignored\n");
+      writeFixture(selectedPackageDir, "runtime/__pycache__/module.pyc", "ignored\n");
+      let buildContext = root;
+
+      try {
+        withMockedDocker(({ createAgentSandbox }) => {
+          const result = createAgentSandbox(
+            makeAgent({
+              name: agentName,
+              displayName: agentName,
+              agentDir: selectedPackageDir,
+              manifestPath: selectedManifest,
+              dockerfileBasePath: null,
+              dockerfilePath: selectedDockerfile,
+            }),
+            { rootDir: root },
+          );
+          buildContext = result.buildCtx;
+          const stagedPackageDir = path.join(result.buildCtx, "packages", packageDirectoryName);
+
+          expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toBe("FROM selected\n");
+          expect(fs.readFileSync(path.join(stagedPackageDir, "start.sh"), "utf8")).toBe(
+            "selected start\n",
+          );
+          expect(fs.readFileSync(path.join(stagedPackageDir, "selected-only.txt"), "utf8")).toBe(
+            "selected package\n",
+          );
+          expect(fs.existsSync(path.join(stagedPackageDir, "bundled-only.txt"))).toBe(false);
+          expect(fs.existsSync(path.join(stagedPackageDir, ".nemoclaw-install.json"))).toBe(false);
+          expect(fs.existsSync(path.join(stagedPackageDir, ".DS_Store"))).toBe(false);
+          expect(fs.existsSync(path.join(stagedPackageDir, ".git"))).toBe(false);
+          expect(fs.existsSync(path.join(stagedPackageDir, "node_modules"))).toBe(false);
+          expect(fs.existsSync(path.join(stagedPackageDir, "runtime/__pycache__"))).toBe(false);
+          expect(
+            fs.readFileSync(path.join(result.buildCtx, "repository-sentinel.txt"), "utf8"),
+          ).toBe("repository file");
+        });
+      } finally {
+        fs.rmSync(buildContext, { recursive: true, force: true });
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("leaves the bundled package unchanged for a legacy agent directory", () => {
+    const root = tmpDir();
+    const bundledPackageDir = path.join(root, "packages", "nemoclaw-hermes");
+    const legacyAgentDir = path.join(tmpDir(), "agents", "hermes");
+    writeFixture(bundledPackageDir, "Dockerfile", "FROM bundled\n");
+    writeFixture(bundledPackageDir, "start.sh", "bundled start\n");
+    writeFixture(bundledPackageDir, "bundled-only.txt", "bundled package\n");
+    const legacyDockerfile = writeFixture(legacyAgentDir, "Dockerfile", "FROM legacy\n");
+    const legacyManifest = writeFixture(legacyAgentDir, "manifest.yaml", "name: hermes\n");
+    writeFixture(legacyAgentDir, "start.sh", "legacy start\n");
+    let buildContext = root;
+
+    try {
+      withMockedDocker(({ createAgentSandbox }) => {
+        const result = createAgentSandbox(
+          makeAgent({
+            agentDir: legacyAgentDir,
+            manifestPath: legacyManifest,
+            dockerfileBasePath: null,
+            dockerfilePath: legacyDockerfile,
+          }),
+          { rootDir: root },
+        );
+        buildContext = result.buildCtx;
+        const stagedPackageDir = path.join(result.buildCtx, "packages", "nemoclaw-hermes");
+
+        expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toBe("FROM legacy\n");
+        expect(fs.readFileSync(path.join(stagedPackageDir, "start.sh"), "utf8")).toBe(
+          "bundled start\n",
+        );
+        expect(fs.readFileSync(path.join(stagedPackageDir, "bundled-only.txt"), "utf8")).toBe(
+          "bundled package\n",
         );
       });
     } finally {

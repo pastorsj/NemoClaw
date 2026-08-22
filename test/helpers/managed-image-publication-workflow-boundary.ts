@@ -13,7 +13,7 @@ const managedInputPaths = [
   ".dockerignore",
   ".github/actions/ci-reviewed-npm-audit/**",
   ".github/workflows/managed-images.yaml",
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "agents/**",
   "packages/**",
   "ci/npm-audit-exceptions.json",

@@ -74,7 +74,7 @@ function managedRuntime(driverName: string): SandboxWorkloadRuntimeCapabilities 
 const REPOSITORY_DOCKERFILE_PATHS: Readonly<Record<string, string>> = {
   hermes: "packages/nemoclaw-hermes/Dockerfile",
   "langchain-deepagents-code": "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
-  openclaw: "Dockerfile",
+  openclaw: "packages/nemoclaw-openclaw/Dockerfile",
 };
 
 function repositoryDockerfilePath(agentName: string): string {
@@ -117,7 +117,7 @@ describe("sandbox workload source resolution", () => {
   it("preserves an explicit custom Dockerfile on a driver that supports local builds (#7744)", () => {
     const source = resolveSandboxWorkloadSource({
       agentName: "openclaw",
-      legacyDockerfilePath: "Dockerfile",
+      legacyDockerfilePath: "packages/nemoclaw-openclaw/Dockerfile",
       customDockerfilePath: "/workspace/custom/Dockerfile",
       runtime: managedRuntime("docker"),
       catalog: CATALOG,
@@ -134,7 +134,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "openclaw",
-        legacyDockerfilePath: "Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-openclaw/Dockerfile",
         customDockerfilePath: "/workspace/custom/Dockerfile",
         runtime: managedRuntime("podman"),
         catalog: CATALOG,

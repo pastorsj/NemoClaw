@@ -38,7 +38,7 @@ const WORKFLOW_SOURCE = `on:
     branches: [main]
     paths:
       - ".github/workflows/base-image.yaml"
-      - "Dockerfile.base"
+      - "packages/nemoclaw-openclaw/Dockerfile.base"
   workflow_dispatch:
 jobs: {}
 `;
@@ -184,8 +184,8 @@ describe("base-image publication evidence", () => {
       expect.arrayContaining([
         ".github/actions/ci-reviewed-npm-audit/**",
         ".github/workflows/base-image.yaml",
-        "Dockerfile",
-        "Dockerfile.base",
+        "packages/nemoclaw-openclaw/Dockerfile",
+        "packages/nemoclaw-openclaw/Dockerfile.base",
         "agents/**",
         "packages/**",
         "packages/nemoclaw-hermes/Dockerfile.base",
@@ -206,24 +206,27 @@ describe("base-image publication evidence", () => {
     [
       "a duplicate",
       WORKFLOW_SOURCE.replace(
-        '      - "Dockerfile.base"',
-        '      - "Dockerfile.base"\n      - "Dockerfile.base"',
+        '      - "packages/nemoclaw-openclaw/Dockerfile.base"',
+        '      - "packages/nemoclaw-openclaw/Dockerfile.base"\n      - "packages/nemoclaw-openclaw/Dockerfile.base"',
       ),
       /must be unique/u,
     ],
     [
       "a glob",
-      WORKFLOW_SOURCE.replace("Dockerfile.base", "Dockerfile.*"),
+      WORKFLOW_SOURCE.replace("packages/nemoclaw-openclaw/Dockerfile.base", "Dockerfile.*"),
       /not a safe literal path/u,
     ],
     [
       "a parent traversal",
-      WORKFLOW_SOURCE.replace("Dockerfile.base", "../Dockerfile.base"),
+      WORKFLOW_SOURCE.replace("packages/nemoclaw-openclaw/Dockerfile.base", "../Dockerfile.base"),
       /not a safe literal path/u,
     ],
     [
       "an unquoted scalar",
-      WORKFLOW_SOURCE.replace('"Dockerfile.base"', "Dockerfile.base"),
+      WORKFLOW_SOURCE.replace(
+        '"packages/nemoclaw-openclaw/Dockerfile.base"',
+        "packages/nemoclaw-openclaw/Dockerfile.base",
+      ),
       /must be one quoted scalar/u,
     ],
     [
@@ -234,8 +237,8 @@ describe("base-image publication evidence", () => {
     [
       "a flow list",
       WORKFLOW_SOURCE.replace(
-        'paths:\n      - ".github/workflows/base-image.yaml"\n      - "Dockerfile.base"',
-        'paths: [".github/workflows/base-image.yaml", "Dockerfile.base"]',
+        'paths:\n      - ".github/workflows/base-image.yaml"\n      - "packages/nemoclaw-openclaw/Dockerfile.base"',
+        'paths: [".github/workflows/base-image.yaml", "packages/nemoclaw-openclaw/Dockerfile.base"]',
       ),
       /non-empty on\.push\.paths/u,
     ],
@@ -250,7 +253,7 @@ describe("base-image publication evidence", () => {
 
   it("passes only reviewed glob families as bounded Git pathspecs (#7744)", () => {
     const expanded = expandBaseImagePushPaths(EXPECTED_SHA, [
-      "Dockerfile",
+      "packages/nemoclaw-openclaw/Dockerfile",
       "agents/**",
       "packages/**",
       "src/lib/messaging/**",
@@ -261,20 +264,24 @@ describe("base-image publication evidence", () => {
       ":(glob)packages/**",
       ":(glob)src/lib/messaging/**",
       ":(glob)test/e2e/live/managed-image-activation-e2e*.ts",
-      "Dockerfile",
+      "packages/nemoclaw-openclaw/Dockerfile",
     ]);
   });
 
   it("binds the applicable commit to the checked-out first-parent chain (#7372)", () => {
     const calls: string[][] = [];
-    const resolved = resolveFirstParentHistory(EXPECTED_SHA, ["Dockerfile.base"], (args) => {
-      calls.push(args);
-      return historyGitResponse(
-        args,
-        RELEVANT_SHA,
-        `${EXPECTED_SHA}\n${DESCENDANT_SHA}\n${RELEVANT_SHA}\n${STALE_SHA}`,
-      );
-    });
+    const resolved = resolveFirstParentHistory(
+      EXPECTED_SHA,
+      ["packages/nemoclaw-openclaw/Dockerfile.base"],
+      (args) => {
+        calls.push(args);
+        return historyGitResponse(
+          args,
+          RELEVANT_SHA,
+          `${EXPECTED_SHA}\n${DESCENDANT_SHA}\n${RELEVANT_SHA}\n${STALE_SHA}`,
+        );
+      },
+    );
 
     expect(resolved.relevantSha).toBe(RELEVANT_SHA);
     expect([...resolved.distanceBySha]).toEqual([
@@ -290,7 +297,7 @@ describe("base-image publication evidence", () => {
       "--format=%H",
       EXPECTED_SHA,
       "--",
-      "Dockerfile.base",
+      "packages/nemoclaw-openclaw/Dockerfile.base",
     ]);
   });
 
@@ -298,8 +305,11 @@ describe("base-image publication evidence", () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-publication-history-"));
     const git = (...args: string[]) =>
       execFileSync("git", args, { cwd: directory, encoding: "utf8" }).trim();
-    const write = (file: string, contents: string) =>
-      fs.writeFileSync(path.join(directory, file), contents);
+    const write = (file: string, contents: string) => {
+      const target = path.join(directory, file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, contents);
+    };
     const commit = (message: string) => {
       git("add", ".");
       git("commit", "-m", message);
@@ -310,12 +320,12 @@ describe("base-image publication evidence", () => {
       git("init", "-b", "main");
       git("config", "user.name", "NemoClaw Test");
       git("config", "user.email", "test@example.com");
-      write("Dockerfile.base", "base\n");
+      write("packages/nemoclaw-openclaw/Dockerfile.base", "base\n");
       commit("base");
       write("unrelated.txt", "main\n");
       const branchPoint = commit("main change");
       git("switch", "-c", "feature");
-      write("Dockerfile.base", "feature\n");
+      write("packages/nemoclaw-openclaw/Dockerfile.base", "feature\n");
       const sideBranchSha = commit("side change");
       git("switch", "main");
       write("main-only.txt", "main\n");
@@ -323,8 +333,10 @@ describe("base-image publication evidence", () => {
       git("merge", "--no-ff", "feature", "-m", "merge feature");
       const mergeSha = git("rev-parse", "HEAD");
 
-      const resolved = resolveFirstParentHistory(mergeSha, ["Dockerfile.base"], (args) =>
-        git(...args),
+      const resolved = resolveFirstParentHistory(
+        mergeSha,
+        ["packages/nemoclaw-openclaw/Dockerfile.base"],
+        (args) => git(...args),
       );
 
       expect(branchPoint).not.toBe(sideBranchSha);
@@ -337,11 +349,17 @@ describe("base-image publication evidence", () => {
 
   it("rejects checkout and history identity drift (#7372)", () => {
     expect(() =>
-      resolveFirstParentHistory(EXPECTED_SHA, ["Dockerfile.base"], () => DESCENDANT_SHA),
+      resolveFirstParentHistory(
+        EXPECTED_SHA,
+        ["packages/nemoclaw-openclaw/Dockerfile.base"],
+        () => DESCENDANT_SHA,
+      ),
     ).toThrow(/checked-out commit/u);
     expect(() =>
-      resolveFirstParentHistory(EXPECTED_SHA, ["Dockerfile.base"], (args) =>
-        historyGitResponse(args, STALE_SHA, `${EXPECTED_SHA}\n${RELEVANT_SHA}`),
+      resolveFirstParentHistory(
+        EXPECTED_SHA,
+        ["packages/nemoclaw-openclaw/Dockerfile.base"],
+        (args) => historyGitResponse(args, STALE_SHA, `${EXPECTED_SHA}\n${RELEVANT_SHA}`),
       ),
     ).toThrow(/not on the first-parent history/u);
   });

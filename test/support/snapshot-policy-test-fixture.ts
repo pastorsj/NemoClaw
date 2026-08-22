@@ -15,7 +15,7 @@ export function resolveTestAgentBaselinePolicy(
     agent: resolvedAgent,
     policyPath:
       resolvedAgent === "openclaw"
-        ? "/repo/nemoclaw-blueprint/policies/openclaw-sandbox.yaml"
+        ? "/repo/packages/nemoclaw-openclaw/policy-additions.yaml"
         : resolveTestPolicyAdditionsPath(resolvedAgent),
     content: "version: 1\nnetwork_policies: {}\n",
   };

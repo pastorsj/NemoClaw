@@ -14,7 +14,7 @@ import {
 const BASELINES = [
   {
     agent: "openclaw",
-    path: "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+    path: "packages/nemoclaw-openclaw/policy-additions.yaml",
   },
   {
     agent: "hermes",

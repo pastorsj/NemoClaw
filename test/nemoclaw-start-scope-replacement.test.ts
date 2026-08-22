@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.resolve(import.meta.dirname, "../scripts/nemoclaw-start.sh");
+const START_SCRIPT = path.resolve(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 
 function runtimeShellEnvBlock(source: string): string {
   const start = source.indexOf("write_runtime_shell_env() {");

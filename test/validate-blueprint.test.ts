@@ -18,11 +18,11 @@ import * as policies from "../src/lib/policy";
 
 const BLUEPRINT_PATH = new URL("../nemoclaw-blueprint/blueprint.yaml", import.meta.url);
 const BASE_POLICY_PATH = new URL(
-  "../nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+  "../packages/nemoclaw-openclaw/policy-additions.yaml",
   import.meta.url,
 );
 const PERMISSIVE_POLICY_PATH = new URL(
-  "../nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
+  "../packages/nemoclaw-openclaw/policy-permissive-default.yaml",
   import.meta.url,
 );
 const HERMES_POLICY_PATH = new URL("../packages/nemoclaw-hermes/policy-additions.yaml", import.meta.url);

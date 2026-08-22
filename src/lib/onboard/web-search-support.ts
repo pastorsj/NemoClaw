@@ -22,8 +22,8 @@ export type WebSearchAgent =
  * the config generator has no code path to emit a web search block — so offering
  * the web-search prompt would mislead the user.
  *
- * OpenClaw uses the root Dockerfile (not packages/nemoclaw-openclaw/Dockerfile), so we
- * fall back to the root Dockerfile when the agent-specific one doesn't exist.
+ * Fall back to the bundled OpenClaw Dockerfile when the agent-specific one
+ * doesn't exist.
  */
 export function agentSupportsWebSearch(
   agent: WebSearchAgent,
@@ -33,7 +33,7 @@ export function agentSupportsWebSearch(
   const candidates = [
     dockerfilePathOverride,
     agent?.dockerfilePath,
-    path.join(rootDir, "Dockerfile"),
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
   ].filter(
     (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );
@@ -68,7 +68,7 @@ export function agentSupportsWebSearchProvider(
   const candidates = [
     dockerfilePathOverride,
     agent?.dockerfilePath,
-    path.join(rootDir, "Dockerfile"),
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
   ].filter(
     (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );

@@ -16,12 +16,12 @@ import { requireSingleReviewedDockerfileRunCommand } from "./helpers/dockerfile-
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const baseDockerfiles = [
-  "Dockerfile.base",
+  "packages/nemoclaw-openclaw/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
 ] as const;
 const finalDockerfiles = [
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ] as const;

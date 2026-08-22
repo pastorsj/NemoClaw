@@ -31,7 +31,8 @@ function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-resolution-key-"));
   roots.push(root);
   fs.mkdirSync(path.join(root, "nemoclaw-blueprint"), { recursive: true });
-  fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM node:22\n");
+  fs.mkdirSync(path.join(root, "packages", "nemoclaw-openclaw"), { recursive: true });
+  fs.writeFileSync(path.join(root, "packages/nemoclaw-openclaw/Dockerfile.base"), "FROM node:22\n");
   fs.writeFileSync(path.join(root, "nemoclaw-blueprint", "blueprint.yaml"), "version: 1\n");
   return root;
 }
@@ -39,7 +40,7 @@ function fixture(): string {
 function options(root: string) {
   return {
     imageName: "ghcr.io/nvidia/nemoclaw/sandbox-base",
-    dockerfilePath: path.join(root, "Dockerfile.base"),
+    dockerfilePath: path.join(root, "packages/nemoclaw-openclaw/Dockerfile.base"),
     localTag: "nemoclaw-sandbox-base-local:test",
     rootDir: root,
     env: { GITHUB_SHA: "1234567890abcdef1234567890abcdef12345678" },
@@ -60,7 +61,10 @@ describe("sandbox base-image resolution key", () => {
   it("changes when a relevant base input changes (#4680)", () => {
     const root = fixture();
     const before = createSandboxBaseImageResolutionKey(options(root));
-    fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM node:22\nRUN echo changed\n");
+    fs.writeFileSync(
+      path.join(root, "packages/nemoclaw-openclaw/Dockerfile.base"),
+      "FROM node:22\nRUN echo changed\n",
+    );
     expect(createSandboxBaseImageResolutionKey(options(root))).not.toBe(before);
   });
 
@@ -93,7 +97,12 @@ describe("sandbox base-image resolution key", () => {
 
   it("changes when an agent-specific dependency lock changes (#6456)", () => {
     const root = fixture();
-    const lockfile = path.join(root, "packages", "nemoclaw-langchain-deepagents-code", "requirements.lock");
+    const lockfile = path.join(
+      root,
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+      "requirements.lock",
+    );
     fs.mkdirSync(path.dirname(lockfile), { recursive: true });
     fs.writeFileSync(lockfile, "deepagents-code==0.1.55\n");
     const keyedOptions = { ...options(root), inputPaths: [lockfile] };

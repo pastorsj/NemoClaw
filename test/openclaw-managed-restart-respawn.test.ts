@@ -9,7 +9,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const HELPER = path.join(import.meta.dirname, "..", "scripts", "managed-gateway-control.py");
-const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 const SUPERVISOR_LIB = path.join(
   import.meta.dirname,
   "..",
