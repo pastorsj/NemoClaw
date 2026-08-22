@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Coverage for the hermes CLI wrapper's one-shot routing translation
-// (agents/hermes/hermes-wrapper.py, #5254): resumed/continued one-shot
+// (packages/nemoclaw-hermes/hermes-wrapper.py, #5254): resumed/continued one-shot
 // invocations must be rewritten through `chat --query` so Hermes appends to the
 // target session, while ambiguous or non-matching argv is passed straight
 // through unchanged. Split out of test/hermes-gateway-wrapper.test.ts to keep
@@ -30,7 +30,7 @@ import {
   writeSessionCoalescerFixture,
 } from "./helpers/hermes-wrapper-harness.ts";
 
-describe.skipIf(!canRun)("agents/hermes/hermes-wrapper.py one-shot routing", () => {
+describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py one-shot routing", () => {
   // Surface a hard error in CI when the prerequisites are missing instead of
   // silently skipping — a green CI run that never executed any wrapper test
   // would mask regressions in the security boundary. Runs after

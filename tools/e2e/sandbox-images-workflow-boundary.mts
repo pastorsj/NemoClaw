@@ -101,7 +101,7 @@ const GUARDED_PRODUCTION_BUILD_CONTRACTS: readonly GuardedProductionBuildContrac
     testImageDockerfile: "-f test/Dockerfile.sandbox",
   },
   {
-    args: '-f agents/hermes/Dockerfile --build-arg "BASE_IMAGE=${HERMES_BASE_IMAGE}"',
+    args: '-f packages/nemoclaw-hermes/Dockerfile --build-arg "BASE_IMAGE=${HERMES_BASE_IMAGE}"',
     envName: "HERMES_BASE_IMAGE",
     jobName: "build-hermes-sandbox-image",
     label: "Hermes production image",
@@ -431,7 +431,7 @@ function validateGuardedProductionBuild(
       dockerBuildLines(job).length !== 0 ||
       action.uses !== HERMES_BUILD_PUSH_ACTION ||
       actionWith.context !== "." ||
-      actionWith.file !== "agents/hermes/Dockerfile" ||
+      actionWith.file !== "packages/nemoclaw-hermes/Dockerfile" ||
       actionWith.load !== true ||
       actionWith.push !== false ||
       actionWith.tags !== contract.target ||

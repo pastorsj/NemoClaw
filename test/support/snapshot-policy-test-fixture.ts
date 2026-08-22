@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+export function resolveTestPolicyAdditionsPath(agent: string): string {
+  return agent === "hermes" || agent === "langchain-deepagents-code"
+    ? `/repo/packages/nemoclaw-${agent}/policy-additions.yaml`
+    : `/repo/agents/${agent}/policy-additions.yaml`;
+}
+
 export function resolveTestAgentBaselinePolicy(
   agent: string | null | undefined,
 ): { agent: string; policyPath: string; content: string } | null {
@@ -10,7 +16,7 @@ export function resolveTestAgentBaselinePolicy(
     policyPath:
       resolvedAgent === "openclaw"
         ? "/repo/nemoclaw-blueprint/policies/openclaw-sandbox.yaml"
-        : `/repo/agents/${resolvedAgent}/policy-additions.yaml`,
+        : resolveTestPolicyAdditionsPath(resolvedAgent),
     content: "version: 1\nnetwork_policies: {}\n",
   };
 }

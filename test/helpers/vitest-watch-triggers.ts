@@ -68,8 +68,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern:
-      /(?:^|\/)internal\/security-reviews\/hermes-0\.19\.0-dependency-review\.md$/,
+    pattern: /(?:^|\/)internal\/security-reviews\/hermes-0\.19\.0-dependency-review\.md$/,
     testsToRun: runTests("test/hermes-dependency-review.test.ts"),
   },
   {
@@ -77,7 +76,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/base-image-resolver-helper.test.ts"),
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/Dockerfile\.base$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/Dockerfile\.base$/,
     testsToRun: runTests(
       "test/hermes-dependency-review.test.ts",
       "test/hermes-share-mount-deps.test.ts",
@@ -86,9 +85,9 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)(agents\/(?:hermes|langchain-deepagents-code)\/)?Dockerfile$/,
+    pattern: /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code)\/)?Dockerfile$/,
     testsToRun: (_file, match) => {
-      if (match[1] === "agents/hermes/") {
+      if (match[1] === "packages/nemoclaw-hermes/") {
         return [
           "src/lib/onboard/managed-startup-profile.test.ts",
           "test/hermes-mcp-runtime-capability.test.ts",
@@ -103,7 +102,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     },
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/policy-additions\.yaml$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/policy-additions\.yaml$/,
     testsToRun: runTests(
       "src/lib/onboard/initial-policy-real-policy.test.ts",
       "src/lib/onboard/initial-policy.test.ts",
@@ -133,7 +132,8 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/effective-policy-contracts.test.ts"),
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/(?:mcp-config-transaction|runtime-config-guard)\.py$/,
+    pattern:
+      /(?:^|\/)packages\/nemoclaw-hermes\/(?:mcp-config-transaction|runtime-config-guard)\.py$/,
     testsToRun: runTests("src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts"),
   },
   {
@@ -235,9 +235,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   },
   {
     pattern: /(?:^|\/)test\/e2e\/live\/portable-profile-rootless-linux\.test\.ts$/,
-    testsToRun: runTests(
-      "test/e2e/support/portable-profile-rootless-runtime-workflow.test.ts",
-    ),
+    testsToRun: runTests("test/e2e/support/portable-profile-rootless-runtime-workflow.test.ts"),
   },
   {
     pattern: /(?:^|\/)test\/e2e\/fixtures\/portable-profile-systemctl-shim\.sh$/,

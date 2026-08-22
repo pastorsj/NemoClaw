@@ -28,7 +28,7 @@ Put model-specific sandbox compatibility here, not directly in generator conditi
 
 - Match logic belongs in a manifest.
 - OpenClaw executable wrappers belong under `nemoclaw-blueprint/openclaw-plugins/`.
-- Hermes executable wrappers belong under `agents/hermes/`.
+- Hermes executable wrappers belong under `packages/nemoclaw-hermes/`.
 - Runtime transformations stay in agent-owned code or plugins; registry manifests stay declarative.
 
 Only add Hermes-specific Kimi behavior after a Hermes-specific failure or acceptance test proves it is needed.

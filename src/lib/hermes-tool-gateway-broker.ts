@@ -22,7 +22,7 @@ const {
   isValidControlRequestId,
   isValidProviderName,
   newControlDeadline,
-} = require(path.join(ROOT, "agents", "hermes", "host", "tool-gateway-control-contract.ts"));
+} = require(path.join(ROOT, "packages", "nemoclaw-hermes", "host", "tool-gateway-control-contract.ts"));
 
 const HERMES_TOOL_GATEWAY_REFRESH_CREDENTIAL_ENV = "NEMOCLAW_HERMES_TOOL_GATEWAY_REFRESH_TOKEN";
 const HERMES_TOOL_GATEWAY_PORT = 11436;
@@ -35,29 +35,25 @@ const HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH = path.join(
 );
 const HERMES_TOOL_GATEWAY_SCRIPT = path.join(
   ROOT,
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "host",
   "tool-gateway-broker.ts",
 );
 const HERMES_TOOL_GATEWAY_MATRIX_PATH = path.join(
   ROOT,
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "host",
   "managed-tool-gateway-matrix.json",
 );
 const HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH = path.join(
   ROOT,
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "host",
   "runtime-refresh-credentials.ts",
 );
 const HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH = path.join(
   ROOT,
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "host",
   "tool-gateway-control-contract.ts",
 );

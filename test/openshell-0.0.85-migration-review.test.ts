@@ -353,15 +353,15 @@ describe("OpenShell 0.0.85 migration review", () => {
     ["OPENSHELL_TLS_CA", "OPENSHELL_TLS_CERT", "OPENSHELL_TLS_KEY"],
   )("treats OpenShell TLS identity as supervisor-only in every managed agent [%s]", (name) => {
     const hermesBoundary = fs.readFileSync(
-      path.join(repoRoot, "agents", "hermes", "validate-env-secret-boundary.py"),
+      path.join(repoRoot, "packages", "nemoclaw-hermes", "validate-env-secret-boundary.py"),
       "utf8",
     );
     const dcodeWrapper = fs.readFileSync(
-      path.join(repoRoot, "agents", "langchain-deepagents-code", "dcode-wrapper.sh"),
+      path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "dcode-wrapper.sh"),
       "utf8",
     );
     const dcodeRuntime = fs.readFileSync(
-      path.join(repoRoot, "agents", "langchain-deepagents-code", "managed-dcode-runtime.py"),
+      path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "managed-dcode-runtime.py"),
       "utf8",
     );
     const boundaries = [hermesBoundary, dcodeWrapper, dcodeRuntime];

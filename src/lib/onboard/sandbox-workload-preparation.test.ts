@@ -76,10 +76,20 @@ function runtime(driverName = "docker"): SandboxWorkloadRuntimeCapabilities {
   };
 }
 
+const REPOSITORY_DOCKERFILE_PATHS: Readonly<Record<string, string>> = {
+  hermes: "packages/nemoclaw-hermes/Dockerfile",
+  "langchain-deepagents-code": "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
+  openclaw: "Dockerfile",
+};
+
+function repositoryDockerfilePath(agentName: string): string {
+  return REPOSITORY_DOCKERFILE_PATHS[agentName] ?? `agents/${agentName}/Dockerfile`;
+}
+
 function input(agentName: string) {
   return {
     agentName,
-    legacyDockerfilePath: `agents/${agentName}/Dockerfile`,
+    legacyDockerfilePath: repositoryDockerfilePath(agentName),
     runtime: runtime(),
     version: "0.0.97",
   };
@@ -147,27 +157,28 @@ describe("sandbox workload preparation", () => {
     }
   });
 
-  it.each(
-    SHIPPED_MANAGED_IMAGE_AGENTS,
-  )("resolves the complete release catalog and exact %s image (#7744)", async (agent) => {
-    const resolveCatalog = vi.fn(async () => CATALOG);
+  it.each(SHIPPED_MANAGED_IMAGE_AGENTS)(
+    "resolves the complete release catalog and exact %s image (#7744)",
+    async (agent) => {
+      const resolveCatalog = vi.fn(async () => CATALOG);
 
-    const prepared = await prepareSandboxWorkloadSource(input(agent), { resolveCatalog });
+      const prepared = await prepareSandboxWorkloadSource(input(agent), { resolveCatalog });
 
-    expect(resolveCatalog).toHaveBeenCalledExactlyOnceWith({
-      release: RELEASE,
-      platform: MANAGED_IMAGE_PLATFORM,
-    });
-    expect(prepared).toEqual({
-      source: {
-        kind: "managed-image",
-        reference: contract(agent, SHIPPED_MANAGED_IMAGE_AGENTS.indexOf(agent)).reference,
-        contract: contract(agent, SHIPPED_MANAGED_IMAGE_AGENTS.indexOf(agent)),
-      },
-      release: RELEASE,
-      fallbackDiagnostic: null,
-    });
-  });
+      expect(resolveCatalog).toHaveBeenCalledExactlyOnceWith({
+        release: RELEASE,
+        platform: MANAGED_IMAGE_PLATFORM,
+      });
+      expect(prepared).toEqual({
+        source: {
+          kind: "managed-image",
+          reference: contract(agent, SHIPPED_MANAGED_IMAGE_AGENTS.indexOf(agent)).reference,
+          contract: contract(agent, SHIPPED_MANAGED_IMAGE_AGENTS.indexOf(agent)),
+        },
+        release: RELEASE,
+        fallbackDiagnostic: null,
+      });
+    },
+  );
 
   it("passes an immutable qualification revision to catalog resolution (#9385)", async () => {
     const resolveCatalog = vi.fn(async () => CATALOG);
@@ -597,6 +608,8 @@ describe("sandbox workload preparation", () => {
         { ...input("pi"), runtime: runtime("docker") },
         { resolveCatalog: async () => CATALOG },
       ),
-    ).rejects.toThrow("the selected agent is a release candidate and candidate selection is disabled");
+    ).rejects.toThrow(
+      "the selected agent is a release candidate and candidate selection is disabled",
+    );
   });
 });

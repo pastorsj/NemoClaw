@@ -19,7 +19,7 @@ the foreground gateway is running and serving (#7804).
 Patch only the entry-token allowlist. The subcommand grammar around it is
 unchanged, so a match still requires a real ``gateway run`` command line and no
 other process becomes visible as a gateway. NemoClaw's own supervisor already
-carries the same compensation for the rename in ``agents/hermes/start.sh``.
+carries the same compensation for the rename in ``packages/nemoclaw-hermes/start.sh``.
 
 Remove this patch when the minimum supported Hermes release resolves its
 entrypoint by content or configuration rather than by executable basename.

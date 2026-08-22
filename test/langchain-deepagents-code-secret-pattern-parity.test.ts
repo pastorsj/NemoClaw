@@ -19,17 +19,15 @@ import {
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const managedRuntimePath = path.join(
   repoRoot,
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "managed-dcode-runtime.py",
 );
 const observabilityPath = path.join(
   repoRoot,
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "nemoclaw_observability.py",
 );
-const wrapperPath = path.join(repoRoot, "agents", "langchain-deepagents-code", "dcode-wrapper.sh");
+const wrapperPath = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "dcode-wrapper.sh");
 
 const canonicalPatterns: Record<CanonicalSecretPatternGroup, readonly RegExp[]> = {
   token: TOKEN_PREFIX_PATTERNS,

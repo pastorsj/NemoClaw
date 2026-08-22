@@ -717,7 +717,7 @@ network_policies: {}
   it("filters inactive Hermes messaging policies from the relative Hermes policy path", () => {
     const hermesPolicyPath = path.relative(
       process.cwd(),
-      path.join(import.meta.dirname, "..", "..", "..", "agents", "hermes", "policy-additions.yaml"),
+      path.join(import.meta.dirname, "..", "..", "..", "packages", "nemoclaw-hermes", "policy-additions.yaml"),
     );
 
     const prepared = prepareInitialSandboxCreatePolicy(hermesPolicyPath, ["discord"]);

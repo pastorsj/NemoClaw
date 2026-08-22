@@ -10,12 +10,11 @@ import { describe, expect, it } from "vitest";
 import { shellQuote } from "../src/lib/core/shell-quote";
 import { extractShellFunction } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const FINALIZER = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "finalize-tirith-marker.py",
 );
 
@@ -83,7 +82,7 @@ function runTirithFinalizer(commands: readonly string[]) {
   }
 }
 
-describe("agents/hermes/start.sh Tirith retry finalization", () => {
+describe("packages/nemoclaw-hermes/start.sh Tirith retry finalization", () => {
   it("returns FAILED without a traceback when the marker parent is missing", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-tirith-missing-parent-"));
     try {

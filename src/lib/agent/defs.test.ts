@@ -31,6 +31,15 @@ import {
 import { resolveAgent } from "./onboard";
 
 const tempAgentDirs: string[] = [];
+const STANDARD_HARNESS_PACKAGES = [
+  { name: "hermes", directory: "nemoclaw-hermes" },
+  {
+    name: "langchain-deepagents-code",
+    directory: "nemoclaw-langchain-deepagents-code",
+  },
+  { name: "openclaw", directory: "nemoclaw-openclaw" },
+] as const;
+const STANDARD_HARNESS_ENV = { HOME: path.join(AGENTS_DIR, ".missing-harness-home") };
 
 function writeTempAgentManifest(name: string, contents: string): void {
   const agentDir = path.join(AGENTS_DIR, name);
@@ -176,6 +185,21 @@ describe("agent definitions", () => {
     expect(choices[0]?.name).toBe("openclaw");
     expect(choices.map((choice) => choice.name)).toContain("hermes");
   });
+
+  it("lists the standard runtimes from harness packages", () => {
+    expect(listAgents(STANDARD_HARNESS_ENV)).toEqual(
+      STANDARD_HARNESS_PACKAGES.map(({ name }) => name),
+    );
+  });
+
+  it.each(STANDARD_HARNESS_PACKAGES)(
+    "loads $name from its harness package manifest",
+    ({ name, directory }) => {
+      expect(loadAgent(name, STANDARD_HARNESS_ENV).manifestPath).toBe(
+        path.resolve(AGENTS_DIR, "..", "packages", directory, "manifest.yaml"),
+      );
+    },
+  );
 
   it("requires a readable regular policy-additions file for non-OpenClaw baselines (#7194)", () => {
     const agentName = `missing-baseline-${String(Date.now())}`;

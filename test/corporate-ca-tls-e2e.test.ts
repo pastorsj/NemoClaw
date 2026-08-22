@@ -26,7 +26,7 @@ import {
 } from "./helpers/corporate-ca-support";
 
 const OPENCLAW_START = path.join(import.meta.dirname, "../scripts/nemoclaw-start.sh");
-const HERMES_START = path.join(import.meta.dirname, "../agents/hermes/start.sh");
+const HERMES_START = path.join(import.meta.dirname, "../packages/nemoclaw-hermes/start.sh");
 const HERMES_MERGE_END = "# OpenShell injects SSL_CERT_FILE/CURL_CA_BUNDLE for its L7 proxy CA.";
 
 const MERGE_ROUTES = [

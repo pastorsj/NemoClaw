@@ -295,7 +295,7 @@ test(
     });
     expect(dockerInfo.exitCode, resultText(dockerInfo)).toBe(0);
 
-    expect(fs.existsSync(path.join(REPO_ROOT, "agents", "hermes", "manifest.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "manifest.yaml"))).toBe(true);
 
     await expect(inference.probeModels("phase-1-inference-models")).resolves.toMatchObject({
       data: expect.arrayContaining([expect.objectContaining({ id: inference.model })]),

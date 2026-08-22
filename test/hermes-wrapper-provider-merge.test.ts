@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Coverage for the hermes CLI wrapper's provider/model flag merging
-// (agents/hermes/hermes-wrapper.py, #7361): separate --provider and -m/--model
+// (packages/nemoclaw-hermes/hermes-wrapper.py, #7361): separate --provider and -m/--model
 // flags must be merged into the combined provider/model form so the invocation
 // routes through the OpenShell proxy rewrite path that resolves credential
 // placeholders.
@@ -19,7 +19,7 @@ import { describe, expect, it } from "vitest";
 
 import { ADAPTER, canRun, runWrapper } from "./helpers/hermes-wrapper-harness.ts";
 
-describe.skipIf(!canRun)("agents/hermes/hermes-wrapper.py provider/model merge", () => {
+describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py provider/model merge", () => {
   it("merges separate --provider and -m flags into the combined form (#7361)", () => {
     const run = runWrapper(["--provider", "opencode-zen", "-m", "nemotron-3-ultra-free"], {});
 

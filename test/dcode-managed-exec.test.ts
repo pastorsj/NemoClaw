@@ -9,8 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const LAUNCHER_PATH = path.join(
   process.cwd(),
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "dcode-launcher.sh",
 );
 const TEST_OWNER_UID = process.getuid?.() ?? 0;

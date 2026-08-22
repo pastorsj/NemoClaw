@@ -311,8 +311,8 @@ If the command trace contains no reviewer-request write, report the event as an 
 - Add a declarative manifest under `nemoclaw-blueprint/model-specific-setup/<agent>/`
 - Use one `agent` per manifest (`openclaw`, `hermes`, etc.); do not make shared multi-agent manifests
 - Put OpenClaw executable wrappers under `nemoclaw-blueprint/openclaw-plugins/`
-- Put Hermes executable wrappers under `agents/hermes/`
-- Keep `agents/hermes/generate-config.ts` as a thin build-time entrypoint; add Hermes env parsing, config construction, registry handling, and serialization under `agents/hermes/config/`
+- Put Hermes executable wrappers under `packages/nemoclaw-hermes/`
+- Keep `packages/nemoclaw-hermes/generate-config.ts` as a thin build-time entrypoint; add Hermes env parsing, config construction, registry handling, and serialization under `packages/nemoclaw-hermes/config/`
 - Do not add Hermes behavior for an OpenClaw issue without a Hermes-specific repro or acceptance test
 
 ### Gotchas

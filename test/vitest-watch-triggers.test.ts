@@ -52,15 +52,15 @@ const OPAQUE_INPUTS = [
   "internal/security-reviews/hermes-0.19.0-dependency-review.md",
   ".github/actions/resolve-hermes-base-image/action.yaml",
   "Dockerfile",
-  "agents/hermes/Dockerfile.base",
-  "agents/hermes/Dockerfile",
-  "agents/langchain-deepagents-code/Dockerfile",
-  "agents/hermes/policy-additions.yaml",
+  "packages/nemoclaw-hermes/Dockerfile.base",
+  "packages/nemoclaw-hermes/Dockerfile",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
+  "packages/nemoclaw-hermes/policy-additions.yaml",
   "src/lib/messaging/channels/telegram/policy/openclaw.yaml",
   "nemoclaw-blueprint/policies/presets/local-inference.yaml",
   "nemoclaw-blueprint/policies/presets/claude-code.yaml",
-  "agents/hermes/runtime-config-guard.py",
-  "agents/hermes/mcp-config-transaction.py",
+  "packages/nemoclaw-hermes/runtime-config-guard.py",
+  "packages/nemoclaw-hermes/mcp-config-transaction.py",
   "test/e2e/lib/ci-compatible-inference.sh",
   "scripts/setup-jetson.sh",
   "tools/e2e/contracts/v1/jetson-dispatch.json",
@@ -147,13 +147,13 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/onboard/managed-startup-profile.test.ts",
       "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
     ]);
-    expect(triggeredBy("agents/hermes/Dockerfile.base")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/Dockerfile.base")).toEqual([
       "test/hermes-dependency-review.test.ts",
       "test/hermes-share-mount-deps.test.ts",
       "test/managed-image-publication-workflow.test.ts",
       "test/sandbox-provisioning.test.ts",
     ]);
-    expect(triggeredBy("agents/hermes/Dockerfile")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/Dockerfile")).toEqual([
       "src/lib/onboard/managed-startup-profile.test.ts",
       "test/hermes-mcp-runtime-capability.test.ts",
     ]);
@@ -161,10 +161,10 @@ describe("Vitest opaque-input watch triggers", () => {
       "test/hermes-share-mount-deps.test.ts",
       "test/managed-image-publication-workflow.test.ts",
     ]);
-    expect(triggeredBy("agents/langchain-deepagents-code/Dockerfile")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/Dockerfile")).toEqual([
       "src/lib/onboard/managed-startup-profile.test.ts",
     ]);
-    expect(triggeredBy("agents/hermes/policy-additions.yaml")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/policy-additions.yaml")).toEqual([
       "src/lib/onboard/initial-policy-real-policy.test.ts",
       "src/lib/onboard/initial-policy.test.ts",
     ]);
@@ -177,10 +177,10 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy("nemoclaw-blueprint/policies/presets/claude-code.yaml")).toEqual([
       "test/effective-policy-contracts.test.ts",
     ]);
-    expect(triggeredBy("agents/hermes/runtime-config-guard.py")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/runtime-config-guard.py")).toEqual([
       "src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts",
     ]);
-    expect(triggeredBy("agents/hermes/mcp-config-transaction.py")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/mcp-config-transaction.py")).toEqual([
       "src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts",
     ]);
     expect(triggeredBy("test/e2e/lib/ci-compatible-inference.sh")).toEqual([
@@ -328,7 +328,7 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy("notes/example.yaml")).toEqual([]);
     expect(triggeredBy("scripts/unrelated.py")).toEqual([]);
     expect(triggeredBy("test/e2e/lib/unrelated.sh")).toEqual([]);
-    expect(triggeredBy("agents/hermes/hermes-wrapper.py")).toEqual([]);
+    expect(triggeredBy("packages/nemoclaw-hermes/hermes-wrapper.py")).toEqual([]);
   });
 
   it("normalizes Windows-style paths before matching (#6692)", () => {

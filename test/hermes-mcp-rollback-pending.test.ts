@@ -8,11 +8,10 @@ import { describe, expect, it } from "vitest";
 const TRANSACTION = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "mcp-config-transaction.py",
 );
-const GUARD = path.join(import.meta.dirname, "..", "agents", "hermes", "runtime-config-guard.py");
+const GUARD = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "runtime-config-guard.py");
 
 describe("Hermes MCP rollback integrity", () => {
   it("keeps a failed runtime rollback pending until a healthy old-config reload", () => {

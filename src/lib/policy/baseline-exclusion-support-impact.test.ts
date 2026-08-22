@@ -18,11 +18,11 @@ const BASELINES = [
   },
   {
     agent: "hermes",
-    path: "agents/hermes/policy-additions.yaml",
+    path: "packages/nemoclaw-hermes/policy-additions.yaml",
   },
   {
     agent: "langchain-deepagents-code",
-    path: "agents/langchain-deepagents-code/policy-additions.yaml",
+    path: "packages/nemoclaw-langchain-deepagents-code/policy-additions.yaml",
   },
 ] as const;
 

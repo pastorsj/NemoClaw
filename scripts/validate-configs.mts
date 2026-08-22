@@ -9,7 +9,7 @@
 //   npx tsx scripts/validate-configs.mts              # validate all known config files
 //   npx tsx scripts/validate-configs.mts --file <config> --schema <schema>  # validate one file
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import Ajv from "ajv/dist/2020.js";
@@ -44,6 +44,30 @@ function pathRelativeToRepo(absPath: string): string {
   return relative(REPO_ROOT, absPath).replaceAll("\\", "/");
 }
 
+const HARNESS_POLICY_FILE = /^(?:policy-additions|policy-permissive[^/]*)\.yaml$/u;
+
+function discoverHarnessPolicyFiles(
+  rootDirectory: "agents" | "packages",
+  includeDirectory: (name: string) => boolean,
+): string[] {
+  const absoluteRoot = join(REPO_ROOT, rootDirectory);
+  try {
+    return readdirSync(absoluteRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && includeDirectory(entry.name))
+      .flatMap((directory) => {
+        const relativeDirectory = `${rootDirectory}/${directory.name}`;
+        return readdirSync(join(REPO_ROOT, relativeDirectory), { withFileTypes: true })
+          .filter((entry) => entry.isFile() && HARNESS_POLICY_FILE.test(entry.name))
+          .map((entry) => `${relativeDirectory}/${entry.name}`);
+      })
+      .sort();
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    return [];
+  }
+}
+
 /**
  * Build the list of config files and their corresponding JSON Schemas.
  * Preset YAML files are discovered dynamically from the presets directory.
@@ -76,25 +100,20 @@ function discoverTargets(): ConfigTarget[] {
     },
   ];
 
-  const agentsDir = join(REPO_ROOT, "agents");
-  try {
-    const agentPolicyFiles = readdirSync(agentsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .flatMap((entry) => {
-        const base = `agents/${entry.name}`;
-        return [`${base}/policy-additions.yaml`, `${base}/policy-permissive.yaml`];
-      })
-      .filter((file) => existsSync(join(REPO_ROOT, file)));
-    if (agentPolicyFiles.length > 0) {
-      const sandboxPolicyTarget = targets.find(
-        (target) => target.schema === "schemas/sandbox-policy.schema.json",
-      );
-      sandboxPolicyTarget?.files.push(...agentPolicyFiles);
+  const sandboxPolicyTarget = targets.find(
+    (target) => target.schema === "schemas/sandbox-policy.schema.json",
+  );
+  if (sandboxPolicyTarget) {
+    const policyFiles = new Set(sandboxPolicyTarget.files);
+    for (const policyFile of discoverHarnessPolicyFiles("agents", () => true)) {
+      policyFiles.add(policyFile);
     }
-  } catch (err) {
-    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
-    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
-    // agents directory may not exist — not an error
+    for (const policyFile of discoverHarnessPolicyFiles("packages", (name) =>
+      name.startsWith("nemoclaw-"),
+    )) {
+      policyFiles.add(policyFile);
+    }
+    sandboxPolicyTarget.files = [...policyFiles].sort();
   }
 
   const modelSetupDir = join(REPO_ROOT, "nemoclaw-blueprint", "model-specific-setup");

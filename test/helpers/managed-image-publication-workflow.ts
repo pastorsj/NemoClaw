@@ -14,7 +14,7 @@ export const baseImagePublishers = [
   {
     agent: "hermes",
     displayName: "Hermes",
-    dockerfile: "agents/hermes/Dockerfile.base",
+    dockerfile: "packages/nemoclaw-hermes/Dockerfile.base",
     image: "nvidia/nemoclaw/hermes-sandbox-base",
     job: "build-and-push-hermes",
     amd64Job: "build-hermes-amd64",
@@ -23,7 +23,7 @@ export const baseImagePublishers = [
   {
     agent: "langchain-deepagents-code",
     displayName: "Deep Agents Code",
-    dockerfile: "agents/langchain-deepagents-code/Dockerfile.base",
+    dockerfile: "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     image: "nvidia/nemoclaw/langchain-deepagents-code-sandbox-base",
     job: "build-and-push-dcode",
     amd64Job: "build-dcode-amd64",

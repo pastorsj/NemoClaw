@@ -37,7 +37,7 @@ export const PR_E2E_MANUAL_CONTROLLER_JOB_IDS = [
 const PR_E2E_MANUAL_CONTROLLER_JOB_ID_SET = new Set<string>(PR_E2E_MANUAL_CONTROLLER_JOB_IDS);
 const DEEPAGENTS_HEADLESS_INFERENCE_CHECK =
   "test/e2e/e2e-cloud-experimental/checks/07-deepagents-code-headless-inference.sh";
-const DEEPAGENTS_CODE_RUNTIME_ROOT = "agents/langchain-deepagents-code/";
+const DEEPAGENTS_CODE_RUNTIME_ROOT = "packages/nemoclaw-langchain-deepagents-code/";
 const JOURNALED_RECREATE_RESUME_RUNTIME_FILES = new Set([
   "src/lib/onboard/machine/handlers/sandbox-resume.ts",
   "src/lib/onboard/machine/handlers/sandbox.ts",
@@ -56,14 +56,14 @@ const MANAGED_STARTUP_E2E_JOB_IDS = [
 ] as const;
 const HERMES_CLI_ADAPTER_E2E_JOB_IDS = ["channels-stop-start", "mcp-bridge"] as const;
 const HERMES_CLI_ADAPTER_RUNTIME_FILES = new Set([
-  "agents/hermes/hermes-cli-adapter-v1.json",
-  "agents/hermes/hermes-wrapper.py",
-  "agents/hermes/validate-cli-adapter.py",
+  "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
+  "packages/nemoclaw-hermes/hermes-wrapper.py",
+  "packages/nemoclaw-hermes/validate-cli-adapter.py",
 ]);
 const HERMES_CRON_RESTORE_E2E_JOB_IDS = ["rebuild-hermes"] as const;
 const HERMES_CRON_RESTORE_RUNTIME_FILES = new Set([
-  "agents/hermes/cron-restore-control.py",
-  "agents/hermes/patch-cron-restore-drain.py",
+  "packages/nemoclaw-hermes/cron-restore-control.py",
+  "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
   "src/lib/actions/sandbox/rebuild-hermes-post-restore.ts",
   "src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts",
 ]);
@@ -77,12 +77,12 @@ const HERMES_MANAGED_POLICY_E2E_JOB_IDS = [
   "security-posture",
 ] as const;
 const HERMES_MANAGED_POLICY_FILES = new Set([
-  "agents/hermes/hermes-wrapper.py",
-  "agents/hermes/image-build-probes.py",
-  "agents/hermes/managed_policy.py",
-  "agents/hermes/patch-profile-policy-defaults.py",
-  "agents/hermes/seed-dashboard-config.py",
-  "agents/hermes/start.sh",
+  "packages/nemoclaw-hermes/hermes-wrapper.py",
+  "packages/nemoclaw-hermes/image-build-probes.py",
+  "packages/nemoclaw-hermes/managed_policy.py",
+  "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
+  "packages/nemoclaw-hermes/seed-dashboard-config.py",
+  "packages/nemoclaw-hermes/start.sh",
   "src/lib/hermes-managed-route.ts",
 ]);
 const MANAGED_IMAGE_PROTECTED_RUNTIME_ACTIVATION =
@@ -131,6 +131,7 @@ const MANAGED_IMAGE_MULTIARCH_INPUT_PREFIXES = [
   "agents/",
   "nemoclaw/",
   "nemoclaw-blueprint/",
+  "packages/",
   "scripts/",
   "src/lib/actions/sandbox/mcp-bridge-",
   "src/lib/messaging/",
@@ -315,7 +316,8 @@ export function focusedPrE2eJobsForChangedFiles(
   const hermesManagedPolicyFiles = stableUnique(
     changedFiles.filter(
       (file) =>
-        (file.startsWith("agents/hermes/config/") || HERMES_MANAGED_POLICY_FILES.has(file)) &&
+        (file.startsWith("packages/nemoclaw-hermes/config/") ||
+          HERMES_MANAGED_POLICY_FILES.has(file)) &&
         isRuntimeRelevant(file),
     ),
   );
@@ -585,7 +587,7 @@ export const RISK_RULES: readonly RiskRule[] = [
     matches: (file) =>
       file.startsWith("nemoclaw/src/blueprint/") ||
       file === "nemoclaw-blueprint/blueprint.yaml" ||
-      file.startsWith("agents/hermes/"),
+      file.startsWith("packages/nemoclaw-hermes/"),
   },
 ] as const;
 

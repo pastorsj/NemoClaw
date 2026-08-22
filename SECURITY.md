@@ -108,7 +108,7 @@ The following security-relevant defaults are intentional. Each item names the co
 
 ### Deep Agents Code proxy env file is world-readable (mode `0444`)
 
-- **Location:** [`agents/langchain-deepagents-code/start.sh`](agents/langchain-deepagents-code/start.sh) (`prepare_runtime_env`)
+- **Location:** [`packages/nemoclaw-langchain-deepagents-code/start.sh`](packages/nemoclaw-langchain-deepagents-code/start.sh) (`prepare_runtime_env`)
 - **Constraint:** `/tmp/nemoclaw-proxy-env.sh` is sandbox-user-owned convenience state, not an integrity boundary. It is created with mode `0444` so independent login and exec shells can source the same credential-free settings. The Deep Agents Code runtime deliberately runs as the non-root sandbox user, unlike the root-supervised OpenClaw and Hermes startup paths.
 - **Compensating controls:**
   1. The file is credential-free by construction. `prepare_runtime_env` writes normalized proxy config and inherited trust-store paths. It does not persist LangSmith tracing, project, or API key variables.

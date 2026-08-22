@@ -203,10 +203,10 @@ The concrete files differ by agent because each runtime has its own plugin syste
 | OpenClaw | `nemoclaw/openclaw.plugin.json`, `nemoclaw/src/runtime-context.ts`, and the TypeScript package under `nemoclaw/src/` | Registers the `/nemoclaw` slash command, adds the NemoClaw inference provider, and injects sandbox and policy context into OpenClaw turns. |
 </AgentOnly>
 <AgentOnly variant="hermes">
-| Hermes | `agents/hermes/manifest.yaml`, `agents/hermes/plugin/plugin.yaml`, `agents/hermes/generate-config.ts`, `agents/hermes/config/`, and `agents/hermes/start.sh` | Declares the Hermes agent contract, installs the NemoClaw Hermes plugin, writes `/sandbox/.hermes/config.yaml` and `/sandbox/.hermes/.env`, and launches `hermes gateway run` behind the OpenShell proxy. |
+| Hermes | `packages/nemoclaw-hermes/manifest.yaml`, `packages/nemoclaw-hermes/plugin/plugin.yaml`, `packages/nemoclaw-hermes/generate-config.ts`, `packages/nemoclaw-hermes/config/`, and `packages/nemoclaw-hermes/start.sh` | Declares the Hermes agent contract, installs the NemoClaw Hermes plugin, writes `/sandbox/.hermes/config.yaml` and `/sandbox/.hermes/.env`, and launches `hermes gateway run` behind the OpenShell proxy. |
 </AgentOnly>
 <AgentOnly variant="deepagents">
-| Deep Agents | `agents/langchain-deepagents-code/manifest.yaml`, `agents/langchain-deepagents-code/generate-config.ts`, `agents/langchain-deepagents-code/start.sh`, and the managed `dcode` launchers | Declares the terminal agent contract, writes `/sandbox/.deepagents/config.toml`, installs managed wrappers for `dcode` and `dcode -n`, and routes inference through `inference.local`. |
+| Deep Agents | `packages/nemoclaw-langchain-deepagents-code/manifest.yaml`, `packages/nemoclaw-langchain-deepagents-code/generate-config.ts`, `packages/nemoclaw-langchain-deepagents-code/start.sh`, and the managed `dcode` launchers | Declares the terminal agent contract, writes `/sandbox/.deepagents/config.toml`, installs managed wrappers for `dcode` and `dcode -n`, and routes inference through `inference.local`. |
 </AgentOnly>
 
 <AgentOnly variant="openclaw">
@@ -259,12 +259,12 @@ The blueprint schema and runner enforce these name constraints before the runner
 The default OpenClaw policy starts from `nemoclaw-blueprint/policies/openclaw-sandbox.yaml`.
 </AgentOnly>
 <AgentOnly variant="hermes">
-Hermes keeps its agent-owned image, plugin, config, entrypoint, and policy additions under `agents/hermes/`.
-The default Hermes policy starts from `agents/hermes/policy-additions.yaml`.
+Hermes keeps its agent-owned image, plugin, config, entrypoint, and policy additions under `packages/nemoclaw-hermes/`.
+The default Hermes policy starts from `packages/nemoclaw-hermes/policy-additions.yaml`.
 </AgentOnly>
 <AgentOnly variant="deepagents">
-Deep Agents keeps its agent-owned image, config generator, entrypoint, wrappers, and policy additions under `agents/langchain-deepagents-code/`.
-The default Deep Agents policy starts from `agents/langchain-deepagents-code/policy-additions.yaml`.
+Deep Agents keeps its agent-owned image, config generator, entrypoint, wrappers, and policy additions under `packages/nemoclaw-langchain-deepagents-code/`.
+The default Deep Agents policy starts from `packages/nemoclaw-langchain-deepagents-code/policy-additions.yaml`.
 </AgentOnly>
 
 The current blueprint runner implementation lives in the `nemoclaw/` TypeScript package:
@@ -313,7 +313,7 @@ The maintained onboarding path for this agent does not consume the component.
 Normal NemoClaw onboarding builds from the [`ghcr.io/nvidia/nemoclaw/sandbox-base`](https://github.com/NVIDIA/NemoClaw/pkgs/container/nemoclaw%2Fsandbox-base) base image and layers the NemoClaw runtime Dockerfile on top.
 </AgentOnly>
 <AgentOnly variant="deepagents">
-Deep Agents onboarding builds from the agent-specific `agents/langchain-deepagents-code/Dockerfile.base` image and layers the managed Deep Agents runtime Dockerfile on top.
+Deep Agents onboarding builds from the agent-specific `packages/nemoclaw-langchain-deepagents-code/Dockerfile.base` image and layers the managed Deep Agents runtime Dockerfile on top.
 That base installs Node, Python, shell tools, and the hash-locked `deepagents-code` package needed by the terminal harness.
 </AgentOnly>
 <AgentOnly variant="openclaw">

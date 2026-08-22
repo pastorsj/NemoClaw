@@ -129,7 +129,7 @@ const testInventory = [
   {
     name: "fast-uri",
     version: "3.1.2",
-    origin: "agents/openclaw/mcporter-runtime/package-lock.json",
+    origin: "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
   },
 ] as const;
 

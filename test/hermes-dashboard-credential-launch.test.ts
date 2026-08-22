@@ -7,12 +7,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const WRAPPER = path.join(import.meta.dirname, "..", "agents", "hermes", "hermes-wrapper.py");
+const WRAPPER = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "hermes-wrapper.py");
 const ADAPTER = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "hermes-cli-adapter-v1.json",
 );
 const PYTHON_AVAILABLE = spawnSync("python3", ["--version"], { timeout: 5_000 }).status === 0;

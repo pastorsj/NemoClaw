@@ -10,8 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const sourcePath = path.join(
   repoRoot,
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "dcode-login-profile.sh",
 );
 const tempDirs: string[] = [];

@@ -9,8 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const managedRuntimePath = path.join(
   process.cwd(),
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "managed-dcode-runtime.py",
 );
 

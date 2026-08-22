@@ -66,8 +66,8 @@ function copyReviewedRegularFileSync(
 }
 
 function stageOpenClawRuntimeGraphs(rootDir: string, buildCtx: string): void {
-  const sourceAgentDir = path.join(rootDir, "agents", "openclaw");
-  const stagedAgentDir = path.join(buildCtx, "agents", "openclaw");
+  const sourceAgentDir = path.join(rootDir, "packages", "nemoclaw-openclaw");
+  const stagedAgentDir = path.join(buildCtx, "packages", "nemoclaw-openclaw");
   fs.mkdirSync(stagedAgentDir, { recursive: true });
   fs.copyFileSync(
     path.join(sourceAgentDir, "state-lock-plan.json"),
@@ -91,7 +91,7 @@ function stageOpenClawRuntimeGraphs(rootDir: string, buildCtx: string): void {
     path.join(stagedAgentDir, "managed-image-messaging-runtime", "npm-cache-seed"),
     { mode: fs.constants.COPYFILE_FICLONE, recursive: true },
   );
-  normalizeReadModesForDockerCopy(path.join(buildCtx, "agents"));
+  normalizeReadModesForDockerCopy(path.join(buildCtx, "packages"));
 }
 
 function stageMcpToolDiscoveryRuntime(rootDir: string, buildCtx: string): void {

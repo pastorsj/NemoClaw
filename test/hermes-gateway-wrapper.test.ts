@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Coverage for the hermes CLI wrapper (agents/hermes/hermes-wrapper.py), which
+// Coverage for the hermes CLI wrapper (packages/nemoclaw-hermes/hermes-wrapper.py), which
 // closes the #4975 bypass: `docker exec ... hermes gateway run` must enforce the
 // same runtime-env secret boundary as the nemoclaw-start entrypoint, refusing
 // raw secret-shaped env vars and never reaching the real gateway.
@@ -20,11 +20,11 @@ import path from "node:path";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { buildHermesManagedPolicy } from "../agents/hermes/config/managed-policy.ts";
+import { buildHermesManagedPolicy } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
 import { buildOpenshellExecArgs } from "../src/lib/actions/sandbox/exec.ts";
 import { canRun, runWrapper, VALIDATOR, WRAPPER } from "./helpers/hermes-wrapper-harness.ts";
 
-describe.skipIf(!canRun)("agents/hermes/hermes-wrapper.py", () => {
+describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
   // Surface a hard error in CI when the prerequisites are missing instead of
   // silently skipping — a green CI run that never executed any wrapper test
   // would mask regressions in the security boundary. Runs after
@@ -938,7 +938,7 @@ describe.skipIf(!canRun)("agents/hermes/hermes-wrapper.py", () => {
     // `nemoclaw hermes exec -- <argv>` resolves to `openshell sandbox exec
     // --name <sandbox> -- <argv>`, which runs `<argv>` inside the sandbox
     // container with `argv[0]` resolved against the in-sandbox PATH. Inside
-    // the Hermes sandbox image (see `agents/hermes/Dockerfile`),
+    // the Hermes sandbox image (see `packages/nemoclaw-hermes/Dockerfile`),
     // `/usr/local/bin/hermes` is the wrapper script tested here; the real
     // binary is at `/usr/local/bin/hermes.real`. The dispatcher adds no
     // masking layer of its own, so invoking the wrapper directly through

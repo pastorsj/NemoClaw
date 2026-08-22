@@ -12,8 +12,8 @@
 #      package via `npm view hermes-agent@<semver> dist.integrity`.
 #   4. Rewrites the HERMES_VERSION / HERMES_SEMVER / HERMES_TARBALL_SHA256 /
 #      HERMES_NPM_INTEGRITY ARGs (and the calver comment) in
-#      agents/hermes/Dockerfile.base.
-#   5. Rewrites expected_version in agents/hermes/manifest.yaml.
+#      packages/nemoclaw-hermes/Dockerfile.base.
+#   5. Rewrites expected_version in packages/nemoclaw-hermes/manifest.yaml.
 #   6. With --update-installed-copies, scans installer-managed locations
 #      (~/.nemoclaw, ~/.hermes, and $NEMOCLAW_SOURCE_ROOT) for saved copies of
 #      the Hermes Dockerfiles and manifests. `nemohermes onboard --resume` /
@@ -52,8 +52,8 @@ set -euo pipefail
 GITHUB_REPO="NousResearch/hermes-agent"
 NPM_PACKAGE="hermes-agent"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DOCKERFILE_BASE="${REPO_ROOT}/agents/hermes/Dockerfile.base"
-MANIFEST="${REPO_ROOT}/agents/hermes/manifest.yaml"
+DOCKERFILE_BASE="${REPO_ROOT}/packages/nemoclaw-hermes/Dockerfile.base"
+MANIFEST="${REPO_ROOT}/packages/nemoclaw-hermes/manifest.yaml"
 BASE_REF="${HERMES_BASE_REF:-ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest}"
 
 CHECK_ONLY=0
@@ -193,12 +193,12 @@ installed_copy_schema_error() {
   done
 
   if [[ ! -f "$dockerfile" ]]; then
-    missing+=("agents/hermes/Dockerfile")
+    missing+=("packages/nemoclaw-hermes/Dockerfile")
   else
     for item in \
       "validate-hermes-env-secret-boundary.py" \
       "seed-hermes-dashboard-config.py" \
-      "COPY agents/hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py" \
+      "COPY packages/nemoclaw-hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py" \
       "/opt/hermes/.venv/bin/python -I /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py --guard /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py" \
       "hermes-mcp-config-transaction.py" \
       "openshell-child-visible-credentials.v0.0.106.json" \
@@ -358,7 +358,7 @@ fi
 echo "npm dist.integrity: ${NPM_INTEGRITY}"
 
 # ---------------------------------------------------------------------------
-# Rewrite agents/hermes/Dockerfile.base and agents/hermes/manifest.yaml
+# Rewrite packages/nemoclaw-hermes/Dockerfile.base and packages/nemoclaw-hermes/manifest.yaml
 # ---------------------------------------------------------------------------
 apply_dockerfile_pins "$DOCKERFILE_BASE" || {
   echo "ERROR: failed to update pins in ${DOCKERFILE_BASE}" >&2

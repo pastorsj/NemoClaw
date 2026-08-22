@@ -11,11 +11,10 @@ import { describe, expect, it } from "vitest";
 const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const MAX_ENV_BYTES = 4 * 1024 * 1024;
 const MAX_ENV_LINE_BYTES = 256 * 1024;
 const MAX_ENV_LINES = 65_536;

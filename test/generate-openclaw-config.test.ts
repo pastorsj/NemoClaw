@@ -1108,7 +1108,7 @@ describe("generate-openclaw-config.mts: config generation", () => {
     // none, fall back to agents[0]. Simulate that locally over the baked
     // list to prove the bake satisfies the upstream contract today. The
     // authoritative resolver still lives in the openclaw npm package; see
-    // agents/openclaw/manifest.yaml -> expected_version for the pinned tag.
+    // packages/nemoclaw-openclaw/manifest.yaml -> expected_version for the pinned tag.
     const config = runConfigScript({
       NEMOCLAW_EXTRA_AGENTS_JSON_B64: extraAgentsB64([
         makeExtra({ id: "research" }),

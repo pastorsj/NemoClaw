@@ -338,7 +338,7 @@ RUN chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && mv /etc/bash.bashrc.new /etc/bash.bashrc \
     && chmod 444 /etc/bash.bashrc
 
-COPY agents/langchain-deepagents-code/requirements.lock /tmp/deepagents-code-requirements.lock
+COPY packages/nemoclaw-langchain-deepagents-code/requirements.lock /tmp/deepagents-code-requirements.lock
 
 RUN python3 -m venv --copies "$VIRTUAL_ENV" \
     && "$VIRTUAL_ENV/bin/pip3" install --no-cache-dir --require-hashes \

@@ -129,10 +129,10 @@ const BUILDS = new Map([
   ["${MAP_SHA256}", "${overrides.sandboxMapVersion ?? openshellMax}"],
 ]);
 `,
-    "agents/hermes/Dockerfile": `
+    "packages/nemoclaw-hermes/Dockerfile": `
 COPY src/lib/actions/sandbox/${credentialManifestName} /usr/local/lib/nemoclaw/${`openshell-child-visible-credentials.v${overrides.hermesDockerfileBoundaryVersion ?? openshellMax}.json`}
 `,
-    "agents/hermes/mcp-config-transaction.py": `
+    "packages/nemoclaw-hermes/mcp-config-transaction.py": `
 BOUNDARY_MANIFEST_NAME = "openshell-child-visible-credentials.v${overrides.hermesTransactionBoundaryVersion ?? openshellMax}.json"
 if manifest.get("openshellVersion") != "${overrides.hermesTransactionExpectedVersion ?? openshellMax}":
     raise RuntimeError("invalid")
@@ -159,7 +159,7 @@ ${openclawSelector(
   overrides.openclawDockerfileSelectorArgVersion,
 )}
 `,
-    "agents/openclaw/manifest.yaml": `
+    "packages/nemoclaw-openclaw/manifest.yaml": `
 expected_version: "${overrides.openclawManifestVersion ?? openclawVersion}"
 `,
     "nemoclaw/package.json": JSON.stringify({
@@ -169,10 +169,10 @@ expected_version: "${overrides.openclawManifestVersion ?? openclawVersion}"
         },
       },
     }),
-    "agents/hermes/Dockerfile.base": `
+    "packages/nemoclaw-hermes/Dockerfile.base": `
 ARG HERMES_SEMVER=${hermesSemver}
 `,
-    "agents/hermes/manifest.yaml": `
+    "packages/nemoclaw-hermes/manifest.yaml": `
 expected_version: "${overrides.hermesManifestVersion ?? hermesSemver}"
 `,
   };

@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HERMES_CRON_RESTORE_DRAIN_MARKER_ROLLBACK_FAILED_CODE } from "../src/lib/actions/sandbox/rebuild-hermes-post-restore";
 import { validateHermesCronRestoreBackup } from "../src/lib/state/rebuild/hermes-cron-restore-backup";
 
-const HELPER = path.resolve("agents/hermes/cron-restore-control.py");
+const HELPER = path.resolve("packages/nemoclaw-hermes/cron-restore-control.py");
 const HOST_VALIDATOR = path.resolve("src/lib/state/rebuild/hermes-cron-restore-backup.ts");
 const RECEIPT_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_V1:";
 const CONTROL_ERROR_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_ERROR_V1:";

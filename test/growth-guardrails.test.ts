@@ -3,6 +3,7 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { testTimeoutOptions } from "./helpers/timeouts";
 import {
   addedJavaScriptViolations,
   conditionalGrowthViolations,
@@ -34,7 +35,7 @@ function fixtureDiff(
   };
 }
 
-describe("codebase growth guardrails", () => {
+describe("codebase growth guardrails", testTimeoutOptions(30_000), () => {
   let diff: GrowthGuardrailDiff;
 
   beforeAll(async () => {

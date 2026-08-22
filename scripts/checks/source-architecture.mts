@@ -67,7 +67,7 @@ const BUDGET_PATH = path.join(REPO_ROOT, "ci", "source-architecture-budget.json"
 const DEFAULT_SCAN_ROOTS = [
   "src",
   "nemoclaw/src",
-  "agents/hermes",
+  "packages/nemoclaw-hermes",
   "bin",
   "scripts",
   "tools",

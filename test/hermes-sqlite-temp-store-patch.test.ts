@@ -10,8 +10,8 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const root = path.join(import.meta.dirname, "..");
-const patcher = path.join(root, "agents", "hermes", "patch-hermes-sqlite-temp-store.py");
-const dockerfile = fs.readFileSync(path.join(root, "agents", "hermes", "Dockerfile"), "utf8");
+const patcher = path.join(root, "packages", "nemoclaw-hermes", "patch-hermes-sqlite-temp-store.py");
+const dockerfile = fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "Dockerfile"), "utf8");
 const fixtures: string[] = [];
 
 const walSetup = 'apply_wal_with_fallback(self._conn, db_label="state.db")';
@@ -79,7 +79,7 @@ describe("Hermes SQLite temp-store patch", () => {
 
     expect(dockerfile).toContain(`ARG NEMOCLAW_HERMES_SQLITE_TEMP_STORE_PATCHER_SHA256=${digest}`);
     expect(dockerfile).toContain(
-      "COPY agents/hermes/patch-hermes-sqlite-temp-store.py " +
+      "COPY packages/nemoclaw-hermes/patch-hermes-sqlite-temp-store.py " +
         "/usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py",
     );
     expect(dockerfile).toContain(

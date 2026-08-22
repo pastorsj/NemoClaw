@@ -17,10 +17,10 @@ const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
 const PRODUCTION_DOCKERFILES = [
   DOCKERFILE,
   DOCKERFILE_BASE,
-  path.join(REPO_ROOT, "agents", "hermes", "Dockerfile"),
-  path.join(REPO_ROOT, "agents", "hermes", "Dockerfile.base"),
-  path.join(REPO_ROOT, "agents", "langchain-deepagents-code", "Dockerfile"),
-  path.join(REPO_ROOT, "agents", "langchain-deepagents-code", "Dockerfile.base"),
+  path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "Dockerfile"),
+  path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base"),
+  path.join(REPO_ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile"),
+  path.join(REPO_ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile.base"),
 ];
 const BLUEPRINT = path.join(REPO_ROOT, "nemoclaw-blueprint", "blueprint.yaml");
 const DEPENDENCY_REVIEW_NOTE = path.join(
@@ -49,8 +49,7 @@ const PINNED_OPENCLAW_INTEGRITY =
 const PINNED_OPENCLAW_TARBALL = "https://registry.npmjs.org/openclaw/-/openclaw-2026.7.1.tgz";
 const OPENCLAW_RUNTIME_LOCKFILE = path.join(
   REPO_ROOT,
-  "agents",
-  "openclaw",
+  "packages", "nemoclaw-openclaw",
   "openclaw-runtime",
   "package-lock.json",
 );
@@ -81,8 +80,7 @@ const PINNED_MCPORTER_INTEGRITY =
 const PINNED_MCPORTER_TARBALL = "https://registry.npmjs.org/mcporter/-/mcporter-0.7.3.tgz";
 const MCPORTER_LOCKFILE = path.join(
   REPO_ROOT,
-  "agents",
-  "openclaw",
+  "packages", "nemoclaw-openclaw",
   "mcporter-runtime",
   "package-lock.json",
 );

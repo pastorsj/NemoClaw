@@ -37,7 +37,7 @@ export function resolveHermesDashboardOnboardState({
   // the resolved effectivePort (covers --control-ui-port / CHAT_UI_URL /
   // persisted) and the raw env override, which the host otherwise silently
   // drops so effectivePort never shows it. This host guard rejects the whole
-  // API range; agents/hermes/start.sh rejects only this sandbox's resolved port.
+  // API range; packages/nemoclaw-hermes/start.sh rejects only this sandbox's resolved port.
   const rawDashboardPort = env.NEMOCLAW_DASHBOARD_PORT?.trim();
   const requestedDashboardPort = rawDashboardPort ? Number(rawDashboardPort) : undefined;
   const reservedPort = [effectivePort, requestedDashboardPort].find(

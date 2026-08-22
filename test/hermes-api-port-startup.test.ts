@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function runHermesApiPortBootstrap(apiPort: string) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-api-port-"));
@@ -41,7 +41,7 @@ function runHermesApiPortBootstrap(apiPort: string) {
   }
 }
 
-describe("agents/hermes/start.sh API port allocation", () => {
+describe("packages/nemoclaw-hermes/start.sh API port allocation", () => {
   it("accepts an allocated interior Hermes API port (#8543)", () => {
     const run = runHermesApiPortBootstrap("8645");
 

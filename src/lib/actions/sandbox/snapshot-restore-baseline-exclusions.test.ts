@@ -65,7 +65,7 @@ describe("runSandboxSnapshot restore: baseline exclusions", () => {
 
     expect(f.resolveAgentBaselinePolicyMock).toHaveBeenCalledWith("hermes");
     expect(f.prepareInitialSandboxCreatePolicyMock).toHaveBeenCalledWith(
-      "/repo/agents/hermes/policy-additions.yaml",
+      "/repo/packages/nemoclaw-hermes/policy-additions.yaml",
       [],
       { agentName: "hermes", sandboxName: "beta", baselineExclusions: [exclusion] },
     );

@@ -15,6 +15,7 @@ const managedInputPaths = [
   ".github/workflows/managed-images.yaml",
   "Dockerfile",
   "agents/**",
+  "packages/**",
   "ci/npm-audit-exceptions.json",
   "ci/reviewed-npm-audit.json",
   "nemoclaw/**",

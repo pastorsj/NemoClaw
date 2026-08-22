@@ -4,7 +4,7 @@
 // Closes the onboard loop for #6177: once the compatible-endpoint probe sets
 // NEMOCLAW_CONTEXT_WINDOW, dockerfile-patch must rewrite the Hermes Dockerfile's
 // ARG so the baked value reaches build-env/config generation. This stages the
-// real agents/hermes/Dockerfile so a future ARG rename cannot silently regress.
+// real packages/nemoclaw-hermes/Dockerfile so a future ARG rename cannot silently regress.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { patchStagedDockerfile } from "./dockerfile-patch";
 
-const HERMES_DOCKERFILE = path.join(import.meta.dirname, "../../../agents/hermes/Dockerfile");
+const HERMES_DOCKERFILE = path.join(import.meta.dirname, "../../../packages/nemoclaw-hermes/Dockerfile");
 const tmpRoots: string[] = [];
 
 function stageHermesDockerfile(): string {

@@ -168,7 +168,7 @@ jobs:
           HERMES_BASE_IMAGE: ${{ env.HERMES_BASE_IMAGE }}
         run: |
           set -euo pipefail
-          build_args=(-f agents/hermes/Dockerfile --build-arg "BASE_IMAGE=${HERMES_BASE_IMAGE}")
+          build_args=(-f packages/nemoclaw-hermes/Dockerfile --build-arg "BASE_IMAGE=${HERMES_BASE_IMAGE}")
           scripts/check-production-build-args.sh "${build_args[@]}"
 
       - name: Record resources before Hermes image build
@@ -183,7 +183,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
-          file: agents/hermes/Dockerfile
+          file: packages/nemoclaw-hermes/Dockerfile
           load: true
           push: false
           tags: nemoclaw-hermes-production
@@ -393,7 +393,7 @@ jobs:
           corporate_ca_sha256="$(sha256sum "$compact_ca_bundle" | cut -d ' ' -f 1)"
           messaging_plan_b64="$(node --experimental-strip-types scripts/check-messaging-plan-image-boundary.mts plan hermes)"
           build_args=(
-            -f agents/hermes/Dockerfile
+            -f packages/nemoclaw-hermes/Dockerfile
             --build-arg "BASE_IMAGE=${HERMES_BASE_IMAGE}"
             --build-arg "NEMOCLAW_CORPORATE_CA_B64=${corporate_ca_b64}"
             --build-arg "NEMOCLAW_MESSAGING_PLAN_B64=${messaging_plan_b64}"

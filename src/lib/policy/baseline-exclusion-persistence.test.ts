@@ -56,7 +56,7 @@ network_policies:
 `;
 const LIVE_ENTRY = getBaselineEntry(LIVE_POLICY, "nous_research");
 const LIVE_DIGEST = digestBaselineEntry(LIVE_ENTRY!);
-const HERMES_BASELINE = fs.readFileSync("agents/hermes/policy-additions.yaml", "utf8");
+const HERMES_BASELINE = fs.readFileSync("packages/nemoclaw-hermes/policy-additions.yaml", "utf8");
 const HERMES_BASELINE_ENTRY = getBaselineEntry(HERMES_BASELINE, "nous_research");
 const HERMES_BASELINE_DIGEST = digestBaselineEntry(HERMES_BASELINE_ENTRY!);
 const HERMES_MANAGED_INFERENCE_DIGEST = digestBaselineEntry(

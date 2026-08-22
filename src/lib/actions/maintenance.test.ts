@@ -1054,12 +1054,10 @@ describe("backupAll", () => {
   });
 
   it("re-throws an Agent-not-found message whose path does not end in manifest.yaml", async () => {
-    // The matcher is anchored to the manifest file path loadAgent() emits
-    // (`path.join(AGENTS_DIR, name, "manifest.yaml")` at
-    // src/lib/agent/defs.ts:367). A future error that wraps `Agent '...' not
-    // found:` with a different artifact path (e.g. a binary, config, or
-    // registry entry) must keep aborting the batch instead of being treated
-    // as an orphan manifest.
+    // The matcher is anchored to the manifest file path that loadAgent() emits.
+    // A future error that wraps `Agent '...' not found:` with a different
+    // artifact path (for example, a binary, configuration, or registry entry)
+    // must keep aborting the batch instead of being treated as an orphan manifest.
     mocks.listSandboxes.mockReturnValue({
       sandboxes: [{ name: "sb-bad" }],
       defaultSandbox: null,

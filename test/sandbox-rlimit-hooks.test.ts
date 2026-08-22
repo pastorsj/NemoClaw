@@ -12,11 +12,10 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const DOCKERFILE = path.join(ROOT, "Dockerfile");
 const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
 const PI_DOCKERFILE_BASE = path.join(ROOT, "agents", "pi", "Dockerfile.base");
-const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
+const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 const DCODE_DOCKERFILE_BASE = path.join(
   ROOT,
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "Dockerfile.base",
 );
 const SANDBOX_RLIMITS = path.join(ROOT, "scripts", "lib", "sandbox-rlimits.sh");
@@ -524,7 +523,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       const command = dockerRunCommandBetween(
         dockerfile,
         "# System-wide RLIMIT hooks for Deep Agents Code",
-        "COPY agents/langchain-deepagents-code/requirements.lock",
+        "COPY packages/nemoclaw-langchain-deepagents-code/requirements.lock",
       )
         .replaceAll("/usr/local/lib/nemoclaw/sandbox-rlimits.sh", rlimitLib)
         .replaceAll("/etc/profile.d/nemoclaw-rlimits.sh", rlimitHook)

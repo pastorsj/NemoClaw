@@ -11,20 +11,18 @@ import { describe, expect, it } from "vitest";
 import { shellQuote } from "../src/lib/core/shell-quote";
 import { dockerRunCommandBetween } from "./helpers/dockerfile-run-shell";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
-const HERMES_DOCKERFILE = path.join(import.meta.dirname, "..", "agents", "hermes", "Dockerfile");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const HERMES_DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "Dockerfile");
 const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "runtime-config-guard.py",
 );
 const SECRET_BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 
@@ -35,7 +33,7 @@ function escapeRegExp(value: string): string {
 function extractShellFunctionFromSource(src: string, name: string): string {
   const escapedName = escapeRegExp(name);
   const match = src.match(new RegExp(`${escapedName}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
-  expect(match, `Expected ${name} in agents/hermes/start.sh`).not.toBeNull();
+  expect(match, `Expected ${name} in packages/nemoclaw-hermes/start.sh`).not.toBeNull();
   return `${name}() {${match![1]}\n}`;
 }
 
@@ -369,7 +367,7 @@ function runHermesRuntimeProviderPlaceholderRefresh(opts: {
   }
 }
 
-describe("agents/hermes/start.sh runtime API server key", () => {
+describe("packages/nemoclaw-hermes/start.sh runtime API server key", () => {
   it("runs the startup guard in isolated mode as the calling shell's direct child", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-direct-child-"));
     const hermesHome = path.join(tmpDir, ".hermes");

@@ -10,7 +10,7 @@ import {
   runHermesBashHarness as runBashHarness,
 } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function writeFakeProcCmdline(procRoot: string, pid: number, args: string[]): void {
   const processDir = path.join(procRoot, String(pid));

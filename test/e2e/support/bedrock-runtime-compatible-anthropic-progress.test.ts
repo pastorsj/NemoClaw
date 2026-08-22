@@ -74,7 +74,7 @@ describe("Bedrock raw-command progress", () => {
     );
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(path.join(REPO_ROOT, "agents/langchain-deepagents-code/Dockerfile"));
+    expect(result.stdout).toBe(path.join(REPO_ROOT, "packages/nemoclaw-langchain-deepagents-code/Dockerfile"));
   });
 
   it("reports timestamp-only output activity without forwarding child payloads", async () => {

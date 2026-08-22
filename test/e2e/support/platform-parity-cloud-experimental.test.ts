@@ -725,7 +725,7 @@ assert_status_mode disabled
       agent: "langchain-deepagents-code",
       interactiveCommand: "dcode",
       statusLine: "Interactive: dcode",
-      source: "agents/langchain-deepagents-code/manifest.yaml:runtime.interactive_command",
+      source: "packages/nemoclaw-langchain-deepagents-code/manifest.yaml:runtime.interactive_command",
     });
   });
 

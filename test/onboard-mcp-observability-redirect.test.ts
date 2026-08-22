@@ -24,7 +24,7 @@ describe("onboard managed MCP recreation redirect", () => {
     const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
     const registryPath = JSON.stringify(path.join(repoRoot, "src", "lib", "state", "registry.ts"));
     const dcodePolicyPath = JSON.stringify(
-      path.join(repoRoot, "agents", "langchain-deepagents-code", "policy-additions.yaml"),
+      path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"),
     );
     const mocksPath = JSON.stringify(
       path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),

@@ -52,7 +52,7 @@ dcode_identity() {
   # Invoke dcode by absolute path: `openshell sandbox exec -- dcode ...` runs
   # without a login shell, so /usr/local/bin is not on PATH and a bare `dcode`
   # resolves to "command not found". The image installs the launcher at
-  # /usr/local/bin/dcode (see agents/langchain-deepagents-code/Dockerfile).
+  # /usr/local/bin/dcode (see packages/nemoclaw-langchain-deepagents-code/Dockerfile).
   openshell sandbox exec --name "$SANDBOX_NAME" -- /usr/local/bin/dcode identity 2>&1
 }
 

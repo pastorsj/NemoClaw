@@ -24,8 +24,7 @@ import { testTimeout } from "./helpers/timeouts";
 const SCRIPT = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "host",
   "tool-gateway-broker.ts",
 );
@@ -40,8 +39,7 @@ const BROKER_WRAPPER = path.join(
 const CONTROL_CONTRACT = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "host",
   "tool-gateway-control-contract.ts",
 );

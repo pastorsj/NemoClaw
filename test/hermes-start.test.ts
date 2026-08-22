@@ -14,20 +14,18 @@ import {
   runHermesSandboxInitPreludeWithFakePath,
 } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const ENV_WRAPPER = path.join(import.meta.dirname, "../scripts/lib/entrypoint-env-wrapper.sh");
 const TIRITH_FINALIZER = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "finalize-tirith-marker.py",
 );
 const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 const GENERATED_API_SERVER_KEY = Array.from({ length: 64 }, (_value, index) =>
@@ -38,7 +36,7 @@ function extractRuntimeShellEnvBlock(src: string): string {
   const start = src.indexOf("write_runtime_shell_env() {");
   const end = src.indexOf("\nwrite_runtime_shell_env\n", start);
   if (start < 0 || end < 0) {
-    throw new Error("Expected write_runtime_shell_env block in agents/hermes/start.sh");
+    throw new Error("Expected write_runtime_shell_env block in packages/nemoclaw-hermes/start.sh");
   }
   return src.slice(start, end).trimEnd();
 }
@@ -47,7 +45,7 @@ function extractDashboardPortBootstrap(src: string): string {
   const start = src.indexOf('NEMOCLAW_CMD=("$@")');
   const end = src.indexOf('\nHERMES="$(command -v hermes)"', start);
   if (start < 0 || end < 0) {
-    throw new Error("Expected Hermes dashboard port bootstrap block in agents/hermes/start.sh");
+    throw new Error("Expected Hermes dashboard port bootstrap block in packages/nemoclaw-hermes/start.sh");
   }
   return src.slice(start, end).trimEnd();
 }
@@ -248,7 +246,7 @@ function extractTirithDispatchBlock(src: string, mode: "non-root" | "root"): str
   const nonRootStart = src.indexOf("# ── Non-root fallback");
   const rootStart = src.indexOf("# ── Root path");
   if (nonRootStart < 0 || rootStart < 0 || rootStart <= nonRootStart) {
-    throw new Error("Expected root and non-root dispatch blocks in agents/hermes/start.sh");
+    throw new Error("Expected root and non-root dispatch blocks in packages/nemoclaw-hermes/start.sh");
   }
   return mode === "non-root" ? src.slice(nonRootStart, rootStart) : src.slice(rootStart);
 }
@@ -724,7 +722,7 @@ function runRuntimeShellEnvBootstrap() {
   }
 }
 
-describe("agents/hermes/start.sh sandbox init bootstrap", () => {
+describe("packages/nemoclaw-hermes/start.sh sandbox init bootstrap", () => {
   it("locks the trusted PATH before sourcing shared sandbox init", () => {
     const { result, dirnameCalled, sourcePath } = runHermesSandboxInitPreludeWithFakePath(
       START_SCRIPT,
@@ -752,7 +750,7 @@ describe("agents/hermes/start.sh sandbox init bootstrap", () => {
   });
 });
 
-describe("agents/hermes/start.sh runtime shell env", () => {
+describe("packages/nemoclaw-hermes/start.sh runtime shell env", () => {
   it("puts the Hermes configure guard in the sourced proxy env file", () => {
     const run = runRuntimeShellEnvBootstrap();
     const escapedCaFile = bashPrintfQ(run.caFile);
@@ -780,7 +778,7 @@ describe("agents/hermes/start.sh runtime shell env", () => {
   });
 });
 
-describe("agents/hermes/start.sh port validation", () => {
+describe("packages/nemoclaw-hermes/start.sh port validation", () => {
   it("derives the dashboard port from CHAT_UI_URL while preserving API port 8642", () => {
     const run = runHermesDashboardPortBootstrap({
       CHAT_UI_URL: "https://hermes.example.test:29443",
@@ -838,12 +836,12 @@ describe("agents/hermes/start.sh port validation", () => {
   });
 });
 
-describe("agents/hermes/start.sh validator-path bootstrap", () => {
+describe("packages/nemoclaw-hermes/start.sh validator-path bootstrap", () => {
   function extractValidatorBootstrapBlock(src: string): string {
     const startMarker = "# Resolve the standalone secret-boundary validator";
     const start = src.indexOf(startMarker);
     if (start < 0) {
-      throw new Error("Expected validator bootstrap comment in agents/hermes/start.sh");
+      throw new Error("Expected validator bootstrap comment in packages/nemoclaw-hermes/start.sh");
     }
     const fiNeedle = "\nfi\n";
     const end = src.indexOf(fiNeedle, start);
@@ -901,7 +899,7 @@ describe("agents/hermes/start.sh validator-path bootstrap", () => {
     const tmpDir = fs.mkdtempSync(
       path.join(os.tmpdir(), "nemoclaw-hermes-validator-bootstrap-fallback-"),
     );
-    const scriptDir = path.join(tmpDir, "agents", "hermes");
+    const scriptDir = path.join(tmpDir, "packages", "nemoclaw-hermes");
     const fallbackValidator = path.join(scriptDir, "validate-env-secret-boundary.py");
     fs.mkdirSync(scriptDir, { recursive: true });
     fs.writeFileSync(fallbackValidator, "#!/usr/bin/env python3\n");
@@ -943,7 +941,7 @@ describe("agents/hermes/start.sh validator-path bootstrap", () => {
   });
 });
 
-describe("agents/hermes/start.sh env secret boundary", () => {
+describe("packages/nemoclaw-hermes/start.sh env secret boundary", () => {
   it("allows OpenShell resolver placeholders and Slack SDK aliases", () => {
     const result = runHermesEnvSecretBoundary({
       envFile: [
@@ -1116,7 +1114,7 @@ describe("agents/hermes/start.sh env secret boundary", () => {
   });
 });
 
-describe("agents/hermes/start.sh gateway runtime cleanup", () => {
+describe("packages/nemoclaw-hermes/start.sh gateway runtime cleanup", () => {
   it("removes stale Hermes pid and lock files plus the legacy compatibility pid symlink", () => {
     const run = runHermesGatewayRuntimeCleanup({});
 
@@ -1401,7 +1399,7 @@ function runShieldsUpRuntimeEnv(opts: { locked: boolean; presetValue?: string })
   }
 }
 
-describe("agents/hermes/start.sh shields-up kanban dispatcher override", () => {
+describe("packages/nemoclaw-hermes/start.sh shields-up kanban dispatcher override", () => {
   it("disables the embedded Hermes kanban dispatcher when the config root is locked", () => {
     const run = runShieldsUpRuntimeEnv({ locked: true });
 
@@ -1428,7 +1426,7 @@ describe("agents/hermes/start.sh shields-up kanban dispatcher override", () => {
   });
 });
 
-describe("agents/hermes/start.sh Tirith marker bootstrap", () => {
+describe("packages/nemoclaw-hermes/start.sh Tirith marker bootstrap", () => {
   it.each([true, false])(
     "resolves the installed Tirith finalizer before fallback (%s)",
     (installed) => {

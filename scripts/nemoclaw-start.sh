@@ -145,7 +145,7 @@ exec > >(tee -a "$_START_LOG" >&3) 2> >(tee -a "$_START_LOG" >&4)
 
 # ── Source shared sandbox initialisation library ─────────────────
 # Single source of truth for security-sensitive primitives shared with
-# agents/hermes/start.sh. Ref: https://github.com/NVIDIA/NemoClaw/issues/2277
+# packages/nemoclaw-hermes/start.sh. Ref: https://github.com/NVIDIA/NemoClaw/issues/2277
 # Installed location (container): /usr/local/lib/nemoclaw/sandbox-init.sh
 # Dev fallback: scripts/lib/sandbox-init.sh relative to this script.
 _SANDBOX_INIT="/usr/local/lib/nemoclaw/sandbox-init.sh"

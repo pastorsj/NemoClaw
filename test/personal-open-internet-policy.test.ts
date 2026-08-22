@@ -39,11 +39,11 @@ const AGENT_POLICY_BASELINES = [
     "OpenClaw",
     path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
   ],
-  ["hermes", "Hermes", path.join(ROOT, "agents", "hermes", "policy-additions.yaml")],
+  ["hermes", "Hermes", path.join(ROOT, "packages", "nemoclaw-hermes", "policy-additions.yaml")],
   [
     "langchain-deepagents-code",
     "Deep Agents Code",
-    path.join(ROOT, "agents", "langchain-deepagents-code", "policy-additions.yaml"),
+    path.join(ROOT, "packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"),
   ],
   ["pi", "Pi", path.join(ROOT, "agents", "pi", "policy-additions.yaml")],
 ] as const;

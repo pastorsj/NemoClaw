@@ -23,7 +23,7 @@ archive remediation to select `tar@7.5.21`, and select the same first patched
 release in both committed production locks. Do not add an audit exception.
 
 The production OpenClaw install uses the authoritative committed lock at
-`agents/openclaw/openclaw-runtime/package-lock.json`, with SHA-256
+`packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json`, with SHA-256
 `60f816dcff6f35179b1c48b4c06db9473497760d45ca1831252c27e8b1d2d665`.
 NemoClaw derives that lock from the SRI-verified `openclaw@2026.7.1` archive
 after applying the reviewed dependency remediation.

@@ -439,8 +439,8 @@ RUN pip3 install --no-cache-dir --break-system-packages "uv==${UV_VERSION}" \
 # Upstream tests are not part of the production runtime and can contain
 # intentionally hostile security-test fixtures. Remove them in the extraction
 # RUN so their bytes never enter a published image layer.
-COPY agents/hermes/security-dependencies.patch /tmp/hermes-security-dependencies.patch
-COPY agents/hermes/whatsapp-proxy.patch /tmp/hermes-whatsapp-proxy.patch
+COPY packages/nemoclaw-hermes/security-dependencies.patch /tmp/hermes-security-dependencies.patch
+COPY packages/nemoclaw-hermes/whatsapp-proxy.patch /tmp/hermes-whatsapp-proxy.patch
 COPY scripts/checks/download-hermes-source-archive.sh /tmp/nemoclaw-download-hermes-source-archive.sh
 RUN mkdir -p /opt/hermes \
     && bash /tmp/nemoclaw-download-hermes-source-archive.sh "${HERMES_VERSION}" /tmp/hermes.tar.gz \
@@ -572,7 +572,7 @@ RUN printf '%s\n' \
 # a temporary durable target without network or dependency resolution, import
 # them against the exact base environment, and remove the probe before
 # publishing the base image.
-COPY --chmod=0444 agents/hermes/hindsight-client-probe-requirements.txt /tmp/nemoclaw-hindsight-client-probe-requirements.txt
+COPY --chmod=0444 packages/nemoclaw-hermes/hindsight-client-probe-requirements.txt /tmp/nemoclaw-hindsight-client-probe-requirements.txt
 ADD --chmod=0444 --checksum=sha256:9fdda176ab50f7cec8d7339c6608c148f0cd9ad7e65d9d76192f2db730bc330a https://files.pythonhosted.org/packages/24/4f/a1d0bc33ef933ecc52e76dc1514163594d25836a5d303c256a61bb61445d/hindsight_client-0.6.1-py3-none-any.whl /tmp/nemoclaw-hindsight-client-artifacts/hindsight_client-0.6.1-py3-none-any.whl
 ADD --chmod=0444 --checksum=sha256:66d2759d1921838256a05a3f80ad7e724936f083e35be5abb5e16eed6be6dc54 https://files.pythonhosted.org/packages/1a/99/84ba7273339d0f3dfa57901b846489d2e5c2cd731470167757f1935fffbd/aiohttp_retry-2.9.1-py3-none-any.whl /tmp/nemoclaw-hindsight-client-artifacts/aiohttp_retry-2.9.1-py3-none-any.whl
 RUN --network=none install -d -o sandbox -g sandbox -m 0750 \

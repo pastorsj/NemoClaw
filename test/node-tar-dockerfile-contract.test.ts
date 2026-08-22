@@ -23,25 +23,25 @@ const dockerfiles = [
   },
   { file: "Dockerfile", installsPatchDownloader: false, installsWithNpm: true, patchCount: 1 },
   {
-    file: "agents/hermes/Dockerfile.base",
+    file: "packages/nemoclaw-hermes/Dockerfile.base",
     installsPatchDownloader: false,
     installsWithNpm: true,
     patchCount: 2,
   },
   {
-    file: "agents/hermes/Dockerfile",
+    file: "packages/nemoclaw-hermes/Dockerfile",
     installsPatchDownloader: false,
     installsWithNpm: true,
     patchCount: 1,
   },
   {
-    file: "agents/langchain-deepagents-code/Dockerfile.base",
+    file: "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     installsPatchDownloader: true,
     installsWithNpm: false,
     patchCount: 2,
   },
   {
-    file: "agents/langchain-deepagents-code/Dockerfile",
+    file: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
     installsPatchDownloader: false,
     installsWithNpm: false,
     patchCount: 1,
@@ -63,8 +63,8 @@ const patchCommand = "node --experimental-strip-types /scripts/patch-bundled-npm
 const npmRootArguments = ["--npm-root", "/usr/local/lib/node_modules/npm"] as const;
 const pinnedBaseDockerfiles = [
   "Dockerfile.base",
-  "agents/hermes/Dockerfile.base",
-  "agents/langchain-deepagents-code/Dockerfile.base",
+  "packages/nemoclaw-hermes/Dockerfile.base",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
   "agents/pi/Dockerfile.base",
 ] as const;
 const reviewedNodeBases = new Set<string>(NODE_BASES_REQUIRING_BUNDLED_NPM_TAR_PATCH);
@@ -262,7 +262,7 @@ describe("node-tar image remediation contract", () => {
 
   // source-shape-contract: security -- Each managed Dockerfile must remain bound to a reviewed Node base digest.
   it("rejects an isolated unreviewed Deep Agents Code Node base pin", () => {
-    const file = "agents/langchain-deepagents-code/Dockerfile.base";
+    const file = "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base";
     const source = fs.readFileSync(path.join(repoRoot, file), "utf8");
     const reviewedBase = NODE_BASES_REQUIRING_BUNDLED_NPM_TAR_PATCH.find((base) =>
       base.startsWith("node:22-"),
@@ -278,8 +278,8 @@ describe("node-tar image remediation contract", () => {
 
   it.each([
     "Dockerfile.base",
-    "agents/hermes/Dockerfile.base",
-    "agents/langchain-deepagents-code/Dockerfile.base",
+    "packages/nemoclaw-hermes/Dockerfile.base",
+    "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     "agents/pi/Dockerfile.base",
   ])("installs curl before patching the bundled npm tar in $file", (file) => {
     const source = completedStage(fs.readFileSync(path.join(repoRoot, file), "utf8"));
@@ -444,8 +444,8 @@ describe("reviewed npm image remediation contract", () => {
 
   it.each([
     { file: "Dockerfile.base", installsWithNpm: true },
-    { file: "agents/hermes/Dockerfile.base", installsWithNpm: true },
-    { file: "agents/langchain-deepagents-code/Dockerfile.base", installsWithNpm: false },
+    { file: "packages/nemoclaw-hermes/Dockerfile.base", installsWithNpm: true },
+    { file: "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base", installsWithNpm: false },
     { file: "agents/pi/Dockerfile.base", installsWithNpm: true },
   ])(
     "patches tar before and after upgrading the complete npm tree in $file",

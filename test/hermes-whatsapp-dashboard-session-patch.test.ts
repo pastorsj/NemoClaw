@@ -8,7 +8,7 @@ import path from "node:path";
 import { expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PATCH = path.join(ROOT, "agents", "hermes", "whatsapp-proxy.patch");
+const PATCH = path.join(ROOT, "packages", "nemoclaw-hermes", "whatsapp-proxy.patch");
 
 it("stores Hermes dashboard pairing state in the gateway session directory (#8184)", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-whatsapp-dashboard-"));

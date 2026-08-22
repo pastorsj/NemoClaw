@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { dockerRunCommandBetween, runLoggedDockerShell } from "./helpers/dockerfile-run-shell";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
+const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 
 function dashboardBuildCommand(hermesRoot: string, rootCache: string): string {
   const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");

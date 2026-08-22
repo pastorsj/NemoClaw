@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Agent definition loader — each agent's definition already lives in its
-// agents/*/manifest.yaml. This facade scans those per-agent files and builds
-// the stable derived accessors used during onboarding; schema types and
-// validation readers stay in focused sibling modules.
+// Agent definition loader. Standard harnesses live in packages/ and temporary
+// candidate integrations remain in agents/. Both use the same manifest and
+// conventional package files, so onboarding keeps one AgentDefinition API.
 
 import fs from "node:fs";
 import path from "node:path";
 import { DASHBOARD_PORT } from "../core/ports";
 import { isCuaEnabled, requireCuaEnabled } from "../cua/feature";
+import { listHarnessPackages, resolveHarnessPackage } from "../harness/package-registry";
 import { ROOT } from "../runner";
 import {
   formatAgentAliasSuffix,
@@ -117,21 +117,35 @@ function unknownAgentMessage(
   return `Unknown agent '${value}'${suffix}. Available: ${choices}${formatAgentAliasSuffix(available)}`;
 }
 
-/**
- * List available agent names by scanning agents/ for directories with
- * a manifest.yaml file.
- */
+function selectableAgent(name: string, env: NodeJS.ProcessEnv): boolean {
+  if (name === "nemocua" && !isCuaEnabled(env)) return false;
+  return !isCandidateAgent(name) || isCandidateAgentSelectable(name, env);
+}
+
+function listLegacyAgents(env: NodeJS.ProcessEnv): string[] {
+  if (!fs.existsSync(AGENTS_DIR)) return [];
+  return fs
+    .readdirSync(AGENTS_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .filter((entry) => selectableAgent(entry.name, env))
+    .filter((entry) => fs.existsSync(path.join(AGENTS_DIR, entry.name, "manifest.yaml")))
+    .map((entry) => entry.name);
+}
+
+/** List harness packages and temporary legacy candidates available to onboarding. */
 export function listAgents(env: NodeJS.ProcessEnv = process.env): string[] {
-  const agents = fs.existsSync(AGENTS_DIR)
-    ? fs
-        .readdirSync(AGENTS_DIR, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .filter((entry) => entry.name !== "nemocua" || isCuaEnabled(env))
-        .filter((entry) => !isCandidateAgent(entry.name) || isCandidateAgentSelectable(entry.name, env))
-        .filter((entry) => fs.existsSync(path.join(AGENTS_DIR, entry.name, "manifest.yaml")))
-        .map((entry) => entry.name)
-    : [];
-  return [...new Set(agents)].sort();
+  const packageAgents = listHarnessPackages(env)
+    .map((entry) => entry.id)
+    .filter((name) => selectableAgent(name, env));
+  const legacyAgents = listLegacyAgents(env);
+  const names = new Set(packageAgents);
+  for (const name of legacyAgents) {
+    if (names.has(name)) {
+      throw new Error(`Duplicate agent id '${name}' is declared by a harness package and agents/`);
+    }
+    names.add(name);
+  }
+  return [...names].sort();
 }
 
 /** Resolve a non-OpenClaw agent's required, readable baseline policy. */
@@ -156,8 +170,10 @@ export function requireAgentPolicyAdditionsPath(
 export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): AgentDefinition {
   if (name === "nemocua") requireCuaEnabled(env);
   requireCandidateAgentSelectable(name, env);
-  const manifestPath = path.join(AGENTS_DIR, name, "manifest.yaml");
-  const cached = _cache.get(name);
+  const harnessPackage = resolveHarnessPackage(name, env);
+  const manifestPath =
+    harnessPackage?.manifestPath ?? path.join(AGENTS_DIR, name, "manifest.yaml");
+  const cached = _cache.get(manifestPath);
   if (cached) return cached;
 
   if (!fs.existsSync(manifestPath)) {
@@ -394,7 +410,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
     },
   };
 
-  _cache.set(name, agent);
+  _cache.set(manifestPath, agent);
   return agent;
 }
 

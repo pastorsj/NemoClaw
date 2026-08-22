@@ -76,7 +76,7 @@ function parseJson<T>(text: string): T {
 // ---------------------------------------------------------------------------
 // Agent-aware config resolution
 //
-// Each agent defines its own config layout in agents/*/manifest.yaml:
+// Each agent manifest defines its own configuration layout:
 //   - openclaw: /sandbox/.openclaw/openclaw.json  (JSON)
 //   - hermes:   /sandbox/.hermes/config.yaml      (YAML)
 //
@@ -649,7 +649,7 @@ function recomputeSandboxConfigHash(sandboxName: string, target: AgentConfigTarg
 }
 
 // Absolute path to the Hermes dashboard config seeder inside the sandbox image
-// (installed by the agents/hermes image build). The python resolution order
+// (installed by the packages/nemoclaw-hermes image build). The python resolution order
 // mirrors start.sh's trusted `_HERMES_PYTHON` list.
 const HERMES_DASHBOARD_SEEDER_PATH = "/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py";
 const HERMES_MANAGED_POLICY_PATH = "/usr/local/share/nemoclaw/hermes-managed-policy.json";

@@ -94,7 +94,7 @@ function writeDcodeWrapperFixture(tmpDir: string, home: string): string {
   ].join("\n");
   const wrapper = fs
     .readFileSync(
-      path.join(REPO_ROOT, "agents", "langchain-deepagents-code", "dcode-wrapper.sh"),
+      path.join(REPO_ROOT, "packages", "nemoclaw-langchain-deepagents-code", "dcode-wrapper.sh"),
       "utf8",
     )
     .replace("export HOME=/sandbox", `export HOME=${JSON.stringify(home)}`)
@@ -310,7 +310,7 @@ const { setupNim } = require(${onboardPath});
         process.execPath,
         [
           "--experimental-strip-types",
-          path.join(REPO_ROOT, "agents", "langchain-deepagents-code", "generate-config.ts"),
+          path.join(REPO_ROOT, "packages", "nemoclaw-langchain-deepagents-code", "generate-config.ts"),
         ],
         {
           cwd: REPO_ROOT,

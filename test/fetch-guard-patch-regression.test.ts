@@ -169,8 +169,7 @@ function runOpenClawUpgradeBlock(currentVersion: string) {
     path.join(
       import.meta.dirname,
       "..",
-      "agents",
-      "openclaw",
+      "packages", "nemoclaw-openclaw",
       "openclaw-runtime",
       "package-lock.json",
     ),

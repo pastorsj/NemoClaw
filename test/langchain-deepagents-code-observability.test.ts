@@ -8,8 +8,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const modulePath = path.join(
   repoRoot,
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "nemoclaw_observability.py",
 );
 const harnessPath = path.join(repoRoot, "test", "fixtures", "deepagents-observability-harness.py");

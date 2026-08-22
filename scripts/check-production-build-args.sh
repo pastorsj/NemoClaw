@@ -15,10 +15,10 @@ readonly repo_root
 readonly -a production_dockerfiles=(
   "${repo_root}/Dockerfile"
   "${repo_root}/Dockerfile.base"
-  "${repo_root}/agents/hermes/Dockerfile"
-  "${repo_root}/agents/hermes/Dockerfile.base"
-  "${repo_root}/agents/langchain-deepagents-code/Dockerfile"
-  "${repo_root}/agents/langchain-deepagents-code/Dockerfile.base"
+  "${repo_root}/packages/nemoclaw-hermes/Dockerfile"
+  "${repo_root}/packages/nemoclaw-hermes/Dockerfile.base"
+  "${repo_root}/packages/nemoclaw-langchain-deepagents-code/Dockerfile"
+  "${repo_root}/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base"
   "${repo_root}/agents/pi/Dockerfile"
   "${repo_root}/agents/pi/Dockerfile.base"
 )

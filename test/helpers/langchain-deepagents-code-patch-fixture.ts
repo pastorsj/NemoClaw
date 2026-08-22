@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { addDarwinFcntlSealConstants } from "./darwin-fcntl-seal-fixture";
 
-export const agentDir = path.join(process.cwd(), "agents", "langchain-deepagents-code");
+export const agentDir = path.join(process.cwd(), "packages", "nemoclaw-langchain-deepagents-code");
 export const patcher = path.join(agentDir, "patch-managed-deepagents-code.py");
 const packageFixtureDirs = new Set<string>();
 

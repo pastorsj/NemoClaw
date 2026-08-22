@@ -6,25 +6,23 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { HermesBuildSettings } from "../agents/hermes/config/build-env.ts";
+import type { HermesBuildSettings } from "../packages/nemoclaw-hermes/config/build-env.ts";
 import {
   buildHermesManagedPolicy,
   HERMES_MANAGED_POLICY_SCHEMA_VERSION,
-} from "../agents/hermes/config/managed-policy.ts";
+} from "../packages/nemoclaw-hermes/config/managed-policy.ts";
 
-const READER_PATH = path.join(import.meta.dirname, "..", "agents", "hermes", "managed_policy.py");
+const READER_PATH = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "managed_policy.py");
 const PROFILE_PATCHER_PATH = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "patch-profile-policy-defaults.py",
 );
 const DASHBOARD_SEEDER_PATH = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "seed-dashboard-config.py",
 );
 const SETTINGS: HermesBuildSettings = {

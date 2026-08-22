@@ -183,20 +183,22 @@ describe("OpenShell policy boundary package contract", () => {
 
   it.each(
     [
-        "managed-tool-gateway-matrix.json",
-        "runtime-refresh-credentials.ts",
-        "tool-gateway-broker.ts",
-        "tool-gateway-control-contract.ts",
-      ],
+      "managed-tool-gateway-matrix.json",
+      "runtime-refresh-credentials.ts",
+      "tool-gateway-broker.ts",
+      "tool-gateway-control-contract.ts",
+    ],
   )("ships the Hermes host broker with its canonical sandbox-name boundary [%s]", (file) => {
-    expect(packageFiles(repoRoot)).toContain("agents/hermes/host/");
+    expect(packageFiles(repoRoot)).toContain("packages/nemoclaw-*/**/*");
 
-    expect(fs.existsSync(path.join(repoRoot, "agents", "hermes", "host", file))).toBe(true);
+    expect(
+      fs.existsSync(path.join(repoRoot, "packages", "nemoclaw-hermes", "host", file)),
+    ).toBe(true);
 
     const controlContractPath = path.join(
       repoRoot,
-      "agents",
-      "hermes",
+      "packages",
+      "nemoclaw-hermes",
       "host",
       "tool-gateway-control-contract.ts",
     );

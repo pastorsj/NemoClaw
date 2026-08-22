@@ -10,8 +10,7 @@ import { describe, expect, it } from "vitest";
 const TRANSACTION = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "mcp-config-transaction.py",
 );
 const MANIFEST_NAME = "openshell-child-visible-credentials.v0.0.106.json";

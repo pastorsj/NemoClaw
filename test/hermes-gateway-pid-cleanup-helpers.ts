@@ -10,7 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -20,7 +20,7 @@ function extractShellFunctionFromSource(src: string, name: string): string {
   const escapedName = escapeRegExp(name);
   const match = src.match(new RegExp(`${escapedName}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
   if (!match) {
-    throw new Error(`Expected ${name} in agents/hermes/start.sh`);
+    throw new Error(`Expected ${name} in packages/nemoclaw-hermes/start.sh`);
   }
   return `${name}() {${match[1]}\n}`;
 }

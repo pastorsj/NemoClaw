@@ -106,7 +106,7 @@
     ".source-revision",
     "agents/*/manifest.yaml",
     "agents/*/state-lock-plan.json",
-    "agents/hermes/host/",
+    "packages/nemoclaw-*/**/*",
     "agents/nemocua/Dockerfile",
     "agents/nemocua/policy-additions.yaml",
     "bin/",
@@ -123,7 +123,9 @@
     "scripts/",
     "docs/resources/local-credential-form.html",
     "Dockerfile",
-    ".dockerignore"
+    ".dockerignore",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
   ],
   "engines": {
     "node": ">=22.19.0"

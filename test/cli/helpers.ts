@@ -23,8 +23,7 @@ export function readOpenClawExpectedVersion(): string {
     import.meta.dirname,
     "..",
     "..",
-    "agents",
-    "openclaw",
+    "packages", "nemoclaw-openclaw",
     "manifest.yaml",
   );
   const manifest = parseYaml(fs.readFileSync(manifestPath, "utf8")) as {
@@ -33,7 +32,7 @@ export function readOpenClawExpectedVersion(): string {
   if (typeof manifest.expected_version === "string" && manifest.expected_version.trim()) {
     return manifest.expected_version;
   }
-  throw new Error("agents/openclaw/manifest.yaml is missing expected_version");
+  throw new Error("packages/nemoclaw-openclaw/manifest.yaml is missing expected_version");
 }
 
 export const OPENCLAW_EXPECTED_VERSION = readOpenClawExpectedVersion();

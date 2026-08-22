@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Functional tests for agents/hermes/seed-dashboard-config.py.
+// Functional tests for packages/nemoclaw-hermes/seed-dashboard-config.py.
 // Runs the actual Python script against temp config files and asserts on the
 // on-disk YAML it leaves behind. Mirrors the spawn-and-read pattern from
 // seed-wechat-accounts.test.ts and generate-hermes-config.test.ts.
@@ -18,14 +18,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
-import type { HermesBuildSettings } from "../agents/hermes/config/build-env.ts";
-import { buildHermesManagedPolicy } from "../agents/hermes/config/managed-policy.ts";
+import type { HermesBuildSettings } from "../packages/nemoclaw-hermes/config/build-env.ts";
+import { buildHermesManagedPolicy } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
 
 const SCRIPT_PATH = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "seed-dashboard-config.py",
 );
 

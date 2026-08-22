@@ -11,11 +11,17 @@ const SCRIPT = path.join(import.meta.dirname, "..", "scripts", "update-hermes-ag
 const HERMES_BASE_DOCKERFILE = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages",
+  "nemoclaw-hermes",
   "Dockerfile.base",
 );
-const HERMES_MANIFEST = path.join(import.meta.dirname, "..", "agents", "hermes", "manifest.yaml");
+const HERMES_MANIFEST = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "manifest.yaml",
+);
 const TARGET_TAG = "v2026.7.20";
 
 const CURRENT_INSTALLED_BASE = [
@@ -28,11 +34,11 @@ const CURRENT_INSTALLED_BASE = [
 ].join("\n");
 
 const CURRENT_INSTALLED_DOCKERFILE = [
-  "COPY agents/hermes/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
-  "COPY agents/hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py",
-  "COPY agents/hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py",
+  "COPY packages/nemoclaw-hermes/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
+  "COPY packages/nemoclaw-hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py",
+  "COPY packages/nemoclaw-hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py",
   'RUN mcp_digest="$(/opt/hermes/.venv/bin/python -I /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py --guard /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py --config /sandbox/.hermes/config.yaml)"',
-  "COPY agents/hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+  "COPY packages/nemoclaw-hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
   "COPY src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json",
   "RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix \\",
   "    && node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts",
@@ -65,12 +71,18 @@ describe("scripts/update-hermes-agent.sh", () => {
     const pinnedRef = `nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`;
     const baseRef = "nemoclaw-hermes-base-local:test";
     fs.mkdirSync(path.dirname(script), { recursive: true });
-    fs.mkdirSync(path.join(repo, "agents", "hermes"), { recursive: true });
+    fs.mkdirSync(path.join(repo, "packages", "nemoclaw-hermes"), { recursive: true });
     fs.mkdirSync(fakeBin, { recursive: true });
     fs.copyFileSync(SCRIPT, script);
     fs.chmodSync(script, 0o755);
-    fs.copyFileSync(HERMES_BASE_DOCKERFILE, path.join(repo, "agents", "hermes", "Dockerfile.base"));
-    fs.copyFileSync(HERMES_MANIFEST, path.join(repo, "agents", "hermes", "manifest.yaml"));
+    fs.copyFileSync(
+      HERMES_BASE_DOCKERFILE,
+      path.join(repo, "packages", "nemoclaw-hermes", "Dockerfile.base"),
+    );
+    fs.copyFileSync(
+      HERMES_MANIFEST,
+      path.join(repo, "packages", "nemoclaw-hermes", "manifest.yaml"),
+    );
     writeExecutable(
       path.join(fakeBin, "curl"),
       `#!/usr/bin/env bash
@@ -142,8 +154,8 @@ fi
       tmpHome,
       ".nemoclaw",
       "source",
-      "agents",
-      "hermes",
+      "packages",
+      "nemoclaw-hermes",
       "Dockerfile.base",
     );
     writeInstalledHermesCopy(installedDockerfile);
@@ -183,7 +195,12 @@ fi
     const sourceRoot = path.join(tmpHome, "source-root");
     const symlinkRoot = path.join(tmpHome, "symlink-root");
     const symlinkTarget = path.join(tmpHome, "target-root");
-    const hardlinkedDockerfile = path.join(sourceRoot, "agents", "hermes", "Dockerfile.base");
+    const hardlinkedDockerfile = path.join(
+      sourceRoot,
+      "packages",
+      "nemoclaw-hermes",
+      "Dockerfile.base",
+    );
     const symlinkDockerfile = path.join(sourceRoot, "aliased", "Dockerfile.base");
     fs.mkdirSync(path.dirname(hardlinkedDockerfile), { recursive: true });
     fs.mkdirSync(path.dirname(symlinkDockerfile), { recursive: true });
@@ -225,8 +242,8 @@ fi
       tmpHome,
       ".nemoclaw",
       "source",
-      "agents",
-      "hermes",
+      "packages",
+      "nemoclaw-hermes",
       "Dockerfile.base",
     );
     const legacyBase = "ARG HERMES_VERSION=v2026.6.5\nARG HERMES_TARBALL_SHA256=oldsha\n";
@@ -269,13 +286,13 @@ fi
       tmpHome,
       ".nemoclaw",
       "source",
-      "agents",
-      "hermes",
+      "packages",
+      "nemoclaw-hermes",
       "Dockerfile.base",
     );
     const installedAgentDockerfile = path.join(path.dirname(installedDockerfile), "Dockerfile");
     const preMcpDockerfile = CURRENT_INSTALLED_DOCKERFILE.replace(
-      /^(?:COPY (?:agents\/hermes\/(?:build-mcp-digest|mcp-config-transaction)\.py|src\/lib\/actions\/sandbox\/openshell-child-visible-credentials\.v0\.0\.106\.json) .*|RUN mcp_digest=.*build-hermes-mcp-digest\.py.*)\n/gm,
+      /^(?:COPY (?:packages\/nemoclaw-hermes\/(?:build-mcp-digest|mcp-config-transaction)\.py|src\/lib\/actions\/sandbox\/openshell-child-visible-credentials\.v0\.0\.106\.json) .*|RUN mcp_digest=.*build-hermes-mcp-digest\.py.*)\n/gm,
       "",
     );
     fs.mkdirSync(path.dirname(installedDockerfile), { recursive: true });
@@ -301,7 +318,7 @@ fi
       expect(run.stdout).toContain("INVALID: installed copy");
       expect(run.stdout).toContain("marker hermes-mcp-config-transaction.py");
       expect(run.stdout).toContain("marker openshell-child-visible-credentials.v0.0.106.json");
-      expect(run.stdout).toContain("marker COPY agents/hermes/build-mcp-digest.py");
+      expect(run.stdout).toContain("marker COPY packages/nemoclaw-hermes/build-mcp-digest.py");
       expect(run.stdout).toContain("marker /opt/hermes/.venv/bin/python -I");
       expect(fs.readFileSync(installedDockerfile, "utf-8")).toBe(CURRENT_INSTALLED_BASE);
       expect(fs.readFileSync(installedAgentDockerfile, "utf-8")).toBe(preMcpDockerfile);
@@ -316,8 +333,8 @@ fi
       tmpHome,
       ".nemoclaw",
       "source",
-      "agents",
-      "hermes",
+      "packages",
+      "nemoclaw-hermes",
       "Dockerfile.base",
     );
     const installedAgentDockerfile = path.join(path.dirname(installedDockerfile), "Dockerfile");

@@ -21,7 +21,7 @@ describe("LangChain Deep Agents Code managed provider label", () => {
     const model = "nvidia/nemotron-3-super-120b-a12b";
     const stagedDockerfile = path.join(tempDir, "Dockerfile");
     fs.copyFileSync(
-      path.join(process.cwd(), "agents", "langchain-deepagents-code", "Dockerfile"),
+      path.join(process.cwd(), "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile"),
       stagedDockerfile,
     );
     patchStagedDockerfile(
@@ -53,8 +53,7 @@ describe("LangChain Deep Agents Code managed provider label", () => {
     );
     const generator = path.join(
       process.cwd(),
-      "agents",
-      "langchain-deepagents-code",
+      "packages", "nemoclaw-langchain-deepagents-code",
       "generate-config.ts",
     );
     execFileSync(process.execPath, ["--experimental-strip-types", generator], {

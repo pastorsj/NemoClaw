@@ -44,7 +44,7 @@ const DEEPAGENTS_CODE_CONNECT_HINT = {
   agent: "langchain-deepagents-code",
   interactiveCommand: "dcode",
   statusLine: "Interactive: dcode",
-  source: "agents/langchain-deepagents-code/manifest.yaml:runtime.interactive_command",
+  source: "packages/nemoclaw-langchain-deepagents-code/manifest.yaml:runtime.interactive_command",
 };
 
 export function buildCloudExperimentalChecksEvidence(

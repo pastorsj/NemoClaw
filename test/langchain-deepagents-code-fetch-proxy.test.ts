@@ -23,7 +23,7 @@ import {
 import { dcodeStateDir, makeStartScriptFixture } from "./support/dcode-start-script-fixture.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const agentDir = path.join(repoRoot, "agents", "langchain-deepagents-code");
+const agentDir = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code");
 
 afterEach(cleanupPackageFixtures);
 

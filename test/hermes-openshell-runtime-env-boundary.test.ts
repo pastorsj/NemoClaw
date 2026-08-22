@@ -10,8 +10,7 @@ import { describe, expect, it } from "vitest";
 const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 const CANONICAL_TLS_KEY_PATH = "/etc/openshell/tls/client/tls.key";

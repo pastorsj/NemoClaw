@@ -288,9 +288,9 @@ function dockerArgs(relativePath: string): Set<string> {
 
 const STOCK_DOCKER_ARGS = {
   openclaw: dockerArgs(path.join(process.cwd(), "Dockerfile")),
-  hermes: dockerArgs(path.join(process.cwd(), "agents/hermes/Dockerfile")),
+  hermes: dockerArgs(path.join(process.cwd(), "packages/nemoclaw-hermes/Dockerfile")),
   "langchain-deepagents-code": dockerArgs(
-    path.join(process.cwd(), "agents/langchain-deepagents-code/Dockerfile"),
+    path.join(process.cwd(), "packages/nemoclaw-langchain-deepagents-code/Dockerfile"),
   ),
   pi: dockerArgs(path.join(process.cwd(), "agents/pi/Dockerfile")),
 } satisfies Record<ManagedStartupAgent, Set<string>>;

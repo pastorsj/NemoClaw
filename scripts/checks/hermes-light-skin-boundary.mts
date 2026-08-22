@@ -10,7 +10,7 @@ const { NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS } = await import(
 );
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const HERMES_DOCKERFILE_BASE = "agents/hermes/Dockerfile.base";
+const HERMES_DOCKERFILE_BASE = "packages/nemoclaw-hermes/Dockerfile.base";
 
 export function checkHermesLightSkinBoundary(options: {
   dockerfileText: string;

@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = path.join(import.meta.dirname, "..");
 const PUBLISHER = path.join(ROOT, "scripts", "runtime_state_mutation_hermes_publisher.py");
-const CAPABILITY = path.join(ROOT, "agents", "hermes", "runtime-state-mutation-publisher-v1.json");
-const STATE_PLAN = path.join(ROOT, "agents", "hermes", "state-lock-plan.json");
-const START = path.join(ROOT, "agents", "hermes", "start.sh");
+const CAPABILITY = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime-state-mutation-publisher-v1.json");
+const STATE_PLAN = path.join(ROOT, "packages", "nemoclaw-hermes", "state-lock-plan.json");
+const START = path.join(ROOT, "packages", "nemoclaw-hermes", "start.sh");
 const STARTUP_GATE = path.join(ROOT, "scripts", "runtime-state-mutation-startup-gate.py");
 
 const HARNESS = String.raw`

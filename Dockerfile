@@ -163,7 +163,7 @@ RUN --network=none set -eu; \
     command -v codex-acp >/dev/null
 
 FROM node:22-trixie-slim@sha256:db8a96a63e5264607ada2d206758876ebbed6a12be2ada7517793cbfb0c2a29c AS wechat-npm-cache
-COPY agents/openclaw/wechat-runtime/package.json agents/openclaw/wechat-runtime/package-lock.json /opt/wechat-runtime/
+COPY packages/nemoclaw-openclaw/wechat-runtime/package.json packages/nemoclaw-openclaw/wechat-runtime/package-lock.json /opt/wechat-runtime/
 COPY scripts/checks/materialize-locked-npm-cache-seed.mts /opt/checks/
 COPY scripts/lib/reviewed-npm-archive.mts scripts/lib/seed-reviewed-npm-cache.mts /opt/nemoclaw-build-tools/
 COPY --from=wechat-npm-archives / /opt/wechat-npm-archives/
@@ -484,7 +484,7 @@ ARG TARGETARCH
 ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false
-COPY agents/openclaw/managed-image-messaging-runtime/package.json agents/openclaw/managed-image-messaging-runtime/package-lock.json /opt/managed-image-messaging-runtime/
+COPY packages/nemoclaw-openclaw/managed-image-messaging-runtime/package.json packages/nemoclaw-openclaw/managed-image-messaging-runtime/package-lock.json /opt/managed-image-messaging-runtime/
 COPY scripts/checks/materialize-locked-npm-cache-seed.mts /opt/nemoclaw-build-tools/checks/
 COPY scripts/lib/reviewed-npm-archive.mts scripts/lib/seed-reviewed-npm-cache.mts /opt/nemoclaw-build-tools/lib/
 COPY --from=openclaw-managed-messaging-npm-archives / /opt/nemoclaw-build-tools/npm-cache-seed/
@@ -523,12 +523,12 @@ FROM openclaw-managed-messaging-npm-cache-${NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UN
 # can collapse related payloads without invalidating earlier final-image work.
 FROM scratch AS openclaw-dependency-payload
 
-COPY agents/openclaw/openclaw-runtime/package.json /usr/local/lib/nemoclaw/openclaw-runtime/package.json
-COPY agents/openclaw/openclaw-runtime/package-lock.json /usr/local/lib/nemoclaw/openclaw-runtime/package-lock.json
-COPY agents/openclaw/mcporter-runtime/package.json /usr/local/lib/nemoclaw/mcporter-runtime/package.json
-COPY agents/openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/package-lock.json
-COPY agents/openclaw/wechat-runtime/package.json /usr/local/lib/nemoclaw/wechat-runtime/package.json
-COPY agents/openclaw/wechat-runtime/package-lock.json /usr/local/lib/nemoclaw/wechat-runtime/package-lock.json
+COPY packages/nemoclaw-openclaw/openclaw-runtime/package.json /usr/local/lib/nemoclaw/openclaw-runtime/package.json
+COPY packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json /usr/local/lib/nemoclaw/openclaw-runtime/package-lock.json
+COPY packages/nemoclaw-openclaw/mcporter-runtime/package.json /usr/local/lib/nemoclaw/mcporter-runtime/package.json
+COPY packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/package-lock.json
+COPY packages/nemoclaw-openclaw/wechat-runtime/package.json /usr/local/lib/nemoclaw/wechat-runtime/package.json
+COPY packages/nemoclaw-openclaw/wechat-runtime/package-lock.json /usr/local/lib/nemoclaw/wechat-runtime/package-lock.json
 COPY ci/npm-audit-exceptions.json /scripts/npm-audit-exceptions.json
 COPY scripts/lib/reviewed-npm-archive.mts /scripts/lib/reviewed-npm-archive.mts
 COPY scripts/lib/bundled-npm-package.mts /scripts/lib/bundled-npm-package.mts
@@ -570,7 +570,7 @@ COPY scripts/lib/openclaw_device_approval_policy.py /usr/local/lib/nemoclaw/open
 COPY scripts/lib/clean_runtime_shell_env_shim.py /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py
 COPY scripts/lib/normalize_mutable_config_perms.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
-COPY agents/openclaw/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
+COPY packages/nemoclaw-openclaw/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
 COPY scripts/openclaw-config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
 COPY scripts/nemoclaw-start.sh /usr/local/bin/nemoclaw-start
@@ -622,7 +622,7 @@ ARG OPENCLAW_2026_3_11_TARBALL=https://registry.npmjs.org/openclaw/-/openclaw-20
 ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
 ARG OPENCLAW_2026_4_24_TARBALL=https://registry.npmjs.org/openclaw/-/openclaw-2026.4.24.tgz
 # Keep the mcporter version, integrity, runtime lock, license, and advisory baseline
-# synchronized with agents/openclaw/dependency-review.md.
+# synchronized with packages/nemoclaw-openclaw/dependency-review.md.
 ARG MCPORTER_VERSION=0.7.3
 ARG MCPORTER_0_7_3_INTEGRITY=sha512-egoPVYqTnWb3NjRIxo+xc8OrAI0dlPrJm9pAiZx0pImuNIV5rKhGtTnIfH/Y1ldGPVu74ibj3KR5c9U/QSdQFA==
 ARG MCPORTER_0_7_3_TARBALL=https://registry.npmjs.org/mcporter/-/mcporter-0.7.3.tgz

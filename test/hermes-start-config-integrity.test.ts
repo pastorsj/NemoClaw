@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -18,7 +18,7 @@ function escapeRegExp(value: string): string {
 function extractShellFunctionFromSource(src: string, name: string): string {
   const escapedName = escapeRegExp(name);
   const match = src.match(new RegExp(`${escapedName}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
-  expect(match, `Expected ${name} in agents/hermes/start.sh`).not.toBeNull();
+  expect(match, `Expected ${name} in packages/nemoclaw-hermes/start.sh`).not.toBeNull();
   return `${name}() {${match?.[1] ?? ""}\n}`;
 }
 
@@ -174,7 +174,7 @@ function runLockedParentStartupPreflight(parentMetadata: string) {
   }
 }
 
-describe("agents/hermes/start.sh config integrity", () => {
+describe("packages/nemoclaw-hermes/start.sh config integrity", () => {
   it("verifies the strict Hermes hash through the sandbox identity in root mode", () => {
     const result = runHermesConfigIntegrityVerifierAsRoot(0);
     expect(result.status).toBe(0);

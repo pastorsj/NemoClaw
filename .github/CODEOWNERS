@@ -25,6 +25,7 @@
 
 # ── Container ──
 /Dockerfile                         @NVIDIA/nemoclaw-security @NVIDIA/nemoclaw-maintainer
+/packages/                          @NVIDIA/nemoclaw-security @NVIDIA/nemoclaw-maintainer
 
 # ── Docs ──
 /docs/                              @NVIDIA/nemoclaw-engineer

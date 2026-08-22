@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const agentDir = path.join(process.cwd(), "agents", "langchain-deepagents-code");
+const agentDir = path.join(process.cwd(), "packages", "nemoclaw-langchain-deepagents-code");
 const TRACING_ENABLE_ENV_NAMES = [
   "DEEPAGENTS_CODE_LANGSMITH_TRACING",
   "DEEPAGENTS_CODE_LANGSMITH_TRACING_V2",

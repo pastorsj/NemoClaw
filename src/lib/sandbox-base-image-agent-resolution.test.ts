@@ -72,8 +72,7 @@ describe("agent-specific sandbox base-image resolution", () => {
     const options = resolutionOptions();
     const lockfile = path.join(
       process.cwd(),
-      "agents",
-      "langchain-deepagents-code",
+      "packages", "nemoclaw-langchain-deepagents-code",
       "requirements.lock",
     );
 

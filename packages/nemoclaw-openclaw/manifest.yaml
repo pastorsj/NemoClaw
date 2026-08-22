@@ -141,7 +141,7 @@ package_registry:
   binary: /usr/local/bin/npm
 
 # ── Current artifact locations ─────────────────────────────────
-# These will move into agents/openclaw/ in Phase 3.
+# These will move into packages/nemoclaw-openclaw/ in Phase 3.
 _legacy_paths:
   dockerfile_base: Dockerfile.base
   dockerfile: Dockerfile

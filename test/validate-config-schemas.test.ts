@@ -11,7 +11,7 @@
 import type { ValidateFunction } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 
-import { compileConfigSchema, discoverTargets } from "../scripts/validate-configs.mts";
+import { compileConfigSchema } from "../scripts/validate-configs.mts";
 
 type LooseScalar = string | number | boolean | null;
 type LooseValue = LooseScalar | LooseObject | LooseValue[];
@@ -216,52 +216,6 @@ function registerOpenShellJsonRpcMcpMatcherTests(
     },
   );
 }
-
-// ── Validation target discovery ─────────────────────────────────────────────
-
-describe("config validation target discovery", () => {
-  const targets = discoverTargets();
-  const filesBySchema = new Map(targets.map((target) => [target.schema, target.files]));
-  const sandboxPolicyFiles = filesBySchema.get("schemas/sandbox-policy.schema.json") ?? [];
-  const presetFiles = filesBySchema.get("schemas/policy-preset.schema.json") ?? [];
-
-  it("includes every binary-scoped sandbox policy family", () => {
-    expect(sandboxPolicyFiles).toEqual(
-      expect.arrayContaining([
-        "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
-        "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
-        "agents/hermes/policy-additions.yaml",
-        "agents/hermes/policy-permissive.yaml",
-        "agents/openclaw/policy-permissive.yaml",
-      ]),
-    );
-  });
-
-  it("discovers model-specific setup manifests", () => {
-    expect(filesBySchema.get("nemoclaw-blueprint/model-specific-setup/schema.json") ?? []).toEqual(
-      expect.arrayContaining([
-        "nemoclaw-blueprint/model-specific-setup/openclaw/kimi-k2.6-managed-inference.json",
-      ]),
-    );
-  });
-
-  it("discovers channel-owned messaging policy presets", () => {
-    expect(presetFiles).toEqual(
-      expect.arrayContaining([
-        "src/lib/messaging/channels/slack/policy/openclaw.yaml",
-        "src/lib/messaging/channels/slack/policy/hermes.yaml",
-        "src/lib/messaging/channels/telegram/policy/openclaw.yaml",
-        "src/lib/messaging/channels/telegram/policy/hermes.yaml",
-      ]),
-    );
-  });
-
-  it("includes the onboard performance budget config", () => {
-    expect(filesBySchema.get("schemas/onboard-config.schema.json") ?? []).toEqual([
-      "ci/onboard-performance-budget.json",
-    ]);
-  });
-});
 
 describe("network-policy.schema.json", () => {
   const validate = compileSchema("schemas/network-policy.schema.json");

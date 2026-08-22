@@ -122,6 +122,20 @@ describe("source-shape scanner", () => {
     expect(cases).toEqual(["asserts function-expression source text"]);
   });
 
+  it("detects direct assertions against harness package source", () => {
+    const cases = detectedCaseNames(`
+      import { readFileSync } from "node:fs";
+      import { expect, it } from "vitest";
+
+      it("mirrors a harness package manifest", () => {
+        const source = readFileSync("packages/nemoclaw-hermes/manifest.yaml", "utf8");
+        expect(source).toContain("name: hermes");
+      });
+    `);
+
+    expect(cases).toEqual(["mirrors a harness package manifest"]);
+  });
+
   it("does not treat uncalled source-reader helpers as source text", () => {
     const cases = detectedCaseNames(`
       import { readFileSync } from "node:fs";
@@ -428,6 +442,21 @@ describe("source-shape scanner", () => {
     `);
 
     expect(cases).toEqual(["still catches nested raw shape"]);
+  });
+
+  it("treats harness package imports as production consumers", () => {
+    const cases = detectedCaseNames(`
+      import { readFileSync } from "node:fs";
+      import { expect, it } from "vitest";
+      import { generateConfig } from "../packages/nemoclaw-hermes/config/generate";
+
+      it("asserts generated configuration behavior", () => {
+        const raw = JSON.parse(readFileSync("package.json", "utf8"));
+        expect(generateConfig(raw).valid).toBe(true);
+      });
+    `);
+
+    expect(cases).toEqual([]);
   });
 
   it("detects explicit raw-config accessors and local selectors", () => {

@@ -9,22 +9,20 @@ import { describe, expect, it } from "vitest";
 
 import { bashPrintfQ, extractShellFunction } from "./support/hermes-shell-harness";
 
-const GUARD = path.join(import.meta.dirname, "..", "agents", "hermes", "runtime-config-guard.py");
+const GUARD = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "runtime-config-guard.py");
 const BUILD_DIGEST = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "build-mcp-digest.py",
 );
 const TRANSACTION = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "mcp-config-transaction.py",
 );
-const START = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function runHermesRootMcpStartup(opts: { commitStatus: 0 | 1; dashboardSeedStatus?: 0 | 23 }) {
   const source = fs.readFileSync(START, "utf-8");

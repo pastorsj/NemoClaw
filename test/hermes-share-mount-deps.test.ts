@@ -11,7 +11,7 @@ import { BASE_APT_SECURITY_FUNCTIONS } from "./helpers/base-apt-security-functio
 import { stageFixedParser, useRealPatchedParser } from "./helpers/python-parser-security-fixture";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const HERMES_DOCKERFILE_BASE = path.join(ROOT, "agents", "hermes", "Dockerfile.base");
+const HERMES_DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base");
 const HERMES_ARCHIVE_HELPER = path.join(
   ROOT,
   "scripts",

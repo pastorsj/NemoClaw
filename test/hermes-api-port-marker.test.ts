@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { shellQuote } from "../src/lib/core/shell-quote";
 import { extractShellFunction } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 interface MarkerSetup {
   shellPrelude: string[];
@@ -138,7 +138,7 @@ function runHermesApiPortMarkerPublication(publicPort: number, setup: MarkerSetu
   }
 }
 
-describe("agents/hermes/start.sh root-owned API port marker", () => {
+describe("packages/nemoclaw-hermes/start.sh root-owned API port marker", () => {
   it("publishes the allocated port atomically with its final mode (#8543)", () => {
     const run = runHermesApiPortMarkerPublication(8645, setupWritableRuntime);
 

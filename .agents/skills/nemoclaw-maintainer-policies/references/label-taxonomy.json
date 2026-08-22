@@ -564,7 +564,7 @@
         {
           "name": "integration: dcode",
           "description": "LangChain Deep Code integration behavior.",
-          "positive_signals": ["LangChain Deep Code", "Deep Code", "langchain-deepagents-code", "dcode", "agents/langchain-deepagents-code"],
+          "positive_signals": ["LangChain Deep Code", "Deep Code", "langchain-deepagents-code", "dcode", "packages/nemoclaw-langchain-deepagents-code"],
           "negative_signals": ["generic LangChain issue without Deep Code evidence", "generic coding-agent issue without LangChain Deep Code evidence"]
         },
         {
@@ -576,7 +576,7 @@
         {
           "name": "integration: hermes",
           "description": "Hermes startup, plugin, sandbox, TUI, or Hermes model/tool-call behavior.",
-          "positive_signals": ["Hermes", "[hermes]", "fix(hermes)", "agents/hermes", "Hermes-3", "Hermes TUI", "Hermes tool call", "Hermes plugin", "Hermes startup", "Hermes sandbox"],
+          "positive_signals": ["Hermes", "[hermes]", "fix(hermes)", "packages/nemoclaw-hermes", "Hermes-3", "Hermes TUI", "Hermes tool call", "Hermes plugin", "Hermes startup", "Hermes sandbox"],
           "negative_signals": ["generic plugin issue without Hermes evidence"]
         },
         {

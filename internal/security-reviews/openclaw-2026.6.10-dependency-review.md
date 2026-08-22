@@ -401,7 +401,7 @@ No real Microsoft Teams tenant proof is included in this PR. The work remains tr
 - The transitive remediation closes the reviewed high-severity `tar`, `brace-expansion`, Axios, and Jaeger propagator findings without changing the OpenClaw version.
   The exact source shapes, replacement SRIs, tarball URLs, patched metadata, and provenance recipe fail closed on drift.
   The low `body-parser` and moderate Hono and `protobufjs` findings remain documented at the configured `high` threshold.
-  Current NemoClaw closes the WeChat residual with `agents/openclaw/wechat-runtime/package-lock.json` and post-install graph verification.
+  Current NemoClaw closes the WeChat residual with `packages/nemoclaw-openclaw/wechat-runtime/package-lock.json` and post-install graph verification.
 - `src/lib/messaging/channels/manifests.test.ts` remains below the shared `test-size:check` threshold and does not need extraction in this dependency bump.
 - The npm audit result in this note remains a point-in-time snapshot.
   Default PR and main CI rematerialize the production-compatible graph from the reviewed local archives, audit it and the committed mcporter lock with `npm audit --omit=dev --json` through the reviewed evaluator, upload the raw reports and normalized policy results, and fail on unaccepted findings at the configured `high` threshold.

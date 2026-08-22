@@ -1162,7 +1162,7 @@ def _normalize_raw_messaging_tool_response(response, current_platform=None):
     intent.
 
     Source of truth for send_message routing is the Hermes tool dispatcher
-    in ``agents/hermes/run_agent.py`` (openclaw runtime); this normalizer is
+    in ``packages/nemoclaw-hermes/run_agent.py`` (openclaw runtime); this normalizer is
     purely an output filter on `AIAgent._strip_think_blocks`. End-to-end
     coverage runs via ``hermes-e2e``, ``hermes-discord-e2e``, and
     ``hermes-slack-e2e`` against a real gateway first-message path.

@@ -75,7 +75,7 @@ function createGitFixture() {
   tmpRoots.push(root);
   git(root, ["init", "-b", "main"]);
   writeFixture(root, "Dockerfile.base", "FROM node:22\n");
-  writeFixture(root, "agents/langchain-deepagents-code/Dockerfile.base", "FROM python:3.13\n");
+  writeFixture(root, "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base", "FROM python:3.13\n");
   writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
   writeFixture(root, "scripts/lib/openclaw-npm-remediation.mts", "export const version = 1;\n");
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
@@ -161,7 +161,7 @@ afterAll(() => {
 describe("sandbox base-image source identity", () => {
   it("normalizes and deduplicates inputs inside the repository while rejecting traversal", () => {
     const root = path.join(os.tmpdir(), "nemoclaw-source-identity-root");
-    const agentDockerfile = "agents/hermes/Dockerfile.base";
+    const agentDockerfile = "packages/nemoclaw-hermes/Dockerfile.base";
 
     expect(
       normalizeBaseImageInputPaths(root, [
@@ -174,8 +174,8 @@ describe("sandbox base-image source identity", () => {
       "Dockerfile.base",
       "nemoclaw-blueprint/blueprint.yaml",
       "scripts/lib/sandbox-rlimits.sh",
-      "agents/openclaw/mcporter-runtime/package.json",
-      "agents/openclaw/mcporter-runtime/package-lock.json",
+      "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
+      "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
       "scripts/security/build-perl-security-packages.sh",
       "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
       "scripts/lib/openclaw-npm-remediation.mts",
@@ -480,14 +480,14 @@ describe("sandbox base-image source identity", () => {
 
   it("detects committed agent Dockerfile.base changes when an agent base path is supplied", () => {
     const root = createGitFixture();
-    const agentBase = path.join(root, "agents/langchain-deepagents-code/Dockerfile.base");
+    const agentBase = path.join(root, "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base");
     git(root, ["switch", "-c", "feature"]);
     writeFixture(
       root,
-      "agents/langchain-deepagents-code/Dockerfile.base",
+      "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
       "FROM python:3.13\nRUN echo changed\n",
     );
-    git(root, ["add", "agents/langchain-deepagents-code/Dockerfile.base"]);
+    git(root, ["add", "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base"]);
     git(root, ["commit", "-m", "change agent base input"]);
 
     expect(baseImageInputsChangedSinceMain(root, gitEnv)).toBe(false);

@@ -193,7 +193,7 @@ const { createSandbox } = require(${onboardPath});
     const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
     const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
     const hermesPolicyPath = JSON.stringify(
-      path.join(repoRoot, "agents", "hermes", "policy-additions.yaml"),
+      path.join(repoRoot, "packages", "nemoclaw-hermes", "policy-additions.yaml"),
     );
     const registryPath = JSON.stringify(path.join(repoRoot, "src", "lib", "state", "registry.ts"));
     const preflightPath = JSON.stringify(

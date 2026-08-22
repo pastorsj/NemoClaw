@@ -391,7 +391,7 @@ fi
 # The list scans first-wins ordered most-preferred first (venv > local >
 # system) so the venv python3 is selected when present and falls back to
 # system python3 when the sandbox image has no venv yet. The same priority
-# is mirrored in `agents/hermes/hermes-wrapper.py:_TRUSTED_PYTHON3` and
+# is mirrored in `packages/nemoclaw-hermes/hermes-wrapper.py:_TRUSTED_PYTHON3` and
 # `src/lib/agent/hermes-recovery-boundary.ts:buildTrustedPython3Picker` so
 # all three entry points pick the same interpreter when several are present.
 # The deprecated `/opt/hermes/.venv/bin/python` symlink path is intentionally

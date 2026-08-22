@@ -200,26 +200,26 @@ function isProductionPathExpression(
 
 function hasDirectProductionPathHint(text: string): boolean {
   return (
-    /["'`](?:\.\.\/)*(?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|scripts|src|test\/e2e)\//.test(
+    /["'`](?:\.\.\/)*(?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|packages|scripts|src|test\/e2e)\//.test(
       text,
     ) ||
     /["'`](?:\.\.\/)*(?:package\.json|install\.sh|\.pre-commit-config\.yaml)["'`]/.test(text) ||
     /["'`](?:\.\.\/)+Dockerfile(?:\.base)?["'`]/.test(text) ||
     /["'`](?:\.\.\/)+bin\//.test(text) ||
-    /["'`](?:\.\.\/)+agents\//.test(text) ||
+    /["'`](?:\.\.\/)+(?:agents|packages)\//.test(text) ||
     /["'`](?:\.\.\/)+scripts\//.test(text) ||
     /["'`](?:\.\.\/)+src\//.test(text) ||
     /["'`](?:\.\.\/)+dist\//.test(text) ||
-    /["'`]\.\.\/["'`]\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]/.test(
+    /["'`]\.\.\/["'`]\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|packages|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]/.test(
       text,
     ) ||
-    /["'`]\.\.["'`]\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]/.test(
+    /["'`]\.\.["'`]\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|packages|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]/.test(
       text,
     ) ||
-    /join\(\s*["'`]\.\.["'`]\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]\s*\)/.test(
+    /join\(\s*["'`]\.\.["'`]\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|packages|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]\s*\)/.test(
       text,
     ) ||
-    /path\.join\(\s*process\.cwd\(\)\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]/.test(
+    /path\.join\(\s*process\.cwd\(\)\s*,\s*["'`](?:\.github|agents|bin|dist|nemoclaw|nemoclaw-blueprint|packages|scripts|src|Dockerfile(?:\.base)?|install\.sh|package\.json)["'`]/.test(
       text,
     ) ||
     /(import\.meta\.dirname|import\.meta\.url)[\s\S]*["'`](?![\w.-]+\.test\.ts["'`])[\w.-]+\.ts["'`]/.test(
@@ -298,8 +298,8 @@ function isDynamicFunctionConstructorFactory(expression: ts.Expression): boolean
   const candidate = prototypeCall.arguments[0];
   return Boolean(
     candidate &&
-      (ts.isArrowFunction(candidate) || ts.isFunctionExpression(candidate)) &&
-      candidate.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword),
+    (ts.isArrowFunction(candidate) || ts.isFunctionExpression(candidate)) &&
+    candidate.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword),
   );
 }
 
@@ -551,7 +551,7 @@ function collectProductionConsumerNames(imports: readonly ImportBinding[]): Set<
         ({ path }) =>
           !isDeclarativeImportPath(path) &&
           !TEST_NAME_PATTERN.test(path) &&
-          /^(?:agents|bin|nemoclaw\/src|scripts|src|tools)\//.test(path),
+          /^(?:agents|bin|nemoclaw\/src|packages|scripts|src|tools)\//.test(path),
       )
       .map(({ local }) => local),
   );
@@ -1488,9 +1488,9 @@ function assertionFromAssertCall(
   const firstRoot = firstArgument ? rootIdentifier(firstArgument) : null;
   const firstIsBehavior = Boolean(
     firstArgument &&
-      (isProductionBehaviorDerivation(firstArgument, productionConsumerNames) ||
-        isExecutionResultDerivation(sourceFile, firstArgument) ||
-        (firstRoot && executionResultVars.has(firstRoot))),
+    (isProductionBehaviorDerivation(firstArgument, productionConsumerNames) ||
+      isExecutionResultDerivation(sourceFile, firstArgument) ||
+      (firstRoot && executionResultVars.has(firstRoot))),
   );
   const argumentCount = ASSERT_TWO_ARGUMENT_MATCHERS.has(method) && !firstIsBehavior ? 2 : 1;
   for (const argument of node.arguments.slice(0, argumentCount)) {
@@ -2129,7 +2129,7 @@ function isDirectInvocation(): boolean {
   const invoked = process.argv[1];
   return Boolean(
     invoked &&
-      (import.meta.url === `file://${invoked}` || invoked.endsWith("find-source-shape-tests.mts")),
+    (import.meta.url === `file://${invoked}` || invoked.endsWith("find-source-shape-tests.mts")),
   );
 }
 

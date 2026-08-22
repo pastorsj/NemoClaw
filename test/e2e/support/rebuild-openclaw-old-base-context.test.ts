@@ -15,8 +15,8 @@ import {
 const copiedContexts: string[] = [];
 const testFiles: string[] = [];
 const MULTILINE_COPY_SOURCES = [
-  "agents/openclaw/openclaw-runtime/package-lock.json",
-  "agents/openclaw/mcporter-runtime/package-lock.json",
+  "packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json",
+  "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
   "scripts/lib/reviewed-npm-audit.mts",
   "scripts/lib/openclaw-npm-remediation.mts",
 ];
@@ -59,8 +59,8 @@ describe("rebuild-openclaw old-base build context", () => {
         "copy scripts/lib/sandbox-rlimits.sh /tmp/lowercase",
         "COPY\tnemoclaw-blueprint/blueprint.yaml /tmp/tabbed",
         "COPY --chown=sandbox:sandbox \\",
-        "  agents/openclaw/openclaw-runtime/package.json \\",
-        "  agents/openclaw/openclaw-runtime/package-lock.json \\",
+        "  packages/nemoclaw-openclaw/openclaw-runtime/package.json \\",
+        "  packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json \\",
         "  /tmp/openclaw/",
         "COPY scripts/lib/reviewed-npm-archive.mts scripts/lib/reviewed-npm-audit.mts /tmp/lib/",
         "COPY --from=build \\",
@@ -74,8 +74,8 @@ describe("rebuild-openclaw old-base build context", () => {
     expect(directDockerfileBaseCopySources(dockerfilePath)).toEqual([
       "scripts/lib/sandbox-rlimits.sh",
       "nemoclaw-blueprint/blueprint.yaml",
-      "agents/openclaw/openclaw-runtime/package.json",
-      "agents/openclaw/openclaw-runtime/package-lock.json",
+      "packages/nemoclaw-openclaw/openclaw-runtime/package.json",
+      "packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json",
       "scripts/lib/reviewed-npm-archive.mts",
       "scripts/lib/reviewed-npm-audit.mts",
     ]);
@@ -90,16 +90,16 @@ describe("rebuild-openclaw old-base build context", () => {
     fs.writeFileSync(
       dockerfilePath,
       [
-        "COPY agents/openclaw/openclaw-runtime/package.json \\",
-        "    agents/openclaw/openclaw-runtime/package-lock.json \\",
+        "COPY packages/nemoclaw-openclaw/openclaw-runtime/package.json \\",
+        "    packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json \\",
         "    /usr/local/lib/nemoclaw/openclaw-runtime/",
       ].join("\n"),
       "utf8",
     );
 
     expect(directDockerfileBaseCopySources(dockerfilePath)).toEqual([
-      "agents/openclaw/openclaw-runtime/package.json",
-      "agents/openclaw/openclaw-runtime/package-lock.json",
+      "packages/nemoclaw-openclaw/openclaw-runtime/package.json",
+      "packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json",
     ]);
   });
 

@@ -9,8 +9,7 @@ import { describe, expect, it } from "vitest";
 const PLUGIN_PATH = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "plugin",
   "__init__.py",
 );

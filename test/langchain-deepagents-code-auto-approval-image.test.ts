@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { makeStartScriptFixture } from "./support/dcode-start-script-fixture.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
-const agentDir = path.join(repoRoot, "agents", "langchain-deepagents-code");
+const agentDir = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code");
 
 function readAgentFile(name: string): string {
   return fs.readFileSync(path.join(agentDir, name), "utf8");

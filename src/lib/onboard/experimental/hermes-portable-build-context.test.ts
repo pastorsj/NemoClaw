@@ -123,7 +123,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
         ),
       ),
     ).toBe(true);
-    expect(fs.existsSync(path.join(inferredContext, "agents/hermes/Dockerfile"))).toBe(false);
+    expect(fs.existsSync(path.join(inferredContext, "packages/nemoclaw-hermes/Dockerfile"))).toBe(false);
     expect(plan.authority.sourceRevision).toMatch(/^[a-f0-9]{40,64}$/u);
     expect(plan.authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
     const stagedDockerfile = fs.readFileSync(first.dockerfilePath, "utf8");
@@ -153,7 +153,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
       ),
     ).toBe(true);
     expect(
-      fs.existsSync(path.join(first.buildContextPath, "agents/hermes/plugin/__pycache__")),
+      fs.existsSync(path.join(first.buildContextPath, "packages/nemoclaw-hermes/plugin/__pycache__")),
     ).toBe(false);
 
     const reused = plan.materialize(contextInput());
@@ -328,16 +328,16 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     { access: "other", mode: 0o602 },
   ])("rejects $access-write access on a source file (#9203)", ({ mode }) => {
     const source = primaryCloneFixture();
-    fs.chmodSync(path.join(source, "agents/hermes/Dockerfile"), mode);
+    fs.chmodSync(path.join(source, "packages/nemoclaw-hermes/Dockerfile"), mode);
 
     expect(() => createHermesPortableBuildContextPlan(source, BUILD_SETTINGS)).toThrow(
-      "source file authority is unsafe: agents/hermes/Dockerfile",
+      "source file authority is unsafe: packages/nemoclaw-hermes/Dockerfile",
     );
   });
 
   it("rejects lowercase Dockerfile copy opcodes before reservation (#9203)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     fs.writeFileSync(dockerfile, fs.readFileSync(dockerfile, "utf8").replace(/^COPY /mu, "copy "), {
       mode: 0o644,
     });
@@ -349,7 +349,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("rejects BuildKit-only local COPY options before reservation (#9921)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     const reservationRoot = path.join(stateDir, "hermes-portable-build-context");
     fs.writeFileSync(
       dockerfile,
@@ -371,10 +371,10 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("rejects source symlinks, hardlinks, and unreviewed secret paths (#9203)", () => {
     const source = primaryCloneFixture();
-    const script = path.join(source, "agents/hermes/start.sh");
+    const script = path.join(source, "packages/nemoclaw-hermes/start.sh");
     const original = fs.readFileSync(script);
     fs.unlinkSync(script);
-    fs.symlinkSync(path.join(source, "agents/hermes/Dockerfile"), script);
+    fs.symlinkSync(path.join(source, "packages/nemoclaw-hermes/Dockerfile"), script);
     expect(() => createHermesPortableBuildContextPlan(source, BUILD_SETTINGS)).toThrow(
       "symlink or special entry",
     );

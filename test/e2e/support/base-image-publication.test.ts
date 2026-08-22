@@ -187,8 +187,9 @@ describe("base-image publication evidence", () => {
         "Dockerfile",
         "Dockerfile.base",
         "agents/**",
-        "agents/hermes/Dockerfile.base",
-        "agents/langchain-deepagents-code/Dockerfile.base",
+        "packages/**",
+        "packages/nemoclaw-hermes/Dockerfile.base",
+        "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
         "nemoclaw/**",
         "nemoclaw-blueprint/**",
         "scripts/**",
@@ -251,11 +252,13 @@ describe("base-image publication evidence", () => {
     const expanded = expandBaseImagePushPaths(EXPECTED_SHA, [
       "Dockerfile",
       "agents/**",
+      "packages/**",
       "src/lib/messaging/**",
       "test/e2e/live/managed-image-activation-e2e*.ts",
     ]);
     expect(expanded).toEqual([
       ":(glob)agents/**",
+      ":(glob)packages/**",
       ":(glob)src/lib/messaging/**",
       ":(glob)test/e2e/live/managed-image-activation-e2e*.ts",
       "Dockerfile",

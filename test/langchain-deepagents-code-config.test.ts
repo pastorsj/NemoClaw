@@ -30,8 +30,7 @@ function runGeneratorProcess(
   tmpHomes.push(home);
   const script = path.join(
     process.cwd(),
-    "agents",
-    "langchain-deepagents-code",
+    "packages", "nemoclaw-langchain-deepagents-code",
     "generate-config.ts",
   );
   const definedOverrides = Object.fromEntries(

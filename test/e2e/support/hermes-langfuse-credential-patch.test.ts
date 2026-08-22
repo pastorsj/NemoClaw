@@ -9,10 +9,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { patchLangfuseCredentials } from "../../../agents/hermes/patch-langfuse-credentials.mts";
+import { patchLangfuseCredentials } from "../../../packages/nemoclaw-hermes/patch-langfuse-credentials.mts";
 
 const patcherPath = fileURLToPath(
-  new URL("../../../agents/hermes/patch-langfuse-credentials.mts", import.meta.url),
+  new URL("../../../packages/nemoclaw-hermes/patch-langfuse-credentials.mts", import.meta.url),
 );
 
 const pinnedValidatorFixture = `\

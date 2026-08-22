@@ -10,13 +10,13 @@ import YAML from "yaml";
 import {
   MIN_HERMES_CONTEXT_WINDOW,
   readHermesBuildSettings,
-} from "../agents/hermes/config/build-env.ts";
-import { generateHermesConfig } from "../agents/hermes/config/generate.ts";
+} from "../packages/nemoclaw-hermes/config/build-env.ts";
+import { generateHermesConfig } from "../packages/nemoclaw-hermes/config/generate.ts";
 import {
   buildHermesManagedPolicy,
   MANAGED_IMAGE_HERMES_NEUTRAL_PLATFORMS,
-} from "../agents/hermes/config/managed-policy.ts";
-import { discoverModelSpecificSetups } from "../agents/hermes/config/model-specific-setup.ts";
+} from "../packages/nemoclaw-hermes/config/managed-policy.ts";
+import { discoverModelSpecificSetups } from "../packages/nemoclaw-hermes/config/model-specific-setup.ts";
 import { HERMES_PROXY_REWRITE_SENTINEL } from "../src/lib/hermes-managed-route";
 import {
   applyCompatibleEndpointContextWindow,
@@ -32,9 +32,9 @@ import {
   withLegacyMessagingPlanEnvDirect,
 } from "./messaging-plan-test-helper";
 
-const SCRIPT_PATH = path.join(import.meta.dirname, "..", "agents", "hermes", "generate-config.ts");
+const SCRIPT_PATH = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "generate-config.ts");
 const SCRIPT_DIR = path.dirname(SCRIPT_PATH);
-const CONFIG_MODULE_DIR = path.join(import.meta.dirname, "..", "agents", "hermes", "config");
+const CONFIG_MODULE_DIR = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "config");
 
 const BASE_ENV: Record<string, string> = {
   NEMOCLAW_MODEL: "test-model",
@@ -228,8 +228,8 @@ function writeManagedToolGatewayMatrixFixture(
 }
 
 function copyConfigGeneratorFixture(fixtureRoot: string): string {
-  const fixtureScriptPath = path.join(fixtureRoot, "agents", "hermes", "generate-config.ts");
-  const fixtureConfigDir = path.join(fixtureRoot, "agents", "hermes", "config");
+  const fixtureScriptPath = path.join(fixtureRoot, "packages", "nemoclaw-hermes", "generate-config.ts");
+  const fixtureConfigDir = path.join(fixtureRoot, "packages", "nemoclaw-hermes", "config");
   fs.mkdirSync(path.dirname(fixtureScriptPath), { recursive: true });
   fs.copyFileSync(SCRIPT_PATH, fixtureScriptPath);
   fs.cpSync(CONFIG_MODULE_DIR, fixtureConfigDir, { recursive: true });
@@ -260,7 +260,7 @@ function findRawSecretEnvEntries(envFile: string): string[] {
   const slackAlias = /^(xoxb|xapp)-OPENSHELL-RESOLVE-ENV-[A-Z0-9_]+$/;
   const allowedNonsecretKeys = new Set(["API_SERVER_HOST", "API_SERVER_PORT"]);
   // Mirror ENV_FILE_ALLOWED_RAW_SECRET_KEYS in
-  // agents/hermes/validate-hermes-env-secret-boundary.py. API_SERVER_KEY is the bearer
+  // packages/nemoclaw-hermes/validate-hermes-env-secret-boundary.py. API_SERVER_KEY is the bearer
   // token Hermes' own api_server (v0.16.0+) requires; it is minted at sandbox
   // startup and never travels through the OpenShell proxy, so it has no resolver
   // placeholder and is allowed to be raw.
@@ -306,7 +306,7 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("agents/hermes/generate-config.ts", () => {
+describe("packages/nemoclaw-hermes/generate-config.ts", () => {
   it(
     "matches direct generation as a strip-types executable with an explicit gateway matrix",
     async () => {

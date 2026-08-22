@@ -7,8 +7,8 @@ import { REPO_ROOT } from "./paths.ts";
 
 const LEGACY_DOCKERFILE_BY_AGENT = {
   openclaw: "Dockerfile",
-  hermes: "agents/hermes/Dockerfile",
-  "langchain-deepagents-code": "agents/langchain-deepagents-code/Dockerfile",
+  hermes: "packages/nemoclaw-hermes/Dockerfile",
+  "langchain-deepagents-code": "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 } as const;
 
 type LegacyDockerfileAgent = keyof typeof LEGACY_DOCKERFILE_BY_AGENT;

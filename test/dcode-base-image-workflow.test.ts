@@ -17,8 +17,8 @@ type Step = {
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const baseDockerfiles = [
   "Dockerfile.base",
-  "agents/hermes/Dockerfile.base",
-  "agents/langchain-deepagents-code/Dockerfile.base",
+  "packages/nemoclaw-hermes/Dockerfile.base",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
 ] as const;
 
 function pinnedAptVersion(dockerfile: string, packageName: string): string {

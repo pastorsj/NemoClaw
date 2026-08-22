@@ -80,14 +80,14 @@ describe("initial sandbox policy real preset merge", () => {
     openclaw: [
       ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
       ["nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"],
-      ["agents", "openclaw", "policy-permissive.yaml"],
+      ["packages", "nemoclaw-openclaw", "policy-permissive.yaml"],
     ],
     hermes: [
-      ["agents", "hermes", "policy-additions.yaml"],
-      ["agents", "hermes", "policy-permissive.yaml"],
+      ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
+      ["packages", "nemoclaw-hermes", "policy-permissive.yaml"],
     ],
     "langchain-deepagents-code": [
-      ["agents", "langchain-deepagents-code", "policy-additions.yaml"],
+      ["packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"],
     ],
   } as const satisfies Record<
     (typeof SHIPPED_MANAGED_IMAGE_AGENTS)[number],
@@ -144,9 +144,9 @@ describe("initial sandbox policy real preset merge", () => {
       path: ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
       agent: "openclaw",
     },
-    { path: ["agents", "hermes", "policy-additions.yaml"], agent: "hermes" },
+    { path: ["packages", "nemoclaw-hermes", "policy-additions.yaml"], agent: "hermes" },
     {
-      path: ["agents", "langchain-deepagents-code", "policy-additions.yaml"],
+      path: ["packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"],
       agent: "langchain-deepagents-code",
     },
     { path: ["agents", "nemocua", "policy-additions.yaml"], agent: "nemocua" },
@@ -212,7 +212,7 @@ describe("initial sandbox policy real preset merge", () => {
 
   it("uses Hermes channel YAML when the Hermes base policy path implies the agent", () => {
     const prepared = prepareInitialSandboxCreatePolicy(
-      repoPath("agents", "hermes", "policy-additions.yaml"),
+      repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
       ["discord", "slack"],
       { sandboxName: "hermes-channel" },
     );
@@ -310,7 +310,7 @@ describe("initial sandbox policy real preset merge", () => {
 
   it.each([
     "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
-    "agents/openclaw/policy-permissive.yaml",
+    "packages/nemoclaw-openclaw/policy-permissive.yaml",
   ])("preserves baseline writable paths in effective OpenClaw permissive policy %s", (policy) => {
     const baseline = readPreparedPolicy(
       prepareInitialSandboxCreatePolicy(
@@ -337,7 +337,7 @@ describe("initial sandbox policy real preset merge", () => {
         path: repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
         agent: "openclaw",
       },
-      { path: repoPath("agents", "hermes", "policy-permissive.yaml"), agent: "hermes" },
+      { path: repoPath("packages", "nemoclaw-hermes", "policy-permissive.yaml"), agent: "hermes" },
     ].flatMap((policyCase) =>
       ["slack.com", "api.slack.com", "hooks.slack.com"].map((host) => ({ policyCase, host })),
     ),
@@ -359,7 +359,7 @@ describe("initial sandbox policy real preset merge", () => {
     const sandboxName = "hermes-discord-e2e";
     const effective = readPreparedPolicy(
       prepareInitialSandboxCreatePolicy(
-        repoPath("agents", "hermes", "policy-additions.yaml"),
+        repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
         ["discord"],
         { agentName: "hermes", sandboxName },
       ),
@@ -388,7 +388,7 @@ describe("initial sandbox policy real preset merge", () => {
   ])("rejects a Hermes Discord create policy with a %s target sandbox name", (_case, sandboxName) => {
     expect(() =>
       prepareInitialSandboxCreatePolicy(
-        repoPath("agents", "hermes", "policy-additions.yaml"),
+        repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
         ["discord"],
         { agentName: "hermes", sandboxName },
       ),
@@ -421,7 +421,7 @@ describe("initial sandbox policy real preset merge", () => {
     (host) => {
       const effective = readPreparedPolicy(
         prepareInitialSandboxCreatePolicy(
-          repoPath("agents", "hermes", "policy-additions.yaml"),
+          repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
           [],
           {
             agentName: "hermes",
@@ -452,7 +452,7 @@ describe("initial sandbox policy real preset merge", () => {
 
   it("adds backend-neutral trace egress only to the requested DCode create policy", () => {
     const prepared = prepareInitialSandboxCreatePolicy(
-      repoPath("agents", "langchain-deepagents-code", "policy-additions.yaml"),
+      repoPath("packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"),
       [],
       {
         agentName: "langchain-deepagents-code",
@@ -479,17 +479,17 @@ describe("initial sandbox policy real preset merge", () => {
     },
     {
       label: "permissive OpenClaw agent policy",
-      path: ["agents", "openclaw", "policy-permissive.yaml"],
+      path: ["packages", "nemoclaw-openclaw", "policy-permissive.yaml"],
       agent: "openclaw",
     },
     {
       label: "Hermes policy additions",
-      path: ["agents", "hermes", "policy-additions.yaml"],
+      path: ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
       agent: "hermes",
     },
     {
       label: "permissive Hermes policy",
-      path: ["agents", "hermes", "policy-permissive.yaml"],
+      path: ["packages", "nemoclaw-hermes", "policy-permissive.yaml"],
       agent: "hermes",
     },
   ] as const)(

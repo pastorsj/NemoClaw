@@ -79,8 +79,8 @@ describe("managed-image staging QA workflow", () => {
     expect(steps.indexOf(finalBuild)).toBeLessThan(steps.indexOf(contract));
 
     const overlaySource = required(overlay.run, "staging QA dependency overlay is missing");
-    expect(overlaySource).toContain("agents/langchain-deepagents-code/Dockerfile.base");
-    expect(overlaySource).toContain("agents/langchain-deepagents-code/requirements.lock");
+    expect(overlaySource).toContain("packages/nemoclaw-langchain-deepagents-code/Dockerfile.base");
+    expect(overlaySource).toContain("packages/nemoclaw-langchain-deepagents-code/requirements.lock");
     expect(overlaySource).toContain("scripts/lib/bundled-npm-package.mts");
     expect(overlaySource).toContain(
       "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
@@ -89,14 +89,14 @@ describe("managed-image staging QA workflow", () => {
     const baseSource = required(baseBuild.run, "staging QA base build is missing");
     expect(baseBuild.env?.DOCKER_BUILDKIT).toBe("1");
     expect(baseSource).toContain(
-      '-f "$source_root/agents/langchain-deepagents-code/Dockerfile.base"',
+      '-f "$source_root/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base"',
     );
     expect(baseSource).toContain('-t "$STAGING_QA_BASE_IMAGE"');
     expect(baseSource).toContain('"$source_root"');
 
     const finalSource = required(finalBuild.run, "staging QA final build is missing");
     expect(finalBuild["working-directory"]).toBe("candidate");
-    expect(finalSource).toContain("-f agents/langchain-deepagents-code/Dockerfile");
+    expect(finalSource).toContain("-f packages/nemoclaw-langchain-deepagents-code/Dockerfile");
     expect(finalSource).toContain('--build-arg BASE_IMAGE="$STAGING_QA_BASE_IMAGE"');
     expect(finalSource).toContain("--build-arg NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b");
     expect(finalSource).toContain("--build-arg NEMOCLAW_INFERENCE_PROVIDER_ID=inference");

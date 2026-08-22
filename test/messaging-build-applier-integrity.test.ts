@@ -84,7 +84,7 @@ function thrownMessage(run: () => void): string {
 describe("messaging-build-applier.mts: plugin archive integrity", () => {
   it("loads the real build applier from the Hermes image module boundary", () => {
     const dockerfile = fs.readFileSync(
-      path.join(REPO_ROOT, "agents", "hermes", "Dockerfile"),
+      path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "Dockerfile"),
       "utf8",
     );
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-applier-boundary-"));

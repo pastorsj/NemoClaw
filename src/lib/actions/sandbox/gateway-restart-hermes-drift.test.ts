@@ -11,8 +11,8 @@ import { hermesAgent } from "../../agent/hermes-recovery-boundary-fixtures";
 import { type GatewayRestartDeps, restartSandboxGatewayWithDeps } from "./gateway-restart";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
-const HERMES_GUARD = path.join(REPO_ROOT, "agents/hermes/runtime-config-guard.py");
-const HERMES_TRANSACTION = path.join(REPO_ROOT, "agents/hermes/mcp-config-transaction.py");
+const HERMES_GUARD = path.join(REPO_ROOT, "packages/nemoclaw-hermes/runtime-config-guard.py");
+const HERMES_TRANSACTION = path.join(REPO_ROOT, "packages/nemoclaw-hermes/mcp-config-transaction.py");
 const YAML_STUB_PYTHON = String.raw`
 import json, sys, types
 

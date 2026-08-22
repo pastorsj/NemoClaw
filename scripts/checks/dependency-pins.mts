@@ -149,7 +149,7 @@ function deriveDependencyPins(rootDir: string = REPO_ROOT): {
   const failures: string[] = [];
   const blueprintSource = readText(rootDir, "nemoclaw-blueprint/blueprint.yaml", failures);
   const dockerfileBase = readText(rootDir, "Dockerfile.base", failures);
-  const hermesDockerfileBase = readText(rootDir, "agents/hermes/Dockerfile.base", failures);
+  const hermesDockerfileBase = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile.base", failures);
   if (failures.length > 0) return { failures, pins: null };
 
   const blueprint = parseMapping(
@@ -208,7 +208,7 @@ function deriveDependencyPins(rootDir: string = REPO_ROOT): {
       expectedVersion: extractArg(
         hermesDockerfileBase,
         "HERMES_SEMVER",
-        "agents/hermes/Dockerfile.base HERMES_SEMVER",
+        "packages/nemoclaw-hermes/Dockerfile.base HERMES_SEMVER",
         failures,
       ),
     },
@@ -582,13 +582,13 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "src/lib/onboard/docker-driver-gateway-service.ts",
     failures,
   );
-  const openclawManifestSource = readText(rootDir, "agents/openclaw/manifest.yaml", failures);
-  const hermesManifestSource = readText(rootDir, "agents/hermes/manifest.yaml", failures);
+  const openclawManifestSource = readText(rootDir, "packages/nemoclaw-openclaw/manifest.yaml", failures);
+  const hermesManifestSource = readText(rootDir, "packages/nemoclaw-hermes/manifest.yaml", failures);
   const dockerfile = readText(rootDir, "Dockerfile", failures);
-  const hermesDockerfile = readText(rootDir, "agents/hermes/Dockerfile", failures);
+  const hermesDockerfile = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile", failures);
   const hermesMcpConfigTransaction = readText(
     rootDir,
-    "agents/hermes/mcp-config-transaction.py",
+    "packages/nemoclaw-hermes/mcp-config-transaction.py",
     failures,
   );
   const updateHermesAgent = readText(rootDir, "scripts/update-hermes-agent.sh", failures);
@@ -619,13 +619,13 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
 
   const openclawManifest = parseMapping(
     openclawManifestSource,
-    "agents/openclaw/manifest.yaml",
+    "packages/nemoclaw-openclaw/manifest.yaml",
     "YAML",
     failures,
   );
   const hermesManifest = parseMapping(
     hermesManifestSource,
-    "agents/hermes/manifest.yaml",
+    "packages/nemoclaw-hermes/manifest.yaml",
     "YAML",
     failures,
   );

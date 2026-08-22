@@ -11,87 +11,87 @@ import { dockerRunCommandBetween, runDockerShell } from "./helpers/dockerfile-ru
 import { expectManagedBootstrapNativeImageContract } from "./support/managed-bootstrap-image-contract";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
+const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 const NPM_ROOT_ARGUMENTS = ["--npm-root", "/usr/local/lib/node_modules/npm"] as const;
 const HERMES_INTEGRITY_FILES = [
   {
     arg: "NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256",
-    source: "agents/hermes/image-build-probes.py",
+    source: "packages/nemoclaw-hermes/image-build-probes.py",
     target: "/opt/nemoclaw-hermes-config/image-build-probes.py",
   },
   {
     arg: "NEMOCLAW_HERMES_SQLITE_TEMP_STORE_PATCHER_SHA256",
-    source: "agents/hermes/patch-hermes-sqlite-temp-store.py",
+    source: "packages/nemoclaw-hermes/patch-hermes-sqlite-temp-store.py",
     target: "/usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py",
   },
   {
     arg: "NEMOCLAW_HERMES_WRAPPER_SHA256",
-    source: "agents/hermes/hermes-wrapper.py",
+    source: "packages/nemoclaw-hermes/hermes-wrapper.py",
     target: "/usr/local/lib/nemoclaw/hermes-wrapper.py",
   },
   {
     arg: "NEMOCLAW_HERMES_CLI_ADAPTER_SHA256",
-    source: "agents/hermes/hermes-cli-adapter-v1.json",
+    source: "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
     target: "/usr/local/share/nemoclaw/hermes-cli-adapter-v1.json",
   },
   {
     arg: "NEMOCLAW_HERMES_CLI_ADAPTER_VALIDATOR_SHA256",
-    source: "agents/hermes/validate-cli-adapter.py",
+    source: "packages/nemoclaw-hermes/validate-cli-adapter.py",
     target: "/usr/local/lib/nemoclaw/validate-hermes-cli-adapter.py",
   },
   {
     arg: "NEMOCLAW_HERMES_VALIDATOR_SHA256",
-    source: "agents/hermes/validate-env-secret-boundary.py",
+    source: "packages/nemoclaw-hermes/validate-env-secret-boundary.py",
     target: "/usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
   },
   {
     arg: "NEMOCLAW_HERMES_TIRITH_FINALIZER_SHA256",
-    source: "agents/hermes/finalize-tirith-marker.py",
+    source: "packages/nemoclaw-hermes/finalize-tirith-marker.py",
     target: "/usr/local/lib/nemoclaw/finalize-tirith-marker.py",
   },
   {
     arg: "NEMOCLAW_HERMES_LANGFUSE_PATCHER_SHA256",
-    source: "agents/hermes/patch-langfuse-credentials.mts",
+    source: "packages/nemoclaw-hermes/patch-langfuse-credentials.mts",
     target: "/usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts",
   },
   {
     arg: "NEMOCLAW_HERMES_DISCORD_RECOVERY_PATCHER_SHA256",
-    source: "agents/hermes/patch-discord-recovery-permissions.py",
+    source: "packages/nemoclaw-hermes/patch-discord-recovery-permissions.py",
     target: "/usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py",
   },
   {
     arg: "NEMOCLAW_HERMES_PROFILE_POLICY_PATCHER_SHA256",
-    source: "agents/hermes/patch-profile-policy-defaults.py",
+    source: "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
     target: "/usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py",
   },
   {
     arg: "NEMOCLAW_HERMES_GATEWAY_RUNTIME_METADATA_PATCHER_SHA256",
-    source: "agents/hermes/patch-gateway-runtime-metadata.py",
+    source: "packages/nemoclaw-hermes/patch-gateway-runtime-metadata.py",
     target: "/opt/nemoclaw-hermes-config/patch-gateway-runtime-metadata.py",
   },
   {
     arg: "NEMOCLAW_HERMES_GATEWAY_PROCESS_IDENTITY_PATCHER_SHA256",
-    source: "agents/hermes/patch-gateway-process-identity.py",
+    source: "packages/nemoclaw-hermes/patch-gateway-process-identity.py",
     target: "/opt/nemoclaw-hermes-config/patch-gateway-process-identity.py",
   },
   {
     arg: "NEMOCLAW_HERMES_CRON_RUNTIME_PATCHER_SHA256",
-    source: "agents/hermes/patch-cron-execution-runtime.py",
+    source: "packages/nemoclaw-hermes/patch-cron-execution-runtime.py",
     target: "/opt/nemoclaw-hermes-config/patch-cron-execution-runtime.py",
   },
   {
     arg: "NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256",
-    source: "agents/hermes/patch-cron-restore-drain.py",
+    source: "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
     target: "/opt/nemoclaw-hermes-config/patch-cron-restore-drain.py",
   },
   {
     arg: "NEMOCLAW_HERMES_CRON_RESTORE_CONTROLLER_SHA256",
-    source: "agents/hermes/cron-restore-control.py",
+    source: "packages/nemoclaw-hermes/cron-restore-control.py",
     target: "/usr/local/lib/nemoclaw/hermes-cron-restore-control.py",
   },
   {
     arg: "NEMOCLAW_HERMES_NEUTRAL_PLATFORM_PATCHER_SHA256",
-    source: "agents/hermes/patch-neutral-platform-env-activation.py",
+    source: "packages/nemoclaw-hermes/patch-neutral-platform-env-activation.py",
     target: "/opt/nemoclaw-hermes-config/patch-neutral-platform-env-activation.py",
   },
 ] as const;

@@ -26,18 +26,18 @@ cd "${repo_root}"
 
 # --progress=plain is required to prove the exact import failure marker. The
 # primary security boundary is the exact ARG-name allowlist below, which covers
-# agents/langchain-deepagents-code/Dockerfile.base,
+# packages/nemoclaw-langchain-deepagents-code/Dockerfile.base,
 # test/Dockerfile.dcode-profile-missing-dependencies, and
-# agents/langchain-deepagents-code/Dockerfile. Those three reviewed Dockerfiles
+# packages/nemoclaw-langchain-deepagents-code/Dockerfile. Those three reviewed Dockerfiles
 # contain no secret-bearing ARGs. NEMOCLAW_CORPORATE_CA_B64 carries public trust
 # anchors, TARGETARCH selects a public build platform, and the PERL_* arguments
 # pin public source and package identities.
 # None are passed to this gate. Only BASE_IMAGE is passed via --build-arg,
 # always as a public, non-secret image reference.
 for dockerfile in \
-  agents/langchain-deepagents-code/Dockerfile.base \
+  packages/nemoclaw-langchain-deepagents-code/Dockerfile.base \
   test/Dockerfile.dcode-profile-missing-dependencies \
-  agents/langchain-deepagents-code/Dockerfile; do
+  packages/nemoclaw-langchain-deepagents-code/Dockerfile; do
   while IFS= read -r arg_name; do
     case "${arg_name}" in
       BASE_IMAGE | NEMOCLAW_CORPORATE_CA_B64 | NEMOCLAW_MODEL | NEMOCLAW_INFERENCE_PROVIDER_ID | NEMOCLAW_PROVIDER_KEY | NEMOCLAW_UPSTREAM_PROVIDER | NEMOCLAW_UPSTREAM_ENDPOINT_URL | NEMOCLAW_INFERENCE_BASE_URL | NEMOCLAW_INFERENCE_API | NEMOCLAW_REASONING_EFFORT | NEMOCLAW_TOOL_DISCLOSURE | NEMOCLAW_DCODE_AUTO_APPROVAL | NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION | NEMOCLAW_MANAGED_IMAGE_RUNTIME_USER | NEMOCLAW_BUILD_ID | NEMOCLAW_DARWIN_VM_COMPAT | NEMOCLAW_PROXY_HOST | NEMOCLAW_PROXY_PORT | PERL_VERSION | PERL_SHA256 | PERL_PACKAGE_REVISION | TARGETARCH) ;;
@@ -70,7 +70,7 @@ done
 # gate above; no build gets secret-bearing input.
 docker build \
   --progress=plain \
-  --file agents/langchain-deepagents-code/Dockerfile.base \
+  --file packages/nemoclaw-langchain-deepagents-code/Dockerfile.base \
   --tag "${source_base_image}" \
   .
 
@@ -83,7 +83,7 @@ docker build \
 
 if docker build \
   --progress=plain \
-  --file agents/langchain-deepagents-code/Dockerfile \
+  --file packages/nemoclaw-langchain-deepagents-code/Dockerfile \
   --build-arg "BASE_IMAGE=${stripped_image}" \
   --tag "${failed_image}" \
   . 2>&1 | tee "${build_log}"; then

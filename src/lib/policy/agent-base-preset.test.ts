@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AGENTS_DIR } from "../agent/defs";
+import { AGENTS_DIR, loadAgent } from "../agent/defs";
 import * as registry from "../state/registry";
 import { isAgentBasePreset } from "./index";
 
@@ -57,10 +57,9 @@ describe("agent base preset detection", () => {
   });
 
   it("recognizes the Hermes base policy when its preset name also exists in the catalog (#9079)", () => {
-    const hermesPolicy = fs.readFileSync(
-      path.join(AGENTS_DIR, "hermes", "policy-additions.yaml"),
-      "utf8",
-    );
+    const hermesPolicyPath = loadAgent("hermes").policyAdditionsPath;
+    expect(hermesPolicyPath).not.toBeNull();
+    const hermesPolicy = fs.readFileSync(hermesPolicyPath ?? "", "utf8");
     const agent = createAgentFixture(hermesPolicy);
     vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "hermes", agent } as never);
 

@@ -10,8 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 const SCRIPT_PATH = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "seed-dashboard-config.py",
 );
 

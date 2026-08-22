@@ -16,8 +16,8 @@ runs:
         min_glibc="2.39"
         base_inputs=(
           Dockerfile.base
-          agents/openclaw/openclaw-runtime/package.json
-          agents/openclaw/openclaw-runtime/package-lock.json
+          packages/nemoclaw-openclaw/openclaw-runtime/package.json
+          packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json
           nemoclaw-blueprint/blueprint.yaml
           scripts/lib/reviewed-npm-archive.mts
         )

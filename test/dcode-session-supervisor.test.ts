@@ -9,8 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const supervisor = path.join(
   process.cwd(),
-  "agents",
-  "langchain-deepagents-code",
+  "packages", "nemoclaw-langchain-deepagents-code",
   "dcode-session-supervisor.py",
 );
 const canRun = process.platform === "linux" && spawnSync("python3", ["--version"]).status === 0;

@@ -171,6 +171,9 @@ reviews:
     - path: "agents/**"
       instructions: *security-boundary
 
+    - path: "packages/**"
+      instructions: *security-boundary
+
     - path: "scripts/nemoclaw-start.sh"
       instructions: *security-boundary
 

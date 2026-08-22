@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { vi } from "vitest";
-import { resolveTestAgentBaselinePolicy } from "../../../../test/support/snapshot-policy-test-fixture";
+import {
+  resolveTestAgentBaselinePolicy,
+  resolveTestPolicyAdditionsPath,
+} from "../../../../test/support/snapshot-policy-test-fixture";
 import type {
   SandboxEntry,
   SandboxHostLocalInferenceProvenance,
@@ -155,7 +158,7 @@ export const captureSnapshotRestoreAuthorityMock = vi.fn(() => ({
 }));
 export const loadAgentMock = vi.fn((name: string) => ({
   name,
-  policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
+  policyAdditionsPath: name === "openclaw" ? null : resolveTestPolicyAdditionsPath(name),
 }));
 export const captureOpenshellMock = vi.fn<
   (args: string[], opts?: Record<string, unknown>) => OpenshellCaptureResult
@@ -396,7 +399,7 @@ export function resetSnapshotRestoreMocks(): void {
   listBackupsMock.mockReturnValue([]);
   loadAgentMock.mockImplementation((name: string) => ({
     name,
-    policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
+    policyAdditionsPath: name === "openclaw" ? null : resolveTestPolicyAdditionsPath(name),
   }));
   resolveAgentBaselinePolicyMock.mockImplementation(resolveTestAgentBaselinePolicy);
   prepareInitialSandboxCreatePolicyMock.mockImplementation((policyPath: string) => ({

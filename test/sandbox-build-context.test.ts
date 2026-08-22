@@ -105,7 +105,7 @@ describe("sandbox build context staging", () => {
 
     writeFixture("Dockerfile");
     writeFixture("tsconfig.runtime-preloads.json", "{}\n");
-    writeFixture(path.join("agents", "openclaw", "state-lock-plan.json"), "{}\n");
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "state-lock-plan.json"), "{}\n");
     writeFixture(
       path.join("ci", "npm-audit-exceptions.json"),
       `${JSON.stringify({ schemaVersion: 1, exceptions: [] })}\n`,
@@ -118,15 +118,14 @@ describe("sandbox build context staging", () => {
     ]) {
       for (const fileName of ["package.json", "package-lock.json"]) {
         writeFixture(
-          path.join("agents", "openclaw", runtimeName, fileName),
+          path.join("packages", "nemoclaw-openclaw", runtimeName, fileName),
           runtimeManifestFixture(runtimeName, fileName),
         );
       }
     }
     writeFixture(
       path.join(
-        "agents",
-        "openclaw",
+        "packages", "nemoclaw-openclaw",
         "managed-image-messaging-runtime",
         "npm-cache-seed",
         ".gitkeep",
@@ -327,12 +326,12 @@ describe("sandbox build context staging", () => {
 
   function expectStagedOpenClawRuntimeGraphs(buildCtx: string, sourceRoot: string) {
     for (const runtimeName of ["mcporter-runtime", "openclaw-runtime", "wechat-runtime"]) {
-      const runtimeDir = path.join(buildCtx, "agents", "openclaw", runtimeName);
+      const runtimeDir = path.join(buildCtx, "packages", "nemoclaw-openclaw", runtimeName);
       expect(fs.readdirSync(runtimeDir).sort()).toEqual(["package-lock.json", "package.json"]);
       for (const fileName of ["package.json", "package-lock.json"]) {
         expect(fs.readFileSync(path.join(runtimeDir, fileName), "utf8")).toBe(
           fs.readFileSync(
-            path.join(sourceRoot, "agents", "openclaw", runtimeName, fileName),
+            path.join(sourceRoot, "packages", "nemoclaw-openclaw", runtimeName, fileName),
             "utf8",
           ),
         );
@@ -347,8 +346,7 @@ describe("sandbox build context staging", () => {
 
     const managedRuntimeDir = path.join(
       buildCtx,
-      "agents",
-      "openclaw",
+      "packages", "nemoclaw-openclaw",
       "managed-image-messaging-runtime",
     );
     expect(fs.readdirSync(managedRuntimeDir).sort()).toEqual([
@@ -359,7 +357,7 @@ describe("sandbox build context staging", () => {
     for (const fileName of ["package.json", "package-lock.json"]) {
       expect(fs.readFileSync(path.join(managedRuntimeDir, fileName), "utf8")).toBe(
         fs.readFileSync(
-          path.join(sourceRoot, "agents", "openclaw", "managed-image-messaging-runtime", fileName),
+          path.join(sourceRoot, "packages", "nemoclaw-openclaw", "managed-image-messaging-runtime", fileName),
           "utf8",
         ),
       );
@@ -370,8 +368,7 @@ describe("sandbox build context staging", () => {
       fs.readFileSync(
         path.join(
           sourceRoot,
-          "agents",
-          "openclaw",
+          "packages", "nemoclaw-openclaw",
           "managed-image-messaging-runtime",
           "npm-cache-seed",
           ".gitkeep",
@@ -881,7 +878,7 @@ describe("sandbox build context staging", () => {
         );
         expect(fs.existsSync(path.join(buildCtx, "scripts", "state-dir-guard.py"))).toBe(true);
         expect(
-          fs.existsSync(path.join(buildCtx, "agents", "openclaw", "state-lock-plan.json")),
+          fs.existsSync(path.join(buildCtx, "packages", "nemoclaw-openclaw", "state-lock-plan.json")),
         ).toBe(true);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "openclaw-config-guard.py"))).toBe(
           true,
@@ -1015,7 +1012,7 @@ describe("sandbox build context staging", () => {
         name: "hermes",
         displayName: "Hermes",
         dockerfileBasePath: null,
-        dockerfilePath: path.join(repoRoot, "agents", "hermes", "Dockerfile"),
+        dockerfilePath: path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"),
       } as AgentDefinition;
       const hermesBuild = createAgentSandbox(hermesAgent, { rootDir: repoRoot });
 

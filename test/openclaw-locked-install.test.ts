@@ -13,7 +13,7 @@ import {
 } from "../scripts/lib/reviewed-npm-archive.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
-const RUNTIME_DIRECTORY = path.join(REPO_ROOT, "agents", "openclaw", "openclaw-runtime");
+const RUNTIME_DIRECTORY = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "openclaw-runtime");
 const LOCKFILE = path.join(RUNTIME_DIRECTORY, "package-lock.json");
 const PACKAGE_SPEC = "openclaw@2026.7.1";
 const INTEGRITY =

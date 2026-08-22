@@ -17,7 +17,7 @@ import {
   prepareManagedProxyFixture,
 } from "./support/dcode-start-script-fixture.ts";
 
-const agentDir = path.join(process.cwd(), "agents", "langchain-deepagents-code");
+const agentDir = path.join(process.cwd(), "packages", "nemoclaw-langchain-deepagents-code");
 const headlessCheckPath = path.join(
   process.cwd(),
   "test",

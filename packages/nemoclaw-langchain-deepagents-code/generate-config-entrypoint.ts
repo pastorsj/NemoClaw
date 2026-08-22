@@ -2,4 +2,4 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Preserve the managed-startup path while the generator keeps its repository-relative imports.
-import "/opt/nemoclaw-deepagents-code/agents/langchain-deepagents-code/generate-config.ts";
+import "/opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts";

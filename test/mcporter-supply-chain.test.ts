@@ -10,9 +10,9 @@ import { describe, expect, it } from "vitest";
 import { type DependencyNode, findDependency } from "./fixtures/dependency-graph.ts";
 
 const repoRoot = path.join(import.meta.dirname, "..");
-const runtimeDirectory = path.join(repoRoot, "agents", "openclaw", "mcporter-runtime");
+const runtimeDirectory = path.join(repoRoot, "packages", "nemoclaw-openclaw", "mcporter-runtime");
 const dependencyReview = fs.readFileSync(
-  path.join(repoRoot, "agents", "openclaw", "dependency-review.md"),
+  path.join(repoRoot, "packages", "nemoclaw-openclaw", "dependency-review.md"),
   "utf8",
 );
 const dockerfiles = ["Dockerfile.base", "Dockerfile"].map((name) => ({
@@ -163,10 +163,10 @@ describe("mcporter image supply-chain controls", () => {
       '--verify-only --package-spec "mcporter@${MCPORTER_VERSION}" --integrity "$MCPORTER_EXPECTED_INTEGRITY" --tarball-url "$MCPORTER_EXPECTED_TARBALL"',
     );
     const groupedRuntimeCopy =
-      "COPY agents/openclaw/mcporter-runtime/package.json agents/openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/";
+      "COPY packages/nemoclaw-openclaw/mcporter-runtime/package.json packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/";
     const splitRuntimeCopies = [
-      "COPY agents/openclaw/mcporter-runtime/package.json /usr/local/lib/nemoclaw/mcporter-runtime/package.json",
-      "COPY agents/openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/package-lock.json",
+      "COPY packages/nemoclaw-openclaw/mcporter-runtime/package.json /usr/local/lib/nemoclaw/mcporter-runtime/package.json",
+      "COPY packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/package-lock.json",
     ];
     expect(
       flattenedContents.includes(groupedRuntimeCopy) ||
@@ -226,7 +226,7 @@ describe("mcporter image supply-chain controls", () => {
       (candidate) => candidate.id === "mcporter-runtime",
     );
     expect(graph).toMatchObject({
-      directory: "agents/openclaw/mcporter-runtime",
+      directory: "packages/nemoclaw-openclaw/mcporter-runtime",
       integrity: expectedIntegrity,
       packageSpec: `mcporter@${expectedVersion}`,
       tarballUrl: expectedTarball,

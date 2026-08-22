@@ -1143,15 +1143,15 @@ describe("regression guards", () => {
           "utf-8",
         );
         const hermesBaseSrc = fs.readFileSync(
-          path.join(repoRoot, "agents", "hermes", "Dockerfile.base"),
+          path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile.base"),
           "utf-8",
         );
         const hermesRuntimeSrc = fs.readFileSync(
-          path.join(repoRoot, "agents", "hermes", "Dockerfile"),
+          path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"),
           "utf-8",
         );
         const hermesStartSrc = fs.readFileSync(
-          path.join(repoRoot, "agents", "hermes", "start.sh"),
+          path.join(repoRoot, "packages", "nemoclaw-hermes", "start.sh"),
           "utf-8",
         );
 

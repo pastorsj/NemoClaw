@@ -33,6 +33,7 @@ on:
       # with tools/e2e/base-image-publication.mts.
       - "Dockerfile"
       - "agents/**"
+      - "packages/**"
       - "nemoclaw/**"
       - "nemoclaw-blueprint/**"
       - "scripts/**"
@@ -51,21 +52,21 @@ on:
       - "tools/mcp-tool-discovery-runtime/**"
       - "tsconfig.runtime-preloads.json"
       - "Dockerfile.base"
-      - "agents/openclaw/openclaw-runtime/package.json"
-      - "agents/openclaw/openclaw-runtime/package-lock.json"
+      - "packages/nemoclaw-openclaw/openclaw-runtime/package.json"
+      - "packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json"
       - "scripts/lib/reviewed-npm-archive.mts"
-      - "agents/hermes/Dockerfile.base"
-      - "agents/hermes/security-dependencies.patch"
-      - "agents/hermes/whatsapp-proxy.patch"
-      - "agents/langchain-deepagents-code/Dockerfile.base"
-      - "agents/langchain-deepagents-code/manifest.yaml"
-      - "agents/langchain-deepagents-code/requirements.lock"
+      - "packages/nemoclaw-hermes/Dockerfile.base"
+      - "packages/nemoclaw-hermes/security-dependencies.patch"
+      - "packages/nemoclaw-hermes/whatsapp-proxy.patch"
+      - "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base"
+      - "packages/nemoclaw-langchain-deepagents-code/manifest.yaml"
+      - "packages/nemoclaw-langchain-deepagents-code/requirements.lock"
       - "agents/pi/Dockerfile.base"
       - "agents/pi/manifest.yaml"
       - "agents/pi/pi-runtime/package.json"
       - "agents/pi/pi-runtime/package-lock.json"
-      - "agents/openclaw/mcporter-runtime/package.json"
-      - "agents/openclaw/mcporter-runtime/package-lock.json"
+      - "packages/nemoclaw-openclaw/mcporter-runtime/package.json"
+      - "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json"
       - "ci/npm-audit-exceptions.json"
       - "ci/reviewed-npm-audit.json"
       # Dockerfile.base validates min_openclaw_version from this file at build time.
@@ -179,7 +180,7 @@ jobs:
       arch: amd64
       platform: linux/amd64
       runner: ubuntu-24.04
-      dockerfile: agents/hermes/Dockerfile.base
+      dockerfile: packages/nemoclaw-hermes/Dockerfile.base
       image: nvidia/nemoclaw/hermes-sandbox-base
     secrets:
       registry_password: ${{ secrets.GITHUB_TOKEN }}
@@ -198,7 +199,7 @@ jobs:
       arch: arm64
       platform: linux/arm64
       runner: ubuntu-24.04-arm
-      dockerfile: agents/hermes/Dockerfile.base
+      dockerfile: packages/nemoclaw-hermes/Dockerfile.base
       image: nvidia/nemoclaw/hermes-sandbox-base
     secrets:
       registry_password: ${{ secrets.GITHUB_TOKEN }}
@@ -217,7 +218,7 @@ jobs:
       arch: amd64
       platform: linux/amd64
       runner: ubuntu-24.04
-      dockerfile: agents/langchain-deepagents-code/Dockerfile.base
+      dockerfile: packages/nemoclaw-langchain-deepagents-code/Dockerfile.base
       image: nvidia/nemoclaw/langchain-deepagents-code-sandbox-base
     secrets:
       registry_password: ${{ secrets.GITHUB_TOKEN }}
@@ -236,7 +237,7 @@ jobs:
       arch: arm64
       platform: linux/arm64
       runner: ubuntu-24.04-arm
-      dockerfile: agents/langchain-deepagents-code/Dockerfile.base
+      dockerfile: packages/nemoclaw-langchain-deepagents-code/Dockerfile.base
       image: nvidia/nemoclaw/langchain-deepagents-code-sandbox-base
     secrets:
       registry_password: ${{ secrets.GITHUB_TOKEN }}

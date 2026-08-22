@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { buildHermesUpstreamHeader as buildAgentHeader } from "../../../agents/hermes/config/upstream-header.ts";
+import { buildHermesUpstreamHeader as buildAgentHeader } from "../../../packages/nemoclaw-hermes/config/upstream-header.ts";
 import { buildHermesUpstreamHeader as buildHostHeader } from "./hermes-upstream-header.ts";
 
 const FIXTURES: Array<{ name: string; config: Record<string, unknown> }> = [

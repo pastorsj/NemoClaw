@@ -4,7 +4,7 @@
 // Shared test harness for the Hermes CLI wrapper suites
 // (test/hermes-gateway-wrapper.test.ts and
 // test/hermes-wrapper-oneshot-routing.test.ts). Both suites drive
-// agents/hermes/hermes-wrapper.py by copying it into a temp dir alongside the
+// packages/nemoclaw-hermes/hermes-wrapper.py by copying it into a temp dir alongside the
 // runtime-env validator, planting stubs, and spawning it. Extracted here — a
 // non-`.test.` module — so the shared `runWrapper` helper (and its planted-PATH
 // `if` branch) lives in one place instead of being duplicated across the two
@@ -19,24 +19,21 @@ export const WRAPPER = path.join(
   import.meta.dirname,
   "..",
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "hermes-wrapper.py",
 );
 export const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 export const ADAPTER = path.join(
   import.meta.dirname,
   "..",
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "hermes-cli-adapter-v1.json",
 );
 

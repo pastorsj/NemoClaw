@@ -6,9 +6,9 @@
 This file records the reviewed dependency baseline for the Deep Agents Code sandbox base image.
 Update it whenever `requirements.lock` changes.
 
-- Lockfile: `agents/langchain-deepagents-code/requirements.lock`
+- Lockfile: `packages/nemoclaw-langchain-deepagents-code/requirements.lock`
 - Lockfile SHA-256: `203eeeb3786c736423be60ce2b315ad6f817d4adf0c13de184bf5deee4c793ad`
-- Audit command: `uv tool run --python 3.13 pip-audit -r agents/langchain-deepagents-code/requirements.lock --progress-spinner off --disable-pip`
+- Audit command: `uv tool run --python 3.13 pip-audit -r packages/nemoclaw-langchain-deepagents-code/requirements.lock --progress-spinner off --disable-pip`
 - Audit date: August 11, 2026
 - Targeted audit result: `aiohttp 3.14.3, cryptography 50.0.0, uv 0.11.33, langgraph-checkpoint-sqlite 3.1.1, MCP 1.28.1, Pillow 12.3.0, and pyasn1 0.6.4 have no known vulnerabilities`
 - Complete-lock audit result: `2 duplicate records in 1 unrelated package`

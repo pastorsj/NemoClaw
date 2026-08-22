@@ -10,7 +10,7 @@ import {
   runHermesBashHarness as runBashHarness,
 } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const SUPERVISOR_LIB = path.join(
   import.meta.dirname,
   "..",

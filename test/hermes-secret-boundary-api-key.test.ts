@@ -10,8 +10,7 @@ import { describe, expect, it } from "vitest";
 const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 const GENERATED_HEX_TOKEN = Array.from({ length: 64 }, (_value, index) =>
@@ -52,7 +51,7 @@ function runRuntimeEnvValidator(envOverrides: Record<string, string>) {
   });
 }
 
-describe("agents/hermes/validate-hermes-env-secret-boundary API_SERVER_KEY contract", () => {
+describe("packages/nemoclaw-hermes/validate-hermes-env-secret-boundary API_SERVER_KEY contract", () => {
   it("allows generated API_SERVER_KEY values in Hermes .env files", () => {
     const envFileResult = runEnvFileValidator(
       [

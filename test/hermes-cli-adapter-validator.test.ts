@@ -9,8 +9,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const CONTRACT = path.join(ROOT, "agents", "hermes", "hermes-cli-adapter-v1.json");
-const VALIDATOR = path.join(ROOT, "agents", "hermes", "validate-cli-adapter.py");
+const CONTRACT = path.join(ROOT, "packages", "nemoclaw-hermes", "hermes-cli-adapter-v1.json");
+const VALIDATOR = path.join(ROOT, "packages", "nemoclaw-hermes", "validate-cli-adapter.py");
 
 const PARSER_FIXTURE = `
 import argparse

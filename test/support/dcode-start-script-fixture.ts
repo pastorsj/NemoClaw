@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const repoRoot = path.join(import.meta.dirname, "..", "..");
-const START_SCRIPT = path.join(repoRoot, "agents", "langchain-deepagents-code", "start.sh");
+const START_SCRIPT = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "start.sh");
 const ENTRYPOINT_ENV_WRAPPER = path.join(repoRoot, "scripts", "lib", "entrypoint-env-wrapper.sh");
 
 export type ManagedProxyEndpoint = { host: string; port: string };

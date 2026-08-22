@@ -71,28 +71,39 @@ function managedRuntime(driverName: string): SandboxWorkloadRuntimeCapabilities 
   };
 }
 
-describe("sandbox workload source resolution", () => {
-  it.each(
-    SHIPPED_MANAGED_IMAGE_AGENTS,
-  )("selects the published managed image for stock %s on a capable runtime (#7744)", (agent) => {
-    const source = resolveSandboxWorkloadSource({
-      agentName: agent,
-      legacyDockerfilePath: `agents/${agent}/Dockerfile`,
-      runtime: managedRuntime("podman"),
-      catalog: CATALOG,
-    });
+const REPOSITORY_DOCKERFILE_PATHS: Readonly<Record<string, string>> = {
+  hermes: "packages/nemoclaw-hermes/Dockerfile",
+  "langchain-deepagents-code": "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
+  openclaw: "Dockerfile",
+};
 
-    expect(source).toEqual({
-      kind: "managed-image",
-      reference: contractFor(agent).reference,
-      contract: contractFor(agent),
-    });
-  });
+function repositoryDockerfilePath(agentName: string): string {
+  return REPOSITORY_DOCKERFILE_PATHS[agentName] ?? `agents/${agentName}/Dockerfile`;
+}
+
+describe("sandbox workload source resolution", () => {
+  it.each(SHIPPED_MANAGED_IMAGE_AGENTS)(
+    "selects the published managed image for stock %s on a capable runtime (#7744)",
+    (agent) => {
+      const source = resolveSandboxWorkloadSource({
+        agentName: agent,
+        legacyDockerfilePath: repositoryDockerfilePath(agent),
+        runtime: managedRuntime("podman"),
+        catalog: CATALOG,
+      });
+
+      expect(source).toEqual({
+        kind: "managed-image",
+        reference: contractFor(agent).reference,
+        contract: contractFor(agent),
+      });
+    },
+  );
 
   it("uses the same contract with an MXC-shaped capable driver (#7744)", () => {
     const source = resolveSandboxWorkloadSource({
       agentName: "hermes",
-      legacyDockerfilePath: "agents/hermes/Dockerfile",
+      legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
       runtime: managedRuntime("mxc"),
       catalog: CATALOG,
     });
@@ -134,7 +145,7 @@ describe("sandbox workload source resolution", () => {
   it("preserves the legacy path when the current driver lacks managed-image capabilities (#7744)", () => {
     const source = resolveSandboxWorkloadSource({
       agentName: "langchain-deepagents-code",
-      legacyDockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+      legacyDockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
       runtime: {
         driverName: "kubernetes",
         managedImageSelectionPolicy: "prefer-managed",
@@ -146,7 +157,7 @@ describe("sandbox workload source resolution", () => {
 
     expect(source).toEqual({
       kind: "legacy-dockerfile",
-      dockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+      dockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
       reason: "runtime-unsupported",
     });
   });
@@ -197,7 +208,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "hermes",
-        legacyDockerfilePath: "agents/hermes/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
         runtime: managedRuntime("podman"),
         catalog: {},
         policy: "require-managed",
@@ -209,7 +220,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "langchain-deepagents-code",
-        legacyDockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
         runtime: {
           driverName: "podman",
           managedImageSelectionPolicy: "require-managed",
@@ -239,45 +250,47 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "hermes",
-        legacyDockerfilePath: "agents/hermes/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
         runtime: managedRuntime("podman"),
         catalog: mutableCatalog,
       }),
     ).toThrow("failed closed validation");
   });
 
-  it.each(
-    CANDIDATE_MANAGED_IMAGE_AGENTS,
-  )("refuses candidate %s while candidate selection is disabled (#7927)", (agent) => {
-    expect(() =>
-      resolveSandboxWorkloadSource({
+  it.each(CANDIDATE_MANAGED_IMAGE_AGENTS)(
+    "refuses candidate %s while candidate selection is disabled (#7927)",
+    (agent) => {
+      expect(() =>
+        resolveSandboxWorkloadSource({
+          agentName: agent,
+          legacyDockerfilePath: `agents/${agent}/Dockerfile`,
+          runtime: managedRuntime("docker"),
+          catalog: { ...CATALOG, [agent]: contractFor(agent) },
+        }),
+      ).toThrow(
+        `Managed image workload is required for '${agent}', but the selected agent is a release candidate and candidate selection is disabled.`,
+      );
+    },
+  );
+
+  it.each(CANDIDATE_MANAGED_IMAGE_AGENTS)(
+    "selects the exact candidate digest for %s behind the gate (#7927)",
+    (agent) => {
+      const source = resolveSandboxWorkloadSource({
         agentName: agent,
         legacyDockerfilePath: `agents/${agent}/Dockerfile`,
         runtime: managedRuntime("docker"),
         catalog: { ...CATALOG, [agent]: contractFor(agent) },
-      }),
-    ).toThrow(
-      `Managed image workload is required for '${agent}', but the selected agent is a release candidate and candidate selection is disabled.`,
-    );
-  });
+        candidateAgentsEnabled: true,
+      });
 
-  it.each(
-    CANDIDATE_MANAGED_IMAGE_AGENTS,
-  )("selects the exact candidate digest for %s behind the gate (#7927)", (agent) => {
-    const source = resolveSandboxWorkloadSource({
-      agentName: agent,
-      legacyDockerfilePath: `agents/${agent}/Dockerfile`,
-      runtime: managedRuntime("docker"),
-      catalog: { ...CATALOG, [agent]: contractFor(agent) },
-      candidateAgentsEnabled: true,
-    });
-
-    expect(source).toEqual({
-      kind: "managed-image",
-      reference: contractFor(agent).reference,
-      contract: contractFor(agent),
-    });
-  });
+      expect(source).toEqual({
+        kind: "managed-image",
+        reference: contractFor(agent).reference,
+        contract: contractFor(agent),
+      });
+    },
+  );
 
   it("never builds a host Dockerfile for a gated candidate on a buildless runtime (#7927)", () => {
     expect(() =>

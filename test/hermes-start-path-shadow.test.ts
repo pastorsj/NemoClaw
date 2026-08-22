@@ -13,12 +13,11 @@ import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "validate-env-secret-boundary.py",
 );
 
@@ -27,12 +26,12 @@ function extractShellFunctionFromSource(source: string, name: string): string {
   const match =
     source.match(new RegExp(`${escaped}\\(\\) \\{([\\s\\S]*?)^\\}`, "m")) ??
     (() => {
-      throw new Error(`Expected ${name} in agents/hermes/start.sh`);
+      throw new Error(`Expected ${name} in packages/nemoclaw-hermes/start.sh`);
     })();
   return `${name}() {${match[1]}\n}`;
 }
 
-describe("agents/hermes/start.sh env secret boundary (PATH shadowing)", () => {
+describe("packages/nemoclaw-hermes/start.sh env secret boundary (PATH shadowing)", () => {
   it("ignores PATH-shadowed python3 at cold start so the validator cannot be bypassed", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-env-shadow-"));
     const hermesHome = path.join(tmpDir, ".hermes");

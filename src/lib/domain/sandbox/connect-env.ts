@@ -11,7 +11,7 @@ export const NEMOCLAW_HERMES_LIGHT_SKIN_REVIEWED_HERMES_VERSIONS = [
 ] as const;
 
 // Compatibility boundary: remove this NemoClaw-managed light skin once the
-// pinned Hermes version in agents/hermes/Dockerfile.base includes upstream
+// pinned Hermes version in packages/nemoclaw-hermes/Dockerfile.base includes upstream
 // readable light-terminal defaults for assistant response and startup list text.
 // The paired unit test intentionally fails on a Hermes version bump so this
 // compatibility shim is re-reviewed instead of silently aging forward.

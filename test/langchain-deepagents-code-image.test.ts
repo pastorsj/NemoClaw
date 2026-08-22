@@ -99,10 +99,7 @@ function pythonStringMap(source: string, constantName: string): Record<string, s
   );
 }
 
-function expectVersionsMatchLock(
-  requirementsLock: string,
-  versions: Record<string, string>,
-): void {
+function expectVersionsMatchLock(requirementsLock: string, versions: Record<string, string>): void {
   expect(versions, "deepagents-code must be present in the version map").toHaveProperty(
     "deepagents-code",
   );
@@ -123,16 +120,19 @@ const TARGETED_ADVISORY_VERSIONS = [
 ] as const;
 
 describe("targeted dependency advisory review", () => {
-  it.each(TARGETED_ADVISORY_VERSIONS)("documents the reviewed %s %s pin", (distribution, version) => {
-    const normalizedDistribution = distribution.replaceAll("-", "[-_]");
-    const normalizedVersion = version.replaceAll(".", "\\.");
-    expect(readAgentFile("dependency-review.md")).toMatch(
-      new RegExp(
-        `(?:^|[^A-Za-z0-9_-])${normalizedDistribution}\\s+${normalizedVersion}(?=[^0-9.]|$)`,
-        "im",
-      ),
-    );
-  });
+  it.each(TARGETED_ADVISORY_VERSIONS)(
+    "documents the reviewed %s %s pin",
+    (distribution, version) => {
+      const normalizedDistribution = distribution.replaceAll("-", "[-_]");
+      const normalizedVersion = version.replaceAll(".", "\\.");
+      expect(readAgentFile("dependency-review.md")).toMatch(
+        new RegExp(
+          `(?:^|[^A-Za-z0-9_-])${normalizedDistribution}\\s+${normalizedVersion}(?=[^0-9.]|$)`,
+          "im",
+        ),
+      );
+    },
+  );
 });
 
 function writeMinimalWheel(directory: string): string {
@@ -169,7 +169,7 @@ with zipfile.ZipFile(wheel_path, "w") as wheel:
 function baseImagePipInstallArgs(dockerfile: string, requirementsPath: string): string[] {
   const logicalDockerfile = dockerfile.replace(/\\\r?\n\s*/g, " ");
   const copiedLock = logicalDockerfile.match(
-    /COPY\s+agents\/langchain-deepagents-code\/requirements\.lock\s+(\S+)/,
+    /COPY\s+packages\/nemoclaw-langchain-deepagents-code\/requirements\.lock\s+(\S+)/,
   );
   expect(copiedLock, "base image must copy the reviewed lockfile").not.toBeNull();
   const invocation = logicalDockerfile.match(/"\$VIRTUAL_ENV\/bin\/pip3" install\s+([^\n]+?)\s+&&/);
@@ -224,12 +224,12 @@ describe("LangChain Deep Agents Code image contracts", () => {
     ].join("\n");
     const managedRuntimeDirectory = "&& install -d -o root -g root -m 0755 /run/nemoclaw";
     const runtimeModeReplay =
-      "&& chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/agents/langchain-deepagents-code/generate-config.ts";
+      "&& chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts";
 
     expect(dockerfile).toContain("ARG BASE_IMAGE\n");
     expect(dockerfile).toContain("ARG NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b");
     expect(dockerfile).toContain(
-      "COPY agents/langchain-deepagents-code/generate-config-entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts",
+      "COPY packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts",
     );
     expect(dockerfile).toContain(
       "COPY src/lib/inference/managed-dcode/identity.ts /opt/nemoclaw-deepagents-code/src/lib/inference/managed-dcode/identity.ts",
@@ -326,7 +326,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const startScript = readAgentFile("start.sh");
 
     expect(dockerfile).toContain(
-      "COPY agents/langchain-deepagents-code/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh",
+      "COPY packages/nemoclaw-langchain-deepagents-code/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh",
     );
     expect(dockerfile).toContain("chown root:sandbox /sandbox");
     expect(dockerfile).toContain("chmod 1775 /sandbox");
@@ -501,7 +501,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
         "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/dcode.real",
         "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/deepagents-code",
         "install -o root -g root -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-managed-exec",
-        "COPY agents/langchain-deepagents-code/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py",
+        "COPY packages/nemoclaw-langchain-deepagents-code/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py",
         `test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-session-supervisor.py)" = "0:0:755"`,
         "test -f /usr/local/lib/nemoclaw/dcode-managed-exec",
         "test ! -L /usr/local/lib/nemoclaw/dcode-managed-exec",
@@ -518,16 +518,18 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(
       dockerfile
         .split("\n")
-        .filter((line) => line.startsWith("COPY agents/langchain-deepagents-code/profile-plugin")),
+        .filter((line) =>
+          line.startsWith("COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin"),
+        ),
     ).toEqual([
-      "COPY agents/langchain-deepagents-code/profile-plugin/pyproject.toml /opt/nemoclaw-deepagents-profile-plugin/",
-      "COPY agents/langchain-deepagents-code/profile-plugin/src/nemoclaw_deepagents_profile/__init__.py /opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/",
+      "COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin/pyproject.toml /opt/nemoclaw-deepagents-profile-plugin/",
+      "COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin/src/nemoclaw_deepagents_profile/__init__.py /opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/",
     ]);
     expect(dockerfile).toContain(
       "rm -f /usr/local/bin/dcode /usr/local/bin/deepagents-code /opt/venv/bin/dcode /opt/venv/bin/deepagents-code",
     );
     expect(dockerfile).toContain(
-      "COPY agents/langchain-deepagents-code/validate-progressive-tool-disclosure.py",
+      "COPY packages/nemoclaw-langchain-deepagents-code/validate-progressive-tool-disclosure.py",
     );
     expect(dockerfile).toContain(
       "python3 /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py",
@@ -545,7 +547,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(dockerfile).not.toContain("nemotron-ultra-harness-profile.py");
     expect(dockerfile).not.toContain("LICENSE.langchain-deepagents");
     expect(dockerfile).not.toContain("langchain-deepagents-MIT.txt");
-    expect(dockerfile).toContain("COPY agents/langchain-deepagents-code/validate-observability.py");
+    expect(dockerfile).toContain(
+      "COPY packages/nemoclaw-langchain-deepagents-code/validate-observability.py",
+    );
     expect(dockerfile).toContain(
       "/opt/venv/bin/python3 -I /opt/nemoclaw-deepagents-code/validate-observability.py",
     );
@@ -639,8 +643,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
   it("keeps optional service egress out of the default policy and requires Landlock", () => {
     const basePolicyPath = path.join(
       repoRoot,
-      "agents",
-      "langchain-deepagents-code",
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
       "policy-additions.yaml",
     );
     const defaultPrepared = prepareInitialSandboxCreatePolicy(basePolicyPath, [], {
@@ -1232,7 +1236,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
 
       expect(review).toContain(`Lockfile SHA-256: \`${sha256(requirementsLock)}\``);
       expect(review).toContain(
-        "uv tool run --python 3.13 pip-audit -r agents/langchain-deepagents-code/requirements.lock --progress-spinner off --disable-pip",
+        "uv tool run --python 3.13 pip-audit -r packages/nemoclaw-langchain-deepagents-code/requirements.lock --progress-spinner off --disable-pip",
       );
       expect(review).toMatch(/Targeted audit result:.*no known vulnerabilities/is);
       expect(review).toMatch(

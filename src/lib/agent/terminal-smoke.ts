@@ -104,7 +104,7 @@ export function runAgentSmokeCommands(
   runCaptureOpenshell: RunCaptureOpenshell,
   gatewayName?: string,
 ): AgentSmokeCommandResult {
-  // smoke_commands are shell-form commands from repository-shipped agents/*/manifest.yaml files.
+  // smoke_commands are shell-form commands from repository-shipped agent manifests.
   // Switch to argv-form commands before accepting custom or user-provided manifests here.
   const commands = agent.runtime?.smoke_commands ?? [];
   for (const command of commands) {

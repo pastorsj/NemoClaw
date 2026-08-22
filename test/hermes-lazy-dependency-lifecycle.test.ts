@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { shellQuote } from "../src/lib/core/shell-quote";
 import { extractShellFunction } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "agents", "hermes", "start.sh");
+const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function runLazyDependencyPreparation(root: boolean, provider = "hindsight") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-lazy-prep-"));

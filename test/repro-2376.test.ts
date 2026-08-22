@@ -11,7 +11,7 @@
  *   Older OpenClaw base images pre-created /sandbox/.bashrc and
  *   /sandbox/.profile entries that sourced /tmp/nemoclaw-proxy-env.sh — the
  *   file the entrypoint writes with HERMES_HOME (and proxy vars) at runtime.
- *   The Hermes base image (agents/hermes/Dockerfile.base) was missing the
+ *   The Hermes base image (packages/nemoclaw-hermes/Dockerfile.base) was missing the
  *   equivalent block, so the proxy-env file existed but was never sourced.
  *
  *   The regression slipped in via #2297 which moved the proxy/HERMES_HOME

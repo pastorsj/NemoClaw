@@ -9,7 +9,7 @@ Pre-wrapping double-wraps the tool, which lenient providers tolerate but strict
 ones (Google Gemini) reject with HTTP 400, and it also drops
 ``transcribe_audio``'s real ``parameters`` to ``{}`` at the outer level.
 
-Runs standalone: ``python -m unittest`` from ``agents/hermes/plugin`` (stdlib +
+Runs standalone: ``python -m unittest`` from ``packages/nemoclaw-hermes/plugin`` (stdlib +
 PyYAML only; no Hermes runtime required).
 """
 

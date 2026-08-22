@@ -14,8 +14,8 @@ const repoRoot = path.join(import.meta.dirname, "..");
 const runtimeRoot = "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime";
 const dockerfiles = [
   "Dockerfile",
-  "agents/hermes/Dockerfile",
-  "agents/langchain-deepagents-code/Dockerfile",
+  "packages/nemoclaw-hermes/Dockerfile",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ] as const;
 
 function createCacheSeedFixture(): {

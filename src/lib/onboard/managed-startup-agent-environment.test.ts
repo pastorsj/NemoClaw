@@ -6,7 +6,7 @@ import { Buffer } from "node:buffer";
 
 import { describe, expect, it } from "vitest";
 
-import { readHermesBuildSettings } from "../../../agents/hermes/config/build-env";
+import { readHermesBuildSettings } from "../../../packages/nemoclaw-hermes/config/build-env";
 import { buildConfig as buildOpenClawConfig } from "../../../scripts/generate-openclaw-config.mts";
 import {
   type ManagedStartupAgentEnvironment,

@@ -120,7 +120,7 @@ const EXDEV_TMPFS_DRIVER_CONFIG = JSON.stringify({
   },
 });
 const STOCK_OPENCLAW_POLICY_PATHS = [
-  path.join(REPO_ROOT, "agents", "openclaw", "policy-permissive.yaml"),
+  path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "policy-permissive.yaml"),
   path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
   path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
 ] as const;

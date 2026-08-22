@@ -73,23 +73,23 @@ COPY scripts/lib/bundled-npm-package.mts /scripts/lib/bundled-npm-package.mts
 COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts
 COPY scripts/lib/patch-bundled-npm-ip-address.mts /scripts/lib/patch-bundled-npm-ip-address.mts
 COPY scripts/patch-bundled-npm-tar.mts /scripts/patch-bundled-npm-tar.mts
-COPY agents/hermes/security-dependencies.patch /scripts/hermes-security-dependencies.patch
+COPY packages/nemoclaw-hermes/security-dependencies.patch /scripts/hermes-security-dependencies.patch
 
 FROM scratch AS hermes-agent-payload
 
-COPY agents/hermes/plugin/ /opt/nemoclaw-hermes-plugin/
+COPY packages/nemoclaw-hermes/plugin/ /opt/nemoclaw-hermes-plugin/
 # Channel-owned Google Chat runtime asset, loaded by the plugin beside its own
 # __init__.py.
 COPY src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py /opt/nemoclaw-hermes-plugin/googlechat_adapter.py
-COPY agents/hermes/generate-config.ts /opt/nemoclaw-hermes-config/generate-config.ts
-COPY agents/hermes/config/ /opt/nemoclaw-hermes-config/config/
-COPY agents/hermes/image-build-probes.py /opt/nemoclaw-hermes-config/image-build-probes.py
-COPY agents/hermes/patch-gateway-runtime-metadata.py /opt/nemoclaw-hermes-config/patch-gateway-runtime-metadata.py
-COPY agents/hermes/patch-gateway-process-identity.py /opt/nemoclaw-hermes-config/patch-gateway-process-identity.py
-COPY agents/hermes/patch-cron-execution-runtime.py /opt/nemoclaw-hermes-config/patch-cron-execution-runtime.py
-COPY agents/hermes/patch-cron-restore-drain.py /opt/nemoclaw-hermes-config/patch-cron-restore-drain.py
-COPY agents/hermes/patch-neutral-platform-env-activation.py /opt/nemoclaw-hermes-config/patch-neutral-platform-env-activation.py
-COPY agents/hermes/host/managed-tool-gateway-matrix.json /opt/nemoclaw-hermes-config/managed-tool-gateway-matrix.json
+COPY packages/nemoclaw-hermes/generate-config.ts /opt/nemoclaw-hermes-config/generate-config.ts
+COPY packages/nemoclaw-hermes/config/ /opt/nemoclaw-hermes-config/config/
+COPY packages/nemoclaw-hermes/image-build-probes.py /opt/nemoclaw-hermes-config/image-build-probes.py
+COPY packages/nemoclaw-hermes/patch-gateway-runtime-metadata.py /opt/nemoclaw-hermes-config/patch-gateway-runtime-metadata.py
+COPY packages/nemoclaw-hermes/patch-gateway-process-identity.py /opt/nemoclaw-hermes-config/patch-gateway-process-identity.py
+COPY packages/nemoclaw-hermes/patch-cron-execution-runtime.py /opt/nemoclaw-hermes-config/patch-cron-execution-runtime.py
+COPY packages/nemoclaw-hermes/patch-cron-restore-drain.py /opt/nemoclaw-hermes-config/patch-cron-restore-drain.py
+COPY packages/nemoclaw-hermes/patch-neutral-platform-env-activation.py /opt/nemoclaw-hermes-config/patch-neutral-platform-env-activation.py
+COPY packages/nemoclaw-hermes/host/managed-tool-gateway-matrix.json /opt/nemoclaw-hermes-config/managed-tool-gateway-matrix.json
 COPY src/lib/hermes-managed-route.ts /src/lib/hermes-managed-route.ts
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
@@ -104,40 +104,40 @@ COPY scripts/lib/corporate-ca-runtime.sh /usr/local/lib/nemoclaw/corporate-ca-ru
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY scripts/lib/gateway-supervisor.sh /usr/local/lib/nemoclaw/gateway-supervisor.sh
 COPY scripts/lib/sandbox-rlimits.sh /usr/local/lib/nemoclaw/sandbox-rlimits.sh
-COPY agents/hermes/start.sh /usr/local/bin/nemoclaw-start
+COPY packages/nemoclaw-hermes/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
-COPY agents/hermes/validate-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py
-COPY agents/hermes/patch-session-list-preview.py /usr/local/lib/nemoclaw/patch-hermes-session-list-preview.py
-COPY agents/hermes/patch-hermes-sqlite-temp-store.py /usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py
-COPY agents/hermes/patch-discord-recovery-permissions.py /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py
-COPY agents/hermes/patch-profile-policy-defaults.py /usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py
-COPY agents/hermes/managed_policy.py /usr/local/lib/nemoclaw/managed_policy.py
-COPY agents/hermes/patch-langfuse-credentials.mts /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts
-COPY agents/hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
-COPY agents/hermes/runtime-config-guard.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py
-COPY agents/hermes/finalize-tirith-marker.py /usr/local/lib/nemoclaw/finalize-tirith-marker.py
-COPY agents/hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py
-COPY agents/hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py
-COPY agents/hermes/cron-restore-control.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py
+COPY packages/nemoclaw-hermes/validate-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py
+COPY packages/nemoclaw-hermes/patch-session-list-preview.py /usr/local/lib/nemoclaw/patch-hermes-session-list-preview.py
+COPY packages/nemoclaw-hermes/patch-hermes-sqlite-temp-store.py /usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py
+COPY packages/nemoclaw-hermes/patch-discord-recovery-permissions.py /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py
+COPY packages/nemoclaw-hermes/patch-profile-policy-defaults.py /usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py
+COPY packages/nemoclaw-hermes/managed_policy.py /usr/local/lib/nemoclaw/managed_policy.py
+COPY packages/nemoclaw-hermes/patch-langfuse-credentials.mts /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts
+COPY packages/nemoclaw-hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
+COPY packages/nemoclaw-hermes/runtime-config-guard.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py
+COPY packages/nemoclaw-hermes/finalize-tirith-marker.py /usr/local/lib/nemoclaw/finalize-tirith-marker.py
+COPY packages/nemoclaw-hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py
+COPY packages/nemoclaw-hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py
+COPY packages/nemoclaw-hermes/cron-restore-control.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py
 COPY src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
 COPY scripts/runtime-state-mutation-control.py /usr/local/lib/nemoclaw/runtime-state-mutation-control.py
 COPY scripts/runtime-state-mutation-startup-gate.py /usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py
 COPY scripts/runtime_state_mutation_hermes_publisher.py /usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py
-COPY agents/hermes/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
-COPY agents/hermes/runtime-state-mutation-publisher-v1.json /usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json
+COPY packages/nemoclaw-hermes/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
+COPY packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json /usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json
 COPY nemoclaw-blueprint/scripts/*.js /usr/local/lib/nemoclaw/preloads/
 
 FROM scratch AS hermes-wrapper-payload
 
-COPY agents/hermes/hermes-wrapper.py /usr/local/lib/nemoclaw/hermes-wrapper.py
-COPY agents/hermes/validate-cli-adapter.py /usr/local/lib/nemoclaw/validate-hermes-cli-adapter.py
-COPY agents/hermes/hermes-cli-adapter-v1.json /usr/local/share/nemoclaw/hermes-cli-adapter-v1.json
+COPY packages/nemoclaw-hermes/hermes-wrapper.py /usr/local/lib/nemoclaw/hermes-wrapper.py
+COPY packages/nemoclaw-hermes/validate-cli-adapter.py /usr/local/lib/nemoclaw/validate-hermes-cli-adapter.py
+COPY packages/nemoclaw-hermes/hermes-cli-adapter-v1.json /usr/local/share/nemoclaw/hermes-cli-adapter-v1.json
 
 
 # Fetch the exact managed capability wheels outside RUN instructions so
@@ -694,7 +694,7 @@ RUN node --experimental-strip-types \
 # updated hash below; otherwise the build fails. This blocks
 # silent supply-chain tampering of the build context (an attacker rewriting a
 # file has to also rewrite the Dockerfile-committed hash, which reviewers gate).
-# Regenerate with `sha256sum agents/hermes/{hermes-wrapper.py,hermes-cli-adapter-v1.json,validate-cli-adapter.py,validate-env-secret-boundary.py,finalize-tirith-marker.py,cron-restore-control.py}`.
+# Regenerate with `sha256sum packages/nemoclaw-hermes/{hermes-wrapper.py,hermes-cli-adapter-v1.json,validate-cli-adapter.py,validate-env-secret-boundary.py,finalize-tirith-marker.py,cron-restore-control.py}`.
 ARG NEMOCLAW_HERMES_WRAPPER_SHA256=f4276e9833638b7a620176c88bd329d6b6d4948538a3227b727a1397146a0e0e
 ARG NEMOCLAW_HERMES_CLI_ADAPTER_SHA256=989edf54a8c09c6efb348600a8aa2f264c0b71408eb9d7bcd579b92cbeccf9b1
 ARG NEMOCLAW_HERMES_CLI_ADAPTER_VALIDATOR_SHA256=db4046e79e513eab67b069a8eda20167b8b65529cf26842531d2ad673c670330

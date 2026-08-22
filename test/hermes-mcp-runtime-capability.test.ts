@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { dockerRunCommandBetween } from "./helpers/dockerfile-run-shell";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
+const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 
 function runHermesOptionalRuntimeValidation({
   mcpAvailable,

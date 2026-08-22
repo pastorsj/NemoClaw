@@ -38,7 +38,7 @@ function explicitLifecycleScripts(block) {
     block.includes(lockedRuntimeCommand)
   ) {
     const manifest = JSON.parse(
-      fs.readFileSync("agents/openclaw/openclaw-runtime/package.json", "utf8"),
+      fs.readFileSync("packages/nemoclaw-openclaw/openclaw-runtime/package.json", "utf8"),
     );
     scripts.push({
       packageSpec: "openclaw@" + manifest.dependencies.openclaw,

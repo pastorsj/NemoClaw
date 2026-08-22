@@ -18,6 +18,22 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       description: "List available agent runtimes for onboard --agent",
     },
   ],
+  "harness:list": [
+    {
+      group: "Getting Started",
+      order: 1.55,
+      usage: "nemoclaw harness list",
+      description: "List available harness packages",
+    },
+  ],
+  "harness:install": [
+    {
+      group: "Getting Started",
+      order: 1.6,
+      usage: "nemoclaw harness install <openclaw|hermes|langchain-deepagents-code>",
+      description: "Install a bundled harness package",
+    },
+  ],
   ...SANDBOX_SESSIONS_DISPLAY_LAYOUT,
   "backup-all": [
     {

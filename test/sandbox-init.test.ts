@@ -760,7 +760,7 @@ EOF
   });
 
   describe("entrypoints call harden_resource_limits", () => {
-    const entrypoints = ["../scripts/nemoclaw-start.sh", "../agents/hermes/start.sh"];
+    const entrypoints = ["../scripts/nemoclaw-start.sh", "../packages/nemoclaw-hermes/start.sh"];
 
     // Both entrypoints must delegate RLIMIT hardening to the shared helper and
     // must no longer carry the pre-#4527 raw inline `ulimit -Su 512` block.

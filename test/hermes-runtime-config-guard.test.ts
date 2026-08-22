@@ -9,8 +9,7 @@ import { loadAgent } from "../src/lib/agent/defs";
 const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "runtime-config-guard.py",
 );
 

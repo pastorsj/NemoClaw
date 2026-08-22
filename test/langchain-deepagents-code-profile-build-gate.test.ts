@@ -11,9 +11,9 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const checkPath = path.join(repoRoot, "scripts", "check-dcode-profile-import-gate.sh");
 const reviewedDockerfiles = [
-  "agents/langchain-deepagents-code/Dockerfile.base",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
   "test/Dockerfile.dcode-profile-missing-dependencies",
-  "agents/langchain-deepagents-code/Dockerfile",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ] as const;
 const unreviewedArgCases = [
   ...reviewedDockerfiles.map((dockerfile) => ({
@@ -56,7 +56,7 @@ function runGateWithFakeDocker(
 set -eu
 printf '%s\\n' "$*" >> "\${FAKE_DOCKER_LOG:?}"
 case " $* " in
-  *" --file agents/langchain-deepagents-code/Dockerfile "*)
+  *" --file packages/nemoclaw-langchain-deepagents-code/Dockerfile "*)
     case "\${FAKE_DOCKER_MODE:?}" in
       expected-failure-with-marker)
         printf '%s\\n' NEMOCLAW_DCODE_PROFILE_IMPORT_GATE "ModuleNotFoundError: No module named 'deepagents'"
@@ -120,7 +120,7 @@ describe("LangChain Deep Agents Code profile build gate", () => {
     );
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.calls).toContain("--file agents/langchain-deepagents-code/Dockerfile");
+    expect(result.calls).toContain("--file packages/nemoclaw-langchain-deepagents-code/Dockerfile");
   });
 
   it("accepts only the expected production-build failure at the runtime marker", () => {
@@ -135,9 +135,9 @@ describe("LangChain Deep Agents Code profile build gate", () => {
     expect(result.stdout).toContain(
       "DCode profile import gate rejected a base missing deepagents and deepagents-code",
     );
-    expect(result.calls).toContain("--file agents/langchain-deepagents-code/Dockerfile.base");
+    expect(result.calls).toContain("--file packages/nemoclaw-langchain-deepagents-code/Dockerfile.base");
     expect(result.calls).toContain("--file test/Dockerfile.dcode-profile-missing-dependencies");
-    expect(result.calls).toContain("--file agents/langchain-deepagents-code/Dockerfile");
+    expect(result.calls).toContain("--file packages/nemoclaw-langchain-deepagents-code/Dockerfile");
     expect(result.calls).not.toContain(":latest");
     expect([...result.calls.matchAll(/--build-arg ([^ =]+)=/g)].map((match) => match[1])).toEqual([
       "BASE_IMAGE",

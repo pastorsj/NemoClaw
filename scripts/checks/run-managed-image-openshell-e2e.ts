@@ -71,8 +71,8 @@ const GATEWAY_PORT = 8080;
 const IMMUTABLE_MANIFEST_REFERENCE_RE = /^([^\s@]+)@(sha256:[a-f0-9]{64})$/u;
 const MANAGED_AGENT_BASE_POLICIES: Record<ShippedManagedImageAgent, readonly string[]> = {
   openclaw: ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
-  hermes: ["agents", "hermes", "policy-additions.yaml"],
-  "langchain-deepagents-code": ["agents", "langchain-deepagents-code", "policy-additions.yaml"],
+  hermes: ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
+  "langchain-deepagents-code": ["packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"],
 };
 
 export const MANAGED_IMAGE_OPENSHELL_SUPERVISOR_ARGV = OPENSHELL_SANDBOX_SUPERVISOR_ARGV;

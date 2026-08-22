@@ -4,7 +4,7 @@
 # OpenClaw MCP Runtime Dependency Review
 
 This file records the reviewed `mcporter` baseline installed in the OpenClaw sandbox image.
-Update it and `agents/openclaw/mcporter-runtime/package*.json` together whenever `MCPORTER_VERSION`, its integrity value, a manifest override, or the locked graph changes in `Dockerfile.base` or `Dockerfile`.
+Update it and `packages/nemoclaw-openclaw/mcporter-runtime/package*.json` together whenever `MCPORTER_VERSION`, its integrity value, a manifest override, or the locked graph changes in `Dockerfile.base` or `Dockerfile`.
 
 - Package: `mcporter@0.7.3`
 - Purpose: in-sandbox OpenClaw MCP configuration and client adapter; it is not a host bridge, proxy, relay, or listener.
@@ -13,9 +13,9 @@ Update it and `agents/openclaw/mcporter-runtime/package*.json` together whenever
 - License: `MIT`, from the npm registry package metadata.
 - npm integrity: `sha512-egoPVYqTnWb3NjRIxo+xc8OrAI0dlPrJm9pAiZx0pImuNIV5rKhGtTnIfH/Y1ldGPVu74ibj3KR5c9U/QSdQFA==`
 - Registry metadata independently queried from npm: 2026-06-30.
-- Locked graph: `agents/openclaw/mcporter-runtime/package-lock.json` (npm lockfile version 3).
-- Lock regeneration command: `npm --prefix agents/openclaw/mcporter-runtime install --package-lock-only --ignore-scripts --omit=dev`
-- Advisory command: `npm --prefix agents/openclaw/mcporter-runtime ci --ignore-scripts --omit=dev && node --experimental-strip-types scripts/lib/reviewed-npm-audit.mts --directory agents/openclaw/mcporter-runtime --exceptions ci/npm-audit-exceptions.json --graph mcporter-runtime --threshold high && npm --prefix agents/openclaw/mcporter-runtime audit signatures`
+- Locked graph: `packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json` (npm lockfile version 3).
+- Lock regeneration command: `npm --prefix packages/nemoclaw-openclaw/mcporter-runtime install --package-lock-only --ignore-scripts --omit=dev`
+- Advisory command: `npm --prefix packages/nemoclaw-openclaw/mcporter-runtime ci --ignore-scripts --omit=dev && node --experimental-strip-types scripts/lib/reviewed-npm-audit.mts --directory packages/nemoclaw-openclaw/mcporter-runtime --exceptions ci/npm-audit-exceptions.json --graph mcporter-runtime --threshold high && npm --prefix packages/nemoclaw-openclaw/mcporter-runtime audit signatures`
 - Advisory review date: 2026-08-11.
 - Advisory result: `0` known vulnerabilities across the resolved production dependency graph. npm verified registry signatures for all `120` resolved packages and attestations for `14` packages.
 - Security override: `@hono/node-server@2.0.11` (`sha512-bjD221KPLoJTWUwso1J6fGKiTXEUFedG/s0visavY4zakFPkeGURMRNly+FhBHs7T8Dz4qHaZIMX9ZoJHSJtKA==`) replaces the SDK's vulnerable `1.19.14` resolution for `GHSA-frvp-7c67-39w9` and the previously reviewed `2.0.5` resolution affected by `GHSA-9mqv-5hh9-4cgg`. `2.0.5` is the first patched release for `GHSA-frvp-7c67-39w9`. The reviewed v2 range retains the `getRequestListener` API used by `@modelcontextprotocol/sdk`; its Node.js 20 floor is below NemoClaw's Node.js 22.19 floor, and the `/vercel` adapter is not consumed. Mcporter's production path imports the SDK's client transport, not the server adapter, and the image build still exercises the installed CLI after the locked install. Remove the override when the SDK's declared range resolves to a reviewed release outside both affected ranges.
@@ -32,8 +32,8 @@ The reviewed audit wrapper reports lower-severity production findings and blocks
 ## WeChat plugin runtime graph
 
 - Package: `@tencent-weixin/openclaw-weixin@2.4.3`.
-- Locked graph: `agents/openclaw/wechat-runtime/package-lock.json` (npm lockfile version 3).
-- Lock regeneration: `npm install --package-lock-only --legacy-peer-deps --ignore-scripts --omit=dev --prefix agents/openclaw/wechat-runtime`.
+- Locked graph: `packages/nemoclaw-openclaw/wechat-runtime/package-lock.json` (npm lockfile version 3).
+- Lock regeneration: `npm install --package-lock-only --legacy-peer-deps --ignore-scripts --omit=dev --prefix packages/nemoclaw-openclaw/wechat-runtime`.
 - Installation boundary: the image materializes the reviewed lock into a root-owned dedicated npm cache and adds the exact package metadata needed by npm's offline resolver. Before that cache becomes immutable, the shared `scripts/lib/reviewed-npm-archive.mts` implementation re-packs every locked archive offline from the final cache and rejects registry-origin drift, metadata or packed-byte SRI drift, unsafe filenames, missing archives, and symlinks. The sandbox user copies that verified immutable source into a writable cache used for registry metadata lookup, archive packing, and the OpenClaw plugin install; no retrieval step falls back to `HOME/.npm`. The copy is deleted in the same image layer, and the trusted cache is never writable. The installer runs in offline, legacy-peer mode, then `verify-wechat-runtime-lock.mts` rejects integrity, version, dependency-set, or peer-range drift and refuses an image OpenClaw version below the plugin's locked peer minimum.
 - Default CI gate: `wechat-runtime-audit` in `.github/workflows/pr.yaml` and `.github/workflows/main.yaml` invokes the reviewed `.github/actions/ci-wechat-runtime-audit` implementation.
   The pull request workflow resolves the action from the PR base SHA.
@@ -52,7 +52,7 @@ The reviewed audit wrapper reports lower-severity production findings and blocks
   Any final nonzero status fails the action.
   The report directory stores each attempt in `npm-audit-signatures-attempt-<n>.txt`.
   After a failed attempt, the action copies available npm debug logs to `npm-audit-signature-debug/`.
-- Advisory command: `npm ci --ignore-scripts --omit=dev --legacy-peer-deps --prefix agents/openclaw/wechat-runtime && npm audit --omit=dev --audit-level=low --json --prefix agents/openclaw/wechat-runtime && npm audit signatures --prefix agents/openclaw/wechat-runtime`.
+- Advisory command: `npm ci --ignore-scripts --omit=dev --legacy-peer-deps --prefix packages/nemoclaw-openclaw/wechat-runtime && npm audit --omit=dev --audit-level=low --json --prefix packages/nemoclaw-openclaw/wechat-runtime && npm audit signatures --prefix packages/nemoclaw-openclaw/wechat-runtime`.
 - Advisory review: `2026-07-12`; result: `0` known vulnerabilities across the resolved production graph.
 - Regression tests: `test/wechat-locked-install.test.ts` keeps the manifest runtime-lock paths and installer verification dispatch synchronized; `test/verify-wechat-runtime-lock.test.ts` proves the installed graph and OpenClaw peer-range compatibility fail closed; `test/wechat-runtime-audit-workflow.test.ts` keeps the Docker cache lifecycle, audit threshold, bounded download-only signature retry, invalid-signature denial, and real npm-pack boundary synchronized.
 

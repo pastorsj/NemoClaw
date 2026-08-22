@@ -12,8 +12,7 @@ import { isWsl } from "../src/lib/platform";
 const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
-  "agents",
-  "hermes",
+  "packages", "nemoclaw-hermes",
   "runtime-config-guard.py",
 );
 const SANDBOX_GID_EXPECTED = 12345;
