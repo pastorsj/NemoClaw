@@ -12,7 +12,7 @@ export const MCP_DEV_TRUSTED_NODE_SETUP_CONTENT_SHA256 =
 export const MCP_DEV_TRUSTED_PREFIX_CONTENT_SHA256 =
   "067df18297c3b5e5175dc11de071a0f3c261aa894db6141b8b789d67f5e9c0d1";
 export const MCP_DEV_POST_INSTALL_TRANSITION_CONTENT_SHA256 =
-  "62cf2ee01ac7192f41fc7b2b071de729da8bacec1e4f693da1ec6f0b1f4723c0";
+  "51605b2b2ca63e59d4d21698b2aff2241af7ecc5a2bf5ed384853eef76cb1d55";
 
 export function contentSha256(value: unknown): string {
   return createHash("sha256")
