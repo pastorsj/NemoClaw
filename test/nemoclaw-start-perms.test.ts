@@ -17,6 +17,8 @@ const START_SCRIPT = path.join(
 const NORMALIZER_SCRIPT = path.join(
   import.meta.dirname,
   "..",
+  "packages",
+  "nemoclaw-openclaw",
   "scripts",
   "lib",
   "normalize_mutable_config_perms.py",

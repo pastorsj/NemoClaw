@@ -11,6 +11,8 @@ import { describe, expect, it } from "vitest";
 const PATCH_SCRIPT = path.join(
   import.meta.dirname,
   "..",
+  "packages",
+  "nemoclaw-openclaw",
   "scripts",
   "patch-openclaw-chat-send.mts",
 );

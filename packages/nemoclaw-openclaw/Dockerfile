@@ -544,6 +544,7 @@ COPY --from=builder /opt/nemoclaw/dist/ /opt/nemoclaw/dist/
 COPY packages/nemoclaw-openclaw/plugin/openclaw.plugin.json /opt/nemoclaw/
 COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
 COPY packages/nemoclaw-openclaw/model-specific-setup/openclaw/ /opt/nemoclaw-blueprint/model-specific-setup/openclaw/
+COPY packages/nemoclaw-openclaw/openclaw-plugins/ /opt/nemoclaw-blueprint/openclaw-plugins/
 COPY packages/nemoclaw-openclaw/policy-additions.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox.yaml
 COPY packages/nemoclaw-openclaw/policy-permissive-default.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml
 

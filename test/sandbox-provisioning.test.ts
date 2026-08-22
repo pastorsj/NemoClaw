@@ -189,6 +189,18 @@ function runOpenclawStaleGroupFallback() {
 }
 
 describe("sandbox provisioning: runtime npm online state", () => {
+  // source-shape-contract: compatibility -- Model manifests and their package-owned plugin sources must remain siblings in the completed image so generator path validation succeeds.
+  it("stages model-specific plugin sources beside their manifests", () => {
+    const dockerfile = fs.readFileSync(DOCKERFILE, "utf-8");
+    expect(dockerfile).toContain(
+      "COPY packages/nemoclaw-openclaw/model-specific-setup/openclaw/ /opt/nemoclaw-blueprint/model-specific-setup/openclaw/",
+    );
+    expect(dockerfile).toContain(
+      "COPY packages/nemoclaw-openclaw/openclaw-plugins/ /opt/nemoclaw-blueprint/openclaw-plugins/",
+    );
+    expect(dockerfile).toContain("COPY --from=openclaw-plugin-payload / /");
+  });
+
   it("does not bake the split-user OpenClaw state marker into the runtime environment", () => {
     const exports = collectDockerfileEnvExports(DOCKERFILE);
     const probe = [

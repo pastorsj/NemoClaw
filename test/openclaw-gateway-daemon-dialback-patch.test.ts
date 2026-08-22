@@ -22,6 +22,8 @@ import { restoreEnv } from "./helpers/env-test-helpers";
 const PATCH_SCRIPT = path.join(
   import.meta.dirname,
   "..",
+  "packages",
+  "nemoclaw-openclaw",
   "scripts",
   "openclaw",
   "patch-gateway-daemon-dialback.mts",

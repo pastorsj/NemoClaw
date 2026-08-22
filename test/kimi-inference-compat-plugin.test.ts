@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 const PLUGIN_PATH = path.resolve(
   import.meta.dirname,
   "..",
-  "nemoclaw-blueprint",
+  "packages",
+  "nemoclaw-openclaw",
   "openclaw-plugins",
   "kimi-inference-compat",
   "index.js",

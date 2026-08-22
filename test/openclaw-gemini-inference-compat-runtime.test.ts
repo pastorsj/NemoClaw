@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -15,7 +14,8 @@ const PLUGIN_INSTALL_PATH = "/usr/local/share/nemoclaw/openclaw-plugins/gemini-i
 const PLUGIN_SOURCE_PATH = path.join(
   import.meta.dirname,
   "..",
-  "nemoclaw-blueprint",
+  "packages",
+  "nemoclaw-openclaw",
   "openclaw-plugins",
   "gemini-inference-compat",
 );
@@ -262,7 +262,11 @@ function parseJsonOutput(output: string): unknown {
 
 suite("OpenClaw Gemini managed-route runtime compatibility", () => {
   beforeAll(() => {
-    contextDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gemini-runtime-"));
+    const cacheDir = path.join(import.meta.dirname, "..", "node_modules", ".cache");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    contextDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(cacheDir, "nemoclaw-gemini-runtime-")),
+    );
     stagedPluginPath = path.join(contextDir, "plugin");
     fs.cpSync(PLUGIN_SOURCE_PATH, stagedPluginPath, { recursive: true });
     fs.chmodSync(stagedPluginPath, 0o755);

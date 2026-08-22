@@ -14,7 +14,14 @@ const START_SCRIPT = path.join(
   "nemoclaw-openclaw",
   "start.sh",
 );
-const APPROVAL_POLICY_DIR = path.join(import.meta.dirname, "..", "scripts", "lib");
+const APPROVAL_POLICY_DIR = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "lib",
+);
 
 function startScriptHeredoc(src: string, marker: string): string {
   const match = src.match(new RegExp(`<<'${marker}'[^\\n]*\\n([\\s\\S]*?)\\n${marker}`));

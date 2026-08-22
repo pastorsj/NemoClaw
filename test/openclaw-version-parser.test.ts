@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const parser = path.join(repoRoot, "scripts", "extract-semver.sh");
+const parser = path.join(
+  repoRoot,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "extract-semver.sh",
+);
 
 function extract(input: string) {
   return spawnSync(parser, ["openclaw"], { encoding: "utf8", input });

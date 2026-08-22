@@ -51,6 +51,8 @@ const SCRIPT_PATH = path.join(
 const GENERATOR_PATH = path.join(
   import.meta.dirname,
   "..",
+  "packages",
+  "nemoclaw-openclaw",
   "scripts",
   "generate-openclaw-config.mts",
 );

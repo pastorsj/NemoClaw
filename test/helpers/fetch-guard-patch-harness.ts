@@ -7,9 +7,7 @@ import path from "node:path";
 
 const DOCKERFILE = path.join(import.meta.dirname, "..", "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 const OPENCLAW_VERSION_EXTRACTOR = path.join(
-  import.meta.dirname,
-  "..",
-  "..",
+  path.dirname(DOCKERFILE),
   "scripts",
   "extract-semver.sh",
 );
