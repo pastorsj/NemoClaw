@@ -3,62 +3,100 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
-import { getAgentChoices, loadAgent } from "../agent/defs";
+import { type AgentChoice, getAgentChoices, loadAgent } from "../agent/defs";
 import { resolveAgent } from "../agent/onboard";
 import { createSelectOnboardAgent } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 
-// Exercises the real agent registry (agents/openclaw + agents/hermes) so the
-// red->green transition reflects genuine wizard behavior rather than a mock.
-function makeSelectOnboardAgent(reply: string) {
+const STANDARD_AGENT_CHOICES = [
+  {
+    name: "openclaw",
+    displayName: "OpenClaw",
+    description: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)",
+  },
+  {
+    name: "hermes",
+    displayName: "Hermes Agent",
+    description: "Self-improving AI agent with learning loop (Nous Research)",
+  },
+  {
+    name: "langchain-deepagents-code",
+    displayName: "LangChain Deep Agents Code",
+    description: "Terminal coding agent built on the Deep Agents SDK",
+  },
+] as const;
+
+// Exercise the real standard agent registry so these tests observe wizard behavior directly.
+function makeSelectOnboardAgent(
+  reply: string,
+  { nonInteractive = false }: { nonInteractive?: boolean } = {},
+) {
   const prompt = vi.fn(async (_question: string) => reply);
   const log = vi.fn((_message?: string) => {});
+  const note = vi.fn((_message: string) => {});
+  const selectFromNumberedMenu = vi.fn(
+    (rawChoice: string, defaultIdx: number, options: AgentChoice[]) =>
+      selectFromNumberedMenuOrExit(rawChoice, defaultIdx, options),
+  );
   const select = createSelectOnboardAgent({
     resolveAgent,
     loadAgent,
     getAgentChoices,
-    isNonInteractive: () => false,
-    note: () => {},
+    isNonInteractive: () => nonInteractive,
+    note,
     log,
     prompt,
-    selectFromNumberedMenu: selectFromNumberedMenuOrExit,
+    selectFromNumberedMenu,
   });
-  return { select, prompt, log };
+  return { select, prompt, log, note, selectFromNumberedMenu };
 }
 
-describe("selectOnboardAgent interactive agent selection", () => {
+describe("selectOnboardAgent behavior", () => {
   beforeEach(() => {
-    delete process.env.NEMOCLAW_AGENT;
+    vi.stubEnv("NEMOCLAW_AGENT", "");
+    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "");
+    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", "");
   });
 
   afterEach(() => {
-    delete process.env.NEMOCLAW_AGENT;
+    vi.unstubAllEnvs();
   });
 
-  it("presents both OpenClaw and Hermes and honors a Hermes selection", async () => {
-    // Derive Hermes' menu position from the real registry so the test stays
-    // correct if another agent is later sorted ahead of Hermes.
-    const choices = getAgentChoices();
-    const hermesPosition = choices.findIndex((choice) => choice.name === "hermes") + 1;
-    assert.ok(hermesPosition > 0, "expected Hermes in the agent registry");
-    const { select, prompt, log } = makeSelectOnboardAgent(String(hermesPosition));
+  it("shows the three standard agents in order and keeps OpenClaw as choice 1", async () => {
+    const { select, prompt, log, selectFromNumberedMenu } = makeSelectOnboardAgent("");
 
     const agent = await select({ canPrompt: true });
 
-    assert.equal(agent?.name, "hermes");
+    assert.equal(agent, null);
+    assert.deepEqual(getAgentChoices(), STANDARD_AGENT_CHOICES);
     assert.equal(prompt.mock.calls.length, 1);
+    assert.match(prompt.mock.calls[0]?.[0] ?? "", /Choose \[1\]/);
+    assert.deepEqual(selectFromNumberedMenu.mock.calls[0], ["", 1, STANDARD_AGENT_CHOICES]);
     const menu = log.mock.calls.map((call) => call[0]).join("\n");
     assert.match(menu, /OpenClaw/);
-    assert.match(menu, /Hermes/);
+    assert.match(menu, /Gateway-based AI agent with plugin ecosystem/);
+    assert.match(menu, /Hermes Agent/);
+    assert.match(menu, /Self-improving AI agent with learning loop/);
+    assert.match(menu, /LangChain Deep Agents Code/);
+    assert.match(menu, /Terminal coding agent built on the Deep Agents SDK/);
   });
 
-  it("defaults to the OpenClaw path when the user accepts the default", async () => {
-    const { select } = makeSelectOnboardAgent("");
+  it("returns LangChain Deep Agents Code when the user selects choice 3", async () => {
+    const { select } = makeSelectOnboardAgent("3");
 
     const agent = await select({ canPrompt: true });
 
-    // The OpenClaw default path is represented by a null agent downstream.
+    assert.equal(agent?.name, "langchain-deepagents-code");
+  });
+
+  it("reports the default OpenClaw selection without prompting in non-interactive mode", async () => {
+    const { select, prompt, note } = makeSelectOnboardAgent("3", { nonInteractive: true });
+
+    const agent = await select({ canPrompt: true });
+
     assert.equal(agent, null);
+    assert.equal(prompt.mock.calls.length, 0);
+    assert.match(note.mock.calls[0]?.[0] ?? "", /\[non-interactive\] Agent: OpenClaw/);
   });
 
   it("skips the picker when an explicit --agent flag is provided", async () => {

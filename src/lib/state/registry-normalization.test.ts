@@ -67,6 +67,60 @@ describe("sandbox registry normalization", () => {
     estimatedModelDownloadBytes: null,
   } as const;
 
+  it("preserves an absent legacy OpenClaw identity and unrelated sandbox fields", async () => {
+    const registry = await loadRegistryWith({
+      "identity-baseline": {
+        name: "identity-baseline",
+        provider: "nvidia",
+        model: "nvidia/example-model",
+        policies: ["github"],
+        gatewayName: "nemoclaw",
+      },
+    });
+
+    const normalized = registry.getSandbox("identity-baseline");
+    expect(normalized).toMatchObject({
+      name: "identity-baseline",
+      provider: "nvidia",
+      model: "nvidia/example-model",
+      policies: ["github"],
+      gatewayName: "nemoclaw",
+    });
+    expect(normalized).not.toHaveProperty("agent");
+  });
+
+  it.each([
+    ["a null legacy OpenClaw identity", null],
+    ["an explicit OpenClaw identity", "openclaw"],
+    ["an explicit Hermes identity", "hermes"],
+    ["an explicit LangChain Deep Agents Code identity", "langchain-deepagents-code"],
+    ["an unknown string identity", "unknown-runtime"],
+    ["a malformed non-string identity", 42],
+  ] as const)("preserves %s and unrelated sandbox fields", async (_label, identity) => {
+    const entry: Record<string, unknown> = {
+      name: "identity-baseline",
+      provider: "nvidia",
+      model: "nvidia/example-model",
+      policies: ["github"],
+      gatewayName: "nemoclaw",
+      agent: identity,
+    };
+    const registry = await loadRegistryWith({ "identity-baseline": entry });
+
+    const normalized = registry.getSandbox("identity-baseline") as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(normalized).toMatchObject({
+      name: "identity-baseline",
+      provider: "nvidia",
+      model: "nvidia/example-model",
+      policies: ["github"],
+      gatewayName: "nemoclaw",
+    });
+    expect(normalized.agent).toBe(identity);
+  });
+
   it.each([null, [], 42, "invalid"])(
     "treats a non-object top-level registry document as empty: %j",
     async (document) => {

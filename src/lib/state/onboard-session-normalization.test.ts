@@ -5,7 +5,8 @@ import { describe, expect, it } from "vitest";
 
 import { createSession, normalizeSession } from "./onboard-session";
 
-type LegacySession = Omit<ReturnType<typeof createSession>, "machine"> & {
+type LegacySession = Omit<ReturnType<typeof createSession>, "agent" | "machine"> & {
+  agent?: unknown;
   machine?: unknown;
 };
 
@@ -16,6 +17,69 @@ function requireNormalizedSession(legacy: LegacySession) {
 }
 
 describe("onboard session normalization", () => {
+  it("normalizes an absent legacy OpenClaw identity to null", () => {
+    const persisted = createSession() as unknown as LegacySession;
+    delete persisted.agent;
+
+    expect(requireNormalizedSession(persisted).agent).toBeNull();
+  });
+
+  it.each([
+    ["a null legacy OpenClaw identity", null, null],
+    ["an explicit OpenClaw identity", "openclaw", "openclaw"],
+    ["an explicit Hermes identity", "hermes", "hermes"],
+    [
+      "an explicit LangChain Deep Agents Code identity",
+      "langchain-deepagents-code",
+      "langchain-deepagents-code",
+    ],
+    ["an unknown string identity", "unknown-runtime", "unknown-runtime"],
+    ["a malformed non-string identity", 42, null],
+  ] as const)("normalizes %s to the current durable value", (_label, input, expected) => {
+    const persisted = createSession() as unknown as LegacySession;
+    persisted.agent = input;
+
+    expect(requireNormalizedSession(persisted).agent).toBe(expected);
+  });
+
+  it("preserves completed and interrupted step state", () => {
+    const completedAt = "2026-08-21T12:00:00.000Z";
+    const interruptedAt = "2026-08-21T12:01:00.000Z";
+    const persisted = createSession({
+      agent: "hermes",
+      status: "failed",
+      lastCompletedStep: "inference",
+      lastStepStarted: "agent_setup",
+      failure: {
+        step: "agent_setup",
+        message: "operator interrupted onboarding",
+        recordedAt: interruptedAt,
+        interrupted: true,
+      },
+    }) as unknown as LegacySession;
+    persisted.steps.inference = {
+      status: "complete",
+      startedAt: completedAt,
+      completedAt,
+      error: null,
+    };
+    persisted.steps.agent_setup = {
+      status: "in_progress",
+      startedAt: interruptedAt,
+      completedAt: null,
+      error: "operator interrupted onboarding",
+    };
+    delete persisted.machine;
+
+    const normalized = requireNormalizedSession(persisted);
+
+    expect(normalized.steps.inference).toEqual(persisted.steps.inference);
+    expect(normalized.steps.agent_setup).toEqual(persisted.steps.agent_setup);
+    expect(normalized.lastCompletedStep).toBe("inference");
+    expect(normalized.lastStepStarted).toBe("agent_setup");
+    expect(normalized.failure).toEqual(persisted.failure);
+  });
+
   it("normalizes old sessions without machine snapshots", () => {
     const legacy = createSession({
       sessionId: "legacy-session",

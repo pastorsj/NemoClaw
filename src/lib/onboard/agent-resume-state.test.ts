@@ -6,10 +6,91 @@ import { describe, expect, it } from "vitest";
 import { decisionSelected } from "../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import { createSession } from "../state/onboard-session";
-import { clearAgentScopedResumeState } from "./agent-resume-state";
+import {
+  clearAgentScopedResumeState,
+  normalizeAgentNameForResumeState,
+} from "./agent-resume-state";
 import { checkpointSandboxIdentityMatches } from "./checkpoint-replay";
 
 describe("clearAgentScopedResumeState", () => {
+  it.each([
+    ["an absent legacy identity", undefined, "openclaw"],
+    ["a null legacy identity", null, "openclaw"],
+    ["explicit OpenClaw", "openclaw", "openclaw"],
+    ["explicit Hermes", "hermes", "hermes"],
+    [
+      "explicit LangChain Deep Agents Code",
+      "langchain-deepagents-code",
+      "langchain-deepagents-code",
+    ],
+    ["a whitespace-padded identity", "  hermes  ", "hermes"],
+  ] as const)("normalizes %s before a resume-state write", (_label, identity, expected) => {
+    expect(normalizeAgentNameForResumeState(identity)).toBe(expected);
+  });
+
+  it.each([
+    ["OpenClaw", "openclaw", null],
+    ["Hermes", "hermes", "hermes"],
+    ["LangChain Deep Agents Code", "langchain-deepagents-code", "langchain-deepagents-code"],
+  ] as const)("writes the current %s durable identity", (_label, selected, expected) => {
+    const session = createSession({ agent: selected === "hermes" ? null : "hermes" });
+
+    clearAgentScopedResumeState(session, selected);
+
+    expect(session.agent).toBe(expected);
+  });
+
+  it("resets completed and interrupted agent steps but keeps the completed gateway", () => {
+    const completedAt = "2026-08-21T12:00:00.000Z";
+    const startedAt = "2026-08-21T12:01:00.000Z";
+    const session = createSession({
+      agent: "hermes",
+      lastCompletedStep: "policies",
+      lastStepStarted: "agent_setup",
+    });
+    session.steps.gateway = {
+      status: "complete",
+      startedAt: completedAt,
+      completedAt,
+      error: null,
+    };
+    session.steps.policies = {
+      status: "complete",
+      startedAt: completedAt,
+      completedAt,
+      error: null,
+    };
+    session.steps.agent_setup = {
+      status: "in_progress",
+      startedAt,
+      completedAt: null,
+      error: "interrupted",
+    };
+
+    clearAgentScopedResumeState(session, "langchain-deepagents-code");
+
+    expect(session.steps.gateway).toEqual({
+      status: "complete",
+      startedAt: completedAt,
+      completedAt,
+      error: null,
+    });
+    expect(session.steps.policies).toEqual({
+      status: "pending",
+      startedAt: null,
+      completedAt: null,
+      error: null,
+    });
+    expect(session.steps.agent_setup).toEqual({
+      status: "pending",
+      startedAt: null,
+      completedAt: null,
+      error: null,
+    });
+    expect(session.lastCompletedStep).toBe("gateway");
+    expect(session.lastStepStarted).toBeNull();
+  });
+
   it("invalidates agent-scoped checkpoint decisions and effect receipts", () => {
     const session = createSession({
       agent: null,
