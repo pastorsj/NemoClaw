@@ -30,22 +30,38 @@ exit 99`,
   );
 }
 
-function writeManagedSource(root: string, revision: string) {
+type TestAgent = "openclaw" | "hermes" | "langchain-deepagents-code";
+
+const CLI_BIN_BY_AGENT: Readonly<Record<TestAgent, string>> = {
+  openclaw: "nemoclaw",
+  hermes: "nemohermes",
+  "langchain-deepagents-code": "nemo-deepagents",
+};
+
+function writeOpenClawPlugin(root: string): void {
+  const pluginRoot = path.join(root, "packages", "nemoclaw-openclaw", "plugin");
+  fs.mkdirSync(path.join(pluginRoot, "dist"), { recursive: true });
+  fs.mkdirSync(path.join(pluginRoot, "node_modules"), { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, "package.json"), '{"name":"nemoclaw-plugin"}');
+  fs.writeFileSync(path.join(pluginRoot, "dist", "index.js"), "module.exports = {};\n");
+}
+
+function skipOpenClawPlugin(_root: string): void {}
+
+function writeManagedSource(
+  root: string,
+  revision: string,
+  cliBin: string,
+  writeAgentPlugin: (root: string) => void,
+) {
   fs.mkdirSync(path.join(root, ".git"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
   fs.mkdirSync(path.join(root, "dist", "lib", "onboard"), { recursive: true });
   fs.mkdirSync(path.join(root, "node_modules"), { recursive: true });
-  const pluginRoot = path.join(root, "packages", "nemoclaw-openclaw", "plugin");
-  fs.mkdirSync(path.join(pluginRoot, "dist"), { recursive: true });
-  fs.mkdirSync(path.join(pluginRoot, "node_modules"), { recursive: true });
   fs.writeFileSync(path.join(root, ".fixture-revision"), revision);
-  fs.writeFileSync(
-    path.join(root, "package.json"),
-    JSON.stringify({ name: "nemoclaw", dependencies: { openclaw: "2026.7.1" } }),
-  );
+  fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ name: "nemoclaw" }));
   fs.writeFileSync(path.join(root, "package-lock.json"), COMMITTED_LOCKFILE);
-  fs.writeFileSync(path.join(pluginRoot, "package.json"), '{"name":"nemoclaw-plugin"}');
-  fs.writeFileSync(path.join(pluginRoot, "dist", "index.js"), "module.exports = {};\n");
+  writeAgentPlugin(root);
   fs.writeFileSync(
     path.join(root, "dist", "lib", "onboard", "preflight.js"),
     "module.exports = {};\n",
@@ -55,8 +71,8 @@ function writeManagedSource(root: string, revision: string) {
     JSON.stringify({ nemoclawVersion: "0.0.99", sourceRevision: revision }, null, 2),
   );
   writeExecutable(
-    path.join(root, "bin", "nemoclaw.js"),
-    '#!/usr/bin/env bash\n[ "$1" = "--version" ] && echo "nemoclaw v0.0.99"\nexit 0\n',
+    path.join(root, "bin", `${cliBin}.js`),
+    `#!/usr/bin/env bash\n[ "$1" = "--version" ] && echo "${cliBin} v0.0.99"\nexit 0\n`,
   );
 }
 
@@ -66,11 +82,24 @@ type InitialStateSetup = (fixture: {
   sourceRoot: string;
   tmp: string;
   revision: string;
+  cliBin: string;
+  selectedAgent: string;
 }) => void;
 
-function setupManagedSource({ fakeBin, sourceRoot, revision }: Parameters<InitialStateSetup>[0]) {
-  writeManagedSource(sourceRoot, revision);
-  fs.symlinkSync(path.join(sourceRoot, "bin", "nemoclaw.js"), path.join(fakeBin, "nemoclaw"));
+function setupManagedSource({
+  fakeBin,
+  sourceRoot,
+  revision,
+  cliBin,
+  selectedAgent,
+}: Parameters<InitialStateSetup>[0]) {
+  writeManagedSource(
+    sourceRoot,
+    revision,
+    cliBin,
+    selectedAgent === "openclaw" ? writeOpenClawPlugin : skipOpenClawPlugin,
+  );
+  fs.symlinkSync(path.join(sourceRoot, "bin", `${cliBin}.js`), path.join(fakeBin, cliBin));
 }
 
 function setupCleanState(_fixture: Parameters<InitialStateSetup>[0]) {}
@@ -92,6 +121,7 @@ function runManagedCliInstallTwice({
   separateInstallerRuns = false,
   failLockfileRestore = false,
   installUmask,
+  agent,
   setupInitialState = setupManagedSource,
 }: {
   initialRevision?: string;
@@ -99,6 +129,7 @@ function runManagedCliInstallTwice({
   separateInstallerRuns?: boolean;
   failLockfileRestore?: boolean;
   installUmask?: string;
+  agent?: TestAgent;
   setupInitialState?: InitialStateSetup;
 } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-reuse-"));
@@ -109,11 +140,21 @@ function runManagedCliInstallTwice({
   const payloadScripts = path.join(tmp, "payload", "scripts");
   const gitLogPath = path.join(tmp, "git.log");
   const npmLogPath = path.join(tmp, "npm.log");
+  const selectedAgent = agent ?? "openclaw";
+  const cliBin = CLI_BIN_BY_AGENT[selectedAgent];
 
   fs.mkdirSync(fakeBin, { recursive: true });
   fs.mkdirSync(path.join(prefix, "bin"), { recursive: true });
   fs.mkdirSync(payloadScripts, { recursive: true });
-  setupInitialState({ fakeBin, home, sourceRoot, tmp, revision: initialRevision });
+  setupInitialState({
+    fakeBin,
+    home,
+    sourceRoot,
+    tmp,
+    revision: initialRevision,
+    cliBin,
+    selectedAgent,
+  });
   writeNodeStub(fakeBin);
 
   writeExecutable(
@@ -147,12 +188,14 @@ case "\${1:-}" in
   init)
     node -e 'const assert = require("node:assert/strict"); const fs = require("node:fs"); assert.equal(fs.statSync(process.argv[1]).mode & 0o777, 0o700)' "$NEMOCLAW_STATE_ROOT"
     target="\${@: -1}"
-    mkdir -p "$target/.git" "$target/bin" "$target/dist/lib/onboard" "$target/node_modules" \
-      "$target/packages/nemoclaw-openclaw/plugin/dist" \
-      "$target/packages/nemoclaw-openclaw/plugin/node_modules"
+    mkdir -p "$target/.git" "$target/bin" "$target/dist/lib/onboard" "$target/node_modules"
     printf '%s' "$EXPECTED_REVISION" > "$target/.fixture-revision"
-    printf '%s\n' '{"name":"nemoclaw","dependencies":{"openclaw":"2026.7.1"}}' > "$target/package.json"
-    printf '%s\n' '{"name":"nemoclaw-plugin"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
+    printf '%s\n' '{"name":"nemoclaw"}' > "$target/package.json"
+    if [ "$SELECTED_AGENT" = "openclaw" ]; then
+      mkdir -p "$target/packages/nemoclaw-openclaw/plugin/dist" \
+        "$target/packages/nemoclaw-openclaw/plugin/node_modules"
+      printf '%s\n' '{"name":"nemoclaw-plugin"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
+    fi
     printf '%s' "\${COMMITTED_LOCKFILE:-}" > "$target/package-lock.json"
     ;;
   describe) printf '%s\n' 'v0.0.99' ;;
@@ -170,7 +213,6 @@ if [ "\${1:-}" = "config" ] && [ "\${2:-}" = "get" ] && [ "\${3:-}" = "prefix" ]
   printf '%s\n' "$NPM_PREFIX"
   exit 0
 fi
-if [ "\${1:-}" = "pack" ]; then exit 1; fi
 if [ "\${1:-}" = "install" ]; then
   printf '%s' '{"lockfileVersion":3,"packages":{"":{"name":"nemoclaw","bin":{}}}}' \
     > "$PWD/package-lock.json"
@@ -195,13 +237,13 @@ if [ "\${1:-}" = "run" ]; then
 fi
 if [ "\${1:-}" = "link" ]; then
   mkdir -p "$PWD/bin" "$NPM_PREFIX/bin"
-  cat > "$PWD/bin/nemoclaw.js" <<'CLI'
+  cat > "$PWD/bin/$CLI_BIN.js" <<CLI
 #!/usr/bin/env bash
-[ "$1" = "--version" ] && echo "nemoclaw v0.0.99"
+[ "\\$1" = "--version" ] && echo "$CLI_BIN v0.0.99"
 exit 0
 CLI
-  chmod +x "$PWD/bin/nemoclaw.js"
-  ln -sfn "$PWD/bin/nemoclaw.js" "$NPM_PREFIX/bin/nemoclaw"
+  chmod +x "$PWD/bin/$CLI_BIN.js"
+  ln -sfn "$PWD/bin/$CLI_BIN.js" "$NPM_PREFIX/bin/$CLI_BIN"
 fi
 exit 0`,
   );
@@ -226,6 +268,7 @@ printf 'PREPARED=%s MODE=%s SOURCE=%s\n' \
       encoding: "utf-8",
       env: {
         ...process.env,
+        CLI_BIN: cliBin,
         COMMITTED_LOCKFILE,
         EXPECTED_REVISION: INSTALL_REUSE_REVISION,
         FAIL_LOCKFILE_RESTORE: failLockfileRestore ? "1" : "",
@@ -233,12 +276,14 @@ printf 'PREPARED=%s MODE=%s SOURCE=%s\n' \
         HOME: home,
         INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
         MANAGED_SOURCE: sourceRoot,
+        NEMOCLAW_AGENT: agent ?? "",
         NEMOCLAW_REINSTALL_CLI: forceCliReinstall ? "1" : "",
         NEMOCLAW_STATE_ROOT: path.join(home, ".nemoclaw"),
         NPM_LOG_PATH: npmLogPath,
         NPM_PREFIX: prefix,
         PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
         PAYLOAD_SCRIPTS: payloadScripts,
+        SELECTED_AGENT: selectedAgent,
       },
     },
   );
@@ -298,9 +343,13 @@ describe("installer-managed CLI reuse", () => {
     expect(npmLog).not.toMatch(/\|(install|ci|run|link)\b/);
   });
 
-  it("builds a changed managed revision once across backup preparation and install (#7898)", () => {
+  it.each([
+    { agent: undefined, label: "default OpenClaw" },
+    { agent: "openclaw" as const, label: "explicit OpenClaw" },
+  ])("builds the plugin for $label (#7898)", ({ agent }) => {
     const { result, gitLog, npmLog } = runManagedCliInstallTwice({
       initialRevision: "b".repeat(40),
+      agent,
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -315,6 +364,43 @@ describe("installer-managed CLI reuse", () => {
     expect(npmLog.match(/\|run build$/gm)).toHaveLength(1);
     expect(npmLog.match(/\|link --ignore-scripts$/gm)).toHaveLength(1);
   });
+
+  it.each([
+    { agent: "hermes" as const, display: "NemoHermes" },
+    { agent: "langchain-deepagents-code" as const, display: "NemoDeepAgents" },
+  ])("reuses $display without OpenClaw plugin dependencies or artifacts", ({ agent, display }) => {
+    const { result, gitLog, npmLog, sourceRoot } = runManagedCliInstallTwice({ agent });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain(
+      `Reusing the installed ${display} CLI at the selected revision`,
+    );
+    expect(result.stdout).toContain(`PREPARED=true MODE=managed SOURCE=${sourceRoot}`);
+    expect(gitLog).not.toMatch(/^init\b/m);
+    expect(npmLog).not.toMatch(/\|(install|ci|run|link)\b/);
+  });
+
+  it.each([
+    { agent: "hermes" as const, display: "NemoHermes" },
+    { agent: "langchain-deepagents-code" as const, display: "NemoDeepAgents" },
+  ])(
+    "installs a changed $display revision without building the OpenClaw plugin",
+    ({ agent, display }) => {
+      const { result, gitLog, npmLog } = runManagedCliInstallTwice({
+        agent,
+        initialRevision: "b".repeat(40),
+      });
+
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(gitLog.match(/^init\b/gm)).toHaveLength(1);
+      expect(npmLog.match(/\|install --ignore-scripts$/gm)).toHaveLength(1);
+      expect(npmLog.match(/\|run --if-present build:cli$/gm)).toHaveLength(1);
+      expect(npmLog).not.toMatch(/\|ci --ignore-scripts$/m);
+      expect(npmLog).not.toMatch(/\|run build$/m);
+      expect(npmLog.match(/\|link --ignore-scripts$/gm)).toHaveLength(1);
+      expect(result.stdout).not.toContain(`Building ${display} plugin`);
+    },
+  );
 
   it("reuses the managed checkout on a later installer run after its own dependency install (#8305)", () => {
     const { result, gitLog, npmLog, lockfile } = runManagedCliInstallTwice({

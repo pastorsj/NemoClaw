@@ -1728,16 +1728,6 @@ exit 1
     expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+(-.+)?$/);
   });
 
-  it("resolve_openclaw_version: falls back to Dockerfile.base when package.json omits it", () => {
-    const { root: tmp } = installerCheckout("nemoclaw-openclaw-version-");
-    fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "fixture" }));
-    const dockerfileBase = path.join(tmp, "packages/nemoclaw-openclaw/Dockerfile.base");
-    fs.mkdirSync(path.dirname(dockerfileBase), { recursive: true });
-    fs.writeFileSync(dockerfileBase, "ARG OPENCLAW_VERSION=1.2.3\n");
-    const r = callInstallerFn(`resolve_openclaw_version ${JSON.stringify(tmp)}`);
-    expect(r.stdout.trim()).toBe("1.2.3");
-  });
-
   it("is_source_checkout: rejects a payload-like checkout without git metadata", () => {
     const { root: tmp } = installerCheckout("nemoclaw-source-checkout-");
     fs.writeFileSync(

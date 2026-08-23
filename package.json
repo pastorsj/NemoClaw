@@ -58,7 +58,7 @@
     "build:policy-boundary": "tsc -p packages/nemoclaw-openclaw/plugin/tsconfig.shared.json",
     "catalog:compile": "tsx src/lib/inference/serving/generate-catalog.ts",
     "catalog:check": "tsx src/lib/inference/serving/generate-catalog.ts --check",
-    "build:cli": "npm run build:policy-boundary && tsc -p tsconfig.src.json && node dist/lib/core/generate-build-identity.js && node dist/lib/inference/serving/generate-catalog.js && node dist/lib/cli/generate-oclif-metadata-manifest.js",
+    "build:cli": "tsc -p tsconfig.src.json && node dist/lib/core/generate-build-identity.js && node dist/lib/inference/serving/generate-catalog.js && node dist/lib/cli/generate-oclif-metadata-manifest.js",
     "clean:cli": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "typecheck:cli": "tsc -p tsconfig.cli.json",
     "validate:configs": "tsx scripts/validate-configs.mts",
