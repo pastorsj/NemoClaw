@@ -91,7 +91,11 @@ function createGitFixture() {
     "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     "FROM python:3.13\n",
   );
-  writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
+  writeFixture(
+    root,
+    "packages/nemoclaw-openclaw/manifest.yaml",
+    'version_constraint: ">=2026.4.24"\n',
+  );
   writeFixture(
     root,
     "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
@@ -113,7 +117,11 @@ function createGitFixtureWithRemoteOnlyBaseRef() {
   git(root, ["init", "-b", "main"]);
   writeBaseImageInputsFixture(root);
   writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
-  writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
+  writeFixture(
+    root,
+    "packages/nemoclaw-openclaw/manifest.yaml",
+    'version_constraint: ">=2026.4.24"\n',
+  );
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
   git(root, ["add", "."]);
   git(root, ["commit", "-m", "initial"]);
@@ -193,7 +201,7 @@ describe("sandbox base-image source identity", () => {
     ).toEqual([
       "packages/nemoclaw-openclaw/base-image-inputs.json",
       "packages/nemoclaw-openclaw/Dockerfile.base",
-      "nemoclaw-blueprint/blueprint.yaml",
+      "packages/nemoclaw-openclaw/manifest.yaml",
       "scripts/lib/sandbox-rlimits.sh",
       "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
       "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
@@ -237,6 +245,22 @@ describe("sandbox base-image source identity", () => {
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
     expect(() => normalizeBaseImageInputPaths(root)).toThrow(
       "must be a canonical repository-relative path",
+    );
+  });
+
+  it("requires the OpenClaw package manifest in the base-image input inventory", () => {
+    const root = createGitFixture();
+    const manifestPath = path.join(root, OPENCLAW_BASE_IMAGE_INPUTS_FILE);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      paths: string[];
+    };
+    manifest.paths = manifest.paths.filter(
+      (inputPath) => inputPath !== "packages/nemoclaw-openclaw/manifest.yaml",
+    );
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+
+    expect(() => normalizeBaseImageInputPaths(root)).toThrow(
+      "missing required path 'packages/nemoclaw-openclaw/manifest.yaml'",
     );
   });
 
@@ -502,7 +526,11 @@ describe("sandbox base-image source identity", () => {
     git(root, ["init", "-b", "feature"]);
     writeBaseImageInputsFixture(root);
     writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
-    writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
+    writeFixture(
+      root,
+      "packages/nemoclaw-openclaw/manifest.yaml",
+      'version_constraint: ">=2026.4.24"\n',
+    );
     git(root, ["add", "."]);
     git(root, ["commit", "-m", "initial"]);
 
@@ -532,11 +560,15 @@ describe("sandbox base-image source identity", () => {
     expect(baseImageInputsChangedSinceMain(root, gitEnv)).toBe(true);
   });
 
-  it("detects committed blueprint minimum-version changes relative to origin/main", () => {
+  it("detects committed package version-constraint changes relative to origin/main", () => {
     const root = createGitFixture();
     git(root, ["switch", "-c", "feature"]);
-    writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.25\n");
-    git(root, ["add", "nemoclaw-blueprint/blueprint.yaml"]);
+    writeFixture(
+      root,
+      "packages/nemoclaw-openclaw/manifest.yaml",
+      'version_constraint: ">=2026.4.25"\n',
+    );
+    git(root, ["add", "packages/nemoclaw-openclaw/manifest.yaml"]);
     git(root, ["commit", "-m", "change base input"]);
 
     expect(baseImageInputsChangedSinceMain(root, gitEnv)).toBe(true);

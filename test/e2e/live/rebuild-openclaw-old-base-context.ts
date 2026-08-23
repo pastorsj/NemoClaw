@@ -10,10 +10,10 @@ import { REPO_ROOT } from "../fixtures/paths.ts";
 const DOCKERFILE_BASE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const DOCKERIGNORE = path.join(REPO_ROOT, ".dockerignore");
 const OLD_OPENCLAW_VERSION = "2026.3.11";
-const BLUEPRINT_RELPATH = "nemoclaw-blueprint/blueprint.yaml";
+const OPENCLAW_MANIFEST_RELPATH = "packages/nemoclaw-openclaw/manifest.yaml";
 
 export function oldBaseContextSources(): string[] {
-  return [BLUEPRINT_RELPATH, ...directDockerfileBaseCopySources()];
+  return directDockerfileBaseCopySources();
 }
 
 export function directDockerfileBaseCopySources(dockerfilePath = DOCKERFILE_BASE): string[] {
@@ -99,20 +99,20 @@ function copyOldBaseContextFile(buildContext: string, relativePath: string): voi
 export function createOldBaseBuildContext(): string {
   const buildContext = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-rebuild-openclaw-base-"));
   // The legacy bash test builds Dockerfile.base with the full repository as
-  // context after temporarily lowering blueprint.yaml in-place. Keep the
+  // context after temporarily lowering the package constraint in-place. Keep the
   // trusted checkout read-only while staging every current Dockerfile.base
   // direct COPY dependency needed by that old-base build.
   for (const relativePath of oldBaseContextSources()) {
     copyOldBaseContextFile(buildContext, relativePath);
   }
 
-  const stagedBlueprint = path.join(buildContext, ...BLUEPRINT_RELPATH.split("/"));
-  const original = fs.readFileSync(stagedBlueprint, "utf8");
-  const minOpenClawVersion = /^(\s*min_openclaw_version:\s*).*/m;
-  if (!minOpenClawVersion.test(original)) {
-    throw new Error("blueprint min_openclaw_version line was not found");
+  const stagedManifest = path.join(buildContext, ...OPENCLAW_MANIFEST_RELPATH.split("/"));
+  const original = fs.readFileSync(stagedManifest, "utf8");
+  const versionConstraint = /^(\s*version_constraint:\s*).*/m;
+  if (!versionConstraint.test(original)) {
+    throw new Error("OpenClaw package version_constraint line was not found");
   }
-  const lowered = original.replace(minOpenClawVersion, `$1"${OLD_OPENCLAW_VERSION}"`);
-  fs.writeFileSync(stagedBlueprint, lowered, "utf8");
+  const lowered = original.replace(versionConstraint, `$1">=${OLD_OPENCLAW_VERSION}"`);
+  fs.writeFileSync(stagedManifest, lowered, "utf8");
   return buildContext;
 }

@@ -9,7 +9,7 @@
 name: openclaw
 display_name: "OpenClaw"
 description: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)"
-version_constraint: ">=2026.3.0"
+version_constraint: ">=2026.3.11"
 language: nodejs
 license: Apache-2.0
 homepage: "https://openclaw.ai"

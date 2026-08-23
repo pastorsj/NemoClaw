@@ -4,7 +4,7 @@
   "paths": [
     "packages/nemoclaw-openclaw/base-image-inputs.json",
     "packages/nemoclaw-openclaw/Dockerfile.base",
-    "nemoclaw-blueprint/blueprint.yaml",
+    "packages/nemoclaw-openclaw/manifest.yaml",
     "scripts/lib/sandbox-rlimits.sh",
     "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
     "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",

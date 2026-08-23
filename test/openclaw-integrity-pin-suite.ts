@@ -22,7 +22,7 @@ const PRODUCTION_DOCKERFILES = [
   path.join(REPO_ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile"),
   path.join(REPO_ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile.base"),
 ];
-const BLUEPRINT = path.join(REPO_ROOT, "nemoclaw-blueprint", "blueprint.yaml");
+const OPENCLAW_MANIFEST = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "manifest.yaml");
 const DEPENDENCY_REVIEW_NOTE = path.join(
   REPO_ROOT,
   "internal",
@@ -55,7 +55,8 @@ const PINNED_OPENCLAW_INTEGRITY =
 const PINNED_OPENCLAW_TARBALL = "https://registry.npmjs.org/openclaw/-/openclaw-2026.7.1.tgz";
 const OPENCLAW_RUNTIME_LOCKFILE = path.join(
   REPO_ROOT,
-  "packages", "nemoclaw-openclaw",
+  "packages",
+  "nemoclaw-openclaw",
   "openclaw-runtime",
   "package-lock.json",
 );
@@ -92,7 +93,8 @@ const PINNED_MCPORTER_INTEGRITY =
 const PINNED_MCPORTER_TARBALL = "https://registry.npmjs.org/mcporter/-/mcporter-0.7.3.tgz";
 const MCPORTER_LOCKFILE = path.join(
   REPO_ROOT,
-  "packages", "nemoclaw-openclaw",
+  "packages",
+  "nemoclaw-openclaw",
   "mcporter-runtime",
   "package-lock.json",
 );
@@ -259,7 +261,7 @@ function runInstallBlock(
     failOpenClawVerifyInstalledLock = false,
   } = options;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-integrity-"));
-  const blueprint = path.join(tmp, "blueprint.yaml");
+  const manifest = path.join(tmp, "manifest.yaml");
   const log = path.join(tmp, "calls.log");
   const provenancePath = path.join(tmp, "openclaw-base-provenance-v1");
   const openclawRuntime = path.join(tmp, "openclaw-runtime");
@@ -292,7 +294,7 @@ function runInstallBlock(
   fs.copyFileSync(OPENCLAW_VERSION_EXTRACTOR, openclawVersionExtractor);
   fs.chmodSync(openclawVersionExtractor, 0o755);
   fs.copyFileSync(MCPORTER_LOCKFILE, path.join(mcporterRuntime, "package-lock.json"));
-  fs.writeFileSync(blueprint, fs.readFileSync(BLUEPRINT, "utf-8"));
+  fs.copyFileSync(OPENCLAW_MANIFEST, manifest);
   fs.writeFileSync(auditExceptionFile, auditExceptionPolicy);
   fs.writeFileSync(
     reviewedNpmExecutable,
@@ -460,8 +462,7 @@ function runInstallBlock(
     "}",
     "pip3() { return 0; }",
     command
-      .replaceAll("/opt/nemoclaw-blueprint/blueprint.yaml", blueprint)
-      .replaceAll("/tmp/blueprint.yaml", blueprint)
+      .replaceAll("/packages/nemoclaw-openclaw/manifest.yaml", manifest)
       .replaceAll(OPENCLAW_BASE_PROVENANCE_PATH, provenancePath)
       .replaceAll("/usr/local/lib/nemoclaw/openclaw-runtime", openclawRuntime)
       .replaceAll("/usr/local/lib/node_modules/openclaw", openclawGlobal)
@@ -1469,6 +1470,39 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
     }
 
     if (group === "contract") {
+      it("rejects OpenClaw versions below the package manifest minimum", () => {
+        const installBlocks = [
+          {
+            label: "production Dockerfile",
+            command: extractRunBlock(
+              DOCKERFILE,
+              "# OPENCLAW_VERSION is the NemoClaw runtime build target",
+              "# Patch OpenClaw media fetch",
+            ),
+          },
+          {
+            label: "base Dockerfile",
+            command: extractRunBlock(
+              DOCKERFILE_BASE,
+              "# Install OpenClaw CLI + PyYAML.",
+              "# Baseline health check.",
+            ),
+          },
+        ];
+
+        for (const block of installBlocks) {
+          const { result, calls } = runInstallBlock(block.command, {
+            openclawVersion: "2026.3.10",
+          });
+
+          expect(result.status, block.label).not.toBe(0);
+          expect(`${result.stdout}${result.stderr}`, block.label).toContain(
+            "below the package minimum 2026.3.11",
+          );
+          expect(calls, block.label).not.toContain("npm ");
+        }
+      });
+
       it("rejects legacy fixture pins unless stale-upgrade fixture mode is explicit", () => {
         const production = runInstallBlock(
           extractRunBlock(

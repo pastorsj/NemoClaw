@@ -17,6 +17,7 @@ const BASE_IMAGE_INPUTS_KEYS = new Set(["$comment", "schemaVersion", "paths"]);
 const REQUIRED_BASE_IMAGE_INPUT_PATHS = new Set([
   OPENCLAW_BASE_IMAGE_INPUTS_FILE,
   "packages/nemoclaw-openclaw/Dockerfile.base",
+  "packages/nemoclaw-openclaw/manifest.yaml",
 ]);
 
 type BaseImageInputsManifest = {

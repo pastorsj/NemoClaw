@@ -209,8 +209,8 @@ async function configureGatewayInferenceRoute(
 
 function seedRegistryAndSession(dashboardPort: number): void {
   // The legacy rebuild regression requires an intentionally old OpenClaw sandbox
-  // that NemoClaw cannot create through the normal onboard path because current
-  // blueprints reject versions below min_openclaw_version. Create that sandbox
+  // that NemoClaw cannot create through the normal onboard path because the
+  // package image builds only the reviewed current target. Create that sandbox
   // through OpenShell, then upsert only this test-owned registry/session entry
   // so `nemoclaw <name> rebuild --yes` exercises the user-visible rebuild
   // boundary. Remove this local seeding once a first-class old-version lifecycle
@@ -482,7 +482,7 @@ test(
     );
 
     // Phase 2: build the old base image with a temporary build context that
-    // lowers only the blueprint minimum-version gate consumed by Dockerfile.base.
+    // lowers only the package version constraint consumed by Dockerfile.base.
     // The trusted checkout stays read-only.
     progress.phase("build the old OpenClaw base image");
     const oldBaseBuildContext = createOldBaseBuildContext();

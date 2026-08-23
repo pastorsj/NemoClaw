@@ -102,6 +102,17 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     },
   },
   {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/manifest\.yaml$/,
+    testsToRun: runTests(
+      "src/lib/sandbox-base-image/source-identity.test.ts",
+      "test/e2e/support/rebuild-openclaw-old-base-context.test.ts",
+      "test/fetch-guard-patch-regression.test.ts",
+      "test/openclaw-integrity-pin-base.test.ts",
+      "test/openclaw-integrity-pin-contract.test.ts",
+      "test/openclaw-integrity-pin-plugin-install.test.ts",
+    ),
+  },
+  {
     pattern: /(?:^|\/)packages\/nemoclaw-hermes\/policy-additions\.yaml$/,
     testsToRun: runTests(
       "src/lib/onboard/initial-policy-real-policy.test.ts",

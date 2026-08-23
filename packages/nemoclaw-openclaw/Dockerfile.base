@@ -412,6 +412,8 @@ COPY scripts/lib/reviewed-npm-archive.mts \
     scripts/lib/bundled-npm-package.mts \
     scripts/lib/reviewed-npm-audit.mts \
     /scripts/lib/
+COPY packages/nemoclaw-openclaw/manifest.yaml \
+    /packages/nemoclaw-openclaw/manifest.yaml
 COPY packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
     /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
 COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts
@@ -460,15 +462,14 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Reviewed-archive invariants (#5896): registry SRI, packed-byte SRI, contained
 # basename in a fresh directory, local-archive-only install, and cleanup.
 # hadolint ignore=DL3016
-RUN --mount=type=bind,source=nemoclaw-blueprint/blueprint.yaml,target=/tmp/blueprint.yaml \
-    echo "$OPENCLAW_VERSION" | grep -qxE '[0-9]+(\.[0-9]+)*' \
+RUN echo "$OPENCLAW_VERSION" | grep -qxE '[0-9]+(\.[0-9]+)*' \
     || { echo "Error: OPENCLAW_VERSION='$OPENCLAW_VERSION' is invalid (expected e.g. 2026.3.11)."; exit 1; }; \
-    OPENCLAW_MIN_VERSION=$(grep -m 1 'min_openclaw_version' /tmp/blueprint.yaml | awk '{print $2}' | tr -d '"'); \
+    OPENCLAW_MIN_VERSION=$(sed -nE 's/^version_constraint:[[:space:]]*">=([0-9]+[.][0-9]+[.][0-9]+)"[[:space:]]*$/\1/p' /packages/nemoclaw-openclaw/manifest.yaml); \
     [ -n "$OPENCLAW_MIN_VERSION" ] \
-    || { echo "Error: Could not parse min_openclaw_version from nemoclaw-blueprint/blueprint.yaml"; exit 1; }; \
+    || { echo "Error: Could not parse OpenClaw version_constraint from packages/nemoclaw-openclaw/manifest.yaml"; exit 1; }; \
     if [ "$(printf '%s\n%s' "$OPENCLAW_MIN_VERSION" "$OPENCLAW_VERSION" | sort -V | head -n1)" != "$OPENCLAW_MIN_VERSION" ]; then \
-        echo "Error: OpenClaw version ${OPENCLAW_VERSION} is below the minimum required version ${OPENCLAW_MIN_VERSION}"; \
-        echo "Hint: Update min_openclaw_version in nemoclaw-blueprint/blueprint.yaml or use a newer version."; exit 1; \
+        echo "Error: OpenClaw version ${OPENCLAW_VERSION} is below the package minimum ${OPENCLAW_MIN_VERSION}"; \
+        echo "Hint: Update version_constraint in packages/nemoclaw-openclaw/manifest.yaml or use a newer version."; exit 1; \
     fi; \
     if [ "$OPENCLAW_VERSION" = "2026.3.11" ] || [ "$OPENCLAW_VERSION" = "2026.4.24" ]; then \
         if [ "$NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW" != "1" ]; then \

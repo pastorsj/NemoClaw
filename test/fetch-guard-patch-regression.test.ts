@@ -13,8 +13,27 @@ import {
   runFetchGuardPatchBlock,
 } from "./helpers/fetch-guard-patch-harness";
 
-const DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile");
-const DOCKERFILE_BASE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile.base");
+const DOCKERFILE = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "Dockerfile",
+);
+const DOCKERFILE_BASE = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "Dockerfile.base",
+);
+const OPENCLAW_MANIFEST = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "manifest.yaml",
+);
 const BLUEPRINT = path.join(import.meta.dirname, "..", "nemoclaw-blueprint", "blueprint.yaml");
 const REVIEWED_NPM_AUDIT_HELPER = path.join(
   import.meta.dirname,
@@ -139,7 +158,7 @@ function readDockerfileOpenClawTarball(): string {
 
 function runOpenClawUpgradeBlock(currentVersion: string) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-upgrade-"));
-  const blueprint = path.join(tmp, "blueprint.yaml");
+  const manifest = path.join(tmp, "manifest.yaml");
   const log = path.join(tmp, "calls.log");
   const openclawInstall = path.join(tmp, "openclaw-global");
   const openclawRuntime = path.join(tmp, "openclaw-runtime");
@@ -159,7 +178,7 @@ function runOpenClawUpgradeBlock(currentVersion: string) {
     /^ARG MCPORTER_0_7_3_TARBALL=([^\s]+)/m,
     "mcporter runtime tarball",
   );
-  fs.writeFileSync(blueprint, `min_openclaw_version: "${readBlueprintMinOpenClawVersion()}"\n`);
+  fs.copyFileSync(OPENCLAW_MANIFEST, manifest);
   fs.mkdirSync(openclawInstall, { recursive: true });
   fs.mkdirSync(openclawRuntime, { recursive: true });
   fs.mkdirSync(mcporterInstall, { recursive: true });
@@ -169,7 +188,8 @@ function runOpenClawUpgradeBlock(currentVersion: string) {
     path.join(
       import.meta.dirname,
       "..",
-      "packages", "nemoclaw-openclaw",
+      "packages",
+      "nemoclaw-openclaw",
       "openclaw-runtime",
       "package-lock.json",
     ),
@@ -183,7 +203,7 @@ function runOpenClawUpgradeBlock(currentVersion: string) {
     "# OPENCLAW_VERSION is the NemoClaw runtime build target",
     "# Patch OpenClaw media fetch",
   )
-    .replaceAll("/opt/nemoclaw-blueprint/blueprint.yaml", blueprint)
+    .replaceAll("/packages/nemoclaw-openclaw/manifest.yaml", manifest)
     .replaceAll("/usr/local/lib/node_modules/openclaw", openclawInstall)
     .replaceAll(
       "mkdir -p /usr/local/lib/node_modules",

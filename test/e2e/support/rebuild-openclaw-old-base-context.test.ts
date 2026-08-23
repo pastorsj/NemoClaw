@@ -20,7 +20,6 @@ const MULTILINE_COPY_SOURCES = [
   "scripts/lib/reviewed-npm-audit.mts",
   "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
 ];
-
 describe("rebuild-openclaw old-base build context", () => {
   afterEach(() => {
     for (const contextPath of copiedContexts.splice(0)) {
