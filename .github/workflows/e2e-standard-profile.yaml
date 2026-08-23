@@ -580,7 +580,7 @@ jobs:
           [[ "$JOB_STATUS" =~ ^(success|failure|cancelled)$ ]] || { echo "::error::E2E job status is invalid" >&2; exit 1; }
           [[ "$ARTIFACT_DIRECTORY" =~ ^e2e-artifacts/live/[a-z0-9]+([_-][a-z0-9]+)*(/[a-z0-9]+([_-][a-z0-9]+)*)?$ ]] || { echo "::error::E2E artifact directory is invalid" >&2; exit 1; }
           install -d -m 0700 "$ARTIFACT_DIRECTORY"
-          product_evidence_count="$(find -P "$ARTIFACT_DIRECTORY" -type f ! -name evidence-manifest.json -printf . | wc -c)"
+          product_evidence_count="$(find -P "$ARTIFACT_DIRECTORY" -type f ! -name evidence-manifest.json -exec printf . \; | wc -c)"
           if [[ "$JOB_STATUS" == "success" && "$product_evidence_count" == "0" ]]; then
             echo "::error::successful E2E target produced no product evidence" >&2
             exit 1
