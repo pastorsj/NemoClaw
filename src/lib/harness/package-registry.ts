@@ -351,6 +351,28 @@ function scanPackageRoot(packagesRoot: string, source: HarnessPackage["source"])
   return packages;
 }
 
+function listPackageDirectoryIds(packagesRoot: string): string[] {
+  let rootMetadata: fs.Stats;
+  try {
+    rootMetadata = fs.lstatSync(packagesRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw new Error(`Harness package root is unavailable: ${packagesRoot}`, { cause: error });
+  }
+  if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
+    throw new Error(`Harness package root must be a regular directory: ${packagesRoot}`);
+  }
+
+  return fs
+    .readdirSync(packagesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .map((entry) => entry.name)
+    .filter((name) => name.startsWith(PACKAGE_DIRECTORY_PREFIX))
+    .map((name) => name.slice(PACKAGE_DIRECTORY_PREFIX.length))
+    .filter((id) => HARNESS_ID.test(id))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function resolveHarnessPackageFromRoot(
   packagesRoot: string,
   id: string,
@@ -742,6 +764,13 @@ export function listHarnessPackages(env: NodeJS.ProcessEnv = process.env): Harne
   return [...bundled.values(), ...installed.values()].sort((left, right) =>
     left.id.localeCompare(right.id),
   );
+}
+
+/** List package directory IDs without validating unrelated package contents. */
+export function listHarnessPackageIds(env: NodeJS.ProcessEnv = process.env): string[] {
+  const ids = new Set(listPackageDirectoryIds(BUNDLED_PACKAGES_ROOT));
+  for (const id of listPackageDirectoryIds(installedPackagesRoot(env))) ids.add(id);
+  return [...ids].sort((left, right) => left.localeCompare(right));
 }
 
 export function resolveHarnessPackage(

@@ -11,7 +11,7 @@ import { DASHBOARD_PORT } from "../core/ports";
 import { isCuaEnabled, requireCuaEnabled } from "../cua/feature";
 import {
   captureHarnessPackageSnapshot,
-  listHarnessPackages,
+  listHarnessPackageIds,
   resolveHarnessPackage,
 } from "../harness/package-registry";
 import { ROOT } from "../runner";
@@ -139,9 +139,7 @@ function listLegacyAgents(env: NodeJS.ProcessEnv): string[] {
 
 /** List harness packages and temporary legacy candidates available to onboarding. */
 export function listAgents(env: NodeJS.ProcessEnv = process.env): string[] {
-  const packageAgents = listHarnessPackages(env)
-    .map((entry) => entry.id)
-    .filter((name) => selectableAgent(name, env));
+  const packageAgents = listHarnessPackageIds(env).filter((name) => selectableAgent(name, env));
   const legacyAgents = listLegacyAgents(env);
   const names = new Set(packageAgents);
   for (const name of legacyAgents) {

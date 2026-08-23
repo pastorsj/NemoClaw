@@ -54,6 +54,7 @@ const qualificationFixtures: CandidateQualificationFixture[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   delete process.env.NEMOCLAW_AGENT;
   delete process.env.NEMOCLAW_CUA_ENABLED;
   authority.digests.splice(0, authority.digests.length);
@@ -216,6 +217,34 @@ describe("agent definitions", () => {
       expect(agent.manifestPath).toBe(path.join(installed.rootDir, "manifest.yaml"));
       expect(agent.startScriptPath).toBe(path.join(installed.rootDir, "start.sh"));
       expect(agent.packageContentDigest).toBe(harnessPackageContentDigest(installed.rootDir));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an unrelated changed installed harness from blocking agent selection", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agent-selection-isolation-"));
+    const environment = { HOME: home };
+    vi.stubEnv("HOME", home);
+    try {
+      const installedOpenClaw = installBundledHarness("openclaw", environment);
+      const installedDcode = installBundledHarness("langchain-deepagents-code", environment);
+      fs.writeFileSync(
+        path.join(installedDcode.rootDir, "local-change.txt"),
+        "changed after installation\n",
+      );
+      const warning = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const selected = resolveAgentName({ agentFlag: "openclaw" });
+      expect(selected).toBe("openclaw");
+      expect(loadAgent(selected)).toMatchObject({
+        agentDir: installedOpenClaw.rootDir,
+        harnessPackageSource: "installed",
+      });
+      expect(getAgentChoices().map((choice) => choice.name)).toEqual(["openclaw", "hermes"]);
+      expect(warning).toHaveBeenCalledWith(
+        expect.stringContaining("skipping agent 'langchain-deepagents-code'"),
+      );
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

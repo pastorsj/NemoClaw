@@ -16,6 +16,7 @@ import {
   captureHarnessPackageTexts,
   harnessPackageContentDigest,
   installBundledHarness,
+  listHarnessPackageIds,
   listHarnessPackages,
   refreshInstalledBundledHarnesses,
   resolveHarnessPackage,
@@ -163,6 +164,11 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     expect(resolveHarnessPackage("openclaw", { HOME: home })).toEqual(
       expect.objectContaining({ id: "openclaw", rootDir: openClawRoot, source: "installed" }),
     );
+    expect(listHarnessPackageIds({ HOME: home })).toEqual([
+      "hermes",
+      "langchain-deepagents-code",
+      "openclaw",
+    ]);
     expect(() => listHarnessPackages({ HOME: home })).toThrow(
       "installation receipt does not match package content",
     );
