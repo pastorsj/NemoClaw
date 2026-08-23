@@ -72,6 +72,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 18789 12345 running";
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.registerSandbox = (entry) => {
   registerCalls.push(entry);
   return true;
@@ -296,6 +297,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "hermes-sandbox 127.0.0.1 18789 12345 running\nhermes-sandbox 127.0.0.1 8642 12346 running";
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -413,6 +415,9 @@ const { createSandbox } = require(${onboardPath});
       path.join(repoRoot, "src", "lib", "sandbox-base-image.ts"),
     );
     const platformPath = JSON.stringify(path.join(repoRoot, "src", "lib", "platform.ts"));
+    const openClawPackagePath = JSON.stringify(
+      path.join(repoRoot, "packages", "nemoclaw-openclaw"),
+    );
 
     fs.mkdirSync(fakeBin, { recursive: true });
     writeOkOpenshell(fakeBin, { readySandboxGet: true });
@@ -454,6 +459,15 @@ sandboxBaseImage.resolveSandboxBaseImage = (options) => {
 };
 buildContext.stageOptimizedSandboxBuildContext = () => {
   const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
+  fs.mkdirSync(path.join(buildCtx, "packages"), { recursive: true });
+  fs.cpSync(${openClawPackagePath}, path.join(buildCtx, "packages", "nemoclaw-openclaw"), {
+    filter: (source) =>
+      !new Set([".nemoclaw-install.json", ".git", ".DS_Store", "node_modules", "__pycache__"]).has(
+        path.basename(source),
+      ),
+    mode: fs.constants.COPYFILE_FICLONE,
+    recursive: true,
+  });
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   fs.writeFileSync(
     stagedDockerfile,
@@ -497,6 +511,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 18789 12345 running";
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -602,6 +617,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 18789 12345 running";
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -708,6 +724,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 19000 12345 running";
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
@@ -733,7 +750,18 @@ const { createSandbox } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
-  const sandboxName = await createSandbox(null, "gpt-5.4");
+  const sandboxName = await createSandbox(
+    null,
+    "gpt-5.4",
+    undefined,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    Number(process.env.NEMOCLAW_DASHBOARD_PORT),
+  );
   console.log(JSON.stringify({ sandboxName, commands }));
 })().catch((error) => {
   console.error(error);
