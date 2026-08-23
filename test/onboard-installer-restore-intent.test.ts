@@ -84,6 +84,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => ({
   name: "my-assistant",
   gpuEnabled: false,
