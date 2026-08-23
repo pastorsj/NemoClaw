@@ -55,6 +55,7 @@ describe("published harness packages", () => {
         "dist/lib/agent/state-file-restore-reader.js",
         "dist/lib/core/json-types.js",
         "dist/lib/harness",
+        "dist/lib/onboard/custom-build-context.js",
         "dist/lib/validation.js",
         "node_modules/argparse",
         "node_modules/js-yaml",

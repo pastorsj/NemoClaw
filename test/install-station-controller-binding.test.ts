@@ -57,6 +57,7 @@ fix_npm_permissions() { :; }
 preinstall_backup_and_retire_legacy_gateway() { :; }
 install_nemoclaw() { record_order install; }
 verify_nemoclaw() { :; }
+install_selected_harness() { :; }
 require_reportable_openshell_version() { :; }
 command_exists() { return 0; }
 registered_sandbox_count() { printf '0\n'; }

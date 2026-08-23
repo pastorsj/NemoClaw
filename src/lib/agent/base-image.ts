@@ -673,6 +673,7 @@ function prepareAgentBaseBuildContext(
   try {
     const includeBuildContextPath = createCustomBuildContextFilter(ROOT);
     fs.cpSync(ROOT, buildContextDir, {
+      mode: fs.constants.COPYFILE_FICLONE,
       recursive: true,
       filter: (sourcePath) =>
         path.basename(sourcePath) !== ".claude" && includeBuildContextPath(sourcePath),
@@ -981,6 +982,7 @@ export function createAgentSandbox(
     if (agent.name !== "nemocua") {
       const shouldIncludeBuildContextPath = createCustomBuildContextFilter(rootDir);
       fs.cpSync(rootDir, buildCtx, {
+        mode: fs.constants.COPYFILE_FICLONE,
         recursive: true,
         filter: (src) => path.basename(src) !== ".claude" && shouldIncludeBuildContextPath(src),
       });
