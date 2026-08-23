@@ -83,7 +83,10 @@ const MAX_INSTALLER_INPUT_BYTES = 1024 * 1024;
 // manifest and formula identities consumed by the shell checker.
 const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
   {
-    brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
+    brevTemplateSha256: [
+      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
+    ],
     formula: {
       asset: "openshell.rb",
       sha256: "4b75a7e3a7630eb8954d73ca828b394d5e0646adbaa4b087b2435329d53b61b3",
@@ -126,7 +129,10 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     version: "0.0.72",
   },
   {
-    brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
+    brevTemplateSha256: [
+      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
+    ],
     formula: {
       asset: "openshell.rb",
       sha256: "fa54640184e22fa74500ab24f5b4372582616c7e12a1152cb6983bc0738c5a74",
@@ -164,7 +170,10 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     version: "0.0.82",
   },
   {
-    brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
+    brevTemplateSha256: [
+      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
+    ],
     formula: {
       asset: "openshell.rb",
       sha256: "f53c62777fed23b42427822d231670451ee4358efeb2660c41a7a38919211b23",
@@ -193,7 +202,10 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     version: "0.0.85",
   },
   {
-    brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
+    brevTemplateSha256: [
+      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
+    ],
     formula: {
       asset: "openshell.rb",
       sha256: "8dd34fc17ee9a30327664a18c9509c8a765cb010de38cda8e22841bddbe92713",
@@ -236,7 +248,10 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     version: "0.0.99",
   },
   {
-    brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
+    brevTemplateSha256: [
+      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
+    ],
     formula: {
       asset: "openshell.rb",
       sha256: "87fadc7b0c854aa44f71d5b3a206865070117cd27825d59c61da252a99f402a2",
@@ -281,7 +296,10 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     version: "0.0.101",
   },
   {
-    brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
+    brevTemplateSha256: [
+      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
+    ],
     formula: {
       asset: "openshell.rb",
       sha256: "95a290f0e0e2f57d7d46ba9171fca6e99e5226875cd12e12391b7338f6c219f9",
@@ -327,6 +345,7 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     brevTemplateSha256: [
       "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
       "56fc6482d1508b73604099e6fd6c16daea16275cf36cc25c1c5366c82a4394e3",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
     ],
     formula: {
       asset: "openshell.rb",

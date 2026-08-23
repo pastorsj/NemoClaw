@@ -528,7 +528,7 @@ const trustAlternateRelease = (source: string): string => {
     marker,
     `${marker}  {
     brevTemplateSha256: [
-      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
+      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
     ],
     formula: {
       asset: "openshell.rb",
