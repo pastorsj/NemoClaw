@@ -67,6 +67,14 @@ function runGenerator(env: Record<string, string | undefined>): string {
 }
 
 describe("LangChain Deep Agents Code config generator", () => {
+  it("runs as declared ESM without module-type warnings", () => {
+    const result = runGeneratorProcess({});
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).not.toContain("MODULE_TYPELESS_PACKAGE_JSON");
+    expect(result.stderr).not.toContain("Reparsing as ES module");
+  });
+
   it("routes managed inference through OpenAI-compatible chat completions", () => {
     const config = runGenerator({});
 

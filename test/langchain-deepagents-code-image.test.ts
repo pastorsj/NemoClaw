@@ -224,12 +224,15 @@ describe("LangChain Deep Agents Code image contracts", () => {
     ].join("\n");
     const managedRuntimeDirectory = "&& install -d -o root -g root -m 0755 /run/nemoclaw";
     const runtimeModeReplay =
-      "&& chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts";
+      "&& chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/package.json";
 
     expect(dockerfile).toContain("ARG BASE_IMAGE\n");
     expect(dockerfile).toContain("ARG NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b");
     expect(dockerfile).toContain(
       "COPY packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts",
+    );
+    expect(dockerfile).toContain(
+      "COPY packages/nemoclaw-langchain-deepagents-code/package.json /opt/nemoclaw-deepagents-code/package.json",
     );
     expect(dockerfile).toContain(
       "COPY packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
