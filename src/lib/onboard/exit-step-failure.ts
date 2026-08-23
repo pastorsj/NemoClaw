@@ -17,12 +17,21 @@ export interface ExitStepFailureSessionDeps {
 export interface OnboardExitFailureProcessLike {
   once(event: "exit", listener: (code: number) => void): unknown;
   on?(event: OnboardInterruptSignal, listener: () => void): unknown;
-  removeListener?(event: OnboardInterruptSignal, listener: () => void): unknown;
+  removeListener?(
+    event: "exit" | OnboardInterruptSignal,
+    listener: ((code: number) => void) | (() => void),
+  ): unknown;
   kill?(pid: number, signal: OnboardInterruptSignal): unknown;
   pid?: number;
 }
 
 type OnboardInterruptSignal = "SIGINT" | "SIGTERM";
+
+const ACTIVE_INCOMPLETE_ONBOARD_HANDLER = Symbol.for("nemoclaw.onboard.incomplete-exit-handler");
+
+type ProcessWithIncompleteOnboardHandler = OnboardExitFailureProcessLike & {
+  [ACTIVE_INCOMPLETE_ONBOARD_HANDLER]?: () => void;
+};
 
 export function markLastStartedStepFailed(
   deps: ExitStepFailureSessionDeps,
@@ -46,7 +55,9 @@ export function registerIncompleteOnboardExitFailureHandler(
   message: string,
   processLike: OnboardExitFailureProcessLike = process,
   portable = isPortableExperimentalProfile(),
-): void {
+): () => void {
+  const processState = processLike as ProcessWithIncompleteOnboardHandler;
+  processState[ACTIVE_INCOMPLETE_ONBOARD_HANDLER]?.();
   const failIncompleteStep = (force = false): void => {
     if (!force && isComplete()) return;
     // A non-null return means a step was in progress, so surface the
@@ -59,16 +70,15 @@ export function registerIncompleteOnboardExitFailureHandler(
     printOnboardResumeHint(portable, undefined, interrupted.sandboxName);
   };
 
-  processLike.once("exit", (code) => {
+  const onExit = (code: number): void => {
     if (code === 0) return;
     failIncompleteStep();
-  });
+  };
+  processLike.once("exit", onExit);
 
   const on = processLike.on?.bind(processLike);
-  const removeListener = processLike.removeListener?.bind(processLike);
   const kill = processLike.kill?.bind(processLike);
   const pid = processLike.pid;
-  if (!on || !removeListener || !kill || pid === undefined) return;
 
   let pendingSignal: OnboardInterruptSignal | null = null;
   const handleSignal = (signal: OnboardInterruptSignal): void => {
@@ -78,15 +88,31 @@ export function registerIncompleteOnboardExitFailureHandler(
     if (pendingSignal) return;
     pendingSignal = signal;
     setImmediate(() => {
-      removeListener("SIGINT", onSigint);
-      removeListener("SIGTERM", onSigterm);
+      processLike.removeListener?.("SIGINT", onSigint);
+      processLike.removeListener?.("SIGTERM", onSigterm);
       failIncompleteStep(true);
-      kill(pid, signal);
+      if (kill && pid !== undefined) kill(pid, signal);
     });
   };
   const onSigint = (): void => handleSignal("SIGINT");
   const onSigterm = (): void => handleSignal("SIGTERM");
 
-  on("SIGINT", onSigint);
-  on("SIGTERM", onSigterm);
+  if (on && kill && pid !== undefined) {
+    on("SIGINT", onSigint);
+    on("SIGTERM", onSigterm);
+  }
+
+  let disposed = false;
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    processLike.removeListener?.("exit", onExit);
+    processLike.removeListener?.("SIGINT", onSigint);
+    processLike.removeListener?.("SIGTERM", onSigterm);
+    if (processState[ACTIVE_INCOMPLETE_ONBOARD_HANDLER] === dispose) {
+      delete processState[ACTIVE_INCOMPLETE_ONBOARD_HANDLER];
+    }
+  };
+  processState[ACTIVE_INCOMPLETE_ONBOARD_HANDLER] = dispose;
+  return dispose;
 }

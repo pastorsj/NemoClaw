@@ -46,8 +46,41 @@ export interface SandboxCancelRollback {
   markCancelled(): void;
   /** Run the rollback iff armed AND cancelled. Idempotent. */
   runIfArmed(): void;
+  /** Disarm the rollback and remove its process-exit hook. */
+  dispose(): void;
   /** Test/introspection helper. */
   isArmed(): boolean;
+}
+
+type ExitHandlerRegistration = (handler: () => void) => () => void;
+
+const PROCESS_CANCEL_ROLLBACK_EXIT_HANDLER = Symbol.for(
+  "nemoclaw.onboard.cancel-rollback.exit-handler",
+);
+
+type ProcessWithCancelRollbackHandler = NodeJS.Process & {
+  [PROCESS_CANCEL_ROLLBACK_EXIT_HANDLER]?: () => void;
+};
+
+function registerProcessExitHandler(handler: () => void): () => void {
+  const target = process as ProcessWithCancelRollbackHandler;
+  target[PROCESS_CANCEL_ROLLBACK_EXIT_HANDLER]?.();
+  // The incomplete-onboarding handler is registered before a sandbox exists.
+  // Once armed, cancellation rollback must run first so it can clear the
+  // cancelled session before generic exit handling considers it incomplete.
+  process.prependListener("exit", handler);
+
+  let active = true;
+  const dispose = (): void => {
+    if (!active) return;
+    active = false;
+    process.removeListener("exit", handler);
+    if (target[PROCESS_CANCEL_ROLLBACK_EXIT_HANDLER] === dispose) {
+      delete target[PROCESS_CANCEL_ROLLBACK_EXIT_HANDLER];
+    }
+  };
+  target[PROCESS_CANCEL_ROLLBACK_EXIT_HANDLER] = dispose;
+  return dispose;
 }
 
 export function buildCancelRollbackMessage(
@@ -73,13 +106,13 @@ export interface InstallSandboxCancelRollbackOptions {
   registry: { removeSandbox(name: string): void };
   clearOnboardSession: () => void;
   log?: (message: string) => void;
-  /** Override for tests; defaults to `process.on("exit", ...)`. */
-  registerExitHandler?: (handler: () => void) => void;
+  /** Override for tests; defaults to a process-scoped `exit` listener. */
+  registerExitHandler?: ExitHandlerRegistration;
 }
 
 /**
- * Wire a sandbox cancel-rollback to OpenShell + the registry and register the
- * process-exit hook that fires it. Kept here (not in onboard.ts) so the
+ * Wire a sandbox cancel-rollback to OpenShell + the registry. The process-exit
+ * hook is registered while armed. Kept here (not in onboard.ts) so the
  * orchestration lives in a focused module rather than the onboard entrypoint.
  *
  * `process.exit()` — how the policy-step prompts terminate on Ctrl+C —
@@ -96,13 +129,40 @@ export function installSandboxCancelRollback(
     clearOnboardSession: opts.clearOnboardSession,
     log: opts.log ?? ((message) => console.error(message)),
   });
-  const register =
-    opts.registerExitHandler ??
-    ((handler: () => void) => {
-      process.on("exit", handler);
-    });
-  register(() => rollback.runIfArmed());
-  return rollback;
+  const register = opts.registerExitHandler ?? registerProcessExitHandler;
+  let unregisterExitHandler: (() => void) | null = null;
+  const clearExitHandler = (): void => {
+    unregisterExitHandler?.();
+    unregisterExitHandler = null;
+  };
+  const onExit = (): void => {
+    rollback.runIfArmed();
+    if (!rollback.isArmed()) clearExitHandler();
+  };
+
+  return {
+    arm(sandboxName: string): void {
+      rollback.arm(sandboxName);
+      unregisterExitHandler ??= register(onExit);
+    },
+    disarm(): void {
+      rollback.disarm();
+      clearExitHandler();
+    },
+    markCancelled(): void {
+      rollback.markCancelled();
+    },
+    runIfArmed(): void {
+      onExit();
+    },
+    dispose(): void {
+      rollback.disarm();
+      clearExitHandler();
+    },
+    isArmed(): boolean {
+      return rollback.isArmed();
+    },
+  };
 }
 
 /**
@@ -158,6 +218,9 @@ export function createSandboxCancelRollback(
       for (const line of buildCancelRollbackMessage(sandboxName, deleteSucceeded)) {
         deps.log(line);
       }
+    },
+    dispose(): void {
+      armedSandboxName = null;
     },
   };
 }

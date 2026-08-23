@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -58,6 +58,43 @@ function requireLoadedSession() {
 }
 
 describe("terminal step failure helper", () => {
+  it("keeps one current process handler across repeated onboard registrations", () => {
+    const processLike = Object.assign(new EventEmitter(), {
+      kill: vi.fn(),
+      pid: 4242,
+    });
+    const finalizers = Array.from({ length: 11 }, () => vi.fn(() => null));
+    let dispose = () => {};
+
+    finalizers.forEach((finalizeIncompleteOnboardStep) => {
+      dispose = registerIncompleteOnboardExitFailureHandler(
+        {
+          loadSession: () => ({ lastStepStarted: "sandbox" }),
+          finalizeIncompleteOnboardStep,
+        },
+        () => false,
+        "Onboarding exited before the step completed.",
+        processLike,
+        false,
+      );
+    });
+
+    expect(processLike.listenerCount("exit")).toBe(1);
+    expect(processLike.listenerCount("SIGINT")).toBe(1);
+    expect(processLike.listenerCount("SIGTERM")).toBe(1);
+
+    processLike.emit("exit", 1);
+    expect(finalizers.slice(0, -1).every((finalize) => finalize.mock.calls.length === 0)).toBe(
+      true,
+    );
+    expect(finalizers.at(-1)).toHaveBeenCalledOnce();
+
+    dispose();
+    expect(processLike.listenerCount("exit")).toBe(0);
+    expect(processLike.listenerCount("SIGINT")).toBe(0);
+    expect(processLike.listenerCount("SIGTERM")).toBe(0);
+  });
+
   it("marks onboard process-exit cleanup failures as terminal machine failures", () => {
     session.saveSession(session.createSession({ lastStepStarted: "inference" }));
 

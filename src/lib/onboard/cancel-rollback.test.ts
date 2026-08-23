@@ -145,46 +145,139 @@ describe("createSandboxCancelRollback", () => {
 });
 
 describe("installSandboxCancelRollback", () => {
-  it("wires delete to openshell and unregister to the registry, and registers an exit hook", () => {
+  it("wires delete to openshell and unregister to the registry while armed", () => {
     const runOpenshell = vi.fn(() => ({ status: 0 }));
     const removeSandbox = vi.fn();
-    const exitHandlers: Array<() => void> = [];
+    const exitHandlers = new Set<() => void>();
 
     const rollback = installSandboxCancelRollback({
       runOpenshell,
       registry: { removeSandbox },
       clearOnboardSession: () => {},
-      registerExitHandler: (h) => exitHandlers.push(h),
+      registerExitHandler: (handler) => {
+        exitHandlers.add(handler);
+        return () => exitHandlers.delete(handler);
+      },
     });
 
-    expect(exitHandlers).toHaveLength(1);
+    expect(exitHandlers.size).toBe(0);
 
     rollback.arm("new-sb");
+    expect(exitHandlers.size).toBe(1);
     rollback.markCancelled();
-    exitHandlers[0]();
+    [...exitHandlers][0]?.();
 
     expect(runOpenshell).toHaveBeenCalledWith(["sandbox", "delete", "new-sb"], {
       ignoreError: true,
     });
     expect(removeSandbox).toHaveBeenCalledWith("new-sb");
+    expect(exitHandlers.size).toBe(0);
   });
 
   it("does not fire the rollback on a non-cancel exit", () => {
     const runOpenshell = vi.fn(() => ({ status: 0 }));
     const removeSandbox = vi.fn();
-    const exitHandlers: Array<() => void> = [];
+    const exitHandlers = new Set<() => void>();
 
     const rollback = installSandboxCancelRollback({
       runOpenshell,
       registry: { removeSandbox },
       clearOnboardSession: () => {},
-      registerExitHandler: (h) => exitHandlers.push(h),
+      registerExitHandler: (handler) => {
+        exitHandlers.add(handler);
+        return () => exitHandlers.delete(handler);
+      },
     });
     rollback.arm("new-sb"); // armed, but never cancelled
-    exitHandlers[0]();
+    [...exitHandlers][0]?.();
 
     expect(runOpenshell).not.toHaveBeenCalled();
     expect(removeSandbox).not.toHaveBeenCalled();
+    expect(exitHandlers.size).toBe(1);
+    rollback.dispose();
+    expect(exitHandlers.size).toBe(0);
+  });
+
+  it("registers one exit hook across repeated arm calls and removes it on disarm", () => {
+    const exitHandlers = new Set<() => void>();
+    const registerExitHandler = vi.fn((handler: () => void) => {
+      exitHandlers.add(handler);
+      return () => exitHandlers.delete(handler);
+    });
+    const rollback = installSandboxCancelRollback({
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      registry: { removeSandbox: vi.fn() },
+      clearOnboardSession: vi.fn(),
+      registerExitHandler,
+    });
+
+    rollback.arm("first");
+    rollback.arm("second");
+    expect(registerExitHandler).toHaveBeenCalledOnce();
+    expect(exitHandlers.size).toBe(1);
+
+    rollback.disarm();
+    expect(exitHandlers.size).toBe(0);
+
+    rollback.arm("third");
+    expect(registerExitHandler).toHaveBeenCalledTimes(2);
+    expect(exitHandlers.size).toBe(1);
+    rollback.dispose();
+    expect(exitHandlers.size).toBe(0);
+  });
+
+  it("keeps one process exit hook when a later onboard instance becomes active", () => {
+    const baseline = process.listenerCount("exit");
+    const options = () => ({
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      registry: { removeSandbox: vi.fn() },
+      clearOnboardSession: vi.fn(),
+    });
+    const first = installSandboxCancelRollback(options());
+    const second = installSandboxCancelRollback(options());
+    try {
+      first.arm("first");
+      expect(process.listenerCount("exit")).toBe(baseline + 1);
+
+      second.arm("second");
+      expect(process.listenerCount("exit")).toBe(baseline + 1);
+    } finally {
+      first.dispose();
+      second.dispose();
+    }
+    expect(process.listenerCount("exit")).toBe(baseline);
+  });
+
+  it("runs cancellation rollback before an earlier incomplete-onboard exit handler", () => {
+    const baselineListeners = new Set(process.listeners("exit"));
+    const order: string[] = [];
+    let sessionPresent = true;
+    const incompleteHandler = () => order.push(sessionPresent ? "incomplete" : "cleared");
+    process.on("exit", incompleteHandler);
+    const rollback = installSandboxCancelRollback({
+      runOpenshell: vi.fn(() => {
+        order.push("rollback");
+        return { status: 0 };
+      }),
+      registry: { removeSandbox: vi.fn() },
+      clearOnboardSession: () => {
+        sessionPresent = false;
+      },
+    });
+
+    try {
+      rollback.arm("new-sb");
+      rollback.markCancelled();
+      const relevantListeners = process
+        .listeners("exit")
+        .filter((listener) => listener === incompleteHandler || !baselineListeners.has(listener));
+      expect(relevantListeners).toHaveLength(2);
+      relevantListeners.forEach((listener) => listener(1));
+      expect(order).toEqual(["rollback", "cleared"]);
+    } finally {
+      rollback.dispose();
+      process.removeListener("exit", incompleteHandler);
+    }
   });
 });
 
