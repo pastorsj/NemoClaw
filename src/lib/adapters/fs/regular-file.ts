@@ -6,6 +6,7 @@ import fs from "node:fs";
 export interface OpenRegularFile {
   close(): void;
   readBytes(maxBytes: number): Buffer;
+  readChunks(maxBytes: number, visitor: (chunk: Buffer) => void): void;
   readUtf8(maxBytes?: number): string;
   replaceUtf8(contents: string, mode: number): void;
 }
@@ -92,9 +93,45 @@ export function openRegularFileNoFollow(
     }
     return bytes;
   };
+  const readChunks = (maxBytes: number, visitor: (chunk: Buffer) => void): void => {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) {
+      throw new RangeError(`regular file read limit must be a non-negative integer: ${target}`);
+    }
+    const beforeRead = assertPathIdentity();
+    if (beforeRead.size > maxBytes) {
+      throw new RangeError(`regular file exceeds the ${maxBytes}-byte read limit: ${target}`);
+    }
+    const buffer = Buffer.allocUnsafe(Math.min(Math.max(beforeRead.size, 1), 64 * 1024));
+    let offset = 0;
+    while (offset < beforeRead.size) {
+      const read = fs.readSync(
+        descriptor,
+        buffer,
+        0,
+        Math.min(buffer.length, beforeRead.size - offset),
+        offset,
+      );
+      if (read === 0) throw new Error(`short read from regular file: ${target}`);
+      visitor(buffer.subarray(0, read));
+      offset += read;
+    }
+    const afterRead = assertPathIdentity();
+    if (
+      beforeRead.dev !== afterRead.dev ||
+      beforeRead.ino !== afterRead.ino ||
+      beforeRead.nlink !== afterRead.nlink ||
+      beforeRead.mode !== afterRead.mode ||
+      beforeRead.size !== afterRead.size ||
+      beforeRead.mtimeMs !== afterRead.mtimeMs ||
+      beforeRead.ctimeMs !== afterRead.ctimeMs
+    ) {
+      throw new Error(`regular file changed while reading: ${target}`);
+    }
+  };
   return {
     close,
     readBytes,
+    readChunks,
     readUtf8: (maxBytes) => {
       const size = fs.fstatSync(descriptor).size;
       if (maxBytes !== undefined && size > maxBytes) {

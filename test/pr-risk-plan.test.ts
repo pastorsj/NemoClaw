@@ -642,6 +642,28 @@ describe("deterministic PR risk plan", () => {
     expect(result.planHash).not.toBe(adjacentCheck.planHash);
   });
 
+  it.each(["src/commands/harness/install.ts", "src/lib/harness/package-registry.ts"])(
+    "selects all three harness onboarding journeys for %s",
+    (changedFile) => {
+      const result = plan(changedFile);
+
+      expect(riskPlanRequiredJobIds(result)).toEqual(
+        expect.arrayContaining(["full-e2e", "hermes-e2e"]),
+      );
+      expect(riskPlanRequiredTargetIds(result)).toEqual([PR_E2E_TYPED_TARGET_IDS[0]]);
+      expect(riskPlanRequiredJobIds(result)).not.toEqual(
+        expect.arrayContaining(["channels-add-remove", "channels-stop-start"]),
+      );
+    },
+  );
+
+  it("selects full E2E for an OpenClaw package runtime change", () => {
+    const result = plan("packages/nemoclaw-openclaw/start.sh");
+
+    expect(riskPlanRequiredJobIds(result)).toContain("full-e2e");
+    expect(riskPlanRequiredTargetIds(result)).not.toContain(PR_E2E_TYPED_TARGET_IDS[0]);
+  });
+
   it.each([
     "src/lib/onboard/machine/handlers/sandbox-resume.ts",
     "src/lib/onboard/machine/handlers/sandbox.ts",
@@ -833,10 +855,12 @@ describe("deterministic PR risk plan", () => {
     expect(adjacentImage.families.map((family) => family.id)).toEqual([
       "platform-install",
       "managed-image-multiarch",
+      "focused-e2e",
     ]);
     expect(riskPlanRequiredJobIds(adjacentImage)).toEqual([
       "cloud-onboard",
       "managed-image-multiarch-startup",
+      "full-e2e",
     ]);
   });
 

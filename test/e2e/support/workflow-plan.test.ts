@@ -681,6 +681,39 @@ describe("E2E workflow plan", () => {
     );
   });
 
+  it.each(["src/commands/harness/install.ts", "src/lib/harness/package-registry.ts"])(
+    "selects the three harness package journeys without messaging for %s",
+    (changedFile) => {
+      const plan = buildE2eWorkflowPlan({}, { changedFiles: [changedFile] });
+      const catalogueIds = Object.values(plan.catalogueMatrices)
+        .flat()
+        .map((row) => row.id);
+
+      expect(catalogueIds).toContain("full-e2e");
+      expect(plan.hermesSelected).toBe(true);
+      expect(plan.matrix.map((row) => row.id)).toContain(
+        "ubuntu-repo-cloud-langchain-deepagents-code",
+      );
+      expect(selectedWorkflowJobs(plan)).not.toContain("messaging-providers");
+      expect(catalogueIds).not.toEqual(
+        expect.arrayContaining(["channels-add-remove", "messaging-compatible-endpoint"]),
+      );
+    },
+  );
+
+  it("selects full E2E for an OpenClaw package runtime change", () => {
+    const plan = buildE2eWorkflowPlan(
+      {},
+      { changedFiles: ["packages/nemoclaw-openclaw/start.sh"] },
+    );
+
+    expect(
+      Object.values(plan.catalogueMatrices)
+        .flat()
+        .map((row) => row.id),
+    ).toContain("full-e2e");
+  });
+
   it("selects the Jetson test when no other E2E job owns a changed file (#8142)", () => {
     const plan = buildE2eWorkflowPlan({}, { changedFiles: ["docs/index.yml"] });
 

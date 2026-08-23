@@ -14,10 +14,21 @@ import {
   createHermesPortableBuildContextPlan,
   withHermesPortableBuildContextPlan,
 } from "./hermes-portable-build-context";
-import { HERMES_PORTABLE_BUILD_CONTEXT_FILES } from "./hermes-portable-build-context-files";
 
 const TRANSACTION_ID = "11111111-1111-4111-8111-111111111111";
 const CREATE_INTENT = "a".repeat(64);
+const INVENTORY_RELATIVE_PATH = "packages/nemoclaw-hermes/portable-build-context.json";
+const PORTABLE_BUILD_CONTEXT_INVENTORY = JSON.parse(
+  fs.readFileSync(path.join(ROOT, INVENTORY_RELATIVE_PATH), "utf8"),
+) as {
+  readonly $comment: string;
+  readonly schemaVersion: number;
+  readonly dockerfileCopySources: readonly string[];
+  readonly trackedFiles: readonly {
+    readonly path: string;
+    readonly mode: "100644" | "100755" | "160000";
+  }[];
+};
 const BUILD_SETTINGS = {
   model: "qwen3-vl:4b",
   provider: "ollama-local",
@@ -84,7 +95,7 @@ function primaryCloneFixture(privateFileModes = false): string {
   const requested = fs.mkdtempSync(path.join(stateDir, "primary-clone-"));
   const root = fs.realpathSync(requested);
   fs.chmodSync(root, 0o700);
-  for (const entry of HERMES_PORTABLE_BUILD_CONTEXT_FILES) {
+  for (const entry of PORTABLE_BUILD_CONTEXT_INVENTORY.trackedFiles) {
     const target = path.join(root, entry.path);
     fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o755 });
     entry.mode === "160000"
@@ -296,6 +307,28 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
     expect(plan.authority.sourceRevision).toBe("b".repeat(40));
     expect(plan.authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(fs.existsSync(path.join(source, "packages/nemoclaw-openclaw"))).toBe(false);
+  });
+
+  it("rejects inventory fields outside the fixed package contract", () => {
+    const source = primaryCloneFixture();
+    const inventoryPath = path.join(source, INVENTORY_RELATIVE_PATH);
+    const inventory = JSON.parse(fs.readFileSync(inventoryPath, "utf8")) as Record<string, unknown>;
+    inventory.extension = true;
+    fs.writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`, { mode: 0o644 });
+
+    expect(() => createHermesPortableBuildContextPlan(source, BUILD_SETTINGS)).toThrow(
+      "inventory has an invalid document contract",
+    );
+  });
+
+  it("binds the package inventory into source authority", () => {
+    const source = primaryCloneFixture();
+    const plan = createHermesPortableBuildContextPlan(source, BUILD_SETTINGS);
+
+    fs.appendFileSync(path.join(source, INVENTORY_RELATIVE_PATH), "\n");
+
+    expect(() => plan.assertCurrentSource()).toThrow("source authority changed after reservation");
   });
 
   it("stages and pins the Dockerfile and helper from the selected installed Hermes package", async () => {

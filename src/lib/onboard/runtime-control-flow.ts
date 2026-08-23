@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type Session, updateSession } from "../state/onboard-session";
+import {
+  type Session,
+  type SessionHarnessPackageAuthority,
+  updateSession,
+} from "../state/onboard-session";
+import type { AgentDefinition } from "../agent/definition-types";
 import { clearAgentScopedResumeState } from "./agent-resume-state";
 import { isDcodeAutoApprovalMode } from "./dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";
@@ -89,12 +94,32 @@ export interface SelectedAgentTransitionPlan {
   commit(): Promise<Session>;
 }
 
+function updateSessionHarnessPackage(
+  session: Session,
+  authority: SessionHarnessPackageAuthority | null | undefined,
+): Session {
+  session.harnessPackage = authority ? { ...authority } : null;
+  return session;
+}
+
+export function resolveSelectedHarnessPackageAuthority(
+  agent: Pick<AgentDefinition, "name" | "harnessPackageSource" | "packageContentDigest">,
+): SessionHarnessPackageAuthority | null {
+  const source = agent.harnessPackageSource ?? null;
+  if (!source) return null;
+  if (!agent.packageContentDigest) {
+    throw new Error(`Selected harness package '${agent.name}' has no loaded content digest`);
+  }
+  return { source, contentDigest: agent.packageContentDigest };
+}
+
 /** Plan an agent transition without changing durable state or stopping a router. */
 export function planSelectedAgentTransition(
   input: {
     resume: boolean;
     session: Session | null;
     selectedAgentName: string | null | undefined;
+    selectedHarnessPackage?: SessionHarnessPackageAuthority | null;
     routerPort: number;
     note(message: string): void;
   },
@@ -123,6 +148,7 @@ export function planSelectedAgentTransition(
     projectedSession = deps.clearAgentScopedResumeState(projectedSession, selectedAgentName);
   }
   projectedSession = updateSessionAgent(projectedSession, input.selectedAgentName, deps);
+  projectedSession = updateSessionHarnessPackage(projectedSession, input.selectedHarnessPackage);
   let committed: Promise<Session> | null = null;
   return {
     session: projectedSession,
@@ -139,7 +165,10 @@ export function planSelectedAgentTransition(
           const transitioned = resumeAgentChanged
             ? deps.clearAgentScopedResumeState(current, selectedAgentName)
             : current;
-          return updateSessionAgent(transitioned, input.selectedAgentName, deps);
+          return updateSessionHarnessPackage(
+            updateSessionAgent(transitioned, input.selectedAgentName, deps),
+            input.selectedHarnessPackage,
+          );
         });
       })();
       return committed;

@@ -27,14 +27,21 @@ import {
   createSandboxBaseImageBuildProvenanceKey,
   createSandboxBaseImageResolutionKey,
 } from "./resolution-key";
+import { OPENCLAW_BASE_IMAGE_INPUTS_FILE } from "./source-identity";
 
 const roots: string[] = [];
+const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
+const baseImageInputsSource = fs.readFileSync(
+  path.join(repositoryRoot, OPENCLAW_BASE_IMAGE_INPUTS_FILE),
+  "utf8",
+);
 
 function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-resolution-key-"));
   roots.push(root);
   fs.mkdirSync(path.join(root, "nemoclaw-blueprint"), { recursive: true });
   fs.mkdirSync(path.join(root, "packages", "nemoclaw-openclaw"), { recursive: true });
+  fs.writeFileSync(path.join(root, OPENCLAW_BASE_IMAGE_INPUTS_FILE), baseImageInputsSource);
   fs.writeFileSync(path.join(root, "packages/nemoclaw-openclaw/Dockerfile.base"), "FROM node:22\n");
   fs.writeFileSync(path.join(root, "nemoclaw-blueprint", "blueprint.yaml"), "version: 1\n");
   return root;

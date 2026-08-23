@@ -537,6 +537,7 @@ describe("uninstall run plan", () => {
         openRegularFile: () => ({
           close: () => {},
           readBytes: () => Buffer.from("12000\n"),
+          readChunks: (_maxBytes, visitor) => visitor(Buffer.from("12000\n")),
           readUtf8: () => "12000\n",
           replaceUtf8: () => {},
         }),

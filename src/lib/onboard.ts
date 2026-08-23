@@ -2962,13 +2962,13 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         resume,
         session,
         selectedAgentName: agent?.name,
+        selectedHarnessPackage: runtimeControlFlow.resolveSelectedHarnessPackageAuthority(effectiveAgent),
         routerPort: loadBlueprintProfile("routed")?.router.port || 4000,
         note,
       });
       setOnboardBrandingAgent(agent?.name || "openclaw");
       session = selectedAgentTransition.session;
       const resumeAgentChanged = selectedAgentTransition.resumeAgentChanged;
-      const forceProviderSelectionForAgentChange = resumeAgentChanged;
       console.log("");
       console.log(`  ${cliDisplayName()} Onboarding`);
       if (isNonInteractive()) note("  (non-interactive mode)");
@@ -3137,7 +3137,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         },
         providerInference: {
           gatewayName: GATEWAY_NAME,
-          forceProviderSelection: forceProviderSelectionForAgentChange,
+          forceProviderSelection: resumeAgentChanged,
           ...authoritativeRebuildTarget.rebuildProviderFlowOptions(opts, coreFlowContext),
           endpointProvenance,
           env: process.env,

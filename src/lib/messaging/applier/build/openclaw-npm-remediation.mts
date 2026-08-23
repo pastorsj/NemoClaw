@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { lstatSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 
 type RemediationRequest = Readonly<{
   archivePath: string;
   env?: NodeJS.ProcessEnv;
+  helperPath: string;
   packageSpec: string;
   workingDirectory: string;
 }>;
@@ -27,10 +29,35 @@ export type RemediatedArchive = Readonly<
     }
 >;
 
-const OPENCLAW_REMEDIATION_HELPER = resolve(
-  import.meta.dirname,
-  "../../../../../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
-);
+export const OPENCLAW_NPM_REMEDIATION_HELPER_ENV =
+  "NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER";
+
+function requirePackageHelperPath(value: unknown): string {
+  if (typeof value !== "string" || value.trim() !== value || !isAbsolute(value)) {
+    throw new Error("OpenClaw npm remediation requires an absolute package-helper path");
+  }
+  const helperPath = resolve(value);
+  if (helperPath !== value) {
+    throw new Error("OpenClaw npm remediation package-helper path must be canonical");
+  }
+  let metadata: ReturnType<typeof lstatSync>;
+  try {
+    metadata = lstatSync(helperPath);
+  } catch (error) {
+    throw new Error(`OpenClaw npm remediation package helper is unavailable: ${helperPath}`, {
+      cause: error,
+    });
+  }
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isFile() ||
+    (metadata.mode & 0o022) !== 0 ||
+    (typeof process.geteuid === "function" && metadata.uid !== process.geteuid())
+  ) {
+    throw new Error(`OpenClaw npm remediation package helper is not trusted: ${helperPath}`);
+  }
+  return helperPath;
+}
 
 function parseRemediationResult(output: string): RemediatedArchive {
   const result = JSON.parse(output) as Partial<RemediatedArchive>;
@@ -52,11 +79,12 @@ function parseRemediationResult(output: string): RemediatedArchive {
 export function remediateReviewedOpenClawPluginArchive(
   request: RemediationRequest,
 ): RemediatedArchive {
+  const helperPath = requirePackageHelperPath(request.helperPath);
   const result = spawnSync(
     process.execPath,
     [
       "--experimental-strip-types",
-      OPENCLAW_REMEDIATION_HELPER,
+      helperPath,
       "--archive",
       resolve(request.archivePath),
       "--package-spec",

@@ -19,7 +19,10 @@ import {
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { remediateReviewedOpenClawPluginArchive } from "./openclaw-npm-remediation.mts";
+import {
+  OPENCLAW_NPM_REMEDIATION_HELPER_ENV,
+  remediateReviewedOpenClawPluginArchive,
+} from "./openclaw-npm-remediation.mts";
 import { packReviewedNpmArchive } from "../../../../../scripts/lib/reviewed-npm-archive.mts";
 import { discordManifest } from "../../channels/discord/manifest.ts";
 import { googlechatManifest } from "../../channels/googlechat/manifest.ts";
@@ -1362,6 +1365,12 @@ function packVerifiedOpenClawPluginArchive(
       `OpenClaw plugin ${install.npmPackageSpec} has no committed npm tarball URL`,
     );
   }
+  const remediationHelperPath = (env[OPENCLAW_NPM_REMEDIATION_HELPER_ENV] || "").trim();
+  if (!remediationHelperPath) {
+    throw new MessagingBuildApplierError(
+      `${OPENCLAW_NPM_REMEDIATION_HELPER_ENV} must be supplied by the OpenClaw package build`,
+    );
+  }
   const archive = packReviewedNpmArchive({
     env: env as NodeJS.ProcessEnv,
     expectedIntegrity: install.integrity,
@@ -1373,6 +1382,7 @@ function packVerifiedOpenClawPluginArchive(
   const remediated = remediateReviewedOpenClawPluginArchive({
     archivePath: archive.archivePath,
     env: env as NodeJS.ProcessEnv,
+    helperPath: remediationHelperPath,
     packageSpec: exactPackage.packageSpec,
     workingDirectory: archive.rootDirectory,
   });

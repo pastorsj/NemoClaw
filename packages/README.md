@@ -4,7 +4,8 @@
 # Agent runtime packages
 
 This directory contains the agent runtime packages that ship with NemoClaw.
-The first package boundary is data-only and uses existing onboarding code.
+The registry discovers packages through data-only manifests and installation receipts.
+Onboarding and lifecycle commands can run package-owned helpers after receipt verification.
 
 Run these commands to inspect or install a package:
 
@@ -36,7 +37,14 @@ basename, and manifest `name` must use the same ID.
 The registry rejects symbolic links, and normal discovery rejects invalid package metadata.
 A refresh can replace an older receipt-managed package when its tracked content matches its receipt.
 Receipt tracking ignores entries named `.git`, `.DS_Store`, `node_modules`, and `__pycache__`.
-It reads package data but does not import a package module.
+Discovery reads package data without importing a package module.
+Package-owned host helpers must not load executable code from receipt-ignored paths.
+The registry rejects credential-shaped build-context paths before installation.
+
+Treat each installed agent runtime package as trusted code.
+Package-owned helpers can receive NemoClaw-held credentials and use the current user's Docker or OpenShell control.
+The receipt detects package changes after installation.
+It does not authenticate the package publisher or validate package behavior.
 
 Every agent runtime package must include the agent manifest named by
 `nemoclaw.harnessManifest` and these files:
@@ -56,7 +64,7 @@ executable. Packages can also include these optional paths:
 Package-specific helpers, lockfiles, patches, schemas, and runtime plugins belong with these files.
 Repository test projects continue to own integration and E2E coverage for the in-tree packages.
 NemoClaw core continues to own command parsing, onboarding, OpenShell lifecycle operations,
-credential custody, and the shared messaging-channel pipeline.
+credential storage and delivery, and the shared messaging-channel pipeline.
 
 ## Add a bundled package
 

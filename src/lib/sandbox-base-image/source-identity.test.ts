@@ -17,9 +17,15 @@ import {
   getSourceShortShaTags,
   getVersionedBaseImageTags,
   normalizeBaseImageInputPaths,
+  OPENCLAW_BASE_IMAGE_INPUTS_FILE,
 } from "./source-identity";
 
 const tmpRoots: string[] = [];
+const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
+const baseImageInputsSource = fs.readFileSync(
+  path.join(repositoryRoot, OPENCLAW_BASE_IMAGE_INPUTS_FILE),
+  "utf8",
+);
 const emptyGitConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-empty-gitconfig-"));
 const emptyGitConfig = path.join(emptyGitConfigDir, "gitconfig");
 const emptyGitHooksDir = path.join(emptyGitConfigDir, "hooks");
@@ -70,10 +76,15 @@ function writeFixture(root: string, relativePath: string, contents: string) {
   fs.writeFileSync(absolutePath, contents);
 }
 
+function writeBaseImageInputsFixture(root: string, source: string = baseImageInputsSource): void {
+  writeFixture(root, OPENCLAW_BASE_IMAGE_INPUTS_FILE, source);
+}
+
 function createGitFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-base-image-test-"));
   tmpRoots.push(root);
   git(root, ["init", "-b", "main"]);
+  writeBaseImageInputsFixture(root);
   writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
   writeFixture(
     root,
@@ -100,6 +111,7 @@ function createGitFixtureWithRemoteOnlyBaseRef() {
 
   git(remote, ["init", "--bare"]);
   git(root, ["init", "-b", "main"]);
+  writeBaseImageInputsFixture(root);
   writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
   writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
@@ -168,7 +180,7 @@ afterAll(() => {
 
 describe("sandbox base-image source identity", () => {
   it("normalizes and deduplicates inputs inside the repository while rejecting traversal", () => {
-    const root = path.join(os.tmpdir(), "nemoclaw-source-identity-root");
+    const root = createGitFixture();
     const agentDockerfile = "packages/nemoclaw-hermes/Dockerfile.base";
 
     expect(
@@ -179,6 +191,7 @@ describe("sandbox base-image source identity", () => {
         "../outside/Dockerfile.base",
       ]),
     ).toEqual([
+      "packages/nemoclaw-openclaw/base-image-inputs.json",
       "packages/nemoclaw-openclaw/Dockerfile.base",
       "nemoclaw-blueprint/blueprint.yaml",
       "scripts/lib/sandbox-rlimits.sh",
@@ -195,6 +208,36 @@ describe("sandbox base-image source identity", () => {
       "scripts/upgrade-bundled-npm.mts",
       agentDockerfile,
     ]);
+  });
+
+  it("requires the package-owned base-image input manifest at its fixed path", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-base-image-input-manifest-"));
+    tmpRoots.push(root);
+
+    expect(() => normalizeBaseImageInputPaths(root)).toThrow(
+      "OpenClaw base-image input manifest is unavailable",
+    );
+  });
+
+  it("rejects traversal and unsupported fields in the package-owned input manifest", () => {
+    const root = createGitFixture();
+    const manifestPath = path.join(root, OPENCLAW_BASE_IMAGE_INPUTS_FILE);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
+      paths: string[];
+      [key: string]: unknown;
+    };
+    manifest.paths.push("../outside");
+    manifest.unexpected = true;
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+
+    expect(() => normalizeBaseImageInputPaths(root)).toThrow(
+      "OpenClaw base-image input manifest has unsupported fields",
+    );
+    delete manifest.unexpected;
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+    expect(() => normalizeBaseImageInputPaths(root)).toThrow(
+      "must be a canonical repository-relative path",
+    );
   });
 
   it("builds deterministic local tags from a source SHA and falls back without one", () => {
@@ -457,6 +500,7 @@ describe("sandbox base-image source identity", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-base-image-no-base-ref-"));
     tmpRoots.push(root);
     git(root, ["init", "-b", "feature"]);
+    writeBaseImageInputsFixture(root);
     writeFixture(root, "packages/nemoclaw-openclaw/Dockerfile.base", "FROM node:22\n");
     writeFixture(root, "nemoclaw-blueprint/blueprint.yaml", "min_openclaw_version: 2026.4.24\n");
     git(root, ["add", "."]);

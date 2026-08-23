@@ -274,6 +274,12 @@ Bundled harnesses remain available before installation, so existing onboarding c
 The NemoClaw installer installs the selected package before it starts onboarding.
 The install does not execute package code, create a sandbox, or request credentials.
 
+<Warning>
+Treat an installed agent runtime package as trusted code.
+Later onboarding and lifecycle commands can give package-owned helpers access to NemoClaw credentials and sandbox control.
+The installation receipt detects later content changes, but it does not authenticate the publisher or validate package behavior.
+</Warning>
+
 ```bash
 $$nemoclaw harness install hermes
 $$nemoclaw harness list
@@ -282,6 +288,8 @@ $$nemoclaw harness list
 The installation succeeds when the same package is already present.
 The receipt tracks regular package files and executable bits, except entries named `.git`, `.DS_Store`, `node_modules`, or `__pycache__`.
 Changes in those ignored entries do not prevent an upgrade and are removed when replacement succeeds.
+Package-owned host helpers must not load executable code from receipt-ignored paths.
+The registry rejects credential-shaped build-context paths before installation.
 NemoClaw replaces an installed copy when bundled content has changed only if the receipt-tracked content still matches its installation receipt.
 If replacement fails before verification, NemoClaw attempts to restore the prior package.
 If restoration also fails, NemoClaw stops and reports the retained prior-package path.

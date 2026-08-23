@@ -39,18 +39,32 @@ afterEach(() => {
 });
 
 describe("OpenClaw backup compatibility wrapper", () => {
-  it("runs the helper from a qualified installed OpenClaw package", () => {
+  it("runs the receipt-qualified helper from an installed OpenClaw package", () => {
+    registry.installBundledHarness("openclaw", { ...process.env, HOME: home });
+
+    const result = spawnSync(WRAPPER, [], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("Usage:");
+    expect(result.stdout).toContain(path.join(home, ".nemoclaw", "backups"));
+  });
+
+  it("rejects a changed installed helper before executing it", () => {
     registry.installBundledHarness("openclaw", { ...process.env, HOME: home });
     const helper = installedBackupScript(home);
-    fs.writeFileSync(helper, "#!/bin/sh\nprintf 'installed:%s\\n' \"$1\"\n", { mode: 0o755 });
+    fs.writeFileSync(helper, "#!/bin/sh\nprintf 'changed helper ran\\n'\n", { mode: 0o755 });
 
     const result = spawnSync(WRAPPER, ["probe"], {
       encoding: "utf8",
       env: { ...process.env, HOME: home },
     });
 
-    expect(result.status).toBe(0);
-    expect(result.stdout).toBe("installed:probe\n");
+    expect(result.status).toBe(1);
+    expect(result.stdout).not.toContain("changed helper ran");
+    expect(result.stderr).toContain("installation receipt does not match package content");
   });
 
   it("rejects a helper-only installed directory before executing it", () => {

@@ -187,6 +187,7 @@ export interface AgentDefinition {
   readonly policyPermissivePath: string | null;
   readonly pluginDir: string | null;
   readonly legacyPaths: AgentLegacyPaths | null;
+  readonly harnessPackageSource?: "bundled" | "installed" | null;
   readonly packageContentDigest: string | null;
 }
 

@@ -6,8 +6,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
-import { harnessPackageContentDigest } from "../harness/package-registry";
-import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
+import {
+  harnessPackageContentDigest,
+  isIgnoredHarnessPackageEntry,
+} from "../harness/package-registry";
 
 export const SANDBOX_BUILD_CONTEXT_PREFIX = "nemoclaw-build-";
 export type SandboxBuildContextOrigin = "custom" | "generated";
@@ -25,7 +27,6 @@ export interface BuildContextStats {
 type BuildContextStatsFilter = (entryPath: string) => boolean;
 
 const MAX_REVIEWED_RUNTIME_ARTIFACT_BYTES = 8 * 1024 * 1024;
-const AGENT_RUNTIME_PACKAGE_IGNORES = new Set([".nemoclaw-install.json", ".DS_Store"]);
 
 function createBuildContextDir(tmpDir: string = os.tmpdir()): string {
   return fs.mkdtempSync(path.join(tmpDir, SANDBOX_BUILD_CONTEXT_PREFIX));
@@ -78,23 +79,20 @@ export function stageAgentRuntimePackage(
     throw new Error("Selected harness package no longer matches its loaded manifest");
   }
   const stagedPackageDir = path.join(buildCtx, "packages", path.basename(sourcePackageDir));
-  const includePackagePath = createCustomBuildContextFilter(sourcePackageDir);
   fs.rmSync(stagedPackageDir, { recursive: true, force: true });
   fs.mkdirSync(path.dirname(stagedPackageDir), { recursive: true });
   fs.cpSync(sourcePackageDir, stagedPackageDir, {
     mode: fs.constants.COPYFILE_FICLONE,
     recursive: true,
     filter: (sourcePath) => {
+      if (isIgnoredHarnessPackageEntry(path.basename(sourcePath))) return false;
       const metadata = fs.lstatSync(sourcePath);
       if (metadata.isSymbolicLink() || (!metadata.isDirectory() && !metadata.isFile())) {
         throw new Error(
           `Agent runtime packages may contain only directories and regular files: ${sourcePath}`,
         );
       }
-      return (
-        !AGENT_RUNTIME_PACKAGE_IGNORES.has(path.basename(sourcePath)) &&
-        includePackagePath(sourcePath)
-      );
+      return true;
     },
   });
   normalizeReadModesForDockerCopy(stagedPackageDir);
@@ -168,6 +166,14 @@ function stageManagedStartupRuntimeSources(rootDir: string, buildCtx: string): v
   );
 }
 
+function stageSharedBoundarySources(rootDir: string, buildCtx: string): void {
+  fs.cpSync(
+    path.join(rootDir, "src", "lib", "shared"),
+    path.join(buildCtx, "src", "lib", "shared"),
+    { recursive: true },
+  );
+}
+
 function stageLegacySandboxBuildContext(
   rootDir: string,
   tmpDir: string = os.tmpdir(),
@@ -195,6 +201,7 @@ function stageLegacySandboxBuildContext(
       path.join(buildCtx, "src", "lib", "messaging"),
       { recursive: true },
     );
+    stageSharedBoundarySources(rootDir, buildCtx);
     fs.copyFileSync(
       path.join(rootDir, "src", "lib", "tool-disclosure.ts"),
       path.join(buildCtx, "src", "lib", "tool-disclosure.ts"),
@@ -325,6 +332,7 @@ function stageOptimizedSandboxBuildContext(
       path.join(buildCtx, "src", "lib", "messaging"),
       { recursive: true },
     );
+    stageSharedBoundarySources(rootDir, buildCtx);
     fs.copyFileSync(
       path.join(rootDir, "src", "lib", "tool-disclosure.ts"),
       path.join(buildCtx, "src", "lib", "tool-disclosure.ts"),

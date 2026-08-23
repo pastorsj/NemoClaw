@@ -53,6 +53,17 @@ const OPENCLAW_SLACK_2026_7_1_INTEGRITY =
 const OPENCLAW_SLACK_2026_7_1_TARBALL =
   "https://registry.npmjs.org/@openclaw/slack/-/slack-2026.7.1.tgz";
 const REPO_ROOT = path.join(import.meta.dirname, "..");
+const OPENCLAW_REMEDIATION_HELPER = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "lib",
+  "openclaw-npm-remediation.mts",
+);
+const OPENCLAW_PACKAGE_BUILD_ENV = {
+  NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER: OPENCLAW_REMEDIATION_HELPER,
+};
 
 function channelsB64(channels: string[]): string {
   return Buffer.from(JSON.stringify(channels)).toString("base64");
@@ -113,6 +124,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
         "build",
         "messaging-build-applier.mts",
       );
+      expect(fs.existsSync(path.join(root, "packages", "nemoclaw-openclaw"))).toBe(false);
       const result = spawnSync(
         process.execPath,
         [
@@ -153,6 +165,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
             `const adapter = await import(${JSON.stringify(pathToFileURL(adapterPath).href)});`,
             "const result = adapter.remediateReviewedOpenClawPluginArchive({",
             "  archivePath: process.argv[1],",
+            "  helperPath: process.argv[3],",
             "  packageSpec: '@openclaw/whatsapp@2026.7.1',",
             "  workingDirectory: process.argv[2],",
             "});",
@@ -160,6 +173,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
           ].join("\n"),
           archivePath,
           root,
+          OPENCLAW_REMEDIATION_HELPER,
         ],
         { encoding: "utf8", timeout: 10_000 },
       );
@@ -172,6 +186,22 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("requires the OpenClaw package build to supply its remediation helper", async () => {
+    const env = await withLegacyMessagingPlanEnvDirect(
+      {
+        PATH: process.env.PATH || "/usr/bin:/bin",
+        OPENCLAW_VERSION: "2026.7.1",
+        NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["slack"]),
+      },
+      "openclaw",
+    );
+    const plan = readMessagingBuildPlanFromEnv(env, "openclaw");
+
+    expect(() => applyMessagingBuildPhase(plan, "agent-install", env)).toThrow(
+      "NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER must be supplied by the OpenClaw package build",
+    );
   });
 
   it(
@@ -204,6 +234,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
         const env = await withLegacyMessagingPlanEnvDirect(
           {
             PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+            ...OPENCLAW_PACKAGE_BUILD_ENV,
             OPENCLAW_TRACE: tracePath,
             OPENCLAW_SLACK_INTEGRITY: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
             OPENCLAW_PACK_INTEGRITY_OVERRIDE: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
@@ -267,6 +298,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
         const env = await withLegacyMessagingPlanEnvDirect(
           {
             PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+            ...OPENCLAW_PACKAGE_BUILD_ENV,
             OPENCLAW_TRACE: tracePath,
             OPENCLAW_SLACK_INTEGRITY: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
             OPENCLAW_PACK_INTEGRITY_OVERRIDE: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
@@ -319,6 +351,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
         const env = await withLegacyMessagingPlanEnvDirect(
           {
             PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+            ...OPENCLAW_PACKAGE_BUILD_ENV,
             OPENCLAW_TRACE: tracePath,
             OPENCLAW_SLACK_INTEGRITY: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
             OPENCLAW_PACK_INTEGRITY_OVERRIDE: "sha512-packed-drift",
@@ -367,6 +400,7 @@ describe("messaging-build-applier.mts: plugin archive integrity", () => {
         const env = await withLegacyMessagingPlanEnvDirect(
           {
             PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+            ...OPENCLAW_PACKAGE_BUILD_ENV,
             OPENCLAW_TRACE: tracePath,
             OPENCLAW_SLACK_INTEGRITY: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
             OPENCLAW_PACK_INTEGRITY_OVERRIDE: OPENCLAW_SLACK_2026_7_1_INTEGRITY,

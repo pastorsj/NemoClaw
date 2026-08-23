@@ -38,6 +38,8 @@ const PR_E2E_MANUAL_CONTROLLER_JOB_ID_SET = new Set<string>(PR_E2E_MANUAL_CONTRO
 const DEEPAGENTS_HEADLESS_INFERENCE_CHECK =
   "test/e2e/e2e-cloud-experimental/checks/07-deepagents-code-headless-inference.sh";
 const DEEPAGENTS_CODE_RUNTIME_ROOT = "packages/nemoclaw-langchain-deepagents-code/";
+const OPENCLAW_PACKAGE_RUNTIME_ROOT = "packages/nemoclaw-openclaw/";
+const CORE_HARNESS_RUNTIME_ROOTS = ["src/commands/harness/", "src/lib/harness/"] as const;
 const JOURNALED_RECREATE_RESUME_RUNTIME_FILES = new Set([
   "src/lib/onboard/machine/handlers/sandbox-resume.ts",
   "src/lib/onboard/machine/handlers/sandbox.ts",
@@ -256,6 +258,12 @@ export function isPrE2eManualControllerJob(value: string): boolean {
 export function focusedPrE2eTargetsForChangedFiles(
   changedFiles: readonly string[],
 ): TrustedFocusedE2eTarget[] {
+  const coreHarnessMatchedFiles = stableUnique(
+    changedFiles.filter(
+      (file) =>
+        CORE_HARNESS_RUNTIME_ROOTS.some((root) => file.startsWith(root)) && isRuntimeRelevant(file),
+    ),
+  );
   const deepAgentsMatchedFiles = stableUnique(
     changedFiles.filter(
       (file) =>
@@ -264,15 +272,19 @@ export function focusedPrE2eTargetsForChangedFiles(
         (file.startsWith(DEEPAGENTS_CODE_RUNTIME_ROOT) && isRuntimeRelevant(file)),
     ),
   );
+  const deepAgentsAuthorityFiles = stableUnique([
+    ...coreHarnessMatchedFiles,
+    ...deepAgentsMatchedFiles,
+  ]);
   const postRebootMatchedFiles = stableUnique(
     changedFiles.filter((file) => POST_REBOOT_DELIVERY_RUNTIME_FILES.has(file)),
   );
   return [
-    ...(deepAgentsMatchedFiles.length > 0
+    ...(deepAgentsAuthorityFiles.length > 0
       ? [
           {
             id: PR_E2E_TYPED_TARGET_IDS[0],
-            matchedFiles: deepAgentsMatchedFiles,
+            matchedFiles: deepAgentsAuthorityFiles,
           },
         ]
       : []),
@@ -290,6 +302,20 @@ export function focusedPrE2eTargetsForChangedFiles(
 export function focusedPrE2eJobsForChangedFiles(
   changedFiles: readonly string[],
 ): TrustedFocusedE2eJob[] {
+  const coreHarnessMatchedFiles = stableUnique(
+    changedFiles.filter(
+      (file) =>
+        CORE_HARNESS_RUNTIME_ROOTS.some((root) => file.startsWith(root)) && isRuntimeRelevant(file),
+    ),
+  );
+  const openclawPackageRuntimeFiles = stableUnique(
+    changedFiles.filter(
+      (file) =>
+        file !== "packages/nemoclaw-openclaw/Dockerfile" &&
+        file.startsWith(OPENCLAW_PACKAGE_RUNTIME_ROOT) &&
+        isRuntimeRelevant(file),
+    ),
+  );
   const journaledRecreateResumeFiles = stableUnique(
     changedFiles.filter((file) => JOURNALED_RECREATE_RESUME_RUNTIME_FILES.has(file)),
   );
@@ -321,6 +347,14 @@ export function focusedPrE2eJobsForChangedFiles(
     ),
   );
   return [
+    {
+      id: "full-e2e",
+      matchedFiles: stableUnique([...coreHarnessMatchedFiles, ...openclawPackageRuntimeFiles]),
+    },
+    {
+      id: "hermes-e2e",
+      matchedFiles: coreHarnessMatchedFiles,
+    },
     ...(journaledRecreateResumeFiles.length > 0
       ? [
           {

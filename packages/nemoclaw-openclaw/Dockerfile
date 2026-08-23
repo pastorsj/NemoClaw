@@ -28,13 +28,14 @@ ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=1000 \
     NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=20000 \
     NPM_CONFIG_FETCH_TIMEOUT=60000
-COPY packages/nemoclaw-openclaw/plugin/package.json packages/nemoclaw-openclaw/plugin/package-lock.json packages/nemoclaw-openclaw/plugin/tsconfig.json /opt/nemoclaw/
+COPY packages/nemoclaw-openclaw/plugin/package.json packages/nemoclaw-openclaw/plugin/package-lock.json packages/nemoclaw-openclaw/plugin/tsconfig.json packages/nemoclaw-openclaw/plugin/tsconfig.shared.json /opt/nemoclaw/
 COPY tools/mcp-tool-discovery-runtime/npm-ci-locked.sh /opt/nemoclaw-build-tools/npm-ci-locked.sh
 COPY tools/mcp-tool-discovery-runtime/npm-cache-seed/ /opt/nemoclaw-build-tools/npm-cache-seed/
 WORKDIR /opt/nemoclaw
 RUN --network=default /opt/nemoclaw-build-tools/npm-ci-locked.sh \
     && rm -rf /opt/nemoclaw-build-tools/npm-cache-seed
 COPY packages/nemoclaw-openclaw/plugin/src/ /opt/nemoclaw/src/
+COPY src/lib/shared/ /src/lib/shared/
 COPY scripts/checks/verify-openshell-policy-boundary-dependencies.mts /opt/nemoclaw-build-checks/
 RUN npm run build \
     && node --experimental-strip-types \
@@ -1919,10 +1920,12 @@ RUN --mount=from=openclaw-managed-messaging-npm-cache,source=/out/npm-cache,targ
         export NPM_CONFIG_FUND=false; \
     fi; \
     NEMOCLAW_WECHAT_NPM_INSTALL_CACHE="$install_cache" \
+        NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
         OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
         node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase agent-install; \
     if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
         NEMOCLAW_WECHAT_NPM_INSTALL_CACHE="$install_cache" \
+            NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
             OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
             node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts \
                 --agent openclaw --phase managed-image-capability-union; \

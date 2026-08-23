@@ -69,6 +69,7 @@ export const SESSION_DIR = nemoclawStateRoot(process.env.HOME || "/tmp", GATEWAY
 export const SESSION_FILE = path.join(SESSION_DIR, "onboard-session.json");
 export const LOCK_FILE = path.join(SESSION_DIR, "onboard.lock");
 const SAFE_VLLM_INSTALL_MODEL = /^[A-Za-z0-9._:/-]+$/;
+const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 // Session-specific aliases for the shared JSON types.
 type SessionJsonValue = JsonValue;
@@ -190,6 +191,11 @@ export interface SessionResourceProfile {
   memory: string;
 }
 
+export interface SessionHarnessPackageAuthority {
+  source: "bundled" | "installed";
+  contentDigest: string;
+}
+
 export interface Session {
   version: number;
   sessionId: string;
@@ -202,6 +208,8 @@ export interface Session {
   lastCompletedStep: string | null;
   failure: SessionFailure | null;
   agent: string | null;
+  /** Secret-free identity of the harness package selected for this onboarding run. */
+  harnessPackage: SessionHarnessPackageAuthority | null;
   sandboxName: string | null;
   provider: string | null;
   model: string | null;
@@ -381,6 +389,15 @@ function defaultSteps(): Record<string, StepState> {
 
 export function isObject(value: unknown): value is UnknownRecord {
   return isObjectRecord(value);
+}
+
+function parseHarnessPackageAuthority(value: unknown): SessionHarnessPackageAuthority | null {
+  if (!isObject(value) || Object.keys(value).length !== 2) return null;
+  if (value.source !== "bundled" && value.source !== "installed") return null;
+  if (typeof value.contentDigest !== "string" || !SHA256_HEX.test(value.contentDigest)) {
+    return null;
+  }
+  return { source: value.source, contentDigest: value.contentDigest };
 }
 
 function readString(value: SessionJsonValue | undefined): string | null {
@@ -745,6 +762,7 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     lastCompletedStep: overrides.lastCompletedStep ?? null,
     failure: overrides.failure ?? null,
     agent: overrides.agent ?? null,
+    harnessPackage: parseHarnessPackageAuthority(overrides.harnessPackage),
     sandboxName: overrides.sandboxName ?? null,
     provider: overrides.provider ?? null,
     model: overrides.model ?? null,
@@ -806,6 +824,10 @@ export function createSession(overrides: Partial<Session> = {}): Session {
 
 export function normalizeSession(data: Session | SessionJsonValue | undefined): Session | null {
   if (!isObject(data) || data.version !== SESSION_VERSION) return null;
+  const harnessPackage = parseHarnessPackageAuthority(data.harnessPackage);
+  if (hasOwn(data, "harnessPackage") && data.harnessPackage !== null && !harnessPackage) {
+    return null;
+  }
   const servingProfileProvenance = parseServingProfileProvenance(data.servingProfileProvenance);
   if (
     hasOwn(data, "servingProfileProvenance") &&
@@ -854,6 +876,7 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     startedAt: readString(data.startedAt) ?? undefined,
     updatedAt: readString(data.updatedAt) ?? undefined,
     agent: readString(data.agent),
+    harnessPackage,
     sandboxName: readString(data.sandboxName),
     provider: readString(data.provider),
     model: readString(data.model),

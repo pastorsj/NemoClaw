@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,7 +19,7 @@ import {
   candidateQualificationEnvironment,
 } from "./candidate-test-fixture";
 import YAML from "yaml";
-import { harnessPackageContentDigest } from "../harness/package-registry";
+import { harnessPackageContentDigest, installBundledHarness } from "../harness/package-registry";
 
 import {
   AGENTS_DIR,
@@ -202,6 +203,23 @@ describe("agent definitions", () => {
       expect(agent.packageContentDigest).toBe(harnessPackageContentDigest(packageRoot));
     },
   );
+
+  it("loads Deep Agents Code from the installed harness package authority", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-installed-dcode-agent-"));
+    const environment = { HOME: home };
+    try {
+      const installed = installBundledHarness("langchain-deepagents-code", environment);
+      const agent = loadAgent("langchain-deepagents-code", environment);
+
+      expect(agent.harnessPackageSource).toBe("installed");
+      expect(agent.agentDir).toBe(installed.rootDir);
+      expect(agent.manifestPath).toBe(path.join(installed.rootDir, "manifest.yaml"));
+      expect(agent.startScriptPath).toBe(path.join(installed.rootDir, "start.sh"));
+      expect(agent.packageContentDigest).toBe(harnessPackageContentDigest(installed.rootDir));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 
   it("requires a readable regular policy-additions file for non-OpenClaw baselines (#7194)", () => {
     const agentName = `missing-baseline-${String(Date.now())}`;

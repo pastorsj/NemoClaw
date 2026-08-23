@@ -13,10 +13,10 @@ import {
   renderHermesPortableDockerfileBuildSettings,
   type HermesPortableDockerfileBuildSettings,
 } from "../dockerfile-patch";
-import { HERMES_PORTABLE_BUILD_CONTEXT_FILES } from "./hermes-portable-build-context-files";
-
 const CONTEXT_SCHEMA_VERSION = 1 as const;
+const INVENTORY_SCHEMA_VERSION = 1 as const;
 const MAX_CONTEXT_ENTRIES = 1024;
+const MAX_DOCKERFILE_COPY_SOURCES = 128;
 const MAX_CONTEXT_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_CONTEXT_TOTAL_BYTES = 16 * 1024 * 1024;
 const MAX_RELATIVE_PATH_BYTES = 512;
@@ -32,70 +32,25 @@ const OPEN_READ_FLAGS =
 const SOURCE_DOCKERFILE_RELATIVE_PATH = "packages/nemoclaw-hermes/Dockerfile" as const;
 const CONTEXT_DOCKERFILE_RELATIVE_PATH = "Dockerfile" as const;
 const HERMES_PACKAGE_RELATIVE_PATH = "packages/nemoclaw-hermes" as const;
+const PORTABLE_BUILD_CONTEXT_INVENTORY_FILE_NAME = "portable-build-context.json" as const;
+const PORTABLE_BUILD_CONTEXT_INVENTORY_RELATIVE_PATH =
+  `${HERMES_PACKAGE_RELATIVE_PATH}/${PORTABLE_BUILD_CONTEXT_INVENTORY_FILE_NAME}` as const;
+const PORTABLE_BUILD_CONTEXT_INVENTORY_COMMENT =
+  "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0" as const;
 const PORTABLE_SOURCE_OVERLAY_PREFIX = "nemoclaw-hermes-portable-source-";
 
-const LOCAL_COPY_SOURCES = [
-  "packages/nemoclaw-hermes/build-mcp-digest.py",
-  "packages/nemoclaw-hermes/config/",
-  "packages/nemoclaw-hermes/cron-restore-control.py",
-  "packages/nemoclaw-hermes/finalize-tirith-marker.py",
-  "packages/nemoclaw-hermes/generate-config.ts",
-  "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
-  "packages/nemoclaw-hermes/hermes-wrapper.py",
-  "packages/nemoclaw-hermes/host/managed-tool-gateway-matrix.json",
-  "packages/nemoclaw-hermes/image-build-probes.py",
-  "packages/nemoclaw-hermes/managed_policy.py",
-  "packages/nemoclaw-hermes/mcp-config-transaction.py",
-  "packages/nemoclaw-hermes/model-specific-setup/",
-  "packages/nemoclaw-hermes/patch-cron-execution-runtime.py",
-  "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
-  "packages/nemoclaw-hermes/patch-discord-recovery-permissions.py",
-  "packages/nemoclaw-hermes/patch-gateway-process-identity.py",
-  "packages/nemoclaw-hermes/patch-gateway-runtime-metadata.py",
-  "packages/nemoclaw-hermes/patch-hermes-sqlite-temp-store.py",
-  "packages/nemoclaw-hermes/patch-langfuse-credentials.mts",
-  "packages/nemoclaw-hermes/patch-neutral-platform-env-activation.py",
-  "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
-  "packages/nemoclaw-hermes/patch-session-list-preview.py",
-  "packages/nemoclaw-hermes/plugin/",
-  "packages/nemoclaw-hermes/runtime-config-guard.py",
-  "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
-  "packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py",
-  "packages/nemoclaw-hermes/scripts/runtime-state-mutation-startup-gate.py",
-  "packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py",
-  "packages/nemoclaw-hermes/security-dependencies.patch",
-  "packages/nemoclaw-hermes/seed-dashboard-config.py",
-  "packages/nemoclaw-hermes/start.sh",
-  "packages/nemoclaw-hermes/state-lock-plan.json",
-  "packages/nemoclaw-hermes/validate-cli-adapter.py",
-  "packages/nemoclaw-hermes/validate-env-secret-boundary.py",
-  "nemoclaw-blueprint/",
-  "scripts/gateway-control.sh",
-  "scripts/lib/bundled-npm-package.mts",
-  "scripts/lib/corporate-ca-runtime.sh",
-  "scripts/lib/entrypoint-env-wrapper.sh",
-  "scripts/lib/gateway-supervisor.sh",
-  "scripts/lib/patch-bundled-npm-ip-address.mts",
-  "scripts/lib/reviewed-npm-archive.mts",
-  "scripts/lib/sandbox-init.sh",
-  "scripts/lib/sandbox-rlimits.sh",
-  "scripts/managed-bootstrap-entrypoint.c",
-  "scripts/managed-bootstrap-trampoline.sh",
-  "scripts/managed-gateway-control.py",
-  "scripts/managed-startup-hold.sh",
-  "scripts/patch-bundled-npm-brace-expansion.mts",
-  "scripts/patch-bundled-npm-tar.mts",
-  "scripts/state-dir-guard.py",
-  "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
-  "src/lib/hermes-managed-route.ts",
-  "src/lib/messaging/",
-  "src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py",
-  "src/lib/tool-disclosure.ts",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/managed-startup-image-runtime.bundle",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/BUNDLED_PACKAGES.json",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/THIRD_PARTY_LICENSES.txt",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle",
-] as const;
+type HermesPortableBuildContextMode = "100644" | "100755" | "160000";
+
+type HermesPortableBuildContextFile = {
+  readonly path: string;
+  readonly mode: HermesPortableBuildContextMode;
+};
+
+type HermesPortableBuildContextInventory = {
+  readonly schemaVersion: typeof INVENTORY_SCHEMA_VERSION;
+  readonly dockerfileCopySources: readonly string[];
+  readonly trackedFiles: readonly HermesPortableBuildContextFile[];
+};
 
 type SourceEntry = {
   readonly kind: "directory" | "file";
@@ -240,7 +195,121 @@ function sourceTokenMatches(relativePath: string, token: string): boolean {
   return relativePath === token;
 }
 
-function parseDockerfileSources(bytes: Buffer): readonly string[] {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...expected].sort());
+}
+
+function parsePortableBuildContextInventory(bytes: Buffer): HermesPortableBuildContextInventory {
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(UTF8.decode(bytes));
+  } catch {
+    fail("inventory is not strict UTF-8 JSON");
+  }
+  if (
+    !isRecord(decoded) ||
+    !hasExactKeys(decoded, [
+      "$comment",
+      "schemaVersion",
+      "dockerfileCopySources",
+      "trackedFiles",
+    ]) ||
+    decoded.$comment !== PORTABLE_BUILD_CONTEXT_INVENTORY_COMMENT ||
+    decoded.schemaVersion !== INVENTORY_SCHEMA_VERSION ||
+    !Array.isArray(decoded.dockerfileCopySources) ||
+    decoded.dockerfileCopySources.length < 1 ||
+    decoded.dockerfileCopySources.length > MAX_DOCKERFILE_COPY_SOURCES ||
+    !Array.isArray(decoded.trackedFiles) ||
+    decoded.trackedFiles.length < 2 ||
+    decoded.trackedFiles.length > MAX_CONTEXT_ENTRIES
+  ) {
+    fail("inventory has an invalid document contract");
+  }
+
+  const dockerfileCopySources: string[] = [];
+  const reviewedSources = new Set<string>();
+  for (const value of decoded.dockerfileCopySources) {
+    if (typeof value !== "string" || /[\\\s]/u.test(value) || reviewedSources.has(value)) {
+      fail("inventory has an invalid or duplicate Dockerfile COPY source");
+    }
+    const relativePath = value.endsWith("/") ? value.slice(0, -1) : value;
+    if (!relativePath || relativePath === "." || relativePath.endsWith("/")) {
+      fail("inventory has an invalid Dockerfile COPY source");
+    }
+    requireSafeRelativePath(relativePath);
+    reviewedSources.add(value);
+    dockerfileCopySources.push(value);
+  }
+
+  const trackedFiles: HermesPortableBuildContextFile[] = [];
+  const trackedPaths = new Set<string>();
+  for (const value of decoded.trackedFiles) {
+    if (
+      !isRecord(value) ||
+      !hasExactKeys(value, ["mode", "path"]) ||
+      typeof value.path !== "string" ||
+      /[\\\s]/u.test(value.path) ||
+      value.path.endsWith("/") ||
+      (value.mode !== "100644" && value.mode !== "100755" && value.mode !== "160000") ||
+      trackedPaths.has(value.path)
+    ) {
+      fail("inventory has an invalid or duplicate tracked file");
+    }
+    requireSafeRelativePath(value.path);
+    trackedPaths.add(value.path);
+    trackedFiles.push({ path: value.path, mode: value.mode });
+  }
+
+  const trackedByPath = new Map(trackedFiles.map((entry) => [entry.path, entry.mode]));
+  if (
+    trackedByPath.get(SOURCE_DOCKERFILE_RELATIVE_PATH) !== "100644" ||
+    trackedByPath.get(PORTABLE_BUILD_CONTEXT_INVENTORY_RELATIVE_PATH) !== "100644"
+  ) {
+    fail("inventory must track its Dockerfile and metadata");
+  }
+  for (const entry of trackedFiles) {
+    if (
+      entry.path !== SOURCE_DOCKERFILE_RELATIVE_PATH &&
+      entry.path !== PORTABLE_BUILD_CONTEXT_INVENTORY_RELATIVE_PATH &&
+      !dockerfileCopySources.some((token) => sourceTokenMatches(entry.path, token))
+    ) {
+      fail(`inventory tracked file is not covered by a Dockerfile COPY source: ${entry.path}`);
+    }
+  }
+  for (const token of dockerfileCopySources) {
+    if (!trackedFiles.some((entry) => sourceTokenMatches(entry.path, token))) {
+      fail(`inventory Dockerfile COPY source has no tracked file: ${token}`);
+    }
+  }
+  return {
+    schemaVersion: INVENTORY_SCHEMA_VERSION,
+    dockerfileCopySources,
+    trackedFiles,
+  };
+}
+
+function loadPortableBuildContextInventory(
+  rootPath: string,
+  relativePath: string,
+): {
+  readonly inventory: HermesPortableBuildContextInventory;
+  readonly sha256: string;
+} {
+  const source = readSourceFile(rootPath, relativePath, "100644");
+  return {
+    inventory: parsePortableBuildContextInventory(source.bytes!),
+    sha256: source.sha256!,
+  };
+}
+
+function parseDockerfileSources(
+  bytes: Buffer,
+  inventory: HermesPortableBuildContextInventory,
+): readonly string[] {
   let text: string;
   try {
     text = UTF8.decode(bytes);
@@ -285,7 +354,7 @@ function parseDockerfileSources(bytes: Buffer): readonly string[] {
     if (options.length > 0) fail("Dockerfile has a non-Portable local COPY option");
     local.push(...sources);
   }
-  const expected = [...LOCAL_COPY_SOURCES].sort();
+  const expected = [...inventory.dockerfileCopySources].sort();
   const actual = [...local].sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     fail("Dockerfile local COPY sources disagree with the reviewed allowlist");
@@ -575,8 +644,10 @@ function readSourceFile(
 
 function captureSourceEntries(
   rootPath: string,
-  tracked: ReadonlyMap<string, "100644" | "100755" | "160000">,
+  inventory: HermesPortableBuildContextInventory,
+  inventorySha256: string,
 ): readonly SourceEntry[] {
+  const tracked = new Map(inventory.trackedFiles.map((entry) => [entry.path, entry.mode]));
   const selected = new Set(tracked.keys());
   const entries: SourceEntry[] = [];
   let totalBytes = 0;
@@ -642,7 +713,8 @@ function captureSourceEntries(
   };
 
   visit(SOURCE_DOCKERFILE_RELATIVE_PATH);
-  for (const token of LOCAL_COPY_SOURCES) {
+  visit(PORTABLE_BUILD_CONTEXT_INVENTORY_RELATIVE_PATH);
+  for (const token of inventory.dockerfileCopySources) {
     if (token.endsWith("/")) {
       visit(token.slice(0, -1));
     } else if (!entries.some((entry) => entry.relativePath === token)) {
@@ -653,6 +725,10 @@ function captureSourceEntries(
   const ordered = [...unique.values()].sort((left, right) =>
     left.relativePath.localeCompare(right.relativePath),
   );
+  const capturedInventory = unique.get(PORTABLE_BUILD_CONTEXT_INVENTORY_RELATIVE_PATH);
+  if (capturedInventory?.kind !== "file" || capturedInventory.sha256 !== inventorySha256) {
+    fail("inventory changed while its source was being captured");
+  }
   if (ordered.length > MAX_CONTEXT_ENTRIES) fail("exceeds the bounded entry limit");
   return ordered;
 }
@@ -721,17 +797,22 @@ function capture(
 } {
   if (!path.isAbsolute(rootPath) || fs.realpathSync(rootPath) !== rootPath)
     fail("source root is invalid");
+  const loadedInventory = loadPortableBuildContextInventory(
+    rootPath,
+    PORTABLE_BUILD_CONTEXT_INVENTORY_RELATIVE_PATH,
+  );
   const revision = captureSourceRevision(rootPath);
   const sourceDirectoryChain = directoryAuthority ?? captureDirectoryChain(rootPath);
-  const tracked = new Map(
-    HERMES_PORTABLE_BUILD_CONTEXT_FILES.map((entry) => [entry.path, entry.mode] as const),
+  const sourceEntries = captureSourceEntries(
+    rootPath,
+    loadedInventory.inventory,
+    loadedInventory.sha256,
   );
-  const sourceEntries = captureSourceEntries(rootPath, tracked);
   const dockerfile = sourceEntries.find(
     (entry) => entry.relativePath === SOURCE_DOCKERFILE_RELATIVE_PATH,
   );
   if (dockerfile?.kind !== "file" || !dockerfile.bytes) fail("Dockerfile source is unavailable");
-  parseDockerfileSources(dockerfile.bytes);
+  parseDockerfileSources(dockerfile.bytes, loadedInventory.inventory);
   const contextEntries = renderContextEntries(sourceEntries, settings);
   return {
     authority: sourceAuthority(sourceEntries, contextEntries, revision, sourceDirectoryChain),
@@ -1430,7 +1511,7 @@ function createHermesPortableOverlayBuildContextPlan(
 function copyPortableSharedSourceEntry(
   rootPath: string,
   overlayRoot: string,
-  entry: (typeof HERMES_PORTABLE_BUILD_CONTEXT_FILES)[number],
+  entry: HermesPortableBuildContextFile,
 ): void {
   const target = path.join(overlayRoot, entry.path);
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o755 });
@@ -1458,16 +1539,20 @@ function stagePortableSourceOverlay(
   rootPath: string,
   packageRoot: string,
   overlayRoot: string,
+  inventory: HermesPortableBuildContextInventory,
 ): void {
-  HERMES_PORTABLE_BUILD_CONTEXT_FILES.filter(
-    (entry) => !entry.path.startsWith(`${HERMES_PACKAGE_RELATIVE_PATH}/`),
-  ).forEach((entry) => copyPortableSharedSourceEntry(rootPath, overlayRoot, entry));
+  inventory.trackedFiles
+    .filter((entry) => !entry.path.startsWith(`${HERMES_PACKAGE_RELATIVE_PATH}/`))
+    .forEach((entry) => copyPortableSharedSourceEntry(rootPath, overlayRoot, entry));
   stageAgentRuntimePackage(packageRoot, overlayRoot);
-  HERMES_PORTABLE_BUILD_CONTEXT_FILES.filter(
-    (entry) => entry.mode !== "160000" && entry.path.startsWith(`${HERMES_PACKAGE_RELATIVE_PATH}/`),
-  ).forEach((entry) =>
-    fs.chmodSync(path.join(overlayRoot, entry.path), entry.mode === "100755" ? 0o755 : 0o644),
-  );
+  inventory.trackedFiles
+    .filter(
+      (entry) =>
+        entry.mode !== "160000" && entry.path.startsWith(`${HERMES_PACKAGE_RELATIVE_PATH}/`),
+    )
+    .forEach((entry) =>
+      fs.chmodSync(path.join(overlayRoot, entry.path), entry.mode === "100755" ? 0o755 : 0o644),
+    );
 }
 
 function selectedPackagePlan(
@@ -1492,7 +1577,14 @@ function selectedPackagePlan(
   if (packageDigest !== expectedPackageDigest) {
     fail("selected package no longer matches its loaded manifest");
   }
-  stagePortableSourceOverlay(rootPath, packageRoot, overlayRoot);
+  const selectedInventory = loadPortableBuildContextInventory(
+    packageRoot,
+    PORTABLE_BUILD_CONTEXT_INVENTORY_FILE_NAME,
+  ).inventory;
+  if (harnessPackageContentDigest(packageRoot) !== packageDigest) {
+    fail("selected package changed while loading its build context inventory");
+  }
+  stagePortableSourceOverlay(rootPath, packageRoot, overlayRoot, selectedInventory);
   assertCheckoutSource();
   const stagedPackageRoot = path.join(overlayRoot, HERMES_PACKAGE_RELATIVE_PATH);
   if (

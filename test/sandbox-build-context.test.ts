@@ -282,6 +282,7 @@ describe("sandbox build context staging", () => {
     writeFixture(
       path.join("src", "lib", "messaging", "channels", "fixture", "hooks", "example.ts"),
     );
+    writeFixture(path.join("src", "lib", "shared", "sandbox-name.cts"));
     writeFixture(path.join("src", "lib", "tool-disclosure.ts"));
     for (const relativePath of [
       path.join("core", "json-types.ts"),

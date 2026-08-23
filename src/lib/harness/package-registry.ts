@@ -8,12 +8,17 @@ import path from "node:path";
 
 import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
 import { parseManifestRecord, readString } from "../agent/manifest-readers";
+import { isInsideIgnoredCustomBuildContextPath } from "../onboard/custom-build-context";
 
 const PACKAGE_DIRECTORY_PREFIX = "nemoclaw-";
 const INSTALL_RECEIPT_FILENAME = ".nemoclaw-install.json";
 const INSTALL_RECEIPT_MAX_BYTES = 4 * 1024;
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 const MANIFEST_MAX_BYTES = 256 * 1024;
+const PACKAGE_FILE_MAX_BYTES = 64 * 1024 * 1024;
+const PACKAGE_TREE_MAX_BYTES = 256 * 1024 * 1024;
+const PACKAGE_TREE_MAX_ENTRIES = 4096;
+const PACKAGE_TREE_MAX_DEPTH = 32;
 const REQUIRED_HARNESS_FILES = [
   "Dockerfile",
   "Dockerfile.base",
@@ -36,6 +41,11 @@ export interface HarnessPackage {
   readonly rootDir: string;
   readonly manifestPath: string;
   readonly source: "bundled" | "installed";
+}
+
+export interface HarnessPackageSnapshot {
+  readonly contentDigest: string;
+  readonly manifestSource: string;
 }
 
 export class HarnessPackageReceiptMismatchError extends Error {}
@@ -316,7 +326,10 @@ function scanPackageRoot(packagesRoot: string, source: HarnessPackage["source"])
       throw new Error(`Harness package must be a regular directory, not a symlink: ${rootDir}`);
     }
     const harnessPackage = readHarnessPackage(rootDir, source);
-    if (source === "installed") packageTreeDigest(rootDir);
+    if (source === "installed") {
+      assertInstalledPackageOwnership(rootDir);
+      assertInstallReceiptMatches(rootDir, packageTreeDigest(rootDir));
+    }
     packages.push(harnessPackage);
   }
   return packages;
@@ -328,10 +341,16 @@ function ignoredTreeEntry(name: string): boolean {
   );
 }
 
+export function isIgnoredHarnessPackageEntry(name: string): boolean {
+  return name === INSTALL_RECEIPT_FILENAME || ignoredTreeEntry(name);
+}
+
 function visitPackageTree(
   rootDir: string,
   visitor: (relativePath: string, metadata: fs.BigIntStats) => void,
 ): void {
+  let entryCount = 0;
+  let totalBytes = 0n;
   const assertUnchanged = (
     absolutePath: string,
     before: fs.BigIntStats,
@@ -352,7 +371,10 @@ function visitPackageTree(
       throw new Error(`Harness package tree changed while it was read: ${absolutePath}`);
     }
   };
-  const walk = (directory: string, prefix: string): void => {
+  const walk = (directory: string, prefix: string, depth: number): void => {
+    if (depth > PACKAGE_TREE_MAX_DEPTH) {
+      throw new Error(`Harness package exceeds the maximum directory depth: ${rootDir}`);
+    }
     const directoryBefore = fs.lstatSync(directory, { bigint: true });
     if (directoryBefore.isSymbolicLink() || !directoryBefore.isDirectory()) {
       throw new Error(`Harness packages may contain only regular directories: ${directory}`);
@@ -364,6 +386,10 @@ function visitPackageTree(
       const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
       const absolutePath = path.join(directory, entry.name);
       const metadata = fs.lstatSync(absolutePath, { bigint: true });
+      entryCount += 1;
+      if (entryCount > PACKAGE_TREE_MAX_ENTRIES) {
+        throw new Error(`Harness package exceeds the maximum entry count: ${rootDir}`);
+      }
       if (metadata.isSymbolicLink()) {
         throw new Error(`Harness packages may not contain symbolic links: ${absolutePath}`);
       }
@@ -372,9 +398,21 @@ function visitPackageTree(
           `Harness packages may contain only directories and regular files: ${absolutePath}`,
         );
       }
+      if (isInsideIgnoredCustomBuildContextPath(relativePath)) {
+        throw new Error(`Harness package contains a forbidden build-context path: ${absolutePath}`);
+      }
+      if (metadata.isFile()) {
+        if (metadata.size > BigInt(PACKAGE_FILE_MAX_BYTES)) {
+          throw new Error(`Harness package file exceeds the size limit: ${absolutePath}`);
+        }
+        totalBytes += metadata.size;
+        if (totalBytes > BigInt(PACKAGE_TREE_MAX_BYTES)) {
+          throw new Error(`Harness package exceeds the total size limit: ${rootDir}`);
+        }
+      }
       visitor(relativePath, metadata);
       if (metadata.isDirectory()) {
-        walk(absolutePath, relativePath);
+        walk(absolutePath, relativePath, depth + 1);
         assertUnchanged(absolutePath, metadata, "directory");
       } else {
         assertUnchanged(absolutePath, metadata, "file");
@@ -382,11 +420,31 @@ function visitPackageTree(
     }
     assertUnchanged(directory, directoryBefore, "directory");
   };
-  walk(rootDir, "");
+  walk(rootDir, "", 0);
 }
 
-function packageTreeDigest(rootDir: string): string {
+function assertInstalledPackageOwnership(rootDir: string): void {
+  if (typeof process.geteuid !== "function") return;
+  const expectedUid = BigInt(process.geteuid());
+  const assertOwned = (candidate: string, metadata: fs.BigIntStats): void => {
+    if (metadata.uid !== expectedUid || (metadata.mode & 0o022n) !== 0n) {
+      throw new Error(
+        `Installed harness paths must be owned by the current user and not group or world writable: ${candidate}`,
+      );
+    }
+  };
+  assertOwned(rootDir, fs.lstatSync(rootDir, { bigint: true }));
+  visitPackageTree(rootDir, (relativePath, metadata) => {
+    assertOwned(path.join(rootDir, ...relativePath.split("/")), metadata);
+  });
+}
+
+function packageTreeSnapshot(
+  rootDir: string,
+  captureRelativePath: string | null = null,
+): { contentDigest: string; capturedFile: Buffer | null } {
   const hash = crypto.createHash("sha256");
+  let capturedFile: Buffer | null = null;
   visitPackageTree(rootDir, (relativePath, metadata) => {
     if (relativePath === INSTALL_RECEIPT_FILENAME) {
       if (!metadata.isFile()) {
@@ -405,21 +463,23 @@ function packageTreeDigest(rootDir: string): string {
     const opened = openRegularFileNoFollow(filePath);
     try {
       const fileSize = Number(metadata.size);
-      if (!Number.isSafeInteger(fileSize)) {
-        throw new Error(`Harness package file is too large to hash: ${filePath}`);
+      hash.update(`f\0${relativePath}\0${executable}\0${String(fileSize)}\0`);
+      if (relativePath === captureRelativePath) {
+        capturedFile = opened.readBytes(MANIFEST_MAX_BYTES);
+        hash.update(capturedFile);
+      } else {
+        opened.readChunks(PACKAGE_FILE_MAX_BYTES, (chunk) => hash.update(chunk));
       }
-      const bytes = opened.readBytes(fileSize);
-      if (bytes.length !== fileSize) {
-        throw new Error(`Harness package file changed while it was read: ${filePath}`);
-      }
-      hash.update(`f\0${relativePath}\0${executable}\0${String(bytes.length)}\0`);
-      hash.update(bytes);
       hash.update("\0");
     } finally {
       opened.close();
     }
   });
-  return hash.digest("hex");
+  return { contentDigest: hash.digest("hex"), capturedFile };
+}
+
+function packageTreeDigest(rootDir: string): string {
+  return packageTreeSnapshot(rootDir).contentDigest;
 }
 
 export function harnessPackageContentDigest(rootDir: string): string {
@@ -433,20 +493,51 @@ export function bundledHarnessPackageContentDigest(id: string): string | null {
   return harnessPackage ? packageTreeDigest(harnessPackage.rootDir) : null;
 }
 
-/** Verify a complete installed package and return the digest bound by its receipt. */
-export function verifyHarnessPackageInstallReceipt(rootDir: string): string {
-  readHarnessPackage(rootDir, "installed");
+function assertInstallReceiptMatches(rootDir: string, contentDigest: string): string {
   const installedDigest = readInstallReceipt(rootDir);
   if (!installedDigest) {
     throw new Error(`Harness installation receipt is missing: ${installReceiptPath(rootDir)}`);
   }
-  const contentDigest = packageTreeDigest(rootDir);
   if (contentDigest !== installedDigest) {
     throw new HarnessPackageReceiptMismatchError(
       `Harness installation receipt does not match package content: ${rootDir}`,
     );
   }
   return contentDigest;
+}
+
+/** Verify a complete installed package and return the digest bound by its receipt. */
+export function verifyHarnessPackageInstallReceipt(rootDir: string): string {
+  readHarnessPackage(rootDir, "installed");
+  assertInstalledPackageOwnership(rootDir);
+  return assertInstallReceiptMatches(rootDir, packageTreeDigest(rootDir));
+}
+
+/** Capture the manifest bytes from the same bounded traversal that hashes the package. */
+export function captureHarnessPackageSnapshot(
+  harnessPackage: HarnessPackage,
+): HarnessPackageSnapshot {
+  const relativeManifest = path
+    .relative(harnessPackage.rootDir, harnessPackage.manifestPath)
+    .split(path.sep)
+    .join("/");
+  if (relativeManifest !== "manifest.yaml") {
+    throw new Error(`Harness manifest must be at the package root: ${harnessPackage.manifestPath}`);
+  }
+  if (harnessPackage.source === "installed") {
+    assertInstalledPackageOwnership(harnessPackage.rootDir);
+  }
+  const snapshot = packageTreeSnapshot(harnessPackage.rootDir, relativeManifest);
+  if (snapshot.capturedFile === null) {
+    throw new Error(`Harness manifest is unavailable: ${harnessPackage.manifestPath}`);
+  }
+  if (harnessPackage.source === "installed") {
+    assertInstallReceiptMatches(harnessPackage.rootDir, snapshot.contentDigest);
+  }
+  return Object.freeze({
+    contentDigest: snapshot.contentDigest,
+    manifestSource: snapshot.capturedFile.toString("utf8"),
+  });
 }
 
 function indexById(
@@ -470,17 +561,7 @@ export function listHarnessPackages(env: NodeJS.ProcessEnv = process.env): Harne
     "installed",
   );
 
-  for (const [id, installedPackage] of installed) {
-    const bundledPackage = bundled.get(id);
-    if (!bundledPackage) continue;
-    const bundledDigest = packageTreeDigest(bundledPackage.rootDir);
-    const installedDigest = packageTreeDigest(installedPackage.rootDir);
-    if (
-      bundledDigest !== installedDigest &&
-      readInstallReceipt(installedPackage.rootDir) === null
-    ) {
-      throw new Error(`Duplicate harness id '${id}' has different bundled and installed content`);
-    }
+  for (const id of installed.keys()) {
     bundled.delete(id);
   }
 

@@ -24,6 +24,54 @@ const GATEWAY_REMOVE_UNSUPPORTED =
   /unrecognized subcommand ['"]remove['"]|unknown command ['"]remove['"]/i;
 const FORWARD_ALREADY_ABSENT =
   /no (?:active )?forward|forward[^\n]*(?:not found|not running)|forward stop[^\n]*not running/i;
+const HARNESS_AUTHORITY_PROBE = String.raw`
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const harnessId = process.argv[1];
+if (!/^[a-z][a-z0-9-]{0,62}$/.test(harnessId)) throw new Error("invalid harness id");
+const home = process.env.HOME || os.homedir();
+const stateRoot = path.join(home, ".nemoclaw");
+const session = JSON.parse(fs.readFileSync(path.join(stateRoot, "onboard-session.json"), "utf8"));
+const receipt = JSON.parse(fs.readFileSync(path.join(stateRoot, "harnesses", "nemoclaw-" + harnessId, ".nemoclaw-install.json"), "utf8"));
+process.stdout.write(JSON.stringify({
+  agent: typeof session.agent === "string" ? session.agent : "openclaw",
+  source: session.harnessPackage && session.harnessPackage.source,
+  contentDigest: session.harnessPackage && session.harnessPackage.contentDigest,
+  installedDigest: receipt.installedDigest,
+}));
+`.trim();
+
+interface HarnessAuthorityProof {
+  agent: string;
+  source: "installed";
+  contentDigest: string;
+  installedDigest: string;
+}
+
+function parseHarnessAuthorityProof(result: ShellProbeResult): HarnessAuthorityProof {
+  let value: unknown;
+  try {
+    value = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`installed harness authority proof is not valid JSON: ${resultText(result)}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`installed harness authority proof is invalid: ${resultText(result)}`);
+  }
+  const proof = value as Record<string, unknown>;
+  if (
+    typeof proof.agent !== "string" ||
+    proof.source !== "installed" ||
+    typeof proof.contentDigest !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(proof.contentDigest) ||
+    typeof proof.installedDigest !== "string" ||
+    proof.installedDigest !== proof.contentDigest
+  ) {
+    throw new Error(`installed harness authority proof is invalid: ${resultText(result)}`);
+  }
+  return proof as unknown as HarnessAuthorityProof;
+}
 
 export class HostCliClient {
   private readonly runner: CommandRunner;
@@ -104,6 +152,7 @@ export class HostCliClient {
   ): Promise<{
     list: ShellProbeResult;
     agents: ShellProbeResult;
+    authority: ShellProbeResult;
   }> {
     const artifactPrefix =
       options.artifactName ?? `harness-${artifactLabel(harnessId)}`;
@@ -145,7 +194,23 @@ export class HostCliClient {
       );
     }
 
-    return { list, agents };
+    const authority = await this.command(
+      process.execPath,
+      ["-e", HARNESS_AUTHORITY_PROBE, harnessId],
+      {
+        ...sharedOptions,
+        artifactName: `${artifactPrefix}-authority`,
+      },
+    );
+    assertExitZero(authority, `verify installed harness authority for ${harnessId}`);
+    const proof = parseHarnessAuthorityProof(authority);
+    if (proof.agent !== harnessId) {
+      throw new Error(
+        `onboarding selected '${proof.agent}' while '${harnessId}' authority was expected`,
+      );
+    }
+
+    return { list, agents, authority };
   }
 
   async expectListed(

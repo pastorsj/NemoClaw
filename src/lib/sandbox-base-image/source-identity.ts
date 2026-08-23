@@ -5,27 +5,108 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
 import { ROOT } from "../runner";
 
-export const BASE_IMAGE_INPUT_PATHS = [
+export const OPENCLAW_BASE_IMAGE_INPUTS_FILE = "packages/nemoclaw-openclaw/base-image-inputs.json";
+
+const BASE_IMAGE_INPUTS_MAX_BYTES = 64 * 1024;
+const BASE_IMAGE_INPUTS_MAX_PATHS = 128;
+const BASE_IMAGE_INPUTS_MAX_PATH_BYTES = 512;
+const BASE_IMAGE_INPUTS_KEYS = new Set(["$comment", "schemaVersion", "paths"]);
+const REQUIRED_BASE_IMAGE_INPUT_PATHS = new Set([
+  OPENCLAW_BASE_IMAGE_INPUTS_FILE,
   "packages/nemoclaw-openclaw/Dockerfile.base",
-  "nemoclaw-blueprint/blueprint.yaml",
-  "scripts/lib/sandbox-rlimits.sh",
-  "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
-  "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
-  "scripts/security/build-perl-security-packages.sh",
-  "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
-  "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
-  "scripts/lib/reviewed-npm-archive.mts",
-  "scripts/lib/bundled-npm-package.mts",
-  "scripts/patch-bundled-npm-brace-expansion.mts",
-  "scripts/lib/patch-bundled-npm-ip-address.mts",
-  "scripts/patch-bundled-npm-tar.mts",
-  "scripts/upgrade-bundled-npm.mts",
-];
+]);
+
+type BaseImageInputsManifest = {
+  readonly $comment: string;
+  readonly schemaVersion: 1;
+  readonly paths: readonly string[];
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertCanonicalBaseImageInputPath(value: unknown, index: number): asserts value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    Buffer.byteLength(value, "utf8") > BASE_IMAGE_INPUTS_MAX_PATH_BYTES ||
+    value.trim() !== value ||
+    value.includes("\\") ||
+    path.posix.isAbsolute(value) ||
+    path.posix.normalize(value) !== value ||
+    value.split("/").some((part) => part === "" || part === "." || part === "..") ||
+    !/^[A-Za-z0-9._/-]+$/u.test(value)
+  ) {
+    throw new Error(
+      `OpenClaw base-image input manifest path ${String(index)} must be a canonical repository-relative path`,
+    );
+  }
+}
+
+function parseBaseImageInputsManifest(
+  source: string,
+  manifestPath: string,
+): BaseImageInputsManifest {
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    throw new Error(`OpenClaw base-image input manifest is not valid JSON: ${manifestPath}`, {
+      cause: error,
+    });
+  }
+  if (!isRecord(value) || Object.keys(value).some((key) => !BASE_IMAGE_INPUTS_KEYS.has(key))) {
+    throw new Error(`OpenClaw base-image input manifest has unsupported fields: ${manifestPath}`);
+  }
+  if (
+    typeof value.$comment !== "string" ||
+    !value.$comment.includes("SPDX-License-Identifier: Apache-2.0") ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.paths) ||
+    value.paths.length === 0 ||
+    value.paths.length > BASE_IMAGE_INPUTS_MAX_PATHS
+  ) {
+    throw new Error(`OpenClaw base-image input manifest has an invalid shape: ${manifestPath}`);
+  }
+  value.paths.forEach(assertCanonicalBaseImageInputPath);
+  if (new Set(value.paths).size !== value.paths.length) {
+    throw new Error(`OpenClaw base-image input manifest contains duplicate paths: ${manifestPath}`);
+  }
+  for (const requiredPath of REQUIRED_BASE_IMAGE_INPUT_PATHS) {
+    if (!value.paths.includes(requiredPath)) {
+      throw new Error(
+        `OpenClaw base-image input manifest is missing required path '${requiredPath}': ${manifestPath}`,
+      );
+    }
+  }
+  return value as BaseImageInputsManifest;
+}
+
+export function readOpenClawBaseImageInputPaths(rootDir = ROOT): string[] {
+  const manifestPath = path.join(path.resolve(rootDir), OPENCLAW_BASE_IMAGE_INPUTS_FILE);
+  let opened: ReturnType<typeof openRegularFileNoFollow>;
+  try {
+    opened = openRegularFileNoFollow(manifestPath);
+  } catch (error) {
+    throw new Error(`OpenClaw base-image input manifest is unavailable: ${manifestPath}`, {
+      cause: error,
+    });
+  }
+  try {
+    const source = opened.readBytes(BASE_IMAGE_INPUTS_MAX_BYTES).toString("utf8");
+    return [...parseBaseImageInputsManifest(source, manifestPath).paths];
+  } finally {
+    opened.close();
+  }
+}
 
 export function normalizeBaseImageInputPaths(rootDir: string, paths: string[] = []): string[] {
   const absoluteRootDir = path.resolve(rootDir);
+  const packageInputs = readOpenClawBaseImageInputPaths(absoluteRootDir);
   const normalizedPaths = paths
     .map((inputPath) => {
       const trimmed = String(inputPath || "").trim();
@@ -45,7 +126,7 @@ export function normalizeBaseImageInputPaths(rootDir: string, paths: string[] = 
       return relativePath.split(path.sep).join("/");
     })
     .filter((inputPath): inputPath is string => !!inputPath);
-  return Array.from(new Set([...BASE_IMAGE_INPUT_PATHS, ...normalizedPaths]));
+  return Array.from(new Set([...packageInputs, ...normalizedPaths]));
 }
 
 export function getSourceShortShaTags(

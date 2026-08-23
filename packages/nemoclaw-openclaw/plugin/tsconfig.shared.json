@@ -2,6 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "dist/shared",
+    "paths": {
+      "yaml": ["./node_modules/yaml"]
+    },
     "rootDir": "../../../src/lib/shared",
     "rootDirs": ["../../../src/lib/shared"]
   },

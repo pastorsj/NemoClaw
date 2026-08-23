@@ -10,7 +10,7 @@ import path from "node:path";
 import { DASHBOARD_PORT } from "../core/ports";
 import { isCuaEnabled, requireCuaEnabled } from "../cua/feature";
 import {
-  harnessPackageContentDigest,
+  captureHarnessPackageSnapshot,
   listHarnessPackages,
   resolveHarnessPackage,
 } from "../harness/package-registry";
@@ -40,6 +40,7 @@ import type {
 } from "./definition-types";
 import {
   loadManifestRecord,
+  parseManifestRecord,
   readBoolean,
   readConfigShieldsFiles,
   readDashboard,
@@ -183,10 +184,10 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
     throw new Error(`Agent '${name}' not found: ${manifestPath}`);
   }
 
-  const packageDigestBefore = harnessPackage
-    ? harnessPackageContentDigest(harnessPackage.rootDir)
-    : null;
-  const raw = loadManifestRecord(manifestPath);
+  const packageSnapshot = harnessPackage ? captureHarnessPackageSnapshot(harnessPackage) : null;
+  const raw = packageSnapshot
+    ? parseManifestRecord(packageSnapshot.manifestSource, manifestPath)
+    : loadManifestRecord(manifestPath);
   const agentDir = path.dirname(manifestPath);
   const manifestName = readString(raw, "name") ?? name;
   const description = readString(raw, "description");
@@ -224,12 +225,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
   const phoneHomeHosts = readStringArray(raw, "phone_home_hosts");
   const legacyPathConfig = readStringMap(raw, "_legacy_paths");
   const dashboardUi = readDashboardUi(raw);
-  const packageContentDigest = harnessPackage
-    ? harnessPackageContentDigest(harnessPackage.rootDir)
-    : null;
-  if (packageContentDigest !== packageDigestBefore) {
-    throw new Error(`Harness package '${name}' changed while its manifest was loaded`);
-  }
+  const packageContentDigest = packageSnapshot?.contentDigest ?? null;
 
   const agent: AgentDefinition = {
     ...raw,
@@ -255,6 +251,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
     _legacy_paths: legacyPathConfig,
     agentDir,
     manifestPath,
+    harnessPackageSource: harnessPackage?.source ?? null,
     packageContentDigest,
 
     get displayName(): string {

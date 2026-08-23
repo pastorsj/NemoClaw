@@ -72,6 +72,18 @@ const OPENCLAW_MSTEAMS_2026_7_1_INTEGRITY =
 const TENCENT_WEIXIN_2_4_3_INTEGRITY =
   "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==";
 const TEST_PATH = process.env.PATH || "/usr/bin:/bin";
+const OPENCLAW_REMEDIATION_HELPER = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "lib",
+  "openclaw-npm-remediation.mts",
+);
+const OPENCLAW_PACKAGE_BUILD_ENV = {
+  NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER: OPENCLAW_REMEDIATION_HELPER,
+};
 
 function fakeOpenClawPluginNpmPackScriptLines(): string[] {
   return [
@@ -105,6 +117,7 @@ function fakeOpenClawPluginNpmPackScriptLines(): string[] {
 }
 
 const BASE_GENERATOR_ENV: Record<string, string> = {
+  ...OPENCLAW_PACKAGE_BUILD_ENV,
   NEMOCLAW_MODEL: "test-model",
   NEMOCLAW_PROVIDER_KEY: "test-provider",
   NEMOCLAW_PRIMARY_MODEL_REF: "test-ref",
@@ -154,6 +167,7 @@ async function buildPlanEnv(
   return withLegacyMessagingPlanEnvDirect(
     {
       PATH: TEST_PATH,
+      ...(agent === "openclaw" ? OPENCLAW_PACKAGE_BUILD_ENV : {}),
       ...envOverrides,
     },
     agent,
@@ -685,6 +699,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
     try {
       const env = {
         PATH: tmp + ":" + (process.env.PATH || "/usr/bin:/bin"),
+        ...OPENCLAW_PACKAGE_BUILD_ENV,
         OPENCLAW_TRACE: tracePath,
         OPENCLAW_DISCORD_2026_7_1_INTEGRITY,
         OPENCLAW_VERSION: "2026.7.1",
@@ -751,6 +766,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       const env = await withLegacyMessagingPlanEnvDirect(
         {
           PATH: `${tmp}:${TEST_PATH}`,
+          ...OPENCLAW_PACKAGE_BUILD_ENV,
           OPENCLAW_TRACE: tracePath,
           OPENCLAW_MSTEAMS_2026_7_1_INTEGRITY,
           OPENCLAW_VERSION: "2026.7.1",
@@ -965,6 +981,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         const planEnv = await withLegacyMessagingPlanEnvDirect(
           {
             PATH: `${tmp}:${TEST_PATH}`,
+            ...OPENCLAW_PACKAGE_BUILD_ENV,
             OPENCLAW_TRACE: tracePath,
             OPENCLAW_DISCORD_2026_7_1_INTEGRITY,
             OPENCLAW_SLACK_2026_7_1_INTEGRITY,
@@ -1037,6 +1054,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       const env = await withLegacyMessagingPlanEnvDirect(
         {
           PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+          ...OPENCLAW_PACKAGE_BUILD_ENV,
           OPENCLAW_TRACE: tracePath,
           OPENCLAW_SLACK_INTEGRITY: OPENCLAW_SLACK_2026_7_1_INTEGRITY,
           OPENCLAW_VERSION: "2026.7.1",
@@ -1092,6 +1110,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
       const env = await withLegacyMessagingPlanEnvDirect(
         {
           PATH: `${tmp}:${process.env.PATH || "/usr/bin:/bin"}`,
+          ...OPENCLAW_PACKAGE_BUILD_ENV,
           OPENCLAW_TRACE: tracePath,
           OPENCLAW_VERSION: "2026.7.1",
           NEMOCLAW_MESSAGING_CHANNELS_B64: channelsB64(["slack"]),

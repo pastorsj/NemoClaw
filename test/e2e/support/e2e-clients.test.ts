@@ -120,6 +120,14 @@ describe("E2E fixture clients", () => {
         "openclaw  @nvidia/nemoclaw-openclaw@0.1.0  bundled\n",
     });
     runner.enqueue({ stdout: "hermes  Self-improving AI agent\nopenclaw  Gateway agent\n" });
+    runner.enqueue({
+      stdout: JSON.stringify({
+        agent: "hermes",
+        source: "installed",
+        contentDigest: "a".repeat(64),
+        installedDigest: "a".repeat(64),
+      }),
+    });
     const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
 
     await host.expectHarnessInstalled("hermes", {
@@ -143,6 +151,15 @@ describe("E2E fixture clients", () => {
         args: ["agents", "list"],
         options: {
           artifactName: "phase-harness-agents",
+          env: { PATH: "/test/bin" },
+          timeoutMs: 123_000,
+        },
+      },
+      {
+        command: process.execPath,
+        args: ["-e", expect.any(String), "hermes"],
+        options: {
+          artifactName: "phase-harness-authority",
           env: { PATH: "/test/bin" },
           timeoutMs: 123_000,
         },
@@ -184,6 +201,37 @@ describe("E2E fixture clients", () => {
 
     await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
       "nemoclaw agents list did not include 'hermes'",
+    );
+  });
+
+  it.each([
+    {
+      name: "a bundled session source",
+      proof: {
+        agent: "hermes",
+        source: "bundled",
+        contentDigest: "a".repeat(64),
+        installedDigest: "a".repeat(64),
+      },
+    },
+    {
+      name: "a receipt digest mismatch",
+      proof: {
+        agent: "hermes",
+        source: "installed",
+        contentDigest: "a".repeat(64),
+        installedDigest: "b".repeat(64),
+      },
+    },
+  ])("host client rejects $name as installed harness authority", async ({ proof }) => {
+    const runner = new FakeRunner();
+    runner.enqueue({ stdout: "hermes  @nvidia/nemoclaw-hermes@0.1.0  installed\n" });
+    runner.enqueue({ stdout: "hermes  Self-improving AI agent\n" });
+    runner.enqueue({ stdout: JSON.stringify(proof) });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
+      "installed harness authority proof is invalid",
     );
   });
 

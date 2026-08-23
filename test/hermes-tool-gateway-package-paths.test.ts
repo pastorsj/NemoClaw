@@ -94,7 +94,7 @@ describe("Hermes tool-gateway package paths", () => {
     },
   );
 
-  it("uses installed Hermes host files and includes their content in the runtime hash", () => {
+  it("uses receipt-qualified installed Hermes host files", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-host-package-"));
     temporaryHome = home;
     process.env.HOME = home;
@@ -123,6 +123,6 @@ describe("Hermes tool-gateway package paths", () => {
       installedBroker.HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeCredentials,
       "\n// test-only installed package change\n",
     );
-    expect(installedBroker.brokerRuntimeHash()).not.toBe(installedHash);
+    expect(() => loadBroker()).toThrow("installation receipt does not match package content");
   });
 });

@@ -1,0 +1,21 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
+  "schemaVersion": 1,
+  "paths": [
+    "packages/nemoclaw-openclaw/base-image-inputs.json",
+    "packages/nemoclaw-openclaw/Dockerfile.base",
+    "nemoclaw-blueprint/blueprint.yaml",
+    "scripts/lib/sandbox-rlimits.sh",
+    "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
+    "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
+    "scripts/security/build-perl-security-packages.sh",
+    "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
+    "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+    "scripts/lib/reviewed-npm-archive.mts",
+    "scripts/lib/bundled-npm-package.mts",
+    "scripts/patch-bundled-npm-brace-expansion.mts",
+    "scripts/lib/patch-bundled-npm-ip-address.mts",
+    "scripts/patch-bundled-npm-tar.mts",
+    "scripts/upgrade-bundled-npm.mts"
+  ]
+}

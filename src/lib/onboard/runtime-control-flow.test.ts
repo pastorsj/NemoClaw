@@ -7,6 +7,7 @@ import { createSession } from "../state/onboard-session";
 import {
   applyOnboardRuntimeControlRequests,
   planSelectedAgentTransition,
+  resolveSelectedHarnessPackageAuthority,
   updateSessionAgent,
 } from "./runtime-control-flow";
 
@@ -53,6 +54,48 @@ describe("onboard runtime control flow", () => {
 
     expect(updateSessionAgent(session, "langchain-deepagents-code")).toBe(session);
     expect(session.agent).toBe("langchain-deepagents-code");
+  });
+
+  it("commits the selected installed DCode harness package with the agent transition", async () => {
+    const session = createSession();
+    const harnessPackage = resolveSelectedHarnessPackageAuthority({
+      name: "langchain-deepagents-code",
+      harnessPackageSource: "installed",
+      packageContentDigest: "d".repeat(64),
+    });
+    const updateSession = vi.fn((mutator) => mutator(session) ?? session);
+    const transition = planSelectedAgentTransition(
+      {
+        resume: false,
+        session,
+        selectedAgentName: "langchain-deepagents-code",
+        selectedHarnessPackage: harnessPackage,
+        routerPort: 4000,
+        note: () => undefined,
+      },
+      { updateSession },
+    );
+
+    expect(transition.session).toMatchObject({
+      agent: "langchain-deepagents-code",
+      harnessPackage,
+    });
+    expect(session.harnessPackage).toBeNull();
+
+    await transition.commit();
+
+    expect(session.harnessPackage).toEqual(harnessPackage);
+    expect(updateSession).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a selected harness package without a loaded content digest", () => {
+    expect(() =>
+      resolveSelectedHarnessPackageAuthority({
+        name: "hermes",
+        harnessPackageSource: "installed",
+        packageContentDigest: null,
+      }),
+    ).toThrow("Selected harness package 'hermes' has no loaded content digest");
   });
 
   it("rejects enabled observability for a non-DCode agent", () => {

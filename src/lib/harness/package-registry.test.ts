@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 
 import {
+  captureHarnessPackageSnapshot,
   harnessPackageContentDigest,
   installBundledHarness,
   listHarnessPackages,
@@ -57,6 +58,7 @@ function writeInstalledPackage(
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
+  writeInstallReceipt(root, packageDigest(root));
   return root;
 }
 
@@ -136,6 +138,7 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
       path.join(root, "index.js"),
       "throw new Error('must not load package code');\n",
     );
+    writeInstallReceipt(root, packageDigest(root));
 
     expect(resolveHarnessPackage("fixture-agent", { HOME: home })).toEqual(
       expect.objectContaining({
@@ -198,6 +201,47 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     );
   });
 
+  it("rejects a credential-shaped path before selecting an installed package", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "credential-file");
+    fs.writeFileSync(path.join(root, ".env"), "TOKEN=not-a-real-secret\n");
+    writeInstallReceipt(root, packageDigest(root));
+
+    expect(() => listHarnessPackages({ HOME: home })).toThrow(
+      "contains a forbidden build-context path",
+    );
+  });
+
+  it("rejects an oversized package file before allocating its declared size", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "oversized-file");
+    const oversized = path.join(root, "oversized.bin");
+    const descriptor = fs.openSync(oversized, "w", 0o644);
+    try {
+      fs.ftruncateSync(descriptor, 64 * 1024 * 1024 + 1);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+    writeInstallReceipt(root, "a".repeat(64));
+
+    expect(() => listHarnessPackages({ HOME: home })).toThrow(
+      "Harness package file exceeds the size limit",
+    );
+  });
+
+  it.runIf(typeof process.geteuid === "function")(
+    "rejects a group-writable installed package path",
+    () => {
+      const home = temporaryHome();
+      const root = writeInstalledPackage(home, "writable-package");
+      fs.chmodSync(path.join(root, "Dockerfile"), 0o664);
+
+      expect(() => listHarnessPackages({ HOME: home })).toThrow(
+        "must be owned by the current user and not group or world writable",
+      );
+    },
+  );
+
   it("rejects a file added while package content is hashed", () => {
     const home = temporaryHome();
     const root = writeInstalledPackage(home, "changing-tree");
@@ -239,6 +283,61 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
       );
     } finally {
       read.mockRestore();
+    }
+  });
+
+  it("rejects a manifest path swapped and restored during snapshot capture", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "manifest-swap");
+    const harnessPackage = resolveHarnessPackage("manifest-swap", { HOME: home });
+    expect(harnessPackage).not.toBeNull();
+    const manifestPath = path.join(root, "manifest.yaml");
+    const displacedPath = path.join(root, "manifest.displaced.yaml");
+    const openSync = fs.openSync.bind(fs);
+    const readSync = fs.readSync.bind(fs);
+    let manifestDescriptor: number | null = null;
+    const open = vi.spyOn(fs, "openSync").mockImplementation((candidate, flags, mode) => {
+      const descriptor = openSync(candidate, flags, mode);
+      manifestDescriptor =
+        path.resolve(candidate.toString()) === path.resolve(manifestPath)
+          ? descriptor
+          : manifestDescriptor;
+      return descriptor;
+    });
+    const read = vi.spyOn(fs, "readSync").mockImplementation(((
+      descriptor,
+      buffer,
+      offset,
+      length,
+      position,
+    ) => {
+      const readSwappedManifest = () => {
+        manifestDescriptor = null;
+        fs.renameSync(manifestPath, displacedPath);
+        fs.writeFileSync(manifestPath, "name: substituted\n");
+        const bytesRead = readSync(descriptor, buffer, offset, length, position);
+        fs.rmSync(manifestPath);
+        fs.renameSync(displacedPath, manifestPath);
+        return bytesRead;
+      };
+      return descriptor === manifestDescriptor
+        ? readSwappedManifest()
+        : readSync(descriptor, buffer, offset, length, position);
+    }) as typeof fs.readSync);
+
+    try {
+      expect(() => captureHarnessPackageSnapshot(harnessPackage!)).toThrow(
+        /changed during validation|changed while reading/u,
+      );
+    } finally {
+      read.mockRestore();
+      open.mockRestore();
+      const restoreDisplacedManifest = () => {
+        fs.rmSync(manifestPath, { force: true });
+        fs.renameSync(displacedPath, manifestPath);
+      };
+      const keepRestoredManifest = () => undefined;
+      (fs.existsSync(displacedPath) ? restoreDisplacedManifest : keepRestoredManifest)();
     }
   });
 
@@ -289,12 +388,13 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     expect(() => listHarnessPackages({ HOME: home })).toThrow("start.sh must be executable");
   });
 
-  it("rejects a divergent installed package with a bundled identity", () => {
+  it("rejects an installed package without an installation receipt", () => {
     const home = temporaryHome();
-    writeInstalledPackage(home, "openclaw");
+    const root = writeInstalledPackage(home, "openclaw");
+    fs.rmSync(path.join(root, ".nemoclaw-install.json"));
 
     expect(() => listHarnessPackages({ HOME: home })).toThrow(
-      "Duplicate harness id 'openclaw' has different bundled and installed content",
+      "Harness installation receipt is missing",
     );
   });
 
@@ -889,13 +989,15 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     ).toEqual([]);
   });
 
-  it("does not overwrite a changed installed package", () => {
+  it("rejects a changed installed package without overwriting it", () => {
     const home = temporaryHome();
     const environment = { HOME: home };
     const installed = installBundledHarness("hermes", environment);
     fs.writeFileSync(path.join(installed.rootDir, "local-change.txt"), "preserve me\n");
 
-    expect(resolveHarnessPackage("hermes", environment)?.source).toBe("installed");
+    expect(() => resolveHarnessPackage("hermes", environment)).toThrow(
+      "installation receipt does not match package content",
+    );
 
     expect(() => installBundledHarness("hermes", environment)).toThrow(
       "differs from the bundled package and has local changes",
