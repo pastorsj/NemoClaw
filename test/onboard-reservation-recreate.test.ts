@@ -86,6 +86,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 
 onboardSession.loadSession = () => ({ sessionId: "session-owner" });
 
