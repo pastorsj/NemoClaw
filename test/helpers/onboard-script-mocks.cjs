@@ -163,6 +163,35 @@ function mockOnboardRunCapture(command, options = {}) {
   return mockSandboxExecCurl(command, options);
 }
 
+function mockDockerLifecycleReleaseFromRunner() {
+  const runner = require(path.resolve(__dirname, "../../src/lib/runner.ts"));
+  const run = runner.run;
+  let lifecycleReleased = false;
+
+  runner.run = (command, ...args) => {
+    const normalized = normalizeCommand(command);
+    const result = run(command, ...args);
+    const succeeded = result && typeof result === "object" && result.status === 0;
+    if (
+      succeeded &&
+      normalized.includes("docker rm openshell-my-assistant-nemoclaw-gpu-backup-")
+    ) {
+      lifecycleReleased = true;
+    }
+    if (lifecycleReleased && normalized.includes("sandbox list")) {
+      return {
+        status: 0,
+        stdout: Buffer.from("No sandboxes found.\n"),
+        stderr: Buffer.alloc(0),
+      };
+    }
+    if (succeeded && normalized.startsWith("docker start ")) {
+      lifecycleReleased = false;
+    }
+    return result;
+  };
+}
+
 function mockStructuredOpenShellCaptureFromRunner() {
   const runner = require(path.resolve(__dirname, "../../src/lib/runner.ts"));
   const client = require(
@@ -247,6 +276,7 @@ process.env.NEMOCLAW_TEST_MANAGED_IMAGE_FALLBACK === "1" && mockManagedImageFall
 
 module.exports = {
   isOpenClawSecurityInventoryProbe,
+  mockDockerLifecycleReleaseFromRunner,
   mockManagedImageFallback,
   mockOnboardRunCapture,
   mockSandboxExecCurl,

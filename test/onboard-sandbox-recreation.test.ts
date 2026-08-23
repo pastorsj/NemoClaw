@@ -157,6 +157,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => registeredSandbox || sourceSandbox;
 registry.registerSandbox = (entry) => { registeredSandbox = entry; return true; };
 registry.updateSandbox = () => true;
@@ -292,6 +293,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => ({ name: "my-assistant", gpuEnabled: false });
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
@@ -446,6 +448,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => ({ name: "my-assistant", gpuEnabled: false });
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
@@ -578,6 +581,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => ({ name: "my-assistant", gpuEnabled: false });
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
@@ -724,6 +728,8 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 
 // Existing sandbox has a custom preset selection: only "npm" (not the
 // full "balanced" tier). Recreating the sandbox must preserve this
@@ -1007,6 +1013,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => ({ name: "my-assistant", toolDisclosure: "progressive" });
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
@@ -1139,6 +1146,7 @@ runner.runCapture = (command) => {
   }
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.getSandbox = () => ({ name: "my-assistant", toolDisclosure: "progressive" });
 registry.registerSandbox = () => true;
 registry.updateSandbox = () => true;
@@ -1304,6 +1312,7 @@ runner.runCapture = (command) => {
   if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 18789 12345 running";
   return "";
 };
+require(${onboardScriptMocksPath}).mockDockerLifecycleReleaseFromRunner();
 registry.registerSandbox = (entry) => { registeredSandbox = entry; return true; };
 registry.updateSandbox = () => true;
 registry.setDefault = () => true;
