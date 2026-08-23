@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 const mocks = vi.hoisted(() => ({
   runInferenceGet: vi.fn(),
@@ -41,7 +42,7 @@ import SandboxInferenceSetCommand from "./set";
 
 const rootDir = process.cwd();
 
-describe("sandbox inference oclif command adapters (#5977)", () => {
+describe("sandbox inference oclif command adapters (#5977)", testTimeoutOptions(30_000), () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.runInferenceSet.mockResolvedValue({

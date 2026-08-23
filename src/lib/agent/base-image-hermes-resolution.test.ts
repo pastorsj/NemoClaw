@@ -140,7 +140,7 @@ describe("Hermes base-image resolver integration", () => {
   it("rejects an explicit platform digest override without pinned provenance", () => {
     vi.stubEnv("NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF", platformRef);
 
-    expect(() => createAgentSandbox(makeAgent())).toThrow(
+    expect(() => ensureAgentBaseImage(makeAgent())).toThrow(
       `Hermes final image does not accept base image ref '${platformRef}'`,
     );
   });

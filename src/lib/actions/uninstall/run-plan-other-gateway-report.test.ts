@@ -218,7 +218,7 @@ describe("uninstall reporting for other gateway-port environments (#7791)", () =
     const errors: string[] = [];
     const result = runUninstallPlan(
       { assumeYes: true, deleteModels: false, keepOpenShell: false },
-      {
+      withManagedAuthority({
         commandExists: (command) => command !== "pgrep",
         env: { HOME: "/tmp/nemoclaw-uninstall-test-scan" } as NodeJS.ProcessEnv,
         error: (line) => errors.push(line),
@@ -232,7 +232,7 @@ describe("uninstall reporting for other gateway-port environments (#7791)", () =
         run: (command, args) =>
           command === "openshell" && args.join(" ") === "gateway list -o json" ? ok("[]") : ok(),
         runDocker: () => ok(),
-      },
+      }),
     );
 
     expect(result.exitCode).toBe(1);
