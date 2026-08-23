@@ -21,6 +21,7 @@ import {
   revokeHttpsPinRuntimeAdapterRoute,
 } from "../inference/https-pin-runtime-adapter";
 import { type ValidationResult, validateLocalProvider } from "../inference/local";
+import { patchOpenClawInferenceConfigGrammar } from "../openclaw/config-grammar";
 import {
   inferenceSelectionRegistryFields,
   type ReasoningEffortRequest,
@@ -48,7 +49,7 @@ import {
   writeSandboxConfig,
 } from "../sandbox/config";
 import type { ConfigObject, ConfigValue } from "../security/credential-filter";
-import { isConfigObject, isConfigValue } from "../security/credential-filter";
+import { isConfigObject } from "../security/credential-filter";
 import { appendAuditEntry } from "../shields/audit";
 import { withTimerBoundShieldsMutationLockAsync } from "../shields/timer-bound-lock";
 import { withSandboxMutationLock } from "../state/mcp-lifecycle-lock";
@@ -83,10 +84,6 @@ import {
   sleepInferenceSetRouteConvergence,
 } from "./inference-set-provider";
 import { buildInferenceSetFailure } from "./inference-set-provider-diagnostics";
-import {
-  applyOpenClawAnthropicReplyBudget,
-  readOpenClawPrimaryReplyBudget,
-} from "./inference-set-reply-budget";
 import {
   type EnsureHttpsPinRuntimeAdapterFn,
   finalizeInferenceSetRoute,
@@ -389,147 +386,6 @@ function resolveTargetSandbox(
   return { sandboxName: targetName, entry, agentName: normalizeSandboxAgent(entry.agent) };
 }
 
-function ensureObject(record: ConfigObject, key: string): ConfigObject {
-  const existing = record[key];
-  if (isConfigObject(existing)) return existing;
-  const created: ConfigObject = {};
-  record[key] = created;
-  return created;
-}
-
-function cloneConfigObject(value: ConfigValue | undefined): ConfigObject {
-  if (!isConfigObject(value)) return {};
-  return { ...value };
-}
-
-const OPENCLAW_UPSTREAM_PROVIDER_HEADER = "X-NemoClaw-Upstream-Provider";
-
-// The image environment records the onboarding provider, but inference-set can
-// switch the live route without rebuilding. Carry the current non-secret
-// provider identity with OpenClaw's runtime config; the sandbox preload removes
-// this private marker before forwarding the request.
-function withOpenClawUpstreamProviderHeader(
-  existing: ConfigObject,
-  upstreamProvider: string,
-): ConfigObject {
-  const headers = cloneConfigObject(existing.headers);
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() === OPENCLAW_UPSTREAM_PROVIDER_HEADER.toLowerCase()) {
-      delete headers[key];
-    }
-  }
-  headers[OPENCLAW_UPSTREAM_PROVIDER_HEADER] = upstreamProvider;
-  return { ...existing, headers };
-}
-
-function asConfigObject(value: Record<string, unknown>): ConfigObject {
-  const result: ConfigObject = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (isConfigValue(entry as ConfigValue)) result[key] = entry as ConfigValue;
-  }
-  return result;
-}
-
-function updateAgentPrimary(config: ConfigObject, primaryModelRef: string): void {
-  const agents = ensureObject(config, "agents");
-  const defaults = ensureObject(agents, "defaults");
-  const model = ensureObject(defaults, "model");
-  model.primary = primaryModelRef;
-  updatePrimaryAgentListModel(agents, primaryModelRef);
-}
-
-function updatePrimaryAgentListModel(agents: ConfigObject, primaryModelRef: string): void {
-  const list = agents.list;
-  if (!Array.isArray(list)) return;
-  let defaultAgent: ConfigObject | undefined;
-  for (const entry of list) {
-    if (!isConfigObject(entry)) continue;
-    if (entry.id === "main") {
-      if (typeof entry.model === "string") {
-        entry.model = primaryModelRef;
-      }
-      return;
-    }
-    if (!defaultAgent && entry.default === true) {
-      defaultAgent = entry;
-    }
-  }
-  if (defaultAgent && typeof defaultAgent.model === "string") {
-    defaultAgent.model = primaryModelRef;
-  }
-}
-
-// Scoped to the provider whose registry row records the effort. Writing it for
-// any other provider would patch a config that the next rebuild silently drops.
-function applyReasoningEffortParams(
-  modelEntry: ConfigObject,
-  provider: string,
-  route: SandboxInferenceConfig,
-  request: ReasoningEffortRequest,
-): void {
-  const canCarryReasoningEffort =
-    provider === "compatible-endpoint" && route.inferenceApi === "openai-completions";
-  if (!request.explicit && canCarryReasoningEffort) return;
-  const params = isConfigObject(modelEntry.params) ? { ...modelEntry.params } : {};
-  const extraBody = isConfigObject(params.extra_body) ? { ...params.extra_body } : {};
-  if (request.effort && canCarryReasoningEffort) {
-    extraBody.reasoning_effort = request.effort;
-  } else {
-    delete extraBody.reasoning_effort;
-  }
-  if (Object.keys(extraBody).length > 0) {
-    params.extra_body = extraBody;
-  } else {
-    delete params.extra_body;
-  }
-  if (Object.keys(params).length > 0) {
-    modelEntry.params = params;
-  } else {
-    delete modelEntry.params;
-  }
-}
-
-function buildProviderConfig(
-  existing: ConfigObject,
-  model: string,
-  provider: string,
-  route: SandboxInferenceConfig,
-  contextWindow?: number,
-  inheritedMaxTokens?: number,
-  upstreamProviderMarker?: string,
-  reasoningEffort: ReasoningEffortRequest = { effort: null, explicit: false },
-): ConfigObject {
-  const firstExistingModel = Array.isArray(existing.models)
-    ? cloneConfigObject(existing.models[0])
-    : {};
-  delete firstExistingModel.compat;
-  firstExistingModel.id = model;
-  firstExistingModel.name = route.primaryModelRef;
-  // Recompute for the new model rather than inheriting the prior model's window.
-  // Omitted (undefined) → keep whatever the existing entry had.
-  if (typeof contextWindow === "number") {
-    firstExistingModel.contextWindow = contextWindow;
-  }
-  if (route.inferenceApi === "anthropic-messages") {
-    applyOpenClawAnthropicReplyBudget(firstExistingModel, inheritedMaxTokens);
-  }
-  if (route.inferenceCompat) {
-    firstExistingModel.compat = asConfigObject(route.inferenceCompat);
-  }
-  applyReasoningEffortParams(firstExistingModel, provider, route, reasoningEffort);
-
-  const providerConfig: ConfigObject = {
-    ...existing,
-    baseUrl: route.inferenceBaseUrl,
-    apiKey: typeof existing.apiKey === "string" && existing.apiKey ? existing.apiKey : "unused",
-    api: route.inferenceApi,
-    models: [firstExistingModel],
-  };
-  return upstreamProviderMarker
-    ? withOpenClawUpstreamProviderHeader(providerConfig, upstreamProviderMarker)
-    : providerConfig;
-}
-
 export function patchOpenClawInferenceConfig(
   config: ConfigObject,
   provider: string,
@@ -539,28 +395,17 @@ export function patchOpenClawInferenceConfig(
   upstreamProviderMarker?: string,
   reasoningEffort: ReasoningEffortRequest = { effort: null, explicit: false },
 ): { changed: boolean; route: SandboxInferenceConfig } {
-  const before = JSON.stringify(config);
   const route = getSandboxInferenceConfig(model, provider, preferredInferenceApi);
-  const inheritedMaxTokens = readOpenClawPrimaryReplyBudget(config);
-
-  updateAgentPrimary(config, route.primaryModelRef);
-
-  const models = ensureObject(config, "models");
-  models.mode = "merge";
-  const providers = ensureObject(models, "providers");
-  const existingProvider = cloneConfigObject(providers[route.providerKey]);
-  providers[route.providerKey] = buildProviderConfig(
-    existingProvider,
-    model,
+  const changed = patchOpenClawInferenceConfigGrammar(
+    config,
     provider,
+    model,
     route,
     contextWindow,
-    inheritedMaxTokens,
     upstreamProviderMarker,
     reasoningEffort,
   );
-
-  return { changed: before !== JSON.stringify(config), route };
+  return { changed, route };
 }
 
 export function patchHermesInferenceConfig(

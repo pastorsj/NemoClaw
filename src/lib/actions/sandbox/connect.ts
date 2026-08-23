@@ -514,6 +514,7 @@ function verifyHermesPortableInferenceRouteOrExit(
         timeout: OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
       },
     ),
+    agent,
   );
   if (
     !probe.healthy ||
@@ -619,7 +620,7 @@ export function probeSandboxInferenceRoute(
         includeStreams: true,
         timeout: OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
       });
-      const parsed = parseSandboxInferenceRouteProbeResult(probe);
+      const parsed = parseSandboxInferenceRouteProbeResult(probe, agent);
       return {
         healthy: parsed.healthy,
         broken: parsed.broken,

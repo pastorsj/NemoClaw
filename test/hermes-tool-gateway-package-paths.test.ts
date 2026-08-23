@@ -16,6 +16,7 @@ import {
 
 type HermesToolGatewayRuntimePaths = Readonly<{
   packageRoot: string;
+  runtimeRoot: string;
   hostDir: string;
   script: string;
   matrix: string;
@@ -26,6 +27,14 @@ type HermesToolGatewayRuntimePaths = Readonly<{
 type HermesToolGatewayBroker = {
   readonly HERMES_TOOL_GATEWAY_RUNTIME_PATHS: HermesToolGatewayRuntimePaths;
   readonly brokerRuntimeHash: () => string;
+  readonly probeHermesToolGatewayBrokerStart: (options: {
+    port: number;
+    spawnSyncImpl: (
+      executable: string,
+      argv: readonly string[],
+      options: { env: NodeJS.ProcessEnv },
+    ) => { status: number };
+  }) => void;
 };
 
 const require = createRequire(import.meta.url);
@@ -68,6 +77,18 @@ function loadBroker(): HermesToolGatewayBroker {
   return require(BROKER_WRAPPER) as HermesToolGatewayBroker;
 }
 
+function expectCapturedFile(
+  runtimePaths: HermesToolGatewayRuntimePaths,
+  sourceHostDir: string,
+  fileName: string,
+): void {
+  const capturedPath = path.join(runtimePaths.hostDir, fileName);
+  expect(fs.readFileSync(capturedPath)).toEqual(
+    fs.readFileSync(path.join(sourceHostDir, fileName)),
+  );
+  expect(fs.statSync(capturedPath).mode & 0o777).toBe(0o400);
+}
+
 beforeEach(() => {
   previousHome = process.env.HOME;
 });
@@ -107,22 +128,49 @@ describe("Hermes tool-gateway package paths", () => {
 
     const installed = installBundledHarness("hermes", { HOME: home });
     const installedBroker = loadBroker();
-    const hostDir = path.join(installed.rootDir, "host");
-    expect(installedBroker.HERMES_TOOL_GATEWAY_RUNTIME_PATHS).toEqual({
-      packageRoot: installed.rootDir,
-      hostDir,
-      script: path.join(hostDir, "tool-gateway-broker.ts"),
-      matrix: path.join(hostDir, "managed-tool-gateway-matrix.json"),
-      runtimeCredentials: path.join(hostDir, "runtime-refresh-credentials.ts"),
-      controlContract: path.join(hostDir, "tool-gateway-control-contract.ts"),
-    });
+    const sourceHostDir = path.join(installed.rootDir, "host");
+    const runtimePaths = installedBroker.HERMES_TOOL_GATEWAY_RUNTIME_PATHS;
+    expect(runtimePaths.packageRoot).toBe(installed.rootDir);
+    expect(runtimePaths.hostDir).toBe(path.join(runtimePaths.runtimeRoot, "host"));
+    expect(runtimePaths.script).toBe(path.join(runtimePaths.hostDir, "tool-gateway-broker.ts"));
+    expect(runtimePaths.matrix).toBe(
+      path.join(runtimePaths.hostDir, "managed-tool-gateway-matrix.json"),
+    );
+    expect(runtimePaths.runtimeCredentials).toBe(
+      path.join(runtimePaths.hostDir, "runtime-refresh-credentials.ts"),
+    );
+    expect(runtimePaths.controlContract).toBe(
+      path.join(runtimePaths.hostDir, "tool-gateway-control-contract.ts"),
+    );
+    expect(loadBroker().HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeRoot).toBe(
+      runtimePaths.runtimeRoot,
+    );
+    expect(fs.statSync(runtimePaths.runtimeRoot).mode & 0o777).toBe(0o700);
+    expectCapturedFile(runtimePaths, sourceHostDir, "tool-gateway-broker.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "managed-tool-gateway-matrix.json");
+    expectCapturedFile(runtimePaths, sourceHostDir, "runtime-refresh-credentials.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "tool-gateway-control-contract.ts");
 
     const installedHash = installedBroker.brokerRuntimeHash();
-    expect(installedHash).not.toBe(bundledHash);
-    fs.appendFileSync(
-      installedBroker.HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeCredentials,
-      "\n// test-only installed package change\n",
-    );
+    expect(installedHash).toBe(bundledHash);
+    const sourceRuntimeCredentials = path.join(sourceHostDir, "runtime-refresh-credentials.ts");
+    fs.appendFileSync(sourceRuntimeCredentials, "\n// test-only installed package change\n");
+    expect(installedBroker.brokerRuntimeHash()).toBe(installedHash);
+
+    let probeInvocation:
+      | { executable: string; argv: readonly string[]; env: NodeJS.ProcessEnv }
+      | undefined;
+    installedBroker.probeHermesToolGatewayBrokerStart({
+      port: 11437,
+      spawnSyncImpl: (executable, argv, options) => {
+        probeInvocation = { executable, argv, env: options.env };
+        return { status: 0 };
+      },
+    });
+    expect(probeInvocation).toBeDefined();
+    expect(probeInvocation?.executable).toBe(process.execPath);
+    expect(probeInvocation?.argv).toEqual(["--experimental-strip-types", runtimePaths.script]);
+    expect(probeInvocation?.env.HERMES_TOOL_GATEWAY_MATRIX_PATH).toBe(runtimePaths.matrix);
     expect(() => loadBroker()).toThrow("installation receipt does not match package content");
   });
 });

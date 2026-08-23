@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DCODE_MANAGED_EXEC_LAUNCHER } from "../actions/sandbox/connect-inference-route-probe";
+import {
+  buildDcodeManagedExecLaunchArgs,
+  DEEP_AGENTS_CODE_PACKAGE_ID,
+  getDcodeManagedExec,
+} from "./deep-agents-code-specifications";
 import type { AgentDefinition } from "./defs";
 
 type RunCaptureOpenshell = (
@@ -60,27 +64,21 @@ export function buildAgentSmokeArgs(
   command: string,
   gatewayName?: string,
 ): string[] {
-  if (agent.name === "langchain-deepagents-code") {
+  if (agent.name === DEEP_AGENTS_CODE_PACKAGE_ID) {
+    getDcodeManagedExec();
     return [
       "sandbox",
       "exec",
       "-n",
       sandboxName,
       ...(gatewayName ? ["-g", gatewayName] : []),
-      "--no-tty",
-      "--env",
-      "HOME=/usr/local/lib/nemoclaw",
-      "--env",
-      "BASH_ENV=",
-      "--env",
-      "ENV=",
-      "--",
-      DCODE_MANAGED_EXEC_LAUNCHER,
-      "/bin/sh",
-      "-c",
-      smokeRunner(false),
-      "nemoclaw-agent-smoke",
-      command,
+      ...buildDcodeManagedExecLaunchArgs([
+        "/bin/sh",
+        "-c",
+        smokeRunner(false),
+        "nemoclaw-agent-smoke",
+        command,
+      ]),
     ];
   }
   return [
@@ -107,6 +105,8 @@ export function runAgentSmokeCommands(
   // smoke_commands are shell-form commands from repository-shipped agent manifests.
   // Switch to argv-form commands before accepting custom or user-provided manifests here.
   const commands = agent.runtime?.smoke_commands ?? [];
+  const requireManagedBoundary = agent.name === DEEP_AGENTS_CODE_PACKAGE_ID;
+  if (requireManagedBoundary) getDcodeManagedExec();
   for (const command of commands) {
     const result = runCaptureOpenshell(
       buildAgentSmokeArgs(sandboxName, agent, command, gatewayName),
@@ -115,7 +115,6 @@ export function runAgentSmokeCommands(
       },
     );
     const output = typeof result === "string" ? result : (result?.output ?? null);
-    const requireManagedBoundary = agent.name === "langchain-deepagents-code";
     const exitCode = getSmokeExitCode(output, requireManagedBoundary);
     const transportFailed =
       requireManagedBoundary && (typeof result === "string" || result?.status !== 0);

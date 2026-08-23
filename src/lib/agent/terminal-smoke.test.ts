@@ -3,9 +3,11 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { DCODE_MANAGED_EXEC_LAUNCHER } from "../actions/sandbox/connect-inference-route-probe";
+import { getDcodeManagedExec } from "./deep-agents-code-specifications";
 import { type AgentDefinition, loadAgent } from "./defs";
 import { buildAgentSmokeArgs, runAgentSmokeCommands } from "./terminal-smoke";
+
+const dcodeManagedExec = getDcodeManagedExec();
 
 function agent(name: string): AgentDefinition {
   return { name, runtime: { smoke_commands: ["dcode --version"] } } as unknown as AgentDefinition;
@@ -21,7 +23,7 @@ describe("terminal agent smoke command invocation", () => {
 
     expect(args).not.toContain("-lc");
     expect(args.join(" ")).not.toContain("sh -lc");
-    expect(args).toContain(DCODE_MANAGED_EXEC_LAUNCHER);
+    expect(args).toContain(dcodeManagedExec.launcher);
     expect(args).toContain("HOME=/usr/local/lib/nemoclaw");
     expect(args).toContain("BASH_ENV=");
     expect(args).toContain("ENV=");
@@ -32,7 +34,7 @@ describe("terminal agent smoke command invocation", () => {
     const args = buildAgentSmokeArgs("probe-box", agent("hermes"), "hermes --version");
 
     expect(args).toContain("-lc");
-    expect(args).not.toContain(DCODE_MANAGED_EXEC_LAUNCHER);
+    expect(args).not.toContain(dcodeManagedExec.launcher);
     expect(args.at(-1)).toBe("hermes --version");
   });
 

@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import { shellQuote } from "../../core/shell-quote";
 import { MANAGED_PROVIDER_ID } from "../../inference/config";
+import { readOpenClawPrimaryModelRefGrammar } from "../../openclaw/config-grammar";
 import { isSafeModelId } from "../../validation";
 import { executeSandboxCommand } from "./process-recovery";
 import type { RebuildLog } from "./rebuild-credential-preflight";
@@ -225,11 +226,10 @@ function readPrimaryModelRef(sandboxName: string): string | null {
   const res = executeSandboxCommand(sandboxName, `cat ${OPENCLAW_CONFIG_PATH} 2>/dev/null`);
   if (!res || res.status !== 0 || !res.stdout.trim()) return null;
   try {
-    const config = JSON.parse(res.stdout) as {
-      agents?: { defaults?: { model?: { primary?: unknown } } };
-    };
-    const primary = config.agents?.defaults?.model?.primary;
-    if (typeof primary !== "string") return null;
+    const primary = readOpenClawPrimaryModelRefGrammar(
+      JSON.parse(res.stdout) as Record<string, unknown>,
+    );
+    if (primary === null) return null;
     const normalized = primary.trim();
     return normalized.length > 0 &&
       normalized.length <= MAX_PRIMARY_MODEL_REF_LENGTH &&

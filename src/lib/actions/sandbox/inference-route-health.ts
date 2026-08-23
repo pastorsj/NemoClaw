@@ -3,6 +3,7 @@
 
 import { captureOpenshellForStatus, isCommandTimeout } from "../../adapters/openshell/runtime";
 import { OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
+import { DEEP_AGENTS_CODE_PACKAGE_ID } from "../../agent/deep-agents-code-specifications";
 import * as agentRuntime from "../../agent/runtime";
 import type { ProviderHealthStatus } from "../../inference/health";
 import {
@@ -20,7 +21,6 @@ import {
 
 export type { SandboxInferenceInvocationResult } from "./inference-invocation-probe";
 export type ProbeSandboxInferenceInvocation = typeof probeSandboxInferenceInvocation;
-
 
 export type SandboxInferenceRouteHealth = {
   ok: boolean;
@@ -47,23 +47,23 @@ export async function probeSandboxInferenceGatewayHealth(
   const endpoint = "https://inference.local/v1/models";
   const capture = options.captureOpenshellImpl ?? captureOpenshellForStatus;
   const getSessionAgent = options.getSessionAgentImpl ?? agentRuntime.getSessionAgent;
+  let agent: ReturnType<typeof agentRuntime.getSessionAgent> = null;
   let result: Awaited<ReturnType<typeof captureOpenshellForStatus>>;
   try {
-    result = await capture(
-      buildSandboxInferenceRouteProbeArgs(sandboxName, getSessionAgent(sandboxName)),
-      {
-        ignoreError: true,
-        includeStreams: true,
-        timeout: OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
-      },
-    );
+    agent = getSessionAgent(sandboxName);
+    result = await capture(buildSandboxInferenceRouteProbeArgs(sandboxName, agent), {
+      ignoreError: true,
+      includeStreams: true,
+      timeout: OPENSHELL_INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
+    });
   } catch {
     return null;
   }
   if (isCommandTimeout(result) || result.error) return null;
-  const parsed = parseSandboxInferenceRouteProbeResult(result);
+  const parsed = parseSandboxInferenceRouteProbeResult(result, agent);
   if (!parsed.healthy && !parsed.broken) {
-    return isDcodeManagedExecMissingDetail(parsed.detail)
+    return agent?.name === DEEP_AGENTS_CODE_PACKAGE_ID &&
+      isDcodeManagedExecMissingDetail(parsed.detail)
       ? {
           ok: false,
           endpoint,

@@ -2,23 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { McpBridgeEntry } from "../../state/registry";
+import { loadDeepAgentsMcpRuntime } from "./runtime/mcp-bridge-adapter-deepagents-runtime";
+import { loadHermesMcpRuntime } from "./runtime/mcp-bridge-adapter-hermes-runtime";
+import { loadOpenClawMcpRuntime } from "./runtime/mcp-bridge-adapter-openclaw-runtime";
 import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readiness";
-import {
-  DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
-  DEEPAGENTS_STRICT_JSON_HELPERS,
-} from "./mcp-bridge-adapter-deepagents-projection";
 
-// NemoClaw owns this dedicated projection. Deep Agents Code's user/project
-// `.mcp.json` discovery is disabled in the managed image so user-authored MCP
-// state can never be layered over the validated registry projection.
+// Keep the existing public constants during the package migration. Runtime operations load the
+// selected harness package only when the matching adapter runs.
 export const DEEPAGENTS_MCP_CONFIG_PATH = "/sandbox/.deepagents/.nemoclaw-mcp.json";
 export const DEFAULT_OPENCLAW_CONFIG_DIR = "/sandbox/.openclaw";
+export const OPENCLAW_MCPORTER_ROOT = "/sandbox/.openclaw/workspace";
 
-/** Resolve Mcporter's project root beneath an OpenClaw agent configuration directory. */
-export function openClawMcporterRoot(configDir = DEFAULT_OPENCLAW_CONFIG_DIR): string {
-  return `${configDir.replace(/\/+$/, "")}/workspace`;
+export function openClawDefaultConfigDir(): string {
+  return loadOpenClawMcpRuntime().DEFAULT_OPENCLAW_CONFIG_DIR;
 }
-export const OPENCLAW_MCPORTER_ROOT = openClawMcporterRoot();
+
+export function openClawDefaultMcporterRoot(): string {
+  return loadOpenClawMcpRuntime().OPENCLAW_MCPORTER_ROOT;
+}
+
+export function openClawMcporterRoot(configDir?: string): string {
+  return loadOpenClawMcpRuntime().openClawMcporterRoot(configDir);
+}
+
 const DEFAULT_AUTH_HEADER = "Authorization";
 const DEFAULT_AUTH_SCHEME = "Bearer";
 
@@ -49,73 +55,30 @@ export function entryHeaders(
   return authorization ? { [DEFAULT_AUTH_HEADER]: authorization } : {};
 }
 
-export function pythonJsonLiteral(value: unknown): string {
-  return JSON.stringify(JSON.stringify(value));
+function runtimeEntry(
+  entry: Pick<McpBridgeEntry, "server" | "url" | "env">,
+  credentialRevision?: McpAttachedCredentialRevision,
+) {
+  return {
+    server: entry.server,
+    url: entry.url,
+    headers: entryHeaders(entry, credentialRevision),
+  };
 }
 
-/**
- * mcporter@0.7.3 normalizes every HTTP definition returned by
- * `config get --json` with an `accept: application/json, text/event-stream`
- * header, even when that header is absent from the persisted config. Treat
- * only that synthesized header as equivalent; every persisted/other header
- * remains part of the ownership fingerprint. When the expected placeholder is
- * canonical, a strictly bounded revisioned form of the same credential is also
- * equivalent. A revisioned expectation remains exact.
- *
- * This function is also serialized into the in-sandbox inspection commands,
- * so keep it self-contained (no references to module-scope values).
- */
 export function mcporterHeadersMatchExpected(
   actual: unknown,
   expected: Record<string, string>,
 ): boolean {
-  if (!actual || typeof actual !== "object" || Array.isArray(actual)) {
-    return false;
-  }
-  const actualHeaders = actual as Record<string, unknown>;
-  for (const [name, value] of Object.entries(expected)) {
-    const actualValue = actualHeaders[name];
-    if (actualValue === value) continue;
-    if (name.toLowerCase() !== "authorization") return false;
-    const prefix = "Bearer openshell:resolve:env:";
-    if (
-      typeof actualValue !== "string" ||
-      !value.startsWith(prefix) ||
-      !actualValue.startsWith(prefix)
-    ) {
-      return false;
-    }
-    const envName = value.slice(prefix.length);
-    const versioned = actualValue.slice(prefix.length);
-    const suffix = `_${envName}`;
-    if (!versioned.startsWith("v") || !versioned.endsWith(suffix)) return false;
-    const revision = versioned.slice(1, -suffix.length);
-    if (!/^[0-9]{1,20}$/u.test(revision)) return false;
-  }
-  const extraNames = Object.keys(actualHeaders).filter((name) => !Object.hasOwn(expected, name));
-  if (extraNames.length === 0) return true;
-  if (extraNames.length !== 1) return false;
-  const [extraName] = extraNames;
-  return (
-    extraName.toLowerCase() === "accept" &&
-    actualHeaders[extraName] === "application/json, text/event-stream"
-  );
+  return loadOpenClawMcpRuntime().mcporterHeadersMatchExpected(actual, expected);
 }
 
 export function mcporterHeaderMatcherSource(): string {
-  return `const mcporterHeadersMatchExpected = ${mcporterHeadersMatchExpected.toString()};`;
+  return loadOpenClawMcpRuntime().mcporterHeaderMatcherSource();
 }
 
 export function hermesManagedServerConfig(entry: McpBridgeEntry): Record<string, unknown> {
-  const headers = entryHeaders(entry);
-  return {
-    url: entry.url,
-    enabled: true,
-    timeout: 120,
-    connect_timeout: 60,
-    tools: { resources: true, prompts: true },
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
-  };
+  return loadHermesMcpRuntime().managedServerConfig(runtimeEntry(entry));
 }
 
 export interface HermesMcpIntentPayload {
@@ -123,106 +86,37 @@ export interface HermesMcpIntentPayload {
   absent: string[];
 }
 
-/** Render the host registry into the credential-safe shape persisted by Hermes. */
 export function buildHermesMcpIntentPayload(
   entries: readonly McpBridgeEntry[],
   managedServerNames: readonly string[],
 ): HermesMcpIntentPayload {
-  const sortedEntries = [...entries].sort((left, right) => left.server.localeCompare(right.server));
-  const present = Object.fromEntries(
-    sortedEntries.map((entry) => [entry.server, hermesManagedServerConfig(entry)]),
+  return loadHermesMcpRuntime().buildIntentPayload(
+    entries.map((entry) => runtimeEntry(entry)),
+    managedServerNames,
   );
-  const presentNames = new Set(Object.keys(present));
-  const absent = [...new Set(managedServerNames)].filter((name) => !presentNames.has(name)).sort();
-  return { present, absent };
 }
 
 export function deepAgentsManagedServerConfig(entry: McpBridgeEntry): Record<string, unknown> {
-  const headers = entryHeaders(entry);
-  return {
-    type: "http",
-    url: entry.url,
-    ...(Object.keys(headers).length > 0 ? { headers } : {}),
-  };
+  return loadDeepAgentsMcpRuntime().managedServerConfig(runtimeEntry(entry));
 }
 
 export function buildHermesMcpStatusCommand(entry: McpBridgeEntry): string {
-  const payload = {
-    server: entry.server,
-    expected: hermesManagedServerConfig(entry),
-  };
-  return [
-    "/opt/hermes/.venv/bin/python - <<'PY'",
-    "import json, pathlib, yaml",
-    `payload = json.loads(${pythonJsonLiteral(payload)})`,
-    'config_path = pathlib.Path("/sandbox/.hermes/config.yaml")',
-    "data = yaml.safe_load(config_path.read_text(encoding='utf-8')) if config_path.exists() else {}",
-    "servers = data.get('mcp_servers') if isinstance(data, dict) else None",
-    "present = isinstance(servers, dict) and payload['server'] in servers",
-    "server = servers.get(payload['server']) if present else None",
-    "ok = server == payload['expected']",
-    "print('registered' if ok else ('mismatch' if present else 'absent'))",
-    "PY",
-  ].join("\n");
+  return loadHermesMcpRuntime().buildStatusCommand(runtimeEntry(entry));
 }
 
 export function buildDeepAgentsMcpStatusCommand(entry: McpBridgeEntry): string {
-  const payload = {
-    server: entry.server,
-    expected: deepAgentsManagedServerConfig(entry),
-  };
-  return [
-    "/opt/venv/bin/python3 -I - <<'PY'",
-    "import json, os, pathlib, stat",
-    `payload = json.loads(${pythonJsonLiteral(payload)})`,
-    `config_path = pathlib.Path(${JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH)})`,
-    ...DEEPAGENTS_STRICT_JSON_HELPERS,
-    ...DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
-    "try:",
-    "    data = read_managed_projection(config_path)[0]",
-    "except Exception:",
-    "    data = {}",
-    "servers = data.get('mcpServers') if isinstance(data, dict) else None",
-    "present = isinstance(servers, dict) and payload['server'] in servers",
-    "server = servers.get(payload['server']) if present else None",
-    "ok = server == payload['expected']",
-    "print('registered' if ok else ('mismatch' if present else 'absent'))",
-    "PY",
-  ].join("\n");
+  return loadDeepAgentsMcpRuntime().buildStatusCommand(runtimeEntry(entry));
 }
 
 export function buildOpenClawMcporterInspectCommand(
   entry: McpBridgeEntry,
   failOnMismatch: boolean,
-  root = OPENCLAW_MCPORTER_ROOT,
+  root?: string,
   credentialRevision?: McpAttachedCredentialRevision,
 ): string {
-  const payload = {
-    server: entry.server,
-    url: entry.url,
-    headers: entryHeaders(entry, credentialRevision),
+  return loadOpenClawMcpRuntime().buildInspectCommand(
+    runtimeEntry(entry, credentialRevision),
     failOnMismatch,
     root,
-  };
-  return [
-    "node - <<'NODE'",
-    'const { spawnSync } = require("node:child_process");',
-    `const expected = JSON.parse(${pythonJsonLiteral(payload)});`,
-    'const result = spawnSync("mcporter", ["--root", expected.root, "config", "get", expected.server, "--json"], { encoding: "utf8" });',
-    "if (result.error) { console.error(result.error.message); process.exit(3); }",
-    "if (result.status !== 0) {",
-    '  const detail = `${result.stderr || ""}\n${result.stdout || ""}`;',
-    "  if (/not\\s+found|does\\s+not\\s+exist|unknown\\s+server/i.test(detail)) { console.log('absent'); process.exit(0); }",
-    "  console.error(detail.trim() || `mcporter config get exited ${result.status}`);",
-    "  process.exit(3);",
-    "}",
-    "let actual = null;",
-    "try { actual = JSON.parse(result.stdout); } catch {}",
-    'const headers = actual && actual.headers && typeof actual.headers === "object" ? actual.headers : {};',
-    mcporterHeaderMatcherSource(),
-    'const registered = !!actual && actual.name === expected.server && actual.transport === "http" && actual.baseUrl === expected.url && mcporterHeadersMatchExpected(headers, expected.headers);',
-    'console.log(registered ? "registered" : "mismatch");',
-    "if (!registered && expected.failOnMismatch) process.exit(2);",
-    "NODE",
-  ].join("\n");
+  );
 }

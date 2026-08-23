@@ -105,11 +105,18 @@ describe("published harness packages", () => {
       "nemoclaw-hermes",
       "config",
     );
+    const installedHermesHost = path.join(
+      installedPackageRoot,
+      "packages",
+      "nemoclaw-hermes",
+      "host",
+    );
     const installedDcodePackage = path.join(
       installedPackageRoot,
       "packages",
       "nemoclaw-langchain-deepagents-code",
     );
+    const installedDcodeHost = path.join(installedDcodePackage, "host");
     const installedOpenClawScripts = path.join(
       installedPackageRoot,
       "packages",
@@ -117,7 +124,9 @@ describe("published harness packages", () => {
       "scripts",
     );
     mkdirSync(installedHermesConfig, { recursive: true });
+    mkdirSync(installedHermesHost, { recursive: true });
     mkdirSync(installedDcodePackage, { recursive: true });
+    mkdirSync(installedDcodeHost, { recursive: true });
     mkdirSync(installedOpenClawScripts, { recursive: true });
     writeFileSync(path.join(installedPackageRoot, "package.json"), '{"name":"nemoclaw"}\n');
     copyFileSync(
@@ -125,12 +134,41 @@ describe("published harness packages", () => {
       path.join(installedHermesConfig, "managed-route.cts"),
     );
     copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-hermes/config/mcp-adapter.cts"),
+      path.join(installedHermesConfig, "mcp-adapter.cts"),
+    );
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/base-image-qualification.cts"),
+      path.join(installedHermesHost, "base-image-qualification.cts"),
+    );
+    copyFileSync(
       path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
       path.join(installedDcodePackage, "managed-identity.cts"),
     );
     copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/reply-budget.cts"),
-      path.join(installedOpenClawScripts, "reply-budget.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts"),
+      path.join(installedDcodePackage, "mcp-adapter.cts"),
+    );
+    copyFileSync(
+      path.join(
+        packagedRoot,
+        "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
+      ),
+      path.join(installedDcodeHost, "qualification-probes.cts"),
+    );
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/config-runtime.cts"),
+      path.join(installedOpenClawScripts, "config-runtime.cts"),
+    );
+    for (const artifact of ["config-restore.cts", "cli-grammar.cts"]) {
+      copyFileSync(
+        path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts", artifact),
+        path.join(installedOpenClawScripts, artifact),
+      );
+    }
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/mcp-adapter.cts"),
+      path.join(path.dirname(installedOpenClawScripts), "mcp-adapter.cts"),
     );
 
     fixtureRequire = createRequire(path.join(fixtureRoot, "package.json"));
@@ -157,15 +195,41 @@ describe("published harness packages", () => {
 
   it.each([
     "packages/nemoclaw-hermes/config/managed-route.cts",
+    "packages/nemoclaw-hermes/config/mcp-adapter.cts",
+    "packages/nemoclaw-hermes/host/base-image-qualification.cts",
+    "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
     "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
-    "packages/nemoclaw-openclaw/scripts/reply-budget.cts",
+    "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts",
+    "packages/nemoclaw-openclaw/mcp-adapter.cts",
+    "packages/nemoclaw-openclaw/scripts/cli-grammar.cts",
+    "packages/nemoclaw-openclaw/scripts/config-restore.cts",
+    "packages/nemoclaw-openclaw/scripts/config-runtime.cts",
   ])("ships package-owned runtime contract %s", (artifact) => {
     expect(packedPaths).toContain(artifact);
   });
 
-  it("ships the reply-budget runtime in the OpenClaw package", () => {
-    expect(openClawPackedPaths).toContain("scripts/reply-budget.cts");
+  it.each([
+    { id: "hermes", artifact: "config/mcp-adapter.cts" },
+    { id: "langchain-deepagents-code", artifact: "mcp-adapter.cts" },
+    { id: "openclaw", artifact: "mcp-adapter.cts" },
+  ])("ships the MCP adapter in the $id package", ({ id, artifact }) => {
+    const report = JSON.parse(
+      execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+        cwd: path.join(fixtureRoot, "packages", `nemoclaw-${id}`),
+        encoding: "utf8",
+      }),
+    ) as Array<{ files?: Array<{ path?: string }> }>;
+    const files = (report[0]?.files ?? []).map((entry) => entry.path);
+
+    expect(files).toContain(artifact);
   });
+
+  it.each(["cli-grammar.cts", "config-restore.cts", "config-runtime.cts"])(
+    "ships OpenClaw package runtime %s",
+    (artifact) => {
+      expect(openClawPackedPaths).toContain(`scripts/${artifact}`);
+    },
+  );
 
   it("loads the package-owned runtime modules from the published tree", () => {
     const hermes = fixtureRequire(
@@ -174,8 +238,49 @@ describe("published harness packages", () => {
     const dcode = fixtureRequire(
       path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
     ) as { normalizeManagedDcodeModelName(model: string): string };
+    const hermesQualification = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/base-image-qualification.cts"),
+    ) as { createHermesBaseImageQualificationProbe(imageRef: string): { args: string[] } };
+    const dcodeQualification = fixtureRequire(
+      path.join(
+        packagedRoot,
+        "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
+      ),
+    ) as { getDeepAgentsCodeBaseImageInputPaths(): string[] };
+    const hermesMcp = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-hermes/config/mcp-adapter.cts"),
+    ) as {
+      buildInspectCommand(payload: string): string[];
+      buildStatusCommand(entry: {
+        server: string;
+        url: string;
+        headers: Record<string, string>;
+      }): string;
+    };
+    const dcodeMcp = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts"),
+    ) as {
+      buildStatusCommand(entry: {
+        server: string;
+        url: string;
+        headers: Record<string, string>;
+      }): string;
+      getMutationCapability(sandboxName: string): {
+        command: string;
+        marker: string;
+      };
+    };
+    const openClawMcp = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/mcp-adapter.cts"),
+    ) as {
+      buildInspectCommand(
+        entry: { server: string; url: string; headers: Record<string, string> },
+        failOnMismatch: boolean,
+      ): string;
+      mcporterAvailabilityProbe(sandboxName: string): { command: string };
+    };
     const openClaw = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/reply-budget.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/config-runtime.cts"),
     ) as {
       readonly DEFAULT_OPENCLAW_MAX_TOKENS: number;
       applyOpenClawAnthropicReplyBudget(config: Record<string, unknown>, inherited?: number): void;
@@ -184,6 +289,28 @@ describe("published harness packages", () => {
 
     expect(hermes.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
     expect(dcode.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
+    expect(
+      hermesQualification.createHermesBaseImageQualificationProbe("hermes:test").args,
+    ).toContain("hermes:test");
+    expect(dcodeQualification.getDeepAgentsCodeBaseImageInputPaths()).toEqual([
+      "manifest.yaml",
+      "requirements.lock",
+    ]);
+    const mcpEntry = { server: "example", url: "https://example.test/mcp", headers: {} };
+    expect(hermesMcp.buildStatusCommand(mcpEntry)).toContain("example");
+    expect(hermesMcp.buildInspectCommand("payload")).toEqual([
+      "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+      "inspect",
+      "--payload",
+      "payload",
+    ]);
+    expect(dcodeMcp.buildStatusCommand(mcpEntry)).toContain("example");
+    expect(dcodeMcp.getMutationCapability("sandbox")).toMatchObject({
+      command: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
+      marker: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2",
+    });
+    expect(openClawMcp.buildInspectCommand(mcpEntry, true)).toContain("example");
+    expect(openClawMcp.mcporterAvailabilityProbe("sandbox").command).toBe("command -v mcporter");
     openClaw.applyOpenClawAnthropicReplyBudget(openClawModel, Number.NaN);
     expect(openClaw.DEFAULT_OPENCLAW_MAX_TOKENS).toBe(4096);
     expect(openClawModel.maxTokens).toBe(4096);
@@ -224,6 +351,89 @@ describe("published harness packages", () => {
       "managed-identity.cts",
       64 * 1024,
     ).exports as { normalizeManagedDcodeModelName(model: string): string };
+    const hermesQualification = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "hermes",
+        packageName: "@nvidia/nemoclaw-hermes",
+        version: "0.1.0",
+        rootDir: hermesRoot,
+        manifestPath: path.join(hermesRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "host/base-image-qualification.cts",
+      64 * 1024,
+    ).exports as { parseHermesPinnedRemoteBaseRef(dockerfile: string): string | null };
+    const dcodeQualification = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "langchain-deepagents-code",
+        packageName: "@nvidia/nemoclaw-langchain-deepagents-code",
+        version: "0.1.0",
+        rootDir: dcodeRoot,
+        manifestPath: path.join(dcodeRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "host/qualification-probes.cts",
+      128 * 1024,
+    ).exports as { buildDcodeManagedExecLaunchArgs(args: string[]): string[] };
+    const hermesMcp = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "hermes",
+        packageName: "@nvidia/nemoclaw-hermes",
+        version: "0.1.0",
+        rootDir: hermesRoot,
+        manifestPath: path.join(hermesRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "config/mcp-adapter.cts",
+      64 * 1024,
+    ).exports as {
+      buildInspectCommand(payload: string): string[];
+      buildStatusCommand(entry: {
+        server: string;
+        url: string;
+        headers: Record<string, string>;
+      }): string;
+    };
+    const dcodeMcp = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "langchain-deepagents-code",
+        packageName: "@nvidia/nemoclaw-langchain-deepagents-code",
+        version: "0.1.0",
+        rootDir: dcodeRoot,
+        manifestPath: path.join(dcodeRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "mcp-adapter.cts",
+      128 * 1024,
+    ).exports as {
+      buildStatusCommand(entry: {
+        server: string;
+        url: string;
+        headers: Record<string, string>;
+      }): string;
+      getMutationCapability(sandboxName: string): {
+        command: string;
+        marker: string;
+      };
+    };
+    const openClawMcp = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "openclaw",
+        packageName: "@nvidia/nemoclaw-openclaw",
+        version: "0.1.0",
+        rootDir: openClawRoot,
+        manifestPath: path.join(openClawRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "mcp-adapter.cts",
+      128 * 1024,
+    ).exports as {
+      buildInspectCommand(
+        entry: { server: string; url: string; headers: Record<string, string> },
+        failOnMismatch: boolean,
+      ): string;
+      mcporterAvailabilityProbe(sandboxName: string): { command: string };
+    };
     const openClaw = runtimeLoader.loadHarnessCommonJsModule(
       {
         id: "openclaw",
@@ -233,9 +443,33 @@ describe("published harness packages", () => {
         manifestPath: path.join(openClawRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "scripts/reply-budget.cts",
-      64 * 1024,
+      "scripts/config-runtime.cts",
+      128 * 1024,
     ).exports as { readonly DEFAULT_OPENCLAW_MAX_TOKENS: number };
+    const openClawRestore = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "openclaw",
+        packageName: "@nvidia/nemoclaw-openclaw",
+        version: "0.1.0",
+        rootDir: openClawRoot,
+        manifestPath: path.join(openClawRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "scripts/config-restore.cts",
+      256 * 1024,
+    ).exports as { mergeOpenClawRestoredConfig(backup: unknown, current: unknown): unknown };
+    const openClawCli = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "openclaw",
+        packageName: "@nvidia/nemoclaw-openclaw",
+        version: "0.1.0",
+        rootDir: openClawRoot,
+        manifestPath: path.join(openClawRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "scripts/cli-grammar.cts",
+      256 * 1024,
+    ).exports as { buildOpenclawAgentDeleteArgs(id: string): string[] };
 
     expect(hermes.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
     expect(
@@ -244,7 +478,38 @@ describe("published harness packages", () => {
       }),
     ).toContain("# Upstream provider: NVIDIA NIM\n# Upstream model: test/model\n");
     expect(dcode.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
+    expect(
+      hermesQualification.parseHermesPinnedRemoteBaseRef(
+        `ARG BASE_IMAGE=ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}\n`,
+      ),
+    ).toContain("hermes-sandbox-base@sha256:");
+    expect(dcodeQualification.buildDcodeManagedExecLaunchArgs(["true"])).toEqual(
+      expect.arrayContaining(["/usr/local/lib/nemoclaw/dcode-managed-exec", "true"]),
+    );
+    const mcpEntry = { server: "example", url: "https://example.test/mcp", headers: {} };
+    expect(hermesMcp.buildStatusCommand(mcpEntry)).toContain("example");
+    expect(hermesMcp.buildInspectCommand("payload")).toEqual([
+      "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+      "inspect",
+      "--payload",
+      "payload",
+    ]);
+    expect(dcodeMcp.buildStatusCommand(mcpEntry)).toContain("example");
+    expect(dcodeMcp.getMutationCapability("sandbox")).toMatchObject({
+      command: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
+      marker: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2",
+    });
+    expect(openClawMcp.buildInspectCommand(mcpEntry, true)).toContain("example");
+    expect(openClawMcp.mcporterAvailabilityProbe("sandbox").command).toBe("command -v mcporter");
     expect(openClaw.DEFAULT_OPENCLAW_MAX_TOKENS).toBe(4096);
+    expect(openClawRestore.mergeOpenClawRestoredConfig({}, {})).toEqual({});
+    expect(openClawCli.buildOpenclawAgentDeleteArgs("example")).toEqual([
+      "openclaw",
+      "agents",
+      "delete",
+      "example",
+      "--force",
+    ]);
   });
 
   it.each([

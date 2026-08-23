@@ -4,7 +4,13 @@
 import path from "node:path";
 import vm from "node:vm";
 
-import { captureHarnessPackageText, type HarnessPackage } from "./package-registry";
+import {
+  captureHarnessPackageText,
+  type HarnessPackage,
+  resolveHarnessPackage,
+} from "./package-registry";
+
+export { resolveHarnessPackage };
 
 export type LoadedHarnessCommonJsModule = {
   readonly contentDigest: string;

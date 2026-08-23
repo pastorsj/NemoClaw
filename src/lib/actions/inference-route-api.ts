@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getSandboxInferenceConfig, resolveAgentInferenceApi } from "../inference/config";
+import {
+  readOpenClawPrimaryProviderKeyGrammar,
+  readOpenClawProviderApiGrammar,
+} from "../openclaw/config-grammar";
 import type { ConfigObject } from "../security/credential-filter";
 import { isConfigObject } from "../security/credential-filter";
 import type { Session } from "../state/onboard-session";
@@ -21,32 +25,11 @@ export function normalizeInferenceApi(value: unknown): InferenceApi | null {
 }
 
 function readProviderApi(config: ConfigObject, providerKey: string): InferenceApi | null {
-  const models = config.models;
-  if (!isConfigObject(models)) return null;
-  const providers = models.providers;
-  if (!isConfigObject(providers)) return null;
-  if (!Object.hasOwn(providers, providerKey)) return null;
-  const provider = providers[providerKey];
-  if (!isConfigObject(provider)) return null;
-  return normalizeInferenceApi(provider.api);
-}
-
-function readOpenClawPrimaryProviderKey(config: ConfigObject): string | null {
-  const agents = config.agents;
-  if (!isConfigObject(agents)) return null;
-  const defaults = agents.defaults;
-  if (!isConfigObject(defaults)) return null;
-  const model = defaults.model;
-  if (!isConfigObject(model)) return null;
-  const primary = model.primary;
-  if (typeof primary !== "string") return null;
-
-  const separator = primary.indexOf("/");
-  return separator > 0 ? primary.slice(0, separator) : null;
+  return normalizeInferenceApi(readOpenClawProviderApiGrammar(config, providerKey));
 }
 
 export function readOpenClawPrimaryRouteApi(config: ConfigObject): InferenceApi | null {
-  const providerKey = readOpenClawPrimaryProviderKey(config);
+  const providerKey = readOpenClawPrimaryProviderKeyGrammar(config);
   if (!providerKey) return null;
   const configuredApi = readProviderApi(config, providerKey);
   if (configuredApi) return configuredApi;
@@ -117,7 +100,7 @@ export function resolveRuntimeInferenceApi(options: {
   const configApi =
     sameProvider && agentName === "hermes"
       ? readHermesRouteApi(config)
-      : sameProvider
+      : sameProvider && agentName === "openclaw"
         ? readOpenClawRouteApi(config, provider)
         : null;
   if (configApi) return configApi;

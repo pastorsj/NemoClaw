@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import {
-  DCODE_MANAGED_EXEC_LAUNCHER,
-  DCODE_MANAGED_EXEC_MISSING_DETAIL,
-} from "./connect-inference-route-probe";
+import { getDcodeManagedExec } from "../../agent/deep-agents-code-specifications";
 import { probeSandboxInferenceGatewayHealth } from "./inference-route-health";
+
+const dcodeManagedExec = getDcodeManagedExec();
 
 describe("sandbox inference route health", () => {
   const makeCapture =
@@ -99,7 +98,7 @@ describe("sandbox inference route health", () => {
 
   it("reports missing DCode helper as a failed compatibility boundary (#6192)", async () => {
     const result = await probeSandboxInferenceGatewayHealth("deep-code", {
-      captureOpenshellImpl: makeCapture(`exec: ${DCODE_MANAGED_EXEC_LAUNCHER}: not found`, 127),
+      captureOpenshellImpl: makeCapture(`exec: ${dcodeManagedExec.launcher}: not found`, 127),
       getSessionAgentImpl: () => ({ name: "langchain-deepagents-code" }) as never,
     });
 
@@ -107,7 +106,7 @@ describe("sandbox inference route health", () => {
       ok: false,
       httpStatus: 0,
       endpoint: "https://inference.local/v1/models",
-      detail: DCODE_MANAGED_EXEC_MISSING_DETAIL,
+      detail: dcodeManagedExec.missingDetail,
     });
   });
 });

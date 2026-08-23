@@ -48,7 +48,7 @@ type OpenClawReplyBudgetRuntime = {
 };
 
 const { DEFAULT_OPENCLAW_MAX_TOKENS } = createRequire(import.meta.url)(
-  "./reply-budget.cts",
+  "./config-runtime.cts",
 ) as OpenClawReplyBudgetRuntime;
 
 const KNOWN_MODEL_SETUP_AGENTS = new Set(["openclaw", "hermes"]);

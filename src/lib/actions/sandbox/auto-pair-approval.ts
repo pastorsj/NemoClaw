@@ -40,11 +40,12 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 
 import { shellQuote } from "../../core/shell-quote";
-import { resolveHarnessPackage } from "../../harness/package-registry";
+import {
+  captureHarnessPackageText,
+  resolveHarnessPackage,
+} from "../../harness/package-registry";
 import { ROOT } from "../../state/paths";
 import {
   CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
@@ -195,15 +196,11 @@ export function readAutoPairApprovalPolicyModule(): string | null {
   try {
     const harnessPackage = resolveHarnessPackage("openclaw");
     if (!harnessPackage) return null;
-    return readFileSync(
-      path.join(
-        harnessPackage.rootDir,
-        "scripts",
-        "lib",
-        "openclaw_device_approval_policy.py",
-      ),
-      "utf-8",
-    );
+    return captureHarnessPackageText(
+      harnessPackage,
+      "scripts/lib/openclaw_device_approval_policy.py",
+      64 * 1024,
+    ).source;
   } catch {
     // Best-effort: a packaging/layout regression must not block connect or
     // doctor. Build-context and package `files` coverage keep this helper

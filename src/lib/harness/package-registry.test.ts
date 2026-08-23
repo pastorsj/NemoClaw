@@ -154,6 +154,23 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     );
   });
 
+  it("resolves one installed harness without validating an unrelated changed harness", () => {
+    const home = temporaryHome();
+    const openClawRoot = writeInstalledPackage(home, "openclaw");
+    const dcodeRoot = writeInstalledPackage(home, "langchain-deepagents-code");
+    fs.writeFileSync(path.join(dcodeRoot, "local-change.txt"), "changed after installation\n");
+
+    expect(resolveHarnessPackage("openclaw", { HOME: home })).toEqual(
+      expect.objectContaining({ id: "openclaw", rootDir: openClawRoot, source: "installed" }),
+    );
+    expect(() => listHarnessPackages({ HOME: home })).toThrow(
+      "installation receipt does not match package content",
+    );
+    expect(() => resolveHarnessPackage("langchain-deepagents-code", { HOME: home })).toThrow(
+      "installation receipt does not match package content",
+    );
+  });
+
   it("requires the manifest at the package root", () => {
     const home = temporaryHome();
     writeInstalledPackage(home, "nested-manifest", {

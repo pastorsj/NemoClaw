@@ -351,6 +351,38 @@ function scanPackageRoot(packagesRoot: string, source: HarnessPackage["source"])
   return packages;
 }
 
+function resolveHarnessPackageFromRoot(
+  packagesRoot: string,
+  id: string,
+  source: HarnessPackage["source"],
+): HarnessPackage | null {
+  let rootMetadata: fs.Stats;
+  try {
+    rootMetadata = fs.lstatSync(packagesRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error(`Harness package root is unavailable: ${packagesRoot}`, { cause: error });
+  }
+  if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
+    throw new Error(`Harness package root must be a regular directory: ${packagesRoot}`);
+  }
+
+  const rootDir = path.join(packagesRoot, `${PACKAGE_DIRECTORY_PREFIX}${id}`);
+  try {
+    fs.lstatSync(rootDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error(`Harness package directory is unavailable: ${rootDir}`, { cause: error });
+  }
+
+  const harnessPackage = readHarnessPackage(rootDir, source);
+  if (source === "installed") {
+    assertInstalledPackageOwnership(rootDir);
+    assertInstallReceiptMatches(rootDir, packageTreeDigest(rootDir));
+  }
+  return harnessPackage;
+}
+
 function ignoredTreeEntry(name: string): boolean {
   return (
     name === ".git" || name === ".DS_Store" || name === "node_modules" || name === "__pycache__"
@@ -718,7 +750,10 @@ export function resolveHarnessPackage(
 ): HarnessPackage | null {
   const normalized = id.trim();
   if (!HARNESS_ID.test(normalized)) return null;
-  return listHarnessPackages(env).find((entry) => entry.id === normalized) ?? null;
+  return (
+    resolveHarnessPackageFromRoot(installedPackagesRoot(env), normalized, "installed") ??
+    resolveHarnessPackageFromRoot(BUNDLED_PACKAGES_ROOT, normalized, "bundled")
+  );
 }
 
 /** Refresh installed packages that are still bundled by this NemoClaw build. */

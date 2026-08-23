@@ -7,6 +7,7 @@ import { createHash, X509Certificate } from "node:crypto";
 import { MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW } from "../../inference/ollama-runtime-context";
 import { hydrateDerivedSandboxMessagingPlanFields } from "../../messaging/hydration";
 import { parseSandboxMessagingPlan } from "../../messaging/plan-validation";
+import { openClawDefaultReplyBudget } from "../../openclaw/config-grammar";
 import { withLocalNoProxy } from "../../proxy/local-no-proxy";
 import {
   MAX_CORPORATE_CA_BYTES,
@@ -37,7 +38,6 @@ import {
 const DEFAULT_MANAGED_PROXY_HOST = "10.200.0.1";
 const DEFAULT_MANAGED_PROXY_PORT = 3128;
 const DEFAULT_CONTEXT_WINDOW = 131_072;
-const DEFAULT_OPENCLAW_MAX_TOKENS = 4096;
 const DEFAULT_OPENCLAW_AGENT_TIMEOUT_SECONDS = 600;
 const DEFAULT_OPENCLAW_OTEL_ENDPOINT = "http://host.openshell.internal:4318";
 const DEFAULT_OPENCLAW_OTEL_SERVICE_NAME = "openclaw-gateway";
@@ -885,6 +885,7 @@ function buildCandidate(input: ManagedStartupProfileBuilderInput): {
   let agentConfig: ManagedStartupProfile["agentConfig"];
   let tuning: ManagedStartupProfile["tuning"];
   if (input.agent === "openclaw") {
+    const defaultMaxTokens = openClawDefaultReplyBudget();
     if (!webSearch) fail("OpenClaw web-search state is missing");
     const otelSampleRaw =
       presentEnvironmentValue(input.environment, "NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE") ?? "1.0";
@@ -926,11 +927,8 @@ function buildCandidate(input: ManagedStartupProfileBuilderInput): {
           maximum: MAX_AUTODETECTED_OLLAMA_CONTEXT_WINDOW,
         }) ?? DEFAULT_CONTEXT_WINDOW,
       maxTokens:
-        parsePositiveInteger(
-          input.environment,
-          "NEMOCLAW_MAX_TOKENS",
-          DEFAULT_OPENCLAW_MAX_TOKENS,
-        ) ?? DEFAULT_OPENCLAW_MAX_TOKENS,
+        parsePositiveInteger(input.environment, "NEMOCLAW_MAX_TOKENS", defaultMaxTokens) ??
+        defaultMaxTokens,
       reasoning: parseReasoning(input.environment) ?? false,
       reasoningEffort: parseReasoningEffort(input.environment),
     };

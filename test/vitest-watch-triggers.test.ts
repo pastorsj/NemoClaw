@@ -58,8 +58,15 @@ const OPAQUE_INPUTS = [
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
   "packages/nemoclaw-hermes/policy-additions.yaml",
   "packages/nemoclaw-hermes/config/managed-route.cts",
+  "packages/nemoclaw-hermes/config/mcp-adapter.cts",
+  "packages/nemoclaw-hermes/host/base-image-qualification.cts",
+  "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
   "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
-  "packages/nemoclaw-openclaw/scripts/reply-budget.cts",
+  "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts",
+  "packages/nemoclaw-openclaw/scripts/cli-grammar.cts",
+  "packages/nemoclaw-openclaw/scripts/config-restore.cts",
+  "packages/nemoclaw-openclaw/scripts/config-runtime.cts",
+  "packages/nemoclaw-openclaw/mcp-adapter.cts",
   "packages/nemoclaw-openclaw/model-specific-setup/openclaw/gemini-3-managed-inference.json",
   "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
   "packages/nemoclaw-openclaw/policies/presets/openclaw-pricing.yaml",
@@ -152,7 +159,7 @@ describe("Vitest opaque-input watch triggers", () => {
       "test/base-image-resolver-helper.test.ts",
     ]);
     expect(triggeredBy("packages/nemoclaw-openclaw/Dockerfile")).toEqual([
-      "src/lib/onboard/managed-startup-profile.test.ts",
+      "src/lib/onboard/managed-startup-profile-builder.test.ts",
       "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
     ]);
     expect(triggeredBy("packages/nemoclaw-openclaw/manifest.yaml")).toEqual([
@@ -192,6 +199,20 @@ describe("Vitest opaque-input watch triggers", () => {
       "test/generate-hermes-config.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
+    expect(triggeredBy("packages/nemoclaw-hermes/host/base-image-qualification.cts")).toEqual([
+      "src/lib/agent/base-image-hermes.test.ts",
+      "src/lib/agent/base-image-hermes-resolution.test.ts",
+      "src/lib/agent/package-qualification-specifications.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-hermes/config/mcp-adapter.cts")).toEqual([
+      "src/lib/actions/sandbox/mcp-bridge-adapter-hermes.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-registration.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-hermes-reconciliation.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
     expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/managed-identity.cts")).toEqual(
       [
         "src/lib/inference/managed-dcode/identity.test.ts",
@@ -199,12 +220,59 @@ describe("Vitest opaque-input watch triggers", () => {
         "test/package-contract/harness-packages.test.ts",
       ],
     );
-    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/reply-budget.cts")).toEqual([
+    expect(
+      triggeredBy("packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts"),
+    ).toEqual([
+      "src/lib/actions/sandbox/connect-inference-route-probe.test.ts",
+      "src/lib/actions/sandbox/dcode-activity-probe.test.ts",
+      "src/lib/agent/deep-agents-code-base-image.test.ts",
+      "src/lib/agent/package-qualification-specifications.test.ts",
+      "src/lib/agent/terminal-smoke.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts")).toEqual([
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-legacy-teardown.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-projection.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-registration.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-rollback.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-runtime-guards.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-v2-removal.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+      "test/deepagents-mcp-legacy-lifecycle.test.ts",
+      "test/deepagents-mcp-runtime-capability.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/config-runtime.cts")).toEqual([
+      "src/lib/actions/inference-route-api.test.ts",
       "src/lib/actions/inference-set-reply-budget.test.ts",
       "src/lib/actions/inference-set-patch-openclaw.test.ts",
+      "src/lib/actions/inference-set-reasoning-effort.test.ts",
+      "src/lib/actions/sandbox/reconcile-session-models.test.ts",
+      "src/lib/onboard/managed-startup-profile-builder.test.ts",
+      "src/lib/openclaw/package-runtime.test.ts",
+      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
       "test/generate-openclaw-config.test.ts",
       "test/package-contract/harness-packages.test.ts",
-      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
+      "test/sandbox-build-context.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/config-restore.cts")).toEqual([
+      "src/lib/openclaw/package-runtime.test.ts",
+      "src/lib/state/openclaw-config-merge-tool-search.test.ts",
+      "src/lib/state/openclaw-config-merge.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/cli-grammar.cts")).toEqual([
+      "src/lib/actions/sandbox/agents/apply.test.ts",
+      "src/lib/openclaw/agent-json-provenance.test.ts",
+      "src/lib/openclaw/package-runtime.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-openclaw/mcp-adapter.cts")).toEqual([
+      "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-registration.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+      "test/package-contract/harness-packages.test.ts",
     ]);
     expect(
       triggeredBy(

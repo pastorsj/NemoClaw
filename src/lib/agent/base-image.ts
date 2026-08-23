@@ -45,6 +45,13 @@ import {
 } from "../sandbox-base-image";
 import { createDeepAgentsCodeBaseImageResolutionOptions } from "./deep-agents-code-base-image";
 import type { AgentDefinition } from "./defs";
+import {
+  createHermesBaseImageQualificationProbe,
+  hermesFinalBaseAcceptsResolution,
+  isHermesOfficialBaseDigestRef,
+  isHermesRepositoryBaseRef,
+  parseHermesPinnedRemoteBaseRef,
+} from "./hermes-base-image-qualification";
 
 function corporateCaBuildArgs(
   env: NodeJS.ProcessEnv = process.env,
@@ -62,23 +69,6 @@ function agentBaseImageBuildArgs(agent: AgentDefinition): Record<string, string>
     ? corporateCaBuildArgs()
     : undefined;
 }
-
-const HERMES_MCP_RUNTIME_PROBE_OK = "nemoclaw-hermes-mcp-runtime-ok";
-const HERMES_BASE_IMAGE_PROBE_GUARDS = [
-  "--network",
-  "none",
-  "--cap-drop",
-  "ALL",
-  "--security-opt",
-  "no-new-privileges",
-  "--read-only",
-  "--user",
-  "sandbox",
-] as const;
-// Matches the official Hermes base repository for both Dockerfile manifest-list
-// pins and Docker-normalized platform manifest digests.
-const HERMES_OFFICIAL_BASE_DIGEST_REF =
-  /^ghcr\.io\/nvidia\/nemoclaw\/hermes-sandbox-base@sha256:[0-9a-f]{64}$/;
 
 type AgentBasePackageAuthority = Readonly<{
   additionalInputFingerprint?: string;
@@ -282,11 +272,8 @@ function getHermesPinnedRemoteBaseRef(agent: AgentDefinition): string | null {
       cause: error,
     });
   }
-  const declarations = [...dockerfile.matchAll(/^ARG BASE_IMAGE=(\S+)$/gm)].map(
-    (match) => match[1],
-  );
-  const pinnedRef = declarations.length === 1 ? declarations[0] : null;
-  if (!pinnedRef || !HERMES_OFFICIAL_BASE_DIGEST_REF.test(pinnedRef)) {
+  const pinnedRef = parseHermesPinnedRemoteBaseRef(dockerfile);
+  if (!pinnedRef) {
     throw new Error(
       "Hermes final Dockerfile must declare exactly one immutable official sandbox base image",
     );
@@ -305,23 +292,19 @@ function hermesFinalDockerfileAcceptsBase(
 ): boolean {
   if (agent.name !== "hermes") return true;
   const imageRef = typeof image === "string" ? image : image.ref;
-  if (
-    imageRef === "nemoclaw-hermes-base-local" ||
-    /^nemoclaw-hermes-(?:root-entrypoint-base|sandbox-base-local|secret-boundary-base|stale-openclaw-dir-base|stale-openclaw-link-base):[^\s]+$/.test(
-      imageRef,
-    )
-  ) {
-    return true;
-  }
-  if (
-    typeof image !== "string" &&
-    image.source === "pinned" &&
-    image.pinnedRemoteRef === getHermesPinnedRemoteBaseRef(agent) &&
-    HERMES_OFFICIAL_BASE_DIGEST_REF.test(imageRef)
-  ) {
-    return true;
-  }
-  return imageRef === getHermesPinnedRemoteBaseRef(agent);
+  if (isHermesRepositoryBaseRef(imageRef)) return true;
+  const trackedPinnedRemoteRef = getHermesPinnedRemoteBaseRef(agent);
+  if (!trackedPinnedRemoteRef) return false;
+  return hermesFinalBaseAcceptsResolution({
+    imageRef,
+    trackedPinnedRemoteRef,
+    ...(typeof image === "string"
+      ? {}
+      : {
+          source: image.source,
+          ...(image.pinnedRemoteRef ? { pinnedRemoteRef: image.pinnedRemoteRef } : {}),
+        }),
+  });
 }
 
 /**
@@ -331,21 +314,9 @@ function hermesFinalDockerfileAcceptsBase(
  * upstream extras.
  */
 export function hermesBaseImageSupportsMcp(imageRef: string): boolean {
-  const output = dockerCapture(
-    [
-      "run",
-      "--rm",
-      ...HERMES_BASE_IMAGE_PROBE_GUARDS,
-      "--entrypoint",
-      "/opt/hermes/.venv/bin/python",
-      imageRef,
-      "-I",
-      "-c",
-      `import importlib.metadata as metadata; import sys; import acp; import mcp; from acp_adapter.server import HermesACPAgent; from tools import mcp_tool; metadata.version("agent-client-protocol") == "0.9.0" or sys.exit(1); getattr(mcp_tool, "_MCP_AVAILABLE", False) or sys.exit(1); getattr(mcp_tool, "_MCP_HTTP_AVAILABLE", False) or sys.exit(1); print("${HERMES_MCP_RUNTIME_PROBE_OK}")`,
-    ],
-    { ignoreError: true, timeout: 20_000 },
-  );
-  return output.trim() === HERMES_MCP_RUNTIME_PROBE_OK;
+  const probe = createHermesBaseImageQualificationProbe(imageRef);
+  const output = dockerCapture([...probe.args], { ignoreError: true, timeout: 20_000 });
+  return output.trim() === probe.expectedOutput;
 }
 
 function createAgentBaseImageResolutionOptions(
@@ -414,9 +385,7 @@ export function bindLocalAgentBaseImageToPinnedProvenance(
   const pinnedRepoDigests = Array.isArray(pinned?.RepoDigests)
     ? pinned.RepoDigests.map(String)
     : [];
-  const resolvedRemoteRef = pinnedRepoDigests.find((ref) =>
-    HERMES_OFFICIAL_BASE_DIGEST_REF.test(ref),
-  );
+  const resolvedRemoteRef = pinnedRepoDigests.find(isHermesOfficialBaseDigestRef);
   if (
     !localId ||
     localId !== pinnedId ||

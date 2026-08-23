@@ -6,19 +6,13 @@ import path from "node:path";
 import { dockerCapture } from "../adapters/docker";
 import type { ResolveBaseImageOptions } from "../sandbox-base-image";
 import { sandboxBaseImageHasSecurityInventory } from "../sandbox-base-image/security-inventory";
+import {
+  createDeepAgentsCodeDos2UnixProbe,
+  createDeepAgentsCodeVersionProbe,
+  getDeepAgentsCodeBaseImageInputPaths,
+  getDeepAgentsCodeDistribution,
+} from "./deep-agents-code-specifications";
 import type { AgentDefinition } from "./defs";
-
-const DEEPAGENTS_CODE_DISTRIBUTION = "deepagents-code";
-const DEEPAGENTS_CODE_DOS2UNIX_PROBE_OK = "nemoclaw-dcode-dos2unix-ok";
-const DEEPAGENTS_CODE_BASE_IMAGE_PROBE_GUARDS = [
-  "--network",
-  "none",
-  "--cap-drop",
-  "ALL",
-  "--security-opt",
-  "no-new-privileges",
-  "--read-only",
-] as const;
 
 type DeepAgentsCodeResolutionOptions = Pick<
   ResolveBaseImageOptions,
@@ -35,26 +29,14 @@ export function deepAgentsCodeBaseImageMatchesVersion(
   imageRef: string,
   expectedVersion: string,
 ): boolean {
-  const output = dockerCapture(
-    [
-      "run",
-      "--rm",
-      ...DEEPAGENTS_CODE_BASE_IMAGE_PROBE_GUARDS,
-      "--entrypoint",
-      "/opt/venv/bin/python3",
-      imageRef,
-      "-I",
-      "-c",
-      `import importlib.metadata; print(importlib.metadata.version("${DEEPAGENTS_CODE_DISTRIBUTION}"))`,
-    ],
-    { ignoreError: true, timeout: 20_000 },
-  );
+  const probe = createDeepAgentsCodeVersionProbe(imageRef);
+  const output = dockerCapture([...probe.args], { ignoreError: true, timeout: 20_000 });
   const installedVersion = output.trim();
   if (!installedVersion) {
     console.warn(
       `  Warning: ${imageRef} returned no Deep Agents Code version output; ` +
         "the container or metadata probe may have failed. " +
-        `Rejecting the base image (expected ${DEEPAGENTS_CODE_DISTRIBUTION}==${expectedVersion}).`,
+        `Rejecting the base image (expected ${probe.distribution}==${expectedVersion}).`,
     );
     return false;
   }
@@ -66,28 +48,9 @@ export function deepAgentsCodeBaseImageMatchesVersion(
  * dos2unix, which workspace and repository workflows require.
  */
 export function deepAgentsCodeBaseImageHasDos2Unix(imageRef: string): boolean {
-  const output = dockerCapture(
-    [
-      "run",
-      "--rm",
-      ...DEEPAGENTS_CODE_BASE_IMAGE_PROBE_GUARDS,
-      "--user",
-      "999:999",
-      "--entrypoint",
-      "/bin/sh",
-      imageRef,
-      "-eu",
-      "-c",
-      [
-        "test -x /usr/bin/dos2unix",
-        'test "$(command -v dos2unix)" = /usr/bin/dos2unix',
-        "dos2unix --version >/dev/null",
-        `printf '%s\\n' "${DEEPAGENTS_CODE_DOS2UNIX_PROBE_OK}"`,
-      ].join("; "),
-    ],
-    { ignoreError: true, timeout: 20_000 },
-  );
-  return output.trim() === DEEPAGENTS_CODE_DOS2UNIX_PROBE_OK;
+  const probe = createDeepAgentsCodeDos2UnixProbe(imageRef);
+  const output = dockerCapture([...probe.args], { ignoreError: true, timeout: 20_000 });
+  return output.trim() === probe.expectedOutput;
 }
 
 export function createDeepAgentsCodeBaseImageResolutionOptions(
@@ -103,16 +66,19 @@ export function createDeepAgentsCodeBaseImageResolutionOptions(
     );
   }
   const agentRoot = path.dirname(dockerfilePath);
+  const distribution = getDeepAgentsCodeDistribution();
   return {
     // Retain the resolver's pre-existing global inputs alongside these agent
     // inputs. Per-agent cache-policy isolation is a separate cross-agent change.
-    inputPaths: [path.join(agentRoot, "manifest.yaml"), path.join(agentRoot, "requirements.lock")],
+    inputPaths: getDeepAgentsCodeBaseImageInputPaths().map((relativePath) =>
+      path.join(agentRoot, ...relativePath.split("/")),
+    ),
     validateImage: (imageRef) =>
       deepAgentsCodeBaseImageMatchesVersion(imageRef, expectedVersion) &&
       deepAgentsCodeBaseImageHasDos2Unix(imageRef) &&
       sandboxBaseImageHasSecurityInventory(imageRef),
     validationDescription:
-      `${DEEPAGENTS_CODE_DISTRIBUTION}==${expectedVersion}, dos2unix, and ` +
+      `${distribution}==${expectedVersion}, dos2unix, and ` +
       "the immutable security package inventory",
   };
 }

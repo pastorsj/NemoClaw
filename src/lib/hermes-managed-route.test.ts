@@ -16,7 +16,7 @@ import {
 
 const temporaryHomes: string[] = [];
 
-function writeInstalledHermesRuntime(): string {
+function writeInstalledHermesRuntime(): { home: string; runtimePath: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-runtime-"));
   temporaryHomes.push(home);
   const root = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-hermes");
@@ -35,8 +35,9 @@ function writeInstalledHermesRuntime(): string {
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
+  const runtimePath = path.join(configDir, "managed-route.cts");
   fs.writeFileSync(
-    path.join(configDir, "managed-route.cts"),
+    runtimePath,
     [
       '"use strict";',
       "module.exports = {",
@@ -54,7 +55,7 @@ function writeInstalledHermesRuntime(): string {
     `${JSON.stringify({ installedDigest: harnessPackageContentDigest(root) })}\n`,
     { mode: 0o600 },
   );
-  return home;
+  return { home, runtimePath };
 }
 
 afterEach(() => {
@@ -70,14 +71,15 @@ describe("Hermes managed-route package runtime", testTimeoutOptions(30_000), () 
   });
 
   it("uses the receipt-verified installed Hermes module", () => {
-    const home = writeInstalledHermesRuntime();
-    vi.stubEnv("HOME", home);
+    const installed = writeInstalledHermesRuntime();
+    vi.stubEnv("HOME", installed.home);
 
     expect(resolveHarnessPackage("hermes")?.rootDir).toBe(
-      path.join(home, ".nemoclaw", "harnesses", "nemoclaw-hermes"),
+      path.join(installed.home, ".nemoclaw", "harnesses", "nemoclaw-hermes"),
     );
 
     expect(hermesProviderKey("ignored by installed runtime")).toBe("installed-hermes-runtime");
+    fs.appendFileSync(installed.runtimePath, "// changed after capture\n");
     expect(buildHermesUpstreamHeader({})).toBe("# installed Hermes header\n");
   });
 });

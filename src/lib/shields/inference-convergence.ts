@@ -79,11 +79,14 @@ export function waitForHermesInferenceRouteConvergence(
           timeout: INFERENCE_ROUTE_PROBE_TIMEOUT_MS,
         },
       );
-      const parsed = parseSandboxInferenceRouteProbeResult({
-        status: probe.status,
-        output: String(probe.stdout ?? ""),
-        stderr: String(probe.stderr ?? ""),
-      });
+      const parsed = parseSandboxInferenceRouteProbeResult(
+        {
+          status: probe.status,
+          output: String(probe.stdout ?? ""),
+          stderr: String(probe.stderr ?? ""),
+        },
+        { name: "hermes" },
+      );
       const httpStatus = parsed.httpStatus;
       return {
         ok: parsed.healthy && httpStatus >= 200 && httpStatus < 300,

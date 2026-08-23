@@ -12,7 +12,7 @@ import { normalizeManagedDcodeModelName, resolveManagedDcodeIdentity } from "./i
 
 const temporaryHomes: string[] = [];
 
-function writeInstalledDcodeRuntime(): string {
+function writeInstalledDcodeRuntime(): { home: string; runtimePath: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-runtime-"));
   temporaryHomes.push(home);
   const root = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-langchain-deepagents-code");
@@ -30,8 +30,9 @@ function writeInstalledDcodeRuntime(): string {
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
+  const runtimePath = path.join(root, "managed-identity.cts");
   fs.writeFileSync(
-    path.join(root, "managed-identity.cts"),
+    runtimePath,
     [
       '"use strict";',
       "module.exports = {",
@@ -51,7 +52,7 @@ function writeInstalledDcodeRuntime(): string {
     `${JSON.stringify({ installedDigest: harnessPackageContentDigest(root) })}\n`,
     { mode: 0o600 },
   );
-  return home;
+  return { home, runtimePath };
 }
 
 afterEach(() => {
@@ -71,15 +72,17 @@ describe("Deep Agents Code managed-identity package runtime", testTimeoutOptions
   });
 
   it("uses the receipt-verified installed Deep Agents Code module", () => {
-    const home = writeInstalledDcodeRuntime();
-    vi.stubEnv("HOME", home);
+    const installed = writeInstalledDcodeRuntime();
+    vi.stubEnv("HOME", installed.home);
 
     expect(resolveHarnessPackage("langchain-deepagents-code")?.rootDir).toBe(
-      path.join(home, ".nemoclaw", "harnesses", "nemoclaw-langchain-deepagents-code"),
+      path.join(installed.home, ".nemoclaw", "harnesses", "nemoclaw-langchain-deepagents-code"),
     );
 
     expect(normalizeManagedDcodeModelName("ignored by installed runtime")).toBe(
       "installed-dcode-runtime",
     );
+    fs.appendFileSync(installed.runtimePath, "// changed after capture\n");
+    expect(normalizeManagedDcodeModelName("still captured")).toBe("installed-dcode-runtime");
   });
 });

@@ -1,405 +1,91 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isObjectRecord, type UnknownRecord } from "../core/json-types";
+import {
+  openClawAgentIncompleteTurnSignalGrammar,
+  openClawAgentJsonProvenanceLinesGrammar,
+  type OpenClawIncompleteTurnSignal,
+} from "./cli-grammar";
 import { redactFull } from "../security/redact";
 
-const FAILURE_STATUS_VALUES = new Set(["error", "errored", "failed", "failure"]);
-const UNTRUSTED_CHILD_BEGIN = "BEGIN_UNTRUSTED_CHILD_RESULT";
-const UNTRUSTED_CHILD_END = "END_UNTRUSTED_CHILD_RESULT";
-const ANSI_OSC_PATTERN = /\x1B\][\s\S]*?(?:\x07|\x1B\\|$)/gu;
-const ANSI_CSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/gu;
-const CONTROL_PATTERN = /[\u0000-\u0007\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
 const PEM_PRIVATE_KEY_PATTERN =
   /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/gu;
 const SECRET_KV_PATTERN =
   /\b([A-Z0-9_.-]*(?:API[_-]?KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTHORIZATION)[A-Z0-9_.-]*)\s*[:=]\s*["']?[^"'\s;,)]*/giu;
-const MAX_PROVENANCE_WALK_NODES = 10_000;
-const MAX_PROVENANCE_WALK_DEPTH = 80;
+const ANSI_OSC_PATTERN = /\x1B\][\s\S]*?(?:\x07|\x1B\\|$)/gu;
+const ANSI_CSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/gu;
+const CONTROL_PATTERN = /[\u0000-\u0007\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu;
+const MAX_PROVENANCE_LINES = 64;
+const MAX_PROVENANCE_LINE_LENGTH = 4096;
+const REDACTION_MARKER_PATTERN = /(<REDACTED(?:_PRIVATE_KEY)?>)/gu;
 
-type WalkEntry = {
-  depth: number;
-  value: unknown;
-};
-
-function snippet(value: string, limit = 300): string {
-  const sanitized = value
-    .replace(ANSI_OSC_PATTERN, "")
-    .replace(ANSI_CSI_PATTERN, "")
-    .replace(/\r|\u0008/gu, "")
-    .replace(CONTROL_PATTERN, "");
-  // Preserve line boundaries while redacting so line-oriented header patterns
-  // cannot consume unrelated details that happen to follow on another line.
-  const squashed = redactProvenanceDetail(sanitized).replace(/\s+/gu, " ").trim();
-  return squashed.length <= limit ? squashed : `${squashed.slice(0, limit - 3)}...`;
+function preserveRedactionMarkers(value: string): string {
+  return value
+    .split(REDACTION_MARKER_PATTERN)
+    .map((part) =>
+      part === "<REDACTED>" || part === "<REDACTED_PRIVATE_KEY>" ? part : redactFull(part),
+    )
+    .join("");
 }
 
 function redactProvenanceDetail(value: string): string {
-  return redactFull(value.replace(PEM_PRIVATE_KEY_PATTERN, "<REDACTED_PRIVATE_KEY>")).replace(
-    SECRET_KV_PATTERN,
-    "$1=<REDACTED>",
-  );
+  const terminalSafe = value
+    .replace(ANSI_OSC_PATTERN, "")
+    .replace(ANSI_CSI_PATTERN, "")
+    .replace(/[\r\n]+/gu, " ")
+    .replace(/\u0008/gu, "")
+    .replace(CONTROL_PATTERN, "");
+  return preserveRedactionMarkers(
+    terminalSafe.replace(PEM_PRIVATE_KEY_PATTERN, "<REDACTED_PRIVATE_KEY>"),
+  ).replace(SECRET_KV_PATTERN, "$1=<REDACTED>");
 }
 
-function strings(value: unknown): string[] {
-  const result: string[] = [];
-  const seen = new WeakSet<object>();
-  const stack: WalkEntry[] = [{ value, depth: 0 }];
-  let visited = 0;
-
-  while (stack.length > 0 && visited < MAX_PROVENANCE_WALK_NODES) {
-    const entry = stack.pop();
-    if (!entry) break;
-    visited += 1;
-    if (entry.depth > MAX_PROVENANCE_WALK_DEPTH) continue;
-
-    if (typeof entry.value === "string") {
-      result.push(entry.value);
-      continue;
-    }
-
-    const children = Array.isArray(entry.value)
-      ? entry.value
-      : isObjectRecord(entry.value)
-        ? Object.values(entry.value)
-        : [];
-    if (children.length === 0) continue;
-
-    const objectValue = entry.value as object;
-    if (seen.has(objectValue)) continue;
-    seen.add(objectValue);
-
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      stack.push({ value: children[index], depth: entry.depth + 1 });
-    }
+function sanitizePackageLines(value: unknown): string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > MAX_PROVENANCE_LINES ||
+    !value.every((line) => typeof line === "string" && line.length <= MAX_PROVENANCE_LINE_LENGTH)
+  ) {
+    throw new Error("OpenClaw harness CLI-grammar module returned invalid provenance lines.");
   }
-
-  return result;
+  return value.map(redactProvenanceDetail);
 }
 
-function detailFromValue(value: unknown): string | null {
-  if (typeof value === "string") return snippet(value);
-  if (Array.isArray(value) || isObjectRecord(value)) {
-    const nested = strings(value)
-      .map((part) => snippet(part))
-      .filter(Boolean);
-    if (nested.length > 0) return snippet(nested.join("; "));
-    try {
-      return snippet(JSON.stringify(value));
-    } catch {
-      return snippet(String(value));
-    }
+function sanitizeIncompleteTurnSignal(value: unknown): OpenClawIncompleteTurnSignal | null {
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("OpenClaw harness CLI-grammar module returned an invalid turn signal.");
   }
-  if (value === null || value === undefined) return null;
-  return snippet(String(value));
-}
-
-function firstDetail(record: Record<string, unknown>): string | null {
-  for (const key of [
-    "text",
-    "content",
-    "message",
-    "error",
-    "stderr",
-    "stdout",
-    "output",
-    "result",
-  ]) {
-    if (Object.hasOwn(record, key)) {
-      const detail = detailFromValue(record[key]);
-      if (detail) return detail;
-    }
+  const record = value as Record<string, unknown>;
+  const markers = sanitizePackageLines(record.markers).map((marker) => marker.trim());
+  if (markers.length === 0 || markers.some((marker) => marker.length === 0)) {
+    throw new Error("OpenClaw harness CLI-grammar module returned an invalid turn signal.");
   }
-  return null;
-}
-
-function normalized(value: unknown): string {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replaceAll("_", "-");
-}
-
-function isToolLike(record: Record<string, unknown>): boolean {
-  const role = normalized(record.role);
-  const type = normalized(record.type);
-  return (
-    role === "toolresult" ||
-    role === "tool-result" ||
-    type === "toolresult" ||
-    type === "tool-result" ||
-    ["toolCallId", "tool_call_id", "toolName", "tool_name", "tool"].some((key) =>
-      Object.hasOwn(record, key),
-    )
-  );
-}
-
-function hasFailureStatus(record: Record<string, unknown>): boolean {
-  if (record.isError === true || record.is_error === true) return true;
-  for (const key of ["status", "state", "finalStatus"]) {
-    if (FAILURE_STATUS_VALUES.has(normalized(record[key]))) return true;
+  if (record.timeoutPhase === undefined) return { markers };
+  if (
+    typeof record.timeoutPhase !== "string" ||
+    record.timeoutPhase.length === 0 ||
+    record.timeoutPhase.length > 128
+  ) {
+    throw new Error("OpenClaw harness CLI-grammar module returned an invalid turn signal.");
   }
-  return record.ok === false || record.success === false;
-}
-
-function toolLabel(record: Record<string, unknown>): string {
-  const tool = record.toolName ?? record.tool_name ?? record.name ?? record.tool;
-  const callId = record.toolCallId ?? record.tool_call_id ?? record.id;
-  const parts = [tool, callId].map((part) => String(part || "").trim()).filter(Boolean);
-  return parts.length > 0 ? parts.join(" ") : "unknown tool";
-}
-
-function toolFailureLine(record: Record<string, unknown>): string | null {
-  if (!isToolLike(record) || !hasFailureStatus(record)) return null;
-  const detail = firstDetail(record) ?? "no failure detail provided";
-  return `[openclaw provenance] failed tool result (${toolLabel(record)}): ${detail}`;
-}
-
-function collectToolFailureProvenance(value: unknown): string[] {
-  const lines: string[] = [];
-  const seen = new WeakSet<object>();
-  const stack: WalkEntry[] = [{ value, depth: 0 }];
-  let visited = 0;
-
-  while (stack.length > 0 && visited < MAX_PROVENANCE_WALK_NODES) {
-    const entry = stack.pop();
-    if (!entry) break;
-    visited += 1;
-    if (entry.depth > MAX_PROVENANCE_WALK_DEPTH) continue;
-
-    let children: unknown[];
-    let recordValue: UnknownRecord | null = null;
-    if (Array.isArray(entry.value)) {
-      children = entry.value;
-    } else if (isObjectRecord(entry.value)) {
-      recordValue = entry.value;
-      children = Object.values(recordValue);
-    } else {
-      continue;
-    }
-
-    const objectValue = entry.value as object;
-    if (seen.has(objectValue)) continue;
-    seen.add(objectValue);
-
-    if (recordValue) {
-      const line = toolFailureLine(recordValue);
-      if (line) lines.push(line);
-    }
-
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      stack.push({ value: children[index], depth: entry.depth + 1 });
-    }
+  const timeoutPhase = redactProvenanceDetail(record.timeoutPhase).trim();
+  if (timeoutPhase.length === 0) {
+    throw new Error("OpenClaw harness CLI-grammar module returned an invalid turn signal.");
   }
-  return lines;
+  return { markers, timeoutPhase };
 }
 
-function untrustedChildExcerpt(value: string): string | null {
-  const start = value.indexOf(UNTRUSTED_CHILD_BEGIN);
-  if (start < 0) return null;
-  let body = value.slice(start + UNTRUSTED_CHILD_BEGIN.length);
-  const end = body.indexOf(UNTRUSTED_CHILD_END);
-  if (end >= 0) body = body.slice(0, end);
-  body = body.replace(/^[<>\s]+|[<>\s]+$/gu, "");
-  return body ? snippet(body) : null;
-}
+export type { OpenClawIncompleteTurnSignal };
 
-function collectUntrustedChildProvenance(raw: string, docs: unknown[]): string[] {
-  const candidates = [...docs.flatMap(strings), raw];
-  if (!candidates.some((candidate) => candidate.includes(UNTRUSTED_CHILD_BEGIN))) return [];
-
-  const lines = [
-    "[openclaw provenance] untrusted child result present; verify child-sourced data before treating it as confirmed.",
-  ];
-  for (const candidate of candidates) {
-    const excerpt = untrustedChildExcerpt(candidate);
-    if (excerpt) {
-      lines.push(`[openclaw provenance] untrusted child excerpt: ${excerpt}`);
-      break;
-    }
-  }
-  return lines;
-}
-
-function parseLogPrefixedJsonDocs(raw: string): unknown[] {
-  const docs: unknown[] = [];
-  let start: number | null = null;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < raw.length; index += 1) {
-    const char = raw[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === '"') inString = false;
-      continue;
-    }
-    if (depth > 0 && char === '"') inString = true;
-    else if (char === "{") {
-      if (depth === 0) start = index;
-      depth += 1;
-    } else if (depth > 0 && char === "}") {
-      depth -= 1;
-      if (depth === 0 && start !== null) {
-        try {
-          const parsed = JSON.parse(raw.slice(start, index + 1)) as unknown;
-          docs.push(...(Array.isArray(parsed) ? parsed : [parsed]));
-        } catch {
-          // Continue scanning for the next balanced candidate object.
-        }
-        start = null;
-      }
-    }
-  }
-  return docs;
-}
-
-function parseOpenClawJsonDocs(raw: string): unknown[] {
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    // Invalid state: upstream OpenClaw has emitted log-prefixed/non-clean JSON
-    // framing for `openclaw agent --json`. Source boundary: OpenClaw owns the
-    // emitter/framing; NemoClaw only consumes the stream to keep provenance
-    // visible. Source-fix constraint: do not patch or fork OpenClaw from this
-    // host-wrapper PR. Regression tests cover log-prefixed balanced candidates
-    // and provenance extraction. Removal condition: supported OpenClaw versions
-    // guarantee stable clean JSON framing on stdout.
-  }
-
-  return parseLogPrefixedJsonDocs(raw);
-}
-
-function dedupe(lines: string[]): string[] {
-  return Array.from(new Set(lines));
-}
-
+/** Extract package-defined OpenClaw agent output provenance with core-owned redaction. */
 export function openClawAgentJsonProvenanceLines(raw: string): string[] {
-  const docs = parseOpenClawJsonDocs(raw);
-  if (docs.length === 0) return [];
-  return dedupe([
-    ...collectUntrustedChildProvenance(raw, docs),
-    ...docs.flatMap(collectToolFailureProvenance),
-  ]);
+  return sanitizePackageLines(openClawAgentJsonProvenanceLinesGrammar(raw, redactProvenanceDetail));
 }
 
-// Turn-level completion markers (#8796).
-//
-// Read ONLY from the run-metadata record the envelope declares, never from
-// arbitrary descendants. Tool results and tool-call arguments are untrusted
-// data: a successful turn whose tool output merely CONTAINS
-// {"replayInvalid": true} must not be reported as a failure, because callers
-// would then retry a turn that already completed and repeat its side effects.
-//
-// Accepted paths, from the OpenClaw 2026.7.1 type declarations
-// (dist/types-*.d.ts, dist/agent-runtime-*.d.ts):
-//   EmbeddedAgentRunResult = { payloads?, meta: EmbeddedAgentRunMeta, ... }
-//   agentCommandInternal() -> { payloads, meta: EmbeddedAgentRunMeta & ... }
-// so run metadata is a sibling of `payloads`, reachable only in a local
-// `{ payloads, meta }` response or a gateway
-// `{ status, result: { payloads, meta } }` response. Tool results live under
-// `result.messages[].content` and are therefore never consulted.
-//
-// The markers themselves, all declared on EmbeddedAgentRunMeta:
-//   replayInvalid?: boolean
-//   livenessState?: "working" | "paused" | "blocked" | "abandoned"
-//   timeoutPhase?: "queue" | "preflight" | "provider" | "post_turn" | "gateway_draining"
-//   error?: { kind: ... | "incomplete_turn" | ... }
-//
-// `timeoutPhase` marks a run whose deadline fired (#8723). It is optional and
-// absent from a turn that answered, so its presence is the marker and any phase
-// value counts; the declared phases are recorded above as documentation, not as
-// an allowlist, so a phase added upstream is still classified as a timeout
-// instead of being reported as a success.
-//
-// `livenessState` is deliberately not a timeout marker. Two identical timed-out
-// runs reported `blocked` and `working`, so only `abandoned` stays tied to the
-// abandonment case it was added for.
-const ABANDONED_LIVENESS_VALUE = "abandoned";
-// Compared after `normalized()`, which lowercases and maps `_` to `-`.
-const INCOMPLETE_TURN_ERROR_KIND = "incomplete-turn";
-
-export type OpenClawIncompleteTurnSignal = {
-  /** Human-readable `field=value` markers, deduped. */
-  markers: string[];
-  /** The declared phase the deadline fired in, absent when the run did not time out. */
-  timeoutPhase?: string;
-};
-
-/** The declared run-metadata record from an agent response envelope. */
-function agentResponseMetaRecord(doc: unknown): UnknownRecord | null {
-  if (!isObjectRecord(doc)) return null;
-
-  const result = doc.result;
-  if (
-    typeof doc.status === "string" &&
-    isObjectRecord(result) &&
-    (!Object.hasOwn(result, "payloads") || Array.isArray(result.payloads)) &&
-    isObjectRecord(result.meta)
-  ) {
-    return result.meta;
-  }
-
-  if (
-    !Object.hasOwn(doc, "event") &&
-    (!Object.hasOwn(doc, "payloads") || Array.isArray(doc.payloads)) &&
-    isObjectRecord(doc.meta)
-  ) {
-    return doc.meta;
-  }
-  return null;
-}
-
-/** Select the final agent response without treating JSON log records as responses. */
-function finalAgentResponseMetaRecord(docs: unknown[]): UnknownRecord | null {
-  for (let index = docs.length - 1; index >= 0; index -= 1) {
-    const meta = agentResponseMetaRecord(docs[index]);
-    if (meta) return meta;
-  }
-  return null;
-}
-
-/** The phase the run's deadline fired in, or null when the run did not time out. */
-function timedOutPhase(meta: UnknownRecord): string | null {
-  const phase = meta.timeoutPhase;
-  if (typeof phase !== "string") return null;
-  const trimmed = phase.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function turnMetaMarkers(meta: UnknownRecord): string[] {
-  const markers: string[] = [];
-  if (meta.replayInvalid === true) markers.push("replayInvalid=true");
-  if (normalized(meta.livenessState) === ABANDONED_LIVENESS_VALUE) {
-    markers.push(`livenessState=${String(meta.livenessState)}`);
-  }
-  const timeoutPhase = timedOutPhase(meta);
-  if (timeoutPhase) markers.push(`timeoutPhase=${timeoutPhase}`);
-  const error = meta.error;
-  if (isObjectRecord(error) && normalized(error.kind) === INCOMPLETE_TURN_ERROR_KIND) {
-    markers.push(`error.kind=${String(error.kind)}`);
-  }
-  return markers;
-}
-
-/**
- * Detect a turn the run metadata itself marks incomplete, abandoned, or timed
- * out. Returns null when no marker is present, so a healthy turn is never
- * reclassified. A timed-out run also carries its declared phase, which the
- * caller uses to pick deadline-specific recovery guidance.
- */
+/** Detect package-defined incomplete-turn markers in an OpenClaw agent response. */
 export function openClawAgentIncompleteTurnSignal(
   raw: string,
 ): OpenClawIncompleteTurnSignal | null {
-  const docs = parseOpenClawJsonDocs(raw);
-  if (docs.length === 0) return null;
-  const meta = finalAgentResponseMetaRecord(docs);
-  if (!meta) return null;
-  const markers = dedupe(turnMetaMarkers(meta));
-  if (markers.length === 0) return null;
-  const timeoutPhase = timedOutPhase(meta);
-  return timeoutPhase ? { markers, timeoutPhase } : { markers };
+  return sanitizeIncompleteTurnSignal(openClawAgentIncompleteTurnSignalGrammar(raw));
 }

@@ -8,10 +8,9 @@ import {
   createConnectHarness,
   requireDist,
 } from "../../../../test/support/connect-flow-test-harness";
-import {
-  DCODE_MANAGED_EXEC_LAUNCHER,
-  DCODE_MANAGED_EXEC_MISSING_DETAIL,
-} from "./connect-inference-route-probe";
+import { getDcodeManagedExec } from "../../agent/deep-agents-code-specifications";
+
+const dcodeManagedExec = getDcodeManagedExec();
 
 describe("connectSandbox DCode probe preamble boundary", () => {
   let exitSpy: MockInstance;
@@ -35,33 +34,33 @@ describe("connectSandbox DCode probe preamble boundary", () => {
     delete require.cache[requireDist.resolve(connectModulePath)];
   });
 
-  it.each([
-    "OK 200\nBROKEN 000",
-    "BROKEN 503\nOK 200",
-  ])("rejects login-shell preamble evidence without repair or SSH (%s) (#6192)", async (output) => {
-    const harness = createConnectHarness({
-      agentName: "langchain-deepagents-code",
-      registryEntry: {
-        provider: "nvidia-prod",
-        model: "nvidia/nemotron-3-super-120b-a12b",
-      },
-      inferenceGetOutput:
-        "Gateway inference:\n  Provider: nvidia-prod\n  Model: nvidia/nemotron-3-super-120b-a12b\n",
-      inferenceProbeResponses: [output],
-      sessionAgent: { name: "langchain-deepagents-code" },
-    });
+  it.each(["OK 200\nBROKEN 000", "BROKEN 503\nOK 200"])(
+    "rejects login-shell preamble evidence without repair or SSH (%s) (#6192)",
+    async (output) => {
+      const harness = createConnectHarness({
+        agentName: "langchain-deepagents-code",
+        registryEntry: {
+          provider: "nvidia-prod",
+          model: "nvidia/nemotron-3-super-120b-a12b",
+        },
+        inferenceGetOutput:
+          "Gateway inference:\n  Provider: nvidia-prod\n  Model: nvidia/nemotron-3-super-120b-a12b\n",
+        inferenceProbeResponses: [output],
+        sessionAgent: { name: "langchain-deepagents-code" },
+      });
 
-    await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
+      await expect(harness.connectSandbox("alpha")).rejects.toThrow("process.exit(1)");
 
-    expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
-    expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
-    expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
-    expect(harness.spawnSyncSpy).not.toHaveBeenCalled();
-    expect(harness.errorSpy.mock.calls.flat().join("\n")).toContain(
-      "did not return a trusted result",
-    );
-    expect(exitSpy).toHaveBeenCalledWith(1);
-  });
+      expect(harness.applyVmDnsMonkeypatchSpy).not.toHaveBeenCalled();
+      expect(harness.runSetupDnsProxySpy).not.toHaveBeenCalled();
+      expect(harness.runOpenshellSpy).not.toHaveBeenCalled();
+      expect(harness.spawnSyncSpy).not.toHaveBeenCalled();
+      expect(harness.errorSpy.mock.calls.flat().join("\n")).toContain(
+        "did not return a trusted result",
+      );
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    },
+  );
 
   it("rejects spoofed stdout when a DCode startup file emits stderr (#6192)", async () => {
     const harness = createConnectHarness({
@@ -107,7 +106,7 @@ describe("connectSandbox DCode probe preamble boundary", () => {
       },
       inferenceGetOutput:
         "Gateway inference:\n  Provider: nvidia-prod\n  Model: nvidia/nemotron-3-super-120b-a12b\n",
-      inferenceProbeResponses: [`exec: ${DCODE_MANAGED_EXEC_LAUNCHER}: not found`],
+      inferenceProbeResponses: [`exec: ${dcodeManagedExec.launcher}: not found`],
       sessionAgent: { name: "langchain-deepagents-code" },
     });
 
@@ -122,7 +121,7 @@ describe("connectSandbox DCode probe preamble boundary", () => {
       expect.any(Object),
     );
     const errorOutput = harness.errorSpy.mock.calls.flat().join("\n");
-    expect(errorOutput).toContain(DCODE_MANAGED_EXEC_MISSING_DETAIL);
+    expect(errorOutput).toContain(dcodeManagedExec.missingDetail);
     expect(errorOutput).toContain("sandbox inference route is not known healthy");
     expect(exitSpy).toHaveBeenCalledWith(1);
   });

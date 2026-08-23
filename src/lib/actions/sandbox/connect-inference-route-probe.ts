@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { redactSensitiveText } from "../../security/redact";
+import {
+  buildDcodeManagedExecLaunchArgs,
+  DEEP_AGENTS_CODE_PACKAGE_ID,
+  getDcodeManagedExec,
+} from "../../agent/deep-agents-code-specifications";
 
 export type InferenceRouteProbeAgent = { name: string } | null;
 
@@ -53,22 +58,22 @@ export const INFERENCE_ROUTE_PROBE_SCRIPT = [
 // This separate regular-file install is intentionally absent from older images:
 // a newer CLI probing one fails before the stateful entrypoint or dcode wrapper
 // can run, so version skew cannot mutate observability state.
-export const DCODE_MANAGED_EXEC_LAUNCHER = "/usr/local/lib/nemoclaw/dcode-managed-exec";
-export const DCODE_MANAGED_EXEC_MISSING_DETAIL =
-  "trusted Deep Agents Code route-probe helper is missing; rebuild this sandbox with the updated NemoClaw image before retrying connect, status, or doctor";
-
 export function isDcodeManagedExecMissingDetail(detail: string): boolean {
+  const dcodeManagedExec = getDcodeManagedExec();
   const normalized = detail.replace(/\s+/g, " ").trim();
-  if (normalized === DCODE_MANAGED_EXEC_MISSING_DETAIL) return true;
+  if (normalized === dcodeManagedExec.missingDetail) return true;
   return (
-    normalized.includes(DCODE_MANAGED_EXEC_LAUNCHER) &&
+    normalized.includes(dcodeManagedExec.launcher) &&
     /\b(?:not found|no such file|does not exist|cannot stat|stat .* failed)\b/i.test(normalized)
   );
 }
 
-function formatUntrustedProbeDetail(detail: string): string {
+function formatUntrustedProbeDetail(detail: string, agent: InferenceRouteProbeAgent): string {
   const normalized = detail.replace(/\s+/g, " ").trim();
-  if (isDcodeManagedExecMissingDetail(normalized)) return DCODE_MANAGED_EXEC_MISSING_DETAIL;
+  if (agent?.name === DEEP_AGENTS_CODE_PACKAGE_ID) {
+    const dcodeManagedExec = getDcodeManagedExec();
+    if (isDcodeManagedExecMissingDetail(normalized)) return dcodeManagedExec.missingDetail;
+  }
   return redactSensitiveText(normalized) ?? "";
 }
 
@@ -93,24 +98,14 @@ export function buildSandboxInferenceRouteProbeArgs(
     sandboxName,
     ...(gatewayName ? ["-g", gatewayName] : []),
   ];
-  if (agent?.name === "langchain-deepagents-code") {
+  if (agent?.name === DEEP_AGENTS_CODE_PACKAGE_ID) {
+    getDcodeManagedExec();
     return [
       ...targetArgs,
-      "--no-tty",
-      "--env",
-      "HOME=/usr/local/lib/nemoclaw",
-      "--env",
-      "BASH_ENV=",
-      "--env",
-      "ENV=",
-      "--",
       // The trusted launcher ignores ambient proxy overrides and does not add
       // another startup-file read or rewrite persistent runtime state. The
       // OpenShell transport-level login shell remains tracked in OpenShell#2668.
-      DCODE_MANAGED_EXEC_LAUNCHER,
-      "/bin/sh",
-      "-c",
-      INFERENCE_ROUTE_PROBE_SCRIPT,
+      ...buildDcodeManagedExecLaunchArgs(["/bin/sh", "-c", INFERENCE_ROUTE_PROBE_SCRIPT]),
     ];
   }
 
@@ -120,6 +115,7 @@ export function buildSandboxInferenceRouteProbeArgs(
 /** Parse the shared route-probe output used by connect, status, and doctor. */
 export function parseSandboxInferenceRouteProbeResult(
   result: InferenceRouteProbeCommandResult,
+  agent: InferenceRouteProbeAgent = null,
 ): ParsedInferenceRouteProbe {
   const stderr = String(result.stderr ?? "").trim();
   if (stderr) {
@@ -127,7 +123,7 @@ export function parseSandboxInferenceRouteProbeResult(
       healthy: false,
       broken: false,
       httpStatus: 0,
-      detail: formatUntrustedProbeDetail(stderr),
+      detail: formatUntrustedProbeDetail(stderr, agent),
     };
   }
   const rawDetail = String(result.output ?? "").trim();
@@ -143,7 +139,7 @@ export function parseSandboxInferenceRouteProbeResult(
   const healthy = commandSucceeded && match?.[1] === "OK" && isReachableHttpStatus;
   const broken =
     commandSucceeded && Boolean(match) && (match?.[1] === "BROKEN" || !isReachableHttpStatus);
-  const trustedDetail = !healthy && !broken ? formatUntrustedProbeDetail(detail) : detail;
+  const trustedDetail = !healthy && !broken ? formatUntrustedProbeDetail(detail, agent) : detail;
   return {
     healthy,
     broken,

@@ -90,6 +90,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/config/mcp-adapter.cts",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/config/managed-tool-gateway.ts",
       "mode": "100644"
     },

@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { hermesApiMode } from "../hermes-managed-route";
 import type { ConfigObject } from "../security/credential-filter";
 import type { Session } from "../state/onboard-session";
@@ -14,6 +18,13 @@ import {
 vi.mock("../inference/local", () => ({
   DEFAULT_OLLAMA_MODEL: "llama3.1",
 }));
+
+const temporaryHomes: string[] = [];
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  temporaryHomes.splice(0).forEach((home) => fs.rmSync(home, { force: true, recursive: true }));
+});
 
 function session(overrides: Partial<Session> = {}): Session {
   return {
@@ -252,6 +263,26 @@ describe("resolveRuntimeInferenceApi", () => {
         },
       ),
     ).toBe("anthropic-messages");
+  });
+
+  it("does not consult the OpenClaw package for a Deep Agents Code config fallback", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-route-api-"));
+    temporaryHomes.push(home);
+    fs.mkdirSync(path.join(home, ".nemoclaw", "harnesses", "nemoclaw-openclaw"), {
+      recursive: true,
+    });
+    vi.stubEnv("HOME", home);
+
+    expect(
+      resolve(
+        {},
+        {
+          agentName: "langchain-deepagents-code",
+          currentProvider: "compatible-endpoint",
+          provider: "compatible-endpoint",
+        },
+      ),
+    ).toBeNull();
   });
 });
 

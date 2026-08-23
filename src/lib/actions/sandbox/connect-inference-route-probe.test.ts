@@ -7,15 +7,16 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { getDcodeManagedExec } from "../../agent/deep-agents-code-specifications";
 import {
   buildSandboxInferenceRouteProbeArgs,
   classifyInferenceRouteFailureLabel,
-  DCODE_MANAGED_EXEC_LAUNCHER,
-  DCODE_MANAGED_EXEC_MISSING_DETAIL,
   INFERENCE_ROUTE_PROBE_SCRIPT,
   isDcodeManagedExecMissingDetail,
   parseSandboxInferenceRouteProbeResult,
 } from "./connect-inference-route-probe";
+
+const dcodeManagedExec = getDcodeManagedExec();
 
 describe("sandbox connect inference route probe argv", () => {
   it("uses the managed DCode proxy boundary without adding a login shell (#6191)", () => {
@@ -47,31 +48,30 @@ describe("sandbox connect inference route probe argv", () => {
     expect(args.every((arg) => !/[\r\n]/.test(arg))).toBe(true);
   });
 
-  it.each([
-    null,
-    { name: "openclaw" },
-    { name: "hermes" },
-  ])("preserves the plain sh probe for non-dcode agents (%j)", (agent) => {
-    expect(buildSandboxInferenceRouteProbeArgs("alpha", agent)).toEqual([
-      "sandbox",
-      "exec",
-      "--name",
-      "alpha",
-      "--",
-      "sh",
-      "-c",
-      INFERENCE_ROUTE_PROBE_SCRIPT,
-    ]);
-  });
+  it.each([null, { name: "openclaw" }, { name: "hermes" }])(
+    "preserves the plain sh probe for non-dcode agents (%j)",
+    (agent) => {
+      expect(buildSandboxInferenceRouteProbeArgs("alpha", agent)).toEqual([
+        "sandbox",
+        "exec",
+        "--name",
+        "alpha",
+        "--",
+        "sh",
+        "-c",
+        INFERENCE_ROUTE_PROBE_SCRIPT,
+      ]);
+    },
+  );
 
-  it.each([
-    null,
-    { name: "langchain-deepagents-code" },
-  ])("pins the probe to the owning OpenShell gateway for agent %j (#8942)", (agent) => {
-    expect(
-      buildSandboxInferenceRouteProbeArgs("alpha", agent, "nemoclaw-8091").slice(0, 7),
-    ).toEqual(["sandbox", "exec", "--name", "alpha", "-g", "nemoclaw-8091", expect.any(String)]);
-  });
+  it.each([null, { name: "langchain-deepagents-code" }])(
+    "pins the probe to the owning OpenShell gateway for agent %j (#8942)",
+    (agent) => {
+      expect(
+        buildSandboxInferenceRouteProbeArgs("alpha", agent, "nemoclaw-8091").slice(0, 7),
+      ).toEqual(["sandbox", "exec", "--name", "alpha", "-g", "nemoclaw-8091", expect.any(String)]);
+    },
+  );
 
   it("verifies the route with OpenShell's CA and discards the response (#6192)", () => {
     const args = buildSandboxInferenceRouteProbeArgs("alpha", { name: "openclaw" });
@@ -105,66 +105,66 @@ describe("sandbox connect inference route probe argv", () => {
     ).toMatchObject({ healthy: false, broken: false, httpStatus: 0 });
   });
 
-  it.each([
-    "OK 200",
-    "BROKEN 503",
-  ])("managed launcher does not run hostile DCode startup or curl config for a %s spoof (#6192)", (spoof) => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-probe-"));
-    const profileMarker = path.join(home, "profile-ran");
-    try {
-      const caBundle = path.join(home, "openshell-ca.pem");
-      const profile = path.join(home, ".bash_profile");
-      const launcher = path.join(home, "nemoclaw-start");
-      const curlConfigMarker = path.join(home, "curl-config-ran");
-      fs.writeFileSync(caBundle, "test CA boundary", "utf8");
-      fs.writeFileSync(
-        profile,
-        `printf '%s' ${JSON.stringify(spoof)} >&3; printf ran > ${JSON.stringify(profileMarker)}; exit 0`,
-      );
-      fs.writeFileSync(
-        path.join(home, ".curlrc"),
-        `trace-ascii = ${JSON.stringify(curlConfigMarker)}\n`,
-      );
-      fs.writeFileSync(launcher, '#!/bin/bash -p\nset -eu\nunset BASH_ENV ENV\nexec "$@"\n', {
-        mode: 0o755,
-      });
-      const args = buildSandboxInferenceRouteProbeArgs("deep-code", {
-        name: "langchain-deepagents-code",
-      });
-      const delimiter = args.indexOf("--");
-      expect(delimiter).toBeGreaterThan(0);
-      const command = args.slice(delimiter + 1);
-      command[0] = launcher;
+  it.each(["OK 200", "BROKEN 503"])(
+    "managed launcher does not run hostile DCode startup or curl config for a %s spoof (#6192)",
+    (spoof) => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-probe-"));
+      const profileMarker = path.join(home, "profile-ran");
+      try {
+        const caBundle = path.join(home, "openshell-ca.pem");
+        const profile = path.join(home, ".bash_profile");
+        const launcher = path.join(home, "nemoclaw-start");
+        const curlConfigMarker = path.join(home, "curl-config-ran");
+        fs.writeFileSync(caBundle, "test CA boundary", "utf8");
+        fs.writeFileSync(
+          profile,
+          `printf '%s' ${JSON.stringify(spoof)} >&3; printf ran > ${JSON.stringify(profileMarker)}; exit 0`,
+        );
+        fs.writeFileSync(
+          path.join(home, ".curlrc"),
+          `trace-ascii = ${JSON.stringify(curlConfigMarker)}\n`,
+        );
+        fs.writeFileSync(launcher, '#!/bin/bash -p\nset -eu\nunset BASH_ENV ENV\nexec "$@"\n', {
+          mode: 0o755,
+        });
+        const args = buildSandboxInferenceRouteProbeArgs("deep-code", {
+          name: "langchain-deepagents-code",
+        });
+        const delimiter = args.indexOf("--");
+        expect(delimiter).toBeGreaterThan(0);
+        const command = args.slice(delimiter + 1);
+        command[0] = launcher;
 
-      const result = spawnSync(command[0], command.slice(1), {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          ALL_PROXY: "",
-          BASH_ENV: profile,
-          CURL_CA_BUNDLE: caBundle,
-          ENV: profile,
-          HOME: home,
-          HTTP_PROXY: "http://127.0.0.1:9",
-          HTTPS_PROXY: "http://127.0.0.1:9",
-          NO_PROXY: "",
-          SSL_CERT_FILE: "",
-          all_proxy: "",
-          http_proxy: "http://127.0.0.1:9",
-          https_proxy: "http://127.0.0.1:9",
-          no_proxy: "",
-        },
-      });
+        const result = spawnSync(command[0], command.slice(1), {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            ALL_PROXY: "",
+            BASH_ENV: profile,
+            CURL_CA_BUNDLE: caBundle,
+            ENV: profile,
+            HOME: home,
+            HTTP_PROXY: "http://127.0.0.1:9",
+            HTTPS_PROXY: "http://127.0.0.1:9",
+            NO_PROXY: "",
+            SSL_CERT_FILE: "",
+            all_proxy: "",
+            http_proxy: "http://127.0.0.1:9",
+            https_proxy: "http://127.0.0.1:9",
+            no_proxy: "",
+          },
+        });
 
-      expect(result.status).toBe(0);
-      expect(result.stdout).toBe("BROKEN 000");
-      expect(result.stdout).not.toContain(spoof);
-      expect(fs.existsSync(profileMarker)).toBe(false);
-      expect(fs.existsSync(curlConfigMarker)).toBe(false);
-    } finally {
-      fs.rmSync(home, { force: true, recursive: true });
-    }
-  });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe("BROKEN 000");
+        expect(result.stdout).not.toContain(spoof);
+        expect(fs.existsSync(profileMarker)).toBe(false);
+        expect(fs.existsSync(curlConfigMarker)).toBe(false);
+      } finally {
+        fs.rmSync(home, { force: true, recursive: true });
+      }
+    },
+  );
 });
 
 describe("sandbox inference route probe result", () => {
@@ -179,30 +179,23 @@ describe("sandbox inference route probe result", () => {
     expect(classifyInferenceRouteFailureLabel(httpStatus)).toBe(expected);
   });
 
-  it.each([
-    "200",
-    "401",
-    "403",
-    "499",
-  ])("accepts HTTP %s as a reachable route (#6192)", (httpStatus) => {
-    expect(
-      parseSandboxInferenceRouteProbeResult({ status: 0, output: `OK ${httpStatus}` }),
-    ).toMatchObject({ healthy: true, broken: false, httpStatus: Number(httpStatus) });
-  });
+  it.each(["200", "401", "403", "499"])(
+    "accepts HTTP %s as a reachable route (#6192)",
+    (httpStatus) => {
+      expect(
+        parseSandboxInferenceRouteProbeResult({ status: 0, output: `OK ${httpStatus}` }),
+      ).toMatchObject({ healthy: true, broken: false, httpStatus: Number(httpStatus) });
+    },
+  );
 
-  it.each([
-    "000",
-    "100",
-    "199",
-    "500",
-    "503",
-    "599",
-    "600",
-  ])("rejects HTTP %s as a broken route (#6192)", (httpStatus) => {
-    expect(
-      parseSandboxInferenceRouteProbeResult({ status: 0, output: `BROKEN ${httpStatus}` }),
-    ).toMatchObject({ healthy: false, broken: true, httpStatus: Number(httpStatus) });
-  });
+  it.each(["000", "100", "199", "500", "503", "599", "600"])(
+    "rejects HTTP %s as a broken route (#6192)",
+    (httpStatus) => {
+      expect(
+        parseSandboxInferenceRouteProbeResult({ status: 0, output: `BROKEN ${httpStatus}` }),
+      ).toMatchObject({ healthy: false, broken: true, httpStatus: Number(httpStatus) });
+    },
+  );
 
   it("does not classify an unavailable probe as healthy or broken (#6192)", () => {
     expect(
@@ -226,17 +219,20 @@ describe("sandbox inference route probe result", () => {
   });
 
   it("normalizes missing-helper diagnostics reported on stderr (#6192)", () => {
-    const parsed = parseSandboxInferenceRouteProbeResult({
-      status: 127,
-      output: "",
-      stderr: `exec: ${DCODE_MANAGED_EXEC_LAUNCHER}: not found`,
-    });
+    const parsed = parseSandboxInferenceRouteProbeResult(
+      {
+        status: 127,
+        output: "",
+        stderr: `exec: ${dcodeManagedExec.launcher}: not found`,
+      },
+      { name: "langchain-deepagents-code" },
+    );
 
     expect(parsed).toMatchObject({
       healthy: false,
       broken: false,
       httpStatus: 0,
-      detail: DCODE_MANAGED_EXEC_MISSING_DETAIL,
+      detail: dcodeManagedExec.missingDetail,
     });
   });
 
@@ -257,15 +253,18 @@ describe("sandbox inference route probe result", () => {
   });
 
   it("fails closed with rebuild guidance when the DCode helper is missing (#6192)", () => {
-    const output = `exec: ${DCODE_MANAGED_EXEC_LAUNCHER}: not found`;
+    const output = `exec: ${dcodeManagedExec.launcher}: not found`;
 
-    const parsed = parseSandboxInferenceRouteProbeResult({ status: 127, output });
+    const parsed = parseSandboxInferenceRouteProbeResult(
+      { status: 127, output },
+      { name: "langchain-deepagents-code" },
+    );
 
     expect(parsed).toMatchObject({
       healthy: false,
       broken: false,
       httpStatus: 0,
-      detail: DCODE_MANAGED_EXEC_MISSING_DETAIL,
+      detail: dcodeManagedExec.missingDetail,
     });
     expect(isDcodeManagedExecMissingDetail(parsed.detail)).toBe(true);
   });
@@ -305,23 +304,23 @@ describe("sandbox inference route probe result", () => {
     });
   });
 
-  it.each([
-    "[stdout] OK 200",
-    "stdout: OK 401",
-  ])("accepts framed healthy output from OpenShell (%s) (#6192)", (output) => {
-    expect(parseSandboxInferenceRouteProbeResult({ status: 0, output })).toMatchObject({
-      healthy: true,
-      broken: false,
-    });
-  });
+  it.each(["[stdout] OK 200", "stdout: OK 401"])(
+    "accepts framed healthy output from OpenShell (%s) (#6192)",
+    (output) => {
+      expect(parseSandboxInferenceRouteProbeResult({ status: 0, output })).toMatchObject({
+        healthy: true,
+        broken: false,
+      });
+    },
+  );
 
-  it.each([
-    "[stdout] BROKEN 503 service unavailable",
-    "stdout: BROKEN 000",
-  ])("accepts framed broken output from OpenShell (%s) (#6192)", (output) => {
-    expect(parseSandboxInferenceRouteProbeResult({ status: 0, output })).toMatchObject({
-      healthy: false,
-      broken: true,
-    });
-  });
+  it.each(["[stdout] BROKEN 503 service unavailable", "stdout: BROKEN 000"])(
+    "accepts framed broken output from OpenShell (%s) (#6192)",
+    (output) => {
+      expect(parseSandboxInferenceRouteProbeResult({ status: 0, output })).toMatchObject({
+        healthy: false,
+        broken: true,
+      });
+    },
+  );
 });

@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { loadHarnessCommonJsModule } from "./harness/commonjs-runtime";
-import { resolveHarnessPackage } from "./harness/package-registry";
+import {
+  loadHarnessCommonJsModule,
+  resolveHarnessPackage,
+} from "./harness/commonjs-runtime";
 
 type HermesManagedProvider = {
   name: string;
@@ -47,12 +49,18 @@ type RuntimeModule = {
   hermesProviderKey(provider: string): string;
 };
 
-let cachedRuntime: { packageRoot: string; module: RuntimeModule } | null = null;
+let cachedRuntime: {
+  selectionKey: string;
+  packageRoot: string;
+  module: RuntimeModule;
+} | null = null;
 
 function loadHermesManagedRouteModule(): RuntimeModule {
+  const selectionKey = process.env.HOME?.trim() || "<default-home>";
+  // A command captures verified helper bytes once. Harness installation takes effect in the next process.
+  if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("hermes");
   if (!harnessPackage) throw new Error("Hermes harness package is unavailable.");
-  if (cachedRuntime?.packageRoot === harnessPackage.rootDir) return cachedRuntime.module;
   const loaded = loadHarnessCommonJsModule(harnessPackage, "config/managed-route.cts", 64 * 1024);
   const runtime = loaded.exports as Partial<RuntimeModule>;
   if (
@@ -63,7 +71,11 @@ function loadHermesManagedRouteModule(): RuntimeModule {
   ) {
     throw new Error("Hermes harness managed-route module has an invalid contract.");
   }
-  cachedRuntime = { packageRoot: harnessPackage.rootDir, module: runtime as RuntimeModule };
+  cachedRuntime = {
+    selectionKey,
+    packageRoot: harnessPackage.rootDir,
+    module: runtime as RuntimeModule,
+  };
   return cachedRuntime.module;
 }
 

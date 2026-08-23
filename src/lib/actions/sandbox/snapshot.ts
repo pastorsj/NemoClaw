@@ -62,8 +62,7 @@ import { getSandboxEntryInference } from "../../state/registry-entry-view";
 import * as sandboxState from "../../state/sandbox";
 import {
   DCODE_AGENT_NAME,
-  DCODE_BUSY_PROBE_SCRIPT,
-  DCODE_PROBE_STATE,
+  getDcodeActivityProbeSpecification,
   parseDcodeProbeState,
 } from "./dcode-activity-probe";
 import {
@@ -814,6 +813,7 @@ function isSnapshotCreationAllowedByDcodeActivity(sandboxName: string): boolean 
   // timeouts, and any detected-but-unverifiable runtime. Remove this workaround
   // when dcode exposes a wrapper-owned idle/active lock or equivalent snapshot
   // quiescence signal and the backup path checks that source directly.
+  const activityProbe = getDcodeActivityProbeSpecification();
   const execMarker = createSandboxExecMarker();
   const probe = captureOpenshell(
     [
@@ -824,7 +824,7 @@ function isSnapshotCreationAllowedByDcodeActivity(sandboxName: string): boolean 
       "--",
       "sh",
       "-c",
-      buildSandboxExecMarkedCommand(DCODE_BUSY_PROBE_SCRIPT, execMarker),
+      buildSandboxExecMarkedCommand(activityProbe.script, execMarker),
     ],
     {
       ignoreError: true,
@@ -841,12 +841,12 @@ function isSnapshotCreationAllowedByDcodeActivity(sandboxName: string): boolean 
     : null;
   const probeState = commandStdout === null ? null : parseDcodeProbeState(commandStdout);
   if (
-    probeState === DCODE_PROBE_STATE.idleDcodeRuntime ||
-    probeState === DCODE_PROBE_STATE.noDcodeRuntime
+    probeState === activityProbe.states.idleDcodeRuntime ||
+    probeState === activityProbe.states.noDcodeRuntime
   ) {
     return true;
   }
-  if (probeState === DCODE_PROBE_STATE.active) {
+  if (probeState === activityProbe.states.active) {
     console.error(
       "  Sandbox is actively running a dcode task. Please retry after the task completes.",
     );

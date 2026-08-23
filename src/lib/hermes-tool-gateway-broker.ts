@@ -13,27 +13,146 @@ const { spawn, spawnSync } = require("child_process");
 const { ROOT, run, runCapture, runCaptureEx, validateName } = require("./runner");
 const { buildSubprocessEnv } = require("./subprocess-env");
 const { getCredsDir } = require("./credentials/store");
-const { resolveHarnessPackage } = require("./harness/package-registry");
+const { captureHarnessPackageTexts, resolveHarnessPackage } = require("./harness/package-registry");
 const oauth = require("./oauth-device-code");
 const onboardProviders = require("./onboard/providers");
 
-function resolveHermesToolGatewayRuntimePaths(env = process.env) {
+const HERMES_TOOL_GATEWAY_RUNTIME_FILES = Object.freeze([
+  Object.freeze({
+    key: "script",
+    relativePath: "host/tool-gateway-broker.ts",
+    maxBytes: 128 * 1024,
+  }),
+  Object.freeze({
+    key: "matrix",
+    relativePath: "host/managed-tool-gateway-matrix.json",
+    maxBytes: 64 * 1024,
+  }),
+  Object.freeze({
+    key: "runtimeCredentials",
+    relativePath: "host/runtime-refresh-credentials.ts",
+    maxBytes: 64 * 1024,
+  }),
+  Object.freeze({
+    key: "controlContract",
+    relativePath: "host/tool-gateway-control-contract.ts",
+    maxBytes: 64 * 1024,
+  }),
+]);
+const HERMES_TOOL_GATEWAY_RUNTIME_CACHE = Symbol.for("nemoclaw.hermesToolGatewayRuntimeCaptures");
+
+function hermesToolGatewayRuntimeCache() {
+  const existing = globalThis[HERMES_TOOL_GATEWAY_RUNTIME_CACHE];
+  if (existing) return existing;
+  const captures = new Map();
+  const cache = Object.freeze({
+    captures,
+    cleanup: () => {
+      for (const runtime of captures.values()) runtime.cleanup();
+      captures.clear();
+    },
+  });
+  Object.defineProperty(globalThis, HERMES_TOOL_GATEWAY_RUNTIME_CACHE, { value: cache });
+  process.once("exit", cache.cleanup);
+  return cache;
+}
+
+function resolveHermesToolGatewayPackage(env = process.env) {
   const harnessPackage = resolveHarnessPackage("hermes", env);
   if (!harnessPackage) {
     throw new Error("Hermes harness package is unavailable");
   }
-  const hostDir = path.join(harnessPackage.rootDir, "host");
-  return Object.freeze({
-    packageRoot: harnessPackage.rootDir,
-    hostDir,
-    script: path.join(hostDir, "tool-gateway-broker.ts"),
-    matrix: path.join(hostDir, "managed-tool-gateway-matrix.json"),
-    runtimeCredentials: path.join(hostDir, "runtime-refresh-credentials.ts"),
-    controlContract: path.join(hostDir, "tool-gateway-control-contract.ts"),
-  });
+  return harnessPackage;
 }
 
-const HERMES_TOOL_GATEWAY_RUNTIME_PATHS = resolveHermesToolGatewayRuntimePaths();
+function captureHermesToolGatewayRuntime(harnessPackage) {
+  const snapshot = captureHarnessPackageTexts(harnessPackage, HERMES_TOOL_GATEWAY_RUNTIME_FILES);
+  const missing = HERMES_TOOL_GATEWAY_RUNTIME_FILES.filter(
+    ({ relativePath }) => snapshot.sources.get(relativePath) === null,
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `Hermes managed-tool broker runtime is incomplete (${missing
+        .map(({ relativePath }) => path.basename(relativePath))
+        .join(", ")})`,
+    );
+  }
+
+  const cache = hermesToolGatewayRuntimeCache();
+  const cacheKey = JSON.stringify([
+    process.env.HOME?.trim() || os.homedir(),
+    harnessPackage.rootDir,
+    snapshot.contentDigest,
+  ]);
+  const cached = cache.captures.get(cacheKey);
+  if (cached) return cached;
+
+  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-broker-runtime-"));
+  const hostDir = path.join(runtimeRoot, "host");
+  const paths = {
+    packageRoot: harnessPackage.rootDir,
+    runtimeRoot,
+    hostDir,
+  };
+  const fileHashes = {};
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+    if (cache.captures.get(cacheKey)?.paths.runtimeRoot === runtimeRoot) {
+      cache.captures.delete(cacheKey);
+    }
+  };
+
+  try {
+    fs.chmodSync(runtimeRoot, 0o700);
+    fs.mkdirSync(hostDir, { mode: 0o700 });
+    for (const { key, relativePath } of HERMES_TOOL_GATEWAY_RUNTIME_FILES) {
+      const source = snapshot.sources.get(relativePath);
+      const target = path.join(hostDir, path.basename(relativePath));
+      fs.writeFileSync(target, source, { encoding: "utf8", flag: "wx", mode: 0o400 });
+      paths[key] = target;
+      fileHashes[key] = crypto.createHash("sha256").update(source).digest("hex");
+    }
+    const runtime = Object.freeze({
+      cleanup,
+      contentDigest: snapshot.contentDigest,
+      fileHashes: Object.freeze(fileHashes),
+      paths: Object.freeze(paths),
+    });
+    cache.captures.set(cacheKey, runtime);
+    return runtime;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+const HERMES_TOOL_GATEWAY_PACKAGE = resolveHermesToolGatewayPackage();
+const HERMES_TOOL_GATEWAY_RUNTIME = captureHermesToolGatewayRuntime(HERMES_TOOL_GATEWAY_PACKAGE);
+const HERMES_TOOL_GATEWAY_RUNTIME_PATHS = HERMES_TOOL_GATEWAY_RUNTIME.paths;
+let controlContract;
+try {
+  controlContract = require(HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract);
+  if (
+    !controlContract ||
+    typeof controlContract !== "object" ||
+    !Number.isSafeInteger(controlContract.HERMES_CLONE_CONTROL_CLIENT_TIMEOUT_MS) ||
+    controlContract.HERMES_CLONE_CONTROL_CLIENT_TIMEOUT_MS <= 0 ||
+    !Number.isSafeInteger(controlContract.HERMES_CLONE_CONTROL_STATUS_TIMEOUT_MS) ||
+    controlContract.HERMES_CLONE_CONTROL_STATUS_TIMEOUT_MS <= 0 ||
+    typeof controlContract.isValidActivationToken !== "function" ||
+    typeof controlContract.isValidControlRequestId !== "function" ||
+    typeof controlContract.isValidProviderName !== "function" ||
+    typeof controlContract.newControlDeadline !== "function"
+  ) {
+    throw new Error("Hermes harness tool-gateway control contract is invalid");
+  }
+} catch (error) {
+  HERMES_TOOL_GATEWAY_RUNTIME.cleanup();
+  throw error;
+}
 const {
   HERMES_CLONE_CONTROL_CLIENT_TIMEOUT_MS,
   HERMES_CLONE_CONTROL_STATUS_TIMEOUT_MS,
@@ -41,7 +160,7 @@ const {
   isValidControlRequestId,
   isValidProviderName,
   newControlDeadline,
-} = require(HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract);
+} = controlContract;
 
 const HERMES_TOOL_GATEWAY_REFRESH_CREDENTIAL_ENV = "NEMOCLAW_HERMES_TOOL_GATEWAY_REFRESH_TOKEN";
 const HERMES_TOOL_GATEWAY_PORT = 11436;
@@ -54,9 +173,6 @@ const HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH = path.join(
 );
 const HERMES_TOOL_GATEWAY_SCRIPT = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.script;
 const HERMES_TOOL_GATEWAY_MATRIX_PATH = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.matrix;
-const HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH =
-  HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeCredentials;
-const HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract;
 const HERMES_TOOL_GATEWAY_RUNTIME_MISMATCH_RECOVERY =
   "Reauthorize every managed-tool Hermes sandbox, then retry.";
 const HERMES_TOOL_GATEWAY_UNOWNED_LISTENER_RECOVERY =
@@ -330,6 +446,29 @@ function brokerRuntimeFileHash(file) {
   }
 }
 
+function assertCapturedHermesToolGatewayRuntime() {
+  const invalid = HERMES_TOOL_GATEWAY_RUNTIME_FILES.map(({ key, relativePath }) => ({
+    actual: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_RUNTIME_PATHS[key]),
+    expected: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes[key],
+    relativePath,
+  })).filter(({ actual, expected }) => actual !== expected);
+  if (invalid.length === 0) return;
+
+  const missing = invalid.filter(({ actual }) => actual === "missing");
+  if (missing.length > 0) {
+    throw new Error(
+      `Hermes managed-tool broker runtime is incomplete (${missing
+        .map(({ relativePath }) => path.basename(relativePath))
+        .join(", ")})`,
+    );
+  }
+  throw new Error(
+    `Hermes managed-tool broker captured runtime changed (${invalid
+      .map(({ relativePath }) => path.basename(relativePath))
+      .join(", ")})`,
+  );
+}
+
 function registerHermesToolGatewayRefreshProvider(sandboxName, refreshToken, runOpenshell) {
   const normalized = String(refreshToken || "").trim();
   if (!normalized) {
@@ -476,6 +615,7 @@ function discardHermesToolGatewayCloneBinding(sandboxName, stagedBinding) {
 }
 
 function probeHermesToolGatewayBrokerStart(options = {}) {
+  assertCapturedHermesToolGatewayRuntime();
   const spawnProbe = options.spawnSyncImpl || spawnSync;
   const probePort = Number.isInteger(options.port) ? options.port : HERMES_TOOL_GATEWAY_PORT;
   // AF_UNIX paths are short on macOS; TMPDIR can already consume most of the
@@ -536,20 +676,7 @@ function probeHermesToolGatewayBrokerStart(options = {}) {
  */
 function preflightHermesToolGatewayCloneBinding(sandboxName, deps = {}) {
   validateName(sandboxName, "sandbox name");
-  const requiredRuntimeFiles = [
-    HERMES_TOOL_GATEWAY_SCRIPT,
-    HERMES_TOOL_GATEWAY_MATRIX_PATH,
-    HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH,
-    HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH,
-  ];
-  const missing = requiredRuntimeFiles.filter((file) => brokerRuntimeFileHash(file) === "missing");
-  if (missing.length > 0) {
-    throw new Error(
-      `Hermes managed-tool broker runtime is incomplete (${missing
-        .map((file) => path.basename(file))
-        .join(", ")})`,
-    );
-  }
+  assertCapturedHermesToolGatewayRuntime();
 
   const pid = readPid();
   const { owned: currentBrokerOwned, healthy: currentBrokerHealthy } =
@@ -601,21 +728,20 @@ function clearPid() {
 }
 
 function brokerRuntimeHash() {
+  assertCapturedHermesToolGatewayRuntime();
   return crypto
     .createHash("sha256")
     .update(
       JSON.stringify({
         port: HERMES_TOOL_GATEWAY_PORT,
-        script: HERMES_TOOL_GATEWAY_SCRIPT,
-        scriptSha256: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_SCRIPT),
-        runtimeCredentials: HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH,
-        runtimeCredentialsSha256: brokerRuntimeFileHash(
-          HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH,
-        ),
-        controlContract: HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH,
-        controlContractSha256: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH),
-        matrix: HERMES_TOOL_GATEWAY_MATRIX_PATH,
-        matrixSha256: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_MATRIX_PATH),
+        script: "host/tool-gateway-broker.ts",
+        scriptSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.script,
+        runtimeCredentials: "host/runtime-refresh-credentials.ts",
+        runtimeCredentialsSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.runtimeCredentials,
+        controlContract: "host/tool-gateway-control-contract.ts",
+        controlContractSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.controlContract,
+        matrix: "host/managed-tool-gateway-matrix.json",
+        matrixSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.matrix,
         stateDir: HERMES_TOOL_GATEWAY_STATE_DIR,
         controlSocket: HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH,
       }),
@@ -721,6 +847,7 @@ function killStaleHermesToolGatewayBroker() {
 }
 
 function spawnHermesToolGatewayBroker(refreshToken, initialSandboxName = null) {
+  assertCapturedHermesToolGatewayRuntime();
   ensurePrivateDir(HERMES_TOOL_GATEWAY_STATE_DIR);
   const credentialEnv = {};
   if (typeof refreshToken === "string" && refreshToken.trim()) {

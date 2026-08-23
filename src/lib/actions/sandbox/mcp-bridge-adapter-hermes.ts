@@ -14,12 +14,12 @@ import {
   type AdapterRegistrationInspection,
   inspectAdapterRegistrationCommand,
 } from "./mcp-bridge-adapter-inspection";
+import { loadHermesMcpRuntime } from "./runtime/mcp-bridge-adapter-hermes-runtime";
 import { buildHermesMcpStatusCommand, entryHeaders } from "./mcp-bridge-adapter-status";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { commandOutput, redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import { executeGatewaySupervisorAction } from "./process-recovery";
 
-const HERMES_MCP_TRANSACTION_HELPER = "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py";
 const HERMES_MCP_EXEC_TIMEOUT_SECONDS = 620;
 const HERMES_MCP_PROBE_TIMEOUT_SECONDS = 30;
 const HERMES_MCP_STARTUP_TIMEOUT_SECONDS = 90;
@@ -33,23 +33,17 @@ export function buildHermesMcpRegisterCommand(
   entry: McpBridgeEntry,
   replaceExisting = false,
 ): string[] {
-  const payload = {
-    server: entry.server,
-    url: entry.url,
-    headers: entryHeaders(entry),
-    replace_existing: replaceExisting,
-  };
-  return [HERMES_MCP_TRANSACTION_HELPER, "add", "--payload", JSON.stringify(payload)];
+  return loadHermesMcpRuntime().buildRegisterCommand(
+    { server: entry.server, url: entry.url, headers: entryHeaders(entry) },
+    replaceExisting,
+  );
 }
 
 function buildHermesMcpRemoveCommand(entry: McpBridgeEntry, force = false): string[] {
-  const payload = {
-    server: entry.server,
-    url: entry.url,
-    headers: entryHeaders(entry),
+  return loadHermesMcpRuntime().buildRemoveCommand(
+    { server: entry.server, url: entry.url, headers: entryHeaders(entry) },
     force,
-  };
-  return [HERMES_MCP_TRANSACTION_HELPER, "remove", "--payload", JSON.stringify(payload)];
+  );
 }
 
 export function buildHermesMcpExecArgs(
@@ -71,7 +65,7 @@ export function buildHermesMcpExecArgs(
 }
 
 export function buildHermesMcpProbeCommand(): string[] {
-  return [HERMES_MCP_TRANSACTION_HELPER, "probe"];
+  return loadHermesMcpRuntime().buildProbeCommand();
 }
 
 export function inspectHermesAdapterRegistration(

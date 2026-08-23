@@ -1,22 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { shellQuote } from "../../runner";
 import type { McpBridgeEntry } from "../../state/registry";
 import {
   type AdapterMutationOptions,
   type AdapterRegistrationInspection,
   inspectAdapterRegistrationCommand,
 } from "./mcp-bridge-adapter-inspection";
+import { loadOpenClawMcpRuntime } from "./runtime/mcp-bridge-adapter-openclaw-runtime";
 import {
-  authorizationValue,
   buildOpenClawMcporterInspectCommand,
-  DEFAULT_OPENCLAW_CONFIG_DIR,
   entryHeaders,
-  mcporterHeaderMatcherSource,
-  OPENCLAW_MCPORTER_ROOT,
+  openClawDefaultConfigDir,
+  openClawDefaultMcporterRoot,
   openClawMcporterRoot,
-  pythonJsonLiteral,
 } from "./mcp-bridge-adapter-status";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
@@ -24,107 +21,47 @@ import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readin
 import { getAgentConfigDir } from "./mcp-bridge-state";
 import { executeSandboxCommand } from "./process-recovery";
 
+// Preserve the existing public version export while runtime operations remain package-owned.
 export const MCPORTER_VERSION = "0.7.3";
 export { OPENCLAW_MCPORTER_ROOT } from "./mcp-bridge-adapter-status";
-
-/** Build a Mcporter argument vector bound to one project root. */
-function mcporterArgs(root: string, ...args: string[]): string[] {
-  return ["mcporter", "--root", root, ...args];
-}
 
 /** Resolve the Mcporter project root owned by an MCP bridge entry's agent. */
 function mcporterRootForEntry(entry: McpBridgeEntry): string {
   return entry.agent
-    ? openClawMcporterRoot(getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR))
-    : OPENCLAW_MCPORTER_ROOT;
+    ? openClawMcporterRoot(getAgentConfigDir(entry.agent, openClawDefaultConfigDir()))
+    : openClawDefaultMcporterRoot();
 }
 
 function ensureMcporter(sandboxName: string): void {
-  const check = executeSandboxCommand(sandboxName, "command -v mcporter");
+  const availability = loadOpenClawMcpRuntime().mcporterAvailabilityProbe(sandboxName);
+  const check = executeSandboxCommand(sandboxName, availability.command);
   if (check?.status === 0 && check.stdout.trim()) return;
-  throw new McpBridgeError(
-    `mcporter is not available in sandbox '${sandboxName}'. Rebuild with a NemoClaw image that includes mcporter@${MCPORTER_VERSION}.`,
-  );
+  throw new McpBridgeError(availability.failureMessage);
 }
 
 export function buildOpenClawMcporterRegisterCommand(
   entry: McpBridgeEntry,
   replaceExisting = false,
-  root = OPENCLAW_MCPORTER_ROOT,
+  root?: string,
   credentialRevision?: McpAttachedCredentialRevision,
 ): string {
-  const args = mcporterArgs(root, "config", "add", entry.server, "--url", entry.url);
-  const authorization = authorizationValue(entry, credentialRevision);
-  if (authorization) args.push("--header", `Authorization=${authorization}`);
-  args.push("--scope", "project");
-  const addCommand = args.map(shellQuote).join(" ");
-  if (replaceExisting) return addCommand;
-  const getCommand = mcporterArgs(root, "config", "get", entry.server, "--json")
-    .map(shellQuote)
-    .join(" ");
-  return [
-    `if ${getCommand} >/dev/null 2>&1; then`,
-    `  echo ${shellQuote(`MCP server '${entry.server}' already exists in mcporter config and is not managed by NemoClaw.`)} >&2`,
-    "  exit 2",
-    "fi",
-    addCommand,
-  ].join("\n");
+  return loadOpenClawMcpRuntime().buildRegisterCommand(
+    { server: entry.server, url: entry.url, headers: entryHeaders(entry, credentialRevision) },
+    replaceExisting,
+    root,
+  );
 }
 
 export function buildOpenClawMcporterRemoveCommand(
   entry: McpBridgeEntry,
   force = false,
-  root = OPENCLAW_MCPORTER_ROOT,
+  root?: string,
 ): string {
-  const payload = {
-    server: entry.server,
-    url: entry.url,
-    headers: entryHeaders(entry),
+  return loadOpenClawMcpRuntime().buildRemoveCommand(
+    { server: entry.server, url: entry.url, headers: entryHeaders(entry) },
     force,
     root,
-  };
-  return [
-    "node - <<'NODE'",
-    'const { spawnSync } = require("node:child_process");',
-    'const os = require("node:os");',
-    'const path = require("node:path");',
-    `const expected = JSON.parse(${pythonJsonLiteral(payload)});`,
-    mcporterHeaderMatcherSource(),
-    'const detail = (result) => `${result.stderr || ""}\n${result.stdout || ""}`;',
-    "const isAbsent = (result) => result.status !== 0 && /not\\s+found|does\\s+not\\s+exist|unknown\\s+server/i.test(detail(result));",
-    "const isMissingConfig = (result, configPath) => result.status !== 0 && /ENOENT: no such file or directory/i.test(detail(result)) && detail(result).includes(configPath);",
-    'const projectDir = path.join(expected.root, "config");',
-    'const xdgHome = path.isAbsolute(process.env.XDG_CONFIG_HOME || "") ? process.env.XDG_CONFIG_HOME : path.join(os.homedir(), ".config");',
-    'const xdgDir = path.join(xdgHome, "mcporter");',
-    'const legacyHomeDir = path.join(os.homedir(), ".mcporter");',
-    'const configPaths = [...new Set([projectDir, xdgDir, legacyHomeDir].filter(Boolean).flatMap((dir) => [path.join(dir, "mcporter.json"), path.join(dir, "mcporter.jsonc")]))];',
-    "const ownedPaths = [];",
-    "for (const configPath of configPaths) {",
-    '  const get = spawnSync("mcporter", ["--root", expected.root, "config", "--config", configPath, "get", expected.server, "--json"], { encoding: "utf8" });',
-    "  if (get.error) { console.error(get.error.message); process.exit(3); }",
-    "  if (isAbsent(get) || isMissingConfig(get, configPath)) continue;",
-    "  if (get.status !== 0) { console.error(detail(get).trim()); process.exit(3); }",
-    "  let actual = null; try { actual = JSON.parse(get.stdout); } catch {}",
-    '  const headers = actual && actual.headers && typeof actual.headers === "object" ? actual.headers : {};',
-    '  const registered = !!actual && actual.name === expected.server && actual.transport === "http" && actual.baseUrl === expected.url && mcporterHeadersMatchExpected(headers, expected.headers);',
-    "  if (!registered && !expected.force) { console.error(`Refusing to remove modified mcporter MCP server '${expected.server}' from ${configPath}. Use --force to remove it.`); process.exit(2); }",
-    "  ownedPaths.push(configPath);",
-    "}",
-    "for (const configPath of ownedPaths) {",
-    '  const remove = spawnSync("mcporter", ["--root", expected.root, "config", "--config", configPath, "remove", expected.server], { encoding: "utf8" });',
-    "  if (remove.stdout) process.stdout.write(remove.stdout);",
-    "  if (remove.stderr) process.stderr.write(remove.stderr);",
-    "  if (remove.error) { console.error(remove.error.message); process.exit(3); }",
-    "  if (remove.status !== 0 && !isAbsent(remove)) process.exit(remove.status === null ? 3 : remove.status);",
-    "}",
-    'const effective = spawnSync("mcporter", ["--root", expected.root, "config", "get", expected.server, "--json"], { encoding: "utf8" });',
-    "if (effective.error) { console.error(effective.error.message); process.exit(3); }",
-    "if (isAbsent(effective)) process.exit(0);",
-    "if (effective.status !== 0) { console.error(detail(effective).trim()); process.exit(3); }",
-    "console.error(`mcporter MCP server '${expected.server}' still resolves after managed configuration cleanup.`);",
-    "process.exit(2);",
-    "NODE",
-  ].join("\n");
+  );
 }
 
 export function inspectOpenClawAdapterRegistration(

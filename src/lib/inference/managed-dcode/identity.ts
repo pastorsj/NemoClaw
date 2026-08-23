@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { loadHarnessCommonJsModule } from "../../harness/commonjs-runtime";
-import { resolveHarnessPackage } from "../../harness/package-registry";
+import {
+  loadHarnessCommonJsModule,
+  resolveHarnessPackage,
+} from "../../harness/commonjs-runtime";
 
 export type ManagedDcodeProvider = "openai" | "openrouter";
 
@@ -22,13 +24,19 @@ type RuntimeModule = {
   ): ManagedDcodeIdentity;
 };
 
-let cachedRuntime: { packageRoot: string; module: RuntimeModule } | null = null;
+let cachedRuntime: {
+  selectionKey: string;
+  packageRoot: string;
+  module: RuntimeModule;
+} | null = null;
 
 function loadManagedDcodeIdentityModule(): RuntimeModule {
+  const selectionKey = process.env.HOME?.trim() || "<default-home>";
+  // A command captures verified helper bytes once. Harness installation takes effect in the next process.
+  if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("langchain-deepagents-code");
   if (!harnessPackage)
     throw new Error("LangChain Deep Agents Code harness package is unavailable.");
-  if (cachedRuntime?.packageRoot === harnessPackage.rootDir) return cachedRuntime.module;
   const loaded = loadHarnessCommonJsModule(harnessPackage, "managed-identity.cts", 64 * 1024);
   const runtime = loaded.exports as Partial<RuntimeModule>;
   if (
@@ -38,7 +46,11 @@ function loadManagedDcodeIdentityModule(): RuntimeModule {
   ) {
     throw new Error("LangChain Deep Agents Code managed-identity module has an invalid contract.");
   }
-  cachedRuntime = { packageRoot: harnessPackage.rootDir, module: runtime as RuntimeModule };
+  cachedRuntime = {
+    selectionKey,
+    packageRoot: harnessPackage.rootDir,
+    module: runtime as RuntimeModule,
+  };
   return cachedRuntime.module;
 }
 

@@ -5,11 +5,11 @@ import { runOpenshellProviderCommand } from "../../adapters/openshell/provider-c
 import { redactFull } from "../../security/redact";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
+import { loadHermesMcpRuntime } from "./runtime/mcp-bridge-adapter-hermes-runtime";
 import { buildHermesMcpIntentPayload } from "./mcp-bridge-adapter-status";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 
-const HERMES_MCP_TRANSACTION_HELPER = "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py";
 const HERMES_MCP_INSPECT_TIMEOUT_SECONDS = 45;
 const HERMES_MCP_INSPECT_TIMEOUT_MS = 60_000;
 const HERMES_MCP_RECONCILIATION_FAILURE =
@@ -45,6 +45,7 @@ function appliesToHermes(sandbox: SandboxEntry, entries: readonly McpBridgeEntry
 }
 
 function buildInspectArgs(sandboxName: string, payload: string): string[] {
+  const inspectCommand = loadHermesMcpRuntime().buildInspectCommand(payload);
   return [
     "sandbox",
     "exec",
@@ -54,10 +55,7 @@ function buildInspectArgs(sandboxName: string, payload: string): string[] {
     String(HERMES_MCP_INSPECT_TIMEOUT_SECONDS),
     "--no-tty",
     "--",
-    HERMES_MCP_TRANSACTION_HELPER,
-    "inspect",
-    "--payload",
-    payload,
+    ...inspectCommand,
   ];
 }
 

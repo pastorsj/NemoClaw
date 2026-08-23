@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import fs from "node:fs";
-import path from "node:path";
-
-import { resolveHarnessPackage } from "../harness/package-registry";
+import {
+  captureHarnessPackageText,
+  resolveHarnessPackage,
+} from "../harness/package-registry";
 import type { PrivilegedExec, PrivilegedExecResult } from "./state-dir-lock";
 
 // OpenClaw's top-level config and trust anchor need a stronger transition than
@@ -336,19 +336,25 @@ export function parseOpenClawConfigGuardOutput(
   };
 }
 
-let cachedHostHelper: string | null = null;
+let cachedHostHelper: { selectionKey: string; source: string } | null = null;
 
 function readHostHelper(): string {
-  if (cachedHostHelper !== null) return cachedHostHelper;
+  const selectionKey = process.env.HOME?.trim() || "<default-home>";
+  if (cachedHostHelper?.selectionKey === selectionKey) return cachedHostHelper.source;
   const harnessPackage = resolveHarnessPackage("openclaw");
   if (!harnessPackage) {
     throw new Error("OpenClaw harness package is unavailable");
   }
-  cachedHostHelper = fs.readFileSync(
-    path.join(harnessPackage.rootDir, "scripts", "openclaw-config-guard.py"),
-    "utf-8",
+  const snapshot = captureHarnessPackageText(
+    harnessPackage,
+    "scripts/openclaw-config-guard.py",
+    512 * 1024,
   );
-  return cachedHostHelper;
+  if (snapshot.source === null) {
+    throw new Error("OpenClaw harness config guard is unavailable");
+  }
+  cachedHostHelper = { selectionKey, source: snapshot.source };
+  return cachedHostHelper.source;
 }
 
 export function runOpenClawConfigGuard(

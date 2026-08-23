@@ -6,12 +6,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  DCODE_BUSY_PROBE_SCRIPT,
-  DCODE_PROBE_PREFIX,
-  DCODE_PROBE_STATE,
-  parseDcodeProbeState,
-} from "./dcode-activity-probe";
+import { getDcodeActivityProbeSpecification, parseDcodeProbeState } from "./dcode-activity-probe";
+
+const activityProbe = getDcodeActivityProbeSpecification();
 
 /** Run the shell probe with controlled ps and /proc inputs. */
 function runProbeScriptWithProcessSources({
@@ -46,7 +43,7 @@ function runProbeScriptWithProcessSources({
   }
   fs.writeFileSync(psPath, `#!/bin/sh\ncat <<'EOF'\n${processes}\nEOF\nexit ${psExitCode}\n`);
   fs.chmodSync(psPath, 0o755);
-  const testProbeScript = DCODE_BUSY_PROBE_SCRIPT.replace(
+  const testProbeScript = activityProbe.script.replace(
     "proc_root=/proc",
     'proc_root="$NEMOCLAW_TEST_DCODE_PROC_ROOT"',
   );
@@ -65,18 +62,15 @@ function runProbeScriptWithProcessSources({
 }
 
 /** Assert the probe emitted exactly one observable sentinel. */
-function expectProbeState(
-  result: { status: number; output: string },
-  state: (typeof DCODE_PROBE_STATE)[keyof typeof DCODE_PROBE_STATE],
-): void {
+function expectProbeState(result: { status: number; output: string }, state: string): void {
   expect(result.status).toBe(0);
-  expect(result.output.trim()).toBe(`${DCODE_PROBE_PREFIX}${state}`);
+  expect(result.output.trim()).toBe(`${activityProbe.prefix}${state}`);
 }
 
 describe("dcode activity probe", () => {
   it("does not let sandbox environment redirect the production proc scan (#6180)", () => {
-    expect(DCODE_BUSY_PROBE_SCRIPT).toContain("proc_root=/proc");
-    expect(DCODE_BUSY_PROBE_SCRIPT).not.toContain("NEMOCLAW_DCODE_PROC_ROOT");
+    expect(activityProbe.script).toContain("proc_root=/proc");
+    expect(activityProbe.script).not.toContain("NEMOCLAW_DCODE_PROC_ROOT");
   });
 
   it("falls back to proc cmdline scanning when ps cannot list processes (#6180)", () => {
@@ -85,21 +79,21 @@ describe("dcode activity probe", () => {
         procCmdlines: ["/bin/sh\0-c\0sleep 30\0", "/usr/bin/python3\0-m\0not_deepagents_code\0"],
         psExitCode: 1,
       }),
-      DCODE_PROBE_STATE.idleDcodeRuntime,
+      activityProbe.states.idleDcodeRuntime,
     );
     expectProbeState(
       runProbeScriptWithProcessSources({
         procCmdlines: ["/opt/venv/bin/python3\0-I\0-m\0deepagents_code\0-n\0work\0"],
         psExitCode: 1,
       }),
-      DCODE_PROBE_STATE.active,
+      activityProbe.states.active,
     );
   });
 
   it("fails closed when ps and proc cannot verify a marked dcode runtime (#6180)", () => {
     expectProbeState(
       runProbeScriptWithProcessSources({ psExitCode: 1 }),
-      DCODE_PROBE_STATE.unverifiableDcodeRuntime,
+      activityProbe.states.unverifiableDcodeRuntime,
     );
   });
 
@@ -109,7 +103,7 @@ describe("dcode activity probe", () => {
         procCmdlines: ["", "/bin/sh\0-c\0sleep 30\0"],
         psExitCode: 1,
       }),
-      DCODE_PROBE_STATE.unverifiableDcodeRuntime,
+      activityProbe.states.unverifiableDcodeRuntime,
     );
     expectProbeState(
       runProbeScriptWithProcessSources({
@@ -117,20 +111,20 @@ describe("dcode activity probe", () => {
         psExitCode: 1,
         unreadableProcEntries: 1,
       }),
-      DCODE_PROBE_STATE.unverifiableDcodeRuntime,
+      activityProbe.states.unverifiableDcodeRuntime,
     );
   });
 
-  it.each(Object.values(DCODE_PROBE_STATE))("parses declared probe state %s", (state) => {
-    expect(parseDcodeProbeState(`${DCODE_PROBE_PREFIX}${state}\n`)).toBe(state);
+  it.each(Object.values(activityProbe.states))("parses declared probe state %s", (state) => {
+    expect(parseDcodeProbeState(`${activityProbe.prefix}${state}\n`)).toBe(state);
   });
 
   it("parses exactly one probe sentinel from sandbox exec output", () => {
-    expect(parseDcodeProbeState(`${DCODE_PROBE_PREFIX}idle\n`)).toBe(
-      DCODE_PROBE_STATE.idleDcodeRuntime,
+    expect(parseDcodeProbeState(`${activityProbe.prefix}idle\n`)).toBe(
+      activityProbe.states.idleDcodeRuntime,
     );
-    expect(parseDcodeProbeState(`${DCODE_PROBE_PREFIX}idle\n${DCODE_PROBE_PREFIX}active\n`)).toBe(
-      null,
-    );
+    expect(
+      parseDcodeProbeState(`${activityProbe.prefix}idle\n${activityProbe.prefix}active\n`),
+    ).toBe(null);
   });
 });

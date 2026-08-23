@@ -11,7 +11,7 @@ import {
   buildDeepAgentsMcpRegisterCommand,
   buildDeepAgentsMcpRemoveCommand,
 } from "./mcp-bridge-adapter-deepagents";
-import { DEEPAGENTS_MCP_MAX_SERVERS } from "./mcp-bridge-adapter-deepagents-projection";
+import { getDeepAgentsMcpMaxServers } from "./mcp-bridge-adapter-deepagents-projection";
 import { buildDeepAgentsMcpStatusCommand } from "./mcp-bridge-adapter-status";
 
 const emptyProjection = { mcpServers: {} };
@@ -21,6 +21,7 @@ const attackerProjection = '{"mcpServers":{"attacker":{"type":"stdio"}}}\n';
 const registrationCommand = buildDeepAgentsMcpRegisterCommand(baseEntry);
 const rollbackCommand = buildDeepAgentsMcpRegisterCommand(baseEntry, true, [baseEntry], true);
 const removalCommand = buildDeepAgentsMcpRemoveCommand(baseEntry);
+const deepAgentsMcpMaxServers = getDeepAgentsMcpMaxServers();
 
 describe("Deep Agents managed MCP projection safety", () => {
   it.each([
@@ -43,7 +44,7 @@ describe("Deep Agents managed MCP projection safety", () => {
       /^\/opt\/venv\/bin\/python3 -I - <<'PY'/,
     );
     expect(rollbackCommand).toContain(
-      `len(payload['expectedServers']) > ${String(DEEPAGENTS_MCP_MAX_SERVERS)}`,
+      `len(payload['expectedServers']) > ${String(deepAgentsMcpMaxServers)}`,
     );
     const sizeCheckIndex = registrationCommand.indexOf("len(payload) > MANAGED_MCP_MAX_BYTES");
     const truncateIndex = registrationCommand.indexOf("os.ftruncate(descriptor, 0)");
@@ -54,7 +55,7 @@ describe("Deep Agents managed MCP projection safety", () => {
 
   it("applies the shared server cap before normal and rollback v2 publication", () => {
     const entries = Array.from(
-      { length: DEEPAGENTS_MCP_MAX_SERVERS + 1 },
+      { length: deepAgentsMcpMaxServers + 1 },
       (_, index): McpBridgeEntry => ({
         ...baseEntry,
         server: `server${String(index)}`,
@@ -63,14 +64,14 @@ describe("Deep Agents managed MCP projection safety", () => {
     );
 
     expect(() => buildDeepAgentsMcpRegisterCommand(entries[0], false, entries)).toThrow(
-      `at most ${String(DEEPAGENTS_MCP_MAX_SERVERS)} servers`,
+      `at most ${String(deepAgentsMcpMaxServers)} servers`,
     );
     const rollback = runDeepAgentsConfigCommand(
       buildDeepAgentsMcpRegisterCommand(entries[0], true, entries, true),
     );
     expect(rollback.status).toBe(2);
     expect(rollback.stderr).toContain(
-      `supports at most ${String(DEEPAGENTS_MCP_MAX_SERVERS)} servers`,
+      `supports at most ${String(deepAgentsMcpMaxServers)} servers`,
     );
   });
 

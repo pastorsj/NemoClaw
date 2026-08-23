@@ -113,6 +113,7 @@ function probeInferenceRoute(
     captureLaunchReadiness(buildSandboxInferenceRouteProbeArgs(sandboxName, agent, gatewayName), {
       includeStreams: true,
     }),
+    agent,
   );
 }
 

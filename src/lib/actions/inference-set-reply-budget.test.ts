@@ -54,7 +54,7 @@ function writeInstalledOpenClawRuntime(): { home: string; root: string; runtimeP
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
-  const runtimePath = path.join(scriptsDir, "reply-budget.cts");
+  const runtimePath = path.join(scriptsDir, "config-runtime.cts");
   fs.writeFileSync(runtimePath, installedOpenClawRuntimeSource(7777));
   fs.writeFileSync(
     path.join(root, ".nemoclaw-install.json"),
@@ -114,7 +114,7 @@ describe("OpenClaw reply-budget package runtime", testTimeoutOptions(30_000), ()
     expect(modelConfig.maxTokens).toBe(4096);
   });
 
-  it("uses a refreshed installed runtime and rejects later receipt drift", () => {
+  it("keeps captured installed runtime bytes stable for the process", () => {
     const installed = writeInstalledOpenClawRuntime();
     vi.stubEnv("HOME", installed.home);
     const modelConfig: ConfigObject = {};
@@ -129,9 +129,17 @@ describe("OpenClaw reply-budget package runtime", testTimeoutOptions(30_000), ()
       { mode: 0o600 },
     );
     applyOpenClawAnthropicReplyBudget(modelConfig);
-    expect(modelConfig.maxTokens).toBe(8888);
+    expect(modelConfig.maxTokens).toBe(7777);
 
     fs.appendFileSync(installed.runtimePath, "// changed after installation\n");
+    expect(readOpenClawPrimaryReplyBudget({})).toBe(7777);
+  });
+
+  it("rejects installed runtime drift before capturing the helper", () => {
+    const installed = writeInstalledOpenClawRuntime();
+    vi.stubEnv("HOME", installed.home);
+    fs.appendFileSync(installed.runtimePath, "// changed after installation\n");
+
     expect(() => readOpenClawPrimaryReplyBudget({})).toThrow(
       "Harness installation receipt does not match package content",
     );

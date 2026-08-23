@@ -85,12 +85,19 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code)\/)?Dockerfile$/,
+    pattern:
+      /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code|openclaw)\/)?Dockerfile$/,
     testsToRun: (_file, match) => {
       if (match[1] === "packages/nemoclaw-hermes/") {
         return [
           "src/lib/onboard/managed-startup-profile.test.ts",
           "test/hermes-mcp-runtime-capability.test.ts",
+        ];
+      }
+      if (match[1] === "packages/nemoclaw-openclaw/") {
+        return [
+          "src/lib/onboard/managed-startup-profile-builder.test.ts",
+          "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
         ];
       }
       return match[1]
@@ -129,6 +136,26 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/host\/base-image-qualification\.cts$/,
+    testsToRun: runTests(
+      "src/lib/agent/base-image-hermes.test.ts",
+      "src/lib/agent/base-image-hermes-resolution.test.ts",
+      "src/lib/agent/package-qualification-specifications.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/config\/mcp-adapter\.cts$/,
+    testsToRun: runTests(
+      "src/lib/actions/sandbox/mcp-bridge-adapter-hermes.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-registration.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-hermes-reconciliation.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
     pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/managed-identity\.cts$/,
     testsToRun: runTests(
       "src/lib/inference/managed-dcode/identity.test.ts",
@@ -137,13 +164,74 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/reply-budget\.cts$/,
+    pattern:
+      /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/host\/qualification-probes\.cts$/,
     testsToRun: runTests(
+      "src/lib/actions/sandbox/connect-inference-route-probe.test.ts",
+      "src/lib/actions/sandbox/dcode-activity-probe.test.ts",
+      "src/lib/agent/deep-agents-code-base-image.test.ts",
+      "src/lib/agent/package-qualification-specifications.test.ts",
+      "src/lib/agent/terminal-smoke.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/mcp-adapter\.cts$/,
+    testsToRun: runTests(
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-legacy-teardown.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-projection.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-registration.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-rollback.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-runtime-guards.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-v2-removal.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+      "test/deepagents-mcp-legacy-lifecycle.test.ts",
+      "test/deepagents-mcp-runtime-capability.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/config-runtime\.cts$/,
+    testsToRun: runTests(
+      "src/lib/actions/inference-route-api.test.ts",
       "src/lib/actions/inference-set-reply-budget.test.ts",
       "src/lib/actions/inference-set-patch-openclaw.test.ts",
+      "src/lib/actions/inference-set-reasoning-effort.test.ts",
+      "src/lib/actions/sandbox/reconcile-session-models.test.ts",
+      "src/lib/onboard/managed-startup-profile-builder.test.ts",
+      "src/lib/openclaw/package-runtime.test.ts",
+      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
       "test/generate-openclaw-config.test.ts",
       "test/package-contract/harness-packages.test.ts",
-      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
+      "test/sandbox-build-context.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/config-restore\.cts$/,
+    testsToRun: runTests(
+      "src/lib/openclaw/package-runtime.test.ts",
+      "src/lib/state/openclaw-config-merge-tool-search.test.ts",
+      "src/lib/state/openclaw-config-merge.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/cli-grammar\.cts$/,
+    testsToRun: runTests(
+      "src/lib/actions/sandbox/agents/apply.test.ts",
+      "src/lib/openclaw/agent-json-provenance.test.ts",
+      "src/lib/openclaw/package-runtime.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/mcp-adapter\.cts$/,
+    testsToRun: runTests(
+      "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapter-registration.test.ts",
+      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+      "test/package-contract/harness-packages.test.ts",
     ),
   },
   {

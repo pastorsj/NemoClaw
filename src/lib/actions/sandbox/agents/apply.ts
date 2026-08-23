@@ -5,6 +5,17 @@ import { spawnSync } from "node:child_process";
 
 import { loadAgentsManifest } from "../../../onboard/agents-manifest";
 import { isOpenclawAgent } from "../../../onboard/openclaw-otel-policy-presets";
+import {
+  buildAgentsApplyDiffGrammar,
+  buildOpenclawAgentAddArgsGrammar,
+  buildOpenclawAgentDeleteArgsGrammar,
+  buildOpenclawAgentListArgsGrammar,
+  computeAgentsApplyDiffGrammar,
+  findManifestToolsByAgentIdGrammar,
+  type OpenClawAgentEntry,
+  parseOpenClawAgentsListGrammar,
+  validateAgentsManifestForApplyGrammar,
+} from "../../../openclaw/cli-grammar";
 import * as registry from "../../../state/registry";
 import { buildOpenshellExecArgs } from "../exec";
 
@@ -20,192 +31,28 @@ function lazyEnsureLive(): EnsureLive {
     .ensureLiveSandboxOrExit as EnsureLive;
 }
 
-interface OpenClawAgentEntry {
-  id: string;
-  workspace?: string;
-  agentDir?: string;
-}
-
 export interface AgentsApplyDiff {
   toAdd: Array<{ id: string; workspace?: string; agentDir?: string }>;
   toDelete: string[];
   rebuildOnlyFields: string[];
 }
 
-const MAIN_AGENT_ID = "main";
-const PROTECTED_IDS = new Set<string>([MAIN_AGENT_ID]);
-
-// Mirrors the authoritative build-time gates in
-// packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts. Live apply runs on the host before
-// the in-sandbox OpenClaw CLI is invoked, so it cannot rely on the build-time
-// validator (which only runs at image-build time inside the container). The
-// gates below are the defensive subset that prevents the live add/delete
-// loop from mutating the sandbox with an unsafe id, non-canonical workspace,
-// or unknown nested key.
-const AGENT_ID_RE = /^[a-z][a-z0-9_-]{0,31}$/;
-const AGENT_DATA_ROOT = "/sandbox/.openclaw";
-const ALLOWED_AGENT_ENTRY_KEYS = new Set<string>([
-  "id",
-  "workspace",
-  "agentDir",
-  "tools",
-  "subagents",
-  "description",
-  "model",
-]);
-
-function expectedAgentPath(kind: "workspace" | "agentDir", id: string): string {
-  const segment = kind === "workspace" ? `workspace-${id}` : `agents/${id}`;
-  return `${AGENT_DATA_ROOT}/${segment}`;
-}
-
 export function validateAgentsManifestForApply(manifestAgents: unknown[]): void {
-  const seenIds = new Set<string>();
-  for (let index = 0; index < manifestAgents.length; index++) {
-    const entry = manifestAgents[index];
-    const label = `agents[${index}]`;
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error(`${label} must be a YAML mapping (object)`);
-    }
-    const record = entry as Record<string, unknown>;
-    const id = record.id;
-    if (typeof id !== "string" || !AGENT_ID_RE.test(id)) {
-      throw new Error(
-        `${label}.id ${JSON.stringify(id)} must match ${AGENT_ID_RE} (1-32 chars, lowercase alphanumeric, dash, underscore; must start with a letter)`,
-      );
-    }
-    if (id === MAIN_AGENT_ID) {
-      throw new Error(
-        `${label}.id "${MAIN_AGENT_ID}" is reserved for the primary agent; use a different id`,
-      );
-    }
-    if (seenIds.has(id)) {
-      throw new Error(`${label}.id "${id}" is duplicated; agent ids must be unique`);
-    }
-    seenIds.add(id);
-    for (const key of Object.keys(record)) {
-      if (!ALLOWED_AGENT_ENTRY_KEYS.has(key)) {
-        throw new Error(
-          `${label} contains unsupported field "${key}". Allowed: ${[...ALLOWED_AGENT_ENTRY_KEYS].sort().join(", ")}.`,
-        );
-      }
-    }
-    for (const pathKey of ["workspace", "agentDir"] as const) {
-      const pathValue = record[pathKey];
-      if (typeof pathValue !== "string" || pathValue.length === 0) {
-        throw new Error(`${label}.${pathKey} must be a non-empty string`);
-      }
-      const expected = expectedAgentPath(pathKey, id);
-      if (pathValue !== expected) {
-        throw new Error(
-          `${label}.${pathKey} must equal "${expected}" for agent id "${id}", got "${pathValue}"`,
-        );
-      }
-    }
-  }
-}
-
-function hasNonEmptyFields(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>).length > 0;
-  }
-  return false;
-}
-
-// Manifest fields that v1 apply cannot reconcile without a rebuild.
-// `main.tools`/`main.subagents`, `defaults.subagents.*`, per-agent `model`,
-// per-agent `subagents.*`, and per-agent `tools` all live in baked
-// `openclaw.json` keys that require `openclaw config set` choreography we
-// have not built yet; for now they require `nemoclaw onboard --agents <file>
-// --recreate-sandbox`. The live `openclaw agents add` path does not bake a
-// tool policy, so silently adding an agent that declares `tools` would let a
-// manifest-required security boundary go missing in the sandbox.
-function findRebuildOnlyFields(manifest: {
-  agents: unknown[];
-  defaults?: unknown;
-  main?: unknown;
-}): string[] {
-  const findings: string[] = [];
-  if (hasNonEmptyFields(manifest.defaults)) {
-    findings.push("defaults");
-  }
-  if (hasNonEmptyFields(manifest.main)) {
-    findings.push("main");
-  }
-  for (const entry of manifest.agents) {
-    if (entry === null || typeof entry !== "object") continue;
-    const record = entry as Record<string, unknown>;
-    const id = typeof record.id === "string" ? record.id : "?";
-    if (record.model !== undefined) {
-      findings.push(`agents[${id}].model`);
-    }
-    if (hasNonEmptyFields(record.subagents)) {
-      findings.push(`agents[${id}].subagents`);
-    }
-    if (hasNonEmptyFields(record.tools)) {
-      findings.push(`agents[${id}].tools`);
-    }
-  }
-  return findings;
-}
-
-function findManifestToolsByAgentId(manifestAgents: unknown[]): Set<string> {
-  const ids = new Set<string>();
-  for (const entry of manifestAgents) {
-    if (entry === null || typeof entry !== "object") continue;
-    const record = entry as Record<string, unknown>;
-    const id = record.id;
-    if (typeof id !== "string" || !id) continue;
-    if (hasNonEmptyFields(record.tools)) {
-      ids.add(id);
-    }
-  }
-  return ids;
+  validateAgentsManifestForApplyGrammar(manifestAgents);
 }
 
 export function computeAgentsApplyDiff(
   currentList: OpenClawAgentEntry[],
   manifestAgents: unknown[],
 ): { toAdd: AgentsApplyDiff["toAdd"]; toDelete: string[] } {
-  const currentIds = new Set(currentList.map((entry) => entry.id));
-  const manifestIds = new Set<string>();
-  const toAdd: AgentsApplyDiff["toAdd"] = [];
-  for (const entry of manifestAgents) {
-    if (entry === null || typeof entry !== "object") continue;
-    const record = entry as Record<string, unknown>;
-    const id = record.id;
-    if (typeof id !== "string" || !id) continue;
-    manifestIds.add(id);
-    if (id === MAIN_AGENT_ID) continue;
-    if (currentIds.has(id)) continue;
-    toAdd.push({
-      id,
-      workspace: typeof record.workspace === "string" ? record.workspace : undefined,
-      agentDir: typeof record.agentDir === "string" ? record.agentDir : undefined,
-    });
-  }
-  const toDelete: string[] = [];
-  for (const entry of currentList) {
-    if (PROTECTED_IDS.has(entry.id)) continue;
-    if (!manifestIds.has(entry.id)) {
-      toDelete.push(entry.id);
-    }
-  }
-  return { toAdd, toDelete };
+  return computeAgentsApplyDiffGrammar(currentList, manifestAgents);
 }
 
 export function buildAgentsApplyDiff(
   currentList: OpenClawAgentEntry[],
   manifest: { agents: unknown[]; defaults?: unknown; main?: unknown },
 ): AgentsApplyDiff {
-  const { toAdd, toDelete } = computeAgentsApplyDiff(currentList, manifest.agents);
-  return {
-    toAdd,
-    toDelete,
-    rebuildOnlyFields: findRebuildOnlyFields(manifest),
-  };
+  return buildAgentsApplyDiffGrammar(currentList, manifest);
 }
 
 export interface RunAgentsApplyOptions {
@@ -230,46 +77,8 @@ function defaultGetSandboxAgent(sandboxName: string): string | null {
   return entry?.agent ?? null;
 }
 
-function parseJsonFromOutput(output: string): unknown {
-  const text = output.trim();
-  const starts: number[] = [];
-  for (let index = 0; index < text.length; index++) {
-    const char = text[index];
-    if (char === "[" || char === "{") {
-      starts.push(index);
-    }
-  }
-  for (const start of starts) {
-    try {
-      return JSON.parse(text.slice(start));
-    } catch {
-      // Keep scanning; warning prefixes can contain bracketed labels.
-    }
-  }
-  return JSON.parse(text || "[]");
-}
-
 export function parseOpenClawAgentsList(output: string): OpenClawAgentEntry[] {
-  const parsed = parseJsonFromOutput(output || "[]");
-  let entries: unknown[] | null = null;
-  if (Array.isArray(parsed)) {
-    entries = parsed;
-  } else if (parsed !== null && typeof parsed === "object") {
-    const agents = (parsed as { agents?: unknown }).agents;
-    if (Array.isArray(agents)) {
-      entries = agents;
-    }
-  }
-  if (!entries) {
-    throw new Error("openclaw agents list --json did not return a JSON array");
-  }
-  return entries.filter((entry): entry is OpenClawAgentEntry => {
-    return (
-      entry !== null &&
-      typeof entry === "object" &&
-      typeof (entry as { id?: unknown }).id === "string"
-    );
-  });
+  return parseOpenClawAgentsListGrammar(output);
 }
 
 function defaultListAgents(sandboxName: string): OpenClawAgentEntry[] {
@@ -277,7 +86,7 @@ function defaultListAgents(sandboxName: string): OpenClawAgentEntry[] {
     require("../../../adapters/openshell/runtime") as typeof import("../../../adapters/openshell/runtime");
   const result = spawnSync(
     getOpenshellBinary(),
-    buildOpenshellExecArgs(sandboxName, ["openclaw", "agents", "list", "--json"]),
+    buildOpenshellExecArgs(sandboxName, buildOpenclawAgentListArgsGrammar()),
     { stdio: ["ignore", "pipe", "pipe"], encoding: "utf-8" },
   );
   if (result.status !== 0) {
@@ -289,22 +98,12 @@ function defaultListAgents(sandboxName: string): OpenClawAgentEntry[] {
   return parseOpenClawAgentsList(String(result.stdout || "[]"));
 }
 
-// OpenClaw flag contract differs by agents verb:
-//   `agents add`    accepts --non-interactive (and --workspace)
-//   `agents delete` accepts --force (skip confirmation) but NOT --non-interactive
-// Passing --non-interactive to `agents delete` makes OpenClaw 2026.5.27 exit 1
-// ("does not recognize option --non-interactive"), which left orphan agents in
-// place during `agents apply` (#5656). --force already makes delete unattended.
 export function buildOpenclawAgentAddArgs(id: string, workspace?: string | null): string[] {
-  const args = ["openclaw", "agents", "add", id, "--non-interactive"];
-  if (workspace) {
-    args.push("--workspace", workspace);
-  }
-  return args;
+  return buildOpenclawAgentAddArgsGrammar(id, workspace);
 }
 
 export function buildOpenclawAgentDeleteArgs(id: string): string[] {
-  return ["openclaw", "agents", "delete", id, "--force"];
+  return buildOpenclawAgentDeleteArgsGrammar(id);
 }
 
 function defaultAddAgent(sandboxName: string, id: string, workspace: string | undefined): void {
@@ -398,7 +197,7 @@ export async function runAgentsApply(
     exit(2);
   }
 
-  const toolsAgentIds = findManifestToolsByAgentId(manifest.agents);
+  const toolsAgentIds = findManifestToolsByAgentIdGrammar(manifest.agents);
   for (const id of diff.toDelete) {
     log(`  Deleting agent: ${id}`);
     deleteAgent(options.sandboxName, id);

@@ -7,7 +7,7 @@ import {
   buildDeepAgentsMcpStatusCommand,
   buildHermesMcpStatusCommand,
   buildOpenClawMcporterInspectCommand,
-  DEFAULT_OPENCLAW_CONFIG_DIR,
+  openClawDefaultConfigDir,
   openClawMcporterRoot,
 } from "./mcp-bridge-adapters";
 import { isAgentMcpAdapter, McpBridgeError, type McpBridgeStatus } from "./mcp-bridge-contracts";
@@ -99,7 +99,7 @@ function getAdapterRegistration(
       ? buildOpenClawMcporterInspectCommand(
           entry,
           false,
-          openClawMcporterRoot(getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR)),
+          openClawMcporterRoot(getAgentConfigDir(entry.agent, openClawDefaultConfigDir())),
         )
       : adapter === "hermes-config"
         ? buildHermesMcpStatusCommand(entry)
