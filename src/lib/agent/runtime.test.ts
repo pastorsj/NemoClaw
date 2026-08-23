@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
 import type { AgentDefinition } from "./defs";
@@ -45,7 +46,7 @@ function writeInstalledOpenClaw(home: string, manifest: string): void {
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
   fs.writeFileSync(
     path.join(root, ".nemoclaw-install.json"),
-    `${JSON.stringify({ installedDigest: "0".repeat(64) })}\n`,
+    `${JSON.stringify({ installedDigest: harnessPackageContentDigest(root) })}\n`,
   );
 }
 
