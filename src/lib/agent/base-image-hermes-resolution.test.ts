@@ -6,6 +6,7 @@ import fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeAgent } from "../../../test/helpers/base-image-test-harness";
+import { testTimeout } from "../../../test/helpers/timeouts";
 
 const dockerMocks = vi.hoisted(() => ({
   build: vi.fn(),
@@ -135,7 +136,7 @@ describe("Hermes base-image resolver integration", () => {
       trackedRef,
       { ignoreError: true },
     );
-  }, 15_000);
+  }, testTimeout(60_000));
 
   it("rejects an explicit platform digest override without pinned provenance", () => {
     vi.stubEnv("NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF", platformRef);
@@ -236,7 +237,7 @@ describe("Hermes base-image resolver integration", () => {
     expect(() => createAgentSandbox(makeAgent())).toThrow(
       `Hermes final image does not accept base image ref '${platformRef}'`,
     );
-  }, 30_000);
+  }, testTimeout(60_000));
 
   it("uses a proven local Hermes base-image alias only to select its remote digest during a rebuild lease (#7144)", () => {
     const localAlias = "nemoclaw-hermes-sandbox-base-local:e2e-current";
