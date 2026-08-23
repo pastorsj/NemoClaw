@@ -111,32 +111,36 @@ describe("Hermes base-image resolver integration", () => {
     for (const buildCtx of createdBuildContexts.splice(0)) {
       fs.rmSync(buildCtx, { force: true, recursive: true });
     }
-  });
-
-  it("stages Hermes on aarch64 with a Dockerfile-pinned platform digest produced by the resolver path (#6313)", () => {
-    const result = createAgentSandbox(makeAgent());
-    createdBuildContexts.push(result.buildCtx);
-
-    expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toContain(
-      `ARG BASE_IMAGE=${platformRef}`,
-    );
-    expect(result.baseImageResolutionMetadata).toMatchObject({
-      architecture: "arm64",
-      digest: platformDigest,
-      pinnedRemoteRef: trackedRef,
-      ref: platformRef,
-      source: "pinned",
-    });
-    expect(dockerMocks.imageInspect).toHaveBeenCalledWith(trackedRef, {
-      ignoreError: true,
-      suppressOutput: true,
-    });
-    expect(dockerMocks.imageInspectFormat).toHaveBeenCalledWith(
-      "{{json .RepoDigests}}",
-      trackedRef,
-      { ignoreError: true },
-    );
   }, testTimeout(60_000));
+
+  it(
+    "stages Hermes on aarch64 with a Dockerfile-pinned platform digest produced by the resolver path (#6313)",
+    () => {
+      const result = createAgentSandbox(makeAgent());
+      createdBuildContexts.push(result.buildCtx);
+
+      expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toContain(
+        `ARG BASE_IMAGE=${platformRef}`,
+      );
+      expect(result.baseImageResolutionMetadata).toMatchObject({
+        architecture: "arm64",
+        digest: platformDigest,
+        pinnedRemoteRef: trackedRef,
+        ref: platformRef,
+        source: "pinned",
+      });
+      expect(dockerMocks.imageInspect).toHaveBeenCalledWith(trackedRef, {
+        ignoreError: true,
+        suppressOutput: true,
+      });
+      expect(dockerMocks.imageInspectFormat).toHaveBeenCalledWith(
+        "{{json .RepoDigests}}",
+        trackedRef,
+        { ignoreError: true },
+      );
+    },
+    testTimeout(60_000),
+  );
 
   it("rejects an explicit platform digest override without pinned provenance", () => {
     vi.stubEnv("NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF", platformRef);
@@ -209,35 +213,39 @@ describe("Hermes base-image resolver integration", () => {
     expect(afterRestore.resolutionMetadata).toMatchObject({ ref: trackedRef, source: "override" });
   }, 30_000);
 
-  it("reuses an outer resolver's pinned platform digest only during its rebuild lease (#7144)", () => {
-    const outer = createAgentSandbox(makeAgent());
-    createdBuildContexts.push(outer.buildCtx);
-    const resolutionMetadata = outer.baseImageResolutionMetadata;
-    expect(resolutionMetadata).not.toBeNull();
-    vi.stubEnv("NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF", platformRef);
-    const restore = pinTrustedAgentRemoteBaseImageOverrideForOperation(
-      "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
-      {
-        ref: platformRef,
-        resolutionMetadata: resolutionMetadata as NonNullable<typeof resolutionMetadata>,
-      },
-    );
-
-    try {
-      const inner = createAgentSandbox(makeAgent());
-      createdBuildContexts.push(inner.buildCtx);
-      expect(fs.readFileSync(inner.stagedDockerfile, "utf8")).toContain(
-        `ARG BASE_IMAGE=${platformRef}`,
+  it(
+    "reuses an outer resolver's pinned platform digest only during its rebuild lease (#7144)",
+    () => {
+      const outer = createAgentSandbox(makeAgent());
+      createdBuildContexts.push(outer.buildCtx);
+      const resolutionMetadata = outer.baseImageResolutionMetadata;
+      expect(resolutionMetadata).not.toBeNull();
+      vi.stubEnv("NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF", platformRef);
+      const restore = pinTrustedAgentRemoteBaseImageOverrideForOperation(
+        "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
+        {
+          ref: platformRef,
+          resolutionMetadata: resolutionMetadata as NonNullable<typeof resolutionMetadata>,
+        },
       );
-      expect(inner.baseImageResolutionMetadata).toBe(resolutionMetadata);
-    } finally {
-      restore();
-    }
 
-    expect(() => createAgentSandbox(makeAgent())).toThrow(
-      `Hermes final image does not accept base image ref '${platformRef}'`,
-    );
-  }, testTimeout(60_000));
+      try {
+        const inner = createAgentSandbox(makeAgent());
+        createdBuildContexts.push(inner.buildCtx);
+        expect(fs.readFileSync(inner.stagedDockerfile, "utf8")).toContain(
+          `ARG BASE_IMAGE=${platformRef}`,
+        );
+        expect(inner.baseImageResolutionMetadata).toBe(resolutionMetadata);
+      } finally {
+        restore();
+      }
+
+      expect(() => createAgentSandbox(makeAgent())).toThrow(
+        `Hermes final image does not accept base image ref '${platformRef}'`,
+      );
+    },
+    testTimeout(60_000),
+  );
 
   it("uses a proven local Hermes base-image alias only to select its remote digest during a rebuild lease (#7144)", () => {
     const localAlias = "nemoclaw-hermes-sandbox-base-local:e2e-current";
