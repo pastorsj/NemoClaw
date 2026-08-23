@@ -7,6 +7,7 @@ import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 import { runCurlProbe } from "../adapters/http/probe";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 import { BACK_TO_SELECTION, isBackToSelection } from "./credential-navigation";
 import { createWebSearchFlowHelpers } from "./web-search-flow";
 
@@ -57,7 +58,7 @@ function writeInstalledOpenClawPackage(home: string, dockerfile: string): void {
   fs.writeFileSync(path.join(packageRoot, "start.sh"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   fs.writeFileSync(
     path.join(packageRoot, ".nemoclaw-install.json"),
-    `${JSON.stringify({ installedDigest: "a".repeat(64) })}\n`,
+    `${JSON.stringify({ installedDigest: harnessPackageContentDigest(packageRoot) })}\n`,
   );
 }
 

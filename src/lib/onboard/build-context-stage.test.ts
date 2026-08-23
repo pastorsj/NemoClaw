@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentSandbox as createManagedAgentSandbox } from "../agent/base-image";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 import { SandboxBaseImageResolutionError } from "../sandbox-base-image";
 import { stageCreateSandboxBuildContext } from "./build-context-stage";
 import { CUSTOM_BUILD_CONTEXT_WARN_BYTES } from "./custom-build-context";
@@ -482,7 +483,7 @@ describe("stageCreateSandboxBuildContext", () => {
     writeFixtureFile(
       installedPackage,
       ".nemoclaw-install.json",
-      `${JSON.stringify({ installedDigest: "0".repeat(64) })}\n`,
+      `${JSON.stringify({ installedDigest: harnessPackageContentDigest(installedPackage) })}\n`,
     );
     vi.stubEnv("HOME", home);
 
