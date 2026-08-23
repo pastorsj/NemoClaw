@@ -246,6 +246,7 @@ describe("sandbox build context staging", () => {
       "openclaw-config-guard.py",
       "codex-acp-wrapper.sh",
       "generate-openclaw-config.mts",
+      "reply-budget.cts",
       "validate-openclaw-tool-search.mts",
     ]) {
       writeFixture(path.join("packages", "nemoclaw-openclaw", "scripts", fileName));
@@ -1027,6 +1028,7 @@ describe("sandbox build context staging", () => {
         expect(fs.existsSync(packagePayload("scripts", "openclaw-config-guard.py"))).toBe(true);
         expect(fs.existsSync(packagePayload("scripts", "codex-acp-wrapper.sh"))).toBe(true);
         expect(fs.existsSync(packagePayload("scripts", "generate-openclaw-config.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("scripts", "reply-budget.cts"))).toBe(true);
         expect(fs.existsSync(packagePayload("scripts", "validate-openclaw-tool-search.mts"))).toBe(
           true,
         );

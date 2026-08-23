@@ -42,6 +42,7 @@ type RuntimeModule = {
     config: Record<string, unknown>,
     route: HermesManagedRoute,
   ): asserts config is Record<string, unknown> & HermesManagedRouting;
+  buildHermesUpstreamHeader(config: Record<string, unknown>): string;
   hermesApiMode(inferenceApi: string): string | null;
   hermesProviderKey(provider: string): string;
 };
@@ -56,6 +57,7 @@ function loadHermesManagedRouteModule(): RuntimeModule {
   const runtime = loaded.exports as Partial<RuntimeModule>;
   if (
     typeof runtime.applyHermesManagedRoute !== "function" ||
+    typeof runtime.buildHermesUpstreamHeader !== "function" ||
     typeof runtime.hermesApiMode !== "function" ||
     typeof runtime.hermesProviderKey !== "function"
   ) {
@@ -63,6 +65,10 @@ function loadHermesManagedRouteModule(): RuntimeModule {
   }
   cachedRuntime = { packageRoot: harnessPackage.rootDir, module: runtime as RuntimeModule };
   return cachedRuntime.module;
+}
+
+export function buildHermesUpstreamHeader(config: Record<string, unknown>): string {
+  return loadHermesManagedRouteModule().buildHermesUpstreamHeader(config);
 }
 
 export function hermesApiMode(inferenceApi: string): string | null {

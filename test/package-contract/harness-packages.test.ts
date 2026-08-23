@@ -110,8 +110,15 @@ describe("published harness packages", () => {
       "packages",
       "nemoclaw-langchain-deepagents-code",
     );
+    const installedOpenClawScripts = path.join(
+      installedPackageRoot,
+      "packages",
+      "nemoclaw-openclaw",
+      "scripts",
+    );
     mkdirSync(installedHermesConfig, { recursive: true });
     mkdirSync(installedDcodePackage, { recursive: true });
+    mkdirSync(installedOpenClawScripts, { recursive: true });
     writeFileSync(path.join(installedPackageRoot, "package.json"), '{"name":"nemoclaw"}\n');
     copyFileSync(
       path.join(packagedRoot, "packages/nemoclaw-hermes/config/managed-route.cts"),
@@ -120,6 +127,10 @@ describe("published harness packages", () => {
     copyFileSync(
       path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
       path.join(installedDcodePackage, "managed-identity.cts"),
+    );
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/reply-budget.cts"),
+      path.join(installedOpenClawScripts, "reply-budget.cts"),
     );
 
     fixtureRequire = createRequire(path.join(fixtureRoot, "package.json"));
@@ -147,8 +158,13 @@ describe("published harness packages", () => {
   it.each([
     "packages/nemoclaw-hermes/config/managed-route.cts",
     "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+    "packages/nemoclaw-openclaw/scripts/reply-budget.cts",
   ])("ships package-owned runtime contract %s", (artifact) => {
     expect(packedPaths).toContain(artifact);
+  });
+
+  it("ships the reply-budget runtime in the OpenClaw package", () => {
+    expect(openClawPackedPaths).toContain("scripts/reply-budget.cts");
   });
 
   it("loads the package-owned runtime modules from the published tree", () => {
@@ -158,9 +174,19 @@ describe("published harness packages", () => {
     const dcode = fixtureRequire(
       path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
     ) as { normalizeManagedDcodeModelName(model: string): string };
+    const openClaw = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/reply-budget.cts"),
+    ) as {
+      readonly DEFAULT_OPENCLAW_MAX_TOKENS: number;
+      applyOpenClawAnthropicReplyBudget(config: Record<string, unknown>, inherited?: number): void;
+    };
+    const openClawModel: Record<string, unknown> = {};
 
     expect(hermes.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
     expect(dcode.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
+    openClaw.applyOpenClawAnthropicReplyBudget(openClawModel, Number.NaN);
+    expect(openClaw.DEFAULT_OPENCLAW_MAX_TOKENS).toBe(4096);
+    expect(openClawModel.maxTokens).toBe(4096);
   });
 
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
@@ -170,6 +196,7 @@ describe("published harness packages", () => {
       "packages",
       "nemoclaw-langchain-deepagents-code",
     );
+    const openClawRoot = path.join(installedPackageRoot, "packages", "nemoclaw-openclaw");
     const hermes = runtimeLoader.loadHarnessCommonJsModule(
       {
         id: "hermes",
@@ -181,7 +208,10 @@ describe("published harness packages", () => {
       },
       "config/managed-route.cts",
       64 * 1024,
-    ).exports as { hermesProviderKey(provider: string): string };
+    ).exports as {
+      buildHermesUpstreamHeader(config: Record<string, unknown>): string;
+      hermesProviderKey(provider: string): string;
+    };
     const dcode = runtimeLoader.loadHarnessCommonJsModule(
       {
         id: "langchain-deepagents-code",
@@ -194,9 +224,27 @@ describe("published harness packages", () => {
       "managed-identity.cts",
       64 * 1024,
     ).exports as { normalizeManagedDcodeModelName(model: string): string };
+    const openClaw = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "openclaw",
+        packageName: "@nvidia/nemoclaw-openclaw",
+        version: "0.1.0",
+        rootDir: openClawRoot,
+        manifestPath: path.join(openClawRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "scripts/reply-budget.cts",
+      64 * 1024,
+    ).exports as { readonly DEFAULT_OPENCLAW_MAX_TOKENS: number };
 
     expect(hermes.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
+    expect(
+      hermes.buildHermesUpstreamHeader({
+        _nemoclaw_upstream: { provider: "NVIDIA NIM", model: "test/model" },
+      }),
+    ).toContain("# Upstream provider: NVIDIA NIM\n# Upstream model: test/model\n");
     expect(dcode.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
+    expect(openClaw.DEFAULT_OPENCLAW_MAX_TOKENS).toBe(4096);
   });
 
   it.each([

@@ -59,6 +59,7 @@ const OPAQUE_INPUTS = [
   "packages/nemoclaw-hermes/policy-additions.yaml",
   "packages/nemoclaw-hermes/config/managed-route.cts",
   "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+  "packages/nemoclaw-openclaw/scripts/reply-budget.cts",
   "packages/nemoclaw-openclaw/model-specific-setup/openclaw/gemini-3-managed-inference.json",
   "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
   "packages/nemoclaw-openclaw/policies/presets/openclaw-pricing.yaml",
@@ -187,6 +188,7 @@ describe("Vitest opaque-input watch triggers", () => {
     ]);
     expect(triggeredBy("packages/nemoclaw-hermes/config/managed-route.cts")).toEqual([
       "src/lib/hermes-managed-route.test.ts",
+      "src/lib/sandbox/hermes-upstream-header.parity.test.ts",
       "test/generate-hermes-config.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
@@ -197,6 +199,13 @@ describe("Vitest opaque-input watch triggers", () => {
         "test/package-contract/harness-packages.test.ts",
       ],
     );
+    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/reply-budget.cts")).toEqual([
+      "src/lib/actions/inference-set-reply-budget.test.ts",
+      "src/lib/actions/inference-set-patch-openclaw.test.ts",
+      "test/generate-openclaw-config.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
+    ]);
     expect(
       triggeredBy(
         "packages/nemoclaw-openclaw/model-specific-setup/openclaw/gemini-3-managed-inference.json",

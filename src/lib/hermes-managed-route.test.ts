@@ -8,7 +8,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { testTimeoutOptions } from "../../test/helpers/timeouts";
 import { harnessPackageContentDigest, resolveHarnessPackage } from "./harness/package-registry";
-import { hermesApiMode, hermesProviderKey } from "./hermes-managed-route";
+import {
+  buildHermesUpstreamHeader,
+  hermesApiMode,
+  hermesProviderKey,
+} from "./hermes-managed-route";
 
 const temporaryHomes: string[] = [];
 
@@ -38,6 +42,7 @@ function writeInstalledHermesRuntime(): string {
       "module.exports = {",
       '  HERMES_PROXY_REWRITE_SENTINEL: "installed-sentinel",',
       "  applyHermesManagedRoute() {},",
+      '  buildHermesUpstreamHeader() { return "# installed Hermes header\\n"; },',
       "  hermesApiMode() { return null; },",
       '  hermesProviderKey() { return "installed-hermes-runtime"; },',
       "};",
@@ -73,5 +78,6 @@ describe("Hermes managed-route package runtime", testTimeoutOptions(30_000), () 
     );
 
     expect(hermesProviderKey("ignored by installed runtime")).toBe("installed-hermes-runtime");
+    expect(buildHermesUpstreamHeader({})).toBe("# installed Hermes header\n");
   });
 });

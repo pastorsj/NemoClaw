@@ -36,12 +36,20 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readToolDisclosureEnv } from "../../../src/lib/tool-disclosure.ts";
 
 type Env = Record<string, string | undefined>;
 type JsonObject = Record<string, any>;
+type OpenClawReplyBudgetRuntime = {
+  readonly DEFAULT_OPENCLAW_MAX_TOKENS: number;
+};
+
+const { DEFAULT_OPENCLAW_MAX_TOKENS } = createRequire(import.meta.url)(
+  "./reply-budget.cts",
+) as OpenClawReplyBudgetRuntime;
 
 const KNOWN_MODEL_SETUP_AGENTS = new Set(["openclaw", "hermes"]);
 const MODEL_SETUP_EFFECT_KEYS: Record<string, Set<string>> = {
@@ -1211,7 +1219,7 @@ export function buildConfig(env: Env = process.env): JsonObject {
   const inferenceBaseUrl = env.NEMOCLAW_INFERENCE_BASE_URL as string;
   const inferenceApi = env.NEMOCLAW_INFERENCE_API as string;
   const contextWindow = coercePositiveInt(env, "NEMOCLAW_CONTEXT_WINDOW", 131072);
-  const maxTokens = coercePositiveInt(env, "NEMOCLAW_MAX_TOKENS", 4096);
+  const maxTokens = coercePositiveInt(env, "NEMOCLAW_MAX_TOKENS", DEFAULT_OPENCLAW_MAX_TOKENS);
   const toolDisclosure = readToolDisclosureEnv(env);
 
   const reasoning = (env.NEMOCLAW_REASONING || "false") === "true";

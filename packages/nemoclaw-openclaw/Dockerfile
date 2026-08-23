@@ -589,6 +589,7 @@ COPY packages/nemoclaw-openclaw/preloads/*.js /usr/local/lib/nemoclaw/preloads/
 COPY --from=runtime-preload-builder /opt/nemoclaw-root/dist/lib/messaging/channels/ /usr/local/lib/nemoclaw/preloads-compiled-channels/
 COPY packages/nemoclaw-openclaw/scripts/codex-acp-wrapper.sh /usr/local/bin/nemoclaw-codex-acp
 COPY packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts /scripts/generate-openclaw-config.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/scripts/reply-budget.cts /scripts/reply-budget.cts
 COPY packages/nemoclaw-openclaw/scripts/validate-openclaw-tool-search.mts /scripts/validate-openclaw-tool-search.mts
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts

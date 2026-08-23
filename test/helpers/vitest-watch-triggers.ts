@@ -123,6 +123,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     pattern: /(?:^|\/)packages\/nemoclaw-hermes\/config\/managed-route\.cts$/,
     testsToRun: runTests(
       "src/lib/hermes-managed-route.test.ts",
+      "src/lib/sandbox/hermes-upstream-header.parity.test.ts",
       "test/generate-hermes-config.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ),
@@ -133,6 +134,16 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
       "src/lib/inference/managed-dcode/identity.test.ts",
       "test/langchain-deepagents-code-image.test.ts",
       "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/reply-budget\.cts$/,
+    testsToRun: runTests(
+      "src/lib/actions/inference-set-reply-budget.test.ts",
+      "src/lib/actions/inference-set-patch-openclaw.test.ts",
+      "test/generate-openclaw-config.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
     ),
   },
   {
