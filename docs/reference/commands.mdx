@@ -285,6 +285,14 @@ $$nemoclaw harness install hermes
 $$nemoclaw harness list
 ```
 
+Use `--refresh-installed` to update every clean installed package that is bundled by the current NemoClaw build.
+You can also install one package and refresh the other clean installed packages in the same command.
+
+```bash
+$$nemoclaw harness install --refresh-installed
+$$nemoclaw harness install hermes --refresh-installed
+```
+
 The installation succeeds when the same package is already present.
 The receipt tracks regular package files and executable bits, except entries named `.git`, `.DS_Store`, `node_modules`, or `__pycache__`.
 Changes in those ignored entries do not prevent an upgrade and are removed when replacement succeeds.
