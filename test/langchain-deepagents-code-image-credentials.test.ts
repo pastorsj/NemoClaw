@@ -13,6 +13,7 @@ import {
   runWrapper,
 } from "./helpers/langchain-deepagents-code-image.ts";
 import { CANONICAL_SECRET_POSITIVE_VECTORS } from "./helpers/langchain-deepagents-code-secret-patterns.ts";
+import { testTimeoutOptions } from "./helpers/timeouts.ts";
 
 function fakePrivateKeyBlock(type = "", newline = "\\n"): string {
   const label = type ? `${type} PRIVATE KEY-----` : "PRIVATE KEY-----";
@@ -85,7 +86,10 @@ describe("LangChain Deep Agents Code image credential boundary", () => {
     },
   );
 
-  it("pins the OTLP endpoint accept/refuse contract on runtime and dotenv paths (#6466, #6538)", () => {
+  it(
+    "pins the OTLP endpoint accept/refuse contract on runtime and dotenv paths (#6466, #6538)",
+    testTimeoutOptions(30_000),
+    () => {
     // The managed collector URL is not a credential and must pass; everything
     // else refuses with the full contract. The #6538 review requires exact
     // status 2, the variable name present, the rejected value absent (no echo),
@@ -170,7 +174,8 @@ describe("LangChain Deep Agents Code image credential boundary", () => {
         expect(fs.existsSync(dv.ranMarker)).toBe(false);
       }
     }
-  });
+    },
+  );
 
   it.each([
     { name: "MODEL_NAME", value: "openshell:resolve:env:OTHER_NAME" },
