@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import { createRequire } from "node:module";
@@ -53,6 +54,7 @@ const HERMES_CONTROL_CONTRACT = path.join(
   "host",
   "tool-gateway-control-contract.ts",
 );
+const SOURCE_REQUIRE_HOOK = path.join(import.meta.dirname, "helpers", "onboard-script-mocks.cjs");
 const NAME_VALIDATION_CASES: readonly { label: string; value: unknown }[] = [
   { label: "undefined", value: undefined },
   { label: "null", value: null },
@@ -173,4 +175,60 @@ describe("Hermes tool-gateway package paths", () => {
     expect(probeInvocation?.env.HERMES_TOOL_GATEWAY_MATRIX_PATH).toBe(runtimePaths.matrix);
     expect(() => loadBroker()).toThrow("installation receipt does not match package content");
   });
+
+  it("shares one captured runtime and cleanup across isolated module globals", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-broker-cache-"));
+    temporaryHome = home;
+    const script = String.raw`
+const fs = require("node:fs");
+const Module = require("node:module");
+const path = require("node:path");
+const vm = require("node:vm");
+const brokerPath = ${JSON.stringify(BROKER_WRAPPER)};
+const brokerSource = fs.readFileSync(brokerPath, "utf8");
+const brokerRequire = Module.createRequire(brokerPath);
+
+function loadBrokerInIsolatedGlobal() {
+  const context = vm.createContext({ process });
+  const compile = vm.runInContext(Module.wrap(brokerSource), context, {
+    filename: brokerPath,
+  });
+  const brokerModule = { exports: {} };
+  compile(
+    brokerModule.exports,
+    brokerRequire,
+    brokerModule,
+    brokerPath,
+    path.dirname(brokerPath),
+  );
+  return brokerModule.exports;
+}
+
+const exitListenersBefore = process.listenerCount("exit");
+const first = loadBrokerInIsolatedGlobal();
+const second = loadBrokerInIsolatedGlobal();
+process.stdout.write(JSON.stringify({
+  exitListenerDelta: process.listenerCount("exit") - exitListenersBefore,
+  runtimeRoots: [
+    first.HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeRoot,
+    second.HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeRoot,
+  ],
+}));
+`;
+
+    const result = spawnSync(process.execPath, ["--require", SOURCE_REQUIRE_HOOK, "-e", script], {
+      cwd: path.join(import.meta.dirname, ".."),
+      encoding: "utf8",
+      env: { ...process.env, HOME: home, NODE_OPTIONS: "" },
+      timeout: 10_000,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    const proof = JSON.parse(result.stdout) as {
+      exitListenerDelta: number;
+      runtimeRoots: [string, string];
+    };
+    expect(proof.exitListenerDelta).toBe(1);
+    expect(proof.runtimeRoots[1]).toBe(proof.runtimeRoots[0]);
+  }, 15_000);
 });

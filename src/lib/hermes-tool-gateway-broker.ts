@@ -42,7 +42,7 @@ const HERMES_TOOL_GATEWAY_RUNTIME_FILES = Object.freeze([
 const HERMES_TOOL_GATEWAY_RUNTIME_CACHE = Symbol.for("nemoclaw.hermesToolGatewayRuntimeCaptures");
 
 function hermesToolGatewayRuntimeCache() {
-  const existing = globalThis[HERMES_TOOL_GATEWAY_RUNTIME_CACHE];
+  const existing = process[HERMES_TOOL_GATEWAY_RUNTIME_CACHE];
   if (existing) return existing;
   const captures = new Map();
   const cache = Object.freeze({
@@ -52,7 +52,7 @@ function hermesToolGatewayRuntimeCache() {
       captures.clear();
     },
   });
-  Object.defineProperty(globalThis, HERMES_TOOL_GATEWAY_RUNTIME_CACHE, { value: cache });
+  Object.defineProperty(process, HERMES_TOOL_GATEWAY_RUNTIME_CACHE, { value: cache });
   process.once("exit", cache.cleanup);
   return cache;
 }
