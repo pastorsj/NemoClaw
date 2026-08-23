@@ -127,10 +127,13 @@ function writeSuccessfulOpenShell(tmpDir: string): string {
 }
 
 function probeEnvironment(tmpDir: string): NodeJS.ProcessEnv {
+  fs.writeFileSync(path.join(tmpDir, "brew"), `#!${process.execPath}\nprocess.exit(1);\n`, {
+    mode: 0o755,
+  });
   const env: NodeJS.ProcessEnv = {
     HOME: tmpDir,
     TMPDIR: tmpDir,
-    PATH: process.env.PATH || "/usr/bin:/bin",
+    PATH: `${tmpDir}${path.delimiter}${process.env.PATH || "/usr/bin:/bin"}`,
     NEMOCLAW_OPENSHELL_BIN: writeSuccessfulOpenShell(tmpDir),
     NODE_ENV: "test",
     NEMOCLAW_NON_INTERACTIVE: "1",

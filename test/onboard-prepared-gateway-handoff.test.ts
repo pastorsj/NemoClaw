@@ -28,6 +28,7 @@ const sourceRequireHook = path.join(repoRoot, "test", "helpers", "onboard-script
 function runHandoffScenario(scenario: HandoffScenario): HandoffResult {
   const workspace = createOnboardProcessWorkspace(`nemoclaw-gateway-handoff-${scenario}-`);
   const home = workspace.homeDir;
+  workspace.writeExecutable("brew", `#!${process.execPath}\nprocess.exit(1);\n`);
   const scriptPath = workspace.path("scenario.cjs");
   const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
   const sessionPath = JSON.stringify(
@@ -130,7 +131,9 @@ const { onboard } = require(${onboardPath});
   );
 
   const result = runOnboardProcess(["--require", sourceRequireHook, scriptPath], {
-    env: minimalSpawnEnv(home),
+    env: minimalSpawnEnv(home, {
+      PATH: `${workspace.binDir}${path.delimiter}${process.env.PATH || "/usr/bin:/bin"}`,
+    }),
     timeoutMs: 15_000,
   });
 
