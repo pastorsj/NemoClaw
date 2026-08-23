@@ -180,7 +180,7 @@ describe("source-loader Node options", () => {
       `require("node:fs").writeFileSync(${JSON.stringify(marker)}, process.env.HOME ?? "");`,
     );
 
-    const result = runWithEnv("not-a-command", {
+    const result = runWithEnv("--not-a-real-option", {
       NODE_OPTIONS: `${sourceLoaderNodeOptions(undefined)} --require=${preload}`,
     });
     const implicitHome = fs.readFileSync(marker, "utf8");

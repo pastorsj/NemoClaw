@@ -37,6 +37,7 @@ const TAVILY_BUILD_ENV = {
   NEMOCLAW_WEB_SEARCH_ENABLED: "1",
   NEMOCLAW_WEB_SEARCH_PROVIDER: "tavily",
   OPENCLAW_VERSION: "2026.5.27",
+  TAVILY_API_KEY: "",
 };
 
 describe("sandbox provisioning: bundled OpenClaw Tavily extension", () => {

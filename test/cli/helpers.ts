@@ -18,6 +18,10 @@ export const CLI = path.join(import.meta.dirname, "..", "..", "bin", "nemoclaw.j
 export const HERMES_CLI = path.join(import.meta.dirname, "..", "..", "bin", "nemohermes.js");
 export const PARSER_EXIT_CODE = 2;
 
+export function isolatedCliPath(localBin: string): string {
+  return [localBin, "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(path.delimiter);
+}
+
 export function readOpenClawExpectedVersion(): string {
   const manifestPath = path.join(
     import.meta.dirname,
@@ -474,7 +478,7 @@ export function createDoctorTestSetup(
         args,
         {
           HOME: home,
-          PATH: `${localBin}:${process.env.PATH || ""}`,
+          PATH: isolatedCliPath(localBin),
         },
         30000,
       ),

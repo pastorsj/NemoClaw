@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { runWithEnv, testTimeoutOptions } from "./helpers";
+import { isolatedCliPath, runWithEnv, testTimeoutOptions } from "./helpers";
 
 function indexOfArg(log: string, needle: string): number {
   return log.split("\n").findIndex((line) => line === needle);
@@ -61,7 +61,7 @@ describe("CLI dispatch", () => {
 
         const r = runWithEnv("alpha destroy -y", {
           HOME: home,
-          PATH: `${localBin}:${process.env.PATH || ""}`,
+          PATH: isolatedCliPath(localBin),
         });
 
         expect(r.code, r.out).toBe(0);

@@ -69,8 +69,9 @@ describe("user-error/startup surfaces return non-zero exit (#5974)", () => {
     binDir = path.join(home, "bin");
     fs.mkdirSync(binDir, { recursive: true });
 
-    // Fake openshell: every gateway/sandbox probe fails, so recovery can never
-    // resurrect a sandbox and the dispatcher's user-error boundaries decide the
+    // Fake OpenShell: expose a healthy, empty NemoClaw gateway. Requested-name
+    // recovery can inspect the empty sandbox list without entering the real
+    // gateway-start path, and the dispatcher's user-error boundaries decide the
     // exit code. Nothing here should ever exit 0 for a sandbox lookup.
     fs.writeFileSync(
       path.join(binDir, "openshell"),
@@ -78,8 +79,14 @@ describe("user-error/startup surfaces return non-zero exit (#5974)", () => {
         "#!/usr/bin/env bash",
         'case "$*" in',
         "  status)",
-        "    echo 'Status: Disconnected' ;",
-        "    exit 1 ;;",
+        "    echo 'Status: Connected' ;",
+        "    echo 'Gateway: nemoclaw' ;",
+        "    exit 0 ;;",
+        "  'gateway info'|'gateway info -g nemoclaw')",
+        "    echo 'Gateway: nemoclaw' ;",
+        "    exit 0 ;;",
+        "  'sandbox list -g nemoclaw')",
+        "    exit 0 ;;",
         "  *)",
         "    echo '' >&2 ;",
         "    exit 1 ;;",
@@ -100,6 +107,13 @@ describe("user-error/startup surfaces return non-zero exit (#5974)", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+
+    // Keep OpenShell ownership checks hermetic. A real Homebrew process uses
+    // the isolated HOME as its cache root and may perform network-backed API
+    // setup before the nonexistent-sandbox boundary can return.
+    fs.writeFileSync(path.join(binDir, "brew"), "#!/usr/bin/env bash\nexit 1\n", {
+      mode: 0o755,
+    });
 
     // Seed a single registered sandbox so the command-specific rows can resolve
     // it and reach their own validation branches.

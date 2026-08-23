@@ -51,6 +51,12 @@ export async function probeSandboxInferenceGatewayHealth(
   let result: Awaited<ReturnType<typeof captureOpenshellForStatus>>;
   try {
     agent = getSessionAgent(sandboxName);
+  } catch {
+    // Status still probes the fixed inference.local route when a recorded
+    // agent cannot load. The generic probe argv never uses that identity.
+    agent = null;
+  }
+  try {
     result = await capture(buildSandboxInferenceRouteProbeArgs(sandboxName, agent), {
       ignoreError: true,
       includeStreams: true,

@@ -97,7 +97,7 @@ describe("Hermes doctor and config hash boundary", () => {
     }
   });
 
-  it("locks trusted gateway recovery preloads as image-owned read-only files", () => {
+  it("removes stale OpenClaw preloads and locks trusted gateway recovery helpers", () => {
     const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-preload-lock-"));
     const binDir = path.join(tmp, "usr-local-bin");
@@ -220,7 +220,6 @@ describe("Hermes doctor and config hash boundary", () => {
       expect(fs.readFileSync(chownLogPath, "utf-8")).toBe(
         [
           `root:root ${path.join(binDir, "nemoclaw-gateway-control")} ${path.join(libDir, "gateway-supervisor.sh")} ${path.join(libDir, "state-dir-guard.py")} ${runtimeStateMutationControlPath} ${runtimeStateMutationStartupGatePath} ${runtimeStateMutationPublisherPath} ${stateLockPlanPath} ${runtimeStateMutationCapabilityPath} ${path.join(libDir, "managed-gateway-control.py")} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${mcpCredentialBoundaryPath}`,
-          `-R 0:0 ${preloadsDir}`,
           "",
         ].join("\n"),
       );
@@ -242,10 +241,7 @@ describe("Hermes doctor and config hash boundary", () => {
       expect(mode(stateLockPlanPath)).toBe("444");
       expect(mode(runtimeStateMutationCapabilityPath)).toBe("444");
       expect(mode(path.join(libDir, "managed-gateway-control.py"))).toBe("500");
-      expect(mode(preloadsDir)).toBe("755");
-      expect(mode(nestedDir)).toBe("755");
-      expect(mode(path.join(preloadsDir, "gateway-safety-net.js"))).toBe("444");
-      expect(mode(path.join(nestedDir, "ciao-preload.js"))).toBe("444");
+      expect(fs.existsSync(preloadsDir)).toBe(false);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

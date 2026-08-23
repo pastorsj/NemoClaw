@@ -204,6 +204,10 @@ describe("hosted inference default model namespace (#5667)", () => {
       String.raw`
 const runner = require(${runnerPath});
 runner.runCapture = () => "";
+// Keep this model-namespace regression independent of host/VPN DNS. The
+// endpoint SSRF contract has dedicated tests; this child only needs one
+// preflight-approved public address before its fake curl records success.
+require("node:dns/promises").lookup = async () => [{ address: "1.1.1.1", family: 4 }];
 
 process.env.NEMOCLAW_NON_INTERACTIVE = "1";
 process.env.NEMOCLAW_YES = "1";

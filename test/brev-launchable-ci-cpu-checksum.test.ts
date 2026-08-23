@@ -131,7 +131,7 @@ exit 0
     `#!/usr/bin/env bash
 if [ "\${1:-}" = "clone" ]; then
   dest="\${@: -1}"
-  mkdir -p "$dest/.git" "$dest/nemoclaw" "$dest/bin"
+  mkdir -p "$dest/.git" "$dest/nemoclaw" "$dest/bin" "$dest/packages/nemoclaw-openclaw/plugin"
   printf '#!/usr/bin/env node\\n' > "$dest/bin/nemoclaw.js"
   exit 0
 fi

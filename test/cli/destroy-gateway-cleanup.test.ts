@@ -6,7 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { runWithEnv, testTimeoutOptions } from "./helpers";
+import {
+  isolatedCliPath,
+  runWithEnv,
+  testTimeoutOptions,
+  writeHealthyDockerStub,
+} from "./helpers";
 
 describe("CLI dispatch", () => {
   it(
@@ -63,7 +68,7 @@ describe("CLI dispatch", () => {
 
       const r = runWithEnv("alpha destroy -y", {
         HOME: home,
-        PATH: `${localBin}:${process.env.PATH || ""}`,
+        PATH: isolatedCliPath(localBin),
       });
 
       expect(r.code).toBe(0);
@@ -145,7 +150,7 @@ describe("CLI dispatch", () => {
         "alpha destroy -y --cleanup-gateway",
         {
           HOME: home,
-          PATH: `${localBin}:${process.env.PATH || ""}`,
+          PATH: isolatedCliPath(localBin),
         },
         30_000,
       );
@@ -224,7 +229,7 @@ describe("CLI dispatch", () => {
         "alpha destroy -y",
         {
           HOME: home,
-          PATH: `${localBin}:${process.env.PATH || ""}`,
+          PATH: isolatedCliPath(localBin),
           NEMOCLAW_CLEANUP_GATEWAY: "1",
         },
         30_000,
@@ -307,7 +312,7 @@ describe("CLI dispatch", () => {
         "alpha destroy -y --cleanup-gateway",
         {
           HOME: home,
-          PATH: `${localBin}:${process.env.PATH || ""}`,
+          PATH: isolatedCliPath(localBin),
         },
         30_000,
       );
@@ -392,7 +397,7 @@ describe("CLI dispatch", () => {
         "alpha destroy -y --cleanup-gateway",
         {
           HOME: home,
-          PATH: `${localBin}:${process.env.PATH || ""}`,
+          PATH: isolatedCliPath(localBin),
           XDG_BIN_HOME: binHome,
           XDG_CONFIG_HOME: configHome,
         },
@@ -468,7 +473,7 @@ describe("CLI dispatch", () => {
 
     const r = runWithEnv("alpha destroy --yes", {
       HOME: home,
-      PATH: `${localBin}:${process.env.PATH || ""}`,
+      PATH: isolatedCliPath(localBin),
     });
 
     expect(r.code).toBe(0);
@@ -533,7 +538,7 @@ describe("CLI dispatch", () => {
 
     const r = runWithEnv("alpha destroy --yes", {
       HOME: home,
-      PATH: `${localBin}:${process.env.PATH || ""}`,
+      PATH: isolatedCliPath(localBin),
     });
 
     expect(r.code).toBe(0);
@@ -610,7 +615,7 @@ describe("CLI dispatch", () => {
 
     const r = runWithEnv("alpha destroy --yes", {
       HOME: home,
-      PATH: `${localBin}:${process.env.PATH || ""}`,
+      PATH: isolatedCliPath(localBin),
     });
 
     expect(r.code, r.out).toBe(0);
@@ -687,7 +692,7 @@ describe("CLI dispatch", () => {
 
       const r = runWithEnv(
         "alpha destroy -y --cleanup-gateway",
-        { HOME: home, PATH: `${localBin}:${process.env.PATH || ""}` },
+        { HOME: home, PATH: isolatedCliPath(localBin) },
         30_000,
       );
 
@@ -745,10 +750,11 @@ describe("CLI dispatch", () => {
       ].join("\n"),
       { mode: 0o755 },
     );
+    writeHealthyDockerStub(localBin);
 
     const r = runWithEnv("alpha destroy --yes", {
       HOME: home,
-      PATH: `${localBin}:${process.env.PATH || ""}`,
+      PATH: isolatedCliPath(localBin),
     });
 
     expect(r.code).toBe(1);
@@ -825,7 +831,7 @@ describe("CLI dispatch", () => {
 
       const r = runWithEnv("alpha destroy --yes", {
         HOME: home,
-        PATH: `${localBin}:${process.env.PATH || ""}`,
+        PATH: isolatedCliPath(localBin),
       });
 
       expect(r.code).toBe(0);
@@ -900,7 +906,7 @@ describe("CLI dispatch", () => {
 
     const r = runWithEnv("alpha destroy --yes", {
       HOME: home,
-      PATH: `${localBin}:${process.env.PATH || ""}`,
+      PATH: isolatedCliPath(localBin),
     });
 
     expect(r.code).toBe(0);

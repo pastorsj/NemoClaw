@@ -5,7 +5,25 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock(
+  "../src/lib/messaging/applier/build/openclaw-npm-remediation.mts",
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import("../src/lib/messaging/applier/build/openclaw-npm-remediation.mts")
+      >();
+    return {
+      ...original,
+      remediateReviewedOpenClawPluginArchive: ({ archivePath }: { archivePath: string }) => ({
+        archivePath,
+        integrity: "sha512-wechat-locked-install-remediation",
+        remediated: false,
+      }),
+    };
+  },
+);
 
 import { wechatManifest } from "../src/lib/messaging/channels/wechat/manifest.ts";
 import {
@@ -13,11 +31,21 @@ import {
   readMessagingBuildPlanFromEnv,
   requireWritableRuntimeInstallCache,
 } from "../src/lib/messaging/applier/build/messaging-build-applier.mts";
+import { OPENCLAW_NPM_REMEDIATION_HELPER_ENV } from "../src/lib/messaging/applier/build/openclaw-npm-remediation.mts";
 
 const WECHAT_INTEGRITY =
   "sha512-dPQbidUNWigC6V10vGW4i+GLH09x+6zUhafZRjuxkJ9GDu8o62WBsnUTojp4KqUH756hz+t2v9khiCRSi0dBDw==";
 const WECHAT_TARBALL =
   "https://registry.npmjs.org/@tencent-weixin/openclaw-weixin/-/openclaw-weixin-2.4.3.tgz";
+const OPENCLAW_REMEDIATION_HELPER = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "scripts",
+  "lib",
+  "openclaw-npm-remediation.mts",
+);
 
 function executable(file: string, contents: string): void {
   fs.writeFileSync(file, contents, { mode: 0o755 });
@@ -155,6 +183,7 @@ printf 'verify|%s|%s|openclaw=%s|offline=%s|cache=%s\n' "$3" "$4" "$5" "$NPM_CON
       WECHAT_TARBALL,
       OPENCLAW_VERSION: "2026.6.10",
       NEMOCLAW_WECHAT_NPM_INSTALL_CACHE: installCache,
+      [OPENCLAW_NPM_REMEDIATION_HELPER_ENV]: OPENCLAW_REMEDIATION_HELPER,
       NEMOCLAW_MESSAGING_PLAN_B64: Buffer.from(JSON.stringify(plan)).toString("base64"),
     };
 

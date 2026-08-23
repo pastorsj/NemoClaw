@@ -62,6 +62,32 @@ describe("sandbox inference route health", () => {
     ).resolves.toBeNull();
   });
 
+  it("uses the fixed generic probe when the recorded agent cannot load", async () => {
+    const captureOpenshellImpl = vi.fn(makeCapture("OK 200"));
+
+    const result = await probeSandboxInferenceGatewayHealth("unknown-agent", {
+      captureOpenshellImpl,
+      getSessionAgentImpl: () => {
+        throw new Error("recorded agent unavailable");
+      },
+    });
+
+    expect(result).toMatchObject({ ok: true, httpStatus: 200 });
+    expect(captureOpenshellImpl).toHaveBeenCalledWith(
+      [
+        "sandbox",
+        "exec",
+        "--name",
+        "unknown-agent",
+        "--",
+        "sh",
+        "-c",
+        expect.stringContaining("/usr/bin/curl -q"),
+      ],
+      expect.objectContaining({ ignoreError: true }),
+    );
+  });
+
   it("uses the DCode agent path while reporting observable route health (#6192)", async () => {
     const captureOpenshellImpl = vi.fn(makeCapture("OK 200"));
     const getSessionAgentImpl = vi.fn(() => ({ name: "langchain-deepagents-code" }) as never);

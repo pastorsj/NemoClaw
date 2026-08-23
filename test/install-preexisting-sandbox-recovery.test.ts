@@ -9,6 +9,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const INSTALLER_PAYLOAD = path.join(import.meta.dirname, "..", "scripts", "install.sh");
+const OPENCLAW_HARNESS_INSTALL_CALL =
+  "restore=1 confirmed= argv=harness install openclaw --refresh-installed";
 
 function writePendingStationReceiptRetirement(tmp: string): void {
   fs.writeFileSync(
@@ -146,6 +148,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status, result.output).toBe(0);
     expect(result.calls).toEqual([
+      OPENCLAW_HARNESS_INSTALL_CALL,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
       "sleep=10",
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
@@ -165,6 +168,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status, result.output).toBe(0);
     expect(result.calls).toEqual([
+      OPENCLAW_HARNESS_INSTALL_CALL,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
       "sleep=10",
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
@@ -180,6 +184,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
+      OPENCLAW_HARNESS_INSTALL_CALL,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
     ]);
     expect(result.output).toContain("Failed to recover 'broken-box'");
@@ -194,6 +199,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
+      OPENCLAW_HARNESS_INSTALL_CALL,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
       "sleep=10",
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
@@ -207,7 +213,10 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
     const result = runRecoveryBeforeOnboard(0, 7);
 
     expect(result.status, result.output).toBe(0);
-    expect(result.calls).toEqual(["restore=1 confirmed= argv=onboard"]);
+    expect(result.calls).toEqual([
+      OPENCLAW_HARNESS_INSTALL_CALL,
+      "restore=1 confirmed= argv=onboard",
+    ]);
   });
 
   it("does not treat a route-only reservation as an existing session (#6500)", () => {
@@ -217,7 +226,10 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
     });
 
     expect(result.status, result.output).toBe(0);
-    expect(result.calls).toEqual(["restore=1 confirmed= argv=onboard"]);
+    expect(result.calls).toEqual([
+      OPENCLAW_HARNESS_INSTALL_CALL,
+      "restore=1 confirmed= argv=onboard",
+    ]);
     expect(result.output).not.toContain("Existing sandbox sessions detected");
   });
 
@@ -227,7 +239,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.calls).toEqual([]);
+    expect(result.calls).toEqual([OPENCLAW_HARNESS_INSTALL_CALL]);
     expect(result.output).toContain(
       "Could not inspect the existing sandbox registry. Onboarding was not started.",
     );

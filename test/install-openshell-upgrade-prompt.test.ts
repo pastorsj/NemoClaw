@@ -17,6 +17,7 @@ const UPDATE_SANDBOXES_DOCS = path.join(
   "update-sandboxes.mdx",
 );
 const COMMANDS_DOCS = path.join(import.meta.dirname, "..", "docs", "reference", "commands.mdx");
+const OPENCLAW_HARNESS_INSTALL = "harness install openclaw --refresh-installed\n";
 
 function writeExecutable(target: string, contents: string): void {
   fs.writeFileSync(target, contents, { mode: 0o755 });
@@ -34,7 +35,9 @@ function runInstallerOpenshellVersionFlow(
   const gatewayState = path.join(tmp, "gateway.state");
   const backupLog = path.join(tmp, "backup.log");
   const installLog = path.join(tmp, "install.log");
+  const harnessInstallLog = path.join(tmp, "harness-install.log");
   const healthyOpenshell = path.join(tmp, "healthy-openshell");
+  const nemoclawCli = path.join(tmp, "nemoclaw");
 
   fs.mkdirSync(path.dirname(registry), { recursive: true });
   fs.mkdirSync(bin, { recursive: true });
@@ -50,6 +53,17 @@ consume_station_local_vllm_resume() { return 1; }
 `,
   );
   writeExecutable(healthyOpenshell, installedOpenshellBody);
+  writeExecutable(
+    nemoclawCli,
+    `#!/usr/bin/env bash
+set -eu
+if [ "\${1:-}" = "harness" ]; then
+  printf '%s\n' "$*" >>"${harnessInstallLog}"
+  [ "$*" = "harness install openclaw --refresh-installed" ]
+fi
+exit 0
+`,
+  );
   setupOpenshell(bin);
 
   const result = spawnSync(
@@ -82,8 +96,10 @@ install_nemoclaw() {
   if ! command_exists openshell; then
     cp "${healthyOpenshell}" "${bin}/openshell"
   fi
+  _CLI_PATH="${nemoclawCli}"
 }
 verify_nemoclaw() { :; }
+run_installer_host_preflight() { return 0; }
 print_done() { :; }
 main --non-interactive --yes-i-accept-third-party-software`,
     ],
@@ -103,6 +119,9 @@ main --non-interactive --yes-i-accept-third-party-software`,
     gatewayState: fs.readFileSync(gatewayState, "utf-8"),
     registry: fs.readFileSync(registry, "utf-8"),
     installLog: fs.existsSync(installLog) ? fs.readFileSync(installLog, "utf-8") : "",
+    harnessInstallLog: fs.existsSync(harnessInstallLog)
+      ? fs.readFileSync(harnessInstallLog, "utf-8")
+      : "",
     openshellBody: fs.readFileSync(path.join(bin, "openshell"), "utf-8"),
   };
 }
@@ -421,30 +440,33 @@ require_reportable_openshell_version`,
   });
 
   it("preserves a reportable OpenShell through the installer flow (#7300)", () => {
-    const { result, openshellBody } = runInstallerOpenshellVersionFlow((bin) => {
+    const { result, harnessInstallLog, openshellBody } = runInstallerOpenshellVersionFlow((bin) => {
       writeExecutable(path.join(bin, "openshell"), healthyOpenshell);
     });
 
     expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(harnessInstallLog).toBe(OPENCLAW_HARNESS_INSTALL);
     expect(openshellBody).toBe(healthyOpenshell);
   });
 
   it("installs OpenShell when no binary is present (#7300)", () => {
-    const { result, installLog } = runInstallerOpenshellVersionFlow(() => undefined);
+    const { result, harnessInstallLog, installLog } = runInstallerOpenshellVersionFlow(
+      () => undefined,
+    );
 
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(installLog).toBe("install\n");
+    expect(harnessInstallLog).toBe(OPENCLAW_HARNESS_INSTALL);
   });
 
   it("rejects an installed OpenShell whose version command fails before onboarding (#7300)", () => {
-    const { result, installLog, openshellBody } = runInstallerOpenshellVersionFlow(
-      () => undefined,
-      versionPrintingBrokenOpenshell,
-    );
+    const { result, harnessInstallLog, installLog, openshellBody } =
+      runInstallerOpenshellVersionFlow(() => undefined, versionPrintingBrokenOpenshell);
 
     expect(result.status, result.stdout + result.stderr).not.toBe(0);
     expect(result.stderr + result.stdout).toContain("could not report its version");
     expect(installLog).toBe("install\n");
+    expect(harnessInstallLog).toBe(OPENCLAW_HARNESS_INSTALL);
     expect(openshellBody).toBe(versionPrintingBrokenOpenshell);
   });
 
