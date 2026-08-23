@@ -197,6 +197,7 @@ export function requireHostedInferenceConfig(
 ): HostedInferenceConfig {
   const apiKey = secrets.required(HOSTED_INFERENCE_SECRET);
   const endpointUrl = env.NEMOCLAW_ENDPOINT_URL || DEFAULT_HOSTED_INFERENCE_BASE_URL;
+  const trustedPrivateInferenceHosts = env.NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS;
   const model =
     env.NEMOCLAW_MODEL ||
     env.NEMOCLAW_COMPAT_MODEL ||
@@ -217,6 +218,9 @@ export function requireHostedInferenceConfig(
       NEMOCLAW_MODEL: model,
       NEMOCLAW_COMPAT_MODEL: model,
       NEMOCLAW_PREFERRED_API: env.NEMOCLAW_PREFERRED_API || "openai-completions",
+      ...(trustedPrivateInferenceHosts?.trim()
+        ? { NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: trustedPrivateInferenceHosts }
+        : {}),
       [HOSTED_INFERENCE_SECRET]: apiKey,
       [HOSTED_INFERENCE_CREDENTIAL_ENV]: apiKey,
     },

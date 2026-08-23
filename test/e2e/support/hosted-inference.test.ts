@@ -198,6 +198,16 @@ describe("hosted inference E2E config", () => {
     expect(cfg.providerName).toBe("compatible-endpoint");
     expect(cfg.credentialEnv).toBe("COMPATIBLE_API_KEY");
     expect(cfg.env.COMPATIBLE_API_KEY).toBe("repo-hosted-key");
+    expect(cfg.env).not.toHaveProperty("NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS");
+  });
+
+  it("passes explicit private inference trust only through hosted target env", () => {
+    const cfg = requireHostedInferenceConfig(
+      secrets({ NVIDIA_INFERENCE_API_KEY: "repo-hosted-key" }),
+      { NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: "inference.internal.example" },
+    );
+
+    expect(cfg.env.NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS).toBe("inference.internal.example");
   });
 
   it("does not require an nvapi-prefixed source secret", () => {
@@ -417,12 +427,14 @@ printf '{"data":[]}'
       BUILDX_BUILDER: "external-builder",
       NEMOCLAW_E2E_USE_HOSTED_INFERENCE: "1",
       NEMOCLAW_OPENSHELL_CHANNEL: "dev",
+      NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: "inference.internal.example",
       NVIDIA_INFERENCE_API_KEY: "repo-hosted-key",
       RANDOM_NON_SECRET: "not-allowlisted",
     });
 
     expect(env.NEMOCLAW_E2E_USE_HOSTED_INFERENCE).toBe("1");
     expect(env.NEMOCLAW_OPENSHELL_CHANNEL).toBe("dev");
+    expect(env).not.toHaveProperty("NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS");
     expect(env).not.toHaveProperty("NVIDIA_INFERENCE_API_KEY");
     expect(env).not.toHaveProperty("RANDOM_NON_SECRET");
     expect(env).not.toHaveProperty("BUILDX_BUILDER");
