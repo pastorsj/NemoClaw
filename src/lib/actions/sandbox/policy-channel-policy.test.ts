@@ -47,6 +47,7 @@ let promptMock: MockInstance;
 let getSandboxMock: MockInstance;
 let getAppliedPresetsMock: MockInstance;
 let getGatewayPresetsMock: MockInstance;
+let listPresetsMock: MockInstance;
 let selectFromListMock: MockInstance;
 let selectForRemovalMock: MockInstance;
 let loadPresetForSandboxMock: MockInstance;
@@ -106,7 +107,7 @@ beforeEach(() => {
     undefined as unknown as onboardSession.Session,
   );
 
-  vi.spyOn(policies, "listPresets").mockReturnValue(POLICY_PRESETS);
+  listPresetsMock = vi.spyOn(policies, "listPresets").mockReturnValue(POLICY_PRESETS);
   vi.spyOn(policies, "listCustomPresets").mockReturnValue([]);
   getAppliedPresetsMock = vi.spyOn(policies, "getAppliedPresets").mockReturnValue([]);
   getGatewayPresetsMock = vi.spyOn(policies, "getGatewayPresets").mockReturnValue(null);
@@ -319,21 +320,20 @@ describe("addSandboxPolicy", () => {
       expected: "curl is not in the preset binary allowlist, so curl probes can fail",
       detail: "https://discord.com/api/v10/gateway",
     },
-  ])("prints validation guidance when $preset is selected interactively", async ({
-    preset,
-    expected,
-    detail,
-  }) => {
-    selectFromListMock.mockResolvedValue(preset);
+  ])(
+    "prints validation guidance when $preset is selected interactively",
+    async ({ preset, expected, detail }) => {
+      selectFromListMock.mockResolvedValue(preset);
 
-    await addSandboxPolicy("test-sandbox");
+      await addSandboxPolicy("test-sandbox");
 
-    expect(printedText()).toContain(expected);
-    expect(printedText()).toContain(detail);
-    expect(applyPresetMock).toHaveBeenCalledWith("test-sandbox", preset, {
-      suppressDisclosure: true,
-    });
-  });
+      expect(printedText()).toContain(expected);
+      expect(printedText()).toContain(detail);
+      expect(applyPresetMock).toHaveBeenCalledWith("test-sandbox", preset, {
+        suppressDisclosure: true,
+      });
+    },
+  );
 
   it("prints Discord validation guidance when the preset name is provided", async () => {
     await addSandboxPolicy("test-sandbox", { preset: "discord", yes: true });
@@ -361,6 +361,41 @@ describe("removeSandboxPolicy", () => {
   beforeEach(() => {
     getAppliedPresetsMock.mockReturnValue(["pypi"]);
   });
+
+  it.each([
+    {
+      agent: "openclaw",
+      allowed: "openclaw-pricing",
+      foreign: "nous-web",
+    },
+    {
+      agent: "hermes",
+      allowed: "nous-web",
+      foreign: "openclaw-pricing",
+    },
+  ])(
+    "scopes removable presets to the $agent runtime package",
+    async ({ agent, allowed, foreign }) => {
+      arrangeSandbox(agent);
+      getAppliedPresetsMock.mockReturnValue([allowed, foreign]);
+      listPresetsMock.mockImplementation((options: { agent?: string | null } = {}) =>
+        POLICY_PRESETS.filter(
+          (preset) =>
+            (options.agent === "openclaw" ? !preset.name.startsWith("nous-") : true) &&
+            (options.agent === "hermes" ? preset.name !== "openclaw-pricing" : true),
+        ),
+      );
+
+      await expect(
+        captureExit(() => removeSandboxPolicy("test-sandbox", { preset: foreign, yes: true })),
+      ).resolves.toBe(1);
+
+      expect(listPresetsMock).toHaveBeenCalledWith({ agent });
+      expect(printedText()).toContain(`Unknown preset '${foreign}'.`);
+      expect(printedText()).toContain(allowed);
+      expect(removePresetMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("prompts for confirmation before removing an interactively selected preset", async () => {
     await removeSandboxPolicy("test-sandbox");

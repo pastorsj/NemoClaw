@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { runOpenshellProviderCommand } from "../adapters/openshell/provider-command";
 import { OPENSHELL_OPERATION_TIMEOUT_MS } from "../adapters/openshell/timeouts";
@@ -10,6 +11,7 @@ import {
   isBridgeProviderName,
   recoverGatewayForCredentialMutationOrExit,
 } from "../credentials/command-support";
+import { captureHarnessPackageText, listHarnessPackages } from "../harness/package-registry";
 import { redact } from "../security/redact";
 import { SECRET_PATTERNS } from "../security/secret-patterns";
 import { withMcpCredentialOwnershipLock } from "../state/mcp-lifecycle-lock/credential-ownership";
@@ -41,6 +43,7 @@ const CONFIG_KEY_DENYLIST =
 const PROVIDER_NAME_PATTERN = /^[a-z][a-z0-9._-]{0,127}$/i;
 const PROVIDER_TYPE_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/i;
 const MAX_CONFIG_ENTRY_LENGTH = 4096;
+const MAX_PROVIDER_PROFILE_BYTES = 256 * 1024;
 
 function ok(successLines: readonly string[]): CredentialsAddResult {
   return { exitCode: 0, successLines, failureLines: [] };
@@ -113,22 +116,78 @@ function inspectProviderProfileCredentialKeys(type: string): {
   };
 }
 
-function bundledProviderProfilePath(type: string): string {
-  return path.join(ROOT, "nemoclaw-blueprint", "provider-profiles", `${type.toLowerCase()}.yaml`);
+function requireRegularProviderProfile(profilePath: string): void {
+  const metadata = fs.lstatSync(profilePath);
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
+    throw new Error(`Provider profile must be a regular file: ${profilePath}`);
+  }
 }
 
-function ensureBundledProviderProfile(type: string): CredentialsAddResult | null {
-  const profilePath = bundledProviderProfilePath(type);
-  if (!fs.existsSync(profilePath)) return null;
+type BuiltInProviderProfile =
+  | { kind: "shared"; path: string }
+  | { kind: "harness"; fileName: string; source: string };
 
-  const result = runOpenshellProviderCommand(
-    ["provider", "profile", "import", "--file", profilePath],
-    {
+function bundledProviderProfile(type: string): BuiltInProviderProfile | null {
+  const profileFile = `${type.toLowerCase()}.yaml`;
+  const central = path.join(ROOT, "nemoclaw-blueprint", "provider-profiles", profileFile);
+  const profiles: BuiltInProviderProfile[] = [];
+  if (fs.existsSync(central)) {
+    requireRegularProviderProfile(central);
+    profiles.push({ kind: "shared", path: central });
+  }
+  for (const harnessPackage of listHarnessPackages()) {
+    const relativePath = `provider-profiles/${profileFile}`;
+    const source = captureHarnessPackageText(
+      harnessPackage,
+      relativePath,
+      MAX_PROVIDER_PROFILE_BYTES,
+    ).source;
+    if (source === null) continue;
+    profiles.push({ kind: "harness", fileName: profileFile, source });
+  }
+  if (profiles.length > 1) {
+    throw new Error(`Provider profile '${type}' is declared by multiple built-in sources`);
+  }
+  return profiles[0] ?? null;
+}
+
+function importProviderProfile(profile: BuiltInProviderProfile) {
+  const importFile = (profilePath: string) =>
+    runOpenshellProviderCommand(["provider", "profile", "import", "--file", profilePath], {
       ignoreError: true,
       stdio: ["ignore", "pipe", "pipe"],
       timeout: OPENSHELL_OPERATION_TIMEOUT_MS,
-    },
-  );
+    });
+  if (profile.kind === "shared") return importFile(profile.path);
+
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-"));
+  const temporaryFile = path.join(temporaryDirectory, profile.fileName);
+  try {
+    fs.chmodSync(temporaryDirectory, 0o700);
+    fs.writeFileSync(temporaryFile, profile.source, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o400,
+    });
+    return importFile(temporaryFile);
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+function ensureBundledProviderProfile(type: string): CredentialsAddResult | null {
+  let profile: BuiltInProviderProfile | null;
+  try {
+    profile = bundledProviderProfile(type);
+  } catch (error) {
+    return fail([
+      `  Could not resolve bundled provider profile '${type}'.`,
+      `  ${redact(error instanceof Error ? error.message : String(error))}`,
+    ]);
+  }
+  if (!profile) return null;
+
+  const result = importProviderProfile(profile);
   if (result.status === 0) return null;
 
   const rawDiagnostic = `${String(result.stderr || "")} ${String(result.stdout || "")}`;

@@ -7,14 +7,30 @@
 // provider credentials stay outside ~/.deepagents files.
 
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import {
-  type ManagedDcodeProvider,
-  normalizeManagedDcodeEndpointUrl,
-  resolveManagedDcodeIdentity,
-} from "../../src/lib/inference/managed-dcode/identity.ts";
+type ManagedDcodeProvider = "openai" | "openrouter";
+
+type ManagedDcodeIdentity = {
+  provider: ManagedDcodeProvider;
+  model: string;
+  defaultModel: string;
+};
+
+type ManagedIdentityRuntime = {
+  normalizeManagedDcodeEndpointUrl(value: string | null | undefined, name: string): string | null;
+  resolveManagedDcodeIdentity(
+    upstreamProvider: string | null | undefined,
+    model: string,
+    upstreamEndpointUrl: string | null | undefined,
+  ): ManagedDcodeIdentity;
+};
+
+const require = createRequire(import.meta.url);
+const { normalizeManagedDcodeEndpointUrl, resolveManagedDcodeIdentity } =
+  require("./managed-identity.cts") as ManagedIdentityRuntime;
 
 type ReasoningEffort = "low" | "medium" | "high";
 

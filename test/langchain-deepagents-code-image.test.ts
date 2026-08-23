@@ -232,7 +232,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
       "COPY packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts",
     );
     expect(dockerfile).toContain(
-      "COPY src/lib/inference/managed-dcode/identity.ts /opt/nemoclaw-deepagents-code/src/lib/inference/managed-dcode/identity.ts",
+      "COPY packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
     );
     expect(dockerfile).toContain(
       "node --experimental-strip-types /opt/nemoclaw-deepagents-code/generate-config.ts",

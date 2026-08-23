@@ -11,12 +11,16 @@ import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 
 import {
   captureHarnessPackageSnapshot,
+  captureHarnessPackageText,
+  captureHarnessPackageTextDirectory,
+  captureHarnessPackageTexts,
   harnessPackageContentDigest,
   installBundledHarness,
   listHarnessPackages,
   refreshInstalledBundledHarnesses,
   resolveHarnessPackage,
   verifyHarnessPackageInstallReceipt,
+  withCapturedHarnessPackageTextFile,
 } from "./package-registry";
 
 const temporaryHomes: string[] = [];
@@ -339,6 +343,93 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
       const keepRestoredManifest = () => undefined;
       (fs.existsSync(displacedPath) ? restoreDisplacedManifest : keepRestoredManifest)();
     }
+  });
+
+  it("captures package text from the same receipt-verified traversal", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "captured-text");
+    fs.mkdirSync(path.join(root, "config"));
+    fs.writeFileSync(path.join(root, "config", "one.txt"), "one\n");
+    fs.writeFileSync(path.join(root, "config", "two.txt"), "two\n");
+    writeInstallReceipt(root, packageDigest(root));
+    const harnessPackage = resolveHarnessPackage("captured-text", { HOME: home });
+
+    const snapshot = captureHarnessPackageTexts(harnessPackage!, [
+      { relativePath: "config/one.txt", maxBytes: 32 },
+      { relativePath: "config/two.txt", maxBytes: 32 },
+      { relativePath: "config/missing.txt", maxBytes: 32 },
+    ]);
+
+    expect(snapshot.sources.get("config/one.txt")).toBe("one\n");
+    expect(snapshot.sources.get("config/two.txt")).toBe("two\n");
+    expect(snapshot.sources.get("config/missing.txt")).toBeNull();
+    expect(snapshot.contentDigest).toBe(packageDigest(root));
+  });
+
+  it("captures matching direct children from a package directory", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "captured-directory");
+    fs.mkdirSync(path.join(root, "policies", "presets", "nested"), { recursive: true });
+    fs.writeFileSync(path.join(root, "policies", "presets", "one.yaml"), "name: one\n");
+    fs.writeFileSync(path.join(root, "policies", "presets", "two.yaml"), "name: two\n");
+    fs.writeFileSync(path.join(root, "policies", "presets", "ignored.yml"), "name: ignored\n");
+    fs.writeFileSync(
+      path.join(root, "policies", "presets", "nested", "ignored.yaml"),
+      "name: nested\n",
+    );
+    writeInstallReceipt(root, packageDigest(root));
+    const harnessPackage = resolveHarnessPackage("captured-directory", { HOME: home });
+
+    const snapshot = captureHarnessPackageTextDirectory(
+      harnessPackage!,
+      "policies/presets",
+      ".yaml",
+      4096,
+    );
+
+    expect([...snapshot.sources.entries()]).toEqual([
+      ["policies/presets/one.yaml", "name: one\n"],
+      ["policies/presets/two.yaml", "name: two\n"],
+    ]);
+    expect(snapshot.contentDigest).toBe(packageDigest(root));
+  });
+
+  it("rejects changed package text before returning it to a consumer", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "changed-text");
+    fs.writeFileSync(path.join(root, "runtime.cjs"), "module.exports = { safe: true };\n");
+    writeInstallReceipt(root, packageDigest(root));
+    const harnessPackage = resolveHarnessPackage("changed-text", { HOME: home });
+    fs.writeFileSync(path.join(root, "runtime.cjs"), "module.exports = { safe: false };\n");
+
+    expect(() => captureHarnessPackageText(harnessPackage!, "runtime.cjs", 4096)).toThrow(
+      "installation receipt does not match package content",
+    );
+  });
+
+  it("materializes only captured package bytes for a synchronous file consumer", () => {
+    const home = temporaryHome();
+    const root = writeInstalledPackage(home, "captured-file");
+    fs.mkdirSync(path.join(root, "provider-profiles"));
+    fs.writeFileSync(path.join(root, "provider-profiles", "search.yaml"), "version: 1\n");
+    writeInstallReceipt(root, packageDigest(root));
+    const harnessPackage = resolveHarnessPackage("captured-file", { HOME: home });
+    let temporaryFile = "";
+
+    const result = withCapturedHarnessPackageTextFile(
+      harnessPackage!,
+      "provider-profiles/search.yaml",
+      4096,
+      (filePath) => {
+        temporaryFile = filePath;
+        expect(filePath).not.toContain(root);
+        expect(fs.readFileSync(filePath, "utf8")).toBe("version: 1\n");
+        return "imported";
+      },
+    );
+
+    expect(result).toBe("imported");
+    expect(fs.existsSync(temporaryFile)).toBe(false);
   });
 
   it("refuses a package metadata file swapped to a symlink before it is opened", () => {

@@ -172,7 +172,7 @@ function partitionPresets(
   applied: ReadonlySet<string>,
   gatewayPresets: ReadonlyArray<string> | null,
 ): { active: PolicyContextPreset[]; unapplied: PolicyContextPreset[] } {
-  const builtin = listPresets();
+  const builtin = listPresets({ agent: registry.getSandbox(sandboxName)?.agent ?? null });
   const customInfo = listCustomPresets(sandboxName);
   const customByName = new Map(
     registry.getCustomPolicies(sandboxName).map((entry) => [entry.name, entry.content]),
@@ -191,7 +191,11 @@ function partitionPresets(
     // would record the preset as operator-applied (#9079). Sibling base additions
     // with no catalog entry are never iterated here, so this only corrects the
     // incidental name-collision case.
-    if (!isApplied && verification === "gateway-only" && isAgentBasePreset(sandboxName, info.name)) {
+    if (
+      !isApplied &&
+      verification === "gateway-only" &&
+      isAgentBasePreset(sandboxName, info.name)
+    ) {
       verification = "agent-base";
     }
     const enforcedNotApplied =

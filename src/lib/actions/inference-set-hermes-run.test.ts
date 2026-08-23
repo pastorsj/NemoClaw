@@ -11,7 +11,7 @@ vi.mock("../onboard/experimental/portable-agent-lifecycle", async (importOrigina
   ...(await importOriginal()),
   assertHermesPortableCommandUnavailable: portableMocks.assertUnavailable,
 }));
-import { HERMES_PROXY_REWRITE_SENTINEL } from "../hermes-managed-route";
+import { HERMES_PROXY_REWRITE_SENTINEL } from "../../../packages/nemoclaw-hermes/config/managed-policy.ts";
 import type { ConfigObject } from "../security/credential-filter";
 import { runInferenceSet } from "./inference-set";
 import { baseSession, createDeps, HERMES_TARGET } from "./inference-set.test-support";
@@ -59,7 +59,7 @@ describe("runInferenceSet Hermes routing", () => {
       .mockImplementationOnce(() => undefined)
       .mockImplementationOnce(() => {
         throw new Error("schema-5 appeared");
-    });
+      });
     const deps = createDeps({
       config: {},
       entry: {

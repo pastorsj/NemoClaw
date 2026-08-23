@@ -16,6 +16,26 @@
     "moduleDetection": "force",
     "types": ["node"]
   },
-  "include": [".agents/skills/nemoclaw-maintainer-day/scripts/check-gates.ts", ".agents/skills/nemoclaw-maintainer-day/scripts/shared.ts", "packages/nemoclaw-hermes/**/*.ts", "packages/nemoclaw-openclaw/scripts/**/*.mts", "bin/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mts", "src/**/*.ts", "test/**/*.ts", "tools/**/*.ts", "tools/**/*.mts"],
-  "exclude": ["node_modules", "packages/nemoclaw-openclaw/plugin", "test/e2e/fixtures/plugins/weather", "tools/mcp-tool-discovery-runtime/mcp-tool-discovery.ts", "tools/mcp-tool-discovery-runtime/streamable-http-client.test.ts"]
+  "include": [
+    ".agents/skills/nemoclaw-maintainer-day/scripts/check-gates.ts",
+    ".agents/skills/nemoclaw-maintainer-day/scripts/shared.ts",
+    "packages/nemoclaw-hermes/**/*.ts",
+    "packages/nemoclaw-langchain-deepagents-code/**/*.ts",
+    "packages/nemoclaw-openclaw/scripts/**/*.mts",
+    "bin/**/*.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.mts",
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "tools/**/*.ts",
+    "tools/**/*.mts"
+  ],
+  "exclude": [
+    "node_modules",
+    "packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts",
+    "packages/nemoclaw-openclaw/plugin",
+    "test/e2e/fixtures/plugins/weather",
+    "tools/mcp-tool-discovery-runtime/mcp-tool-discovery.ts",
+    "tools/mcp-tool-discovery-runtime/streamable-http-client.test.ts"
+  ]
 }

@@ -59,6 +59,9 @@ The registry requires each file to be a non-empty regular file and requires `sta
 executable. Packages can also include these optional paths:
 
 - `policy-permissive.yaml` optionally defines the agent runtime's Shields down policy.
+- `policies/presets/` optionally contains policy presets available only to this agent runtime.
+- `provider-profiles/` optionally contains package-owned OpenShell provider profiles.
+- `model-specific-setup/` optionally contains compatibility manifests for this agent runtime.
 - `plugin/` optionally contains an agent runtime plugin.
 
 Package-specific helpers, lockfiles, patches, schemas, and runtime plugins belong with these files.

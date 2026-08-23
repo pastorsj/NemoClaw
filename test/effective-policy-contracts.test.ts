@@ -287,11 +287,7 @@ describe("effective built-in policy contracts", () => {
         requireEndpoint(teams, host).request_body_credential_rewrite,
       );
     });
-    [
-      "login.microsoftonline.com",
-      "outlook.office365.com",
-      "outlook.office.com",
-    ].forEach((host) => {
+    ["login.microsoftonline.com", "outlook.office365.com", "outlook.office.com"].forEach((host) => {
       expect(methods(requireEndpoint(outlook, host))).toEqual(["GET", "POST"]);
     });
 
@@ -375,7 +371,7 @@ describe("effective built-in policy contracts", () => {
   it("keeps host-local inference and managed tools on their broker boundaries", () => {
     const matrix = loadManagedToolGatewayMatrix();
     const managedPresetNames = Object.keys(matrix);
-    const effective = composePresets(["local-inference", ...managedPresetNames]);
+    const effective = composePresets(["local-inference", ...managedPresetNames], "hermes");
     const localInference = requireNetworkPolicy(effective, "local_inference");
     const privateRanges = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"];
 
@@ -546,11 +542,13 @@ describe("effective built-in policy contracts", () => {
       expect(endpoint).not.toHaveProperty("protocol");
       expect(endpoint).not.toHaveProperty("tls");
     });
-    (brew.endpoints ?? []).filter(
-      (candidate) => !["github.com", "raw.githubusercontent.com"].includes(candidate.host ?? ""),
-    ).forEach((endpoint) => {
-      expect(endpoint).toMatchObject({ access: "full", tls: "skip" });
-    });
+    (brew.endpoints ?? [])
+      .filter(
+        (candidate) => !["github.com", "raw.githubusercontent.com"].includes(candidate.host ?? ""),
+      )
+      .forEach((endpoint) => {
+        expect(endpoint).toMatchObject({ access: "full", tls: "skip" });
+      });
     expect((claude.endpoints ?? []).map((endpoint) => endpoint.host).sort()).toEqual([
       "api.anthropic.com",
       "platform.claude.com",

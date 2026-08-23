@@ -90,7 +90,6 @@ COPY packages/nemoclaw-hermes/patch-cron-execution-runtime.py /opt/nemoclaw-herm
 COPY packages/nemoclaw-hermes/patch-cron-restore-drain.py /opt/nemoclaw-hermes-config/patch-cron-restore-drain.py
 COPY packages/nemoclaw-hermes/patch-neutral-platform-env-activation.py /opt/nemoclaw-hermes-config/patch-neutral-platform-env-activation.py
 COPY packages/nemoclaw-hermes/host/managed-tool-gateway-matrix.json /opt/nemoclaw-hermes-config/managed-tool-gateway-matrix.json
-COPY src/lib/hermes-managed-route.ts /src/lib/hermes-managed-route.ts
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
 
@@ -98,6 +97,8 @@ FROM scratch AS hermes-runtime-payload
 
 COPY --from=mcp-tool-discovery-runtime /opt/mcp-tool-discovery-runtime/dist/ /usr/local/lib/nemoclaw/mcp-tool-discovery-runtime/
 COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
+COPY packages/nemoclaw-hermes/policies/presets/ /opt/nemoclaw-blueprint/policies/presets/
+COPY packages/nemoclaw-hermes/provider-profiles/ /opt/nemoclaw-blueprint/provider-profiles/
 COPY packages/nemoclaw-hermes/model-specific-setup/ /opt/nemoclaw-hermes-config/model-specific-setup/
 COPY scripts/lib/sandbox-init.sh /usr/local/lib/nemoclaw/sandbox-init.sh
 COPY scripts/lib/corporate-ca-runtime.sh /usr/local/lib/nemoclaw/corporate-ca-runtime.sh
@@ -398,7 +399,7 @@ RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
 # read-only.
 RUN find /opt/nemoclaw-hermes-config -type d -exec chmod 755 {} + \
     && find /opt/nemoclaw-hermes-config -type f -exec chmod 444 {} + \
-    && chmod 444 /src/lib/hermes-managed-route.ts /src/lib/tool-disclosure.ts \
+    && chmod 444 /opt/nemoclaw-hermes-config/config/managed-route.cts /src/lib/tool-disclosure.ts \
     && chmod 444 /scripts/lib/reviewed-npm-archive.mts /scripts/lib/bundled-npm-package.mts \
         /scripts/patch-bundled-npm-brace-expansion.mts /scripts/lib/patch-bundled-npm-ip-address.mts \
         /scripts/patch-bundled-npm-tar.mts \

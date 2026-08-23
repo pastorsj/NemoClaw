@@ -68,6 +68,32 @@ function discoverHarnessPolicyFiles(
   }
 }
 
+function discoverHarnessPresetFiles(): string[] {
+  const packagesRoot = join(REPO_ROOT, "packages");
+  try {
+    return readdirSync(packagesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+      .flatMap((packageDirectory) => {
+        const relativeDirectory = `packages/${packageDirectory.name}/policies/presets`;
+        try {
+          return readdirSync(join(REPO_ROOT, relativeDirectory), { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
+            .map((entry) => `${relativeDirectory}/${entry.name}`);
+        } catch (err) {
+          const code =
+            typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+          if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+          return [];
+        }
+      })
+      .sort();
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    return [];
+  }
+}
+
 /**
  * Build the list of config files and their corresponding JSON Schemas.
  * Preset YAML files are discovered dynamically from the presets directory.
@@ -127,11 +153,18 @@ function discoverTargets(): ConfigTarget[] {
       }
     }
   };
-  for (const modelSetupDir of [
-    join(REPO_ROOT, "nemoclaw-blueprint", "model-specific-setup"),
-    join(REPO_ROOT, "packages", "nemoclaw-openclaw", "model-specific-setup"),
-    join(REPO_ROOT, "packages", "nemoclaw-hermes", "model-specific-setup"),
-  ]) {
+  const modelSetupDirectories = [join(REPO_ROOT, "nemoclaw-blueprint", "model-specific-setup")];
+  try {
+    modelSetupDirectories.push(
+      ...readdirSync(join(REPO_ROOT, "packages"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+        .map((entry) => join(REPO_ROOT, "packages", entry.name, "model-specific-setup")),
+    );
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+  }
+  for (const modelSetupDir of modelSetupDirectories) {
     try {
       walkModelSetup(modelSetupDir);
     } catch (err) {
@@ -160,6 +193,7 @@ function discoverTargets(): ConfigTarget[] {
     if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
     // presets directory may not exist — not an error
   }
+  presetFiles.push(...discoverHarnessPresetFiles());
 
   const channelPoliciesDir = join(REPO_ROOT, "src/lib/messaging/channels");
   try {

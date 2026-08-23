@@ -56,6 +56,12 @@ const OPAQUE_INPUTS = [
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
   "packages/nemoclaw-hermes/policy-additions.yaml",
+  "packages/nemoclaw-hermes/config/managed-route.cts",
+  "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+  "packages/nemoclaw-openclaw/model-specific-setup/openclaw/gemini-3-managed-inference.json",
+  "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
+  "packages/nemoclaw-openclaw/policies/presets/openclaw-pricing.yaml",
+  "packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml",
   "src/lib/messaging/channels/telegram/policy/openclaw.yaml",
   "nemoclaw-blueprint/policies/presets/local-inference.yaml",
   "nemoclaw-blueprint/policies/presets/claude-code.yaml",
@@ -170,6 +176,33 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/onboard/initial-policy-real-policy.test.ts",
       "src/lib/onboard/initial-policy.test.ts",
     ]);
+    expect(triggeredBy("packages/nemoclaw-hermes/config/managed-route.cts")).toEqual([
+      "src/lib/hermes-managed-route.test.ts",
+      "test/generate-hermes-config.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/managed-identity.cts")).toEqual(
+      [
+        "src/lib/inference/managed-dcode/identity.test.ts",
+        "test/langchain-deepagents-code-image.test.ts",
+        "test/package-contract/harness-packages.test.ts",
+      ],
+    );
+    expect(
+      triggeredBy(
+        "packages/nemoclaw-openclaw/model-specific-setup/openclaw/gemini-3-managed-inference.json",
+      ),
+    ).toEqual(["test/validate-config-target-discovery.test.ts"]);
+    expect(triggeredBy("packages/nemoclaw-hermes/policies/presets/local-memory.yaml")).toEqual([
+      "test/effective-policy-contracts.test.ts",
+      "test/policies.test.ts",
+    ]);
+    expect(
+      triggeredBy("packages/nemoclaw-openclaw/policies/presets/openclaw-pricing.yaml"),
+    ).toEqual(["test/effective-policy-contracts.test.ts", "test/policies.test.ts"]);
+    expect(triggeredBy("packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml")).toEqual(
+      ["src/lib/onboard/brave-provider-profile.test.ts"],
+    );
     expect(triggeredBy("src/lib/messaging/channels/telegram/policy/openclaw.yaml")).toEqual([
       "src/lib/messaging/channels/policy.test.ts",
     ]);

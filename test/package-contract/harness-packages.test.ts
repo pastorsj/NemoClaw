@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { execFileSync } from "node:child_process";
-import { realpathSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -37,12 +37,23 @@ type HarnessRegistry = {
   readonly resolveHarnessPackage: (id: string, env: NodeJS.ProcessEnv) => HarnessPackage | null;
 };
 
+type HarnessRuntimeLoader = {
+  readonly loadHarnessCommonJsModule: (
+    harnessPackage: HarnessPackage & { packageName: string; version: string },
+    relativePath: string,
+    maxBytes: number,
+  ) => { exports: unknown };
+};
+
 describe("published harness packages", () => {
   let fixtureRoot: string;
   let packagedRoot: string;
   let packedPaths: ReadonlySet<string>;
   let openClawPackedPaths: ReadonlySet<string>;
+  let installedPackageRoot: string;
+  let fixtureRequire: NodeRequire;
   let registry: HarnessRegistry;
+  let runtimeLoader: HarnessRuntimeLoader;
   let environment: NodeJS.ProcessEnv;
 
   beforeAll(() => {
@@ -87,10 +98,37 @@ describe("published harness packages", () => {
         .filter((entry): entry is string => typeof entry === "string"),
     );
 
-    const fixtureRequire = createRequire(path.join(fixtureRoot, "package.json"));
+    installedPackageRoot = path.join(fixtureRoot, "installed", "node_modules", "nemoclaw");
+    const installedHermesConfig = path.join(
+      installedPackageRoot,
+      "packages",
+      "nemoclaw-hermes",
+      "config",
+    );
+    const installedDcodePackage = path.join(
+      installedPackageRoot,
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+    );
+    mkdirSync(installedHermesConfig, { recursive: true });
+    mkdirSync(installedDcodePackage, { recursive: true });
+    writeFileSync(path.join(installedPackageRoot, "package.json"), '{"name":"nemoclaw"}\n');
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-hermes/config/managed-route.cts"),
+      path.join(installedHermesConfig, "managed-route.cts"),
+    );
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
+      path.join(installedDcodePackage, "managed-identity.cts"),
+    );
+
+    fixtureRequire = createRequire(path.join(fixtureRoot, "package.json"));
     registry = fixtureRequire(
       path.join(fixtureRoot, "dist/lib/harness/package-registry.js"),
     ) as HarnessRegistry;
+    runtimeLoader = fixtureRequire(
+      path.join(fixtureRoot, "dist/lib/harness/commonjs-runtime.js"),
+    ) as HarnessRuntimeLoader;
     environment = { HOME: path.join(fixtureRoot, "home") };
   }, 120_000);
 
@@ -104,6 +142,61 @@ describe("published harness packages", () => {
     expect(packedPaths).toContain(`${packageRoot}/package.json`);
     expect(packedPaths).toContain(`${packageRoot}/manifest.yaml`);
     expect(packedPaths).toContain(`${packageRoot}/${harness.runtimeFile}`);
+  });
+
+  it.each([
+    "packages/nemoclaw-hermes/config/managed-route.cts",
+    "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+  ])("ships package-owned runtime contract %s", (artifact) => {
+    expect(packedPaths).toContain(artifact);
+  });
+
+  it("loads the package-owned runtime modules from the published tree", () => {
+    const hermes = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-hermes/config/managed-route.cts"),
+    ) as { hermesProviderKey(provider: string): string };
+    const dcode = fixtureRequire(
+      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
+    ) as { normalizeManagedDcodeModelName(model: string): string };
+
+    expect(hermes.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
+    expect(dcode.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
+  });
+
+  it("loads package-owned runtime modules from a normal node_modules installation", () => {
+    const hermesRoot = path.join(installedPackageRoot, "packages", "nemoclaw-hermes");
+    const dcodeRoot = path.join(
+      installedPackageRoot,
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+    );
+    const hermes = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "hermes",
+        packageName: "@nvidia/nemoclaw-hermes",
+        version: "0.1.0",
+        rootDir: hermesRoot,
+        manifestPath: path.join(hermesRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "config/managed-route.cts",
+      64 * 1024,
+    ).exports as { hermesProviderKey(provider: string): string };
+    const dcode = runtimeLoader.loadHarnessCommonJsModule(
+      {
+        id: "langchain-deepagents-code",
+        packageName: "@nvidia/nemoclaw-langchain-deepagents-code",
+        version: "0.1.0",
+        rootDir: dcodeRoot,
+        manifestPath: path.join(dcodeRoot, "manifest.yaml"),
+        source: "bundled",
+      },
+      "managed-identity.cts",
+      64 * 1024,
+    ).exports as { normalizeManagedDcodeModelName(model: string): string };
+
+    expect(hermes.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
+    expect(dcode.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
   });
 
   it.each([

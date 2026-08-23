@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -30,6 +30,41 @@ describe("config validation target discovery", () => {
         .map((entry) => `packages/${packageDirectory.name}/${entry.name}`);
     })
     .sort();
+  const packagePresetFiles = readdirSync(path.join(repositoryRoot, "packages"), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+    .flatMap((packageDirectory) => {
+      const relativeDirectory = `packages/${packageDirectory.name}/policies/presets`;
+      const directory = path.join(repositoryRoot, relativeDirectory);
+      return existsSync(directory)
+        ? readdirSync(directory, { withFileTypes: true })
+            .filter((entry) => entry.isFile() && entry.name.endsWith(".yaml"))
+            .map((entry) => `${relativeDirectory}/${entry.name}`)
+        : [];
+    })
+    .sort();
+  const packageModelSetupFiles = readdirSync(path.join(repositoryRoot, "packages"), {
+    withFileTypes: true,
+  })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+    .flatMap((packageDirectory) => {
+      const packageRoot = path.join(repositoryRoot, "packages", packageDirectory.name);
+      const modelSetupRoot = path.join(packageRoot, "model-specific-setup");
+      const walk = (directory: string): string[] =>
+        existsSync(directory)
+          ? readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+              const candidate = path.join(directory, entry.name);
+              return entry.isDirectory()
+                ? walk(candidate)
+                : entry.isFile() && entry.name.endsWith(".json") && entry.name !== "schema.json"
+                  ? [path.relative(repositoryRoot, candidate).split(path.sep).join("/")]
+                  : [];
+            })
+          : [];
+      return walk(modelSetupRoot);
+    })
+    .sort();
 
   it("includes every binary-scoped sandbox policy family", () => {
     expect(sandboxPolicyFiles).toEqual(
@@ -53,12 +88,13 @@ describe("config validation target discovery", () => {
     expect(new Set(sandboxPolicyFiles).size).toBe(sandboxPolicyFiles.length);
   });
 
-  it("discovers model-specific setup manifests", () => {
-    expect(filesBySchema.get("nemoclaw-blueprint/model-specific-setup/schema.json") ?? []).toEqual(
-      expect.arrayContaining([
-        "packages/nemoclaw-openclaw/model-specific-setup/openclaw/kimi-k2.6-managed-inference.json",
-      ]),
+  it("discovers every harness package model-specific setup manifest once", () => {
+    const modelSetupFiles =
+      filesBySchema.get("nemoclaw-blueprint/model-specific-setup/schema.json") ?? [];
+    expect(modelSetupFiles.filter((file) => file.startsWith("packages/nemoclaw-"))).toEqual(
+      packageModelSetupFiles,
     );
+    expect(new Set(modelSetupFiles).size).toBe(modelSetupFiles.length);
   });
 
   it("discovers channel-owned messaging policy presets", () => {
@@ -70,6 +106,13 @@ describe("config validation target discovery", () => {
         "src/lib/messaging/channels/telegram/policy/hermes.yaml",
       ]),
     );
+  });
+
+  it("discovers every harness package policy preset once", () => {
+    expect(presetFiles.filter((file) => file.startsWith("packages/nemoclaw-"))).toEqual(
+      packagePresetFiles,
+    );
+    expect(new Set(presetFiles).size).toBe(presetFiles.length);
   });
 
   it("includes the onboard performance budget config", () => {

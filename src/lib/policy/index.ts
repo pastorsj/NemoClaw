@@ -54,13 +54,17 @@ import {
 import { classifyPolicySetResult, type PolicySetOutcome } from "./policy-set-outcome";
 import {
   findUnexpectedExistingPolicyKey,
+  listNonMessagingPolicyPresets,
+  loadBuiltInPolicyPreset,
+  loadSharedPolicyPreset,
   PERSONAL_OPEN_INTERNET_PRESET_NAME,
-} from "./preset-ownership";
+  PRESETS_DIR,
+  type PresetInfo,
+} from "./preset-catalog";
 import {
   isPolicyDocument,
   isPolicyObject,
   isPresetPolicyMap,
-  materializeLocalInferencePresetPorts,
   type PolicyDocument,
   type PolicyObject,
   type PolicyValue,
@@ -77,18 +81,9 @@ import {
   type TrustedPrivatePolicyPinCapability,
 } from "./trusted-private-endpoints";
 
-const PRESETS_DIR = path.join(ROOT, "nemoclaw-blueprint", "policies", "presets");
-
 const PERSONAL_OPEN_INTERNET_POLICY_KEY = "personal_open_internet";
 const PERSONAL_OPEN_INTERNET_PORTS = new Set([80, 443]);
-
 const MAX_PRESET_FILE_BYTES = 10_000_000;
-
-type PresetInfo = {
-  file: string;
-  name: string;
-  description: string;
-};
 
 type SelectionOptions = {
   applied?: string[];
@@ -114,11 +109,20 @@ type SetupPolicyPresetSupportOptions = {
   agent?: string | null;
 };
 
+function assertUniquePresetNames(presets: readonly PresetInfo[]): void {
+  const seen = new Set<string>();
+  for (const preset of presets) {
+    if (seen.has(preset.name)) {
+      throw new Error(`Duplicate built-in policy preset '${preset.name}'`);
+    }
+    seen.add(preset.name);
+  }
+}
+
 /**
- * Enumerate every built-in preset and return `{ file, name, description }`
- * triples parsed from each file's `preset:` header. Non-messaging presets live
- * under `nemoclaw-blueprint/policies/presets/`; messaging channel presets live
- * beside their channel manifests under `src/lib/messaging/channels/<channel>/policy/`.
+ * Enumerate shared presets plus presets owned by the selected harness package.
+ * Omitting `agent` returns the complete built-in catalogue for internal checks.
+ * Messaging channel presets remain beside their channel manifests.
  */
 function listPresets(options: PresetListOptions = {}): PresetInfo[] {
   const channelPresets = listMessagingChannelPolicyPresets({ agent: options.agent }).map(
@@ -129,41 +133,14 @@ function listPresets(options: PresetListOptions = {}): PresetInfo[] {
     }),
   );
   const channelPresetNames = new Set(channelPresets.map((preset) => preset.name));
-  if (!fs.existsSync(PRESETS_DIR)) return channelPresets;
-  const centralPresets = fs
-    .readdirSync(PRESETS_DIR)
-    .filter((f: string) => f.endsWith(".yaml"))
-    .map((f: string) => {
-      const content = fs.readFileSync(path.join(PRESETS_DIR, f), "utf-8");
-      const nameMatch = content.match(/^\s*name:\s*(.+)$/m);
-      const descMatch = content.match(/^\s*description:\s*"?([^\n"]*)"?$/m);
-      return {
-        file: f,
-        name: nameMatch ? nameMatch[1].trim() : f.replace(".yaml", ""),
-        description: descMatch ? descMatch[1].trim() : "",
-      };
-    })
-    .filter((preset: PresetInfo) => !channelPresetNames.has(preset.name));
-  return [...centralPresets, ...channelPresets];
-}
-
-/**
- * Read a non-messaging built-in preset by short name from `PRESETS_DIR`.
- * Guards against path traversal and returns `null` if the preset does not
- * exist.
- */
-function loadCentralPreset(name: string, options: { reportMissing?: boolean } = {}): string | null {
-  const file = path.resolve(PRESETS_DIR, `${name}.yaml`);
-  if (!file.startsWith(PRESETS_DIR + path.sep) && file !== PRESETS_DIR) {
-    console.error(`  Invalid preset name: ${name}`);
-    return null;
-  }
-  if (!fs.existsSync(file)) {
-    if (options.reportMissing !== false) console.error(`  Preset not found: ${name}`);
-    return null;
-  }
-  const content = fs.readFileSync(file, "utf-8");
-  return name === "local-inference" ? materializeLocalInferencePresetPorts(content) : content;
+  const nonMessagingPresets = listNonMessagingPolicyPresets(options.agent).filter(
+    (preset: PresetInfo) => !channelPresetNames.has(preset.name),
+  );
+  assertUniquePresetNames(nonMessagingPresets);
+  return [
+    ...nonMessagingPresets.sort((left, right) => left.file.localeCompare(right.file)),
+    ...channelPresets,
+  ];
 }
 
 function loadPresetForAgent(name: string, options: PresetLoadOptions = {}): string | null {
@@ -173,7 +150,7 @@ function loadPresetForAgent(name: string, options: PresetLoadOptions = {}): stri
   });
   if (channelPreset) return channelPreset;
   if (isMessagingChannelPolicyPreset(name)) return null;
-  return loadCentralPreset(name);
+  return loadBuiltInPolicyPreset(name, options.agent);
 }
 
 function loadPreset(name: string): string | null {
@@ -325,7 +302,13 @@ function loadAgentPresetContent(
  * classification.
  */
 function isAgentBasePreset(sandboxName: string, presetName: string): boolean {
-  const builtinPresetContent = loadCentralPreset(presetName);
+  let sandboxAgent: string | null = null;
+  try {
+    sandboxAgent = registry.getSandbox(sandboxName)?.agent ?? null;
+  } catch {
+    sandboxAgent = null;
+  }
+  const builtinPresetContent = loadBuiltInPolicyPreset(presetName, sandboxAgent);
   return loadAgentPresetContent(sandboxName, presetName, builtinPresetContent ?? "") !== null;
 }
 
@@ -344,7 +327,7 @@ function loadPresetForSandbox(sandboxName: string, presetName: string): string |
   if (channelPresetContent) return channelPresetContent;
   if (isMessagingChannelPolicyPreset(presetName)) return null;
 
-  const builtinPresetContent = loadCentralPreset(presetName);
+  const builtinPresetContent = loadBuiltInPolicyPreset(presetName, sandboxAgent);
   if (!builtinPresetContent) return null;
   return (
     loadAgentPresetContent(sandboxName, presetName, builtinPresetContent) || builtinPresetContent
@@ -777,7 +760,7 @@ function normalizePersonalOpenInternetPolicy(policyContent: string): string {
   }
   const personalEntry = networkPolicies[PERSONAL_OPEN_INTERNET_POLICY_KEY];
 
-  const reviewedContent = loadCentralPreset(PERSONAL_OPEN_INTERNET_PRESET_NAME, {
+  const reviewedContent = loadSharedPolicyPreset(PERSONAL_OPEN_INTERNET_PRESET_NAME, {
     reportMissing: false,
   });
   const reviewedEntry = parseNetworkPolicies(reviewedContent)?.[PERSONAL_OPEN_INTERNET_POLICY_KEY];

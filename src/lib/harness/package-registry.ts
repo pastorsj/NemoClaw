@@ -48,6 +48,22 @@ export interface HarnessPackageSnapshot {
   readonly manifestSource: string;
 }
 
+export interface HarnessPackageTextSnapshot {
+  readonly contentDigest: string;
+  readonly source: string | null;
+}
+
+export interface HarnessPackageTextsSnapshot {
+  readonly contentDigest: string;
+  readonly sources: ReadonlyMap<string, string | null>;
+}
+
+type PackageTextDirectoryCapture = {
+  readonly prefix: string;
+  readonly suffix: string;
+  readonly maxBytes: number;
+};
+
 export class HarnessPackageReceiptMismatchError extends Error {}
 
 type JsonRecord = Record<string, unknown>;
@@ -441,10 +457,11 @@ function assertInstalledPackageOwnership(rootDir: string): void {
 
 function packageTreeSnapshot(
   rootDir: string,
-  captureRelativePath: string | null = null,
-): { contentDigest: string; capturedFile: Buffer | null } {
+  captureFiles: ReadonlyMap<string, number> = new Map(),
+  captureDirectory: PackageTextDirectoryCapture | null = null,
+): { contentDigest: string; capturedFiles: ReadonlyMap<string, Buffer> } {
   const hash = crypto.createHash("sha256");
-  let capturedFile: Buffer | null = null;
+  const capturedFiles = new Map<string, Buffer>();
   visitPackageTree(rootDir, (relativePath, metadata) => {
     if (relativePath === INSTALL_RECEIPT_FILENAME) {
       if (!metadata.isFile()) {
@@ -464,8 +481,16 @@ function packageTreeSnapshot(
     try {
       const fileSize = Number(metadata.size);
       hash.update(`f\0${relativePath}\0${executable}\0${String(fileSize)}\0`);
-      if (relativePath === captureRelativePath) {
-        capturedFile = opened.readBytes(MANIFEST_MAX_BYTES);
+      const directChild = captureDirectory
+        ? relativePath.startsWith(captureDirectory.prefix) &&
+          !relativePath.slice(captureDirectory.prefix.length).includes("/") &&
+          relativePath.endsWith(captureDirectory.suffix)
+        : false;
+      const captureMaxBytes =
+        captureFiles.get(relativePath) ?? (directChild ? captureDirectory?.maxBytes : undefined);
+      if (captureMaxBytes !== undefined) {
+        const capturedFile = opened.readBytes(captureMaxBytes);
+        capturedFiles.set(relativePath, capturedFile);
         hash.update(capturedFile);
       } else {
         opened.readChunks(PACKAGE_FILE_MAX_BYTES, (chunk) => hash.update(chunk));
@@ -475,7 +500,7 @@ function packageTreeSnapshot(
       opened.close();
     }
   });
-  return { contentDigest: hash.digest("hex"), capturedFile };
+  return { contentDigest: hash.digest("hex"), capturedFiles };
 }
 
 function packageTreeDigest(rootDir: string): string {
@@ -527,8 +552,12 @@ export function captureHarnessPackageSnapshot(
   if (harnessPackage.source === "installed") {
     assertInstalledPackageOwnership(harnessPackage.rootDir);
   }
-  const snapshot = packageTreeSnapshot(harnessPackage.rootDir, relativeManifest);
-  if (snapshot.capturedFile === null) {
+  const snapshot = packageTreeSnapshot(
+    harnessPackage.rootDir,
+    new Map([[relativeManifest, MANIFEST_MAX_BYTES]]),
+  );
+  const manifestBytes = snapshot.capturedFiles.get(relativeManifest);
+  if (!manifestBytes) {
     throw new Error(`Harness manifest is unavailable: ${harnessPackage.manifestPath}`);
   }
   if (harnessPackage.source === "installed") {
@@ -536,8 +565,121 @@ export function captureHarnessPackageSnapshot(
   }
   return Object.freeze({
     contentDigest: snapshot.contentDigest,
-    manifestSource: snapshot.capturedFile.toString("utf8"),
+    manifestSource: manifestBytes.toString("utf8"),
   });
+}
+
+function assertHarnessPackageRelativeTextPath(relativePath: string, maxBytes: number): void {
+  if (
+    !relativePath ||
+    relativePath.includes("\\") ||
+    relativePath.split("/").some((segment) => !segment || segment === "." || segment === "..")
+  ) {
+    throw new Error(`Harness package file path must be normalized and relative: ${relativePath}`);
+  }
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > PACKAGE_FILE_MAX_BYTES) {
+    throw new RangeError(`Harness package file read limit is invalid: ${maxBytes}`);
+  }
+}
+
+/** Read text files from the same bounded traversal that verifies the package receipt. */
+export function captureHarnessPackageTexts(
+  harnessPackage: HarnessPackage,
+  files: readonly { relativePath: string; maxBytes: number }[],
+): HarnessPackageTextsSnapshot {
+  const captureFiles = new Map<string, number>();
+  for (const file of files) {
+    assertHarnessPackageRelativeTextPath(file.relativePath, file.maxBytes);
+    if (captureFiles.has(file.relativePath)) {
+      throw new Error(`Harness package file path is duplicated: ${file.relativePath}`);
+    }
+    captureFiles.set(file.relativePath, file.maxBytes);
+  }
+  if (harnessPackage.source === "installed") {
+    assertInstalledPackageOwnership(harnessPackage.rootDir);
+  }
+  const snapshot = packageTreeSnapshot(harnessPackage.rootDir, captureFiles);
+  if (harnessPackage.source === "installed") {
+    assertInstallReceiptMatches(harnessPackage.rootDir, snapshot.contentDigest);
+  }
+  return Object.freeze({
+    contentDigest: snapshot.contentDigest,
+    sources: new Map(
+      [...captureFiles.keys()].map((relativePath) => [
+        relativePath,
+        snapshot.capturedFiles.get(relativePath)?.toString("utf8") ?? null,
+      ]),
+    ),
+  });
+}
+
+/** Read one text file from the same bounded traversal that verifies the package receipt. */
+export function captureHarnessPackageText(
+  harnessPackage: HarnessPackage,
+  relativePath: string,
+  maxBytes: number,
+): HarnessPackageTextSnapshot {
+  const snapshot = captureHarnessPackageTexts(harnessPackage, [{ relativePath, maxBytes }]);
+  return Object.freeze({
+    contentDigest: snapshot.contentDigest,
+    source: snapshot.sources.get(relativePath) ?? null,
+  });
+}
+
+/** Read every matching direct child of a package directory during receipt verification. */
+export function captureHarnessPackageTextDirectory(
+  harnessPackage: HarnessPackage,
+  relativeDirectory: string,
+  suffix: string,
+  maxBytes: number,
+): HarnessPackageTextsSnapshot {
+  assertHarnessPackageRelativeTextPath(`${relativeDirectory}/fixture${suffix}`, maxBytes);
+  if (!suffix.startsWith(".") || suffix.includes("/")) {
+    throw new Error(`Harness package text suffix is invalid: ${suffix}`);
+  }
+  if (harnessPackage.source === "installed") {
+    assertInstalledPackageOwnership(harnessPackage.rootDir);
+  }
+  const prefix = `${relativeDirectory}/`;
+  const snapshot = packageTreeSnapshot(harnessPackage.rootDir, new Map(), {
+    prefix,
+    suffix,
+    maxBytes,
+  });
+  if (harnessPackage.source === "installed") {
+    assertInstallReceiptMatches(harnessPackage.rootDir, snapshot.contentDigest);
+  }
+  return Object.freeze({
+    contentDigest: snapshot.contentDigest,
+    sources: new Map(
+      [...snapshot.capturedFiles.entries()].map(([relativePath, bytes]) => [
+        relativePath,
+        bytes.toString("utf8"),
+      ]),
+    ),
+  });
+}
+
+/** Supply a private temporary file containing receipt-verified package text. */
+export function withCapturedHarnessPackageTextFile<T>(
+  harnessPackage: HarnessPackage,
+  relativePath: string,
+  maxBytes: number,
+  consume: (filePath: string) => T,
+): T {
+  const snapshot = captureHarnessPackageText(harnessPackage, relativePath, maxBytes);
+  if (snapshot.source === null) {
+    throw new Error(`Harness package file is unavailable: ${relativePath}`);
+  }
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-harness-file-"));
+  const temporaryFile = path.join(temporaryDirectory, path.basename(relativePath));
+  try {
+    fs.chmodSync(temporaryDirectory, 0o700);
+    fs.writeFileSync(temporaryFile, snapshot.source, { encoding: "utf8", flag: "wx", mode: 0o400 });
+    return consume(temporaryFile);
+  } finally {
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
 }
 
 function indexById(

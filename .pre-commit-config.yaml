@@ -172,7 +172,7 @@ repos:
         entry: npx tsx scripts/validate-configs.mts
         language: system
         pass_filenames: false
-        files: ^(nemoclaw-blueprint/.*\.yaml$|packages/nemoclaw-openclaw/(?:model-specific-setup/.*\.json|plugin/openclaw\.plugin\.json|schemas/.*\.json)$|schemas/.*\.json$)
+        files: ^(nemoclaw-blueprint/.*\.yaml$|agents/[^/]+/(?:policy-additions|policy-permissive[^/]*)\.yaml$|packages/nemoclaw-[^/]+/(?:(?:policy-additions|policy-permissive[^/]*)\.yaml|policies/presets/[^/]+\.yaml|model-specific-setup/.*\.json)$|packages/nemoclaw-openclaw/(?:plugin/openclaw\.plugin\.json|schemas/.*\.json)$|src/lib/messaging/channels/[^/]+/policy/[^/]+\.ya?ml$|ci/onboard-performance-budget\.json$|schemas/.*\.json$)
         priority: 10
 
       - id: validate-managed-inference-catalog
@@ -187,7 +187,7 @@ repos:
         name: Repository checks
         entry: npm run checks:repository
         language: system
-        files: ^(\.pre-commit-config\.yaml$|\.github/workflows/e2e\.yaml$|Dockerfile(?:\.base)?$|packages/nemoclaw-openclaw/(?:Dockerfile(?:\.base)?|manifest\.yaml|plugin/package\.json|plugin/src/.*\.(?:cts|mts|ts|tsx)|scripts/.*\.(?:mts|ts))$|packages/nemoclaw-hermes/(?:Dockerfile(?:\.base)?|manifest\.yaml|mcp-config-transaction\.py|scripts/update-hermes-agent\.sh)$|docs/resources/starter-prompt\.md$|nemoclaw-blueprint/blueprint\.yaml$|package\.json$|scripts/(?:brev-launchable-ci-cpu|check-installer-hash|install-openshell)\.sh$|src/lib/actions/sandbox/openshell-child-visible-credentials\.v[0-9]+\.[0-9]+\.[0-9]+\.json$|bin/.*\.(cjs|js|mjs)$|src/.*\.(cts|mts|ts|tsx)$|scripts/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$|test/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$)
+        files: ^(\.pre-commit-config\.yaml$|\.github/workflows/e2e\.yaml$|Dockerfile(?:\.base)?$|packages/nemoclaw-[^/]+/(?:Dockerfile(?:\.base)?|.*\.(?:cjs|cts|js|json|mjs|mts|py|sh|ts|tsx|yaml))$|docs/resources/starter-prompt\.md$|nemoclaw-blueprint/blueprint\.yaml$|package\.json$|scripts/(?:brev-launchable-ci-cpu|check-installer-hash|install-openshell)\.sh$|src/lib/actions/sandbox/openshell-child-visible-credentials\.v[0-9]+\.[0-9]+\.[0-9]+\.json$|bin/.*\.(cjs|js|mjs)$|src/.*\.(cts|mts|ts|tsx)$|scripts/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$|test/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$)
         pass_filenames: false
         priority: 10
 
@@ -266,7 +266,7 @@ repos:
         entry: npm run typecheck:cli -- --incremental
         language: system
         pass_filenames: false
-        files: ^(packages/nemoclaw-hermes|packages/nemoclaw-openclaw/scripts|bin|scripts|src|test|tools)/.*\.(ts|tsx|mts|cts|json)$|^\.agents/skills/nemoclaw-maintainer-day/scripts/(check-gates|shared)\.ts$|^packages/nemoclaw-openclaw/plugin/src/(lib/subprocess-env|blueprint/private-networks)\.ts$|^(package(-lock)?\.json|tsconfig\.cli\.json|vitest\.config\.ts)$
+        files: ^(packages/nemoclaw-hermes|packages/nemoclaw-langchain-deepagents-code|packages/nemoclaw-openclaw/scripts|bin|scripts|src|test|tools)/.*\.(ts|tsx|mts|cts|json)$|^\.agents/skills/nemoclaw-maintainer-day/scripts/(check-gates|shared)\.ts$|^packages/nemoclaw-openclaw/plugin/src/(lib/subprocess-env|blueprint/private-networks)\.ts$|^(package(-lock)?\.json|tsconfig\.cli\.json|vitest\.config\.ts)$
         stages: [pre-push]
         priority: 10
 

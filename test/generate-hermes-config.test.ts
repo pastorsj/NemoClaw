@@ -14,10 +14,10 @@ import {
 import { generateHermesConfig } from "../packages/nemoclaw-hermes/config/generate.ts";
 import {
   buildHermesManagedPolicy,
+  HERMES_PROXY_REWRITE_SENTINEL,
   MANAGED_IMAGE_HERMES_NEUTRAL_PLATFORMS,
 } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
 import { discoverModelSpecificSetups } from "../packages/nemoclaw-hermes/config/model-specific-setup.ts";
-import { HERMES_PROXY_REWRITE_SENTINEL } from "../src/lib/hermes-managed-route";
 import {
   applyCompatibleEndpointContextWindow,
   resetCompatibleEndpointContextWindowAutoState,
@@ -32,9 +32,21 @@ import {
   withLegacyMessagingPlanEnvDirect,
 } from "./messaging-plan-test-helper";
 
-const SCRIPT_PATH = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "generate-config.ts");
+const SCRIPT_PATH = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "generate-config.ts",
+);
 const SCRIPT_DIR = path.dirname(SCRIPT_PATH);
-const CONFIG_MODULE_DIR = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "config");
+const CONFIG_MODULE_DIR = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "config",
+);
 
 const BASE_ENV: Record<string, string> = {
   NEMOCLAW_MODEL: "test-model",
@@ -228,7 +240,12 @@ function writeManagedToolGatewayMatrixFixture(
 }
 
 function copyConfigGeneratorFixture(fixtureRoot: string): string {
-  const fixtureScriptPath = path.join(fixtureRoot, "packages", "nemoclaw-hermes", "generate-config.ts");
+  const fixtureScriptPath = path.join(
+    fixtureRoot,
+    "packages",
+    "nemoclaw-hermes",
+    "generate-config.ts",
+  );
   const fixtureConfigDir = path.join(fixtureRoot, "packages", "nemoclaw-hermes", "config");
   fs.mkdirSync(path.dirname(fixtureScriptPath), { recursive: true });
   fs.copyFileSync(SCRIPT_PATH, fixtureScriptPath);
@@ -241,10 +258,6 @@ function copyConfigGeneratorFixture(fixtureRoot: string): string {
   fs.copyFileSync(
     path.join(import.meta.dirname, "..", "src", "lib", "tool-disclosure.ts"),
     path.join(fixtureRoot, "src", "lib", "tool-disclosure.ts"),
-  );
-  fs.copyFileSync(
-    path.join(import.meta.dirname, "..", "src", "lib", "hermes-managed-route.ts"),
-    path.join(fixtureRoot, "src", "lib", "hermes-managed-route.ts"),
   );
   return fixtureScriptPath;
 }
@@ -744,9 +757,7 @@ describe("packages/nemoclaw-hermes/generate-config.ts", () => {
     expect(config.model.api_key).toBe(HERMES_PROXY_REWRITE_SENTINEL);
   });
 
-  it.each(
-    ["api_server", "discord", "slack", "telegram", "weixin", "whatsapp"],
-  )(
+  it.each(["api_server", "discord", "slack", "telegram", "weixin", "whatsapp"])(
     "preserves Hermes remote platform toolsets while keeping CLI defaults unpinned [%s]",
     async (platform) => {
       const { config } = await runConfigScriptWithMessaging({

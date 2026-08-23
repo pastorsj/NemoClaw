@@ -14,6 +14,7 @@
     "packages/nemoclaw-hermes/managed_policy.py",
     "packages/nemoclaw-hermes/mcp-config-transaction.py",
     "packages/nemoclaw-hermes/model-specific-setup/",
+    "packages/nemoclaw-hermes/policies/presets/",
     "packages/nemoclaw-hermes/patch-cron-execution-runtime.py",
     "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
     "packages/nemoclaw-hermes/patch-discord-recovery-permissions.py",
@@ -25,6 +26,7 @@
     "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
     "packages/nemoclaw-hermes/patch-session-list-preview.py",
     "packages/nemoclaw-hermes/plugin/",
+    "packages/nemoclaw-hermes/provider-profiles/",
     "packages/nemoclaw-hermes/runtime-config-guard.py",
     "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
     "packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py",
@@ -54,7 +56,6 @@
     "scripts/patch-bundled-npm-tar.mts",
     "scripts/state-dir-guard.py",
     "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
-    "src/lib/hermes-managed-route.ts",
     "src/lib/messaging/",
     "src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py",
     "src/lib/tool-disclosure.ts",
@@ -82,6 +83,10 @@
     },
     {
       "path": "packages/nemoclaw-hermes/config/managed-policy.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/managed-route.cts",
       "mode": "100644"
     },
     {
@@ -301,27 +306,27 @@
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/policies/presets/local-memory.yaml",
+      "path": "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/policies/presets/nous-audio.yaml",
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-audio.yaml",
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/policies/presets/nous-browser.yaml",
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-browser.yaml",
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/policies/presets/nous-code.yaml",
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-code.yaml",
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/policies/presets/nous-image.yaml",
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-image.yaml",
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/policies/presets/nous-web.yaml",
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-web.yaml",
       "mode": "100644"
     },
     {
@@ -330,14 +335,6 @@
     },
     {
       "path": "nemoclaw-blueprint/policies/presets/observability-otlp-local.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "nemoclaw-blueprint/policies/presets/openclaw-diagnostics-otel-local.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "nemoclaw-blueprint/policies/presets/openclaw-pricing.yaml",
       "mode": "100644"
     },
     {
@@ -393,7 +390,7 @@
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/provider-profiles/tavily-hermes-v1.yaml",
+      "path": "packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml",
       "mode": "100644"
     },
     {
@@ -478,10 +475,6 @@
     },
     {
       "path": "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
-      "mode": "100644"
-    },
-    {
-      "path": "src/lib/hermes-managed-route.ts",
       "mode": "100644"
     },
     {

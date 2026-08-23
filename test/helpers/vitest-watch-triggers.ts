@@ -109,6 +109,26 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/config\/managed-route\.cts$/,
+    testsToRun: runTests(
+      "src/lib/hermes-managed-route.test.ts",
+      "test/generate-hermes-config.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/managed-identity\.cts$/,
+    testsToRun: runTests(
+      "src/lib/inference/managed-dcode/identity.test.ts",
+      "test/langchain-deepagents-code-image.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-[^/]+\/model-specific-setup\/.*\.json$/,
+    testsToRun: runTests("test/validate-config-target-discovery.test.ts"),
+  },
+  {
     pattern:
       /(?:^|\/)(?:agents\/pi\/(?:Dockerfile(?:\.base)?|dependency-review\.md|generate-config\.ts|manifest\.yaml|policy-additions\.yaml|start\.sh|pi-runtime\/package(?:-lock)?\.json)|\.github\/workflows\/(?:managed-images|base-image)\.yaml)$/,
     testsToRun: runTests("test/pi-candidate-runtime-artifacts.test.ts"),
@@ -124,8 +144,12 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)nemoclaw-blueprint\/policies\/presets\/local-memory\.yaml$/,
-    testsToRun: runTests("test/effective-policy-contracts.test.ts"),
+    pattern: /(?:^|\/)packages\/nemoclaw-(?:hermes|openclaw)\/policies\/presets\/[^/]+\.yaml$/,
+    testsToRun: runTests("test/effective-policy-contracts.test.ts", "test/policies.test.ts"),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/provider-profiles\/tavily-hermes-v1\.yaml$/,
+    testsToRun: runTests("src/lib/onboard/brave-provider-profile.test.ts"),
   },
   {
     pattern: /(?:^|\/)nemoclaw-blueprint\/policies\/presets\/claude-code\.yaml$/,

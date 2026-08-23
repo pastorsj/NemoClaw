@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { HERMES_PROXY_REWRITE_SENTINEL } from "../hermes-managed-route";
+import { HERMES_PROXY_REWRITE_SENTINEL } from "../../../packages/nemoclaw-hermes/config/managed-policy.ts";
 import type { ConfigObject } from "../security/credential-filter";
 import { patchHermesInferenceConfig } from "./inference-set";
 

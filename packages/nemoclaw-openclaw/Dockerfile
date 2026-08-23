@@ -544,6 +544,7 @@ FROM scratch AS openclaw-plugin-payload
 COPY --from=builder /opt/nemoclaw/dist/ /opt/nemoclaw/dist/
 COPY packages/nemoclaw-openclaw/plugin/openclaw.plugin.json /opt/nemoclaw/
 COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
+COPY packages/nemoclaw-openclaw/policies/presets/ /opt/nemoclaw-blueprint/policies/presets/
 COPY packages/nemoclaw-openclaw/model-specific-setup/openclaw/ /opt/nemoclaw-blueprint/model-specific-setup/openclaw/
 COPY packages/nemoclaw-openclaw/openclaw-plugins/ /opt/nemoclaw-blueprint/openclaw-plugins/
 COPY packages/nemoclaw-openclaw/policy-additions.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox.yaml

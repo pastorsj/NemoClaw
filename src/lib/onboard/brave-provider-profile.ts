@@ -3,6 +3,8 @@
 
 import path from "node:path";
 
+import * as harnessPackages from "../harness/package-registry";
+
 import { compactText } from "../core/url-utils";
 import { isWebSearchEnabled } from "../inference/web-search";
 
@@ -50,6 +52,8 @@ export type BraveProviderProfileDeps = {
     opts: any,
   ) => { status: number | null; stderr?: string | Buffer | null; stdout?: string | Buffer | null };
   redact: (input: string) => string;
+  resolveHarnessPackage?: typeof harnessPackages.resolveHarnessPackage;
+  withCapturedHarnessPackageTextFile?: typeof harnessPackages.withCapturedHarnessPackageTextFile;
   log?: (message?: string) => void;
   exit?: (code?: number) => never;
 };
@@ -70,7 +74,11 @@ export function braveProviderProfilePath(root: string): string {
 export function webSearchProviderProfilePath(
   root: string,
   provider: WebSearchProviderProfileId,
+  hermesPackageRoot: string = path.join(root, "packages", "nemoclaw-hermes"),
 ): string {
+  if (provider === HERMES_TAVILY_PROVIDER_PROFILE_ID) {
+    return path.join(hermesPackageRoot, "provider-profiles", `${provider}.yaml`);
+  }
   return path.join(root, "nemoclaw-blueprint", "provider-profiles", `${provider}.yaml`);
 }
 
@@ -109,16 +117,29 @@ export function ensureWebSearchProviderProfiles(
   const exit = deps.exit ?? ((code?: number) => process.exit(code));
 
   for (const provider of neededProviders) {
-    const result = deps.runOpenshell(
-      [
-        "provider",
-        "profile",
-        "import",
-        "--file",
-        webSearchProviderProfilePath(deps.root, provider),
-      ],
-      { ignoreError: true, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const importProfile = (profilePath: string) =>
+      deps.runOpenshell(["provider", "profile", "import", "--file", profilePath], {
+        ignoreError: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    let result: ReturnType<typeof importProfile>;
+    if (provider === HERMES_TAVILY_PROVIDER_PROFILE_ID) {
+      const resolveHarnessPackage =
+        deps.resolveHarnessPackage ?? harnessPackages.resolveHarnessPackage;
+      const harnessPackage = resolveHarnessPackage("hermes");
+      if (!harnessPackage) throw new Error("Hermes harness package is unavailable");
+      const withCapturedFile =
+        deps.withCapturedHarnessPackageTextFile ??
+        harnessPackages.withCapturedHarnessPackageTextFile;
+      result = withCapturedFile(
+        harnessPackage,
+        `provider-profiles/${provider}.yaml`,
+        256 * 1024,
+        importProfile,
+      );
+    } else {
+      result = importProfile(webSearchProviderProfilePath(deps.root, provider));
+    }
     if (result.status === 0) continue;
 
     // OpenShell reports re-imports of an already-registered custom profile as

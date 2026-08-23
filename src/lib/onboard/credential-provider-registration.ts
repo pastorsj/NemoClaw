@@ -211,10 +211,7 @@ export function createCredentialProviderRegistration(deps: CredentialProviderReg
     type: string,
     credentialEnv: string,
   ): boolean {
-    return credentialBindingMatchesGateway(
-      { name, type, credentialEnv },
-      gatewayRunner(),
-    );
+    return credentialBindingMatchesGateway({ name, type, credentialEnv }, gatewayRunner());
   }
 
   function preflightRequiredCredentialProviderBindings(

@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import YAML from "yaml";
 
 import {
   BRAVE_PROVIDER_PROFILE_ID,
@@ -28,6 +31,36 @@ function makeDeps(runOpenshell: ReturnType<typeof vi.fn>, overrides: Record<stri
 }
 
 describe("ensureBraveProviderProfile", () => {
+  it("imports a Hermes Tavily profile accepted by its native request path", () => {
+    const runOpenshell = vi.fn((args: string[]) => {
+      const profile = YAML.parse(fs.readFileSync(args[4], "utf8"));
+      const credential = profile.credentials?.[0];
+      const endpoint = profile.endpoints?.[0];
+      const supported =
+        profile.id === "tavily-hermes-v1" &&
+        credential?.env_vars?.includes("TAVILY_API_KEY") &&
+        credential?.required === true &&
+        endpoint?.host === "api.tavily.com" &&
+        endpoint?.request_body_credential_rewrite === true &&
+        endpoint?.rules?.some(
+          (rule: { allow?: { method?: string; path?: string } }) =>
+            rule.allow?.method === "POST" && rule.allow.path === "/search",
+        ) &&
+        profile.binaries?.includes("/opt/hermes/.venv/bin/python");
+      return supported
+        ? { status: 0, stderr: "", stdout: "" }
+        : { status: 2, stderr: "profile rejected", stdout: "" };
+    });
+
+    expect(() =>
+      ensureWebSearchProviderProfiles(
+        [{ providerType: HERMES_TAVILY_PROVIDER_PROFILE_ID, token: "tvly-test" }],
+        makeDeps(runOpenshell),
+      ),
+    ).not.toThrow();
+    expect(runOpenshell).toHaveBeenCalledOnce();
+  });
+
   it("does nothing when no token def is brave-typed", () => {
     const runOpenshell = vi.fn();
     ensureBraveProviderProfile([{ providerType: "generic", token: "tok" }], makeDeps(runOpenshell));
@@ -90,10 +123,53 @@ describe("ensureBraveProviderProfile", () => {
         "profile",
         "import",
         "--file",
-        webSearchProviderProfilePath("/repo", HERMES_TAVILY_PROVIDER_PROFILE_ID),
+        expect.stringMatching(/nemoclaw-harness-file-.+[\\/]tavily-hermes-v1\.yaml$/u),
       ],
       expect.objectContaining({ ignoreError: true }),
     );
+  });
+
+  it("imports the Hermes profile from the selected installed harness package", () => {
+    const runOpenshell = vi.fn(() => ({ status: 0, stderr: "", stdout: "" }));
+    const installedPackageRoot = "/home/test/.nemoclaw/harnesses/nemoclaw-hermes";
+
+    ensureWebSearchProviderProfiles(
+      [{ providerType: HERMES_TAVILY_PROVIDER_PROFILE_ID, token: "tvly-test" }],
+      makeDeps(runOpenshell, {
+        resolveHarnessPackage: vi.fn(() => ({ rootDir: installedPackageRoot })),
+        withCapturedHarnessPackageTextFile: vi.fn(
+          (_harnessPackage, relativePath, _maxBytes, consume) =>
+            consume(path.join(installedPackageRoot, relativePath)),
+        ),
+      }),
+    );
+
+    expect(runOpenshell).toHaveBeenCalledWith(
+      [
+        "provider",
+        "profile",
+        "import",
+        "--file",
+        path.join(
+          installedPackageRoot,
+          "provider-profiles",
+          `${HERMES_TAVILY_PROVIDER_PROFILE_ID}.yaml`,
+        ),
+      ],
+      expect.objectContaining({ ignoreError: true }),
+    );
+  });
+
+  it("refuses Hermes profile registration when the selected harness package is unavailable", () => {
+    const runOpenshell = vi.fn();
+
+    expect(() =>
+      ensureWebSearchProviderProfiles(
+        [{ providerType: HERMES_TAVILY_PROVIDER_PROFILE_ID, token: "tvly-test" }],
+        makeDeps(runOpenshell, { resolveHarnessPackage: vi.fn(() => null) }),
+      ),
+    ).toThrow("Hermes harness package is unavailable");
+    expect(runOpenshell).not.toHaveBeenCalled();
   });
 
   it("treats an existing-profile diagnostic as success on re-onboard", () => {

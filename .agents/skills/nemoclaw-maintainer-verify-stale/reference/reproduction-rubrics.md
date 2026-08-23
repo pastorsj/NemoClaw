@@ -225,7 +225,7 @@ grep -oE '(^|[^[:alnum:]_])(openshell|nemoclaw|openclaw)[[:space:]]+[a-z-]+' "$E
   | while IFS= read -r t; do
   echo "=== drift check: $t ==="
   git log "$REPORTED_VERSION".."$LATEST" -S"$t" --oneline -- \
-    src/ bin/ scripts/ nemoclaw/src/ agents/ packages/ \
+    src/ bin/ scripts/ agents/ packages/ \
     nemoclaw-blueprint/openclaw-plugins/ 2>&1 | head -5
 done
 ```

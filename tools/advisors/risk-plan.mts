@@ -38,6 +38,7 @@ const PR_E2E_MANUAL_CONTROLLER_JOB_ID_SET = new Set<string>(PR_E2E_MANUAL_CONTRO
 const DEEPAGENTS_HEADLESS_INFERENCE_CHECK =
   "test/e2e/e2e-cloud-experimental/checks/07-deepagents-code-headless-inference.sh";
 const DEEPAGENTS_CODE_RUNTIME_ROOT = "packages/nemoclaw-langchain-deepagents-code/";
+const DEEPAGENTS_CODE_CORE_RUNTIME_ROOT = "src/lib/inference/managed-dcode/";
 const OPENCLAW_PACKAGE_RUNTIME_ROOT = "packages/nemoclaw-openclaw/";
 const CORE_HARNESS_RUNTIME_ROOTS = ["src/commands/harness/", "src/lib/harness/"] as const;
 const JOURNALED_RECREATE_RESUME_RUNTIME_FILES = new Set([
@@ -81,6 +82,7 @@ const HERMES_MANAGED_POLICY_E2E_JOB_IDS = [
 const HERMES_MANAGED_POLICY_FILES = new Set([
   "packages/nemoclaw-hermes/hermes-wrapper.py",
   "packages/nemoclaw-hermes/image-build-probes.py",
+  "packages/nemoclaw-hermes/config/managed-route.cts",
   "packages/nemoclaw-hermes/managed_policy.py",
   "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
   "packages/nemoclaw-hermes/seed-dashboard-config.py",
@@ -269,6 +271,7 @@ export function focusedPrE2eTargetsForChangedFiles(
       (file) =>
         file === DEEPAGENTS_HEADLESS_INFERENCE_CHECK ||
         JOURNALED_RECREATE_RESUME_RUNTIME_FILES.has(file) ||
+        (file.startsWith(DEEPAGENTS_CODE_CORE_RUNTIME_ROOT) && isRuntimeRelevant(file)) ||
         (file.startsWith(DEEPAGENTS_CODE_RUNTIME_ROOT) && isRuntimeRelevant(file)),
     ),
   );

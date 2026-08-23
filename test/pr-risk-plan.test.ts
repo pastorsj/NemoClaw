@@ -72,6 +72,7 @@ const HERMES_WRAPPER_FOCUSED_JOBS = [
 const HERMES_WRAPPER_REQUIRED_JOBS = [...HERMES_MANAGED_POLICY_REQUIRED_JOBS, "mcp-bridge"];
 const HERMES_MANAGED_POLICY_FILES = [
   "packages/nemoclaw-hermes/config/managed-policy.ts",
+  "packages/nemoclaw-hermes/config/managed-route.cts",
   "packages/nemoclaw-hermes/hermes-wrapper.py",
   "packages/nemoclaw-hermes/image-build-probes.py",
   "packages/nemoclaw-hermes/managed_policy.py",
@@ -86,21 +87,19 @@ function plan(...changedFiles: string[]) {
 }
 
 describe("deterministic PR risk plan", () => {
-  it.each([
-    "inference-routing",
-    "managed-image-protected-runtime",
-  ])("classifies the controller-accepted %s job for the commit under review", (jobId) => {
-    expect(isPrE2eManualControllerJob(jobId)).toBe(true);
-  });
+  it.each(["inference-routing", "managed-image-protected-runtime"])(
+    "classifies the controller-accepted %s job for the commit under review",
+    (jobId) => {
+      expect(isPrE2eManualControllerJob(jobId)).toBe(true);
+    },
+  );
 
-  it.each([
-    "cloud-inference",
-    "security-posture",
-    "network-policy",
-    "jetson-nvmap-gpu",
-  ])("classifies %s as manual-only when the controller rejects the job", (jobId) => {
-    expect(isPrE2eManualControllerJob(jobId)).toBe(false);
-  });
+  it.each(["cloud-inference", "security-posture", "network-policy", "jetson-nvmap-gpu"])(
+    "classifies %s as manual-only when the controller rejects the job",
+    (jobId) => {
+      expect(isPrE2eManualControllerJob(jobId)).toBe(false);
+    },
+  );
 
   it("emits a stable plan and digest for equivalent inputs", () => {
     const first = plan("src/lib/state/registry.ts", "src/lib/onboard.ts");
@@ -222,39 +221,40 @@ describe("deterministic PR risk plan", () => {
     expect(riskPlanRequiredJobIds(result)).toEqual(expectedRequiredJobs);
   });
 
-  it.each(
-    HERMES_CRON_RESTORE_FILES,
-  )("selects Hermes rebuild E2E for cron restore and drain changes in %s (#7806)", (changedFile) => {
-    const result = plan(changedFile);
-    const expectedRequiredJobs = changedFile.startsWith("packages/nemoclaw-hermes/")
-      ? [...HERMES_SANDBOX_BOUNDARY_JOBS, "rebuild-hermes"]
-      : changedFile === "src/lib/actions/sandbox/rebuild-hermes-post-restore.ts"
-        ? [
-            "managed-image-multiarch-startup",
-            "managed-image-protected-runtime",
-            "onboard-repair",
-            "onboard-resume",
-            "rebuild-hermes",
-            "rebuild-openclaw",
-            "state-backup-restore",
-          ]
-        : [
-            "onboard-repair",
-            "onboard-resume",
-            "rebuild-hermes",
-            "rebuild-openclaw",
-            "state-backup-restore",
-          ];
+  it.each(HERMES_CRON_RESTORE_FILES)(
+    "selects Hermes rebuild E2E for cron restore and drain changes in %s (#7806)",
+    (changedFile) => {
+      const result = plan(changedFile);
+      const expectedRequiredJobs = changedFile.startsWith("packages/nemoclaw-hermes/")
+        ? [...HERMES_SANDBOX_BOUNDARY_JOBS, "rebuild-hermes"]
+        : changedFile === "src/lib/actions/sandbox/rebuild-hermes-post-restore.ts"
+          ? [
+              "managed-image-multiarch-startup",
+              "managed-image-protected-runtime",
+              "onboard-repair",
+              "onboard-resume",
+              "rebuild-hermes",
+              "rebuild-openclaw",
+              "state-backup-restore",
+            ]
+          : [
+              "onboard-repair",
+              "onboard-resume",
+              "rebuild-hermes",
+              "rebuild-openclaw",
+              "state-backup-restore",
+            ];
 
-    expect(result.families).toContainEqual(
-      expect.objectContaining({
-        id: "focused-e2e",
-        matchedFiles: [changedFile],
-        requiredJobs: ["rebuild-hermes"],
-      }),
-    );
-    expect(riskPlanRequiredJobIds(result)).toEqual(expectedRequiredJobs);
-  });
+      expect(result.families).toContainEqual(
+        expect.objectContaining({
+          id: "focused-e2e",
+          matchedFiles: [changedFile],
+          requiredJobs: ["rebuild-hermes"],
+        }),
+      );
+      expect(riskPlanRequiredJobIds(result)).toEqual(expectedRequiredJobs);
+    },
+  );
 
   it("does not select Hermes rebuild E2E for the generic recovery command (#7806)", () => {
     const result = plan("src/commands/sandbox/recover.ts");
@@ -263,29 +263,30 @@ describe("deterministic PR risk plan", () => {
     expect(riskPlanRequiredJobIds(result)).not.toContain("rebuild-hermes");
   });
 
-  it.each(
-    HERMES_MANAGED_POLICY_FILES,
-  )("selects every Hermes managed-policy live E2E job for %s (#8008)", (changedFile) => {
-    const result = plan(changedFile);
-    const isWrapper = changedFile === "packages/nemoclaw-hermes/hermes-wrapper.py";
-    const expectedFocusedJobs = isWrapper
-      ? HERMES_WRAPPER_FOCUSED_JOBS
-      : HERMES_MANAGED_POLICY_JOBS;
-    const expectedRequiredJobs = isWrapper
-      ? HERMES_WRAPPER_REQUIRED_JOBS
-      : changedFile === "src/lib/hermes-managed-route.ts"
-        ? HERMES_MANAGED_POLICY_JOBS
-        : HERMES_MANAGED_POLICY_REQUIRED_JOBS;
+  it.each(HERMES_MANAGED_POLICY_FILES)(
+    "selects every Hermes managed-policy live E2E job for %s (#8008)",
+    (changedFile) => {
+      const result = plan(changedFile);
+      const isWrapper = changedFile === "packages/nemoclaw-hermes/hermes-wrapper.py";
+      const expectedFocusedJobs = isWrapper
+        ? HERMES_WRAPPER_FOCUSED_JOBS
+        : HERMES_MANAGED_POLICY_JOBS;
+      const expectedRequiredJobs = isWrapper
+        ? HERMES_WRAPPER_REQUIRED_JOBS
+        : changedFile === "src/lib/hermes-managed-route.ts"
+          ? HERMES_MANAGED_POLICY_JOBS
+          : HERMES_MANAGED_POLICY_REQUIRED_JOBS;
 
-    const focusedFamily = result.families.find((family) => family.id === "focused-e2e");
-    expect(focusedFamily).toEqual(
-      expect.objectContaining({
-        matchedFiles: [changedFile],
-        requiredJobs: expectedFocusedJobs,
-      }),
-    );
-    expect(riskPlanRequiredJobIds(result)).toEqual(expectedRequiredJobs);
-  });
+      const focusedFamily = result.families.find((family) => family.id === "focused-e2e");
+      expect(focusedFamily).toEqual(
+        expect.objectContaining({
+          matchedFiles: [changedFile],
+          requiredJobs: expectedFocusedJobs,
+        }),
+      );
+      expect(riskPlanRequiredJobIds(result)).toEqual(expectedRequiredJobs);
+    },
+  );
 
   it("does not select managed-policy E2E for an unrelated Hermes runtime file (#8008)", () => {
     const result = plan("packages/nemoclaw-hermes/runtime-version.py");
@@ -667,24 +668,27 @@ describe("deterministic PR risk plan", () => {
   it.each([
     "src/lib/onboard/machine/handlers/sandbox-resume.ts",
     "src/lib/onboard/machine/handlers/sandbox.ts",
-  ])("selects gateway upgrade and the Deep Agents Code target for journaled recreation changes in %s", (file) => {
-    const result = plan(file);
+  ])(
+    "selects gateway upgrade and the Deep Agents Code target for journaled recreation changes in %s",
+    (file) => {
+      const result = plan(file);
 
-    expect(result.requiredJobs).toContainEqual(
-      expect.objectContaining({
-        id: "openshell-gateway-upgrade",
-        families: ["focused-e2e"],
-        matchedFiles: [file],
-      }),
-    );
-    expect(result.requiredTargets).toContainEqual(
-      expect.objectContaining({
-        id: PR_E2E_TYPED_TARGET_IDS[0],
-        families: ["focused-e2e"],
-        matchedFiles: [file],
-      }),
-    );
-  });
+      expect(result.requiredJobs).toContainEqual(
+        expect.objectContaining({
+          id: "openshell-gateway-upgrade",
+          families: ["focused-e2e"],
+          matchedFiles: [file],
+        }),
+      );
+      expect(result.requiredTargets).toContainEqual(
+        expect.objectContaining({
+          id: PR_E2E_TYPED_TARGET_IDS[0],
+          families: ["focused-e2e"],
+          matchedFiles: [file],
+        }),
+      );
+    },
+  );
 
   it("does not select the journaled recreation lanes for an adjacent sandbox handler", () => {
     const result = plan("src/lib/onboard/machine/handlers/sandbox-messaging.ts");
@@ -713,12 +717,29 @@ describe("deterministic PR risk plan", () => {
       expect.objectContaining({
         id: PR_E2E_TYPED_TARGET_IDS[0],
         families: ["focused-e2e"],
-        matchedFiles: ["packages/nemoclaw-langchain-deepagents-code/patch-managed-deepagents-code.py"],
+        matchedFiles: [
+          "packages/nemoclaw-langchain-deepagents-code/patch-managed-deepagents-code.py",
+        ],
       }),
     ]);
     expect(result.tier).toBe(3);
     expect(riskPlanRequiredJobIds(result)).toContain("managed-image-multiarch-startup");
     expect(riskPlanRequiredTargetIds(docsAndTestsOnly)).toEqual([]);
+  });
+
+  it.each([
+    "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+    "src/lib/inference/managed-dcode/identity.ts",
+  ])("selects the Deep Agents Code target for managed identity changes in %s", (changedFile) => {
+    const result = plan(changedFile);
+
+    expect(riskPlanRequiredTargetIds(result)).toEqual([PR_E2E_TYPED_TARGET_IDS[0]]);
+    expect(result.requiredTargets).toContainEqual(
+      expect.objectContaining({
+        id: PR_E2E_TYPED_TARGET_IDS[0],
+        matchedFiles: [changedFile],
+      }),
+    );
   });
 
   it.each([
@@ -746,9 +767,7 @@ describe("deterministic PR risk plan", () => {
     const changedFile = "tools/e2e/onboard-timeout-contract.mts";
     const result = plan(changedFile);
 
-    expect(riskPlanRequiredTargetIds(result)).toEqual([
-      "ubuntu-repo-docker-post-reboot-recovery",
-    ]);
+    expect(riskPlanRequiredTargetIds(result)).toEqual(["ubuntu-repo-docker-post-reboot-recovery"]);
     expect(result.requiredTargets).toEqual([
       expect.objectContaining({
         id: "ubuntu-repo-docker-post-reboot-recovery",

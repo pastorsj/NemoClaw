@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { HermesManagedRouting } from "../../../src/lib/hermes-managed-route.ts";
-import { applyHermesManagedRoute } from "../../../src/lib/hermes-managed-route.ts";
+import { createRequire } from "node:module";
+
 import type { HermesBuildSettings } from "./build-env.ts";
 import { buildHermesEnvLines } from "./hermes-env.ts";
 import {
@@ -12,12 +12,57 @@ import {
 } from "./managed-tool-gateway.ts";
 import { isObjectRecord } from "./object-record.ts";
 
-export type { HermesManagedRoute } from "../../../src/lib/hermes-managed-route.ts";
-export {
-  applyHermesManagedRoute,
-  hermesApiMode,
-  hermesProviderKey,
-} from "../../../src/lib/hermes-managed-route.ts";
+export type HermesManagedRoute = {
+  model: string;
+  baseUrl: string;
+  upstreamProvider: string;
+  inferenceApi: string;
+  contextWindow?: number | null;
+};
+
+type HermesManagedProvider = {
+  name: string;
+  api_key: "sk-OPENSHELL-PROXY-REWRITE";
+  discover_models: true;
+  api?: string;
+  base_url?: string;
+  default_model?: string;
+  transport?: string;
+  api_mode?: string;
+};
+
+type HermesManagedRouting = {
+  _nemoclaw_upstream: { provider: string; provider_key: string; model: string };
+  model: {
+    default: string;
+    provider: "custom";
+    base_url: string;
+    api_key: "sk-OPENSHELL-PROXY-REWRITE";
+    api_mode?: string;
+    context_length?: number;
+  };
+  providers: Record<string, HermesManagedProvider>;
+  custom_providers: HermesManagedProvider[];
+};
+
+type HermesManagedRouteRuntime = {
+  HERMES_PROXY_REWRITE_SENTINEL: "sk-OPENSHELL-PROXY-REWRITE";
+  applyHermesManagedRoute(
+    config: Record<string, unknown>,
+    route: HermesManagedRoute,
+  ): asserts config is Record<string, unknown> & HermesManagedRouting;
+  hermesApiMode(inferenceApi: string): string | null;
+  hermesProviderKey(provider: string): string;
+};
+
+const require = createRequire(import.meta.url);
+const managedRoute = require("./managed-route.cts") as HermesManagedRouteRuntime;
+
+export const HERMES_PROXY_REWRITE_SENTINEL = managedRoute.HERMES_PROXY_REWRITE_SENTINEL;
+export const applyHermesManagedRoute: HermesManagedRouteRuntime["applyHermesManagedRoute"] =
+  managedRoute.applyHermesManagedRoute;
+export const hermesApiMode = managedRoute.hermesApiMode;
+export const hermesProviderKey = managedRoute.hermesProviderKey;
 
 export const HERMES_MANAGED_POLICY_SCHEMA_VERSION = 1 as const;
 

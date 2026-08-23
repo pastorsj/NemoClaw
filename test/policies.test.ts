@@ -14,6 +14,9 @@ const REPO_ROOT = path.join(import.meta.dirname, "..");
 const policies = requireForTest(
   path.join(REPO_ROOT, "src", "lib", "policy", "index.ts"),
 ) as typeof import("../src/lib/policy");
+const harnessRegistry = requireForTest(
+  path.join(REPO_ROOT, "src", "lib", "harness", "package-registry.ts"),
+) as typeof import("../src/lib/harness/package-registry");
 const resolveOpenshellModule = requireForTest(
   path.join(REPO_ROOT, "src", "lib", "adapters", "openshell", "resolve.ts"),
 ) as { resolveOpenshell: (...args: unknown[]) => string | null };
@@ -53,12 +56,102 @@ describe("policies", () => {
       );
       expect(whatsapp?.description).not.toContain("network_policies:");
     });
+
+    it("shows harness-owned presets only for their selected agent", () => {
+      const openclaw = policies.listPresets({ agent: "openclaw" }).map((preset) => preset.name);
+      const hermes = policies.listPresets({ agent: "hermes" }).map((preset) => preset.name);
+
+      expect(openclaw).toEqual(
+        expect.arrayContaining(["openclaw-pricing", "openclaw-diagnostics-otel-local"]),
+      );
+      expect(openclaw).not.toContain("nous-web");
+      expect(openclaw).not.toContain("local-memory");
+      expect(hermes).toEqual(expect.arrayContaining(["nous-web", "nous-code", "local-memory"]));
+      expect(hermes).not.toContain("openclaw-pricing");
+      expect(hermes).not.toContain("openclaw-diagnostics-otel-local");
+    });
+
+    it("reads Hermes presets from the selected installed harness package", () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-package-"));
+      try {
+        const installed = harnessRegistry.installBundledHarness("hermes", {
+          ...process.env,
+          HOME: home,
+        });
+        const presetPath = path.join(installed.rootDir, "policies", "presets", "nous-web.yaml");
+        fs.writeFileSync(
+          presetPath,
+          fs
+            .readFileSync(presetPath, "utf8")
+            .replace(
+              "Nous Portal managed web search and crawl gateway",
+              "Installed Hermes web gateway",
+            ),
+        );
+        fs.writeFileSync(
+          path.join(installed.rootDir, ".nemoclaw-install.json"),
+          `${JSON.stringify({
+            installedDigest: harnessRegistry.harnessPackageContentDigest(installed.rootDir),
+          })}\n`,
+          { mode: 0o600 },
+        );
+        vi.stubEnv("HOME", home);
+
+        expect(
+          policies.listPresets({ agent: "hermes" }).find((preset) => preset.name === "nous-web")
+            ?.description,
+        ).toBe("Installed Hermes web gateway");
+      } finally {
+        vi.unstubAllEnvs();
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects an installed policy preset whose filename differs from preset.name", () => {
+      const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-package-name-"));
+      try {
+        const installed = harnessRegistry.installBundledHarness("hermes", {
+          ...process.env,
+          HOME: home,
+        });
+        const presetPath = path.join(installed.rootDir, "policies", "presets", "nous-web.yaml");
+        fs.writeFileSync(
+          presetPath,
+          fs.readFileSync(presetPath, "utf8").replace("name: nous-web", "name: renamed-web"),
+        );
+        fs.writeFileSync(
+          path.join(installed.rootDir, ".nemoclaw-install.json"),
+          `${JSON.stringify({
+            installedDigest: harnessRegistry.harnessPackageContentDigest(installed.rootDir),
+          })}\n`,
+          { mode: 0o600 },
+        );
+        vi.stubEnv("HOME", home);
+
+        expect(() => policies.listPresets({ agent: "hermes" })).toThrow(
+          "Policy preset 'nous-web.yaml' must declare preset.name 'nous-web'",
+        );
+      } finally {
+        vi.unstubAllEnvs();
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("loadPreset", () => {
     it("loads existing preset", () => {
       const content = requirePresetContent(policies.loadPreset("outlook"));
       expect(content.includes("network_policies:")).toBeTruthy();
+    });
+
+    it("keeps the compatibility loader scoped to OpenClaw package presets", () => {
+      expect(policies.loadPreset("openclaw-pricing")).toContain("network_policies:");
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      try {
+        expect(policies.loadPreset("nous-web")).toBeNull();
+      } finally {
+        error.mockRestore();
+      }
     });
 
     it("returns null for nonexistent preset", () => {

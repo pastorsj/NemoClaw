@@ -1994,7 +1994,8 @@ async function removeSandboxPolicyUnlocked(
 
   // Remove-able presets = built-in presets + custom presets applied via
   // --from-file / --from-dir (tracked in registry.customPolicies).
-  const builtinPresets = policies.listPresets();
+  const sandboxAgent = registry.getSandbox(sandboxName)?.agent ?? null;
+  const builtinPresets = policies.listPresets({ agent: sandboxAgent });
   const customPresets = policies.listCustomPresets(sandboxName);
   const allPresets = [...builtinPresets, ...customPresets];
   // `policy list` reports a preset as active when either the registry or the

@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -13,6 +16,7 @@ const mocks = vi.hoisted(() => ({
     () => Array<{ sandboxName: string; server: string; credentialKeys: string[] }>
   >(() => []),
   resolveGatewayCredentialMutationAuthority: vi.fn(),
+  listHarnessPackages: vi.fn(),
 }));
 
 vi.mock("../lib/credentials/store", () => ({
@@ -33,6 +37,10 @@ vi.mock("../lib/adapters/openshell/provider-command", () => ({
 vi.mock("../lib/onboard/gateway-teardown-authority", () => ({
   resolveGatewayCredentialMutationAuthority: mocks.resolveGatewayCredentialMutationAuthority,
 }));
+vi.mock("../lib/harness/package-registry", async (importOriginal) => ({
+  ...(await importOriginal()),
+  listHarnessPackages: mocks.listHarnessPackages,
+}));
 
 import { runCredentialsAddAction } from "../lib/actions/credentials-add";
 import CredentialsCommand from "./credentials";
@@ -48,6 +56,11 @@ describe("credentials oclif adapter source coverage", () => {
     mocks.runOpenshellProviderCommand.mockReturnValue({ status: 0, stdout: "nvidia-prod\n" });
     mocks.listManagedMcpCredentialReservations.mockReturnValue([]);
     mocks.resolveGatewayCredentialMutationAuthority.mockReturnValue({});
+    mocks.listHarnessPackages.mockReturnValue([
+      { rootDir: path.join(rootDir, "packages", "nemoclaw-hermes") },
+      { rootDir: path.join(rootDir, "packages", "nemoclaw-langchain-deepagents-code") },
+      { rootDir: path.join(rootDir, "packages", "nemoclaw-openclaw") },
+    ]);
     process.exitCode = undefined;
   });
 
@@ -218,5 +231,64 @@ describe("credentials oclif adapter source coverage", () => {
     expect(mocks.recordExtraProvider.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.runOpenshellProviderCommand.mock.invocationCallOrder[0],
     );
+  });
+
+  it("imports the Hermes Tavily profile from the selected harness package", async () => {
+    vi.stubEnv("TAVILY_API_KEY", "tvly-test-value");
+
+    const result = await runCredentialsAddAction({
+      provider: "hermes-tavily",
+      type: "tavily-hermes-v1",
+      credentials: ["TAVILY_API_KEY"],
+      configPairs: [],
+      fromExisting: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(mocks.runOpenshellProviderCommand).toHaveBeenNthCalledWith(
+      1,
+      [
+        "provider",
+        "profile",
+        "import",
+        "--file",
+        expect.stringMatching(/nemoclaw-profile-.+[\\/]tavily-hermes-v1\.yaml$/u),
+      ],
+      expect.objectContaining({ ignoreError: true }),
+    );
+  });
+
+  it.each([
+    { type: "tavily", packageCount: 1 },
+    { type: "test-collision-v1", packageCount: 2 },
+  ])("rejects ambiguous built-in provider profile '$type'", async ({ type, packageCount }) => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-profile-collision-"));
+    try {
+      vi.stubEnv("TEST_PROFILE_TOKEN", "test-profile-value");
+      const harnessPackages = Array.from({ length: packageCount }, (_, index) => {
+        const packageRoot = path.join(fixtureRoot, `nemoclaw-fixture-${index}`);
+        const profileRoot = path.join(packageRoot, "provider-profiles");
+        fs.mkdirSync(profileRoot, { recursive: true });
+        fs.writeFileSync(path.join(profileRoot, `${type}.yaml`), "version: 1\n");
+        return { rootDir: packageRoot };
+      });
+      mocks.listHarnessPackages.mockReturnValue(harnessPackages);
+
+      const result = await runCredentialsAddAction({
+        provider: "ambiguous-provider",
+        type,
+        credentials: ["TEST_PROFILE_TOKEN"],
+        configPairs: [],
+        fromExisting: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.failureLines.join("\n")).toContain(
+        `Provider profile '${type}' is declared by multiple built-in sources`,
+      );
+      expect(mocks.runOpenshellProviderCommand).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
   });
 });
