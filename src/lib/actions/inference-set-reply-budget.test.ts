@@ -39,8 +39,8 @@ function writeInstalledOpenClawRuntime(): { home: string; root: string; runtimeP
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-reply-budget-"));
   temporaryHomes.push(home);
   const root = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-openclaw");
-  const scriptsDir = path.join(root, "scripts");
-  fs.mkdirSync(scriptsDir, { recursive: true });
+  const hostDir = path.join(root, "host");
+  fs.mkdirSync(hostDir, { recursive: true });
   fs.writeFileSync(
     path.join(root, "package.json"),
     JSON.stringify({
@@ -54,7 +54,7 @@ function writeInstalledOpenClawRuntime(): { home: string; root: string; runtimeP
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
-  const runtimePath = path.join(scriptsDir, "config-runtime.cts");
+  const runtimePath = path.join(hostDir, "config-runtime.cts");
   fs.writeFileSync(runtimePath, installedOpenClawRuntimeSource(7777));
   fs.writeFileSync(
     path.join(root, ".nemoclaw-install.json"),

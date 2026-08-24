@@ -59,8 +59,9 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const localShare = path.join(tmp, "usr", "local", "share", "nemoclaw");
     const localSrc = path.join(tmp, "src");
     const localScripts = path.join(tmp, "scripts");
+    const localPackageRoot = path.join(tmp, "packages", "nemoclaw-openclaw");
     const configCommandPath = path.join(localLib, "generate-config");
-    const generatorPath = path.join(localScripts, "generate-openclaw-config.mts");
+    const generatorPath = path.join(localPackageRoot, "config", "generate-config.mts");
     const toolSearchValidatorPath = path.join(localScripts, "validate-openclaw-tool-search.mts");
     const toolDisclosurePath = path.join(localSrc, "lib", "tool-disclosure.ts");
     const applierPath = path.join(
@@ -121,6 +122,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       fs.mkdirSync(localBin, { recursive: true });
       fs.mkdirSync(localLib, { recursive: true });
       fs.mkdirSync(localScripts, { recursive: true });
+      fs.mkdirSync(path.dirname(generatorPath), { recursive: true });
       fs.mkdirSync(nestedPluginDir, { recursive: true });
       fs.mkdirSync(path.dirname(applierPath), { recursive: true });
       fs.mkdirSync(path.dirname(messagingHookPath), { recursive: true });
@@ -137,6 +139,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         .replaceAll("/usr/local/bin", localBin)
         .replaceAll("/usr/local/lib/nemoclaw", localLib)
         .replaceAll("/usr/local/share/nemoclaw", localShare)
+        .replaceAll("/packages/nemoclaw-openclaw", localPackageRoot)
         .replaceAll("/src", localSrc)
         .replaceAll("/scripts", localScripts);
       const { calls, result } = runLoggedDockerShell(command, tmp, [

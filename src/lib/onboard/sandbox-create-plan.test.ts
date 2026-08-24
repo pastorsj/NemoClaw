@@ -426,7 +426,7 @@ describe("resolveSandboxCreateIntent", () => {
   it("materializes a raw GPU UUID as Docker and Podman CDI driver config", () => {
     vi.stubEnv("NEMOCLAW_EXPERIMENTAL_PROFILE", "portable");
     const intent = resolveSandboxCreateIntent({
-      basePolicyPath: "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+      basePolicyPath: "packages/nemoclaw-hermes/policy-additions.yaml",
       sandboxName: "portable-hermes",
       channels: [],
       enabledChannels: [],
