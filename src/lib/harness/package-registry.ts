@@ -87,6 +87,17 @@ interface InstallPathAuthority {
   readonly harnessRoot: InstallDirectoryAuthority;
 }
 
+interface CopiedPackagePath {
+  readonly relativePath: string;
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly mode: bigint;
+  readonly size: bigint;
+  readonly modifiedAt: bigint;
+  readonly changedAt: bigint;
+  readonly directory: boolean;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -866,6 +877,83 @@ function secureInstallDirectory(candidate: string): InstallDirectoryAuthority {
   }
 }
 
+function normalizeCopiedPackageModes(rootDir: string): void {
+  const writablePaths: CopiedPackagePath[] = [];
+  visitPackageTree(rootDir, (relativePath, metadata) => {
+    if ((metadata.mode & 0o022n) === 0n) return;
+    writablePaths.push({
+      relativePath,
+      device: metadata.dev,
+      inode: metadata.ino,
+      mode: metadata.mode,
+      size: metadata.size,
+      modifiedAt: metadata.mtimeNs,
+      changedAt: metadata.ctimeNs,
+      directory: metadata.isDirectory(),
+    });
+  });
+
+  const nonblock = typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0;
+  for (const expected of writablePaths) {
+    const candidate = path.join(rootDir, ...expected.relativePath.split("/"));
+    const changed = (): Error =>
+      new Error(`Harness package tree changed while permissions were secured: ${candidate}`);
+    let descriptor: number;
+    try {
+      descriptor = fs.openSync(
+        candidate,
+        fs.constants.O_RDONLY |
+          fs.constants.O_NOFOLLOW |
+          nonblock |
+          (expected.directory ? fs.constants.O_DIRECTORY : 0),
+      );
+    } catch (error) {
+      throw new Error(`Harness package path could not be opened securely: ${candidate}`, {
+        cause: error,
+      });
+    }
+
+    try {
+      const opened = fs.fstatSync(descriptor, { bigint: true });
+      const typeMatches = expected.directory ? opened.isDirectory() : opened.isFile();
+      if (
+        !typeMatches ||
+        opened.dev !== expected.device ||
+        opened.ino !== expected.inode ||
+        opened.mode !== expected.mode ||
+        opened.size !== expected.size ||
+        opened.mtimeNs !== expected.modifiedAt ||
+        opened.ctimeNs !== expected.changedAt
+      ) {
+        throw changed();
+      }
+
+      const normalizedMode = Number(opened.mode & 0o7777n & ~0o022n);
+      fs.fchmodSync(descriptor, normalizedMode);
+
+      const secured = fs.fstatSync(descriptor, { bigint: true });
+      const current = fs.lstatSync(candidate, { bigint: true });
+      const securedTypeMatches = expected.directory
+        ? secured.isDirectory() && current.isDirectory()
+        : secured.isFile() && current.isFile();
+      if (
+        current.isSymbolicLink() ||
+        !securedTypeMatches ||
+        secured.dev !== expected.device ||
+        secured.ino !== expected.inode ||
+        current.dev !== expected.device ||
+        current.ino !== expected.inode ||
+        (secured.mode & 0o7777n) !== BigInt(normalizedMode) ||
+        (current.mode & 0o7777n) !== BigInt(normalizedMode)
+      ) {
+        throw changed();
+      }
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  }
+}
+
 function assertInstallDirectoryAuthority(authority: InstallDirectoryAuthority): void {
   let current: fs.BigIntStats;
   try {
@@ -982,23 +1070,6 @@ function assertSafeToReplace(
   throw new Error(
     `Installed harness '${existing.id}' differs from the bundled package and has local changes`,
   );
-}
-
-function copyPackageWithoutSharedWrites(source: string, target: string): void {
-  // fs.cpSync creates nested directories through the process umask. Mask shared
-  // writes without weakening stricter caller settings, then restore the caller's
-  // umask when this synchronous copy finishes.
-  const previousUmask = process.umask();
-  process.umask(previousUmask | 0o022);
-  try {
-    fs.cpSync(source, target, {
-      recursive: true,
-      dereference: false,
-      filter: (sourcePath) => !ignoredTreeEntry(path.basename(sourcePath)),
-    });
-  } finally {
-    process.umask(previousUmask);
-  }
 }
 
 function replaceInstalledPackage(
@@ -1168,8 +1239,14 @@ export function installBundledHarness(
   let newPublishedAuthority: InstallDirectoryAuthority | null = null;
   try {
     assertInstallOperationAuthority(installAuthority, stagingAuthority);
-    copyPackageWithoutSharedWrites(bundled.rootDir, stagedPackage);
+    fs.cpSync(bundled.rootDir, stagedPackage, {
+      recursive: true,
+      dereference: false,
+      filter: (sourcePath) => !ignoredTreeEntry(path.basename(sourcePath)),
+    });
     const copiedPackageAuthority = secureInstallDirectory(stagedPackage);
+    assertInstallOperationAuthority(installAuthority, stagingAuthority, copiedPackageAuthority);
+    normalizeCopiedPackageModes(stagedPackage);
     assertInstallOperationAuthority(installAuthority, stagingAuthority, copiedPackageAuthority);
     const staged = readHarnessPackage(stagedPackage, "installed");
     if (packageTreeDigest(staged.rootDir) !== expectedDigest) {

@@ -529,32 +529,36 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     expect(resolveHarnessPackage("openclaw", environment)?.source).toBe("installed");
   });
 
-  it("masks shared writes during package copy and restores the host umask", () => {
+  it("normalizes shared writes in copied package paths", () => {
     const home = temporaryHome();
     const environment = { HOME: home };
     const copySync = fs.cpSync.bind(fs);
-    const copyUmasks: number[] = [];
     const copy = vi.spyOn(fs, "cpSync").mockImplementation((source, destination, options) => {
-      copyUmasks.push(process.umask());
-      return copySync(source, destination, options);
+      copySync(source, destination, options);
+      const copiedRoot = destination.toString();
+      fs.chmodSync(path.join(copiedRoot, "checks"), 0o775);
+      fs.chmodSync(path.join(copiedRoot, "checks", "base-inputs.json"), 0o664);
+      fs.chmodSync(path.join(copiedRoot, "start.sh"), 0o775);
     });
     const previousUmask = process.umask(0o002);
-    let installedRoot = "";
+    let installedPackageRoot = "";
     let umaskAfterInstall = -1;
 
     try {
-      installedRoot = installBundledHarness("openclaw", environment).rootDir;
+      installedPackageRoot = installBundledHarness("openclaw", environment).rootDir;
       umaskAfterInstall = process.umask();
     } finally {
       process.umask(previousUmask);
       copy.mockRestore();
     }
 
-    expect(copyUmasks).toEqual([0o022]);
     expect(umaskAfterInstall).toBe(0o002);
-    expect(fs.lstatSync(installedRoot).mode & 0o777).toBe(0o700);
-    expect(fs.lstatSync(path.join(installedRoot, "checks")).mode & 0o022).toBe(0);
-    expect(fs.lstatSync(path.join(installedRoot, "start.sh")).mode & 0o111).not.toBe(0);
+    expect(fs.lstatSync(installedPackageRoot).mode & 0o777).toBe(0o700);
+    expect(fs.lstatSync(path.join(installedPackageRoot, "checks")).mode & 0o777).toBe(0o755);
+    expect(
+      fs.lstatSync(path.join(installedPackageRoot, "checks", "base-inputs.json")).mode & 0o777,
+    ).toBe(0o644);
+    expect(fs.lstatSync(path.join(installedPackageRoot, "start.sh")).mode & 0o777).toBe(0o755);
     expect(
       captureHarnessPackageTextDirectory(
         resolveHarnessPackage("openclaw", environment)!,
@@ -565,13 +569,69 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     ).toBeGreaterThan(0);
   });
 
-  it("does not publish a copied package path that remains group-writable", () => {
+  it("does not follow a writable copied file replaced during mode normalization", () => {
     const home = temporaryHome();
     const environment = { HOME: home };
+    const outside = path.join(home, "outside-mode-target");
+    fs.writeFileSync(outside, "preserve me\n", { mode: 0o644 });
     const copySync = fs.cpSync.bind(fs);
+    const openSync = fs.openSync.bind(fs);
+    let copiedFile = "";
+    let displacedFile = "";
+    let substituted = false;
     const copy = vi.spyOn(fs, "cpSync").mockImplementation((source, destination, options) => {
       copySync(source, destination, options);
-      fs.chmodSync(path.join(destination.toString(), "checks", "base-inputs.json"), 0o664);
+      copiedFile = path.join(destination.toString(), "checks", "base-inputs.json");
+      displacedFile = `${copiedFile}.moved`;
+      fs.chmodSync(copiedFile, 0o664);
+    });
+    const open = vi.spyOn(fs, "openSync").mockImplementation((candidate, flags, mode) => {
+      switch (
+        !substituted &&
+        copiedFile !== "" &&
+        path.resolve(candidate.toString()) === copiedFile
+      ) {
+        case true:
+          substituted = true;
+          fs.renameSync(copiedFile, displacedFile);
+          fs.symlinkSync(outside, copiedFile);
+          break;
+      }
+      return openSync(candidate, flags, mode);
+    });
+
+    try {
+      expect(() => installBundledHarness("openclaw", environment)).toThrow(
+        "Harness package path could not be opened securely",
+      );
+    } finally {
+      open.mockRestore();
+      copy.mockRestore();
+    }
+
+    expect(substituted).toBe(true);
+    expect(fs.readFileSync(outside, "utf8")).toBe("preserve me\n");
+    expect(fs.lstatSync(outside).mode & 0o777).toBe(0o644);
+    expect(fs.existsSync(path.join(installedRoot(home), "nemoclaw-openclaw"))).toBe(false);
+    expect(
+      fs.readdirSync(installedRoot(home)).some((name) => name.startsWith(".install-openclaw-")),
+    ).toBe(false);
+  });
+
+  it("does not publish a package changed after copied modes are normalized", () => {
+    const home = temporaryHome();
+    const environment = { HOME: home };
+    const renameSync = fs.renameSync.bind(fs);
+    const rename = vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+      renameSync(source, destination);
+      switch (path.basename(destination.toString()) === ".nemoclaw-install.json") {
+        case true:
+          fs.chmodSync(
+            path.join(path.dirname(destination.toString()), "checks", "base-inputs.json"),
+            0o664,
+          );
+          break;
+      }
     });
 
     try {
@@ -579,7 +639,7 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
         "not group or world writable",
       );
     } finally {
-      copy.mockRestore();
+      rename.mockRestore();
     }
 
     expect(fs.existsSync(path.join(installedRoot(home), "nemoclaw-openclaw"))).toBe(false);
@@ -593,13 +653,17 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     const environment = { HOME: home };
     const first = installBundledHarness("openclaw", environment);
     const firstInode = fs.lstatSync(first.rootDir).ino;
+    const writableDirectory = path.join(first.rootDir, "checks");
     const writableFile = path.join(first.rootDir, "checks", "base-inputs.json");
+    fs.chmodSync(writableDirectory, 0o775);
     fs.chmodSync(writableFile, 0o664);
 
     const refreshed = installBundledHarness("openclaw", environment);
 
     expect(fs.lstatSync(refreshed.rootDir).ino).not.toBe(firstInode);
-    expect(fs.lstatSync(writableFile).mode & 0o022).toBe(0);
+    expect(fs.lstatSync(writableDirectory).mode & 0o777).toBe(0o755);
+    expect(fs.lstatSync(writableFile).mode & 0o777).toBe(0o644);
+    expect(fs.lstatSync(path.join(refreshed.rootDir, "start.sh")).mode & 0o111).not.toBe(0);
     expect(verifyHarnessPackageInstallReceipt(refreshed.rootDir)).toBe(
       packageDigest(refreshed.rootDir),
     );
