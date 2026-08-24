@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   V00103_SANDBOX_BUILD_DIGESTS,
   V00106_SANDBOX_BUILD_DIGESTS,
+  V00111_SANDBOX_BUILD_DIGESTS,
 } from "./helpers/openshell-release-fixtures";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
@@ -157,7 +158,10 @@ describe("standalone sandbox build trust", () => {
     expect(runParser().status).toBe(0);
   });
 
-  it.each([["0.0.103", V00103_SANDBOX_BUILD_DIGESTS]] as const)(
+  it.each([
+    ["0.0.103", V00103_SANDBOX_BUILD_DIGESTS],
+    ["0.0.111", V00111_SANDBOX_BUILD_DIGESTS],
+  ] as const)(
     "accepts the base-trusted OpenShell %s sandbox identities before version selection (#8893)",
     (version, digests) => {
       const result = runParser((source) => ensureSandboxBuildPins(source, version, digests));

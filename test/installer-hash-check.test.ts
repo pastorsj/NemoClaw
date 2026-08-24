@@ -24,6 +24,10 @@ import {
   V00106_CHECKSUM_MANIFESTS,
   V00106_SANDBOX_BUILD_DIGESTS,
   V00106_SUPERVISOR_MANIFEST_DIGEST,
+  V00111_ASSET_DIGESTS,
+  V00111_CHECKSUM_MANIFESTS,
+  V00111_SANDBOX_BUILD_DIGESTS,
+  V00111_SUPERVISOR_MANIFEST_DIGEST,
 } from "./helpers/openshell-release-fixtures";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
@@ -506,12 +510,27 @@ const CHECKSUM_MANIFESTS_BY_VERSION = new Map([
   ["0.0.101", V00101_CHECKSUM_MANIFESTS],
   ["0.0.103", V00103_CHECKSUM_MANIFESTS],
   ["0.0.106", V00106_CHECKSUM_MANIFESTS],
+  ["0.0.111", V00111_CHECKSUM_MANIFESTS],
 ]);
 const ASSET_DIGESTS_BY_VERSION = new Map([
   ["0.0.99", V0099_ASSET_DIGESTS],
   ["0.0.101", V00101_ASSET_DIGESTS],
   ["0.0.103", V00103_ASSET_DIGESTS],
   ["0.0.106", V00106_ASSET_DIGESTS],
+  ["0.0.111", V00111_ASSET_DIGESTS],
+]);
+const SANDBOX_BUILD_DIGESTS_BY_VERSION = new Map<string, readonly string[]>([
+  ["0.0.101", V00101_SANDBOX_BUILD_DIGESTS],
+  ["0.0.103", V00103_SANDBOX_BUILD_DIGESTS],
+  ["0.0.106", V00106_SANDBOX_BUILD_DIGESTS],
+  ["0.0.111", V00111_SANDBOX_BUILD_DIGESTS],
+  ["9.9.9", SYNTHETIC_SANDBOX_BUILD_DIGESTS],
+]);
+const SUPERVISOR_MANIFEST_BY_VERSION = new Map([
+  ["0.0.103", V00103_SUPERVISOR_MANIFEST_DIGEST],
+  ["0.0.106", V00106_SUPERVISOR_MANIFEST_DIGEST],
+  ["0.0.111", V00111_SUPERVISOR_MANIFEST_DIGEST],
+  ["9.9.9", SYNTHETIC_SUPERVISOR_MANIFEST_DIGEST],
 ]);
 const trustAlternateRelease = (source: string): string => {
   const digests = SYNTHETIC_SANDBOX_BUILD_DIGESTS;
@@ -707,7 +726,6 @@ function removeV00106OperationalTrust(source: string): string {
   expect([capabilityStart, fallbackStart], "v0.0.106 proof boundaries").not.toContain(-1);
   return `${withoutIdentity.slice(0, capabilityStart)}${withoutIdentity.slice(fallbackStart)}`;
 }
-
 function renderInstallerTemplate(openshellVersion: string, pinFunction: string): string {
   const selected = INSTALLER_TEMPLATE.replace(
     /^MIN_VERSION="[0-9]+\.[0-9]+\.[0-9]+"$/m,
@@ -725,7 +743,7 @@ function renderInstallerTemplate(openshellVersion: string, pinFunction: string):
     pinFunction,
   );
   const operationalTemplate =
-    openshellVersion === "0.0.106"
+    openshellVersion === "0.0.106" || openshellVersion === "0.0.111"
       ? withPinFunction.includes("is_pinned_openshell_v00106_linux_x86_64_install() {")
         ? withPinFunction
         : addV00106OperationalTrust(withPinFunction)
@@ -739,22 +757,12 @@ function renderInstallerTemplate(openshellVersion: string, pinFunction: string):
   expect(sandboxFunctionEnd, "sandbox build map template end").not.toBe(-1);
   const sandboxFunction = operationalTemplate.slice(sandboxFunctionStart, sandboxFunctionEnd);
   const hasSandboxBuild = sandboxFunction.includes(`printf '%s\\n' "${openshellVersion}"`);
-  const selectedDigests =
-    openshellVersion === "0.0.101"
-      ? V00101_SANDBOX_BUILD_DIGESTS
-      : openshellVersion === "0.0.103"
-        ? V00103_SANDBOX_BUILD_DIGESTS
-        : openshellVersion === "0.0.106"
-          ? V00106_SANDBOX_BUILD_DIGESTS
-          : openshellVersion === "9.9.9"
-            ? SYNTHETIC_SANDBOX_BUILD_DIGESTS
-            : undefined;
+  const selectedDigests = SANDBOX_BUILD_DIGESTS_BY_VERSION.get(openshellVersion);
   expect(hasSandboxBuild || selectedDigests, `sandbox fixture ${openshellVersion}`).toBeTruthy();
   return hasSandboxBuild
     ? operationalTemplate
     : addSandboxBuildPins(operationalTemplate, openshellVersion, selectedDigests!);
 }
-
 function renderBrevTemplate(openshellVersion: string, pinFunction: string): string {
   const selected = BREV_TEMPLATE.replace(
     /^(\s*stable\s*\|\s*auto\)\s*OPENSHELL_VERSION=")v[0-9]+\.[0-9]+\.[0-9]+("\s*;;\s*)$/m,
@@ -767,19 +775,11 @@ function renderBrevTemplate(openshellVersion: string, pinFunction: string): stri
     pinFunction,
   );
 }
-
 function renderSupervisorRuntime(openshellVersion: string): string {
   const hasManifestIdentity = SUPERVISOR_RUNTIME_TEMPLATE.includes(
     `  "${openshellVersion}": "sha256:`,
   );
-  const manifestDigest =
-    openshellVersion === "0.0.103"
-      ? V00103_SUPERVISOR_MANIFEST_DIGEST
-      : openshellVersion === "0.0.106"
-        ? V00106_SUPERVISOR_MANIFEST_DIGEST
-        : openshellVersion === "9.9.9"
-          ? SYNTHETIC_SUPERVISOR_MANIFEST_DIGEST
-          : undefined;
+  const manifestDigest = SUPERVISOR_MANIFEST_BY_VERSION.get(openshellVersion);
   expect(
     hasManifestIdentity || manifestDigest,
     `supervisor fixture ${openshellVersion}`,
@@ -793,7 +793,6 @@ function renderSupervisorRuntime(openshellVersion: string): string {
 `,
       );
 }
-
 function createFixture(
   openshellVersion = "0.0.72",
   formatting: PinFormatting = "canonical",
@@ -1135,6 +1134,7 @@ describe("installer hash verification", () => {
     ["0.0.101", V00101_CHECKSUM_MANIFESTS, V00101_ASSET_DIGESTS],
     ["0.0.103", V00103_CHECKSUM_MANIFESTS, V00103_ASSET_DIGESTS],
     ["0.0.106", V00106_CHECKSUM_MANIFESTS, V00106_ASSET_DIGESTS],
+    ["0.0.111", V00111_CHECKSUM_MANIFESTS, V00111_ASSET_DIGESTS],
   ] as const)(
     "accepts the complete trusted OpenShell %s release identity",
     (version, manifests, assets) => {
