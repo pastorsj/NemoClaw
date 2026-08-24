@@ -1586,6 +1586,14 @@ RUN managed_runtime_assertion_failed() { \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh)" = '0:0:444' \
     && install -d -o root -g root -m 0755 /run/nemoclaw
 
+# COPY --chmod=0444 also applies that mode to destination directories that do
+# not exist in the scratch payload. Restore directory search permission before
+# build-time configuration runs as the sandbox user.
+RUN chmod 0555 /packages \
+    && chmod 0555 /packages/nemoclaw-openclaw \
+    && chmod 0555 /packages/nemoclaw-openclaw/config \
+    && chmod 0555 /packages/nemoclaw-openclaw/host
+
 # Copy startup script and shared sandbox initialisation library.
 RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /usr/local/bin/nemoclaw-managed-bootstrap \

@@ -9,10 +9,12 @@ import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { main } from "../packages/nemoclaw-openclaw/config/generate-config.mts";
+import { dockerRunCommandBetween, runLoggedDockerShell } from "./helpers/dockerfile-run-shell";
 import { baseOpenClawGenerationEnv, buildOpenClawTestEnv } from "./helpers/openclaw-env-fixture";
 import { withLegacyMessagingPlanEnv } from "./messaging-plan-test-helper";
 
 const BASE_ENV = baseOpenClawGenerationEnv();
+const OPENCLAW_DOCKERFILE = path.resolve("packages", "nemoclaw-openclaw", "Dockerfile");
 
 const TOOLS_OK = { profile: "minimal", allow: ["read"], deny: ["exec"] };
 
@@ -98,6 +100,42 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
       agentDir: "/sandbox/.openclaw/agents/legacy-worker",
       tools: { allow: ["read"] },
     });
+  });
+
+  it("restores search permission on copied package configuration directories", () => {
+    const imageRoot = path.join(tmpDir, "image-root");
+    const imagePackagesRoot = path.join(imageRoot, "packages");
+    const packageRoot = path.join(imagePackagesRoot, "nemoclaw-openclaw");
+    const configDirectory = path.join(packageRoot, "config");
+    const hostDirectory = path.join(packageRoot, "host");
+
+    fs.mkdirSync(configDirectory, { recursive: true });
+    fs.mkdirSync(hostDirectory, { recursive: true });
+    fs.chmodSync(hostDirectory, 0o444);
+    fs.chmodSync(configDirectory, 0o444);
+    fs.chmodSync(packageRoot, 0o444);
+    fs.chmodSync(imagePackagesRoot, 0o444);
+
+    try {
+      const dockerfile = fs.readFileSync(OPENCLAW_DOCKERFILE, "utf8");
+      const permissionCommand = dockerRunCommandBetween(
+        dockerfile,
+        "# COPY --chmod=0444 also applies that mode to destination directories",
+        "# Copy startup script and shared sandbox initialisation library.",
+      ).replaceAll("/packages", imagePackagesRoot);
+      const { result } = runLoggedDockerShell(permissionCommand, tmpDir);
+
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(fs.statSync(imagePackagesRoot).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(packageRoot).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(configDirectory).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(hostDirectory).mode & 0o777).toBe(0o555);
+    } finally {
+      fs.chmodSync(imagePackagesRoot, 0o755);
+      fs.chmodSync(packageRoot, 0o755);
+      fs.chmodSync(configDirectory, 0o755);
+      fs.chmodSync(hostDirectory, 0o755);
+    }
   });
 
   it("runs the copied package-relative image layout through the real Node entry point", () => {
