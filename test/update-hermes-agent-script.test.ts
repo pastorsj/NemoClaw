@@ -92,6 +92,7 @@ describe(
       const imageId = `sha256:${"a".repeat(64)}`;
       const pinnedRef = `nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`;
       const baseRef = "nemoclaw-hermes-base-local:test";
+      const curlLog = path.join(tmp, "curl-argv.log");
       fs.mkdirSync(path.dirname(script), { recursive: true });
       fs.mkdirSync(path.join(repo, "packages", "nemoclaw-hermes"), { recursive: true });
       fs.mkdirSync(fakeBin, { recursive: true });
@@ -109,6 +110,7 @@ describe(
         path.join(fakeBin, "curl"),
         `#!/usr/bin/env bash
 set -euo pipefail
+printf '%s\\n' "$*" >> "$FAKE_CURL_LOG"
 output=""
 previous=""
 for arg in "$@"; do
@@ -156,6 +158,7 @@ fi
             HERMES_BASE_REF: baseRef,
             FAKE_DOCKER_LOG: dockerLog,
             FAKE_NEMOHERMES_LOG: nemohermesLog,
+            FAKE_CURL_LOG: curlLog,
             NEMOCLAW_SOURCE_ROOT: undefined,
           },
           timeout: 10_000,
@@ -165,6 +168,92 @@ fi
         expect(fs.readFileSync(dockerLog, "utf8")).toContain(`tag ${baseRef} ${pinnedRef}`);
         expect(fs.readFileSync(nemohermesLog, "utf8")).toContain(`${pinnedRef}|hermes rebuild`);
         expect(run.stdout).toContain("OK: sandbox reports Hermes Agent v0.19.0");
+        // #9979: every archive fetch must reject protocol-downgrade redirects.
+        const curlArgv = fs.readFileSync(curlLog, "utf8").trim();
+        const curlCalls = curlArgv.split("\n").filter((line) => line.length > 0);
+        expect(curlCalls.length).toBeGreaterThan(0);
+        expect(
+          curlCalls.every(
+            (call) => call.includes("--proto =https") && call.includes("--proto-redir =https"),
+          ),
+        ).toBe(true);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("pins the latest-release GitHub API lookup to HTTPS when --tag is omitted (#9979)", () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-update-latest-"));
+      try {
+        const repo = path.join(tmp, "repo");
+        const script = path.join(
+          repo,
+          "packages",
+          "nemoclaw-hermes",
+          "scripts",
+          "update-hermes-agent.sh",
+        );
+        const fakeBin = path.join(tmp, "bin");
+        const curlLog = path.join(tmp, "curl-argv.log");
+        fs.mkdirSync(path.dirname(script), { recursive: true });
+        fs.mkdirSync(path.join(repo, "packages", "nemoclaw-hermes"), { recursive: true });
+        fs.mkdirSync(fakeBin, { recursive: true });
+        fs.copyFileSync(SCRIPT, script);
+        fs.chmodSync(script, 0o755);
+        fs.copyFileSync(
+          HERMES_BASE_DOCKERFILE,
+          path.join(repo, "packages", "nemoclaw-hermes", "Dockerfile.base"),
+        );
+        fs.copyFileSync(
+          HERMES_MANIFEST,
+          path.join(repo, "packages", "nemoclaw-hermes", "manifest.yaml"),
+        );
+        writeExecutable(
+          path.join(fakeBin, "curl"),
+          `#!/usr/bin/env bash
+set -euo pipefail
+# Redact any bearer token before it ever touches disk, so a real
+# credential can never end up in a test log even transiently.
+printf '%s\\n' "$*" | sed -E 's/(Authorization: ?Bearer )[^ ]+/\\1[REDACTED]/' >> "$FAKE_CURL_LOG"
+if [[ "$*" == *api.github.com* ]]; then
+  printf '{"tag_name":"v2026.6.5"}'
+fi
+`,
+        );
+
+        const run = spawnSync("bash", [script, "--check"], {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            PATH: `${fakeBin}:${process.env.PATH}`,
+            HOME: path.join(tmp, "home"),
+            FAKE_CURL_LOG: curlLog,
+            // Exercise the authenticated path without inheriting or logging a real token.
+            GITHUB_TOKEN: "test-not-a-real-token",
+            NEMOCLAW_SOURCE_ROOT: undefined,
+          },
+          timeout: 10_000,
+        });
+
+        // --check returns 0 for current pins and 1 for stale pins.
+        expect([0, 1], `${run.stdout}\n${run.stderr}`).toContain(run.status);
+        expect(run.stdout).toMatch(/^(OK|STALE): Dockerfile\.base pins Hermes/m);
+
+        const curlCalls = fs
+          .readFileSync(curlLog, "utf8")
+          .split("\n")
+          .filter((line) => line.length > 0);
+        expect(curlCalls.length).toBeGreaterThan(0);
+        expect(
+          curlCalls.every(
+            (call) => call.includes("--proto =https") && call.includes("--proto-redir =https"),
+          ),
+        ).toBe(true);
+        expect(curlCalls.some((call) => call.includes("[REDACTED]"))).toBe(true);
+        expect(curlCalls.join("\n")).not.toContain("test-not-a-real-token");
+        expect(curlCalls.join("\n")).toContain(
+          "api.github.com/repos/NousResearch/hermes-agent/releases/latest",
+        );
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }

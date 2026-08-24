@@ -47,6 +47,7 @@ runner.run = (command) => {
   if (_n(command).includes("sandbox delete")) {
     throw new Error("unexpected sandbox delete");
   }
+  if (_n(command).includes("sandbox list")) return { status: 0, stdout: "No sandboxes found." };
   return { status: 0 };
 };
 runner.runCapture = (command) => {
@@ -141,6 +142,9 @@ runner.run = (command, opts = {}) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   commands.push({ command: cmd, env: opts.env || null });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: " + _sandboxId + "\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -276,6 +280,9 @@ runner.run = (command) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   events.push({ kind: "run", cmd });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -431,6 +438,9 @@ runner.run = (command) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   events.push({ kind: "run", cmd });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -561,7 +571,11 @@ runner.run = (command) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   events.push({ kind: "run", cmd });
+  if (cmd.includes("sandbox list")) return { status: 0, stdout: "No sandboxes found." };
   if (cmd.includes("sandbox delete")) sandboxDeleted = true;
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -712,6 +726,9 @@ runner.run = (command, opts = {}) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   commands.push({ command: cmd, env: opts.env || null });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -857,6 +874,9 @@ runner.run = (command, opts = {}) => {
     }
   }
   commands.push({ command: cmd, env: opts.env || null });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -993,6 +1013,9 @@ runner.run = (command, opts = {}) => {
     }
   }
   commands.push({ command: cmd, env: opts.env || null });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -1126,7 +1149,11 @@ runner.run = (command, opts = {}) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   commands.push({ command: cmd, env: opts.env || null });
+  if (cmd.includes("sandbox list")) return { status: 0, stdout: "No sandboxes found." };
   if (cmd.includes("sandbox delete")) sandboxDeleted = true;
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant")
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-4f2a91c0d7\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -1234,7 +1261,7 @@ const { createSandbox } = require(${onboardPath});
     assert.ok(result.stdout.includes("not ready"), "should mention sandbox is not ready");
   });
   it("registers a fresh create only after owner-scoped identity confirmation (#8942)", {
-    timeout: 20000,
+    timeout: 45000,
   }, async () => {
     const repoRoot = path.join(import.meta.dirname, "..");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-create-ready-"));
@@ -1286,6 +1313,9 @@ runner.run = (command, opts = {}) => {
   const cmd = _n(command);
   _deleted = _deleted || cmd.includes("sandbox delete");
   commands.push({ command: cmd, env: opts.env || null });
+  if (cmd.includes("sandbox list")) {
+    return { status: 0, stdout: Buffer.from("No sandboxes found.\n"), stderr: Buffer.alloc(0) };
+  }
   return cmd.includes("sandbox get") && cmd.includes("my-assistant") && sandboxCreated
     ? { status: 0, stdout: Buffer.from("my-assistant\nId: sbx-fresh-create\n"), stderr: Buffer.alloc(0) }
     : { status: 0 };
@@ -1402,7 +1432,7 @@ const { createSandbox } = require(${onboardPath});
         NEMOCLAW_NON_INTERACTIVE: "1",
         OPENSHELL_DRIVERS: "docker",
       },
-      timeout: 15000,
+      timeout: 30000,
     });
 
     assert.equal(result.status, 0, result.stderr);

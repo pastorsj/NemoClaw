@@ -71,6 +71,8 @@ describe("release handoff summary", () => {
         previousTagCommit: previous,
         targetVersion: "v1.2.3",
         candidateCommit: candidate,
+        candidateSelection: "current-main",
+        historicalCandidateException: "None",
       },
       command,
     );
@@ -80,6 +82,8 @@ describe("release handoff summary", () => {
       previousTagCommit: previous,
       targetVersion: "v1.2.3",
       candidateCommit: candidate,
+      candidateSelection: "current-main",
+      historicalCandidateException: "None",
       commitCount: 2,
       riskyFileCount: 6,
       riskyAreas: [
@@ -133,6 +137,9 @@ describe("release handoff summary CLI", () => {
     fs.writeFileSync(
       plan,
       JSON.stringify({
+        candidateCommit: candidate,
+        candidateSelection: "current-main",
+        historicalCandidateException: "None",
         nextTag: "v1.2.3",
         originMainCommit: candidate,
         originMainHeadline: "test: release candidate",

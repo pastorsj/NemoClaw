@@ -186,8 +186,10 @@ function requireCompleteManagedImageCatalog(
   catalog: ManagedImageContractCatalog,
   expectedRelease: string,
   expectedPlatform: ManagedImagePlatform,
-): string {
+  expectedRevision: string | null,
+): { readonly release: string; readonly revision: string } {
   let cohortRevision: string | null = null;
+  let cohortRelease: string | null = null;
   let publicationCohort: string | null = null;
   for (const agent of SHIPPED_MANAGED_IMAGE_AGENTS) {
     const candidate = catalog[agent];
@@ -198,9 +200,15 @@ function requireCompleteManagedImageCatalog(
     }
     try {
       const contract = parseManagedImageContractV1(candidate, agent, expectedPlatform);
-      if (contract.source.release !== expectedRelease) {
+      if (expectedRevision === null && contract.source.release !== expectedRelease) {
         throw new SandboxWorkloadPreparationError(
           `managed image catalog contract for '${agent}' belongs to '${contract.source.release}', not '${expectedRelease}'`,
+        );
+      }
+      cohortRelease ??= contract.source.release;
+      if (contract.source.release !== cohortRelease) {
+        throw new SandboxWorkloadPreparationError(
+          "managed image catalog does not identify one all-agent release",
         );
       }
       cohortRevision ??= contract.source.revision;
@@ -223,7 +231,12 @@ function requireCompleteManagedImageCatalog(
       );
     }
   }
-  return cohortRevision!;
+  if (expectedRevision !== null && cohortRevision !== expectedRevision) {
+    throw new SandboxWorkloadPreparationError(
+      "managed image catalog source revision does not match the live E2E candidate revision",
+    );
+  }
+  return { release: cohortRelease!, revision: cohortRevision! };
 }
 
 function requireCandidateManagedImageCatalog(
@@ -365,12 +378,13 @@ export async function prepareSandboxWorkloadSource(
       acceptedCandidateContract,
     );
   } else {
-    const catalogRevision = requireCompleteManagedImageCatalog(catalog, release, platform);
-    if (input.expectedCatalogRevision && catalogRevision !== input.expectedCatalogRevision) {
-      throw new SandboxWorkloadPreparationError(
-        "managed image catalog source revision does not match the live E2E candidate revision",
-      );
-    }
+    const catalogIdentity = requireCompleteManagedImageCatalog(
+      catalog,
+      release,
+      platform,
+      input.expectedCatalogRevision ?? null,
+    );
+    release = catalogIdentity.release;
   }
 
   return {
