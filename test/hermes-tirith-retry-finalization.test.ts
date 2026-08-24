@@ -8,14 +8,22 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
-import { extractShellFunction } from "./support/hermes-shell-harness";
+import { extractShellFunction, readHermesStartupSource } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 const FINALIZER = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "tirith-marker.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "tirith-marker.py",
 );
 
 function readRegularFileNoFollow(filePath: string) {
@@ -47,7 +55,7 @@ function runTirithFinalizer(commands: readonly string[]) {
     fs.mkdirSync(hermesHome, { recursive: true });
     fs.writeFileSync(marker, "download_failed");
 
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     fs.writeFileSync(
       scriptPath,
       [

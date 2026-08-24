@@ -11,22 +11,28 @@ import { shellQuote } from "../src/lib/core/shell-quote";
 import {
   bashPrintfQ,
   extractShellFunction as extractShellFunctionFromSource,
+  hermesStartPath,
+  readHermesStartupSource,
+  runHermesEntrypointWrapperFallback,
   runHermesSandboxInitPreludeWithFakePath,
 } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const ENV_WRAPPER = path.join(import.meta.dirname, "../scripts/lib/entrypoint-env-wrapper.sh");
 const TIRITH_FINALIZER = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "tirith-marker.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "tirith-marker.py",
 );
 const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "env-boundary.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "env-boundary.py",
 );
 const GENERATED_API_SERVER_KEY = Array.from({ length: 64 }, (_value, index) =>
   (index % 16).toString(16),
@@ -45,7 +51,9 @@ function extractDashboardPortBootstrap(src: string): string {
   const start = src.indexOf('NEMOCLAW_CMD=("$@")');
   const end = src.indexOf('\nHERMES="$(command -v hermes)"', start);
   if (start < 0 || end < 0) {
-    throw new Error("Expected Hermes dashboard port bootstrap block in packages/nemoclaw-hermes/start.sh");
+    throw new Error(
+      "Expected Hermes dashboard port bootstrap block in packages/nemoclaw-hermes/start.sh",
+    );
   }
   return src.slice(start, end).trimEnd();
 }
@@ -53,7 +61,7 @@ function extractDashboardPortBootstrap(src: string): string {
 function runHermesDashboardPortBootstrap(env: Record<string, string | undefined> = {}) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-port-bootstrap-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -91,7 +99,7 @@ function runHermesDashboardPortBootstrap(env: Record<string, string | undefined>
 function runHermesDashboardArgs(tuiValue?: string) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-dashboard-args-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -129,7 +137,7 @@ function runHermesPortValidation(opts: {
 }) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-port-validation-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -172,7 +180,7 @@ function runHermesEnvSecretBoundary(opts: { envFile?: string; symlinkEnvFile?: b
     fs.writeFileSync(envFile, opts.envFile);
   }
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -206,7 +214,7 @@ function runHermesEnvSecretBoundary(opts: { envFile?: string; symlinkEnvFile?: b
 function runHermesRuntimeEnvSecretBoundary(envOverrides: Record<string, string>) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-runtime-boundary-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -246,7 +254,9 @@ function extractTirithDispatchBlock(src: string, mode: "non-root" | "root"): str
   const nonRootStart = src.indexOf("# ── Non-root fallback");
   const rootStart = src.indexOf("# ── Root path");
   if (nonRootStart < 0 || rootStart < 0 || rootStart <= nonRootStart) {
-    throw new Error("Expected root and non-root dispatch blocks in packages/nemoclaw-hermes/start.sh");
+    throw new Error(
+      "Expected root and non-root dispatch blocks in packages/nemoclaw-hermes/start.sh",
+    );
   }
   return mode === "non-root" ? src.slice(nonRootStart, rootStart) : src.slice(rootStart);
 }
@@ -260,7 +270,7 @@ function runTirithExplicitCommandDispatch(mode: "non-root" | "root") {
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.writeFileSync(marker, "download_failed");
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -320,7 +330,7 @@ function runHermesRootStartupMutableRootPreflight() {
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.chmodSync(hermesHome, 0o750);
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -378,7 +388,7 @@ function runTirithFinalizerPathResolution(installed: boolean) {
   const scriptPath = path.join(tmpDir, "run.sh");
   const installedPath = path.join(tmpDir, "installed-finalizer.py");
   const fallbackPath = path.join(tmpDir, "runtime", "tirith-marker.py");
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   const start = source.indexOf(
     '_HERMES_TIRITH_MARKER_FINALIZER="/usr/local/lib/nemoclaw/finalize-tirith-marker.py"',
   );
@@ -548,7 +558,7 @@ function runHermesGatewayRuntimeCleanup(opts: {
     ].join("\n"),
   );
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -672,7 +682,7 @@ function runRuntimeShellEnvBootstrap() {
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.writeFileSync(caFile, "ca");
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -726,7 +736,7 @@ function runRuntimeShellEnvBootstrap() {
 describe("packages/nemoclaw-hermes/start.sh sandbox init bootstrap", () => {
   it("locks the trusted PATH before sourcing shared sandbox init", () => {
     const { result, dirnameCalled, sourcePath } = runHermesSandboxInitPreludeWithFakePath(
-      START_SCRIPT,
+      hermesStartPath,
       ENV_WRAPPER,
     );
 
@@ -748,6 +758,12 @@ describe("packages/nemoclaw-hermes/start.sh sandbox init bootstrap", () => {
     } finally {
       fs.rmSync(fixtureDir, { recursive: true, force: true });
     }
+  });
+
+  it("resolves the entrypoint wrapper relative to the source-checkout entrypoint", () => {
+    const result = runHermesEntrypointWrapperFallback(ENV_WRAPPER);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("WRAPPER_FALLBACK_OK");
   });
 });
 
@@ -861,7 +877,7 @@ describe("packages/nemoclaw-hermes/start.sh validator-path bootstrap", () => {
     fs.writeFileSync(installValidator, "#!/usr/bin/env python3\n");
     fs.writeFileSync(evilValidator, "#!/usr/bin/env python3\n");
 
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readHermesStartupSource();
     const bootstrap = extractValidatorBootstrapBlock(src).replaceAll(
       "/usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
       installValidator,
@@ -905,7 +921,7 @@ describe("packages/nemoclaw-hermes/start.sh validator-path bootstrap", () => {
     fs.mkdirSync(path.dirname(fallbackValidator), { recursive: true });
     fs.writeFileSync(fallbackValidator, "#!/usr/bin/env python3\n");
 
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readHermesStartupSource();
     const missingInstallPath = path.join(tmpDir, "definitely-not-installed.py");
     const bootstrap = extractValidatorBootstrapBlock(src).replaceAll(
       "/usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
@@ -991,7 +1007,7 @@ describe("packages/nemoclaw-hermes/start.sh env secret boundary", () => {
   });
 
   it("checks the .env secret boundary before MCP integrity", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = spawnSync(
       "bash",
       [
@@ -1360,7 +1376,7 @@ function runShieldsUpRuntimeEnv(opts: { locked: boolean; presetValue?: string })
     fs.writeFileSync(path.join(hermesHome, ".env"), "HERMES_TEST=1\n");
   }
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   const statMock = opts.locked ? LOCKED_HERMES_CONFIG_STAT_MOCK : "";
   const presetLine =
     opts.presetValue === undefined

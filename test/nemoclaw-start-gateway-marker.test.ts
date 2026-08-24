@@ -7,14 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 // Extracts a shell function body (including heredocs) from the start script so
 // the real helper can be exercised in isolation.
@@ -76,7 +70,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   // launch site, or skipped on a launch path, the probe would observe its
   // absence here.
   it("has the in-container gateway marker present when the gateway launches, in both modes (#4503, #4710)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway");
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-launch-"));
@@ -188,7 +182,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
       },
     ],
   ])("does not let %s env suppress a reached local gateway launch (#4710)", (_label, env) => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway");
 
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-env-contract-"));
@@ -240,7 +234,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   // an empty file at the target path and is a no-op when the path is already
   // present (idempotent restart-loop semantics).
   it("mark_in_container_gateway writes the marker file idempotently (#4710)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-marker-"));
     const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
     const fnSrc = extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
@@ -280,7 +274,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   // never exits the script) keeps it in place.
 
   it("clear_in_container_gateway_marker removes the marker and is a no-op when absent (#4952)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-clear-"));
     const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
     const clearFn = extractShellFunctionFromSource(
@@ -319,7 +313,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   ])(
     "clears the marker when $label exits before recording PID identity (#4952)",
     ({ launchFunction }) => {
-      const src = fs.readFileSync(START_SCRIPT, "utf-8");
+      const src = readOpenClawStartupSource();
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-early-exit-"));
       const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
 
@@ -371,7 +365,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   ])(
     "arms $signal cleanup before the $label marker write (#4952)",
     ({ label, signal, exitCode }) => {
-      const src = fs.readFileSync(START_SCRIPT, "utf-8");
+      const src = readOpenClawStartupSource();
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-early-signal-"));
       const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
       const clearFn = extractShellFunctionFromSource(
@@ -412,7 +406,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   // exactly the state that flips the healthcheck back to the marker-absent
   // healthy branch.
   it("drops the marker when the supervisor reaches a clean exit (#4952)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-exit-"));
     const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
     const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
@@ -454,7 +448,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   });
 
   it("drops the marker when the supervisor exits through errexit (#4952)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-errexit-"));
     const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
     const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
@@ -503,7 +497,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   // itself while it blocks in `wait`, mirroring the supervise loop being
   // signalled. This avoids cross-process timing races.
   it("drops the marker when the supervisor is terminated by a signal (#4952)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-signal-"));
     const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
     const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(
@@ -563,7 +557,7 @@ describe("nemoclaw-start in-container gateway healthcheck marker (#4503, #4710)"
   // re-launch re-drops the marker idempotently — the marker is present
   // throughout.
   it("keeps the marker in place across respawns while the supervisor runs (#4952)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gw-respawn-"));
     const markerPath = path.join(tmpDir, "nemoclaw-gateway-local");
     const markFn = extractShellFunctionFromSource(src, "mark_in_container_gateway").replaceAll(

@@ -5,14 +5,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 function extractShellFunction(source: string, name: string): string {
   const header = `${name}() {`;
@@ -28,7 +22,7 @@ function extractShellFunction(source: string, name: string): string {
 }
 
 describe("OpenClaw gateway recovery during respawn races", () => {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readOpenClawStartupSource();
 
   it.each([
     ["already reaped", "0", "", ""],

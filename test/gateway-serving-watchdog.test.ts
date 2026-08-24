@@ -18,19 +18,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 import {
   extractGatewayLogAppendFunction,
   extractShellFunction,
   pidIdentityFunctions,
   readFileIfPresent,
-  START_SCRIPT,
   safeTmpHelpers,
   writeProcStatFunction,
 } from "./nemoclaw-start-gateway.test-helpers";
 
 function watchdogFunctions(gatewayLog: string): string {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   return [
     safeTmpHelpers(src),
     pidIdentityFunctions(src),
@@ -611,7 +611,7 @@ describe("gateway serving watchdog (#4710, #7377)", () => {
   });
 
   it("tracks the replacement before a termination signal interrupts restart health wait", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-restart-signal-race-"));
     const eventLog = path.join(tmpDir, "events.log");
     const scriptPath = path.join(tmpDir, "run.sh");

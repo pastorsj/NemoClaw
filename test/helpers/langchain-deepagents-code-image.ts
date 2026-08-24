@@ -45,6 +45,10 @@ function materializeWrapperFixture(
   transform: (source: string) => string,
 ): string {
   const wrapperPath = path.join(tempDir, "dcode-wrapper.sh");
+  fs.copyFileSync(
+    path.join(agentDir, "runtime", "agent-status.sh"),
+    path.join(tempDir, "agent-status.sh"),
+  );
   const source = mustReplaceOnce(
     stubManagedMcpValidator(readAgentFile("runtime/agent-wrapper.sh")),
     [

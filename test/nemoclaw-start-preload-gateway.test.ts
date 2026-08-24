@@ -7,15 +7,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 import { extractShellFunctionFromSource } from "./support/shell-function-extractor.ts";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 const PRELOAD_SCRIPTS = path.join(
   import.meta.dirname,
   "..",
@@ -137,7 +131,7 @@ describe("nemoclaw-start gateway preload process detection (#2478)", () => {
 });
 
 describe("nemoclaw-start persistent gateway log hardening", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   function persistentLogFunction(root: string, gatewayLog: string): string {
     return extractShellFunctionFromSource(src, "start_persistent_gateway_log_mirror")
       .replaceAll("/sandbox/.openclaw/logs", path.join(root, "logs"))

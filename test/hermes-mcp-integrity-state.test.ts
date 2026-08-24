@@ -7,25 +7,40 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { bashPrintfQ, extractShellFunction } from "./support/hermes-shell-harness";
+import {
+  bashPrintfQ,
+  extractShellFunction,
+  readHermesStartupSource,
+} from "./support/hermes-shell-harness";
 
-const GUARD = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "runtime", "config-guard.py");
+const GUARD = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "config-guard.py",
+);
 const BUILD_DIGEST = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "mcp-digest.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "mcp-digest.py",
 );
 const TRANSACTION = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "mcp-transaction.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "mcp-transaction.py",
 );
 const START = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 
 function runHermesRootMcpStartup(opts: { commitStatus: 0 | 1; dashboardSeedStatus?: 0 | 23 }) {
-  const source = fs.readFileSync(START, "utf-8");
+  const source = readHermesStartupSource();
   const startupBlock = source.match(
     /^prepare_hermes_dashboard_home sandbox:sandbox \|\| exit 1$\n[\s\S]*?^launch_hermes_gateway\nstart_gateway_log_stream\nwait_for_hermes_gateway_internal "\$GATEWAY_PID"\nensure_hermes_supervised_auxiliaries\nfinalize_tirith_marker_retry\nif ! commit_hermes_mcp_applied_if_pending; then\n[\s\S]*?^restore_hermes_config_permissions_after_dashboard_start$/m,
   )?.[0];
@@ -312,7 +327,7 @@ print(json.dumps({
   });
 
   it("runs startup-owned MCP inspection as a direct child", () => {
-    const source = fs.readFileSync(START, "utf-8");
+    const source = readHermesStartupSource();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-mcp-parent-"));
     const helper = path.join(tempDir, "guard-helper.sh");
     const parentFile = path.join(tempDir, "guard-parent");
@@ -364,7 +379,7 @@ print(json.dumps({
     { status: 10, expected: "rc=0 pending=1 failed=0\n" },
     { status: 1, expected: "rc=1 pending=9 failed=1\n" },
   ])("uses only the authenticated guard exit status ($status)", ({ status, expected }) => {
-    const source = fs.readFileSync(START, "utf-8");
+    const source = readHermesStartupSource();
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-mcp-status-"));
     const helper = path.join(tempDir, "guard-helper.sh");
     fs.writeFileSync(

@@ -12,49 +12,49 @@
  *   - exit code 0 = success, non-zero = failure
  */
 
-import { randomUUID } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 
 import { execa } from "execa";
-import YAML from "yaml";
 
 import { DASHBOARD_PORT } from "../lib/ports.js";
 import { buildSubprocessEnv } from "../lib/subprocess-env.js";
-import { isPlainObject, type UnknownRecord } from "../shared/object-record.js";
-import * as importedOpenShellPolicyBoundary from "#nemoclaw-shared/openshell-policy-boundary.cjs";
+import { isPlainObject } from "../shared/object-record.js";
 import * as importedSandboxName from "#nemoclaw-shared/sandbox-name.cjs";
 import {
+  loadBlueprint,
+  mergePolicyAdditions,
+  type Blueprint,
+  type InferenceProfile,
+  type InferenceProfileMap,
+  type RouterConfig,
+  type SandboxConfig,
+} from "./blueprint-config.js";
+import {
   attachRuntimeIdentity,
-  buildRuntimeIdentityPlan,
   compensateRuntimeIdentityApply,
-  isRuntimeIdentityConfig,
   isRuntimeIdentityReceipt,
   mintRuntimeIdentityCredential,
   parseRuntimeIdentityProviderMetadata,
   prepareRuntimeIdentity,
   type RuntimeIdentityCommandDeps,
   type RuntimeIdentityCommandOptions,
-  type RuntimeIdentityConfig,
   type RuntimeIdentityDeps,
-  type RuntimeIdentityPlan,
   type RuntimeIdentityProfilePolicy,
   type RuntimeIdentityReceipt,
   removeRuntimeIdentity,
 } from "./runtime-identity.js";
+import {
+  buildPersistedRunPlan,
+  buildSafePublicRunPlan,
+  buildStatusRunPlan,
+  type RunPlan,
+} from "./run-plan.js";
+import { emitRunId, writeRunLog, writeRunProgress } from "./run-output.js";
 import type { SnapshotCommandOptions } from "./snapshot-command.js";
 import { actionSnapshots } from "./snapshot-command.js";
 import { safeEndpointUrlForDownstream, validateEndpointUrl } from "./ssrf.js";
-
-// The compiled plugin exposes named CommonJS exports. Source-mode tsx maps the
-// .cjs specifier back to .cts and exposes that same module as its default.
-const sourceOrGeneratedOpenShellPolicyBoundary =
-  importedOpenShellPolicyBoundary as typeof importedOpenShellPolicyBoundary & {
-    default?: typeof importedOpenShellPolicyBoundary;
-  };
-const { parseOpenShellPolicy, withoutProviderComposedPolicies } =
-  sourceOrGeneratedOpenShellPolicyBoundary.default ?? sourceOrGeneratedOpenShellPolicyBoundary;
 
 // sourceOfTruth: src/lib/shared/sandbox-name.cts
 const sourceOrGeneratedSandboxName = importedSandboxName as typeof importedSandboxName & {
@@ -62,6 +62,10 @@ const sourceOrGeneratedSandboxName = importedSandboxName as typeof importedSandb
 };
 const { assertValidName, assertValidProviderName } =
   sourceOrGeneratedSandboxName.default ?? sourceOrGeneratedSandboxName;
+
+export { loadBlueprint } from "./blueprint-config.js";
+export { emitRunId } from "./run-output.js";
+export type { RunPlan } from "./run-plan.js";
 
 type Action = "plan" | "apply" | "status" | "rollback";
 
@@ -72,39 +76,6 @@ type RollbackPlanSource = {
   inference?: unknown;
   identity?: unknown;
 };
-type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
-type RestProtocol = "rest";
-type EndpointEnforcement = "enforce" | "audit";
-type EndpointTls = "terminate" | "passthrough" | "skip";
-
-interface PolicyRule {
-  allow: {
-    method: HttpMethod;
-    path: string;
-  };
-}
-
-interface PolicyEndpoint {
-  host: string;
-  port: number;
-  protocol?: RestProtocol;
-  enforcement?: EndpointEnforcement;
-  tls?: EndpointTls;
-  access?: "full";
-  rules?: PolicyRule[];
-}
-
-interface PolicyAddition {
-  name: string;
-  endpoints: PolicyEndpoint[];
-}
-
-type PolicyAdditions = { [name: string]: PolicyAddition };
-
-const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
-const REST_PROTOCOLS = new Set(["rest"]);
-const ENDPOINT_ENFORCEMENT_MODES = new Set(["enforce", "audit"]);
-const ENDPOINT_TLS_MODES = new Set(["terminate", "passthrough", "skip"]);
 const MISSING_SANDBOX_PATTERN = /\b(?:not found|does not exist)\b/i;
 const MISSING_SANDBOX_INSPECTION_PATTERN =
   /(?:\bsandbox\b[^\r\n]*\b(?:not found|does not exist)\b|\b(?:not found|does not exist)\b[^\r\n]*\bsandbox\b)/i;
@@ -194,198 +165,6 @@ function boundedCommandError(stderr: string, secretValues: readonly string[] = [
     : collapsed;
 }
 
-function isOptionalString(value: unknown): value is string | undefined {
-  return value === undefined || typeof value === "string";
-}
-
-function isOptionalFiniteNumber(value: unknown): value is number | undefined {
-  return value === undefined || (typeof value === "number" && Number.isFinite(value));
-}
-
-function isOptionalBoolean(value: unknown): value is boolean | undefined {
-  return value === undefined || typeof value === "boolean";
-}
-
-function isValidPort(value: unknown): value is number {
-  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
-}
-
-function isOptionalPortList(value: unknown): value is number[] | undefined {
-  return (
-    value === undefined || (Array.isArray(value) && value.every((entry) => isValidPort(entry)))
-  );
-}
-
-function hasOnlyKeys(value: UnknownRecord, allowed: readonly string[]): boolean {
-  return Object.keys(value).every((key) => allowed.includes(key));
-}
-
-function isPolicyRule(value: unknown): value is PolicyRule {
-  if (!isPlainObject(value) || !hasOnlyKeys(value, ["allow"])) {
-    return false;
-  }
-  const allow = value.allow;
-  if (!isPlainObject(allow) || !hasOnlyKeys(allow, ["method", "path"])) {
-    return false;
-  }
-  return (
-    typeof allow.method === "string" &&
-    HTTP_METHODS.has(allow.method) &&
-    typeof allow.path === "string" &&
-    allow.path.startsWith("/")
-  );
-}
-
-function isPolicyEndpoint(value: unknown): value is PolicyEndpoint {
-  if (
-    !isPlainObject(value) ||
-    !hasOnlyKeys(value, ["host", "port", "protocol", "enforcement", "tls", "access", "rules"])
-  ) {
-    return false;
-  }
-
-  const protocol = value.protocol;
-  const enforcement = value.enforcement;
-  const tls = value.tls;
-  const access = value.access;
-  const rules = value.rules;
-
-  return (
-    typeof value.host === "string" &&
-    isValidPort(value.port) &&
-    (protocol === undefined || (typeof protocol === "string" && REST_PROTOCOLS.has(protocol))) &&
-    (enforcement === undefined ||
-      (typeof enforcement === "string" && ENDPOINT_ENFORCEMENT_MODES.has(enforcement))) &&
-    (tls === undefined || (typeof tls === "string" && ENDPOINT_TLS_MODES.has(tls))) &&
-    (access === undefined || access === "full") &&
-    (rules === undefined ||
-      (Array.isArray(rules) && rules.length > 0 && rules.every((entry) => isPolicyRule(entry)))) &&
-    (protocol !== "rest" || rules !== undefined)
-  );
-}
-
-function isPolicyAddition(value: unknown): value is PolicyAddition {
-  if (!isPlainObject(value) || !hasOnlyKeys(value, ["name", "endpoints"])) {
-    return false;
-  }
-  return (
-    typeof value.name === "string" &&
-    Array.isArray(value.endpoints) &&
-    value.endpoints.length > 0 &&
-    value.endpoints.every((entry) => isPolicyEndpoint(entry))
-  );
-}
-
-function isPolicyAdditions(value: unknown): value is PolicyAdditions {
-  return isPlainObject(value) && Object.values(value).every((entry) => isPolicyAddition(entry));
-}
-
-function isInferenceProfile(value: unknown): value is InferenceProfile {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  return (
-    isOptionalString(value.provider_type) &&
-    isOptionalString(value.provider_name) &&
-    isOptionalString(value.endpoint) &&
-    isOptionalString(value.model) &&
-    isOptionalString(value.credential_env) &&
-    isOptionalString(value.credential_default) &&
-    isOptionalFiniteNumber(value.timeout_secs)
-  );
-}
-
-function isBlueprint(value: unknown): value is Blueprint {
-  if (!isPlainObject(value)) {
-    return false;
-  }
-
-  if (!isOptionalString(value.version)) {
-    return false;
-  }
-
-  const components = value.components;
-  if (components === undefined) {
-    return true;
-  }
-  if (!isPlainObject(components)) {
-    return false;
-  }
-
-  const inference = components.inference;
-  if (inference !== undefined) {
-    if (!isPlainObject(inference)) {
-      return false;
-    }
-    const profiles = inference.profiles;
-    if (profiles !== undefined) {
-      if (
-        !isPlainObject(profiles) ||
-        !Object.values(profiles).every((entry) => isInferenceProfile(entry))
-      ) {
-        return false;
-      }
-    }
-  }
-
-  const sandbox = components.sandbox;
-  if (sandbox !== undefined) {
-    if (!isPlainObject(sandbox)) {
-      return false;
-    }
-    if (
-      !isOptionalString(sandbox.image) ||
-      !isOptionalString(sandbox.name) ||
-      !isOptionalPortList(sandbox.forward_ports)
-    ) {
-      return false;
-    }
-  }
-
-  const router = components.router;
-  if (router !== undefined) {
-    if (!isPlainObject(router)) {
-      return false;
-    }
-    if (
-      !isOptionalBoolean(router.enabled) ||
-      !(router.port === undefined || isValidPort(router.port)) ||
-      !isOptionalString(router.pool_config_path)
-    ) {
-      return false;
-    }
-  }
-
-  const policy = components.policy;
-  if (policy !== undefined) {
-    if (!isPlainObject(policy)) {
-      return false;
-    }
-    const additions = policy.additions;
-    if (additions !== undefined) {
-      if (!isPolicyAdditions(additions)) {
-        return false;
-      }
-    }
-  }
-
-  const identity = components.identity;
-  if (identity !== undefined && !isRuntimeIdentityConfig(identity)) return false;
-
-  return true;
-}
-
-// ── Logging helpers ─────────────────────────────────────────────
-
-function log(msg: string): void {
-  process.stdout.write(msg + "\n");
-}
-
-function progress(pct: number, label: string): void {
-  process.stdout.write(`PROGRESS:${String(pct)}:${label}\n`);
-}
-
 function readRollbackSandboxName(value: RollbackPlanSource | null): string {
   if (!value || typeof value.sandbox_name !== "string" || value.sandbox_name.trim() === "") {
     throw new Error("rollback plan sandbox_name must be a non-empty string");
@@ -434,106 +213,6 @@ function assertReusableInferenceProvider(
       `Inference provider '${expected.name}' does not match the requested non-secret binding; refusing runtime identity apply`,
     );
   }
-}
-
-// ── Utilities ───────────────────────────────────────────────────
-
-export function emitRunId(): string {
-  const now = new Date();
-  const ts = now
-    .toISOString()
-    .replace(/[-:T]/g, "")
-    .slice(0, 14)
-    .replace(/^(\d{8})(\d{6})/, "$1-$2");
-  const rid = `nc-${ts}-${randomUUID().replace(/-/g, "").slice(0, 8)}`;
-  process.stdout.write(`RUN_ID:${rid}\n`);
-  return rid;
-}
-
-type InferenceProfileMap = { [profileName: string]: InferenceProfile };
-
-interface Blueprint {
-  version?: string;
-  components?: {
-    inference?: {
-      profiles?: InferenceProfileMap;
-    };
-    sandbox?: SandboxConfig;
-    router?: RouterConfig;
-    policy?: {
-      additions?: PolicyAdditions;
-    };
-    identity?: RuntimeIdentityConfig;
-  };
-}
-
-interface InferenceProfile {
-  provider_type?: string;
-  provider_name?: string;
-  endpoint?: string;
-  model?: string;
-  credential_env?: string;
-  credential_default?: string;
-  timeout_secs?: number;
-}
-
-interface SandboxConfig {
-  image?: string;
-  name?: string;
-  forward_ports?: number[];
-}
-
-interface RouterConfig {
-  enabled?: boolean;
-  port?: number;
-  pool_config_path?: string;
-}
-
-const DEFAULT_ROUTER_PORT = 4000;
-
-function mergePolicyAdditions(currentPolicyRaw: string, additions: PolicyAdditions): string {
-  // sourceOfTruth: src/lib/shared/openshell-policy-boundary.cts
-  const current = parseOpenShellPolicy(currentPolicyRaw).policy;
-  const existingNetworkPolicies = current.network_policies ?? {};
-  const output: UnknownRecord = {};
-
-  // OpenShell 0.0.72 and later expose composable top-level policy sections as
-  // mappings. Preserve unknown mapping sections for forward compatibility, but
-  // fail closed on a scalar or sequence until its mutation semantics are
-  // reviewed for the next supported OpenShell contract.
-  for (const [key, value] of Object.entries(current)) {
-    if (key !== "version" && key !== "network_policies") {
-      if (!isPlainObject(value)) {
-        throw new Error(`Current policy top-level field "${key}" must be a YAML mapping`);
-      }
-      output[key] = value;
-    }
-  }
-
-  output.version = current.version ?? 1;
-  output.network_policies = withoutProviderComposedPolicies({
-    ...existingNetworkPolicies,
-    ...additions,
-  });
-  return YAML.stringify(output);
-}
-
-export function loadBlueprint(): Blueprint {
-  const blueprintPath = process.env.NEMOCLAW_BLUEPRINT_PATH ?? ".";
-  const bpFile = join(blueprintPath, "blueprint.yaml");
-  let content: string;
-  try {
-    content = readFileSync(bpFile, "utf-8");
-  } catch {
-    throw new Error(`blueprint.yaml not found at ${bpFile}`);
-  }
-  const parsed: unknown = YAML.parse(content);
-  if (!isBlueprint(parsed)) {
-    throw new Error(
-      `blueprint.yaml at ${bpFile} must contain a YAML mapping with valid nested component shapes`,
-    );
-  }
-  return parsed;
 }
 
 async function runCmd(
@@ -656,241 +335,13 @@ async function resolveRunConfig(
 
 // ── Actions ─────────────────────────────────────────────────────
 
-export interface RunPlan {
-  run_id: string;
-  profile: string;
-  sandbox: {
-    image: string;
-    name: string;
-    forward_ports: number[];
-  };
-  inference: {
-    provider_type: string | undefined;
-    provider_name: string | undefined;
-    endpoint: string | undefined;
-    model: string | undefined;
-  };
-  router: {
-    enabled: boolean;
-    port: number;
-    pool_config_path: string | undefined;
-  };
-  identity?: RuntimeIdentityPlan;
-  policy_additions: PolicyAdditions;
-  dry_run: boolean;
-}
-
-interface SafeInferencePlan {
-  provider_type: string | undefined;
-  provider_name: string | undefined;
-  endpoint: string | undefined;
-  model: string | undefined;
-}
-
-interface PersistedRunPlan {
-  run_id: string;
-  profile: string;
-  sandbox_name: string;
-  sandbox_created_by_apply: boolean;
-  inference_provider_created_by_apply: boolean;
-  policy_additions: PolicyAdditions;
-  inference: SafeInferencePlan;
-  identity?: RuntimeIdentityReceipt;
-  timestamp: string;
-}
-
-type StatusRunPlan = {
-  run_id: string;
-  profile?: string;
-  sandbox?: {
-    image?: string;
-    name?: string;
-    forward_ports?: number[];
-  };
-  sandbox_name?: string;
-  sandbox_created_by_apply?: boolean;
-  inference_provider_created_by_apply?: boolean;
-  policy_additions?: PolicyAdditions;
-  inference?: SafeInferencePlan;
-  identity?: RuntimeIdentityReceipt;
-  router?: {
-    enabled?: boolean;
-    port?: number;
-    pool_config_path?: string;
-  };
-  timestamp?: string;
-  dry_run?: boolean;
-};
-
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function buildSafeInferencePlan(source: InferenceProfile | UnknownRecord): SafeInferencePlan {
-  return {
-    provider_type: optionalString(source.provider_type),
-    provider_name: optionalString(source.provider_name),
-    endpoint: optionalString(source.endpoint),
-    model: optionalString(source.model),
-  };
-}
-
-function buildSafePublicRunPlan(args: {
-  runId: string;
-  profile: string;
-  inferenceCfg: InferenceProfile;
-  sandboxCfg: SandboxConfig;
-  routerCfg: RouterConfig;
-  runtimeIdentityConfig?: RuntimeIdentityConfig;
-  policyAdditions: PolicyAdditions;
-  dryRun: boolean;
-}): RunPlan {
-  const routerEnabled = args.routerCfg.enabled === true;
-  const routerPort = args.routerCfg.port ?? DEFAULT_ROUTER_PORT;
-
-  const plan: RunPlan = {
-    run_id: args.runId,
-    profile: args.profile,
-    sandbox: {
-      image: args.sandboxCfg.image ?? "openclaw",
-      name: args.sandboxCfg.name ?? "openclaw",
-      forward_ports: args.sandboxCfg.forward_ports ?? [DASHBOARD_PORT],
-    },
-    inference: buildSafeInferencePlan(args.inferenceCfg),
-    router: {
-      enabled: routerEnabled,
-      port: routerPort,
-      pool_config_path: args.routerCfg.pool_config_path,
-    },
-    policy_additions: args.policyAdditions,
-    dry_run: args.dryRun,
-  };
-  if (args.runtimeIdentityConfig) {
-    plan.identity = buildRuntimeIdentityPlan(args.runtimeIdentityConfig);
-  }
-  return plan;
-}
-
-function buildPersistedRunPlan(args: {
-  runId: string;
-  profile: string;
-  sandboxName: string;
-  sandboxCreatedByApply: boolean;
-  inferenceProviderCreatedByApply: boolean;
-  policyAdditions: PolicyAdditions;
-  inferenceCfg: InferenceProfile;
-  runtimeIdentityReceipt?: RuntimeIdentityReceipt;
-  timestamp: string;
-}): PersistedRunPlan {
-  const plan: PersistedRunPlan = {
-    run_id: args.runId,
-    profile: args.profile,
-    sandbox_name: args.sandboxName,
-    sandbox_created_by_apply: args.sandboxCreatedByApply,
-    inference_provider_created_by_apply: args.inferenceProviderCreatedByApply,
-    policy_additions: args.policyAdditions,
-    inference: buildSafeInferencePlan(args.inferenceCfg),
-    timestamp: args.timestamp,
-  };
-  if (args.runtimeIdentityReceipt) {
-    plan.identity = args.runtimeIdentityReceipt;
-  }
-  return plan;
-}
-
-function buildStatusRunPlan(source: unknown, fallbackRunId: string): StatusRunPlan | null {
-  if (!isPlainObject(source)) {
-    return null;
-  }
-
-  const safePlan: StatusRunPlan = {
-    run_id: optionalString(source.run_id) ?? fallbackRunId,
-  };
-
-  const profile = optionalString(source.profile);
-  if (profile !== undefined) {
-    safePlan.profile = profile;
-  }
-
-  if (isPlainObject(source.sandbox)) {
-    const sandbox: StatusRunPlan["sandbox"] = {};
-    const image = optionalString(source.sandbox.image);
-    const name = optionalString(source.sandbox.name);
-    const forwardPorts = isOptionalPortList(source.sandbox.forward_ports)
-      ? source.sandbox.forward_ports
-      : undefined;
-    if (image !== undefined) {
-      sandbox.image = image;
-    }
-    if (name !== undefined) {
-      sandbox.name = name;
-    }
-    if (forwardPorts !== undefined) {
-      sandbox.forward_ports = forwardPorts;
-    }
-    if (Object.keys(sandbox).length > 0) {
-      safePlan.sandbox = sandbox;
-    }
-  }
-
-  const sandboxName = optionalString(source.sandbox_name);
-  if (sandboxName !== undefined) {
-    safePlan.sandbox_name = sandboxName;
-  }
-  if (typeof source.sandbox_created_by_apply === "boolean") {
-    safePlan.sandbox_created_by_apply = source.sandbox_created_by_apply;
-  }
-  if (typeof source.inference_provider_created_by_apply === "boolean") {
-    safePlan.inference_provider_created_by_apply = source.inference_provider_created_by_apply;
-  }
-
-  if (isPolicyAdditions(source.policy_additions)) {
-    safePlan.policy_additions = source.policy_additions;
-  }
-
-  if (isPlainObject(source.inference)) {
-    safePlan.inference = buildSafeInferencePlan(source.inference);
-  }
-
-  if (isRuntimeIdentityReceipt(source.identity)) {
-    safePlan.identity = source.identity;
-  }
-
-  if (isPlainObject(source.router)) {
-    const router: StatusRunPlan["router"] = {};
-    if (typeof source.router.enabled === "boolean") {
-      router.enabled = source.router.enabled;
-    }
-    if (isValidPort(source.router.port)) {
-      router.port = source.router.port;
-    }
-    const poolConfigPath = optionalString(source.router.pool_config_path);
-    if (poolConfigPath !== undefined) {
-      router.pool_config_path = poolConfigPath;
-    }
-    if (Object.keys(router).length > 0) {
-      safePlan.router = router;
-    }
-  }
-
-  const timestamp = optionalString(source.timestamp);
-  if (timestamp !== undefined) {
-    safePlan.timestamp = timestamp;
-  }
-  if (typeof source.dry_run === "boolean") {
-    safePlan.dry_run = source.dry_run;
-  }
-
-  return safePlan;
-}
-
 export async function actionPlan(
   profile: string,
   blueprint: Blueprint,
   options?: { dryRun?: boolean; endpointUrl?: string },
 ): Promise<RunPlan> {
   const rid = emitRunId();
-  progress(10, "Validating blueprint");
+  writeRunProgress(10, "Validating blueprint");
 
   const { inferenceCfg, sandboxCfg, routerCfg } = await resolveRunConfig(
     profile,
@@ -898,7 +349,7 @@ export async function actionPlan(
     options?.endpointUrl,
   );
 
-  progress(20, "Checking prerequisites");
+  writeRunProgress(20, "Checking prerequisites");
   if (!(await openshellAvailable())) {
     throw new Error(
       "openshell CLI not found. Install OpenShell first.\n  See: https://github.com/NVIDIA/OpenShell",
@@ -916,8 +367,8 @@ export async function actionPlan(
     dryRun: options?.dryRun ?? false,
   });
 
-  progress(100, "Plan complete");
-  log(JSON.stringify(plan, null, 2));
+  writeRunProgress(100, "Plan complete");
+  writeRunLog(JSON.stringify(plan, null, 2));
   return plan;
 }
 
@@ -1050,7 +501,7 @@ export async function actionApply(
             activeRoute.timeoutSeconds === inferenceCfg.timeout_secs);
       }
 
-      progress(10, "Configuring runtime identity");
+      writeRunProgress(10, "Configuring runtime identity");
       // Establish durable state before the first identity mutation, then update
       // the receipt after each acquired resource.
       persistRunPlan();
@@ -1058,9 +509,9 @@ export async function actionApply(
       persistRunPlan();
     }
 
-    progress(20, "Creating OpenClaw sandbox");
+    writeRunProgress(20, "Creating OpenClaw sandbox");
     if (reuseExistingSandbox) {
-      log(`Sandbox '${sandboxName}' already exists, reusing.`);
+      writeRunLog(`Sandbox '${sandboxName}' already exists, reusing.`);
     } else {
       const createArgs = [
         "openshell",
@@ -1095,7 +546,7 @@ export async function actionApply(
             }
             assertReusableRuntimeIdentitySandbox(racedSandbox.stdout, sandboxName);
           }
-          log(`Sandbox '${sandboxName}' already exists, reusing.`);
+          writeRunLog(`Sandbox '${sandboxName}' already exists, reusing.`);
         } else {
           throw new Error(`Failed to create sandbox: ${createResult.stderr}`);
         }
@@ -1104,9 +555,9 @@ export async function actionApply(
 
     // Keep runtime credentials unattached until OpenShell accepts the
     // sandbox's requested inference route.
-    progress(50, "Configuring inference provider");
+    writeRunProgress(50, "Configuring inference provider");
     if (reuseExistingInferenceProvider) {
-      log(`Provider '${providerName}' already exists, reusing.`);
+      writeRunLog(`Provider '${providerName}' already exists, reusing.`);
     } else {
       const providerArgs = [
         "openshell",
@@ -1159,7 +610,7 @@ export async function actionApply(
               requiresCredential: credential !== "",
             });
           }
-          log(`Provider '${providerName}' already exists, reusing.`);
+          writeRunLog(`Provider '${providerName}' already exists, reusing.`);
         } else {
           throw new Error(
             `Failed to create inference provider '${providerName}': ${boundedCommandError(providerResult.stderr, [credential])}`,
@@ -1172,9 +623,9 @@ export async function actionApply(
       }
     }
 
-    progress(70, "Setting inference route");
+    writeRunProgress(70, "Setting inference route");
     if (reuseExistingInferenceRoute) {
-      log(`Inference route '${providerName} / ${model}' is already active, reusing.`);
+      writeRunLog(`Inference route '${providerName} / ${model}' is already active, reusing.`);
     } else {
       const inferenceArgs = [
         "openshell",
@@ -1222,7 +673,7 @@ export async function actionApply(
     }
 
     if (Object.keys(policyAdditions).length > 0) {
-      progress(78, "Applying policy additions");
+      writeRunProgress(78, "Applying policy additions");
       const currentPolicy = await runCmd(["openshell", "policy", "get", "--base", sandboxName], {
         reject: false,
       });
@@ -1247,12 +698,12 @@ export async function actionApply(
       }
     }
 
-    progress(85, "Saving run state");
+    writeRunProgress(85, "Saving run state");
     persistRunPlan();
 
-    progress(100, "Apply complete");
-    log(`Sandbox '${sandboxName}' is ready.`);
-    log(`Inference: ${providerName} -> ${model} @ ${endpoint}`);
+    writeRunProgress(100, "Apply complete");
+    writeRunLog(`Sandbox '${sandboxName}' is ready.`);
+    writeRunLog(`Inference: ${providerName} -> ${model} @ ${endpoint}`);
   } catch (error) {
     const cleanupFailures: string[] = [];
     if (runtimeIdentityReceipt) {
@@ -1338,11 +789,11 @@ export function actionStatus(rid?: string): void {
     try {
       runs = readdirSync(runsDir).sort().reverse();
     } catch {
-      log("No runs found.");
+      writeRunLog("No runs found.");
       return;
     }
     if (runs.length === 0) {
-      log("No runs found.");
+      writeRunLog("No runs found.");
       return;
     }
     runDir = join(runsDir, runs[0]);
@@ -1356,9 +807,9 @@ export function actionStatus(rid?: string): void {
     if (!safePlan) {
       throw new Error("plan.json must contain a JSON object");
     }
-    log(JSON.stringify(safePlan, null, 2));
+    writeRunLog(JSON.stringify(safePlan, null, 2));
   } catch {
-    log(JSON.stringify({ run_id: name, status: "unknown" }));
+    writeRunLog(JSON.stringify({ run_id: name, status: "unknown" }));
   }
 }
 
@@ -1404,15 +855,18 @@ export async function actionRollback(rid: string): Promise<void> {
   }
 
   if (runtimeIdentityReceipt) {
-    progress(20, `Removing runtime identity provider ${runtimeIdentityReceipt.provider_name}`);
+    writeRunProgress(
+      20,
+      `Removing runtime identity provider ${runtimeIdentityReceipt.provider_name}`,
+    );
     await removeRuntimeIdentity(runtimeIdentityReceipt, sandboxName, runtimeIdentityCommandDeps());
   }
 
   if (sandboxCreatedByApply) {
-    progress(30, `Stopping sandbox ${sandboxName}`);
+    writeRunProgress(30, `Stopping sandbox ${sandboxName}`);
     const stop = await runCmd(["openshell", "sandbox", "stop", sandboxName], { reject: false });
 
-    progress(60, `Removing sandbox ${sandboxName}`);
+    writeRunProgress(60, `Removing sandbox ${sandboxName}`);
     const remove = await runCmd(["openshell", "sandbox", "remove", sandboxName], {
       reject: false,
     });
@@ -1427,11 +881,11 @@ export async function actionRollback(rid: string): Promise<void> {
       );
     }
   } else {
-    progress(60, `Preserving unowned sandbox ${sandboxName}`);
+    writeRunProgress(60, `Preserving unowned sandbox ${sandboxName}`);
   }
 
   if (inferenceProviderCreatedByApply) {
-    progress(80, `Removing inference provider ${inferenceProviderName!}`);
+    writeRunProgress(80, `Removing inference provider ${inferenceProviderName!}`);
     const removeProvider = await runCmd(
       ["openshell", "provider", "delete", inferenceProviderName!],
       { reject: false },
@@ -1446,10 +900,10 @@ export async function actionRollback(rid: string): Promise<void> {
     }
   }
 
-  progress(90, "Cleaning up run state");
+  writeRunProgress(90, "Cleaning up run state");
   writeFileSync(join(stateDir, "rolled_back"), new Date().toISOString());
 
-  progress(100, "Rollback complete");
+  writeRunProgress(100, "Rollback complete");
 }
 
 // ── CLI ─────────────────────────────────────────────────────────

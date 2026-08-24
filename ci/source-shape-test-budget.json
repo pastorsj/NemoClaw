@@ -237,11 +237,6 @@
       "category": "security"
     },
     {
-      "file": "test/repro-5978-policy-denial-hint.test.ts",
-      "test": "prints only once when the file is sourced twice in one login shell",
-      "category": "compatibility"
-    },
-    {
       "file": "test/sandbox-provisioning.test.ts",
       "test": "stages model-specific plugin sources beside their manifests",
       "category": "compatibility"

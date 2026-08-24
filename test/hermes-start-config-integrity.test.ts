@@ -8,8 +8,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -25,7 +32,7 @@ function extractShellFunctionFromSource(src: string, name: string): string {
 function runHermesConfigIntegrityVerifierAsRoot(inspectStatus: 0 | 1) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-integrity-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   const hermesHome = path.join(tmpDir, ".hermes");
   const hashFile = path.join(tmpDir, "hermes.config-hash");
   fs.mkdirSync(hermesHome, { recursive: true });
@@ -67,7 +74,7 @@ function runHermesDashboardHomePrepAsRoot() {
   const logPath = path.join(tmpDir, "seed.log");
   const hermesHome = path.join(tmpDir, ".hermes");
   const dashboardHome = path.join(hermesHome, "profiles", "dashboard-home");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.mkdirSync(dashboardHome, { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(path.join(dashboardHome, "gateway_state.json"), "stale\n");
@@ -138,7 +145,7 @@ function runHermesDashboardHomePrepAsRoot() {
 function runLockedParentStartupPreflight(parentMetadata: string) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-parent-preflight-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   const mainStart = src.indexOf('if [ "$(id -u)" -eq 0 ]; then', src.indexOf("# ── Main"));
   const rootBranchEnd = src.indexOf("\nelif ", mainStart);
   expect(mainStart).toBeGreaterThanOrEqual(0);
@@ -191,24 +198,28 @@ describe("packages/nemoclaw-hermes/start.sh config integrity", () => {
     expect(result.stdout).toContain("result=failure failure-code=mcp-integrity");
   });
 
-  it("prepares root dashboard home and seeds config through the sandbox identity", {
-    timeout: 15_000,
-  }, () => {
-    const result = runHermesDashboardHomePrepAsRoot();
+  it(
+    "prepares root dashboard home and seeds config through the sandbox identity",
+    {
+      timeout: 15_000,
+    },
+    () => {
+      const result = runHermesDashboardHomePrepAsRoot();
 
-    expect(result.status).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toContain("gateway_state_exists=0");
-    expect(result.stdout).toContain("cmd=mkdir stepped=1");
-    expect(result.stdout).toContain("cmd=chmod stepped=1");
-    expect(result.stdout).toContain("cmd=rm stepped=1");
-    expect(result.stdout).toContain("cmd=python stepped=1");
-    expect(result.stdout).not.toContain("cmd=chown");
-    expect(result.stdout).toMatch(
-      /seed-dashboard-config[.]py\s+[^\s]*managed-policy[.]json\s+[^\s]*config[.]yaml/u,
-    );
-    expect(result.stdout).toContain("/.env");
-  });
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("");
+      expect(result.stdout).toContain("gateway_state_exists=0");
+      expect(result.stdout).toContain("cmd=mkdir stepped=1");
+      expect(result.stdout).toContain("cmd=chmod stepped=1");
+      expect(result.stdout).toContain("cmd=rm stepped=1");
+      expect(result.stdout).toContain("cmd=python stepped=1");
+      expect(result.stdout).not.toContain("cmd=chown");
+      expect(result.stdout).toMatch(
+        /seed-dashboard-config[.]py\s+[^\s]*managed-policy[.]json\s+[^\s]*config[.]yaml/u,
+      );
+      expect(result.stdout).toContain("/.env");
+    },
+  );
 
   it("continues locked startup only when /sandbox has the sticky root-owned posture", () => {
     const protectedParent = runLockedParentStartupPreflight("root:sandbox 1775");

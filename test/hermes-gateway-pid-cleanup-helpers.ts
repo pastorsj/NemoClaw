@@ -10,7 +10,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
+
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -34,7 +42,7 @@ export function runRemoveStale(
   seed: (tmp: string, pidPath: string) => void,
   label = "legacy PID file",
 ): { status: number | null; stderr: string; tmp: string; pidPath: string } {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   const fn = extractShellFunctionFromSource(src, "remove_stale_gateway_file");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hermes-gw-pid-cleanup-"));
   const pidPath = path.join(tmp, "gateway.pid");

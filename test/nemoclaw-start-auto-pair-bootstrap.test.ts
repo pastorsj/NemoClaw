@@ -6,14 +6,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  readOpenClawAutoPairSource,
+  readOpenClawStartupSource,
+} from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 const APPROVAL_POLICY = path.join(
   import.meta.dirname,
   "..",
@@ -23,12 +20,6 @@ const APPROVAL_POLICY = path.join(
   "device-approval.py",
 );
 
-function startScriptHeredoc(src: string, marker: string): string {
-  const match = src.match(new RegExp(`<<'${marker}'[^\\n]*\\n([\\s\\S]*?)\\n${marker}`));
-  expect(match).not.toBeNull();
-  return match![1];
-}
-
 function trustedApprovalPolicyFile(tmpDir: string): string {
   const helperPath = path.join(tmpDir, "openclaw_device_approval_policy.py");
   fs.copyFileSync(APPROVAL_POLICY, helperPath);
@@ -37,7 +28,7 @@ function trustedApprovalPolicyFile(tmpDir: string): string {
 }
 
 function autoPairPythonScript(src: string, tmpDir: string): string {
-  return startScriptHeredoc(src, "PYAUTOPAIR")
+  return src
     .replace(
       "APPROVAL_POLICY_FILE = '/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py'",
       `APPROVAL_POLICY_FILE = ${JSON.stringify(trustedApprovalPolicyFile(tmpDir))}`,
@@ -55,7 +46,14 @@ def _nemoclaw_test_sleep(seconds): _nemoclaw_test_clock.__setitem__(0, _nemoclaw
 }
 
 describe("nemoclaw-start initial CLI auto-pair bootstrap (#6113)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawAutoPairSource();
+
+  it("does not let the background watcher or its CLI children inherit container stdin", () => {
+    const startupSource = readOpenClawStartupSource();
+    expect(startupSource).toMatch(
+      /python3 -u "\$_OPENCLAW_AUTO_PAIR_SCRIPT" <\/dev\/null/,
+    );
+  });
 
   it("approves an initial CLI pairing request when device list is itself gated (#6113)", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-auto-pair-bootstrap-"));
@@ -1117,7 +1115,7 @@ fi
     fs.writeFileSync(writablePolicy, "def approval_request_decision(_device): return {}\n", {
       mode: 0o600,
     });
-    const script = startScriptHeredoc(src, "PYAUTOPAIR").replace(
+    const script = src.replace(
       "APPROVAL_POLICY_FILE = '/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py'",
       `APPROVAL_POLICY_FILE = ${JSON.stringify(writablePolicy)}`,
     );

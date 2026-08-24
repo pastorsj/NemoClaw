@@ -584,6 +584,13 @@ COPY packages/nemoclaw-openclaw/runtime/state/plan.json /usr/local/share/nemocla
 COPY packages/nemoclaw-openclaw/runtime/config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
 COPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/nemoclaw-start
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/auto-pair.py /usr/local/lib/nemoclaw/openclaw-startup/auto-pair.py
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/gateway-setup.sh /usr/local/lib/nemoclaw/openclaw-startup/gateway-setup.sh
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/model-routing.sh /usr/local/lib/nemoclaw/openclaw-startup/model-routing.sh
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/process-control.sh /usr/local/lib/nemoclaw/openclaw-startup/process-control.sh
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/runtime-state.sh /usr/local/lib/nemoclaw/openclaw-startup/runtime-state.sh
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/sandbox-setup.sh /usr/local/lib/nemoclaw/openclaw-startup/sandbox-setup.sh
+COPY --chmod=0444 packages/nemoclaw-openclaw/runtime/startup-env.sh /usr/local/lib/nemoclaw/openclaw-startup/startup-env.sh
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
@@ -1589,6 +1596,9 @@ RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /src/lib/messaging/applier/build/messaging-build-applier.mts \
     && chmod 444 /src/lib/tool-disclosure.ts \
         /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh \
+    && chown -R root:root /usr/local/lib/nemoclaw/openclaw-startup \
+    && find /usr/local/lib/nemoclaw/openclaw-startup -type d -exec chmod 755 {} + \
+    && find /usr/local/lib/nemoclaw/openclaw-startup -type f -exec chmod 444 {} + \
     && chmod -R a+rX /src/lib/messaging \
     && chown root:root /usr/local/bin/nemoclaw-gateway-control \
         /usr/local/lib/nemoclaw/generate-config \
@@ -2355,6 +2365,18 @@ RUN check_metadata() { \
     && check_metadata /usr/local/bin/nemoclaw-gateway-control 'root:root:700' \
     && check_metadata /usr/local/lib/nemoclaw/state-dir-guard.py 'root:root:500' \
     && check_metadata /usr/local/share/nemoclaw/state-lock-plan.json 'root:root:444' \
+    && check_metadata /usr/local/lib/nemoclaw/openclaw-startup 'root:root:755' \
+    && for startup_module in \
+        auto-pair.py \
+        gateway-setup.sh \
+        model-routing.sh \
+        process-control.sh \
+        runtime-state.sh \
+        sandbox-setup.sh \
+        startup-env.sh; do \
+      test ! -L "/usr/local/lib/nemoclaw/openclaw-startup/$startup_module" \
+        && check_metadata "/usr/local/lib/nemoclaw/openclaw-startup/$startup_module" 'root:root:444'; \
+    done \
     && check_metadata /usr/local/lib/nemoclaw/preloads/sandbox-safety-net.js 'root:root:644'
 
 # Health check: poll the gateway's /health endpoint so Docker (and Compose)

@@ -21,8 +21,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const NEMOCLAW_START_SCRIPT = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 const ENTRYPOINT_ENV_WRAPPER = join(
   import.meta.dirname,
   "../scripts/lib/entrypoint-env-wrapper.sh",
@@ -37,7 +37,7 @@ function rcShimWrapperHeader(): string {
 }
 
 function extractRuntimeShellEnvSnippet() {
-  const src = readFileSync(NEMOCLAW_START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const start = src.indexOf("write_runtime_shell_env() {");
   const end = src.indexOf("# cleanup_on_signal", start);
   if (start === -1 || end === -1 || end <= start) {
@@ -50,7 +50,7 @@ function extractRuntimeShellEnvSnippet() {
 }
 
 function extractOpenClawBootstrapEnvSnippet() {
-  const src = readFileSync(NEMOCLAW_START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const entrypointStart = src.indexOf("# managed-entrypoint-env-wrapper begin");
   const entrypointEndMarker = "# managed-entrypoint-env-wrapper end";
   const entrypointEnd = src.indexOf(entrypointEndMarker, entrypointStart);
@@ -73,7 +73,7 @@ function extractOpenClawBootstrapEnvSnippet() {
 }
 
 function extractRuntimeShellEnvShimSnippet() {
-  const src = readFileSync(NEMOCLAW_START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const start = src.indexOf("ensure_runtime_shell_env_shim() {");
   const end = src.indexOf("# ── Legacy layout migration", start);
   if (start === -1 || end === -1 || end <= start) {
@@ -86,7 +86,7 @@ function extractRuntimeShellEnvShimSnippet() {
 }
 
 function extractToolRedirectsSnippet() {
-  const src = readFileSync(NEMOCLAW_START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const start = src.indexOf("_TOOL_REDIRECTS=(");
   const loop = src.indexOf("for _redir", start);
   const endMarker = "\ndone";
@@ -101,7 +101,7 @@ function extractToolRedirectsSnippet() {
 }
 
 function extractProxyVarsSnippet() {
-  const src = readFileSync(NEMOCLAW_START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const start = src.indexOf("PROXY_HOST=");
   const endMarker = 'export no_proxy="$_NO_PROXY_VAL"';
   const end = src.indexOf(endMarker, start);
@@ -215,8 +215,7 @@ describe("service environment", () => {
     const sandboxInitSource = `source ${JSON.stringify(join(import.meta.dirname, "../scripts/lib/sandbox-init.sh"))}`;
 
     it("entrypoint exports GIT_SSL_CAINFO when SSL_CERT_FILE points to a real file", () => {
-      const scriptPath = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
-      const src = readFileSync(scriptPath, "utf-8");
+      const src = readOpenClawStartupSource();
       const start = src.indexOf("# Git TLS CA bundle fix");
       const end = src.indexOf("# HTTP library + NODE_USE_ENV_PROXY", start);
       if (start === -1 || end === -1 || end <= start) {
@@ -343,7 +342,7 @@ describe("service environment", () => {
 
   describe("runtime npm online state", () => {
     it("entrypoint exports npm_config_offline=false and NPM_CONFIG_OFFLINE=false at PID 1", () => {
-      const src = readFileSync(NEMOCLAW_START_SCRIPT, "utf-8");
+      const src = readOpenClawStartupSource();
       const start = src.indexOf("_TOOL_REDIRECTS=(");
       const end = src.indexOf("done", src.indexOf("for _redir", start));
       if (start === -1 || end === -1 || end <= start) {
@@ -425,8 +424,7 @@ describe("service environment", () => {
     ])(
       "entrypoint pre-creates redirected dirs and restricts GNUPGHOME permissions [$scenario]",
       ({ scenario }) => {
-        const scriptPath = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
-        const src = readFileSync(scriptPath, "utf-8");
+        const src = readOpenClawStartupSource();
         const start = src.indexOf("# Pre-create redirected directories");
         const end = src.indexOf("# ── Drop unnecessary Linux capabilities", start);
         if (start === -1 || end === -1 || end <= start) {

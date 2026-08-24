@@ -6,14 +6,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 function extractShellFunction(src: string, name: string): string {
   const header = `${name}() {`;
@@ -38,7 +32,7 @@ function extractShellFunction(src: string, name: string): string {
 // verify PLUGIN_REFRESH_PID is appended for SIGTERM cleanup. These anchors
 // span the full workaround block for #2021 / openclaw/openclaw#89606.
 function extractRefreshBlock(): string {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const start = src.indexOf("\nstart_auto_pair\n");
   const end = src.indexOf("SANDBOX_WAIT_PID=", start);
   if (start === -1 || end === -1 || end <= start) {
@@ -217,7 +211,7 @@ describe("plugin refresh log preparation", () => {
           "set -euo pipefail",
           `PLUGIN_REFRESH_LOG=${JSON.stringify(refreshLog)}`,
           extractShellFunction(
-            fs.readFileSync(START_SCRIPT, "utf-8"),
+            readOpenClawStartupSource(),
             "prepare_plugin_refresh_log",
           ),
           "prepare_plugin_refresh_log",
@@ -248,7 +242,7 @@ describe("plugin refresh log preparation", () => {
           "set -euo pipefail",
           `PLUGIN_REFRESH_LOG=${JSON.stringify(refreshLog)}`,
           extractShellFunction(
-            fs.readFileSync(START_SCRIPT, "utf-8"),
+            readOpenClawStartupSource(),
             "prepare_plugin_refresh_log",
           ),
           "prepare_plugin_refresh_log",
@@ -282,7 +276,7 @@ describe("plugin refresh log preparation", () => {
           'id() { if [ "${1:-}" = "-u" ]; then printf "0"; else command id "$@"; fi; }',
           'chown() { ln -sfn "$RACE_TARGET" "$PLUGIN_REFRESH_LOG"; return 0; }',
           extractShellFunction(
-            fs.readFileSync(START_SCRIPT, "utf-8"),
+            readOpenClawStartupSource(),
             "prepare_plugin_refresh_log",
           ),
           "prepare_plugin_refresh_log",

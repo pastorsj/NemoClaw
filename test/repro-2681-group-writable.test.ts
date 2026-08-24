@@ -18,14 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentStateLockPlan } from "../src/lib/agent/definition-types";
-
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 const MUTABLE_CONFIG_NORMALIZER = path.join(
   import.meta.dirname,
   "..",
@@ -97,7 +90,7 @@ function restoreCachedModule(modulePath: string, previous: NodeJS.Module | undef
 }
 
 function normalizeMutableConfigPermsFor(configDir: string): string {
-  const startScript = fs.readFileSync(START_SCRIPT, "utf-8");
+  const startScript = readOpenClawStartupSource();
   const normalizeFunction = replaceRequired(
     extractShellFunctionFromSource(startScript, "normalize_mutable_config_perms"),
     'local config_dir="/sandbox/.openclaw"',

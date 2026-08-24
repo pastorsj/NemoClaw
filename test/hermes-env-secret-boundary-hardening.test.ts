@@ -8,13 +8,23 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
+
 const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "env-boundary.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "env-boundary.py",
 );
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 const MAX_ENV_BYTES = 4 * 1024 * 1024;
 const MAX_ENV_LINE_BYTES = 256 * 1024;
 const MAX_ENV_LINES = 65_536;
@@ -41,7 +51,7 @@ function extractShellFunction(source: string, name: string): string {
 }
 
 function runStartEnvValidation(hermesDir: string) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-env-start-check-"));
   const script = path.join(runDir, "run.sh");
   try {
@@ -75,7 +85,7 @@ function runStartEnvValidation(hermesDir: string) {
 }
 
 function runRuntimeEnvValidation(envOverrides: Record<string, string | undefined>) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-env-check-"));
   const script = path.join(runDir, "run.sh");
   try {
@@ -397,7 +407,7 @@ wait "$child"
 `,
       { mode: 0o700 },
     );
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const script = path.join(root, "run.sh");
     fs.writeFileSync(
       script,
@@ -456,7 +466,6 @@ describe("Hermes durable lazy-install target", () => {
     expect(result.stderr).not.toContain(value);
   });
 
-
   it("accepts the image-owned lazy target in the runtime environment (#8613)", () => {
     const result = runRuntimeEnvValidation({
       HERMES_LAZY_INSTALL_TARGET: "/sandbox/.hermes/lazy-packages",
@@ -469,12 +478,15 @@ describe("Hermes durable lazy-install target", () => {
   it.each([
     ["missing", undefined],
     ["overridden", "/tmp/untrusted-packages"],
-  ])("rejects a %s lazy target that could mutate or import through the sealed gateway (#8613)", (_case, value) => {
-    const result = runRuntimeEnvValidation({ HERMES_LAZY_INSTALL_TARGET: value });
+  ])(
+    "rejects a %s lazy target that could mutate or import through the sealed gateway (#8613)",
+    (_case, value) => {
+      const result = runRuntimeEnvValidation({ HERMES_LAZY_INSTALL_TARGET: value });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("HERMES_LAZY_INSTALL_TARGET");
-  });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("HERMES_LAZY_INSTALL_TARGET");
+    },
+  );
 
   it("rejects the lazy target in the sealed env file even when its value is canonical (#8613)", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-env-lazy-target-"));

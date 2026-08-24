@@ -6,6 +6,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
+
 const ROOT = path.join(import.meta.dirname, "..");
 const PUBLISHER = path.join(
   ROOT,
@@ -419,7 +421,7 @@ describe("Hermes runtime state mutation publisher", () => {
     expect(fs.readFileSync(CAPABILITY, "utf8")).toBe(
       '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}\n',
     );
-    const start = fs.readFileSync(START, "utf8");
+    const start = readHermesStartupSource();
     const gate = start.indexOf(
       'NEMOCLAW_RUNTIME_STATE_MUTATION_GATE_HELPER="/usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py"',
     );

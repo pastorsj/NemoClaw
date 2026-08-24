@@ -9,6 +9,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { safeTmpHelpers } from "./nemoclaw-start-gateway.test-helpers";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const NORMALIZER = path.join(
@@ -18,7 +19,6 @@ const NORMALIZER = path.join(
   "runtime",
   "config-permissions.py",
 );
-const START_SCRIPT = path.join(ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 const temporaryRoots: string[] = [];
 
 function temporaryConfigDir(): string {
@@ -177,7 +177,7 @@ describe("OpenClaw 2026.7 startup compatibility", () => {
       ].join("\n"),
       { mode: 0o700 },
     );
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readOpenClawStartupSource();
     const launchProcess = extractShellFunction(
       source,
       "launch_openclaw_gateway_process",

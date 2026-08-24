@@ -7,9 +7,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
-const START_SCRIPT = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 const PRELOAD_SOURCE = path.join(
   REPO_ROOT,
   "src",
@@ -286,7 +286,7 @@ function extractGuardFunction(src: string): string {
 }
 
 describe("WhatsApp pairing guard (channels login --channel whatsapp)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const guard = extractGuardFunction(src);
 
   function runGuard(

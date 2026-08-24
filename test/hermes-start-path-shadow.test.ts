@@ -12,13 +12,22 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "env-boundary.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "env-boundary.py",
 );
 
 function extractShellFunctionFromSource(source: string, name: string): string {
@@ -44,7 +53,7 @@ describe("packages/nemoclaw-hermes/start.sh env secret boundary (PATH shadowing)
     fs.writeFileSync(path.join(shadowBin, "python3"), "#!/usr/bin/env bash\nexit 0\n", {
       mode: 0o755,
     });
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readHermesStartupSource();
     fs.writeFileSync(
       scriptPath,
       [

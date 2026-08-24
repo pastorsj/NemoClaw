@@ -5,8 +5,8 @@ import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(process.cwd(), "packages", "nemoclaw-openclaw", "start.sh");
 
 function sourceBlock(source: string, startMarker: string, endMarker: string): string {
   const start = source.indexOf(startMarker);
@@ -26,7 +26,7 @@ function runBash(lines: string[]): SpawnSyncReturns<string> {
 }
 
 describe("nemoclaw-start shared-state topology (#7280)", () => {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readOpenClawStartupSource();
 
   it.each([
     { expected: "1", initial: "caller-disabled", uid: 0 },

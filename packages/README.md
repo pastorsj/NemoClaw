@@ -91,11 +91,11 @@ Shared directory names describe shared responsibilities. Packages do not need em
 identical internal files. File names use the shortest one- or two-word name that states the
 responsibility; use a third word only when removing it makes the name ambiguous.
 
-Keep orchestration entry points short enough to read as a workflow, and move a cohesive
-implementation behind a descriptive module when it has an independent responsibility. Generated
-locks and inventories, version-bound source patches, and atomic security or rollback protocols can
-remain large when splitting them would separate validation from mutation. Name that debt in the
-package README instead of hiding it behind generic helper files.
+Keep each bundled `start.sh` at or below 1,000 lines so it can read as a workflow, and move a
+cohesive implementation behind a descriptive module when it has an independent responsibility.
+Generated locks and inventories, version-bound source patches, and atomic security or rollback
+protocols can remain large when splitting them would separate validation from mutation. Name that
+debt in the package README instead of hiding it behind generic helper files.
 
 A complete package reads in this order:
 

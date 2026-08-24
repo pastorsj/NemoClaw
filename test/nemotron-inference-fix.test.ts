@@ -7,14 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 const NEMOTRON_FIX_SOURCE = path.join(
   import.meta.dirname,
   "..",
@@ -43,7 +36,7 @@ function extractShellFunction(source, name) {
 }
 
 describe("NVIDIA endpoint inference fix preload (#1193, #2051, #4063)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   it("entrypoint writes the preload and registers it in NODE_OPTIONS", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-nemotron-entrypoint-"));

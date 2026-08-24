@@ -6,14 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 function extractShellFunction(source: string, name: string): string {
   const start = source.indexOf(`${name}() {`);
@@ -27,7 +21,7 @@ function extractShellFunction(source: string, name: string): string {
 function runParentPreflight(configOwner: "root" | "sandbox", parentProtected: boolean) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-parent-"));
   const scriptPath = path.join(tmpDir, "run.sh");
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readOpenClawStartupSource();
   const blockStart = source.indexOf(
     "# A root-owned config directory is the shields-up discriminator.",
   );

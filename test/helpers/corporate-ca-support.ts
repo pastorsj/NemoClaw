@@ -10,10 +10,22 @@ import fs from "node:fs";
 import https from "node:https";
 import os from "node:os";
 import path from "node:path";
+import {
+  openClawStartPath,
+  readOpenClawStartupSource,
+} from "../support/openclaw-startup";
+import { hermesStartPath, readHermesStartupSource } from "../support/hermes-shell-harness";
+
+function readPackageStartupSource(scriptPath: string): string {
+  const resolvedPath = path.resolve(scriptPath);
+  if (resolvedPath === path.resolve(openClawStartPath)) return readOpenClawStartupSource();
+  if (resolvedPath === path.resolve(hermesStartPath)) return readHermesStartupSource();
+  return fs.readFileSync(scriptPath, "utf-8");
+}
 
 /** Extract a marked block of shell text from a script for execution in tests. */
 export function sliceBlock(scriptPath: string, startMarker: string, endMarker: string): string {
-  const src = fs.readFileSync(scriptPath, "utf-8");
+  const src = readPackageStartupSource(scriptPath);
   const start = src.indexOf(startMarker);
   const end = src.indexOf(endMarker, start);
   if (start === -1 || end === -1 || end <= start) {
@@ -336,7 +348,7 @@ export function runCorporateCaHelperGuard(
   deployedMode: "missing" | "symlink",
   endMarker: string,
 ): { status: number; stderr: string; mergedPath: string; secret: string } {
-  const src = fs.readFileSync(scriptPath, "utf-8");
+  const src = readPackageStartupSource(scriptPath);
   const startMarker =
     '_NEMOCLAW_CORPORATE_CA_HELPER="/usr/local/lib/nemoclaw/corporate-ca-runtime.sh"';
   const start = src.indexOf(startMarker);

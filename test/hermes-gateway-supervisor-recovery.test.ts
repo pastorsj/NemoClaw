@@ -8,9 +8,9 @@ import { describe, expect, it } from "vitest";
 import {
   extractShellFunction,
   runHermesBashHarness as runBashHarness,
+  readHermesStartupSource,
 } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const SUPERVISOR_LIB = path.join(
   import.meta.dirname,
   "..",
@@ -20,7 +20,7 @@ const SUPERVISOR_LIB = path.join(
 );
 
 function runHermesHealthyGatewayRecovery(integrityStatus: 0 | 1) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   return runBashHarness([
     'trace() { printf "%s\\n" "$*"; }',
     "gateway_control_take_request() { GATEWAY_CONTROL_ACTION=recover; trace take-request; }",
@@ -50,7 +50,7 @@ function runHermesGatewayProbe(opts: {
   healthStatus: 0 | 1;
   auxiliariesStatus: 0 | 1;
 }) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   return runBashHarness([
     'trace() { printf "%s\\n" "$*"; }',
     "gateway_control_take_request() { GATEWAY_CONTROL_ACTION=probe; trace take-request; }",
@@ -78,7 +78,7 @@ function runHermesOrphanedSealCheck(opts: {
   stateFileExists?: boolean;
   hashValid?: boolean;
 }) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   return runBashHarness(
     [
       'trace() { printf "%s\\n" "$*"; }',
@@ -99,7 +99,7 @@ function runHermesOrphanedSealCheck(opts: {
 }
 
 function runHermesStartupReadiness(gatewayInitStatus: 0 | 1) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   const start = source.indexOf("if ! gateway_control_init; then");
   const print = source.indexOf("print_dashboard_urls", start);
   const blockStart =
@@ -226,21 +226,19 @@ describe("Hermes PID 1 supervisor recovery", () => {
         "handler-rc:1",
       ],
     },
-  ])("keeps the authenticated probe read-only when it $label", ({
-    prepareStatus,
-    healthStatus,
-    auxiliariesStatus,
-    expected,
-  }) => {
-    const result = runHermesGatewayProbe({ prepareStatus, healthStatus, auxiliariesStatus });
+  ])(
+    "keeps the authenticated probe read-only when it $label",
+    ({ prepareStatus, healthStatus, auxiliariesStatus, expected }) => {
+      const result = runHermesGatewayProbe({ prepareStatus, healthStatus, auxiliariesStatus });
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout.trim().split("\n")).toEqual(expected);
-    expect(result.stdout).not.toContain("unexpected-");
-  });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(expected);
+      expect(result.stdout).not.toContain("unexpected-");
+    },
+  );
 
   it("stops a healthy replacement gateway when the pending MCP applied-state commit fails", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "gateway_control_take_request() { GATEWAY_CONTROL_ACTION=restart; trace take-request; }",
@@ -289,7 +287,7 @@ describe("Hermes PID 1 supervisor recovery", () => {
   });
 
   it("routes a secret-boundary refusal through whole-container gateway revocation", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "gateway_control_take_request() { GATEWAY_CONTROL_ACTION=restart; trace take-request; }",
@@ -316,7 +314,7 @@ describe("Hermes PID 1 supervisor recovery", () => {
   });
 
   it("does not unseal or stop the gateway when a foreign config transaction owns restart state", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -403,7 +401,7 @@ describe("Hermes orphaned restart seal detection", () => {
 
 describe("Hermes startup mutation ownership", () => {
   it("cold-resumes a pending 0500 shields clamp through recursive verification", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -475,7 +473,7 @@ esac
   });
 
   it("waits for a live host transaction to finish instead of consuming its state", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -513,7 +511,7 @@ echo "state=1 lock=1 owner_active=1 token_match=0 original_locked=0 recovery_saf
   });
 
   it("fails closed instead of guessing how to recover an interrupted shields transition", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -551,7 +549,7 @@ echo "state=1 lock=1 owner_active=1 token_match=0 original_locked=0 recovery_saf
 
 describe("Hermes supervised auxiliary recovery", () => {
   it("keeps restart bookkeeping alive when the dashboard log tail is absent (#7484)", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'id() { [ "${1:-}" = "-u" ] && printf "1000\\n"; }',
@@ -581,7 +579,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("rejects public health from a relay that loses its tracked identity during the probe", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "CHECKS=0",
@@ -600,7 +598,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("re-prepares runtime inputs and retries a refused non-root gateway respawn", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'hermes_tracked_role_is_current() { case "$2" in 5252) tracked_5252=$((tracked_5252 + 1)); [ "$tracked_5252" -le 2 ] ;; 6262) tracked_6262=$((tracked_6262 + 1)); [ "$tracked_6262" -le 2 ] || { trace "supervised:$2"; exit 0; } ;; *) return 1 ;; esac; }',
@@ -657,7 +655,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("quarantines after five gateway exits in one minute without a sixth launch", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "hermes_tracked_role_is_current() { return 1; }",
@@ -687,7 +685,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("starts a recovered gateway with a fresh consecutive health-failure budget", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "hermes_tracked_role_is_current() { return 0; }",
@@ -734,7 +732,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("counts repeated gateway health failures and never launches a sixth candidate", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "prepare_hermes_nonroot_runtime() { return 0; }",
@@ -770,7 +768,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("does not count preparation refusals or launch before preparation succeeds", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'prepare_hermes_nonroot_runtime() { prepare_calls=$((prepare_calls + 1)); trace "prepare:$prepare_calls"; [ "$prepare_calls" -ge 3 ]; }',
@@ -812,7 +810,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("keeps the initial non-root supervisor alive and recovers a failed first child", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'launch_hermes_gateway_current_user() { GATEWAY_PID=4100; trace "launch:$GATEWAY_PID"; }',
@@ -854,7 +852,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("quarantines instead of orphaning an unhealthy child whose exact stop fails", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "hermes_tracked_role_is_current() { return 0; }",
@@ -890,7 +888,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("refreshes exact role identities and clears a stale gateway wait PID before cleanup", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "refresh_hermes_supervised_child_pids() { trace refresh-identities; SANDBOX_CHILD_PIDS=(202); }",
@@ -914,7 +912,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("binds a tracked role to the startup supervisor parent, effective uid, cmdline, and start time", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -961,7 +959,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("refuses to forget or signal a live PID whose start identity was reused", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "hermes_tracked_role_is_current() { trace identity-mismatch; return 1; }",
@@ -989,7 +987,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("forgets a tracked child only after proving the numeric PID is gone", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "hermes_tracked_role_is_current() { trace role-gone; return 1; }",
@@ -1011,7 +1009,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("passes the captured start identity through every tracked stop", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'hermes_role_identity_value() { printf "777"; }',
@@ -1029,7 +1027,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("does not accept a tracked-stop success while the numeric PID remains live", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'hermes_role_identity_value() { printf "777"; }',
@@ -1050,7 +1048,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("does not signal a launched child whose role identity was never proven", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "tail() { :; }",
@@ -1072,7 +1070,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("quarantines a managed supervisor until an unproven direct child is reaped", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'wait() { trace "wait:$1"; return 143; }',
@@ -1093,7 +1091,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("refuses to reap a live recycled gateway PID", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "GATEWAY_PID=4242",
@@ -1115,7 +1113,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("refuses to wait on a live gateway when role proof becomes unavailable", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "GATEWAY_PID=4242",
@@ -1139,7 +1137,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("reaps only an exact matching zombie gateway", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "GATEWAY_PID=4242",
@@ -1162,7 +1160,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("defers reaping a still-proven gateway to a pending authenticated request", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "GATEWAY_PID=4242",
@@ -1187,7 +1185,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("exits PID 1 instead of marking an unproven gateway stopped", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "hermes_stop_tracked_role() { trace stop-refused; return 1; }",
@@ -1207,7 +1205,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("replaces a live but listener-less reused dashboard PID and its stale bridge", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'id() { [ "${1:-}" = "-u" ] && printf "0\\n"; }',
@@ -1260,7 +1258,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("replaces a live API bridge PID that owns no public listener", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'id() { [ "${1:-}" = "-u" ] && printf "0\\n"; }',
@@ -1311,7 +1309,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("restarts a dashboard that owns its listener but fails HTTP health", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'id() { [ "${1:-}" = "-u" ] && printf "0\\n"; }',
@@ -1360,7 +1358,7 @@ describe("Hermes supervised auxiliary recovery", () => {
   });
 
   it("propagates API bridge startup failure without touching the dashboard", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'id() { [ "${1:-}" = "-u" ] && printf "0\\n"; }',
@@ -1397,7 +1395,7 @@ describe("Hermes supervised auxiliary recovery", () => {
 
 describe("Hermes socat bridge startup", () => {
   it("fails promptly when the exact service owner exits during readiness", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         "INTERNAL_PORT=18642",
@@ -1435,7 +1433,7 @@ describe("Hermes socat bridge startup", () => {
   });
 
   it("refuses to publish a forward when the internal service never binds", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         "INTERNAL_PORT=18642",
@@ -1466,7 +1464,7 @@ describe("Hermes socat bridge startup", () => {
   });
 
   it("rejects a socat listener that exits immediately", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const supervisor = fs.readFileSync(SUPERVISOR_LIB, "utf-8");
     const result = runBashHarness(
       [

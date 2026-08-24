@@ -37,10 +37,16 @@ describe("standalone Hermes package", () => {
       const installedRoot = path.join(outputDirectory, "package");
       const hostRoot = path.join(installedRoot, "host");
       expect(
-        ["tool-matrix.json", "refresh-credentials.ts", "tool-broker.ts", "tool-contract.ts"].map(
-          (fileName) => fs.statSync(path.join(hostRoot, fileName)).isFile(),
-        ),
-      ).toEqual([true, true, true, true]);
+        [
+          "broker-credentials.ts",
+          "clone-control.ts",
+          "request-proxy.ts",
+          "tool-matrix.json",
+          "refresh-credentials.ts",
+          "tool-broker.ts",
+          "tool-contract.ts",
+        ].map((fileName) => fs.statSync(path.join(hostRoot, fileName)).isFile()),
+      ).toEqual([true, true, true, true, true, true, true]);
       expect(fs.existsSync(path.join(outputDirectory, "nemoclaw-openclaw"))).toBe(false);
 
       const contractPath = path.join(hostRoot, "tool-contract.ts");

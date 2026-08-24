@@ -17,21 +17,25 @@ The workflow reads from top to bottom:
 2. `Dockerfile` assembles the NemoClaw image from package-owned configuration, runtime, plugin,
    policy, and compatibility files.
 3. `config/generate-config.ts` translates managed startup inputs into Hermes configuration.
-4. `start.sh` starts the gateway, dashboard, and supervised services.
-5. `runtime/` protects configuration and state while the sandbox is running.
+4. `start.sh` reads as the startup workflow: admit startup, load the package modules, configure the
+   proxy boundary, and execute the root or non-root launch path.
+5. The shell modules in `runtime/` define each startup responsibility without hiding orchestration
+   or effects inside a framework.
 6. `compat/` adapts the pinned upstream release where its native behavior does not yet meet the
    NemoClaw contract.
-7. `checks/` validates those build and compatibility boundaries.
+7. `plugin/__init__.py` registers Hermes tools and hooks, then delegates managed-tool compatibility
+   to `plugin/tool_broker.py`.
+8. `checks/` validates those build and compatibility boundaries.
 
 ## Directory guide
 
 | Path | Responsibility |
 | --- | --- |
 | `config/` | Builds Hermes `config.yaml`, `.env`, managed policy, model setup, and tool-gateway settings. |
-| `runtime/` | Provides commands and guards installed into the sandbox. `runtime/state/` is the bounded state-mutation subsystem. |
+| `runtime/` | Provides startup modules, commands, and guards installed into the sandbox. `runtime/state/` is the bounded state-mutation subsystem. |
 | `host/` | Provides receipt-verified helpers that NemoClaw core loads for managed routes, MCP, image qualification, and the tool gateway. |
 | `compat/` | Contains version-bound patches for the pinned Hermes release. |
-| `plugin/` | Contains code loaded through Hermes' plugin mechanism. |
+| `plugin/` | Registers Hermes tools and hooks. `tool_broker.py` contains managed tool-broker compatibility, while channel adapters stay separate. |
 | `checks/` | Provides build probes, the CLI contract validator, source download verification, and the release update command. |
 | `policies/` | Contains the permissive policy and Hermes-only policy presets. |
 | `provider-profiles/` | Contains package-owned OpenShell provider profiles. |
@@ -45,13 +49,34 @@ that exact metadata location.
 
 Managed startup invokes the fixed `/usr/local/lib/nemoclaw/generate-config` command. The package
 wrapper runs `config/generate-config.ts`, which writes Hermes-native configuration. `start.sh` then
-validates the environment boundary, prepares the dashboard profile, establishes the configuration
-hash, and launches the gateway.
+loads five package-owned modules in execution order:
+
+| Module | Startup responsibility |
+| --- | --- |
+| `runtime/state-gate.sh` | Authenticates startup against an active runtime-state mutation. |
+| `runtime/config-setup.sh` | Validates ports and prepares configuration, logs, and durable state. |
+| `runtime/service-control.sh` | Tracks process identity and operates the dashboard and loopback relays. |
+| `runtime/runtime-integrity.sh` | Migrates legacy state and protects configuration across managed restarts. |
+| `runtime/gateway-control.sh` | Launches, validates, recovers, and supervises the gateway topology. |
+
+After those definitions are loaded, the visible main section in `start.sh` performs the same
+non-root or root startup sequence as before. New Hermes integrations should keep orchestration in
+the entrypoint, put one coherent implementation responsibility in each runtime module, and avoid
+moving Hermes behavior into NemoClaw core.
 
 The CLI wrapper and adapter preserve the managed Hermes command surface. The configuration guard,
 MCP transaction, cron control, and state-mutation subsystem reconcile mutable state without moving
 those protocols into NemoClaw core. Host helpers remain data- and receipt-bound entry points for
 the core operations that still need them.
+
+The host broker reads as one process workflow:
+
+| Module | Host broker responsibility |
+| --- | --- |
+| `host/tool-broker.ts` | Starts the public and private listeners, schedules refresh, and owns shutdown. |
+| `host/broker-credentials.ts` | Keeps refresh credentials in memory and owns OAuth rotation, inference keys, and the atomic clone credential transaction. |
+| `host/clone-control.ts` | Binds the private control socket and dispatches bounded clone credential requests. |
+| `host/request-proxy.ts` | Removes sandbox secrets, adds host-managed authorization, forwards requests, and sanitizes responses. |
 
 ## Compatibility debt
 
@@ -59,9 +84,25 @@ Files in `compat/` are tied to Hermes release `v2026.7.20` (`0.19.0`). Each patc
 reviewed upstream source shape and fails when that shape changes. Remove a patch when Hermes owns
 the required behavior; otherwise refresh its source binding and focused test during an upgrade.
 
-The large runtime guards retain their existing security protocols in this refactor. Their size is
-visible debt, but splitting them without an independent protocol boundary would make this move
-harder to review and could change behavior.
+The runtime modules retain the existing security protocols and execution order. Their boundaries
+follow the workflow above rather than creating shared abstractions with other agent runtimes.
+
+## Large-file boundaries
+
+The remaining large files each hold one security or build protocol:
+
+| File | Why it remains whole |
+| --- | --- |
+| `Dockerfile` | Assembles and attests the ordered Hermes image, including every pinned compatibility input. |
+| `runtime/config-guard.py` | Owns descriptor-pinned configuration validation, mutation, sealing, recovery, and rollback. |
+| `runtime/state/control.py` | Owns the authenticated runtime-state mutation transaction and its recovery state machine. |
+| `runtime/mcp-transaction.py` | Keeps native MCP inspection, apply, reload, verification, commit, and rollback in one transaction. |
+| `runtime/state/publisher.py` | Publishes and validates the candidate and release receipts used by the same state protocol. |
+| `portable-build-context.json` | Is a generated, mode-aware inventory consumed as one Portable build receipt. |
+
+Splitting these files before their protocols have a smaller proven boundary would separate checks
+from the mutations they authorize. The startup, plugin, and host-broker workflows are split because
+their responsibilities already have stable handoffs.
 
 ## Checks
 

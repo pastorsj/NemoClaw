@@ -20,6 +20,9 @@ type HermesToolGatewayRuntimePaths = Readonly<{
   runtimeRoot: string;
   hostDir: string;
   script: string;
+  brokerCredentials: string;
+  cloneControl: string;
+  requestProxy: string;
   matrix: string;
   runtimeCredentials: string;
   controlContract: string;
@@ -135,6 +138,11 @@ describe("Hermes tool-gateway package paths", () => {
     expect(runtimePaths.packageRoot).toBe(installed.rootDir);
     expect(runtimePaths.hostDir).toBe(path.join(runtimePaths.runtimeRoot, "host"));
     expect(runtimePaths.script).toBe(path.join(runtimePaths.hostDir, "tool-broker.ts"));
+    expect(runtimePaths.brokerCredentials).toBe(
+      path.join(runtimePaths.hostDir, "broker-credentials.ts"),
+    );
+    expect(runtimePaths.cloneControl).toBe(path.join(runtimePaths.hostDir, "clone-control.ts"));
+    expect(runtimePaths.requestProxy).toBe(path.join(runtimePaths.hostDir, "request-proxy.ts"));
     expect(runtimePaths.matrix).toBe(path.join(runtimePaths.hostDir, "tool-matrix.json"));
     expect(runtimePaths.runtimeCredentials).toBe(
       path.join(runtimePaths.hostDir, "refresh-credentials.ts"),
@@ -145,6 +153,9 @@ describe("Hermes tool-gateway package paths", () => {
     );
     expect(fs.statSync(runtimePaths.runtimeRoot).mode & 0o777).toBe(0o700);
     expectCapturedFile(runtimePaths, sourceHostDir, "tool-broker.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "broker-credentials.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "clone-control.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "request-proxy.ts");
     expectCapturedFile(runtimePaths, sourceHostDir, "tool-matrix.json");
     expectCapturedFile(runtimePaths, sourceHostDir, "refresh-credentials.ts");
     expectCapturedFile(runtimePaths, sourceHostDir, "tool-contract.ts");

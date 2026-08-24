@@ -502,6 +502,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
         "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/dcode.real",
         "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/deepagents-code",
         "install -o root -g root -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-managed-exec",
+        "COPY packages/nemoclaw-langchain-deepagents-code/runtime/agent-status.sh /usr/local/lib/nemoclaw/dcode-agent-status.sh",
+        `test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-agent-status.sh)" = "0:0:444"`,
         "COPY packages/nemoclaw-langchain-deepagents-code/runtime/session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py",
         `test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-session-supervisor.py)" = "0:0:755"`,
         "test -f /usr/local/lib/nemoclaw/dcode-managed-exec",

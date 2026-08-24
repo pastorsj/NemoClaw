@@ -20,6 +20,7 @@ const WRAPPER = path.join(
   "runtime",
   "agent-wrapper.sh",
 );
+const STATUS_MODULE = path.join(path.dirname(WRAPPER), "agent-status.sh");
 
 function replaceOrThrow(source: string, search: string, replacement: string): string {
   expect(source, `dcode-wrapper.sh fixture patch target not found: ${search}`).toContain(search);
@@ -28,6 +29,7 @@ function replaceOrThrow(source: string, search: string, replacement: string): st
 
 function makeWrapperFixture(tempDir: string): { wrapperPath: string; ranMarker: string } {
   const wrapperPath = path.join(tempDir, "dcode-wrapper.sh");
+  fs.copyFileSync(STATUS_MODULE, path.join(tempDir, "agent-status.sh"));
   const ranMarker = path.join(tempDir, "dcode-ran");
   const dcodeEnvFile = path.join(tempDir, "dcode.env");
   const configFile = path.join(tempDir, "config.toml");

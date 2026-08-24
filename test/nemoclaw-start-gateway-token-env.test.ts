@@ -7,11 +7,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 import { safeTmpHelpers } from "./nemoclaw-start-gateway.test-helpers";
 import { extractShellFunctionFromSource } from "./support/shell-function-extractor";
 
-const START_SCRIPT = path.resolve(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 
 describe("OpenClaw gateway credential environment", () => {
   it.each([
@@ -21,7 +21,7 @@ describe("OpenClaw gateway credential environment", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-token-env-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     const seed = "existing gateway output\n";
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const launch = extractShellFunctionFromSource(
       source,
       "launch_openclaw_gateway_process",
@@ -60,7 +60,7 @@ describe("OpenClaw gateway credential environment", () => {
     }) => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-token-proc-"));
       const gatewayLog = path.join(tmpDir, "gateway.log");
-      const source = fs.readFileSync(START_SCRIPT, "utf8");
+      const source = readOpenClawStartupSource();
       const launch = extractShellFunctionFromSource(
         source,
         "launch_openclaw_gateway_process",
@@ -104,7 +104,7 @@ describe("OpenClaw gateway credential environment", () => {
   it("rejects an unknown gateway log mode before launch (#8693)", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-token-env-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const launch = extractShellFunctionFromSource(
       source,
       "launch_openclaw_gateway_process",

@@ -6,21 +6,17 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { extractShellFunctionFromSource } from "./helpers/shell-source";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
+const startupSource = readOpenClawStartupSource();
 
 describe("nemoclaw-start sealed restart", () => {
   it("preserves the sealed gateway token during non-root startup with Shields up (#8112)", () => {
     const script = [
       "set -euo pipefail",
-      `eval "$(sed -n '/^needs_gateway_token_for_current_command() {$/,/^}$/p' "$1")"`,
-      `eval "$(sed -n '/^prepare_gateway_token_for_current_command() {$/,/^}$/p' "$1")"`,
+      extractShellFunctionFromSource(startupSource, "needs_gateway_token_for_current_command"),
+      extractShellFunctionFromSource(startupSource, "prepare_gateway_token_for_current_command"),
       "id() { echo 998; }",
       "openclaw_config_dir_owner() { echo root; }",
       "_read_gateway_token() { echo sealed-token; }",
@@ -30,7 +26,7 @@ describe("nemoclaw-start sealed restart", () => {
       "prepare_gateway_token_for_current_command",
     ].join("\n");
 
-    const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+    const result = spawnSync("bash", ["-s"], {
       input: script,
       encoding: "utf-8",
       timeout: 5000,
@@ -47,8 +43,8 @@ describe("nemoclaw-start sealed restart", () => {
   it("refuses non-root startup when the sealed config has no gateway token (#8112)", () => {
     const script = [
       "set -euo pipefail",
-      `eval "$(sed -n '/^needs_gateway_token_for_current_command() {$/,/^}$/p' "$1")"`,
-      `eval "$(sed -n '/^prepare_gateway_token_for_current_command() {$/,/^}$/p' "$1")"`,
+      extractShellFunctionFromSource(startupSource, "needs_gateway_token_for_current_command"),
+      extractShellFunctionFromSource(startupSource, "prepare_gateway_token_for_current_command"),
       "id() { echo 998; }",
       "openclaw_config_dir_owner() { echo root; }",
       "_read_gateway_token() { :; }",
@@ -58,7 +54,7 @@ describe("nemoclaw-start sealed restart", () => {
       "prepare_gateway_token_for_current_command",
     ].join("\n");
 
-    const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+    const result = spawnSync("bash", ["-s"], {
       input: script,
       encoding: "utf-8",
       timeout: 5000,
@@ -89,14 +85,14 @@ describe("nemoclaw-start sealed restart", () => {
     fs.fchmodSync(authFd, 0o000);
     const script = [
       "set -euo pipefail",
-      `eval "$(sed -n '/^write_auth_profile() {$/,/^}$/p' "$1")"`,
+      extractShellFunctionFromSource(startupSource, "write_auth_profile"),
       "id() { echo 998; }",
       "openclaw_config_dir_owner() { echo root; }",
       "write_auth_profile",
     ].join("\n");
 
     try {
-      const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+      const result = spawnSync("bash", ["-s"], {
         input: script,
         env: {
           PATH: process.env.PATH,
@@ -121,14 +117,14 @@ describe("nemoclaw-start sealed restart", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-missing-sealed-auth-test-"));
     const script = [
       "set -euo pipefail",
-      `eval "$(sed -n '/^write_auth_profile() {$/,/^}$/p' "$1")"`,
+      extractShellFunctionFromSource(startupSource, "write_auth_profile"),
       "id() { echo 998; }",
       "openclaw_config_dir_owner() { echo root; }",
       "write_auth_profile",
     ].join("\n");
 
     try {
-      const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+      const result = spawnSync("bash", ["-s"], {
         input: script,
         env: {
           PATH: process.env.PATH,

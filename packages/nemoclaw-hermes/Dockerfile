@@ -111,6 +111,7 @@ COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-en
 COPY scripts/lib/gateway-supervisor.sh /usr/local/lib/nemoclaw/gateway-supervisor.sh
 COPY scripts/lib/sandbox-rlimits.sh /usr/local/lib/nemoclaw/sandbox-rlimits.sh
 COPY packages/nemoclaw-hermes/start.sh /usr/local/bin/nemoclaw-start
+COPY packages/nemoclaw-hermes/runtime/state-gate.sh packages/nemoclaw-hermes/runtime/config-setup.sh packages/nemoclaw-hermes/runtime/service-control.sh packages/nemoclaw-hermes/runtime/runtime-integrity.sh packages/nemoclaw-hermes/runtime/gateway-control.sh /usr/local/lib/nemoclaw/hermes-startup/
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
@@ -396,8 +397,10 @@ ENV HERMES_TUI_DIR="/opt/hermes/ui-tui"
 
 COPY --from=hermes-agent-payload / /
 
-# Ensure the NemoClaw plugin for Hermes is readable.
-RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/
+# Ensure both the plugin entry point and its managed-tool implementation are readable.
+RUN chmod -R a+rX /opt/nemoclaw-hermes-plugin/ \
+    && test -r /opt/nemoclaw-hermes-plugin/__init__.py \
+    && test -r /opt/nemoclaw-hermes-plugin/tool_broker.py
 
 # Keep the config generator and its source dependencies root-owned and
 # read-only.
@@ -498,7 +501,10 @@ RUN chmod -R a+rX /opt/nemoclaw-blueprint/
 # preloads. Remove them so the completed Hermes image contains only Hermes code.
 RUN rm -rf /usr/local/lib/nemoclaw/preloads \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold /usr/local/bin/nemoclaw-managed-bootstrap /usr/local/lib/nemoclaw/sandbox-init.sh /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/patch-hermes-session-list-preview.py /usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py /usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py /usr/local/lib/nemoclaw/finalize-tirith-marker.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py \
-    && chown root:root /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/runtime-state-mutation-control.py /usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py /usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py /usr/local/share/nemoclaw/state-lock-plan.json /usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json /usr/local/lib/nemoclaw/managed-gateway-control.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
+    && chown root:root /usr/local/lib/nemoclaw/hermes-startup /usr/local/lib/nemoclaw/hermes-startup/*.sh /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/gateway-supervisor.sh /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/runtime-state-mutation-control.py /usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py /usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py /usr/local/share/nemoclaw/state-lock-plan.json /usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json /usr/local/lib/nemoclaw/managed-gateway-control.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py /usr/local/lib/nemoclaw/hermes-cron-restore-control.py /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
+    && chmod 555 /usr/local/lib/nemoclaw/hermes-startup \
+    && chmod 444 /usr/local/lib/nemoclaw/hermes-startup/*.sh \
+    && for hermes_startup_script in /usr/local/bin/nemoclaw-start /usr/local/lib/nemoclaw/hermes-startup/*.sh; do bash -n "$hermes_startup_script"; done \
     && chmod 700 /usr/local/bin/nemoclaw-gateway-control /usr/local/lib/nemoclaw/hermes-cron-restore-control.py \
     && chmod 500 /usr/local/lib/nemoclaw/state-dir-guard.py /usr/local/lib/nemoclaw/runtime-state-mutation-control.py /usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py /usr/local/lib/nemoclaw/managed-gateway-control.py \
     && chmod 555 /usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py \
@@ -1434,6 +1440,12 @@ RUN check_metadata() { \
     && check_metadata /opt/nemoclaw-hermes-config/config/generate-config.ts 'root:root 444' \
     && test ! -L /usr/local/lib/nemoclaw/generate-config \
     && check_metadata /usr/local/lib/nemoclaw/generate-config 'root:root 555' \
+    && check_metadata /usr/local/lib/nemoclaw/hermes-startup 'root:root 555' \
+    && check_metadata /usr/local/lib/nemoclaw/hermes-startup/state-gate.sh 'root:root 444' \
+    && check_metadata /usr/local/lib/nemoclaw/hermes-startup/config-setup.sh 'root:root 444' \
+    && check_metadata /usr/local/lib/nemoclaw/hermes-startup/service-control.sh 'root:root 444' \
+    && check_metadata /usr/local/lib/nemoclaw/hermes-startup/runtime-integrity.sh 'root:root 444' \
+    && check_metadata /usr/local/lib/nemoclaw/hermes-startup/gateway-control.sh 'root:root 444' \
     && check_metadata /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py 'root:root 755' \
     && check_metadata /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py 'root:root 755' \
     && check_metadata /usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py 'root:root 755' \

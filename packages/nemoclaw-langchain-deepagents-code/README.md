@@ -40,13 +40,22 @@ The final image exposes `/usr/local/bin/dcode`, `dcode.real`, and `deepagents-co
 root-owned launcher. `runtime/agent-launcher.sh` validates the process boundary and starts
 `runtime/session-supervisor.py`. The supervisor contains the process tree, then delegates to
 `runtime/agent-wrapper.sh`. The wrapper validates managed inference and observability inputs before
-it invokes the pinned Python agent runtime.
+it invokes the pinned Python agent runtime. Status, identity, and managed help output live in
+`runtime/agent-status.sh`, which the wrapper loads only for those commands.
 
 The compatibility patch installs `runtime/managed-runtime.py`, `runtime/tool-disclosure.py`, and
 `runtime/observability.py` into the pinned upstream package. The wrapper also exposes
 `runtime/readonly-mcp.py` for deterministic read-only tool calls. Repository file names describe
 their package responsibilities; the Dockerfile preserves established paths inside the image so the
 external command behavior does not change.
+
+`runtime/managed-runtime.py` remains one security module because the compatibility patch installs
+it as the upstream runtime-invariant boundary. It validates environment, managed inference, sealed
+Model Context Protocol state, proxy access, approval, and reasoning settings before patched
+upstream call sites use them. `runtime/observability.py` remains one export boundary because its
+capture limits, redaction, middleware, and exporter lifecycle must apply together. Splitting either
+module would add import boundaries inside the pinned upstream patch without simplifying package
+startup.
 
 ## Compatibility debt
 
@@ -59,6 +68,16 @@ managed model aliases depend on reviewed upstream profile internals.
 Treat changes in `runtime/requirements.lock`, the compatibility patch, or plugin source as one
 semantic dependency migration. Update their version checks, hashes, compatibility notes, and
 focused tests together.
+
+## Large-file boundaries
+
+`runtime/requirements.lock` is the generated dependency inventory. `compat/runtime-patch.py`
+validates and applies one version-bound upstream source transformation, so its symbol checks and
+edits advance together. As described above, `runtime/managed-runtime.py` and
+`runtime/observability.py` are single runtime trust boundaries. The larger programs under `checks/`
+are self-contained image-build validators: they intentionally probe the installed environment
+without importing mutable package source. Split any of these only after a smaller interface can
+preserve the same pin, validation, and failure evidence.
 
 ## Checks
 

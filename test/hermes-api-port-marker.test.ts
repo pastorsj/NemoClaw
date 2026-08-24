@@ -8,9 +8,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
-import { extractShellFunction } from "./support/hermes-shell-harness";
+import { extractShellFunction, readHermesStartupSource } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 
 interface MarkerSetup {
   shellPrelude: string[];
@@ -108,7 +114,7 @@ function runHermesApiPortMarkerPublication(publicPort: number, setup: MarkerSetu
     const fixture = setup(runtimeParent, runtimeDir, markerPath, targetPath);
 
     const scriptPath = path.join(tmpDir, "run.sh");
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readHermesStartupSource();
     fs.writeFileSync(
       scriptPath,
       [

@@ -47,9 +47,21 @@ support file lives under the directory that names its execution responsibility.
 startup settings. The generator writes OpenClaw's native configuration. Managed startup can invoke
 `/usr/local/lib/nemoclaw/generate-config` again through the same package-owned generator.
 
-`start.sh` then prepares the OpenClaw state directories, applies the state protection plan, loads
-the required runtime preloads, and starts the OpenClaw agent gateway. The `plugin/` code runs
-inside OpenClaw. Other `runtime/` helpers run as bounded commands in the sandbox.
+`start.sh` is the readable process entry point. It loads package-owned modules from `runtime/`,
+then prepares state, applies provider routing, configures the gateway, and supervises the OpenClaw
+process. The modules keep each startup responsibility visible without adding callbacks to NemoClaw
+core:
+
+- `runtime/runtime-state.sh` protects and recovers native configuration state.
+- `runtime/model-routing.sh` applies model, provider, and browser-origin overrides.
+- `runtime/gateway-setup.sh` prepares messaging, gateway authentication, and automatic pairing.
+- `runtime/startup-env.sh` prepares proxy, preload, and connect-shell environments.
+- `runtime/sandbox-setup.sh` migrates state and prepares workspaces and plugins.
+- `runtime/process-control.sh` starts, monitors, restarts, and stops the gateway.
+- `runtime/auto-pair.py` implements the bounded automatic-pairing watcher.
+
+The `plugin/` code runs inside OpenClaw. Other `runtime/` helpers run as bounded commands in the
+sandbox.
 
 NemoClaw core loads `host/` helpers only after it verifies the installed package receipt. These
 helpers describe OpenClaw configuration grammar, restore behavior, CLI grammar, and MCP adapter
@@ -64,6 +76,23 @@ condition. Review this directory when the OpenClaw version changes.
 `compat/shell-env.py` removes state written by older images. `compat/npm-remediation.mts` repairs
 reviewed package archives during a bounded dependency migration. `compat/dependency-review.md`
 records the dependency graph and its update checks.
+
+## Large-file boundaries
+
+The remaining large implementation files are deliberate boundaries, not hidden workflow files:
+
+| File | Why it remains whole |
+| --- | --- |
+| `Dockerfile` | Builds and attests one ordered image graph; its final metadata checks cover the exact files assembled above them. |
+| `runtime/config-guard.py` | Owns one descriptor-pinned configuration transaction, including recovery, mutation, sealing, and rollback. |
+| `runtime/config-permissions.py` | Owns the corresponding mutable-tree ownership and permission transaction without reopening paths between validation and repair. |
+| `compat/device-approval.mts` | Audits and applies one release-bound OpenClaw source transformation whose markers advance together. |
+| `compat/npm-remediation.mts` | Verifies, repairs, repacks, and re-verifies one reviewed npm archive transaction. |
+| `plugin/src/blueprint/runtime-identity.ts` | Keeps provider discovery, credential redaction, runtime probes, and signed identity validation in one trust boundary. |
+
+The package lockfiles are generated dependency inventories. Do not split or hand-edit them; refresh
+them through the owning dependency workflow. Split one of the implementation boundaries only when
+the new interface can preserve the same validation, mutation, and rollback evidence.
 
 ## Checks
 

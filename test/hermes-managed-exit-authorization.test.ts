@@ -7,7 +7,15 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
+
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 const SUPERVISOR_LIB = path.join(
   import.meta.dirname,
   "..",
@@ -66,7 +74,7 @@ function runBashHarness(lines: string[], configure?: (tmpDir: string) => Record<
 }
 
 function runAuthorizationCheck(options: AuthorizationOptions = {}) {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
   const supervisor = fs.readFileSync(SUPERVISOR_LIB, "utf-8");
   const pid = "4242";
   const startIdentity = "333";
@@ -187,7 +195,7 @@ describe("Hermes managed gateway exit authorization", () => {
   });
 
   it("does not charge authenticated host-authorized exits against crash quarantine", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'hermes_tracked_role_is_current() { [ "$2" = "5006" ] && { trace "supervised:$2:crashes=$HERMES_MANAGED_GATEWAY_EXIT_COUNT"; exit 0; }; return 1; }',

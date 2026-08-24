@@ -36,14 +36,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 function extractShellFunctionFromSource(src: string, name: string): string {
   const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
@@ -145,7 +138,7 @@ function writeDoctorFixFake(tmpDir: string): string {
 }
 
 describe("raw `openclaw doctor --fix` mutable-perm restore (#4538)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   // source-shape-contract: security -- Executes the shipped restore helper to verify hardened mutable ownership modes
   it("restore helper re-asserts 2770/660 after the tree is tightened to 700/600", () => {
@@ -386,7 +379,7 @@ describe.skipIf(!RUN_DOCKER_E2E || !dockerAvailable())(
           "No sandbox image found. Build/pull nemoclaw-production:latest or set NEMOCLAW_DOCTOR_PERMS_E2E_IMAGE.",
         );
       }
-      const src = fs.readFileSync(START_SCRIPT, "utf-8");
+      const src = readOpenClawStartupSource();
       // Pass the guard via a base64 env var and decode in-container, so it never
       // depends on host file/dir traversal perms for the sandbox uid.
       const guardB64 = Buffer.from(extractGuardBlock(src), "utf-8").toString("base64");

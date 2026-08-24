@@ -7,16 +7,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 import { extractShellFunctionFromSource } from "./support/shell-function-extractor";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 function safeTmpHelpers(src: string): string {
   const start = src.indexOf("_nemoclaw_safe_replace_tmp_file() {");
@@ -26,7 +20,7 @@ function safeTmpHelpers(src: string): string {
 }
 
 describe("nemoclaw-start safe tmp file creation", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   it.each([
     ["root parent after CAP_DAC_OVERRIDE drop", "0", "3|/tmp/auto-pair.log 600 root:root"],

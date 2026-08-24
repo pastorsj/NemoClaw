@@ -8,9 +8,15 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
-import { extractShellFunction } from "./support/hermes-shell-harness";
+import { extractShellFunction, readHermesStartupSource } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 
 function runLazyDependencyPreparation(root: boolean, provider = "hindsight") {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-lazy-prep-"));
@@ -19,7 +25,7 @@ function runLazyDependencyPreparation(root: boolean, provider = "hindsight") {
   const handoffPath = path.join(tmpDir, "sandbox-handoff");
   const scriptPath = path.join(tmpDir, "run.sh");
   const hermesDir = path.join(tmpDir, ".hermes");
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readHermesStartupSource();
 
   fs.mkdirSync(hermesDir);
   fs.writeFileSync(path.join(hermesDir, "config.yaml"), `memory:\n  provider: ${provider}\n`);
@@ -106,16 +112,19 @@ describe("Hermes lazy dependency lifecycle", () => {
   it.each([
     ["root-separated", true, "sandbox"],
     ["same-identity", false, "current"],
-  ] as const)("runs approved preparation under the sandbox owner (%s) (#8613)", (_mode, root, identity) => {
-    const result = runLazyDependencyPreparation(root);
+  ] as const)(
+    "runs approved preparation under the sandbox owner (%s) (#8613)",
+    (_mode, root, identity) => {
+      const result = runLazyDependencyPreparation(root);
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain(`identity=${identity}`);
-    expect(result.stdout).toContain("home=/sandbox");
-    expect(result.stdout).toContain("target=/sandbox/.hermes/lazy-packages");
-    expect(result.stdout).toContain("activated=durable");
-    expect(result.stdout).toContain("installer=reviewed");
-  });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(`identity=${identity}`);
+      expect(result.stdout).toContain("home=/sandbox");
+      expect(result.stdout).toContain("target=/sandbox/.hermes/lazy-packages");
+      expect(result.stdout).toContain("activated=durable");
+      expect(result.stdout).toContain("installer=reviewed");
+    },
+  );
 
   it("skips dependency preparation for a non-Hindsight provider (#8613)", () => {
     const result = runLazyDependencyPreparation(false, "local");

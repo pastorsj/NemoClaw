@@ -6,14 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 function extractShellFunction(source: string, name: string): string {
   const header = `${name}() {`;
@@ -75,7 +69,7 @@ function runRecoveryHarness({
   gatewayLogKind = "regular",
   missingCiaoSource = false,
 }: RecoveryHarnessOptions = {}): Harness {
-  const source = fs.readFileSync(START_SCRIPT, "utf8");
+  const source = readOpenClawStartupSource();
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-recovery-"));
   const eventLog = path.join(tmpDir, "events.log");
   const gatewayLog = path.join(tmpDir, "gateway.log");
@@ -283,7 +277,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   });
 
   it("refuses a gateway log path replaced between validation and append", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-replaced-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     try {
@@ -311,7 +305,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   });
 
   it("does not block when the gateway log is replaced with a FIFO before open", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-fifo-swap-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     try {
@@ -338,7 +332,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   });
 
   it("ignores inherited non-canonical gateway log environment", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-contract-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     const inheritedTarget = path.join(tmpDir, "inherited.log");
@@ -367,7 +361,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   });
 
   it("sanitizes gateway log lines before appending", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-sanitize-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     try {
@@ -416,7 +410,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   // through an extracted production helper. It detects a refactor that moves
   // the warning back to stderr-only diagnostics.
   it("mirrors the guard-chain restore warning into the gateway log file", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-warn-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     try {
@@ -461,7 +455,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   it("does not emit the recovery warning when the guard chain is already complete", () => {
     // Fence the branch: a healthy chain must stay silent so the log marker
     // remains a true recovery signal rather than startup noise.
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-guard-quiet-"));
     const gatewayLog = path.join(tmpDir, "gateway.log");
     try {
@@ -495,7 +489,7 @@ describe("OpenClaw PID 1 guard-chain recovery", () => {
   });
 
   it("refuses an automatic respawn when guard restoration fails", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf8");
+    const source = readOpenClawStartupSource();
     const script = [
       "set -uo pipefail",
       "restore_openclaw_runtime_guard_chain() { printf 'restore-attempted\\n'; return 1; }",

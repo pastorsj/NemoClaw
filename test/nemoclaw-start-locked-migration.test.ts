@@ -7,19 +7,13 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 describe("legacy migration with Shields active", () => {
-  const source = fs.readFileSync(START_SCRIPT, "utf-8");
+  const source = readOpenClawStartupSource();
   const migrationFunctions = [
     "path_has_immutable_bit",
     "ensure_mutable_for_migration",

@@ -211,6 +211,9 @@ describe("OpenShell policy boundary package contract", () => {
   });
 
   it.each([
+    "broker-credentials.ts",
+    "clone-control.ts",
+    "request-proxy.ts",
     "tool-matrix.json",
     "refresh-credentials.ts",
     "tool-broker.ts",

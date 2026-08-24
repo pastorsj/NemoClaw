@@ -34,8 +34,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../src/lib/name-validation.js";
-
-const START_SCRIPT = path.resolve(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 function runtimeShellEnvBlock(source: string): string {
   const start = source.indexOf("write_runtime_shell_env() {");
@@ -53,7 +52,7 @@ function runtimeShellEnvBlock(source: string): string {
  */
 function generateConnectEnv(tmpDir: string, injectedName: string | undefined): string {
   const proxyEnv = path.join(tmpDir, "proxy-env.sh");
-  const source = fs.readFileSync(START_SCRIPT, "utf8");
+  const source = readOpenClawStartupSource();
   const block = `${runtimeShellEnvBlock(source)}\nwrite_runtime_shell_env`.replaceAll(
     "/tmp/nemoclaw-proxy-env.sh",
     proxyEnv,

@@ -131,11 +131,12 @@ describe("LangChain Deep Agents Code managed entrypoints", () => {
 
   it("exposes only the fixed deterministic read-only MCP command (#9889)", () => {
     const wrapper = readAgentFile("runtime/agent-wrapper.sh");
+    const status = readAgentFile("runtime/agent-status.sh");
     const command = readAgentFile("runtime/readonly-mcp.py");
     const validator = readAgentFile("checks/mcp-call.py");
 
     expect(wrapper).toContain("list | call-read-only | help");
-    expect(wrapper).toContain("dcode tools call-read-only TOOL --json");
+    expect(status).toContain("dcode tools call-read-only TOOL --json");
     expect(wrapper).toContain(
       'exec /opt/venv/bin/python3 -I /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py "$@" 2>/dev/null',
     );

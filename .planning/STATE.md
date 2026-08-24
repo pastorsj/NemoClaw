@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: agent-runtime-package-migration
 status: executing
-stopped_at: Phase 11 Task 4
-last_updated: "2026-08-24T00:51:24-04:00"
-last_activity: 2026-08-24 - Reorganized all three packages and removed native generator dispatch from core.
+stopped_at: Phase 11 Task 5
+last_updated: "2026-08-24T03:27:51-04:00"
+last_activity: 2026-08-24 - Completed the package readability slice and started final qualification.
 progress:
   total_phases: 11
   completed_phases: 0
@@ -23,7 +23,7 @@ progress:
 
 Phase: 11 of 11 (Package Workflow)
 Plan: 11-01
-Task: 4 of 4 - Qualify deterministic checks and no-messaging live journeys
+Task: 5 of 5 - Qualify deterministic checks and one no-messaging live journey
 Status: Executing
 
 The branch is based on `origin/main` commit `67aab7ef57` through local merge commit `fff00cbbfb`.
@@ -34,7 +34,8 @@ The worktree was clean when Phase 11 started. All commits remain local.
 - [x] Task 1: Freeze the package workflow and configuration command.
 - [x] Task 2: Reorganize OpenClaw, Hermes, and LangChain Deep Agents Code.
 - [x] Task 3: Remove proven agent-specific core dispatch.
-- [ ] Task 4: Qualify deterministic checks and one no-messaging live journey.
+- [x] Task 4: Make OpenClaw and Hermes startup entrypoints readable.
+- [ ] Task 5: Qualify deterministic checks and one no-messaging live journey.
 
 ## Success Conditions
 
@@ -43,7 +44,8 @@ The worktree was clean when Phase 11 started. All commits remain local.
 - Managed startup invokes `/usr/local/lib/nemoclaw/generate-config` for every current managed agent.
 - NemoClaw core does not select a configuration generator by agent ID.
 - Package contracts, focused tests, type-checks, and repository checks pass.
-- One configured Brev environment completes a credential-free install through cleanup journey.
+- OpenClaw and Hermes `start.sh` files remain visible workflows backed by bounded runtime modules.
+- One configured Brev environment completes a no-messaging install through cleanup journey.
 - Live messaging-service tests remain excluded.
 
 ## Decisions
@@ -104,9 +106,27 @@ Tasks 2 and 3:
 - All 55 configuration files validated. CLI and plugin type-checking, repository checks, reviewed
   runtime bundle verification, and `git diff --check` passed.
 - A default-worker full-suite attempt was stopped after unrelated host load caused widespread
-  timeout failures. Task 4 will rerun the deterministic suite with bounded workers.
+  timeout failures. Task 5 will rerun the deterministic suite with bounded workers after the
+  startup split.
+
+Task 4:
+
+- OpenClaw `start.sh` is 967 lines and loads six package-owned shell modules plus one bounded
+  automatic-pairing watcher. Its plugin runner and migration-state entry points now delegate
+  blueprint planning and host-state discovery to named modules while preserving their imports.
+- Hermes `start.sh` is 688 lines and loads five package-owned shell modules in execution order.
+  Its native plugin keeps `register(ctx)` as the stable entry point, and its host tool broker now
+  separates credential authority, clone control, and request proxying without changing core's
+  receipt-verified entry point.
+- Deep Agents Code keeps its launch chain and moves status, identity, and managed help output into
+  `runtime/agent-status.sh`; the remaining large runtime files retain atomic security or pinned
+  compatibility responsibilities documented by the package.
+- Bash syntax, ShellCheck, and Python compilation passed. Focused integration tests passed:
+  OpenClaw 359 assertions with 6 platform skips, Hermes startup 246 assertions, Deep Agents Code
+  174 assertions with 41 Linux-only skips, OpenClaw plugin 259 assertions, Hermes host broker 31
+  assertions, Hermes plugin integration 7 assertions, and Hermes Python plugin 5 assertions.
 
 ## Resume
 
 Read `.planning/phases/11-package-workflow/11-CONTEXT.md` and execute
-`.planning/phases/11-package-workflow/11-01-PLAN.md` from Task 4.
+`.planning/phases/11-package-workflow/11-01-PLAN.md` from Task 5.

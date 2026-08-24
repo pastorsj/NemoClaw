@@ -2,14 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const START_SCRIPT = path.resolve(HERE, "..", "packages", "nemoclaw-openclaw", "start.sh");
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 function requireNonNegative(value: number, message: string): number {
   return value >= 0
@@ -19,23 +14,25 @@ function requireNonNegative(value: number, message: string): number {
       })();
 }
 
-function extractShellFunction(scriptPath: string, name: string): string {
-  const body = readFileSync(scriptPath, "utf8");
+function extractShellFunction(source: string, name: string): string {
   const startMarker = `${name}() {`;
   const start = requireNonNegative(
-    body.indexOf(startMarker),
-    `function ${name} not found in ${scriptPath}`,
+    source.indexOf(startMarker),
+    `function ${name} not found in the OpenClaw startup workflow`,
   );
-  const lines = body.slice(start).split("\n");
+  const lines = source.slice(start).split("\n");
   const endIndex = requireNonNegative(
     lines.findIndex((line, index) => index > 0 && line === "}"),
-    `function ${name} missing closing brace in ${scriptPath}`,
+    `function ${name} missing a closing brace in the OpenClaw startup workflow`,
   );
   return lines.slice(0, endIndex + 1).join("\n");
 }
 
 function runGuard(value: string): number {
-  const functionBody = extractShellFunction(START_SCRIPT, "gateway_watchdog_positive_int_ok");
+  const functionBody = extractShellFunction(
+    readOpenClawStartupSource(),
+    "gateway_watchdog_positive_int_ok",
+  );
   const harness = `
 ${functionBody}
 gateway_watchdog_positive_int_ok "$1"

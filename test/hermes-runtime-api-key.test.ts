@@ -10,20 +10,37 @@ import { describe, expect, it } from "vitest";
 
 import { shellQuote } from "../src/lib/core/shell-quote";
 import { dockerRunCommandBetween } from "./helpers/dockerfile-run-shell";
+import { readHermesStartupSource } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
-const HERMES_DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "Dockerfile");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
+const HERMES_DOCKERFILE = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "Dockerfile",
+);
 const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "config-guard.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "config-guard.py",
 );
 const SECRET_BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-hermes",
-  "runtime", "env-boundary.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "env-boundary.py",
 );
 
 function escapeRegExp(value: string): string {
@@ -114,7 +131,7 @@ function runHermesRuntimeApiServerKeyMint(
     fs.chmodSync(compatHashPath, 0o444);
   }
 
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readHermesStartupSource();
   fs.writeFileSync(
     scriptPath,
     [
@@ -204,7 +221,7 @@ function runExtractedProviderPlaceholderRefresh(opts: {
   writeRuntimePlanPath[opts.runtimePlanPathKind]();
 
   const functionSource = extractShellFunctionFromSource(
-    fs.readFileSync(START_SCRIPT, "utf-8"),
+    readHermesStartupSource(),
     "refresh_hermes_provider_placeholders",
   ).replaceAll("/usr/local/share/nemoclaw/messaging-runtime-plan.json", runtimePlanPath);
 
@@ -382,7 +399,7 @@ describe("packages/nemoclaw-hermes/start.sh runtime API server key", () => {
       '#!/usr/bin/env bash\nprintf "%s\\n" "$PPID" >"$PPID_FILE"\nprintf "%s\\n" "$@" >"$ARGS_FILE"\nprintf "minted=0\\n"\n',
       { mode: 0o700 },
     );
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     fs.writeFileSync(
       script,
       [

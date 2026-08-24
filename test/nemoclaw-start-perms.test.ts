@@ -6,14 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 const NORMALIZER_SCRIPT = path.join(
   import.meta.dirname,
   "..",
@@ -22,7 +16,7 @@ const NORMALIZER_SCRIPT = path.join(
   "runtime",
   "config-permissions.py",
 );
-const startSource = fs.readFileSync(START_SCRIPT, "utf-8");
+const startSource = readOpenClawStartupSource();
 const normalizerSource = fs.readFileSync(NORMALIZER_SCRIPT, "utf-8");
 
 function extractShellFunction(name: string): string {

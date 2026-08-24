@@ -9,14 +9,8 @@ import { type SpawnSyncReturns, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-export const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 // Heredoc-aware extractor. The reconcile harness's naive /^}/m regex stops at
 // the first column-0 "}", which for refresh_openclaw_provider_placeholders is
@@ -52,7 +46,7 @@ export interface RunResult {
 }
 
 export function runRefresh(config: unknown, env: Record<string, string> = {}): RunResult {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-extra-placeholder-"));
   const openclawDir = path.join(root, ".openclaw");
   fs.mkdirSync(openclawDir, { recursive: true });

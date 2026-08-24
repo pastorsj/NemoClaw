@@ -26,13 +26,18 @@
     "packages/nemoclaw-hermes/runtime/cli-adapter.json",
     "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
     "packages/nemoclaw-hermes/runtime/config-guard.py",
+    "packages/nemoclaw-hermes/runtime/config-setup.sh",
     "packages/nemoclaw-hermes/runtime/cron-control.py",
     "packages/nemoclaw-hermes/runtime/dashboard-config.py",
     "packages/nemoclaw-hermes/runtime/env-boundary.py",
+    "packages/nemoclaw-hermes/runtime/gateway-control.sh",
     "packages/nemoclaw-hermes/runtime/generate-config.sh",
     "packages/nemoclaw-hermes/runtime/managed_policy.py",
     "packages/nemoclaw-hermes/runtime/mcp-digest.py",
     "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
+    "packages/nemoclaw-hermes/runtime/runtime-integrity.sh",
+    "packages/nemoclaw-hermes/runtime/service-control.sh",
+    "packages/nemoclaw-hermes/runtime/state-gate.sh",
     "packages/nemoclaw-hermes/runtime/state/control.py",
     "packages/nemoclaw-hermes/runtime/state/plan.json",
     "packages/nemoclaw-hermes/runtime/state/publisher.json",
@@ -304,6 +309,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/plugin/tool_broker.py",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/plugin/plugin.yaml",
       "mode": "100644"
     },
@@ -360,6 +369,10 @@
       "mode": "100755"
     },
     {
+      "path": "packages/nemoclaw-hermes/runtime/config-setup.sh",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/runtime/cron-control.py",
       "mode": "100644"
     },
@@ -370,6 +383,10 @@
     {
       "path": "packages/nemoclaw-hermes/runtime/env-boundary.py",
       "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/gateway-control.sh",
+      "mode": "100644"
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/generate-config.sh",
@@ -386,6 +403,18 @@
     {
       "path": "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
       "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/runtime-integrity.sh",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/service-control.sh",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/state-gate.sh",
+      "mode": "100644"
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/state/control.py",

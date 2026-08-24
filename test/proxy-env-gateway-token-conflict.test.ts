@@ -9,16 +9,16 @@
 // conflicting value (#8428).
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const OPENCLAW_START = join(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 const WRITE_RUNTIME_SHELL_ENV = extractShellFunctionFromSource(
-  readFileSync(OPENCLAW_START, "utf-8"),
+  readOpenClawStartupSource(),
   "write_runtime_shell_env",
 );
 const REAL_TOKEN = "REAL-GATEWAY-TOKEN-abc123";

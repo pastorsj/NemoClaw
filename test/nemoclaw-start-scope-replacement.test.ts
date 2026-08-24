@@ -7,8 +7,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.resolve(import.meta.dirname, "../packages/nemoclaw-openclaw/start.sh");
 
 function runtimeShellEnvBlock(source: string): string {
   const start = source.indexOf("write_runtime_shell_env() {");
@@ -32,7 +32,7 @@ exit "\${APPROVAL_EXIT_CODE:-0}"
     { mode: 0o755 },
   );
 
-  const source = fs.readFileSync(START_SCRIPT, "utf8");
+  const source = readOpenClawStartupSource();
   const block = `${runtimeShellEnvBlock(source)}\nwrite_runtime_shell_env`.replaceAll(
     "/tmp/nemoclaw-proxy-env.sh",
     proxyEnv,

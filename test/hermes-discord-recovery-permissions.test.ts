@@ -9,11 +9,20 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { extractShellFunction } from "./support/hermes-shell-harness";
+import { extractShellFunction, readHermesStartupSource } from "./support/hermes-shell-harness";
 
 const repoRoot = path.join(import.meta.dirname, "..");
-const patcher = path.join(repoRoot, "packages", "nemoclaw-hermes", "compat", "discord-permissions.py");
-const dockerfile = fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"), "utf8");
+const patcher = path.join(
+  repoRoot,
+  "packages",
+  "nemoclaw-hermes",
+  "compat",
+  "discord-permissions.py",
+);
+const dockerfile = fs.readFileSync(
+  path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"),
+  "utf8",
+);
 const imageBuildProbes = fs.readFileSync(
   path.join(repoRoot, "packages", "nemoclaw-hermes", "checks", "image-probes.py"),
   "utf8",
@@ -22,7 +31,7 @@ const baseDockerfile = fs.readFileSync(
   path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile.base"),
   "utf8",
 );
-const startScript = fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-hermes", "start.sh"), "utf8");
+const startScript = readHermesStartupSource();
 const fixtures: string[] = [];
 
 const exactUpstreamFixture = `\

@@ -7,14 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
 function messagingRuntimeSetupSection(src: string, planPath: string): string {
   const start = src.indexOf("# ── Messaging runtime setup from manifest metadata");
@@ -70,7 +64,7 @@ function encodeRuntimeSetupPlan(channelId: string, value: Record<string, unknown
 }
 
 describe("Slack runtime env normalization (#4274)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function runNormalize(env: Record<string, string | undefined> = {}): {
     bot: string;

@@ -8,10 +8,10 @@ import os from "node:os";
 import path from "node:path";
 import * as ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { openClawAutoPairPath, readOpenClawStartupSource } from "./support/openclaw-startup";
 import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
 const OPENCLAW_PACKAGE = path.join(import.meta.dirname, "../packages/nemoclaw-openclaw");
-const START_SCRIPT = path.join(OPENCLAW_PACKAGE, "start.sh");
 const APPROVAL_POLICY_SOURCE = path.join(OPENCLAW_PACKAGE, "runtime", "device-approval.py");
 const MUTABLE_CONFIG_NORMALIZER = path.join(OPENCLAW_PACKAGE, "runtime", "config-permissions.py");
 const INSTALLED_APPROVAL_POLICY = "/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py";
@@ -133,28 +133,28 @@ function nonRootFallbackBlock(src: string): string {
 function startScriptHeredoc(src: string, marker: string): string {
   const match = src.match(new RegExp(`<<'${marker}'[^\\n]*\\n([\\s\\S]*?)\\n${marker}`));
   if (match) return match[1];
-  const preloadByMarker: Record<string, string> = {
-    CIAO_GUARD_EOF: "ciao-network-guard.js",
-    SAFETY_NET_EOF: "sandbox-safety-net.js",
+  const sourcePathByMarker: Record<string, string> = {
+    PYAUTOPAIR: openClawAutoPairPath,
+    CIAO_GUARD_EOF: path.join(PRELOAD_SCRIPTS, "ciao-network-guard.js"),
+    SAFETY_NET_EOF: path.join(PRELOAD_SCRIPTS, "sandbox-safety-net.js"),
+    SLACK_GUARD_EOF: path.join(
+      CHANNEL_RUNTIME_SCRIPTS,
+      "slack",
+      "runtime",
+      "slack-channel-guard.ts",
+    ),
+    TELEGRAM_DIAGNOSTICS_EOF: path.join(
+      CHANNEL_RUNTIME_SCRIPTS,
+      "telegram",
+      "runtime",
+      "telegram-diagnostics.ts",
+    ),
   };
-  const preload = preloadByMarker[marker];
-  if (preload) return fs.readFileSync(path.join(PRELOAD_SCRIPTS, preload), "utf-8");
-  const channelPreload =
-    marker === "SLACK_GUARD_EOF"
-      ? ["slack", "slack-channel-guard.ts"]
-      : marker === "TELEGRAM_DIAGNOSTICS_EOF"
-        ? ["telegram", "telegram-diagnostics.ts"]
-        : undefined;
-  expect(channelPreload).toBeTruthy();
-  const preloadPath = path.join(
-    CHANNEL_RUNTIME_SCRIPTS,
-    channelPreload[0],
-    "runtime",
-    channelPreload[1],
-  );
-  const preloadSource = fs.readFileSync(preloadPath, "utf-8");
-  if (!preloadPath.endsWith(".ts")) return preloadSource;
-  return ts.transpileModule(preloadSource, {
+  const sourcePath = sourcePathByMarker[marker];
+  expect(sourcePath).toBeTruthy();
+  const source = fs.readFileSync(sourcePath, "utf-8");
+  if (!sourcePath.endsWith(".ts")) return source;
+  return ts.transpileModule(source, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
       target: ts.ScriptTarget.ES2022,
@@ -245,7 +245,7 @@ function rootIntegrityGateBlock(src: string): string {
 
 describe("nemoclaw-start non-root fallback", () => {
   it("exits before startup work when locked config integrity fails in non-root mode", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const script = [
       "set -euo pipefail",
       'id() { if [ "${1:-}" = "-u" ]; then printf "1000"; else command id "$@"; fi; }',
@@ -266,7 +266,7 @@ describe("nemoclaw-start non-root fallback", () => {
   });
 
   it("verifies config integrity in both non-root and root startup paths", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const nonRootScript = [
       "set -euo pipefail",
       'id() { if [ "${1:-}" = "-u" ]; then printf "1000"; else command id "$@"; fi; }',
@@ -299,7 +299,7 @@ describe("nemoclaw-start non-root fallback", () => {
   });
 
   it("sends startup diagnostics to stderr so they do not leak into bridge output (#1064)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const token = "a".repeat(64);
     const script = [
       "set -euo pipefail",
@@ -324,7 +324,7 @@ describe("nemoclaw-start non-root fallback", () => {
   });
 
   it("runs runtime preloads and scans before explicit non-root commands", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const script = [
       "set -euo pipefail",
       'id() { if [ "${1:-}" = "-u" ]; then printf "1000"; else command id "$@"; fi; }',
@@ -365,7 +365,7 @@ describe("nemoclaw-start non-root fallback", () => {
   });
 
   it("only requires early gateway token generation for gateway and OpenClaw commands (#3256)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const script = [
       "set -euo pipefail",
       extractShellFunctionFromSource(src, "needs_gateway_token_for_current_command"),
@@ -388,7 +388,7 @@ describe("nemoclaw-start non-root fallback", () => {
   });
 
   it("refreshes startup tokens but only ensures direct OpenClaw command tokens (#4517)", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const script = [
       "set -euo pipefail",
       extractShellFunctionFromSource(src, "needs_gateway_token_for_current_command"),
@@ -412,7 +412,7 @@ describe("nemoclaw-start non-root fallback", () => {
   it.each(["workspace", "memory", "credentials", "flows", "telegram", "media"])(
     "repairs writable OpenClaw state directories in non-root mode [%s]",
     (dir) => {
-      const src = fs.readFileSync(START_SCRIPT, "utf-8");
+      const src = readOpenClawStartupSource();
       const match = src.match(/fix_openclaw_ownership\(\) \{([\s\S]*?)^\s*\}/m);
       if (!match) {
         throw new Error("Expected fix_openclaw_ownership in packages/nemoclaw-openclaw/start.sh");
@@ -453,7 +453,7 @@ describe("nemoclaw-start non-root fallback", () => {
 });
 
 describe("nemoclaw-start gateway token export (#1114)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function runGatewayTokenHarness(
     configJson: string,
@@ -749,7 +749,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
 });
 
 describe("nemoclaw-start configure guard behavior", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function writeProxyEnvWithGuard() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-configure-guard-"));
@@ -978,7 +978,7 @@ exit 1
 });
 
 describe("runtime model override (#759)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
@@ -1139,7 +1139,7 @@ describe("runtime model override (#759)", () => {
 });
 
 describe("runtime CORS origin override (#719)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
@@ -1215,7 +1215,7 @@ describe("runtime CORS origin override (#719)", () => {
 });
 
 describe("Slack channel guard — unhandled-rejection safety net (#2340)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const extractGuardScript = () => startScriptHeredoc(src, "SLACK_GUARD_EOF");
 
   function runSlackGuardHarness(body: string): ReturnType<typeof spawnSync> {
@@ -1378,7 +1378,7 @@ setImmediate(function () {
 });
 
 describe("nemoclaw-start auto-pair client whitelisting (#117)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   it("refuses an approval policy helper writable by the current user", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-auto-pair-policy-mode-"));
@@ -1508,7 +1508,7 @@ exit 2
   }, 40_000);
 });
 describe("nemoclaw-start auto-pair slow-mode keepalive (#4263)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function buildAutoPairScript(): string {
     return autoPairPythonScript(src);
@@ -1945,7 +1945,7 @@ exit 0
     try {
       // Do NOT monkey-patch time.sleep here: we want real wall-clock
       // semantics so subprocess.run(..., timeout=...) actually fires.
-      const watcherSrc = localApprovalPolicyPythonScript(fs.readFileSync(START_SCRIPT, "utf-8"));
+      const watcherSrc = localApprovalPolicyPythonScript(readOpenClawStartupSource());
       const start = Date.now();
       const run = spawnSync("python3", ["-c", watcherSrc], {
         encoding: "utf-8",
@@ -2026,7 +2026,7 @@ exit 2
     );
 
     try {
-      const watcherSrc = localApprovalPolicyPythonScript(fs.readFileSync(START_SCRIPT, "utf-8"));
+      const watcherSrc = localApprovalPolicyPythonScript(readOpenClawStartupSource());
       const run = spawnSync("python3", ["-c", watcherSrc], {
         encoding: "utf-8",
         env: {
@@ -2133,7 +2133,7 @@ exit 2
 
 // NC-2227-01: Legacy migration behavior
 describe("NC-2227-01: legacy migration behavior", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function migrationFunctions(): string {
     return [
@@ -2314,7 +2314,7 @@ describe("NC-2227-01: legacy migration behavior", () => {
 });
 
 describe("seed_default_workspace_templates (#3240)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function runSeed(
     workspaceDir: string,
@@ -2641,7 +2641,7 @@ describe("seed_default_workspace_templates (#3240)", () => {
 });
 
 describe("Slack secrets-on-disk tripwire (#2085)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   it("refuses to serve when real Slack tokens leak to disk", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-slack-secret-"));
@@ -2693,7 +2693,7 @@ describe("Slack secrets-on-disk tripwire (#2085)", () => {
 });
 
 describe("provider placeholder refresh (#4251)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function runRefresh(
     config: unknown,
@@ -3308,7 +3308,7 @@ describe("provider placeholder refresh (#4251)", () => {
 });
 
 describe("Telegram diagnostics (#2766)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const telegramDiagnosticsScript = startScriptHeredoc(src, "TELEGRAM_DIAGNOSTICS_EOF");
   type EntryKind = "non-root" | "root";
 
@@ -3679,7 +3679,7 @@ describe("write_auth_profile (#1332)", () => {
   // behavior, not source-text shape.
   const wrapper = [
     "set -euo pipefail",
-    `eval "$(sed -n '/^write_auth_profile() {$/,/^}$/p' "$1")"`,
+    extractShellFunctionFromSource(readOpenClawStartupSource(), "write_auth_profile"),
     "write_auth_profile",
   ].join("\n");
 
@@ -3690,7 +3690,7 @@ describe("write_auth_profile (#1332)", () => {
     stderr: string;
   } {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-auth-test-"));
-    const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+    const result = spawnSync("bash", ["-s"], {
       input: wrapper,
       env: { PATH: process.env.PATH, HOME: home, ...env },
       encoding: "utf-8",
@@ -3807,7 +3807,7 @@ describe("write_auth_profile (#1332)", () => {
 // present) when the active config is empty/whitespace-only.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("openclaw.json baseline + recovery (#3118)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function extractShellFunction(name: string): string {
     const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
@@ -4117,7 +4117,7 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
 });
 
 describe("run_step_down_as_sandbox", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const helper = [
     extractShellFunctionFromSource(src, "_step_down_extract_function"),
     extractShellFunctionFromSource(src, "run_step_down_as_sandbox"),
@@ -4312,7 +4312,7 @@ describe("run_step_down_as_sandbox", () => {
 });
 
 describe("setup_auth_profile_as_sandbox", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const helper = [
     extractShellFunctionFromSource(src, "_step_down_extract_function"),
     extractShellFunctionFromSource(src, "run_step_down_as_sandbox"),
@@ -4355,7 +4355,7 @@ describe("setup_auth_profile_as_sandbox", () => {
 });
 
 describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function runHashRefresh(opts: { asRoot: boolean; preexistingHash?: string }) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hash-refresh-"));
@@ -4510,7 +4510,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
 });
 
 describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   it("runs the helper chain end-to-end against a simulated root entrypoint", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-direct-root-"));

@@ -7,14 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 const TELEGRAM_RUNTIME_PRELOAD = path.join(
   import.meta.dirname,
   "..",
@@ -101,7 +95,7 @@ function encodeRuntimeSetupPlan(
 }
 
 describe("Telegram runtime preload installation", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   it("installs Telegram diagnostics only when Telegram is configured", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-telegram-install-"));

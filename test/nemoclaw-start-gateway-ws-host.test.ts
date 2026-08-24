@@ -8,19 +8,14 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { extractShellFunctionFromSource } from "./helpers/shell-source";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 const requireForTest = createRequire(import.meta.url);
 const YAML = requireForTest("yaml");
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 
-const startScriptSource = fs.readFileSync(START_SCRIPT, "utf-8");
+const startScriptSource = readOpenClawStartupSource();
 
 function gatewayWsHostBlock(): string {
   const start = startScriptSource.indexOf('_GATEWAY_WS_HOST="${NEMOCLAW_GATEWAY_WS_HOST:-}"');
@@ -39,12 +34,10 @@ function runtimeShellEnvFunction(): string {
 }
 
 function startAutoPairFunction(autoPairLog: string): string {
-  const start = startScriptSource.indexOf("start_auto_pair() {");
-  const endMarker = "\n}\n\n# ── Proxy environment";
-  const end = startScriptSource.indexOf(endMarker, start);
-  expect(start).toBeGreaterThan(-1);
-  expect(end).toBeGreaterThan(start);
-  return startScriptSource.slice(start, end + 2).replaceAll("/tmp/auto-pair.log", autoPairLog);
+  return extractShellFunctionFromSource(startScriptSource, "start_auto_pair").replaceAll(
+    "/tmp/auto-pair.log",
+    autoPairLog,
+  );
 }
 
 function writeRuntimeShellEnv(tmpDir: string): string {
@@ -280,6 +273,7 @@ describe("gateway websocket url host derivation", () => {
           "set -euo pipefail",
           'id() { if [ "${1:-}" = "-u" ]; then printf "1000\\n"; else command id "$@"; fi; }',
           `_RUNTIME_SHELL_ENV_FILE=${JSON.stringify(runtimeEnv)}`,
+          "_OPENCLAW_AUTO_PAIR_SCRIPT=/dev/null",
           `OPENCLAW=${JSON.stringify(path.join(tmpDir, "openclaw"))}`,
           "STEP_DOWN_PREFIX_SANDBOX=()",
           "capture_openclaw_pid_start_identity() { return 0; }",

@@ -13,13 +13,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 import {
   extractShellFunction,
   GATEWAY_SUPERVISOR,
   pidIdentityFunctions,
   readFileIfPresent,
-  START_SCRIPT,
   safeTmpHelpers,
   writeProcStatFunction,
 } from "./nemoclaw-start-gateway.test-helpers";
@@ -60,7 +60,7 @@ function gatewayLaunchBlock(src: string, kind: "non-root" | "root", gatewayLog: 
 
 describe("OpenClaw supervised child PID identity", () => {
   it("does not re-admit a recycled plugin-refresh PID owned by another process", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-aux-pid-identity-"));
     const procRoot = path.join(tmpDir, "proc");
     const scriptPath = path.join(tmpDir, "run.sh");
@@ -110,7 +110,7 @@ describe("OpenClaw supervised child PID identity", () => {
   });
 
   it("does not accept a tracked-stop success while the numeric gateway PID remains live", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readOpenClawStartupSource();
     const script = [
       "set -uo pipefail",
       "openclaw_supervised_pid_is_live() { return 0; }",
@@ -133,7 +133,7 @@ describe("OpenClaw supervised child PID identity", () => {
   });
 
   it("exits PID 1 instead of marking an unproven OpenClaw gateway stopped", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readOpenClawStartupSource();
     const script = [
       "set -uo pipefail",
       "GATEWAY_PID=4242",
@@ -161,7 +161,7 @@ describe("OpenClaw supervised child PID identity", () => {
     ["a live PID with a different start identity", 'printf "888\\n"', "S"],
     ["a live PID whose identity is temporarily unavailable", "return 1", "S"],
   ])("refuses to reap %s", (_label, identityBody, state) => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readOpenClawStartupSource();
     const script = [
       "set -euo pipefail",
       "GATEWAY_PID=4242",
@@ -194,7 +194,7 @@ describe("OpenClaw supervised child PID identity", () => {
 
 describe("managed gateway restart config boundary", () => {
   it("routes unrecoverable seal failure through whole-container gateway revocation", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readOpenClawStartupSource();
     const script = [
       "set -uo pipefail",
       "GATEWAY_PID=4242",
@@ -228,7 +228,7 @@ describe("managed gateway restart config boundary", () => {
   });
 
   it("removes only regular gateway locks and refuses a matching attacker directory", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-lock-cleanup-"));
     const parent = path.join(tmpDir, "openclaw-test");
     const regularLock = path.join(parent, "gateway.good.lock");
@@ -282,8 +282,8 @@ describe("record_gateway_pid", () => {
           "#!/usr/bin/env bash",
           "set -euo pipefail",
           `GATEWAY_PID_FILE=${JSON.stringify(pidFile)}`,
-          safeTmpHelpers(fs.readFileSync(START_SCRIPT, "utf-8")),
-          extractShellFunction(fs.readFileSync(START_SCRIPT, "utf-8"), "record_gateway_pid"),
+          safeTmpHelpers(readOpenClawStartupSource()),
+          extractShellFunction(readOpenClawStartupSource(), "record_gateway_pid"),
           "record_gateway_pid 4242 987654",
         ].join("\n"),
         { mode: 0o755 },
@@ -321,8 +321,8 @@ describe("record_gateway_pid", () => {
           "#!/usr/bin/env bash",
           "set -euo pipefail",
           `GATEWAY_PID_FILE=${JSON.stringify(pidFile)}`,
-          safeTmpHelpers(fs.readFileSync(START_SCRIPT, "utf-8")),
-          extractShellFunction(fs.readFileSync(START_SCRIPT, "utf-8"), "record_gateway_pid"),
+          safeTmpHelpers(readOpenClawStartupSource()),
+          extractShellFunction(readOpenClawStartupSource(), "record_gateway_pid"),
           "record_gateway_pid 4242 987654",
         ].join("\n"),
         { mode: 0o755 },
@@ -338,7 +338,7 @@ describe("record_gateway_pid", () => {
   });
 
   it("clears the pid/starttime record when the tracked gateway is marked stopped", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-watchdog-pid-clear-"));
     const pidFile = path.join(tmpDir, "gateway.pid");
     const script = path.join(tmpDir, "run.sh");
@@ -390,7 +390,7 @@ describe("gateway_pid_is_openclaw_gateway", () => {
           "#!/usr/bin/env bash",
           `_NEMOCLAW_PROC_ROOT=${JSON.stringify(procRoot)}`,
           extractShellFunction(
-            fs.readFileSync(START_SCRIPT, "utf-8"),
+            readOpenClawStartupSource(),
             "gateway_pid_is_openclaw_gateway",
           ),
           "gateway_pid_is_openclaw_gateway 4242",
@@ -428,7 +428,7 @@ describe("openclaw_gateway_healthy listener ownership", () => {
     result: ReturnType<typeof spawnSync>;
     events: string;
   } {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-health-owner-"));
     const eventLog = path.join(tmpDir, "events.log");
     const scriptPath = path.join(tmpDir, "run.sh");
@@ -478,7 +478,7 @@ describe("openclaw_gateway_healthy listener ownership", () => {
   });
 
   it("rejects a PID1-adopted recycled PID even when its cmdline and listener look valid", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-reused-identity-"));
     const procRoot = path.join(tmpDir, "proc");
     const eventLog = path.join(tmpDir, "events.log");
@@ -527,7 +527,7 @@ describe("openclaw_gateway_healthy listener ownership", () => {
 // This behaviorally covers the driver-env marker regression (#4748).
 describe("gateway launch wiring (#4710)", () => {
   it("exits PID 1 without signaling when gateway identity capture fails", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const launch = extractShellFunction(src, "launch_openclaw_gateway");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-launch-capture-failure-"));
     const eventLog = path.join(tmpDir, "events.log");
@@ -568,7 +568,7 @@ describe("gateway launch wiring (#4710)", () => {
   });
 
   function runLaunchWiring(kind: "non-root" | "root") {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-launch-wiring-${kind}-`));
     const fakeBin = path.join(tmpDir, "bin");
     const openclawLog = path.join(tmpDir, "openclaw.log");
@@ -703,7 +703,7 @@ describe("respawn loop pidfile refresh (#4710)", () => {
     "non-root",
     "root",
   ] as const)("%s respawn records the relaunched gateway PID in the pidfile", (kind) => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-respawn-${kind}-`));
     const fakeBin = path.join(tmpDir, "bin");
     const openclawLog = path.join(tmpDir, "openclaw.log");
@@ -805,7 +805,7 @@ describe("respawn loop pidfile refresh (#4710)", () => {
   });
 
   it("services a supervisor request that interrupts root respawn backoff before relaunch", () => {
-    const src = fs.readFileSync(START_SCRIPT, "utf-8");
+    const src = readOpenClawStartupSource();
     const supervisor = fs.readFileSync(GATEWAY_SUPERVISOR, "utf-8");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-respawn-control-race-"));
     const eventLog = path.join(tmpDir, "events.log");
@@ -898,7 +898,7 @@ describe("respawn loop pidfile refresh (#4710)", () => {
 // Launch-path signal handling and child-PID tracking for both entrypoint modes.
 // This file owns gateway launch coverage to keep the legacy test within budget.
 describe("nemoclaw-start gateway launch signal handling", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
 
   function runLaunchBlock(kind: "non-root" | "root") {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `nemoclaw-launch-${kind}-`));

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 const ROOT = path.join(import.meta.dirname, "..");
 const CANONICAL_FIX = path.join(
@@ -16,8 +17,6 @@ const CANONICAL_FIX = path.join(
   "preloads",
   "http-proxy-fix.js",
 );
-const START_SCRIPT = path.join(ROOT, "packages", "nemoclaw-openclaw", "start.sh");
-
 function extractShellFunction(source: string, name: string): string {
   const header = `${name}() {`;
   const start = source.indexOf(header);
@@ -30,7 +29,7 @@ function extractShellFunction(source: string, name: string): string {
 
 describe("http-proxy-fix preload sync (#2109)", () => {
   it("entrypoint emits the proxy fix preload and registers it in NODE_OPTIONS", () => {
-    const startScript = fs.readFileSync(START_SCRIPT, "utf-8");
+    const startScript = readOpenClawStartupSource();
     const start = startScript.indexOf('_PROXY_FIX_SCRIPT="/tmp/nemoclaw-http-proxy-fix.js"');
     const end = startScript.indexOf(
       "# NVIDIA endpoint model-specific inference parameter injection",

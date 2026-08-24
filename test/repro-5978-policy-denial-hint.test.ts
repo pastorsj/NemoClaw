@@ -33,9 +33,9 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../src/lib/name-validation.js";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
-const START_SCRIPT = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 
 // Opt-in container E2E: drives the EXACT reporter workflow against the real
 // sandbox base image — the image's own /etc/profile.d + /etc/bash.bashrc hooks
@@ -125,7 +125,7 @@ function runPlain(snippet: string, env: NodeJS.ProcessEnv): { stdout: string; st
 }
 
 describe("sandbox policy-denial logs breadcrumb (#5978)", () => {
-  const src = fs.readFileSync(START_SCRIPT, "utf-8");
+  const src = readOpenClawStartupSource();
   const stanza = extractHintStanza(src);
 
   it("auto-invokes the gate at source time so connect shells get it for free", () => {
@@ -316,7 +316,6 @@ describe("sandbox policy-denial logs breadcrumb (#5978)", () => {
     expect(stdout).not.toContain("logs --tail 50");
   });
 
-  // source-shape-contract: compatibility -- Executing the emitted shell hook twice protects login profile and bashrc coexistence
   it("prints only once when the file is sourced twice in one login shell", () => {
     // A login shell sources both the system profile and bashrc hooks, each of
     // which sources this file and runs its trailing auto-invocation — the
@@ -368,6 +367,7 @@ describe("sandbox policy-denial logs breadcrumb (#5978)", () => {
       // A 403-on-CONNECT proxy reproduces the OpenShell L7 denial. The connect
       // shell starts at SHLVL=0→1 (a fresh login shell), so the stanza's
       // source-time gate fires exactly as it does for a real `connect`.
+      const encodedStanza = Buffer.from(stanza, "utf8").toString("base64");
       const inside = [
         "#!/bin/bash",
         "set -u",
@@ -385,7 +385,7 @@ describe("sandbox policy-denial logs breadcrumb (#5978)", () => {
         "    c, _ = s.accept(); threading.Thread(target=handle, args=(c,), daemon=True).start()",
         "PY",
         "python3 /tmp/deny-proxy.py & sleep 1",
-        "awk '/# nemoclaw-policy-denial-hint begin/{f=1} f{print} /# nemoclaw-policy-denial-hint end/{f=0}' /work/packages/nemoclaw-openclaw/start.sh > /tmp/stanza.sh",
+        `printf '%s' '${encodedStanza}' | base64 --decode > /tmp/stanza.sh`,
         "{ echo 'export OPENSHELL_SANDBOX=qa-5978'; echo 'export HTTPS_PROXY=http://127.0.0.1:8888'; cat /tmp/stanza.sh; } > /tmp/nemoclaw-proxy-env.sh",
         "chmod 444 /tmp/nemoclaw-proxy-env.sh",
         // Interactive connect session: the breadcrumb prints once at login, then

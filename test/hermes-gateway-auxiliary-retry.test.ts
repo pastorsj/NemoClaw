@@ -8,9 +8,16 @@ import { describe, expect, it } from "vitest";
 import {
   extractShellFunction,
   runHermesBashHarness as runBashHarness,
+  readHermesStartupSource,
 } from "./support/hermes-shell-harness";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
+const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-hermes",
+  "start.sh",
+);
 
 function writeFakeProcCmdline(procRoot: string, pid: number, args: string[]): void {
   const processDir = path.join(procRoot, String(pid));
@@ -20,7 +27,7 @@ function writeFakeProcCmdline(procRoot: string, pid: number, args: string[]): vo
 
 describe("Hermes gateway auxiliary retry", () => {
   it("retries transient auxiliary failures without churning the healthy gateway", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "prepare_hermes_nonroot_runtime() { return 0; }",
@@ -71,7 +78,7 @@ describe("Hermes gateway auxiliary retry", () => {
   });
 
   it("stops and charges a replacement that loses health during auxiliary retry", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       "prepare_hermes_nonroot_runtime() { return 0; }",
@@ -117,7 +124,7 @@ describe("Hermes gateway auxiliary retry", () => {
 
 describe("Hermes gateway relay convergence", () => {
   it("preserves exact tracked relays while removing matching orphan processes", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -163,7 +170,7 @@ describe("Hermes gateway relay convergence", () => {
   });
 
   it("removes a recorded relay when its exact tracked identity is not proven", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -195,7 +202,7 @@ describe("Hermes gateway relay convergence", () => {
   });
 
   it("retries transient public health without churning an exact listener", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness(
       [
         'trace() { printf "%s\\n" "$*"; }',
@@ -236,7 +243,7 @@ describe("Hermes gateway relay convergence", () => {
   });
 
   it("replaces structural listener loss once and preserves a public-red replacement", () => {
-    const source = fs.readFileSync(START_SCRIPT, "utf-8");
+    const source = readHermesStartupSource();
     const result = runBashHarness([
       'trace() { printf "%s\\n" "$*"; }',
       'id() { [ "${1:-}" = "-u" ] && printf "1000\\n"; }',

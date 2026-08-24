@@ -18,6 +18,7 @@ const WRAPPER = path.join(
   "runtime",
   "agent-wrapper.sh",
 );
+const STATUS_MODULE = path.join(path.dirname(WRAPPER), "agent-status.sh");
 
 const canRun = process.platform === "linux";
 
@@ -63,6 +64,7 @@ type Fixture = { wrapperPath: string; ranMarker: string; envFile: string; config
 
 function buildFixture(tempDir: string, configContent: string): Fixture {
   const wrapperPath = path.join(tempDir, "dcode");
+  fs.copyFileSync(STATUS_MODULE, path.join(tempDir, "agent-status.sh"));
   const ranMarker = path.join(tempDir, "dcode-ran");
   const envFile = path.join(tempDir, ".env");
   const configFile = path.join(tempDir, "config.toml");
