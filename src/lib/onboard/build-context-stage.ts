@@ -86,6 +86,23 @@ function isMatchingRepositoryDockerfile(
   }
 }
 
+function resolveSelectedDockerfileAgent(
+  input: CreateSandboxBuildContextInput,
+  selectedDockerfile: string,
+): AgentDefinition | null {
+  if (input.agent) return input.agent;
+
+  const repositoryOpenClawDockerfile = path.join(
+    path.resolve(input.root),
+    "packages",
+    "nemoclaw-openclaw",
+    "Dockerfile",
+  );
+  return isSameFile(selectedDockerfile, repositoryOpenClawDockerfile)
+    ? loadAgent("openclaw")
+    : null;
+}
+
 function createCleanupBuildContext(buildCtx: string): () => boolean {
   return () => {
     try {
@@ -122,17 +139,23 @@ export function stageCreateSandboxBuildContext(
     // scripts/, nemoclaw-blueprint/), so the parent-directory contract can
     // never satisfy it. Stage it exactly like the managed build instead of
     // failing at the first COPY (#7205).
-    const agentDockerfile = input.agent?.dockerfilePath ?? null;
+    // Legacy callers represent the default OpenClaw selection as null. Resolve
+    // that identity only for the repository-owned Dockerfile so an unrelated
+    // custom Dockerfile keeps its parent-directory context contract.
+    const selectedAgent = resolveSelectedDockerfileAgent(input, fromResolved);
+    const agentDockerfile = selectedAgent?.dockerfilePath ?? null;
     const isSelectedAgentDockerfile =
-      input.agent &&
+      selectedAgent &&
       agentDockerfile &&
       (isSameFile(fromResolved, agentDockerfile) ||
-        isMatchingRepositoryDockerfile(input.root, fromResolved, input.agent));
-    if (input.agent && isSelectedAgentDockerfile) {
-      log(`  Using trusted ${input.agent.displayName} Dockerfile: ${fromResolved}`);
-      log(`  Staging the repository root as the managed ${input.agent.displayName} build context.`);
+        isMatchingRepositoryDockerfile(input.root, fromResolved, selectedAgent));
+    if (selectedAgent && isSelectedAgentDockerfile) {
+      log(`  Using trusted ${selectedAgent.displayName} Dockerfile: ${fromResolved}`);
+      log(
+        `  Staging the repository root as the managed ${selectedAgent.displayName} build context.`,
+      );
       try {
-        build = input.createAgentSandbox(input.agent);
+        build = input.createAgentSandbox(selectedAgent);
       } catch (err) {
         if (err instanceof SandboxBaseImageResolutionError) {
           error(`  ${err.message}`);

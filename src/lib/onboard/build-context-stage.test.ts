@@ -7,7 +7,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentSandbox as createManagedAgentSandbox } from "../agent/base-image";
-import { harnessPackageContentDigest } from "../harness/package-registry";
+import type { AgentDefinition } from "../agent/defs";
+import { harnessPackageContentDigest, installBundledHarness } from "../harness/package-registry";
 import { SandboxBaseImageResolutionError } from "../sandbox-base-image";
 import { stageCreateSandboxBuildContext } from "./build-context-stage";
 import { CUSTOM_BUILD_CONTEXT_WARN_BYTES } from "./custom-build-context";
@@ -42,6 +43,7 @@ function readStagedBytes(root: string): string {
 describe("stageCreateSandboxBuildContext", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     for (const dir of tmpDirs.splice(0)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -157,6 +159,36 @@ describe("stageCreateSandboxBuildContext", () => {
     expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toContain(
       "COPY packages/nemoclaw-hermes/ /opt/hermes/",
     );
+  });
+
+  it("stages the repository root for an installed OpenClaw package selected through the legacy null identity", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../../..");
+    const privateHome = makeTmpDir("nemoclaw-installed-openclaw-home-");
+    vi.stubEnv("HOME", privateHome);
+    const installedPackage = installBundledHarness("openclaw", process.env);
+    const agentBuild = {
+      buildCtx: makeTmpDir("nemoclaw-openclaw-staged-"),
+      stagedDockerfile: path.join(makeTmpDir("nemoclaw-openclaw-staged-df-"), "Dockerfile"),
+    };
+    const createAgentSandbox = vi.fn((_selectedAgent: AgentDefinition) => agentBuild);
+
+    const result = stageCreateSandboxBuildContext({
+      root: repoRoot,
+      fromDockerfile: path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"),
+      agent: null,
+      createAgentSandbox,
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+
+    expect(createAgentSandbox).toHaveBeenCalledOnce();
+    expect(createAgentSandbox.mock.calls[0]?.[0]).toMatchObject({
+      name: "openclaw",
+      agentDir: installedPackage.rootDir,
+      harnessPackageSource: "installed",
+    });
+    expect(result.buildCtx).toBe(agentBuild.buildCtx);
+    expect(result.origin).toBe("generated");
   });
 
   it("keeps a repository Dockerfile custom when its package differs from the installed package", () => {
