@@ -15,6 +15,7 @@ import {
   parseAutoPairApprovalReceipt,
   readAutoPairApprovalPolicyModule,
 } from "../auto-pair-approval";
+import { CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S } from "../connect-autopair-budget";
 import {
   buildOpenClawPairingObservationScript,
   observeOpenClawPairingQualification,
@@ -469,7 +470,10 @@ process.stdout.write("{}\\n");
           {
             emitReceipt: true,
             localDeviceOnly: true,
-            budget: { maxApprovals: 1 },
+            budget: {
+              approveTimeoutS: CONNECT_AUTO_PAIR_APPROVE_TIMEOUT_S,
+              maxApprovals: 1,
+            },
           },
         ),
       });

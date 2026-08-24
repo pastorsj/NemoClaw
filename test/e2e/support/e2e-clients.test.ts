@@ -132,9 +132,19 @@ describe("E2E fixture clients", () => {
 
     await host.expectHarnessInstalled("hermes", {
       artifactName: "phase-harness",
-      env: { PATH: "/test/bin" },
+      env: {
+        HOME: "/tmp/e2e-home",
+        NEMOCLAW_GATEWAY_PORT: "18080",
+        PATH: "/test/bin",
+      },
       timeoutMs: 123_000,
     });
+
+    const expectedEnv = {
+      HOME: "/tmp/e2e-home",
+      NEMOCLAW_GATEWAY_PORT: "18080",
+      PATH: "/test/bin",
+    };
 
     expect(runner.calls).toEqual([
       {
@@ -142,7 +152,7 @@ describe("E2E fixture clients", () => {
         args: ["harness", "list"],
         options: {
           artifactName: "phase-harness-list",
-          env: { PATH: "/test/bin" },
+          env: expectedEnv,
           timeoutMs: 123_000,
         },
       },
@@ -151,16 +161,22 @@ describe("E2E fixture clients", () => {
         args: ["agents", "list"],
         options: {
           artifactName: "phase-harness-agents",
-          env: { PATH: "/test/bin" },
+          env: expectedEnv,
           timeoutMs: 123_000,
         },
       },
       {
         command: process.execPath,
-        args: ["-e", expect.any(String), "hermes"],
+        args: [
+          "-e",
+          expect.any(String),
+          "hermes",
+          "/tmp/e2e-home/.nemoclaw/gateways/18080/onboard-session.json",
+          "/tmp/e2e-home/.nemoclaw/harnesses/nemoclaw-hermes/.nemoclaw-install.json",
+        ],
         options: {
           artifactName: "phase-harness-authority",
-          env: { PATH: "/test/bin" },
+          env: expectedEnv,
           timeoutMs: 123_000,
         },
       },

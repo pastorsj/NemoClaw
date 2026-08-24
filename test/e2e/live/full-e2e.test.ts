@@ -5,6 +5,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { GATEWAY_PORT } from "../../../src/lib/core/ports.ts";
+import { resolveGatewayName } from "../../../src/lib/onboard/gateway-binding.ts";
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { GATEWAY_STOP_SCRIPT } from "../../../src/lib/tunnel/gateway-stop-script.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -51,6 +54,7 @@ import { runOpenClawLaunchReadinessLeaseTurns } from "./launch-agent-turn.ts";
 import { bindApprovedPrBaseForBaseImageComparison } from "./pr-base-comparison.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-full";
+const GATEWAY_NAME = resolveGatewayName(GATEWAY_PORT);
 const FULL_E2E_TARGET_ID = process.env.E2E_TARGET_ID ?? "full-e2e";
 const SETUP_MODE = process.env.NEMOCLAW_E2E_SETUP_MODE ?? "source-install";
 const USE_PREINSTALLED_LAUNCHABLE = SETUP_MODE === "preinstalled-launchable";
@@ -85,7 +89,8 @@ function env(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: "nemoclaw",
+    NEMOCLAW_GATEWAY_PORT: String(GATEWAY_PORT),
+    OPENSHELL_GATEWAY: GATEWAY_NAME,
     ...securityPostureModeEnv(),
     ...extra,
   };
@@ -185,7 +190,7 @@ async function cleanup(host: HostCliClient, sandbox: SandboxClient): Promise<voi
     })
     .catch(() => undefined);
   await sandbox
-    .openshell(["gateway", "destroy", "-g", "nemoclaw"], {
+    .openshell(["gateway", "destroy", "-g", GATEWAY_NAME], {
       artifactName: "cleanup-openshell-gateway-destroy",
       env: env(),
       timeoutMs: 60_000,
@@ -438,7 +443,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
     skip(`Docker is required: ${resultText(docker)}`);
   }
 
-  cleanupRegistry.trackGateway(host, "nemoclaw", {
+  cleanupRegistry.trackGateway(host, GATEWAY_NAME, {
     artifactName: "cleanup-openshell-gateway-destroy",
     env: env(),
     redactionValues: [hosted.apiKey],
@@ -620,7 +625,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
 
   progress.phase("remove full-E2E sandbox");
   await cleanup(host, sandbox);
-  const registry = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
+  const registry = path.join(nemoclawStateRoot(os.homedir(), GATEWAY_PORT), "sandboxes.json");
   const registryText = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : "";
   expect(registryText).not.toContain(SANDBOX_NAME);
 

@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import os from "node:os";
+import path from "node:path";
+
+import { DEFAULT_GATEWAY_PORT, parsePort } from "../../../../src/lib/core/ports.ts";
+import { nemoclawStateRoot } from "../../../../src/lib/state/state-root.ts";
 import { buildAvailabilityProbeEnv } from "../availability-env.ts";
 import type { ShellProbeResult, ShellProbeRunOptions } from "../shell-probe.ts";
 import { trustedShellCommand } from "../shell-probe.ts";
@@ -26,14 +31,12 @@ const FORWARD_ALREADY_ABSENT =
   /no (?:active )?forward|forward[^\n]*(?:not found|not running)|forward stop[^\n]*not running/i;
 const HARNESS_AUTHORITY_PROBE = String.raw`
 const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
 const harnessId = process.argv[1];
+const sessionPath = process.argv[2];
+const receiptPath = process.argv[3];
 if (!/^[a-z][a-z0-9-]{0,62}$/.test(harnessId)) throw new Error("invalid harness id");
-const home = process.env.HOME || os.homedir();
-const stateRoot = path.join(home, ".nemoclaw");
-const session = JSON.parse(fs.readFileSync(path.join(stateRoot, "onboard-session.json"), "utf8"));
-const receipt = JSON.parse(fs.readFileSync(path.join(stateRoot, "harnesses", "nemoclaw-" + harnessId, ".nemoclaw-install.json"), "utf8"));
+const session = JSON.parse(fs.readFileSync(sessionPath, "utf8"));
+const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
 process.stdout.write(JSON.stringify({
   agent: typeof session.agent === "string" ? session.agent : "openclaw",
   source: session.harnessPackage && session.harnessPackage.source,
@@ -194,9 +197,23 @@ export class HostCliClient {
       );
     }
 
+    const authorityEnv = sharedOptions.env ?? {};
+    const authorityHome = authorityEnv.HOME || process.env.HOME || os.homedir();
+    const gatewayPort = parsePort("NEMOCLAW_GATEWAY_PORT", DEFAULT_GATEWAY_PORT, authorityEnv);
+    const sessionPath = path.join(
+      nemoclawStateRoot(authorityHome, gatewayPort),
+      "onboard-session.json",
+    );
+    const receiptPath = path.join(
+      authorityHome,
+      ".nemoclaw",
+      "harnesses",
+      `nemoclaw-${harnessId}`,
+      ".nemoclaw-install.json",
+    );
     const authority = await this.command(
       process.execPath,
-      ["-e", HARNESS_AUTHORITY_PROBE, harnessId],
+      ["-e", HARNESS_AUTHORITY_PROBE, harnessId, sessionPath, receiptPath],
       {
         ...sharedOptions,
         artifactName: `${artifactPrefix}-authority`,
