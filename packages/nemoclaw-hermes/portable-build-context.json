@@ -29,6 +29,7 @@
     "packages/nemoclaw-hermes/provider-profiles/",
     "packages/nemoclaw-hermes/runtime-config-guard.py",
     "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
+    "packages/nemoclaw-hermes/runtime/generate-config.sh",
     "packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py",
     "packages/nemoclaw-hermes/scripts/runtime-state-mutation-startup-gate.py",
     "packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py",
@@ -225,6 +226,10 @@
     {
       "path": "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
       "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/generate-config.sh",
+      "mode": "100755"
     },
     {
       "path": "packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py",

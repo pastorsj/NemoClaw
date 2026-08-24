@@ -193,6 +193,13 @@ describe("published harness packages", () => {
     expect(packedPaths).toContain(`${packageRoot}/${harness.runtimeFile}`);
   });
 
+  it.each(HARNESSES)("ships the $id configuration workflow command", ({ id }) => {
+    const artifact = `packages/nemoclaw-${id}/runtime/generate-config.sh`;
+
+    expect(packedPaths).toContain(artifact);
+    expect(statSync(path.join(packagedRoot, artifact)).mode & 0o111).not.toBe(0);
+  });
+
   it.each([
     "packages/nemoclaw-hermes/config/managed-route.cts",
     "packages/nemoclaw-hermes/config/mcp-adapter.cts",

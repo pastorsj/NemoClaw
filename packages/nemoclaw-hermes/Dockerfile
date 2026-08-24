@@ -115,6 +115,7 @@ COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hol
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
+COPY packages/nemoclaw-hermes/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
 COPY packages/nemoclaw-hermes/validate-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py
@@ -465,6 +466,11 @@ RUN managed_runtime_assertion_failed() { \
     && { chown root:root /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
     && { chmod 0444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null || managed_runtime_assertion_failed mode-0444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
     && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null)" = '0:0:444' || managed_runtime_assertion_failed metadata-0:0:444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
+    && { test -f /usr/local/lib/nemoclaw/generate-config || managed_runtime_assertion_failed regular-file /usr/local/lib/nemoclaw/generate-config; } \
+    && { test ! -L /usr/local/lib/nemoclaw/generate-config || managed_runtime_assertion_failed non-symlink /usr/local/lib/nemoclaw/generate-config; } \
+    && { chown root:root /usr/local/lib/nemoclaw/generate-config 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/generate-config; } \
+    && { chmod 0555 /usr/local/lib/nemoclaw/generate-config 2>/dev/null || managed_runtime_assertion_failed mode-0555 /usr/local/lib/nemoclaw/generate-config; } \
+    && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config 2>/dev/null)" = '0:0:555' || managed_runtime_assertion_failed metadata-0:0:555 /usr/local/lib/nemoclaw/generate-config; } \
     && test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test ! -L /usr/local/bin/nemoclaw-managed-bootstrap \
     && test "$(stat -c '%u:%g:%a' /usr/local/bin/nemoclaw-managed-bootstrap)" = '0:0:755' \
@@ -1426,6 +1432,8 @@ RUN check_metadata() { \
     && check_metadata /scripts/lib/patch-bundled-npm-ip-address.mts 'root:root 444' \
     && check_metadata /scripts/patch-bundled-npm-tar.mts 'root:root 444' \
     && check_metadata /opt/nemoclaw-hermes-config/generate-config.ts 'root:root 444' \
+    && test ! -L /usr/local/lib/nemoclaw/generate-config \
+    && check_metadata /usr/local/lib/nemoclaw/generate-config 'root:root 555' \
     && check_metadata /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py 'root:root 755' \
     && check_metadata /usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py 'root:root 755' \
     && check_metadata /usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py 'root:root 755' \

@@ -154,6 +154,7 @@ RUN set -eu; \
     [ "$installed_version" = "${PI_VERSION}" ]
 
 COPY agents/pi/generate-config.ts /opt/nemoclaw-pi/generate-config.ts
+COPY agents/pi/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY agents/pi/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
@@ -167,6 +168,11 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test -f /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && test ! -L /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh)" = '0:0:444' \
+    && test -f /usr/local/lib/nemoclaw/generate-config \
+    && test ! -L /usr/local/lib/nemoclaw/generate-config \
+    && chown root:root /usr/local/lib/nemoclaw/generate-config \
+    && chmod 0555 /usr/local/lib/nemoclaw/generate-config \
+    && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config)" = '0:0:555' \
     && chmod 444 /opt/nemoclaw-pi/generate-config.ts /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold \
     && chmod -R a+rX /opt/nemoclaw-blueprint

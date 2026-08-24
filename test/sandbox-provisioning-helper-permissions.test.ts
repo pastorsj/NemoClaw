@@ -59,6 +59,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const localShare = path.join(tmp, "usr", "local", "share", "nemoclaw");
     const localSrc = path.join(tmp, "src");
     const localScripts = path.join(tmp, "scripts");
+    const configCommandPath = path.join(localLib, "generate-config");
     const generatorPath = path.join(localScripts, "generate-openclaw-config.mts");
     const toolSearchValidatorPath = path.join(localScripts, "validate-openclaw-tool-search.mts");
     const toolDisclosurePath = path.join(localSrc, "lib", "tool-disclosure.ts");
@@ -106,6 +107,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       path.join(localLib, "openclaw_device_approval_policy.py"),
       path.join(localLib, "clean_runtime_shell_env_shim.py"),
       path.join(localLib, "normalize_mutable_config_perms.py"),
+      configCommandPath,
       generatorPath,
       toolSearchValidatorPath,
       toolDisclosurePath,
@@ -137,9 +139,21 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         .replaceAll("/usr/local/share/nemoclaw", localShare)
         .replaceAll("/src", localSrc)
         .replaceAll("/scripts", localScripts);
-      const { result } = runLoggedDockerShell(command, tmp, ["chown() { :; }"]);
+      const { calls, result } = runLoggedDockerShell(command, tmp, [
+        'chown() { printf "chown %s\\n" "$*" >> "$call_log"; }',
+      ]);
 
       expect(result.status, result.stderr).toBe(0);
+      expect(fs.lstatSync(configCommandPath).isSymbolicLink()).toBe(false);
+      expect((fs.statSync(configCommandPath).mode & 0o777).toString(8)).toBe("555");
+      expect(
+        calls
+          .split("\n")
+          .some(
+            (line) =>
+              line.startsWith("chown root:root ") && line.split(" ").includes(configCommandPath),
+          ),
+      ).toBe(true);
       expect((fs.statSync(generatorPath).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(toolSearchValidatorPath).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(toolDisclosurePath).mode & 0o777).toString(8)).toBe("444");

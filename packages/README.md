@@ -64,6 +64,25 @@ executable. Packages can also include these optional paths:
 - `model-specific-setup/` optionally contains compatibility manifests for this agent runtime.
 - `plugin/` optionally contains an agent runtime plugin.
 
+Use these responsibility directories when the package needs them:
+
+- `config/` contains build-time native configuration code.
+- `runtime/` contains commands and helpers that run inside the sandbox.
+- `host/` contains receipt-verified transition helpers that NemoClaw core still executes.
+- `compat/` contains patches and workarounds bound to an upstream agent runtime version.
+- `checks/` contains package-owned build and behavior checks.
+
+A package that participates in managed startup must provide an executable
+`runtime/generate-config.sh`. Its image installs that file as the root-owned,
+non-symbolic-link command `/usr/local/lib/nemoclaw/generate-config` with mode `0555`.
+The command translates NemoClaw's managed startup environment into the agent runtime's native
+configuration. NemoClaw core invokes the fixed command path and does not select the native
+generator by agent ID.
+
+Shared directory names describe shared responsibilities. Packages do not need empty directories or
+identical internal files. File names use the shortest one- or two-word name that states the
+responsibility; use a third word only when removing it makes the name ambiguous.
+
 Package-specific helpers, lockfiles, patches, schemas, and runtime plugins belong with these files.
 Repository test projects continue to own integration and E2E coverage for the in-tree packages.
 NemoClaw core continues to own command parsing, onboarding, OpenShell lifecycle operations,

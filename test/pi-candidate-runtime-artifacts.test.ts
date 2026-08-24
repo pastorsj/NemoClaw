@@ -18,6 +18,7 @@ import {
   SHIPPED_MANAGED_IMAGE_AGENTS,
 } from "../src/lib/onboard/managed-image/contract.ts";
 import { validateCandidateContract } from "../tools/managed-images/validate-candidate-contract.mts";
+import { dockerRunCommandBetween, runLoggedDockerShell } from "./helpers/dockerfile-run-shell";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -84,6 +85,68 @@ function candidateContract(overrides: Record<string, unknown> = {}): Record<stri
 describe("Pi candidate runtime artifacts", () => {
   it("accepts the Pi artifacts committed in this repository", () => {
     expect(verifyPiCandidateArtifacts(currentSources())).toEqual([]);
+  });
+
+  it("installs the compatibility configuration command as a fixed image executable", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pi-config-command-"));
+    const localBin = path.join(tmp, "usr", "local", "bin");
+    const localLib = path.join(tmp, "usr", "local", "lib", "nemoclaw");
+    const localPi = path.join(tmp, "opt", "nemoclaw-pi");
+    const localBlueprint = path.join(tmp, "opt", "nemoclaw-blueprint");
+    const configCommandPath = path.join(localLib, "generate-config");
+    const bootstrapPath = path.join(localBin, "nemoclaw-managed-bootstrap");
+    const trampolinePath = path.join(localLib, "managed-bootstrap-trampoline.sh");
+    const nativeGeneratorPath = path.join(localPi, "generate-config.ts");
+    const environmentWrapperPath = path.join(localLib, "entrypoint-env-wrapper.sh");
+    const startPath = path.join(localBin, "nemoclaw-start");
+    const startupHoldPath = path.join(localBin, "nemoclaw-managed-startup-hold");
+    const blueprintPath = path.join(localBlueprint, "blueprint.yaml");
+
+    try {
+      fs.mkdirSync(localBin, { recursive: true });
+      fs.mkdirSync(localLib, { recursive: true });
+      fs.mkdirSync(localPi, { recursive: true });
+      fs.mkdirSync(localBlueprint, { recursive: true });
+      fs.writeFileSync(bootstrapPath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(trampolinePath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(configCommandPath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(nativeGeneratorPath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(environmentWrapperPath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(startPath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(startupHoldPath, "# fixture\n", { mode: 0o600 });
+      fs.writeFileSync(blueprintPath, "# fixture\n", { mode: 0o600 });
+      fs.chmodSync(bootstrapPath, 0o755);
+      fs.chmodSync(trampolinePath, 0o444);
+
+      const command = dockerRunCommandBetween(
+        currentSources().dockerfile,
+        "COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/",
+        "ARG NEMOCLAW_MODEL",
+      )
+        .replaceAll("/usr/local/lib/nemoclaw", localLib)
+        .replaceAll("/usr/local/bin", localBin)
+        .replaceAll("/opt/nemoclaw-pi", localPi)
+        .replaceAll("/opt/nemoclaw-blueprint", localBlueprint);
+      const functionDefs = [
+        'chown() { printf "chown %s\\n" "$*" >> "$call_log"; }',
+        `stat() { case "$*" in *${bootstrapPath}) printf '0:0:755\\n' ;; *${trampolinePath}) printf '0:0:444\\n' ;; *${configCommandPath}) printf '0:0:555\\n' ;; *) command stat "$@" ;; esac; }`,
+      ];
+
+      fs.rmSync(configCommandPath);
+      fs.symlinkSync(path.join(localPi, "generate-config.ts"), configCommandPath);
+      const rejected = runLoggedDockerShell(command, tmp, functionDefs);
+      expect(rejected.result.status).not.toBe(0);
+
+      fs.rmSync(configCommandPath);
+      fs.writeFileSync(configCommandPath, "# fixture\n", { mode: 0o600 });
+      const accepted = runLoggedDockerShell(command, tmp, functionDefs);
+      expect(accepted.result.status, accepted.result.stderr).toBe(0);
+      expect(fs.lstatSync(configCommandPath).isSymbolicLink()).toBe(false);
+      expect(fs.statSync(configCommandPath).mode & 0o777).toBe(0o555);
+      expect(accepted.calls).toContain(`chown root:root ${configCommandPath}`);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("rejects a manifest version that drifts from the locked package", () => {

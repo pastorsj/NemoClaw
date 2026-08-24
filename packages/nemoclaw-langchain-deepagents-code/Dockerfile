@@ -1,5 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Existing secret-named inputs and the named sandbox user are covered by package image tests and
+# are unchanged by this configuration-command refactor.
+# hadolint global ignore=DL3064,DL3066
 #
 # LangChain Deep Agents Code sandbox image.
 
@@ -202,6 +205,7 @@ COPY packages/nemoclaw-langchain-deepagents-code/dcode-wrapper.sh /usr/local/lib
 COPY packages/nemoclaw-langchain-deepagents-code/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-launcher.sh
 COPY packages/nemoclaw-langchain-deepagents-code/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh
 COPY packages/nemoclaw-langchain-deepagents-code/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY packages/nemoclaw-langchain-deepagents-code/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
@@ -225,6 +229,11 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test -f /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && test ! -L /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh)" = '0:0:444' \
+    && test -f /usr/local/lib/nemoclaw/generate-config \
+    && test ! -L /usr/local/lib/nemoclaw/generate-config \
+    && chown root:root /usr/local/lib/nemoclaw/generate-config \
+    && chmod 0555 /usr/local/lib/nemoclaw/generate-config \
+    && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config)" = '0:0:555' \
     && chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/package.json /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/managed-dcode-runtime.py /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/progressive_tool_disclosure.py /opt/nemoclaw-deepagents-code/nemoclaw_observability.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-observability.py /opt/nemoclaw-deepagents-code/validate-read-only-mcp-call.py /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold /usr/local/bin/nemoclaw-managed-bootstrap /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-session-supervisor.py \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-session-supervisor.py)" = "0:0:755" \
@@ -357,7 +366,7 @@ USER sandbox
 
 RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
     && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/ \
-    && node --experimental-strip-types /opt/nemoclaw-deepagents-code/generate-config.ts \
+    && /usr/local/lib/nemoclaw/generate-config \
     && chmod 660 /sandbox/.deepagents/config.toml
 
 USER root

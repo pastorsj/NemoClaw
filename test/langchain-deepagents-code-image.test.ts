@@ -237,9 +237,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(dockerfile).toContain(
       "COPY packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
     );
-    expect(dockerfile).toContain(
-      "node --experimental-strip-types /opt/nemoclaw-deepagents-code/generate-config.ts",
-    );
+    expect(dockerfile).toContain("&& /usr/local/lib/nemoclaw/generate-config \\");
     expect(dockerfile).not.toContain("langchain-deepagents-code-sandbox-base:latest");
     expect(dockerfile).toContain(
       'timeout 10 env -i /usr/local/lib/nemoclaw/dcode-wrapper.sh -n ""',
@@ -1224,8 +1222,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
   it("assigns the read-only MCP contract to each loaded validator tool", () => {
     const validatorPath = path.join(
       repoRoot,
-      "agents",
-      "langchain-deepagents-code",
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
       "validate-progressive-tool-disclosure.py",
     );
     const metadata = JSON.parse(

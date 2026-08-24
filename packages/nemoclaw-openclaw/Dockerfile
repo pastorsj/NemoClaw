@@ -3,6 +3,9 @@
 # Layers PR-specific code (plugin, blueprint, config, startup script) on top
 # of the pre-built base image from GHCR. The base image contains all the
 # expensive, rarely-changing layers (apt, setpriv, users, openclaw CLI).
+# Existing whole-stage copies, secret-named inputs, named users, and the shell entrypoint are
+# covered by package image tests and are unchanged by this configuration-command refactor.
+# hadolint global ignore=DL3025,DL3064,DL3066,DL3067
 #
 # For local builds without GHCR access, build the base first:
 #   docker build -f packages/nemoclaw-openclaw/Dockerfile.base -t ghcr.io/nvidia/nemoclaw/sandbox-base:latest .
@@ -588,6 +591,7 @@ COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
 COPY packages/nemoclaw-openclaw/preloads/*.js /usr/local/lib/nemoclaw/preloads/
 COPY --from=runtime-preload-builder /opt/nemoclaw-root/dist/lib/messaging/channels/ /usr/local/lib/nemoclaw/preloads-compiled-channels/
 COPY packages/nemoclaw-openclaw/scripts/codex-acp-wrapper.sh /usr/local/bin/nemoclaw-codex-acp
+COPY packages/nemoclaw-openclaw/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts /scripts/generate-openclaw-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/scripts/config-runtime.cts /scripts/config-runtime.cts
 COPY packages/nemoclaw-openclaw/scripts/validate-openclaw-tool-search.mts /scripts/validate-openclaw-tool-search.mts
@@ -1560,6 +1564,11 @@ RUN managed_runtime_assertion_failed() { \
     && { chown root:root /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
     && { chmod 0444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null || managed_runtime_assertion_failed mode-0444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
     && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null)" = '0:0:444' || managed_runtime_assertion_failed metadata-0:0:444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
+    && { test -f /usr/local/lib/nemoclaw/generate-config || managed_runtime_assertion_failed regular-file /usr/local/lib/nemoclaw/generate-config; } \
+    && { test ! -L /usr/local/lib/nemoclaw/generate-config || managed_runtime_assertion_failed non-symlink /usr/local/lib/nemoclaw/generate-config; } \
+    && { chown root:root /usr/local/lib/nemoclaw/generate-config 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/generate-config; } \
+    && { chmod 0555 /usr/local/lib/nemoclaw/generate-config 2>/dev/null || managed_runtime_assertion_failed mode-0555 /usr/local/lib/nemoclaw/generate-config; } \
+    && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config 2>/dev/null)" = '0:0:555' || managed_runtime_assertion_failed metadata-0:0:555 /usr/local/lib/nemoclaw/generate-config; } \
     && test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test ! -L /usr/local/bin/nemoclaw-managed-bootstrap \
     && test "$(stat -c '%u:%g:%a' /usr/local/bin/nemoclaw-managed-bootstrap)" = '0:0:755' \
@@ -1580,6 +1589,7 @@ RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh \
     && chmod -R a+rX /src/lib/messaging \
     && chown root:root /usr/local/bin/nemoclaw-gateway-control \
+        /usr/local/lib/nemoclaw/generate-config \
         /usr/local/lib/nemoclaw/gateway-supervisor.sh \
         /usr/local/lib/nemoclaw/state-dir-guard.py \
         /usr/local/share/nemoclaw/state-lock-plan.json \
@@ -1595,7 +1605,8 @@ RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && chmod 644 /usr/local/lib/nemoclaw/openclaw_device_approval_policy.py \
         /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py \
-    && chmod 555 /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py \
+    && chmod 555 /usr/local/lib/nemoclaw/generate-config \
+        /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py \
     && if [ -d /usr/local/lib/nemoclaw/preloads-compiled-channels ]; then \
         find /usr/local/lib/nemoclaw/preloads-compiled-channels -path '*/runtime/*.js' -type f \
             -exec sh -c 'for file do cp "$file" "/usr/local/lib/nemoclaw/preloads/$(basename "$file")"; done' sh {} +; \
@@ -2337,6 +2348,8 @@ RUN check_metadata() { \
     && check_metadata /usr/local/bin/nemoclaw-managed-bootstrap 'root:root:755' \
     && test ! -L /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && check_metadata /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh 'root:root:444' \
+    && test ! -L /usr/local/lib/nemoclaw/generate-config \
+    && check_metadata /usr/local/lib/nemoclaw/generate-config 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-gateway-control 'root:root:700' \
     && check_metadata /usr/local/lib/nemoclaw/state-dir-guard.py 'root:root:500' \
     && check_metadata /usr/local/share/nemoclaw/state-lock-plan.json 'root:root:444' \

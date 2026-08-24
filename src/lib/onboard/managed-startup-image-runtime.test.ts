@@ -42,6 +42,7 @@ import {
   applyManagedStartupRootRequest,
   buildManagedStartupImageActionPlan,
   installHermesManagedPolicy,
+  MANAGED_STARTUP_GENERATE_CONFIG_EXECUTABLE,
   MANAGED_STARTUP_PROFILE_ENV,
   type ManagedStartupImageActionPlanInput,
   main as mainManagedStartupImageRuntime,
@@ -152,25 +153,16 @@ describe("buildManagedStartupImageActionPlan", () => {
       {
         action: "generate-agent-config",
         runAs: "sandbox",
-        argv: [
-          "/usr/local/bin/node",
-          "--experimental-strip-types",
-          "/opt/nemoclaw-deepagents-code/generate-config.ts",
-        ],
+        argv: [MANAGED_STARTUP_GENERATE_CONFIG_EXECUTABLE],
       },
     ]);
   });
 
-  it.each([
-    ["openclaw", "/scripts/generate-openclaw-config.mts"],
-    ["hermes", "/opt/nemoclaw-hermes-config/generate-config.ts"],
-    ["langchain-deepagents-code", "/opt/nemoclaw-deepagents-code/generate-config.ts"],
-    ["pi", "/opt/nemoclaw-pi/generate-config.ts"],
-  ] as const)("selects the reviewed %s generator asset", (agent, generator) => {
+  it.each(MANAGED_STARTUP_AGENTS)("uses the package configuration command for %s", (agent) => {
     const command = buildManagedStartupImageActionPlan(actionInput(agent)).find(
       ({ action }) => action === "generate-agent-config",
     );
-    expect(command?.argv.at(-1)).toBe(generator);
+    expect(command?.argv).toEqual([MANAGED_STARTUP_GENERATE_CONFIG_EXECUTABLE]);
   });
 
   it.each([

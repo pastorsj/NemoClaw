@@ -48,6 +48,8 @@ export { MANAGED_STARTUP_CA_ENV, MANAGED_STARTUP_PROFILE_ENV } from "./transport
 export const MANAGED_STARTUP_RUNTIME_ENV_FILE = "/run/nemoclaw/managed-startup-runtime.env";
 export const MANAGED_STARTUP_RUNTIME_EXECUTABLE =
   "/usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs";
+export const MANAGED_STARTUP_GENERATE_CONFIG_EXECUTABLE =
+  "/usr/local/lib/nemoclaw/generate-config";
 export const MANAGED_STARTUP_MERGED_CA_FILE = "/run/nemoclaw/managed-startup-ca-bundle.pem";
 export const MANAGED_STARTUP_COMPLETION_FILE = "/run/nemoclaw/managed-startup-complete.json";
 
@@ -517,35 +519,6 @@ function execute(
   };
 }
 
-function generatorCommand(agent: ManagedStartupAgent): readonly string[] {
-  switch (agent) {
-    case "openclaw":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/scripts/generate-openclaw-config.mts",
-      ];
-    case "hermes":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/opt/nemoclaw-hermes-config/generate-config.ts",
-      ];
-    case "langchain-deepagents-code":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/opt/nemoclaw-deepagents-code/generate-config.ts",
-      ];
-    case "pi":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/opt/nemoclaw-pi/generate-config.ts",
-      ];
-  }
-}
-
 function messagingCommand(
   agent: ManagedStartupMessagingAgent,
   phase: "runtime-setup" | "post-agent-install",
@@ -609,7 +582,7 @@ export function buildManagedStartupImageActionPlan(
         commands.push({
           action: "generate-agent-config",
           runAs: action.runAs,
-          argv: generatorCommand(action.agent),
+          argv: [MANAGED_STARTUP_GENERATE_CONFIG_EXECUTABLE],
         });
         break;
       }
