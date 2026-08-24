@@ -113,6 +113,10 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
     const scriptsDirectory = path.join(imageRoot, "scripts");
     const scriptsLibDirectory = path.join(scriptsDirectory, "lib");
     const reviewedArchiveHelper = path.join(scriptsLibDirectory, "reviewed-npm-archive.mts");
+    const bundledPackageHelper = path.join(scriptsLibDirectory, "bundled-npm-package.mts");
+    const bracePatch = path.join(scriptsDirectory, "patch-bundled-npm-brace-expansion.mts");
+    const ipAddressPatch = path.join(scriptsLibDirectory, "patch-bundled-npm-ip-address.mts");
+    const tarPatch = path.join(scriptsDirectory, "patch-bundled-npm-tar.mts");
     const sourceDirectory = path.join(imageRoot, "src");
     const sourceLibDirectory = path.join(sourceDirectory, "lib");
 
@@ -123,6 +127,10 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
     fs.mkdirSync(sourceLibDirectory, { recursive: true });
     fs.writeFileSync(npmRemediationHelper, "fixture\n", { mode: 0o700 });
     fs.writeFileSync(reviewedArchiveHelper, "fixture\n", { mode: 0o700 });
+    fs.writeFileSync(bundledPackageHelper, "fixture\n", { mode: 0o600 });
+    fs.writeFileSync(bracePatch, "fixture\n", { mode: 0o700 });
+    fs.writeFileSync(ipAddressPatch, "fixture\n", { mode: 0o700 });
+    fs.writeFileSync(tarPatch, "fixture\n", { mode: 0o700 });
     fs.chmodSync(sourceLibDirectory, 0o700);
     fs.chmodSync(sourceDirectory, 0o700);
     fs.chmodSync(scriptsLibDirectory, 0o700);
@@ -155,6 +163,10 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
       expect(fs.statSync(scriptsDirectory).mode & 0o777).toBe(0o555);
       expect(fs.statSync(scriptsLibDirectory).mode & 0o777).toBe(0o555);
       expect(fs.statSync(reviewedArchiveHelper).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(bundledPackageHelper).mode & 0o777).toBe(0o644);
+      expect(fs.statSync(bracePatch).mode & 0o777).toBe(0o755);
+      expect(fs.statSync(ipAddressPatch).mode & 0o777).toBe(0o755);
+      expect(fs.statSync(tarPatch).mode & 0o777).toBe(0o755);
       expect(fs.statSync(sourceDirectory).mode & 0o777).toBe(0o555);
       expect(fs.statSync(sourceLibDirectory).mode & 0o777).toBe(0o555);
     } finally {

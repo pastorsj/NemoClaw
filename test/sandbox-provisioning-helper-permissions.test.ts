@@ -20,6 +20,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const manifestDir = path.join(blueprintRoot, "model-specific-setup", "openclaw");
     const manifestPath = path.join(manifestDir, "kimi-k2.6-managed-inference.json");
     const pluginPackageJson = path.join(nemoclawRoot, "package.json");
+    const pluginManifest = path.join(nemoclawRoot, "openclaw.plugin.json");
 
     try {
       fs.mkdirSync(manifestDir, { recursive: true });
@@ -29,8 +30,10 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       fs.chmodSync(manifestPath, 0o600);
       fs.mkdirSync(nemoclawRoot, { recursive: true });
       fs.writeFileSync(pluginPackageJson, "{}\n", { mode: 0o400 });
+      fs.writeFileSync(pluginManifest, "{}\n", { mode: 0o400 });
       fs.chmodSync(nemoclawRoot, 0o700);
       fs.chmodSync(pluginPackageJson, 0o400);
+      fs.chmodSync(pluginManifest, 0o400);
 
       const command = dockerRunCommandBetween(
         dockerfile,
@@ -47,6 +50,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       expect((fs.statSync(manifestPath).mode & 0o777).toString(8)).toBe("644");
       expect((fs.statSync(nemoclawRoot).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(pluginPackageJson).mode & 0o777).toString(8)).toBe("444");
+      expect((fs.statSync(pluginManifest).mode & 0o777).toString(8)).toBe("644");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

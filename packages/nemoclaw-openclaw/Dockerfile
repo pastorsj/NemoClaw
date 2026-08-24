@@ -786,7 +786,8 @@ RUN --network=default if [ -f /usr/local/share/nemoclaw/corporate-ca.pem ]; then
 COPY --from=openclaw-plugin-payload / /
 
 # Copy built plugin and blueprint into the sandbox
-RUN chmod -R a+rX /opt/nemoclaw /opt/nemoclaw-blueprint/
+RUN chmod -R a+rX /opt/nemoclaw /opt/nemoclaw-blueprint/ \
+    && chmod 0644 /opt/nemoclaw/openclaw.plugin.json
 
 # The builder-stage verify-openshell-policy-boundary-dependencies.mts check is
 # the primary security gate: it enforces the generated boundary's strict module
@@ -1600,7 +1601,11 @@ RUN chmod 0555 /packages \
     && chmod 0555 /scripts/lib \
     && chmod 0555 /src \
     && chmod 0555 /src/lib \
-    && chmod 0555 /scripts/lib/reviewed-npm-archive.mts
+    && chmod 0555 /scripts/lib/reviewed-npm-archive.mts \
+    && chmod 0644 /scripts/lib/bundled-npm-package.mts \
+    && chmod 0755 /scripts/patch-bundled-npm-brace-expansion.mts \
+    && chmod 0755 /scripts/lib/patch-bundled-npm-ip-address.mts \
+    && chmod 0755 /scripts/patch-bundled-npm-tar.mts
 
 # Copy startup script and shared sandbox initialisation library.
 RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
