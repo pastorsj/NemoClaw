@@ -102,15 +102,32 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
     });
   });
 
-  it("restores search permission on copied package configuration directories", () => {
+  it("restores copied package and build-helper permissions for the sandbox user", () => {
     const imageRoot = path.join(tmpDir, "image-root");
     const imagePackagesRoot = path.join(imageRoot, "packages");
     const packageRoot = path.join(imagePackagesRoot, "nemoclaw-openclaw");
     const configDirectory = path.join(packageRoot, "config");
     const hostDirectory = path.join(packageRoot, "host");
+    const compatDirectory = path.join(packageRoot, "compat");
+    const npmRemediationHelper = path.join(compatDirectory, "npm-remediation.mts");
+    const scriptsDirectory = path.join(imageRoot, "scripts");
+    const scriptsLibDirectory = path.join(scriptsDirectory, "lib");
+    const reviewedArchiveHelper = path.join(scriptsLibDirectory, "reviewed-npm-archive.mts");
+    const sourceDirectory = path.join(imageRoot, "src");
+    const sourceLibDirectory = path.join(sourceDirectory, "lib");
 
     fs.mkdirSync(configDirectory, { recursive: true });
     fs.mkdirSync(hostDirectory, { recursive: true });
+    fs.mkdirSync(compatDirectory, { recursive: true });
+    fs.mkdirSync(scriptsLibDirectory, { recursive: true });
+    fs.mkdirSync(sourceLibDirectory, { recursive: true });
+    fs.writeFileSync(npmRemediationHelper, "fixture\n", { mode: 0o700 });
+    fs.writeFileSync(reviewedArchiveHelper, "fixture\n", { mode: 0o700 });
+    fs.chmodSync(sourceLibDirectory, 0o700);
+    fs.chmodSync(sourceDirectory, 0o700);
+    fs.chmodSync(scriptsLibDirectory, 0o700);
+    fs.chmodSync(scriptsDirectory, 0o700);
+    fs.chmodSync(compatDirectory, 0o700);
     fs.chmodSync(hostDirectory, 0o444);
     fs.chmodSync(configDirectory, 0o444);
     fs.chmodSync(packageRoot, 0o444);
@@ -122,7 +139,10 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
         dockerfile,
         "# COPY --chmod=0444 also applies that mode to destination directories",
         "# Copy startup script and shared sandbox initialisation library.",
-      ).replaceAll("/packages", imagePackagesRoot);
+      )
+        .replaceAll("/packages", imagePackagesRoot)
+        .replaceAll("/scripts", scriptsDirectory)
+        .replaceAll("/src", sourceDirectory);
       const { result } = runLoggedDockerShell(permissionCommand, tmpDir);
 
       expect(result.status, result.stderr || result.stdout).toBe(0);
@@ -130,11 +150,23 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
       expect(fs.statSync(packageRoot).mode & 0o777).toBe(0o555);
       expect(fs.statSync(configDirectory).mode & 0o777).toBe(0o555);
       expect(fs.statSync(hostDirectory).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(compatDirectory).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(npmRemediationHelper).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(scriptsDirectory).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(scriptsLibDirectory).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(reviewedArchiveHelper).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(sourceDirectory).mode & 0o777).toBe(0o555);
+      expect(fs.statSync(sourceLibDirectory).mode & 0o777).toBe(0o555);
     } finally {
       fs.chmodSync(imagePackagesRoot, 0o755);
       fs.chmodSync(packageRoot, 0o755);
       fs.chmodSync(configDirectory, 0o755);
       fs.chmodSync(hostDirectory, 0o755);
+      fs.chmodSync(compatDirectory, 0o755);
+      fs.chmodSync(scriptsDirectory, 0o755);
+      fs.chmodSync(scriptsLibDirectory, 0o755);
+      fs.chmodSync(sourceDirectory, 0o755);
+      fs.chmodSync(sourceLibDirectory, 0o755);
     }
   });
 

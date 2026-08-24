@@ -1587,12 +1587,20 @@ RUN managed_runtime_assertion_failed() { \
     && install -d -o root -g root -m 0755 /run/nemoclaw
 
 # COPY --chmod=0444 also applies that mode to destination directories that do
-# not exist in the scratch payload. Restore directory search permission before
-# build-time configuration runs as the sandbox user.
+# not exist in the scratch payload. A private source checkout can also leave an
+# executable helper readable only by root. Restore the exact search and read
+# permissions needed by build-time configuration running as the sandbox user.
 RUN chmod 0555 /packages \
     && chmod 0555 /packages/nemoclaw-openclaw \
     && chmod 0555 /packages/nemoclaw-openclaw/config \
-    && chmod 0555 /packages/nemoclaw-openclaw/host
+    && chmod 0555 /packages/nemoclaw-openclaw/host \
+    && chmod 0555 /packages/nemoclaw-openclaw/compat \
+    && chmod 0555 /packages/nemoclaw-openclaw/compat/npm-remediation.mts \
+    && chmod 0555 /scripts \
+    && chmod 0555 /scripts/lib \
+    && chmod 0555 /src \
+    && chmod 0555 /src/lib \
+    && chmod 0555 /scripts/lib/reviewed-npm-archive.mts
 
 # Copy startup script and shared sandbox initialisation library.
 RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
