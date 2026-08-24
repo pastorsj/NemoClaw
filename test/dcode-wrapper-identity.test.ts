@@ -13,8 +13,10 @@ import { SECRET_BLOCK_PATTERNS } from "../src/lib/security/secret-patterns.ts";
 const WRAPPER = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-langchain-deepagents-code",
-  "dcode-wrapper.sh",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
+  "runtime",
+  "agent-wrapper.sh",
 );
 
 const canRun = process.platform === "linux";
@@ -120,7 +122,7 @@ function withTempDir(run: (dir: string) => void): void {
 }
 
 describe.skipIf(!canRun)(
-  "packages/nemoclaw-langchain-deepagents-code/dcode-wrapper.sh identity command",
+  "packages/nemoclaw-langchain-deepagents-code/runtime/agent-wrapper.sh identity command",
   () => {
     it.each(["status", "whoami", "identity"])(
       "'%s' reports the sandbox identity and does not launch dcode",
@@ -484,7 +486,7 @@ describe.skipIf(!canRun)(
 );
 
 describe.skipIf(!canRun)(
-  "packages/nemoclaw-langchain-deepagents-code/dcode-wrapper.sh OpenShell supervisor identity boundary",
+  "packages/nemoclaw-langchain-deepagents-code/runtime/agent-wrapper.sh OpenShell supervisor identity boundary",
   () => {
     it.each([
       ["OPENSHELL_TLS_CA", "/etc/openshell/tls/client/ca.crt"],

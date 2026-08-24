@@ -359,7 +359,7 @@ jobs:
           fi
           install -d -o root -g root -m 0755 /usr/local/lib/nemoclaw
           install -o root -g root -m 0644 \
-            packages/nemoclaw-openclaw/scripts/lib/normalize_mutable_config_perms.py \
+            packages/nemoclaw-openclaw/runtime/config-permissions.py \
             /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
           npx vitest run --project integration \
             test/hermes-restart-config-seal-recovery.test.ts \

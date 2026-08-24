@@ -74,6 +74,7 @@ describe("agent-specific sandbox base-image resolution", () => {
       process.cwd(),
       "packages",
       "nemoclaw-langchain-deepagents-code",
+      "runtime",
       "requirements.lock",
     );
 

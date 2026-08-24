@@ -28,8 +28,8 @@ const guardPath = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "openclaw-config-guard.py",
+  "runtime",
+  "config-guard.py",
 );
 
 // Loads the guard module, neutralizes the filesystem helpers _transition("lock")

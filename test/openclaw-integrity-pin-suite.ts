@@ -44,8 +44,8 @@ const OPENCLAW_VERSION_EXTRACTOR = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "extract-semver.sh",
+  "checks",
+  "extract-version.sh",
 );
 const REVIEWED_NPM_AUDIT_HELPER = path.join(REPO_ROOT, "scripts", "lib", "reviewed-npm-audit.mts");
 const UNPINNED_OPENCLAW_VERSION = "2026.7.2";
@@ -57,7 +57,8 @@ const OPENCLAW_RUNTIME_LOCKFILE = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "openclaw-runtime",
+  "runtime",
+  "openclaw",
   "package-lock.json",
 );
 const NEMOCLAW_PLUGIN_LOCKFILE = path.join(
@@ -95,7 +96,8 @@ const MCPORTER_LOCKFILE = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "mcporter-runtime",
+  "runtime",
+  "mcporter",
   "package-lock.json",
 );
 const NPM_AUDIT_EXCEPTION_FILE = path.join(REPO_ROOT, "ci", "npm-audit-exceptions.json");
@@ -475,7 +477,7 @@ function runInstallBlock(
       .replaceAll("/usr/local/bin", path.join(tmp, "usr-local-bin"))
       .replaceAll("/scripts/lib/reviewed-npm-archive.mts", REVIEWED_NPM_ARCHIVE_HELPER)
       .replaceAll(
-        "/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+        "/packages/nemoclaw-openclaw/compat/npm-remediation.mts",
         remediationHelper,
       )
       .replaceAll("/scripts/lib/reviewed-npm-audit.mts", auditHelper)
@@ -656,7 +658,7 @@ function runOptionalOpenClawPluginBlock(
       )
       .replaceAll("/scripts/lib/reviewed-npm-archive.mts", REVIEWED_NPM_ARCHIVE_HELPER)
       .replaceAll(
-        "/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+        "/packages/nemoclaw-openclaw/compat/npm-remediation.mts",
         remediationFixture,
       ),
   ].join("\n");
@@ -744,13 +746,13 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
         expect(reviewNote).toContain("imports `dist/extensions/telegram/test-api.js`");
         expect(reviewNote).toContain("gateway/upstream reporting layer");
         expect(reviewNote).toContain(
-          "packages/nemoclaw-openclaw/scripts/patch-openclaw-issue-4434-diagnostics.mts",
+          "packages/nemoclaw-openclaw/compat/inference-diagnostics.mts",
         );
         expect(reviewNote).toContain(
-          "packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts",
+          "packages/nemoclaw-openclaw/compat/device-approval.mts",
         );
         expect(reviewNote).toContain(
-          "packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts",
+          "packages/nemoclaw-openclaw/compat/state-permissions.mts",
         );
         expect(reviewNote).toContain("Gateway Startup Migration Compatibility");
         expect(reviewNote).toContain("HOME=/sandbox");
@@ -1872,9 +1874,8 @@ export function registerOpenClawIntegrityPinTests(group: OpenClawIntegrityPinTes
             REPO_ROOT,
             "packages",
             "nemoclaw-openclaw",
-            "scripts",
-            "lib",
-            "openclaw-npm-remediation.mts",
+            "compat",
+            "npm-remediation.mts",
           ),
           "utf-8",
         );

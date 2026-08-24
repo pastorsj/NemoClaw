@@ -18,7 +18,7 @@ const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 
 function extractShellFunctionFromSource(source: string, name: string): string {

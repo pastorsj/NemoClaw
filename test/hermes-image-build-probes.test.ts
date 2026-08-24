@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 
 const root = path.join(import.meta.dirname, "..");
 const dockerfile = fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "Dockerfile"), "utf8");
-const probes = path.join(root, "packages", "nemoclaw-hermes", "image-build-probes.py");
+const probes = path.join(root, "packages", "nemoclaw-hermes", "checks", "image-probes.py");
 const imageProbePath = "/opt/nemoclaw-hermes-config/image-build-probes.py";
 const commands = [
   "cron-backup",
@@ -35,7 +35,7 @@ describe("Hermes image build probes", () => {
     "uses a checked-in probe runner instead of builder-dependent heredocs [case %#] (#7981)",
     (command) => {
       expect(dockerfile).not.toMatch(/<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?/u);
-      expect(dockerfile).toContain(`COPY packages/nemoclaw-hermes/image-build-probes.py ${imageProbePath}`);
+      expect(dockerfile).toContain(`COPY packages/nemoclaw-hermes/checks/image-probes.py ${imageProbePath}`);
       const normalizedDockerfile = dockerfile.replace(/\\\n/gu, "").replace(/\s+/gu, " ");
 
       expect(normalizedDockerfile).toContain(`${imageProbePath} ${command}`);

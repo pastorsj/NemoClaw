@@ -11,7 +11,7 @@ const SCRIPT_PATH = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "seed-dashboard-config.py",
+  "runtime", "dashboard-config.py",
 );
 
 let tmpDir: string;

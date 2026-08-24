@@ -41,11 +41,11 @@ function runAuditValidation(
   mutate: (fixture: { readonly targetRoot: string; readonly runtimeDir: string }) => void,
 ) {
   const targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-wechat-audit-test-"));
-  const runtimeDir = path.join(targetRoot, "packages", "nemoclaw-openclaw", "wechat-runtime");
+  const runtimeDir = path.join(targetRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat");
   fs.mkdirSync(runtimeDir, { recursive: true });
   for (const filename of ["package.json", "package-lock.json"]) {
     fs.copyFileSync(
-      path.join(repoRoot, "packages", "nemoclaw-openclaw", "wechat-runtime", filename),
+      path.join(repoRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat", filename),
       path.join(runtimeDir, filename),
     );
   }
@@ -105,7 +105,7 @@ function installFakeAuditNpm(
   const npm = path.join(binDir, "npm");
   const packageLock = JSON.parse(
     fs.readFileSync(
-      path.join(targetRoot, "packages", "nemoclaw-openclaw", "wechat-runtime", "package-lock.json"),
+      path.join(targetRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat", "package-lock.json"),
       "utf8",
     ),
   );

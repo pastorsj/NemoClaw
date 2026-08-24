@@ -8,8 +8,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PATCHER = path.join(ROOT, "packages", "nemoclaw-hermes", "patch-gateway-runtime-metadata.py");
-const MCP_TRANSACTION = path.join(ROOT, "packages", "nemoclaw-hermes", "mcp-config-transaction.py");
+const PATCHER = path.join(ROOT, "packages", "nemoclaw-hermes", "compat", "gateway-metadata.py");
+const MCP_TRANSACTION = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime", "mcp-transaction.py");
 
 const UPSTREAM_FIXTURE = `from pathlib import Path
 from typing import Optional

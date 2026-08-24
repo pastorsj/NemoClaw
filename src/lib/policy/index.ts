@@ -2865,13 +2865,6 @@ async function selectFromList(
   return item.name;
 }
 
-const PERMISSIVE_POLICY_PATH = path.join(
-  ROOT,
-  "packages",
-  "nemoclaw-openclaw",
-  "policy-permissive-default.yaml",
-);
-
 /**
  * Resolve the on-disk path to the permissive policy YAML for the given
  * sandbox, honoring the agent-specific override registered in
@@ -2893,7 +2886,7 @@ function resolvePermissivePolicyPath(sandboxName: string): string {
     // Fall through to global permissive policy
   }
   const openClaw = loadAgent("openclaw");
-  return path.join(openClaw.agentDir, "policy-permissive-default.yaml");
+  return path.join(openClaw.agentDir, "policies", "permissive-default.yaml");
 }
 
 function applyPermissivePolicy(sandboxName: string): void {
@@ -2964,7 +2957,6 @@ export {
   mergePresetIntoPolicy,
   mergePresetNamesIntoPolicy,
   networkPoliciesHasAllowedIps,
-  PERMISSIVE_POLICY_PATH,
   PRESETS_DIR,
   parseCurrentPolicyOrEmpty as parseCurrentPolicy,
   parsePresetPolicyKeys,

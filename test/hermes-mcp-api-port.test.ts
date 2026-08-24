@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 const TRANSACTION = path.resolve(
   import.meta.dirname,
   "..",
-  "packages/nemoclaw-hermes/mcp-config-transaction.py",
+  "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
 );
 
 describe("Hermes MCP API port resolution", () => {

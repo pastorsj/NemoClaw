@@ -9,7 +9,7 @@ import path from "node:path";
 import { addDarwinFcntlSealConstants } from "./darwin-fcntl-seal-fixture";
 
 export const agentDir = path.join(process.cwd(), "packages", "nemoclaw-langchain-deepagents-code");
-export const patcher = path.join(agentDir, "patch-managed-deepagents-code.py");
+export const patcher = path.join(agentDir, "compat", "runtime-patch.py");
 const packageFixtureDirs = new Set<string>();
 
 export function managedAutoApprovalPath(root: string): string {

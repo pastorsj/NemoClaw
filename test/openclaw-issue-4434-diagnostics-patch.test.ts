@@ -13,8 +13,8 @@ const PATCH_SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-issue-4434-diagnostics.mts",
+  "compat",
+  "inference-diagnostics.mts",
 );
 
 type Formatter = (raw: unknown) => string;

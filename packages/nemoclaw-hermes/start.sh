@@ -334,7 +334,7 @@ HERMES_HASH_FILE="/etc/nemoclaw/hermes.config-hash"
 # at an attacker-controlled script.
 _HERMES_BOUNDARY_VALIDATOR="/usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py"
 if [ ! -f "$_HERMES_BOUNDARY_VALIDATOR" ]; then
-  _HERMES_BOUNDARY_VALIDATOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/validate-env-secret-boundary.py"
+  _HERMES_BOUNDARY_VALIDATOR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime/env-boundary.py"
 fi
 
 # Resolve the dashboard config seeder (same install/dev-fallback pattern as the
@@ -345,18 +345,18 @@ fi
 # resolve the routed model.
 _HERMES_DASHBOARD_CONFIG_SEEDER="/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py"
 if [ ! -f "$_HERMES_DASHBOARD_CONFIG_SEEDER" ]; then
-  _HERMES_DASHBOARD_CONFIG_SEEDER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/seed-dashboard-config.py"
+  _HERMES_DASHBOARD_CONFIG_SEEDER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime/dashboard-config.py"
 fi
 _HERMES_MANAGED_POLICY="/usr/local/share/nemoclaw/hermes-managed-policy.json"
 
 # Descriptor-safe updater for runtime-mutable Hermes config/env/hash files.
 _HERMES_RUNTIME_CONFIG_GUARD="/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py"
 if [ ! -f "$_HERMES_RUNTIME_CONFIG_GUARD" ]; then
-  _HERMES_RUNTIME_CONFIG_GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime-config-guard.py"
+  _HERMES_RUNTIME_CONFIG_GUARD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime/config-guard.py"
 fi
 _HERMES_TIRITH_MARKER_FINALIZER="/usr/local/lib/nemoclaw/finalize-tirith-marker.py"
 if [ ! -f "$_HERMES_TIRITH_MARKER_FINALIZER" ]; then
-  _HERMES_TIRITH_MARKER_FINALIZER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/finalize-tirith-marker.py"
+  _HERMES_TIRITH_MARKER_FINALIZER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime/tirith-marker.py"
 fi
 _HERMES_GUARD_TIMEOUT=(timeout --signal=TERM --kill-after=5s 12m)
 _HERMES_BOUNDARY_TIMEOUT=(timeout --signal=TERM --kill-after=2s 15s)
@@ -391,7 +391,7 @@ fi
 # The list scans first-wins ordered most-preferred first (venv > local >
 # system) so the venv python3 is selected when present and falls back to
 # system python3 when the sandbox image has no venv yet. The same priority
-# is mirrored in `packages/nemoclaw-hermes/hermes-wrapper.py:_TRUSTED_PYTHON3` and
+# is mirrored in `packages/nemoclaw-hermes/runtime/cli-wrapper.py:_TRUSTED_PYTHON3` and
 # `src/lib/agent/hermes-recovery-boundary.ts:buildTrustedPython3Picker` so
 # all three entry points pick the same interpreter when several are present.
 # The deprecated `/opt/hermes/.venv/bin/python` symlink path is intentionally

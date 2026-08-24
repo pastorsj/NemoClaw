@@ -9,9 +9,9 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const agentDir = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code");
-const middlewarePath = path.join(agentDir, "progressive_tool_disclosure.py");
-const observabilityPath = path.join(agentDir, "nemoclaw_observability.py");
-const patcherPath = path.join(agentDir, "patch-managed-deepagents-code.py");
+const middlewarePath = path.join(agentDir, "runtime", "tool-disclosure.py");
+const observabilityPath = path.join(agentDir, "runtime", "observability.py");
+const patcherPath = path.join(agentDir, "compat", "runtime-patch.py");
 const harnessPath = path.join(
   repoRoot,
   "test",

@@ -257,7 +257,7 @@ repos:
         entry: bash -c 'npm run build:cli && npx tsc -p jsconfig.json'
         language: system
         pass_filenames: false
-        files: ^(bin|test|scripts|packages/nemoclaw-openclaw/preloads)/.*\.js$|^(jsconfig\.json|package(-lock)?\.json)$
+        files: ^(bin|test|scripts|packages/nemoclaw-openclaw/runtime/preloads)/.*\.js$|^(jsconfig\.json|package(-lock)?\.json)$
         stages: [pre-push]
         priority: 10
 
@@ -266,7 +266,7 @@ repos:
         entry: npm run typecheck:cli -- --incremental
         language: system
         pass_filenames: false
-        files: ^(packages/nemoclaw-hermes|packages/nemoclaw-langchain-deepagents-code|packages/nemoclaw-openclaw/scripts|bin|scripts|src|test|tools)/.*\.(ts|tsx|mts|cts|json)$|^\.agents/skills/nemoclaw-maintainer-day/scripts/(check-gates|shared)\.ts$|^packages/nemoclaw-openclaw/plugin/src/(lib/subprocess-env|blueprint/private-networks)\.ts$|^(package(-lock)?\.json|tsconfig\.cli\.json|vitest\.config\.ts)$
+        files: ^(packages/nemoclaw-hermes|packages/nemoclaw-langchain-deepagents-code|packages/nemoclaw-openclaw/(checks|compat|config|host)|bin|scripts|src|test|tools)/.*\.(ts|tsx|mts|cts|json)$|^\.agents/skills/nemoclaw-maintainer-day/scripts/(check-gates|shared)\.ts$|^packages/nemoclaw-openclaw/plugin/src/(lib/subprocess-env|blueprint/private-networks)\.ts$|^(package(-lock)?\.json|tsconfig\.cli\.json|vitest\.config\.ts)$
         stages: [pre-push]
         priority: 10
 

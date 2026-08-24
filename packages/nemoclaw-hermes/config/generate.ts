@@ -7,7 +7,7 @@ import {
   finalizeHermesPlatformToolsets,
   type HermesManagedPolicyV1,
 } from "./managed-policy.ts";
-import { discoverModelSpecificSetups } from "./model-specific-setup.ts";
+import { discoverModelSpecificSetups } from "./model-setup.ts";
 import { type WrittenHermesConfig, writeHermesConfigFiles } from "./write-config.ts";
 
 export type GenerateHermesConfigOptions = {

@@ -260,7 +260,7 @@ export function loadDeepAgentsMcpRuntime(): DeepAgentsMcpRuntime {
   if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("langchain-deepagents-code");
   if (!harnessPackage) throw new Error("Deep Agents Code harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(harnessPackage, "mcp-adapter.cts", 128 * 1024);
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/mcp-adapter.cts", 128 * 1024);
   const runtime = loaded.exports as Partial<DeepAgentsMcpRuntime>;
   if (
     !isStringArray(runtime.DEEPAGENTS_LEGACY_CONFIG_HELPERS) ||

@@ -50,7 +50,7 @@ function loadOpenClawConfigRestoreModule(): RuntimeModule {
   if (!harnessPackage) throw new Error("OpenClaw harness package is unavailable.");
   const loaded = loadHarnessCommonJsModule(
     harnessPackage,
-    "scripts/config-restore.cts",
+    "host/config-restore.cts",
     256 * 1024,
   );
   const runtime = loaded.exports as Partial<RuntimeModule>;

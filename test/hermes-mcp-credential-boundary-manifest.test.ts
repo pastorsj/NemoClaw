@@ -11,7 +11,7 @@ const TRANSACTION = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "mcp-config-transaction.py",
+  "runtime", "mcp-transaction.py",
 );
 const MANIFEST_NAME = "openshell-child-visible-credentials.v0.0.106.json";
 const validManifest: Record<string, unknown> = {

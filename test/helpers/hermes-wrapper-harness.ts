@@ -4,7 +4,7 @@
 // Shared test harness for the Hermes CLI wrapper suites
 // (test/hermes-gateway-wrapper.test.ts and
 // test/hermes-wrapper-oneshot-routing.test.ts). Both suites drive
-// packages/nemoclaw-hermes/hermes-wrapper.py by copying it into a temp dir alongside the
+// packages/nemoclaw-hermes/runtime/cli-wrapper.py by copying it into a temp dir alongside the
 // runtime-env validator, planting stubs, and spawning it. Extracted here — a
 // non-`.test.` module — so the shared `runWrapper` helper (and its planted-PATH
 // `if` branch) lives in one place instead of being duplicated across the two
@@ -20,21 +20,21 @@ export const WRAPPER = path.join(
   "..",
   "..",
   "packages", "nemoclaw-hermes",
-  "hermes-wrapper.py",
+  "runtime", "cli-wrapper.py",
 );
 export const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 export const ADAPTER = path.join(
   import.meta.dirname,
   "..",
   "..",
   "packages", "nemoclaw-hermes",
-  "hermes-cli-adapter-v1.json",
+  "runtime", "cli-adapter.json",
 );
 
 export function python3Available(): boolean {
@@ -92,11 +92,11 @@ export function runWrapper(
     const adapterContent = opts.adapter
       ? `${JSON.stringify(opts.adapter, null, 2)}\n`
       : fs.readFileSync(ADAPTER, "utf-8");
-    fs.writeFileSync(path.join(dir, "hermes-cli-adapter-v1.json"), adapterContent);
+    fs.writeFileSync(path.join(dir, "cli-adapter.json"), adapterContent);
     writeSessionCoalescerFixture(dir, opts.sessionBoundaries);
     const validatorContent = opts.validatorScript ?? fs.readFileSync(VALIDATOR, "utf-8");
     // Source-layout filename lets the wrapper's dev fallback pick it up.
-    fs.writeFileSync(path.join(dir, "validate-env-secret-boundary.py"), validatorContent, {
+    fs.writeFileSync(path.join(dir, "env-boundary.py"), validatorContent, {
       mode: 0o755,
     });
     fs.chmodSync(path.join(dir, "hermes"), 0o755);

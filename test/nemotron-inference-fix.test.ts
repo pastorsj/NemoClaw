@@ -20,6 +20,7 @@ const NEMOTRON_FIX_SOURCE = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
+  "runtime",
   "preloads",
   "nemotron-inference-fix.js",
 );

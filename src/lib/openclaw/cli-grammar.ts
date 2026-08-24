@@ -54,7 +54,7 @@ function loadOpenClawCliGrammarModule(): RuntimeModule {
   if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("openclaw");
   if (!harnessPackage) throw new Error("OpenClaw harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(harnessPackage, "scripts/cli-grammar.cts", 256 * 1024);
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/cli-grammar.cts", 256 * 1024);
   const runtime = loaded.exports as Partial<RuntimeModule>;
   const functions = [
     runtime.validateAgentsManifestForApply,

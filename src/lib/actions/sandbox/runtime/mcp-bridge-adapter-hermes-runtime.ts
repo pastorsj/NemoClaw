@@ -193,7 +193,7 @@ export function loadHermesMcpRuntime(): HermesMcpRuntime {
   if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("hermes");
   if (!harnessPackage) throw new Error("Hermes harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(harnessPackage, "config/mcp-adapter.cts", 64 * 1024);
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/mcp-adapter.cts", 64 * 1024);
   const runtime = loaded.exports as Partial<HermesMcpRuntime>;
   if (
     typeof runtime.HERMES_MCP_TRANSACTION_HELPER !== "string" ||

@@ -714,22 +714,27 @@ network_policies: {}
     expect(ordinary).not.toHaveProperty("cleanupExact");
   });
 
-  it("filters inactive Hermes messaging policies from the relative Hermes policy path", () => {
+  it("does not infer the selected agent from a policy path", () => {
     const hermesPolicyPath = path.relative(
       process.cwd(),
-      path.join(import.meta.dirname, "..", "..", "..", "packages", "nemoclaw-hermes", "policy-additions.yaml"),
+      path.join(
+        import.meta.dirname,
+        "..",
+        "..",
+        "..",
+        "packages",
+        "nemoclaw-hermes",
+        "policy-additions.yaml",
+      ),
     );
 
     const prepared = prepareInitialSandboxCreatePolicy(hermesPolicyPath, ["discord"]);
     const policyNames = getNetworkPolicyNames(fs.readFileSync(prepared.policyPath, "utf-8"));
 
-    expect(policyNames?.has("discord")).toBe(true);
-    expect(policyNames?.has("telegram")).toBe(false);
-    expect(policyNames?.has("slack")).toBe(false);
-    expect(policyNames?.has("teams")).toBe(false);
-    expect(policyNames?.has("wechat_bridge")).toBe(false);
-    expect(prepared.cleanup?.()).toBe(true);
-    expect(fs.existsSync(prepared.policyPath)).toBe(false);
+    expect(policyNames?.has("nous_research")).toBe(true);
+    expect(policyNames?.has("discord")).toBe(false);
+    expect(prepared.policyPath).toBe(hermesPolicyPath);
+    expect(prepared.cleanup).toBeUndefined();
   });
 
   it("merges missing create-time presets into a temporary policy", () => {

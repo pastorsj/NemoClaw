@@ -7,7 +7,7 @@
 // Several Hermes/OpenClaw suites build fixture files (config.yaml, .env,
 // .config-hash, strict hash files) in system temp directories and then feed
 // them to the production runtime-config guard
-// (packages/nemoclaw-hermes/runtime-config-guard.py). That guard fails closed on
+// (packages/nemoclaw-hermes/runtime/config-guard.py). That guard fails closed on
 // group/world-writable runtime config paths (`mode & 0o022`). On a fresh
 // developer checkout whose ambient umask is permissive (for example 0002 on
 // Ubuntu 24.04 / CI-like hosts), fixture files are created group-writable

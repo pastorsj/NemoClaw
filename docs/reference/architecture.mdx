@@ -197,7 +197,7 @@ For the DGX Spark-specific variant of this topology (cgroup v2, aarch64, unified
 NemoClaw integrates with each supported agent through a runtime layer that adapts the agent to OpenShell-managed providers, policies, and sandbox state.
 The concrete files differ by agent because each runtime has its own plugin system, config format, state layout, and startup command.
 Each standard runtime layer is stored under `packages/nemoclaw-<id>/` with its agent manifest, image files, startup script, and baseline policy.
-`$$nemoclaw harness install <harness>` copies one bundled package to `~/.nemoclaw/harnesses` without executing package code.
+`$$nemoclaw harness install <id>` copies one bundled package to `~/.nemoclaw/harnesses` without executing package code.
 Onboarding uses the installed copy when present and keeps the existing bundled choices available.
 The host CLI continues to own command parsing, credentials, OpenShell lifecycle operations, and shared messaging channels.
 
@@ -207,10 +207,10 @@ The host CLI continues to own command parsing, credentials, OpenShell lifecycle 
 | OpenClaw | `packages/nemoclaw-openclaw/plugin/openclaw.plugin.json`, `packages/nemoclaw-openclaw/plugin/src/runtime-context.ts`, and the TypeScript package under `packages/nemoclaw-openclaw/plugin/src/` | Registers the `/nemoclaw` slash command, adds the NemoClaw inference provider, and injects sandbox and policy context into OpenClaw turns. |
 </AgentOnly>
 <AgentOnly variant="hermes">
-| Hermes | `packages/nemoclaw-hermes/manifest.yaml`, `packages/nemoclaw-hermes/plugin/plugin.yaml`, `packages/nemoclaw-hermes/generate-config.ts`, `packages/nemoclaw-hermes/config/`, and `packages/nemoclaw-hermes/start.sh` | Declares the Hermes agent contract, installs the NemoClaw Hermes plugin, writes `/sandbox/.hermes/config.yaml` and `/sandbox/.hermes/.env`, and launches `hermes gateway run` behind the OpenShell proxy. |
+| Hermes | `packages/nemoclaw-hermes/manifest.yaml`, `packages/nemoclaw-hermes/plugin/plugin.yaml`, `packages/nemoclaw-hermes/config/generate-config.ts`, `packages/nemoclaw-hermes/config/`, and `packages/nemoclaw-hermes/start.sh` | Declares the Hermes agent contract, installs the NemoClaw Hermes plugin, writes `/sandbox/.hermes/config.yaml` and `/sandbox/.hermes/.env`, and launches `hermes gateway run` behind the OpenShell proxy. |
 </AgentOnly>
 <AgentOnly variant="deepagents">
-| Deep Agents | `packages/nemoclaw-langchain-deepagents-code/manifest.yaml`, `packages/nemoclaw-langchain-deepagents-code/generate-config.ts`, `packages/nemoclaw-langchain-deepagents-code/start.sh`, and the managed `dcode` launchers | Declares the terminal agent contract, writes `/sandbox/.deepagents/config.toml`, installs managed wrappers for `dcode` and `dcode -n`, and routes inference through `inference.local`. |
+| Deep Agents | `packages/nemoclaw-langchain-deepagents-code/manifest.yaml`, `packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts`, `packages/nemoclaw-langchain-deepagents-code/start.sh`, and the managed `dcode` launchers | Declares the terminal agent contract, writes `/sandbox/.deepagents/config.toml`, installs managed wrappers for `dcode` and `dcode -n`, and routes inference through `inference.local`. |
 </AgentOnly>
 
 <AgentOnly variant="openclaw">

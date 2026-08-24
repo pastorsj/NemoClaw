@@ -20,13 +20,13 @@ const TIRITH_FINALIZER = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "finalize-tirith-marker.py",
+  "runtime", "tirith-marker.py",
 );
 const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 const GENERATED_API_SERVER_KEY = Array.from({ length: 64 }, (_value, index) =>
   (index % 16).toString(16),
@@ -377,7 +377,7 @@ function runTirithFinalizerPathResolution(installed: boolean) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-tirith-path-"));
   const scriptPath = path.join(tmpDir, "run.sh");
   const installedPath = path.join(tmpDir, "installed-finalizer.py");
-  const fallbackPath = path.join(tmpDir, "finalize-tirith-marker.py");
+  const fallbackPath = path.join(tmpDir, "runtime", "tirith-marker.py");
   const source = fs.readFileSync(START_SCRIPT, "utf-8");
   const start = source.indexOf(
     '_HERMES_TIRITH_MARKER_FINALIZER="/usr/local/lib/nemoclaw/finalize-tirith-marker.py"',
@@ -386,6 +386,7 @@ function runTirithFinalizerPathResolution(installed: boolean) {
   const resolver = source
     .slice(start, end)
     .replace("/usr/local/lib/nemoclaw/finalize-tirith-marker.py", installedPath);
+  fs.mkdirSync(path.dirname(fallbackPath), { recursive: true });
   fs.writeFileSync(fallbackPath, "#!/usr/bin/env python3\n", { mode: 0o755 });
   void (installed ? fs.writeFileSync(installedPath, "#!/usr/bin/env python3\n") : undefined);
   fs.writeFileSync(
@@ -900,8 +901,8 @@ describe("packages/nemoclaw-hermes/start.sh validator-path bootstrap", () => {
       path.join(os.tmpdir(), "nemoclaw-hermes-validator-bootstrap-fallback-"),
     );
     const scriptDir = path.join(tmpDir, "packages", "nemoclaw-hermes");
-    const fallbackValidator = path.join(scriptDir, "validate-env-secret-boundary.py");
-    fs.mkdirSync(scriptDir, { recursive: true });
+    const fallbackValidator = path.join(scriptDir, "runtime", "env-boundary.py");
+    fs.mkdirSync(path.dirname(fallbackValidator), { recursive: true });
     fs.writeFileSync(fallbackValidator, "#!/usr/bin/env python3\n");
 
     const src = fs.readFileSync(START_SCRIPT, "utf-8");

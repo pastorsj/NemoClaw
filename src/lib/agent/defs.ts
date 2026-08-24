@@ -391,7 +391,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
     },
 
     get policyPermissivePath(): string | null {
-      const policyPermissivePath = path.join(agentDir, "policy-permissive.yaml");
+      const policyPermissivePath = path.join(agentDir, "policies", "permissive.yaml");
       return fs.existsSync(policyPermissivePath) ? policyPermissivePath : null;
     },
 

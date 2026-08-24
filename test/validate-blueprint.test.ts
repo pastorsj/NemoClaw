@@ -22,7 +22,7 @@ const BASE_POLICY_PATH = new URL(
   import.meta.url,
 );
 const PERMISSIVE_POLICY_PATH = new URL(
-  "../packages/nemoclaw-openclaw/policy-permissive-default.yaml",
+  "../packages/nemoclaw-openclaw/policies/permissive-default.yaml",
   import.meta.url,
 );
 const HERMES_POLICY_PATH = new URL("../packages/nemoclaw-hermes/policy-additions.yaml", import.meta.url);

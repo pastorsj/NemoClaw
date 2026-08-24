@@ -13,9 +13,9 @@ const REMOTE_BIND_ARG_RE = /^ARG\s+NEMOCLAW_DASHBOARD_BIND=/;
 const REMOTE_BIND_PATCHED_ARG_RE = /^ARG\s+NEMOCLAW_DASHBOARD_BIND=0\.0\.0\.0$/;
 const REMOTE_BIND_PROMOTION_RE = /NEMOCLAW_DASHBOARD_BIND=\$\{NEMOCLAW_DASHBOARD_BIND\}/;
 const OPENCLAW_CONFIG_GENERATOR_RE =
-  /^RUN\s+(?:NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=0\s+)?(?:NEMOCLAW_OPENCLAW_MANAGED_PROXY=0\s+)?node\s+--experimental-strip-types\s+\/scripts\/generate-openclaw-config\.mts$/;
+  /^RUN\s+(?:NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=0\s+)?(?:NEMOCLAW_OPENCLAW_MANAGED_PROXY=0\s+)?node\s+--experimental-strip-types\s+\/packages\/nemoclaw-openclaw\/config\/generate-config\.mts$/;
 const SAFE_VALIDATION_GENERATOR_RE =
-  /^RUN\s+validation_home="\$validation_root\/progressive";\s+HOME=(?:"\$validation_home"|\$validation_home)\s+node\s+--experimental-strip-types\s+\/scripts\/generate-openclaw-config\.mts$/;
+  /^RUN\s+validation_home="\$validation_root\/progressive";\s+HOME=(?:"\$validation_home"|\$validation_home)\s+node\s+--experimental-strip-types\s+\/packages\/nemoclaw-openclaw\/config\/generate-config\.mts$/;
 const PASSIVE_FINAL_STAGE_INSTRUCTION_RE = /^(?:ARG|ENV|WORKDIR|USER|HEALTHCHECK|ENTRYPOINT|CMD)\b/;
 const CONFIG_MODE_RE = /^RUN\s+chmod\s+660\s+\/sandbox\/\.openclaw\/openclaw\.json$/;
 const CONFIG_HASH_RE =
@@ -33,7 +33,7 @@ const EXACT_CUSTOM_POST_GENERATOR_RUN_RE = [
 // Dockerfile append `&& <rewrite openclaw.json>` to an otherwise safe command.
 // A lifecycle test verifies these digests against the checked-in Dockerfile.
 const CANONICAL_POST_GENERATOR_RUN_SHA256 = new Set([
-  "9300de0b56a7d8a1498fd36cb9c05313b6691d6756b455f91628ed989221afc2",
+  "42b4e4a1ec8b6f8dd950443938b084f501afc87616e9c0859d4e1583d7ba1814",
   "6f457f365f5c0d128e5e3b549a630b5bd9ebd223919f2c2c8e6a31235d763781",
   "dca7d3dbc030e4efa77c850b9d21a826358c69c7d2062f3eee2f5a57eeb07aa2",
   "b01b5f5d2cba5778cd8eb87139f2c6a8174082a7f6775e443a1dbdc0629ce7e5",
@@ -43,7 +43,7 @@ const CANONICAL_POST_GENERATOR_RUN_SHA256 = new Set([
   "737edaaa69f80cf10d42fd349e0be068c1ef6e7375d5dcb4055b012420b58736",
   "5b814e92449a6778385f588877fe72ebed80e601f8eb0c90c2842b17a489f3da",
   "0e1a9a7bab2fab0a974577c3af8785157b4b9be2b4db32d5f4f9e5aa3c8c8171",
-  "ede14966118316b58139830b4a1ffaceca86a6d0857cd0c1705d69db109907b0",
+  "8b1a73bf8ef0aec2c6cd1fa63990dac978e060b739048ca664fd55ebacf17961",
   "a68297161e2c6463440b822f4e4be0518e745fb5fba8c61ab53b876724f7b666",
   "a54e2ac58ef00d7080ad697cb1892bf91b7bffe011f698df17b936c9906cd4af",
   "ca493ae7905fae5c587a8e5c31fcb3d423235940589c2decee99d7b338e87d88",
@@ -56,7 +56,7 @@ const CANONICAL_POST_GENERATOR_RUN_SHA256 = new Set([
   "a0a554d474cb70087e50686d998915eae06201d6182a2410d3ccc4879e5058e6",
   "5af905889f94ffed2f6c371111d0589e38eed7b0de54ddb0dd68ad912a23149a",
   "1197b99bdb996b37a3e4e386a507dfabcdfb2c26a40b015d617f97208668187d",
-  "c65f4558aa283a73d4043aa7465fe8f4291af0be72ea721d76812095e7be6995",
+  "88f52abba69b5d820c9f21db4251c9e08b1eb10af92267d04501695175d5b008",
   "c0b409e1bf4d33a9e44f407c6bd9b0445b2ffd0b796823fe3cfa5989314d6603",
   "9fcc674a44a152707380cdb09a67f8594f568288406c96f5354f1c87f5b939a6",
   "83567d1fa0e73bef6a3333383c13ace05e26704964ae6a7a76ee24a2f2be3d7e",
@@ -64,8 +64,8 @@ const CANONICAL_POST_GENERATOR_RUN_SHA256 = new Set([
   "4165899eb1f0f948f8883eddf4136136caac21cee1df39b12afea7672b23a378",
   "7e6a6879382f833f17be02ca7d287685b6afa1c423b1e087b3b05dd677d6e325",
   "4a54da2c1c33c681ae0dad181a5a7456c926051d91420aa60cf7edef6330ba65",
-  "e744a3fc1b1939bac7a64463f29404dc7136ff97142d70c9263dbc1158cf353e",
-  "312b3b503615e55f16a04e7cc8565943b80db97f082ee21383eb20741deb3f6f",
+  "1d01fb557668aa859e89964ee2a5ae699fc1e9521e7b6886fd10755d84358f7b",
+  "dd07e460fb2c063f92ab269bdbf5d3ddde7e7d0c9bb1156273da13680e5b0d6c",
   "e1b6dca3e6b30624f364b36ff52e654978bc120cc7800df2ff209c14949acd64",
   "c682148fc7efec9f947c326c6029181cd879b7cba3e8361246aba7d0e6fe70a3",
 ]);

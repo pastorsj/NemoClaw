@@ -147,7 +147,7 @@ export function loadOpenClawMcpRuntime(): OpenClawMcpRuntime {
   if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("openclaw");
   if (!harnessPackage) throw new Error("OpenClaw harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(harnessPackage, "mcp-adapter.cts", 128 * 1024);
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/mcp-adapter.cts", 128 * 1024);
   const runtime = loaded.exports as Partial<OpenClawMcpRuntime>;
   if (
     typeof runtime.DEFAULT_OPENCLAW_CONFIG_DIR !== "string" ||

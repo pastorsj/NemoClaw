@@ -67,7 +67,7 @@ function loadDeepAgentsCodeSpecificationsRuntime(): {
   }
   const loaded = loadHarnessCommonJsModule(
     harnessPackage,
-    "host/qualification-probes.cts",
+    "host/base-qualification.cts",
     128 * 1024,
   );
   const runtime = loaded.exports as Partial<DeepAgentsCodeSpecificationsRuntime>;
@@ -80,9 +80,7 @@ function loadDeepAgentsCodeSpecificationsRuntime(): {
     typeof runtime.getDcodeActivityProbe !== "function" ||
     typeof runtime.getDcodeManagedExec !== "function"
   ) {
-    throw new Error(
-      "LangChain Deep Agents Code harness qualification-probes module has an invalid contract.",
-    );
+    throw new Error("LangChain Deep Agents Code qualification module has an invalid contract.");
   }
   cachedRuntime = {
     selectionKey,
@@ -130,7 +128,7 @@ function commandArgs(value: unknown): readonly string[] | null {
 
 function invalidProbe(): never {
   throw new Error(
-    "LangChain Deep Agents Code harness qualification-probes module returned an invalid specification.",
+    "LangChain Deep Agents Code qualification module returned an invalid specification.",
   );
 }
 

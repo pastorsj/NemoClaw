@@ -61,7 +61,7 @@ function loadHermesManagedRouteModule(): RuntimeModule {
   if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("hermes");
   if (!harnessPackage) throw new Error("Hermes harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(harnessPackage, "config/managed-route.cts", 64 * 1024);
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/managed-route.cts", 64 * 1024);
   const runtime = loaded.exports as Partial<RuntimeModule>;
   if (
     typeof runtime.applyHermesManagedRoute !== "function" ||

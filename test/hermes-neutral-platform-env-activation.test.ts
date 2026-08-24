@@ -9,7 +9,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PATCHER = path.join(ROOT, "packages", "nemoclaw-hermes", "patch-neutral-platform-env-activation.py");
+const PATCHER = path.join(ROOT, "packages", "nemoclaw-hermes", "compat", "env-activation.py");
 
 const UPSTREAM_FIXTURE = `import logging
 import os

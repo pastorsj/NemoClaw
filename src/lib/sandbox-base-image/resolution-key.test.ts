@@ -40,7 +40,9 @@ function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-resolution-key-"));
   roots.push(root);
   fs.mkdirSync(path.join(root, "nemoclaw-blueprint"), { recursive: true });
-  fs.mkdirSync(path.join(root, "packages", "nemoclaw-openclaw"), { recursive: true });
+  fs.mkdirSync(path.dirname(path.join(root, OPENCLAW_BASE_IMAGE_INPUTS_FILE)), {
+    recursive: true,
+  });
   fs.writeFileSync(path.join(root, OPENCLAW_BASE_IMAGE_INPUTS_FILE), baseImageInputsSource);
   fs.writeFileSync(path.join(root, "packages/nemoclaw-openclaw/Dockerfile.base"), "FROM node:22\n");
   fs.writeFileSync(path.join(root, "nemoclaw-blueprint", "blueprint.yaml"), "version: 1\n");
@@ -134,6 +136,7 @@ describe("sandbox base-image resolution key", () => {
       root,
       "packages",
       "nemoclaw-langchain-deepagents-code",
+      "runtime",
       "requirements.lock",
     );
     fs.mkdirSync(path.dirname(lockfile), { recursive: true });

@@ -12,6 +12,7 @@ const CANONICAL_FIX = path.join(
   ROOT,
   "packages",
   "nemoclaw-openclaw",
+  "runtime",
   "preloads",
   "http-proxy-fix.js",
 );

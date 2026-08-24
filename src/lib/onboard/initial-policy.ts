@@ -388,11 +388,6 @@ function filterHermesInactiveMessagingPolicies(
   };
 }
 
-function isHermesPolicyPath(policyPath: string): boolean {
-  const normalized = policyPath.split(path.sep).join("/");
-  return /(^|\/)packages\/nemoclaw-hermes\/policy-additions\.yaml$/.test(normalized);
-}
-
 function resolveInitialSandboxCreatePolicy(
   basePolicyPath: string,
   activeMessagingChannels: string[],
@@ -472,9 +467,8 @@ function resolveInitialSandboxCreatePolicy(
       tierKnown && options.policyTier !== "restricted"
         ? requiredOpenclawOtelPolicyPresets(options.agentName ?? "openclaw")
         : [];
-    const isHermesPolicyFromPath = isHermesPolicyPath(basePolicyPath);
-    const isHermesPolicy = options.agentName === "hermes" || isHermesPolicyFromPath;
-    const policyAgent = options.agentName ?? (isHermesPolicyFromPath ? "hermes" : null);
+    const isHermesPolicy = options.agentName === "hermes";
+    const policyAgent = options.agentName ?? null;
     const messagingCreateTimePresets = isHermesPolicy
       ? allMessagingChannelPolicyPresets(activeMessagingChannels)
       : requiredMessagingChannelPolicyPresets(activeMessagingChannels);

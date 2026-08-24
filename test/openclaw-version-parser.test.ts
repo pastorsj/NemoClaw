@@ -12,8 +12,8 @@ const parser = path.join(
   repoRoot,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "extract-semver.sh",
+  "checks",
+  "extract-version.sh",
 );
 
 function extract(input: string) {

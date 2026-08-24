@@ -96,7 +96,7 @@ Axios remediation and the diagnostics Jaeger remediation. See
 [`openclaw-2026.7.1-dependency-review.md`](./openclaw-2026.7.1-dependency-review.md)
 for the active source and validation boundary.
 
-`packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts` recognizes only eight exact reviewed identities: the E2E-only 2026.3.11 core archive, four retained 2026.6.10 identities, and three active 2026.7.1 identities.
+`packages/nemoclaw-openclaw/compat/npm-remediation.mts` recognizes only eight exact reviewed identities: the E2E-only 2026.3.11 core archive, four retained 2026.6.10 identities, and three active 2026.7.1 identities.
 It rejects an unexpected source dependency shape before it changes or installs an archive.
 The helper verifies every replacement package by exact registry SRI and tarball URL.
 It also rejects unsafe archive members before extraction and after repacking.
@@ -401,7 +401,7 @@ No real Microsoft Teams tenant proof is included in this PR. The work remains tr
 - The transitive remediation closes the reviewed high-severity `tar`, `brace-expansion`, Axios, and Jaeger propagator findings without changing the OpenClaw version.
   The exact source shapes, replacement SRIs, tarball URLs, patched metadata, and provenance recipe fail closed on drift.
   The low `body-parser` and moderate Hono and `protobufjs` findings remain documented at the configured `high` threshold.
-  Current NemoClaw closes the WeChat residual with `packages/nemoclaw-openclaw/wechat-runtime/package-lock.json` and post-install graph verification.
+  Current NemoClaw closes the WeChat residual with `packages/nemoclaw-openclaw/runtime/wechat/package-lock.json` and post-install graph verification.
 - `src/lib/messaging/channels/manifests.test.ts` remains below the shared `test-size:check` threshold and does not need extraction in this dependency bump.
 - The npm audit result in this note remains a point-in-time snapshot.
   Default PR and main CI rematerialize the production-compatible graph from the reviewed local archives, audit it and the committed mcporter lock with `npm audit --omit=dev --json` through the reviewed evaluator, upload the raw reports and normalized policy results, and fail on unaccepted findings at the configured `high` threshold.

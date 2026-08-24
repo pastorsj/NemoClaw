@@ -16,15 +16,15 @@ import {
   normalizeMcpServerArgs,
   patchMcpTransportText,
   redactMcpArgs,
-} from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-npx.mts";
+} from "../packages/nemoclaw-openclaw/compat/mcp-npx.mts";
 
 const PATCH_SCRIPT = path.join(
   import.meta.dirname,
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-mcp-npx.mts",
+  "compat",
+  "mcp-npx.mts",
 );
 
 function writeMcpFixture(dist: string): string {

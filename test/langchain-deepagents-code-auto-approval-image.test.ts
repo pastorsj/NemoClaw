@@ -21,10 +21,10 @@ describe("LangChain Deep Agents Code auto-approval image contracts", () => {
     "bakes an exact root-owned capability without env trust [$scenario] (#6478)",
     ({ scenario }) => {
       const dockerfile = readAgentFile("Dockerfile");
-      const launcher = readAgentFile("dcode-launcher.sh");
+      const launcher = readAgentFile("runtime/agent-launcher.sh");
       const start = readAgentFile("start.sh");
-      const wrapper = readAgentFile("dcode-wrapper.sh");
-      const runtime = readAgentFile("managed-dcode-runtime.py");
+      const wrapper = readAgentFile("runtime/agent-wrapper.sh");
+      const runtime = readAgentFile("runtime/managed-runtime.py");
 
       expect(dockerfile).toContain("ARG NEMOCLAW_DCODE_AUTO_APPROVAL=disabled");
       expect(dockerfile).toContain("disabled|thread-opt-in)");

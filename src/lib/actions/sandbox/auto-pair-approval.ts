@@ -17,7 +17,7 @@
  *     OpenClaw tool-scope approvals without ever opening an SSH `connect`.
  *
  * Both surfaces apply the SAME narrow allowlist as the startup watcher
- * (`packages/nemoclaw-openclaw/scripts/lib/openclaw_device_approval_policy.py`): the explicit `cli`,
+ * (`packages/nemoclaw-openclaw/runtime/device-approval.py`): the explicit `cli`,
  * `openclaw-cli`, and `openclaw-control-ui` client identities, restricted to
  * operator.pairing/read/write scopes. A known mode alone is never sufficient;
  * unknown clients are ignored, never approved.
@@ -201,7 +201,7 @@ export function readAutoPairApprovalPolicyModule(): string | null {
     if (!harnessPackage) return null;
     return captureHarnessPackageText(
       harnessPackage,
-      "scripts/lib/openclaw_device_approval_policy.py",
+      "runtime/device-approval.py",
       64 * 1024,
     ).source;
   } catch {

@@ -47,7 +47,7 @@ describe("Deep Agents Code base image compatibility", () => {
     expect(options).toMatchObject({
       inputPaths: [
         "/test/root/packages/nemoclaw-langchain-deepagents-code/manifest.yaml",
-        "/test/root/packages/nemoclaw-langchain-deepagents-code/requirements.lock",
+        "/test/root/packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock",
       ],
       validationDescription:
         "deepagents-code==9.8.7, dos2unix, and the immutable security package inventory",

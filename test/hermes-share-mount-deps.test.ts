@@ -17,7 +17,7 @@ const HERMES_ARCHIVE_HELPER = path.join(
   "packages",
   "nemoclaw-hermes",
   "checks",
-  "download-hermes-source-archive.sh",
+  "download-source.sh",
 );
 const PRIVATE_CURL_DIAGNOSTIC = "private curl diagnostic must stay redacted";
 

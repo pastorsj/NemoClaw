@@ -10,7 +10,7 @@ const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "runtime-config-guard.py",
+  "runtime", "config-guard.py",
 );
 
 function runPythonHarness(source: string) {
@@ -31,6 +31,17 @@ spec.loader.exec_module(guard)
 `;
 
 describe("Hermes sealed configuration contract", () => {
+  it("resolves the state guard from the source checkout", () => {
+    const result = runPythonHarness(`${loadGuardModule}
+print(guard.checkout_state_guard_path())
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(
+      path.join(import.meta.dirname, "..", "scripts", "state-dir-guard.py"),
+    );
+  });
+
   it("keeps the root guard in parity with the host manifest projection (#8006)", () => {
     const result = runPythonHarness(String.raw`
 import importlib.util

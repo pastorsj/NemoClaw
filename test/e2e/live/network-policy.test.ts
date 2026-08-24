@@ -41,7 +41,8 @@ const PERMISSIVE_POLICY = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "policy-permissive-default.yaml",
+  "policies",
+  "permissive-default.yaml",
 );
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-net-policy";
 const SUPPRESSION_SANDBOX_NAME =

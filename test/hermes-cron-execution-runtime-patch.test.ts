@@ -10,10 +10,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const root = path.join(import.meta.dirname, "..");
-const patcher = path.join(root, "packages", "nemoclaw-hermes", "patch-cron-execution-runtime.py");
+const patcher = path.join(root, "packages", "nemoclaw-hermes", "compat", "cron-execution.py");
 const dockerfile = fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "Dockerfile"), "utf8");
 const imageBuildProbes = fs.readFileSync(
-  path.join(root, "packages", "nemoclaw-hermes", "image-build-probes.py"),
+  path.join(root, "packages", "nemoclaw-hermes", "checks", "image-probes.py"),
   "utf8",
 );
 const fixtures: string[] = [];
@@ -115,7 +115,7 @@ describe("Hermes cron execution runtime patch", () => {
         "1bcef6f736f1d52055837789f24becdba4a670f0a1abb5ac9973b1a1a7306f35",
     );
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-hermes/patch-cron-execution-runtime.py " +
+      "COPY packages/nemoclaw-hermes/compat/cron-execution.py " +
         "/opt/nemoclaw-hermes-config/patch-cron-execution-runtime.py",
     );
     expect(dockerfile).toMatch(

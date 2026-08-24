@@ -13,7 +13,7 @@ const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "runtime-config-guard.py",
+  "runtime", "config-guard.py",
 );
 const SANDBOX_GID_EXPECTED = 12345;
 const EACCES = 13;

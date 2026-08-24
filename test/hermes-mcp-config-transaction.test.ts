@@ -17,9 +17,9 @@ import {
 const TRANSACTION = path.resolve(
   import.meta.dirname,
   "..",
-  "packages/nemoclaw-hermes/mcp-config-transaction.py",
+  "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
 );
-const GUARD = path.resolve(import.meta.dirname, "..", "packages/nemoclaw-hermes/runtime-config-guard.py");
+const GUARD = path.resolve(import.meta.dirname, "..", "packages/nemoclaw-hermes/runtime/config-guard.py");
 
 function runPython(source: string, args: string[] = []) {
   return spawnSync("python3", ["-c", source, TRANSACTION, GUARD, ...args], {

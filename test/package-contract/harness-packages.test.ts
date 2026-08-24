@@ -13,17 +13,37 @@ import { createPackageFixture } from "./helpers/package-fixture";
 const HARNESSES = [
   {
     id: "hermes",
-    runtimeFile: "hermes-wrapper.py",
+    runtimeFile: "runtime/cli-wrapper.py",
   },
   {
     id: "langchain-deepagents-code",
-    runtimeFile: "dcode-wrapper.sh",
+    runtimeFile: "runtime/agent-wrapper.sh",
   },
   {
     id: "openclaw",
-    runtimeFile: "openclaw-runtime/package-lock.json",
+    runtimeFile: "runtime/openclaw/package-lock.json",
   },
 ] as const;
+
+const COMMON_PACKAGE_FILES = [
+  "README.md",
+  "package.json",
+  "manifest.yaml",
+  "Dockerfile.base",
+  "Dockerfile",
+  "start.sh",
+  "policy-additions.yaml",
+] as const;
+
+const COMMON_PACKAGE_ARTIFACTS = HARNESSES.flatMap(({ id }) =>
+  COMMON_PACKAGE_FILES.map((artifact) => ({ id, artifact })),
+);
+
+const COMMON_WORKFLOW_DIRECTORIES = ["config", "runtime", "host", "compat", "plugin", "checks"];
+
+const COMMON_WORKFLOW_ARTIFACTS = HARNESSES.flatMap(({ id }) =>
+  COMMON_WORKFLOW_DIRECTORIES.map((directory) => ({ id, directory })),
+);
 
 type HarnessPackage = {
   readonly id: string;
@@ -99,12 +119,6 @@ describe("published harness packages", () => {
     );
 
     installedPackageRoot = path.join(fixtureRoot, "installed", "node_modules", "nemoclaw");
-    const installedHermesConfig = path.join(
-      installedPackageRoot,
-      "packages",
-      "nemoclaw-hermes",
-      "config",
-    );
     const installedHermesHost = path.join(
       installedPackageRoot,
       "packages",
@@ -117,58 +131,59 @@ describe("published harness packages", () => {
       "nemoclaw-langchain-deepagents-code",
     );
     const installedDcodeHost = path.join(installedDcodePackage, "host");
-    const installedOpenClawScripts = path.join(
+    const installedOpenClawHost = path.join(
       installedPackageRoot,
       "packages",
       "nemoclaw-openclaw",
-      "scripts",
+      "host",
     );
-    mkdirSync(installedHermesConfig, { recursive: true });
     mkdirSync(installedHermesHost, { recursive: true });
-    mkdirSync(installedDcodePackage, { recursive: true });
     mkdirSync(installedDcodeHost, { recursive: true });
-    mkdirSync(installedOpenClawScripts, { recursive: true });
+    mkdirSync(installedOpenClawHost, { recursive: true });
     writeFileSync(path.join(installedPackageRoot, "package.json"), '{"name":"nemoclaw"}\n');
     copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-hermes/config/managed-route.cts"),
-      path.join(installedHermesConfig, "managed-route.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/managed-route.cts"),
+      path.join(installedHermesHost, "managed-route.cts"),
     );
     copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-hermes/config/mcp-adapter.cts"),
-      path.join(installedHermesConfig, "mcp-adapter.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/mcp-adapter.cts"),
+      path.join(installedHermesHost, "mcp-adapter.cts"),
     );
     copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-hermes/host/base-image-qualification.cts"),
-      path.join(installedHermesHost, "base-image-qualification.cts"),
-    );
-    copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
-      path.join(installedDcodePackage, "managed-identity.cts"),
-    );
-    copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts"),
-      path.join(installedDcodePackage, "mcp-adapter.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/base-qualification.cts"),
+      path.join(installedHermesHost, "base-qualification.cts"),
     );
     copyFileSync(
       path.join(
         packagedRoot,
-        "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
+        "packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts",
       ),
-      path.join(installedDcodeHost, "qualification-probes.cts"),
+      path.join(installedDcodeHost, "managed-identity.cts"),
     );
     copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/config-runtime.cts"),
-      path.join(installedOpenClawScripts, "config-runtime.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/host/mcp-adapter.cts"),
+      path.join(installedDcodeHost, "mcp-adapter.cts"),
+    );
+    copyFileSync(
+      path.join(
+        packagedRoot,
+        "packages/nemoclaw-langchain-deepagents-code/host/base-qualification.cts",
+      ),
+      path.join(installedDcodeHost, "base-qualification.cts"),
+    );
+    copyFileSync(
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/host/config-runtime.cts"),
+      path.join(installedOpenClawHost, "config-runtime.cts"),
     );
     for (const artifact of ["config-restore.cts", "cli-grammar.cts"]) {
       copyFileSync(
-        path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts", artifact),
-        path.join(installedOpenClawScripts, artifact),
+        path.join(packagedRoot, "packages/nemoclaw-openclaw/host", artifact),
+        path.join(installedOpenClawHost, artifact),
       );
     }
     copyFileSync(
-      path.join(packagedRoot, "packages/nemoclaw-openclaw/mcp-adapter.cts"),
-      path.join(path.dirname(installedOpenClawScripts), "mcp-adapter.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/host/mcp-adapter.cts"),
+      path.join(installedOpenClawHost, "mcp-adapter.cts"),
     );
 
     fixtureRequire = createRequire(path.join(fixtureRoot, "package.json"));
@@ -193,6 +208,24 @@ describe("published harness packages", () => {
     expect(packedPaths).toContain(`${packageRoot}/${harness.runtimeFile}`);
   });
 
+  it.each(COMMON_PACKAGE_ARTIFACTS)(
+    "ships $id package workflow file $artifact",
+    ({ id, artifact }) => {
+      expect(packedPaths).toContain(`packages/nemoclaw-${id}/${artifact}`);
+    },
+  );
+
+  it.each(COMMON_WORKFLOW_ARTIFACTS)(
+    "ships a $directory responsibility in the $id package example",
+    ({ id, directory }) => {
+      expect(
+        [...packedPaths].some((artifact) =>
+          artifact.startsWith(`packages/nemoclaw-${id}/${directory}/`),
+        ),
+      ).toBe(true);
+    },
+  );
+
   it.each(HARNESSES)("ships the $id configuration workflow command", ({ id }) => {
     const artifact = `packages/nemoclaw-${id}/runtime/generate-config.sh`;
 
@@ -201,24 +234,24 @@ describe("published harness packages", () => {
   });
 
   it.each([
-    "packages/nemoclaw-hermes/config/managed-route.cts",
-    "packages/nemoclaw-hermes/config/mcp-adapter.cts",
-    "packages/nemoclaw-hermes/host/base-image-qualification.cts",
-    "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
-    "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
-    "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts",
-    "packages/nemoclaw-openclaw/mcp-adapter.cts",
-    "packages/nemoclaw-openclaw/scripts/cli-grammar.cts",
-    "packages/nemoclaw-openclaw/scripts/config-restore.cts",
-    "packages/nemoclaw-openclaw/scripts/config-runtime.cts",
+    "packages/nemoclaw-hermes/host/managed-route.cts",
+    "packages/nemoclaw-hermes/host/mcp-adapter.cts",
+    "packages/nemoclaw-hermes/host/base-qualification.cts",
+    "packages/nemoclaw-langchain-deepagents-code/host/base-qualification.cts",
+    "packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts",
+    "packages/nemoclaw-langchain-deepagents-code/host/mcp-adapter.cts",
+    "packages/nemoclaw-openclaw/host/mcp-adapter.cts",
+    "packages/nemoclaw-openclaw/host/cli-grammar.cts",
+    "packages/nemoclaw-openclaw/host/config-restore.cts",
+    "packages/nemoclaw-openclaw/host/config-runtime.cts",
   ])("ships package-owned runtime contract %s", (artifact) => {
     expect(packedPaths).toContain(artifact);
   });
 
   it.each([
-    { id: "hermes", artifact: "config/mcp-adapter.cts" },
-    { id: "langchain-deepagents-code", artifact: "mcp-adapter.cts" },
-    { id: "openclaw", artifact: "mcp-adapter.cts" },
+    { id: "hermes", artifact: "host/mcp-adapter.cts" },
+    { id: "langchain-deepagents-code", artifact: "host/mcp-adapter.cts" },
+    { id: "openclaw", artifact: "host/mcp-adapter.cts" },
   ])("ships the MCP adapter in the $id package", ({ id, artifact }) => {
     const report = JSON.parse(
       execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
@@ -234,28 +267,31 @@ describe("published harness packages", () => {
   it.each(["cli-grammar.cts", "config-restore.cts", "config-runtime.cts"])(
     "ships OpenClaw package runtime %s",
     (artifact) => {
-      expect(openClawPackedPaths).toContain(`scripts/${artifact}`);
+      expect(openClawPackedPaths).toContain(`host/${artifact}`);
     },
   );
 
   it("loads the package-owned runtime modules from the published tree", () => {
     const hermes = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-hermes/config/managed-route.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/managed-route.cts"),
     ) as { hermesProviderKey(provider: string): string };
     const dcode = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts"),
+      path.join(
+        packagedRoot,
+        "packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts",
+      ),
     ) as { normalizeManagedDcodeModelName(model: string): string };
     const hermesQualification = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-hermes/host/base-image-qualification.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/base-qualification.cts"),
     ) as { createHermesBaseImageQualificationProbe(imageRef: string): { args: string[] } };
     const dcodeQualification = fixtureRequire(
       path.join(
         packagedRoot,
-        "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
+        "packages/nemoclaw-langchain-deepagents-code/host/base-qualification.cts",
       ),
     ) as { getDeepAgentsCodeBaseImageInputPaths(): string[] };
     const hermesMcp = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-hermes/config/mcp-adapter.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-hermes/host/mcp-adapter.cts"),
     ) as {
       buildInspectCommand(payload: string): string[];
       buildStatusCommand(entry: {
@@ -265,7 +301,7 @@ describe("published harness packages", () => {
       }): string;
     };
     const dcodeMcp = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-langchain-deepagents-code/host/mcp-adapter.cts"),
     ) as {
       buildStatusCommand(entry: {
         server: string;
@@ -278,7 +314,7 @@ describe("published harness packages", () => {
       };
     };
     const openClawMcp = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-openclaw/mcp-adapter.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/host/mcp-adapter.cts"),
     ) as {
       buildInspectCommand(
         entry: { server: string; url: string; headers: Record<string, string> },
@@ -287,7 +323,7 @@ describe("published harness packages", () => {
       mcporterAvailabilityProbe(sandboxName: string): { command: string };
     };
     const openClaw = fixtureRequire(
-      path.join(packagedRoot, "packages/nemoclaw-openclaw/scripts/config-runtime.cts"),
+      path.join(packagedRoot, "packages/nemoclaw-openclaw/host/config-runtime.cts"),
     ) as {
       readonly DEFAULT_OPENCLAW_MAX_TOKENS: number;
       applyOpenClawAnthropicReplyBudget(config: Record<string, unknown>, inherited?: number): void;
@@ -301,7 +337,7 @@ describe("published harness packages", () => {
     ).toContain("hermes:test");
     expect(dcodeQualification.getDeepAgentsCodeBaseImageInputPaths()).toEqual([
       "manifest.yaml",
-      "requirements.lock",
+      "runtime/requirements.lock",
     ]);
     const mcpEntry = { server: "example", url: "https://example.test/mcp", headers: {} };
     expect(hermesMcp.buildStatusCommand(mcpEntry)).toContain("example");
@@ -340,7 +376,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(hermesRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "config/managed-route.cts",
+      "host/managed-route.cts",
       64 * 1024,
     ).exports as {
       buildHermesUpstreamHeader(config: Record<string, unknown>): string;
@@ -355,7 +391,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(dcodeRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "managed-identity.cts",
+      "host/managed-identity.cts",
       64 * 1024,
     ).exports as { normalizeManagedDcodeModelName(model: string): string };
     const hermesQualification = runtimeLoader.loadHarnessCommonJsModule(
@@ -367,7 +403,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(hermesRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "host/base-image-qualification.cts",
+      "host/base-qualification.cts",
       64 * 1024,
     ).exports as { parseHermesPinnedRemoteBaseRef(dockerfile: string): string | null };
     const dcodeQualification = runtimeLoader.loadHarnessCommonJsModule(
@@ -379,7 +415,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(dcodeRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "host/qualification-probes.cts",
+      "host/base-qualification.cts",
       128 * 1024,
     ).exports as { buildDcodeManagedExecLaunchArgs(args: string[]): string[] };
     const hermesMcp = runtimeLoader.loadHarnessCommonJsModule(
@@ -391,7 +427,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(hermesRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "config/mcp-adapter.cts",
+      "host/mcp-adapter.cts",
       64 * 1024,
     ).exports as {
       buildInspectCommand(payload: string): string[];
@@ -410,7 +446,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(dcodeRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "mcp-adapter.cts",
+      "host/mcp-adapter.cts",
       128 * 1024,
     ).exports as {
       buildStatusCommand(entry: {
@@ -432,7 +468,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(openClawRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "mcp-adapter.cts",
+      "host/mcp-adapter.cts",
       128 * 1024,
     ).exports as {
       buildInspectCommand(
@@ -450,7 +486,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(openClawRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "scripts/config-runtime.cts",
+      "host/config-runtime.cts",
       128 * 1024,
     ).exports as { readonly DEFAULT_OPENCLAW_MAX_TOKENS: number };
     const openClawRestore = runtimeLoader.loadHarnessCommonJsModule(
@@ -462,7 +498,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(openClawRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "scripts/config-restore.cts",
+      "host/config-restore.cts",
       256 * 1024,
     ).exports as { mergeOpenClawRestoredConfig(backup: unknown, current: unknown): unknown };
     const openClawCli = runtimeLoader.loadHarnessCommonJsModule(
@@ -474,7 +510,7 @@ describe("published harness packages", () => {
         manifestPath: path.join(openClawRoot, "manifest.yaml"),
         source: "bundled",
       },
-      "scripts/cli-grammar.cts",
+      "host/cli-grammar.cts",
       256 * 1024,
     ).exports as { buildOpenclawAgentDeleteArgs(id: string): string[] };
 
@@ -519,18 +555,14 @@ describe("published harness packages", () => {
     ]);
   });
 
-  it.each([
-    "Dockerfile",
-    "Dockerfile.base",
-    "start.sh",
-    "policy-additions.yaml",
-    "policy-permissive.yaml",
-    "policy-permissive-default.yaml",
-  ])("ships OpenClaw package artifact %s", (artifact) => {
-    expect(packedPaths).toContain(`packages/nemoclaw-openclaw/${artifact}`);
-  });
+  it.each(["policies/permissive.yaml", "policies/permissive-default.yaml"])(
+    "ships OpenClaw package policy %s",
+    (artifact) => {
+      expect(packedPaths).toContain(`packages/nemoclaw-openclaw/${artifact}`);
+    },
+  );
 
-  it.each(["scripts/backup-workspace.sh", "scripts/lib/openclaw-npm-remediation.mts"])(
+  it.each(["runtime/backup-workspace.sh", "compat/npm-remediation.mts"])(
     "ships executable OpenClaw package helper %s",
     (artifact) => {
       expect(packedPaths).toContain(`packages/nemoclaw-openclaw/${artifact}`);

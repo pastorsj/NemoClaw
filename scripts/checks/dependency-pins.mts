@@ -592,12 +592,12 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
   const hermesDockerfile = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile", failures);
   const hermesMcpConfigTransaction = readText(
     rootDir,
-    "packages/nemoclaw-hermes/mcp-config-transaction.py",
+    "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
     failures,
   );
   const updateHermesAgent = readText(
     rootDir,
-    "packages/nemoclaw-hermes/scripts/update-hermes-agent.sh",
+    "packages/nemoclaw-hermes/checks/update-agent.sh",
     failures,
   );
   const credentialBoundarySource = readText(

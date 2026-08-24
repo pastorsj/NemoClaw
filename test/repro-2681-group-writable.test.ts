@@ -31,9 +31,8 @@ const MUTABLE_CONFIG_NORMALIZER = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "normalize_mutable_config_perms.py",
+  "runtime",
+  "config-permissions.py",
 );
 const OPENCLAW_CONFIG_GUARD = "/usr/local/lib/nemoclaw/openclaw-config-guard.py";
 const STATE_DIR_GUARD = "/usr/local/lib/nemoclaw/state-dir-guard.py";

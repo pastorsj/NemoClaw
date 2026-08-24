@@ -34,8 +34,8 @@ const HERMES_SANDBOX_BOUNDARY_JOBS = [
 ];
 const HERMES_CLI_ADAPTER_JOBS = ["channels-stop-start", "mcp-bridge"];
 const HERMES_CRON_RESTORE_FILES = [
-  "packages/nemoclaw-hermes/cron-restore-control.py",
-  "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
+  "packages/nemoclaw-hermes/runtime/cron-control.py",
+  "packages/nemoclaw-hermes/compat/cron-drain.py",
   "src/lib/actions/sandbox/rebuild-hermes-post-restore.ts",
   "src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts",
 ];
@@ -72,12 +72,12 @@ const HERMES_WRAPPER_FOCUSED_JOBS = [
 const HERMES_WRAPPER_REQUIRED_JOBS = [...HERMES_MANAGED_POLICY_REQUIRED_JOBS, "mcp-bridge"];
 const HERMES_MANAGED_POLICY_FILES = [
   "packages/nemoclaw-hermes/config/managed-policy.ts",
-  "packages/nemoclaw-hermes/config/managed-route.cts",
-  "packages/nemoclaw-hermes/hermes-wrapper.py",
-  "packages/nemoclaw-hermes/image-build-probes.py",
-  "packages/nemoclaw-hermes/managed_policy.py",
-  "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
-  "packages/nemoclaw-hermes/seed-dashboard-config.py",
+  "packages/nemoclaw-hermes/host/managed-route.cts",
+  "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+  "packages/nemoclaw-hermes/checks/image-probes.py",
+  "packages/nemoclaw-hermes/runtime/managed_policy.py",
+  "packages/nemoclaw-hermes/compat/profile-policy.py",
+  "packages/nemoclaw-hermes/runtime/dashboard-config.py",
   "packages/nemoclaw-hermes/start.sh",
   "src/lib/hermes-managed-route.ts",
 ];
@@ -200,12 +200,12 @@ describe("deterministic PR risk plan", () => {
   });
 
   it.each([
-    "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
-    "packages/nemoclaw-hermes/hermes-wrapper.py",
-    "packages/nemoclaw-hermes/validate-cli-adapter.py",
+    "packages/nemoclaw-hermes/runtime/cli-adapter.json",
+    "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+    "packages/nemoclaw-hermes/checks/cli-adapter.py",
   ])("selects Hermes MCP and channel lifecycle E2E for %s (#8011)", (changedFile) => {
     const result = plan(changedFile);
-    const isWrapper = changedFile === "packages/nemoclaw-hermes/hermes-wrapper.py";
+    const isWrapper = changedFile === "packages/nemoclaw-hermes/runtime/cli-wrapper.py";
     const expectedFocusedJobs = isWrapper ? HERMES_WRAPPER_FOCUSED_JOBS : HERMES_CLI_ADAPTER_JOBS;
     const expectedRequiredJobs = isWrapper
       ? HERMES_WRAPPER_REQUIRED_JOBS
@@ -267,7 +267,7 @@ describe("deterministic PR risk plan", () => {
     "selects every Hermes managed-policy live E2E job for %s (#8008)",
     (changedFile) => {
       const result = plan(changedFile);
-      const isWrapper = changedFile === "packages/nemoclaw-hermes/hermes-wrapper.py";
+      const isWrapper = changedFile === "packages/nemoclaw-hermes/runtime/cli-wrapper.py";
       const expectedFocusedJobs = isWrapper
         ? HERMES_WRAPPER_FOCUSED_JOBS
         : HERMES_MANAGED_POLICY_JOBS;
@@ -302,12 +302,12 @@ describe("deterministic PR risk plan", () => {
   });
 
   it("combines CLI adapter and managed-policy E2E for the Hermes wrapper (#8011)", () => {
-    const result = plan("packages/nemoclaw-hermes/hermes-wrapper.py");
+    const result = plan("packages/nemoclaw-hermes/runtime/cli-wrapper.py");
 
     expect(result.families).toContainEqual(
       expect.objectContaining({
         id: "focused-e2e",
-        matchedFiles: ["packages/nemoclaw-hermes/hermes-wrapper.py"],
+        matchedFiles: ["packages/nemoclaw-hermes/runtime/cli-wrapper.py"],
         requiredJobs: HERMES_WRAPPER_FOCUSED_JOBS,
       }),
     );
@@ -699,14 +699,14 @@ describe("deterministic PR risk plan", () => {
 
   it("selects the Deep Agents Code target for its managed runtime changes (#7463)", () => {
     const changedFiles = [
-      "packages/nemoclaw-langchain-deepagents-code/dependency-review.md",
-      "packages/nemoclaw-langchain-deepagents-code/patch-managed-deepagents-code.py",
+      "packages/nemoclaw-langchain-deepagents-code/compat/dependencies.md",
+      "packages/nemoclaw-langchain-deepagents-code/compat/runtime-patch.py",
       "test/langchain-deepagents-code-managed-model-params.test.ts",
       "test/langchain-deepagents-code-nemotron-profile-plugin.test.ts",
     ];
     const result = buildRiskPlan({ headSha: HEAD_SHA, changedFiles });
     const docsAndTestsOnly = plan(
-      "packages/nemoclaw-langchain-deepagents-code/dependency-review.md",
+      "packages/nemoclaw-langchain-deepagents-code/compat/dependencies.md",
       "packages/nemoclaw-langchain-deepagents-code/runtime-notes.mdx",
       "packages/nemoclaw-langchain-deepagents-code/resolver.test.ts",
       "test/langchain-deepagents-code-managed-model-params.test.ts",
@@ -717,9 +717,7 @@ describe("deterministic PR risk plan", () => {
       expect.objectContaining({
         id: PR_E2E_TYPED_TARGET_IDS[0],
         families: ["focused-e2e"],
-        matchedFiles: [
-          "packages/nemoclaw-langchain-deepagents-code/patch-managed-deepagents-code.py",
-        ],
+        matchedFiles: ["packages/nemoclaw-langchain-deepagents-code/compat/runtime-patch.py"],
       }),
     ]);
     expect(result.tier).toBe(3);
@@ -728,7 +726,7 @@ describe("deterministic PR risk plan", () => {
   });
 
   it.each([
-    "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+    "packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts",
     "src/lib/inference/managed-dcode/identity.ts",
   ])("selects the Deep Agents Code target for managed identity changes in %s", (changedFile) => {
     const result = plan(changedFile);

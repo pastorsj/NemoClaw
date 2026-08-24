@@ -61,16 +61,16 @@ const OPAQUE_INPUTS = [
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
   "packages/nemoclaw-hermes/policy-additions.yaml",
-  "packages/nemoclaw-hermes/config/managed-route.cts",
-  "packages/nemoclaw-hermes/config/mcp-adapter.cts",
-  "packages/nemoclaw-hermes/host/base-image-qualification.cts",
-  "packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts",
-  "packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
-  "packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts",
-  "packages/nemoclaw-openclaw/scripts/cli-grammar.cts",
-  "packages/nemoclaw-openclaw/scripts/config-restore.cts",
-  "packages/nemoclaw-openclaw/scripts/config-runtime.cts",
-  "packages/nemoclaw-openclaw/mcp-adapter.cts",
+  "packages/nemoclaw-hermes/host/managed-route.cts",
+  "packages/nemoclaw-hermes/host/mcp-adapter.cts",
+  "packages/nemoclaw-hermes/host/base-qualification.cts",
+  "packages/nemoclaw-langchain-deepagents-code/host/base-qualification.cts",
+  "packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts",
+  "packages/nemoclaw-langchain-deepagents-code/host/mcp-adapter.cts",
+  "packages/nemoclaw-openclaw/host/cli-grammar.cts",
+  "packages/nemoclaw-openclaw/host/config-restore.cts",
+  "packages/nemoclaw-openclaw/host/config-runtime.cts",
+  "packages/nemoclaw-openclaw/host/mcp-adapter.cts",
   "packages/nemoclaw-openclaw/model-specific-setup/openclaw/gemini-3-managed-inference.json",
   "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
   "packages/nemoclaw-openclaw/policies/presets/openclaw-pricing.yaml",
@@ -78,15 +78,15 @@ const OPAQUE_INPUTS = [
   "src/lib/messaging/channels/telegram/policy/openclaw.yaml",
   "nemoclaw-blueprint/policies/presets/local-inference.yaml",
   "nemoclaw-blueprint/policies/presets/claude-code.yaml",
-  "packages/nemoclaw-hermes/runtime-config-guard.py",
-  "packages/nemoclaw-hermes/mcp-config-transaction.py",
+  "packages/nemoclaw-hermes/runtime/config-guard.py",
+  "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
   "test/e2e/lib/ci-compatible-inference.sh",
   "scripts/setup-jetson.sh",
   "tools/e2e/contracts/v1/jetson-dispatch.json",
   ".github/workflows/base-image.yaml",
   ".github/workflows/base-image-platform.yaml",
   "scripts/export-managed-base-image-contract.sh",
-  "packages/nemoclaw-hermes/checks/download-hermes-source-archive.sh",
+  "packages/nemoclaw-hermes/checks/download-source.sh",
   "scripts/checks/validate-managed-base-index.sh",
   "scripts/e2e/sanitize-trace-timing.py",
   "test/e2e/manifests/openclaw-nvidia.yaml",
@@ -205,9 +205,7 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/onboard/managed-startup-profile.test.ts",
       "test/hermes-mcp-runtime-capability.test.ts",
     ]);
-    expect(
-      triggeredBy("packages/nemoclaw-hermes/checks/download-hermes-source-archive.sh"),
-    ).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/checks/download-source.sh")).toEqual([
       "test/hermes-share-mount-deps.test.ts",
       "test/managed-image-publication-workflow.test.ts",
     ]);
@@ -218,19 +216,19 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/onboard/initial-policy-real-policy.test.ts",
       "src/lib/onboard/initial-policy.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-hermes/config/managed-route.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/host/managed-route.cts")).toEqual([
       "src/lib/hermes-managed-route.test.ts",
       "src/lib/sandbox/hermes-upstream-header.parity.test.ts",
       "test/generate-hermes-config.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-hermes/host/base-image-qualification.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/host/base-qualification.cts")).toEqual([
       "src/lib/agent/base-image-hermes.test.ts",
       "src/lib/agent/base-image-hermes-resolution.test.ts",
       "src/lib/agent/package-qualification-specifications.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-hermes/config/mcp-adapter.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/host/mcp-adapter.cts")).toEqual([
       "src/lib/actions/sandbox/mcp-bridge-adapter-hermes.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-registration.test.ts",
@@ -238,15 +236,15 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/managed-identity.cts")).toEqual(
-      [
-        "src/lib/inference/managed-dcode/identity.test.ts",
-        "test/langchain-deepagents-code-image.test.ts",
-        "test/package-contract/harness-packages.test.ts",
-      ],
-    );
     expect(
-      triggeredBy("packages/nemoclaw-langchain-deepagents-code/host/qualification-probes.cts"),
+      triggeredBy("packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts"),
+    ).toEqual([
+      "src/lib/inference/managed-dcode/identity.test.ts",
+      "test/langchain-deepagents-code-image.test.ts",
+      "test/package-contract/harness-packages.test.ts",
+    ]);
+    expect(
+      triggeredBy("packages/nemoclaw-langchain-deepagents-code/host/base-qualification.cts"),
     ).toEqual([
       "src/lib/actions/sandbox/connect-inference-route-probe.test.ts",
       "src/lib/actions/sandbox/dcode-activity-probe.test.ts",
@@ -255,19 +253,21 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/agent/terminal-smoke.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/mcp-adapter.cts")).toEqual([
-      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-legacy-teardown.test.ts",
-      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-projection.test.ts",
-      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-registration.test.ts",
-      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-rollback.test.ts",
-      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-runtime-guards.test.ts",
-      "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-v2-removal.test.ts",
-      "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
-      "test/deepagents-mcp-legacy-lifecycle.test.ts",
-      "test/deepagents-mcp-runtime-capability.test.ts",
-      "test/package-contract/harness-packages.test.ts",
-    ]);
-    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/config-runtime.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/host/mcp-adapter.cts")).toEqual(
+      [
+        "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-legacy-teardown.test.ts",
+        "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-projection.test.ts",
+        "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-registration.test.ts",
+        "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-rollback.test.ts",
+        "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-runtime-guards.test.ts",
+        "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-v2-removal.test.ts",
+        "src/lib/actions/sandbox/mcp-bridge-runtime-boundary.test.ts",
+        "test/deepagents-mcp-legacy-lifecycle.test.ts",
+        "test/deepagents-mcp-runtime-capability.test.ts",
+        "test/package-contract/harness-packages.test.ts",
+      ],
+    );
+    expect(triggeredBy("packages/nemoclaw-openclaw/host/config-runtime.cts")).toEqual([
       "src/lib/actions/inference-route-api.test.ts",
       "src/lib/actions/inference-set-reply-budget.test.ts",
       "src/lib/actions/inference-set-patch-openclaw.test.ts",
@@ -280,19 +280,19 @@ describe("Vitest opaque-input watch triggers", () => {
       "test/package-contract/harness-packages.test.ts",
       "test/sandbox-build-context.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/config-restore.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-openclaw/host/config-restore.cts")).toEqual([
       "src/lib/openclaw/package-runtime.test.ts",
       "src/lib/state/openclaw-config-merge-tool-search.test.ts",
       "src/lib/state/openclaw-config-merge.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-openclaw/scripts/cli-grammar.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-openclaw/host/cli-grammar.cts")).toEqual([
       "src/lib/actions/sandbox/agents/apply.test.ts",
       "src/lib/openclaw/agent-json-provenance.test.ts",
       "src/lib/openclaw/package-runtime.test.ts",
       "test/package-contract/harness-packages.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-openclaw/mcp-adapter.cts")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-openclaw/host/mcp-adapter.cts")).toEqual([
       "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-registration.test.ts",
@@ -323,10 +323,10 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy("nemoclaw-blueprint/policies/presets/claude-code.yaml")).toEqual([
       "test/effective-policy-contracts.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-hermes/runtime-config-guard.py")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/runtime/config-guard.py")).toEqual([
       "src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts",
     ]);
-    expect(triggeredBy("packages/nemoclaw-hermes/mcp-config-transaction.py")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-hermes/runtime/mcp-transaction.py")).toEqual([
       "src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts",
     ]);
     expect(triggeredBy("test/e2e/lib/ci-compatible-inference.sh")).toEqual([
@@ -474,7 +474,7 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy("notes/example.yaml")).toEqual([]);
     expect(triggeredBy("scripts/unrelated.py")).toEqual([]);
     expect(triggeredBy("test/e2e/lib/unrelated.sh")).toEqual([]);
-    expect(triggeredBy("packages/nemoclaw-hermes/hermes-wrapper.py")).toEqual([]);
+    expect(triggeredBy("packages/nemoclaw-hermes/runtime/cli-wrapper.py")).toEqual([]);
   });
 
   it("normalizes Windows-style paths before matching (#6692)", () => {

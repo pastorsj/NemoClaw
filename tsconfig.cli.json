@@ -21,7 +21,7 @@
     ".agents/skills/nemoclaw-maintainer-day/scripts/shared.ts",
     "packages/nemoclaw-hermes/**/*.ts",
     "packages/nemoclaw-langchain-deepagents-code/**/*.ts",
-    "packages/nemoclaw-openclaw/scripts/**/*.mts",
+    "packages/nemoclaw-openclaw/**/*.mts",
     "bin/**/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mts",
@@ -32,7 +32,7 @@
   ],
   "exclude": [
     "node_modules",
-    "packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts",
+    "packages/nemoclaw-langchain-deepagents-code/config/entrypoint.ts",
     "packages/nemoclaw-openclaw/plugin",
     "test/e2e/fixtures/plugins/weather",
     "tools/mcp-tool-discovery-runtime/mcp-tool-discovery.ts",

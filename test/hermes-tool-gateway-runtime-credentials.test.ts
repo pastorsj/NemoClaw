@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
 const { RuntimeRefreshCredentialStore } =
-  require("../packages/nemoclaw-hermes/host/runtime-refresh-credentials.ts") as {
+  require("../packages/nemoclaw-hermes/host/refresh-credentials.ts") as {
     RuntimeRefreshCredentialStore: new (
       hashCredential: (value: string) => string,
     ) => {

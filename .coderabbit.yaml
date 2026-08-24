@@ -180,7 +180,7 @@ reviews:
     - path: "scripts/lib/sandbox-init.sh"
       instructions: *security-boundary
 
-    - path: "packages/nemoclaw-openclaw/preloads/http-proxy-fix.js"
+    - path: "packages/nemoclaw-openclaw/runtime/preloads/http-proxy-fix.js"
       instructions: *security-boundary
 
     - path: "nemoclaw-blueprint/policies/**"

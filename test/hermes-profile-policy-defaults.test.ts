@@ -12,8 +12,8 @@ import type { HermesBuildSettings } from "../packages/nemoclaw-hermes/config/bui
 import { buildHermesManagedPolicy } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
 
 const root = path.join(import.meta.dirname, "..");
-const patcher = path.join(root, "packages", "nemoclaw-hermes", "patch-profile-policy-defaults.py");
-const imageBuildProbes = path.join(root, "packages", "nemoclaw-hermes", "image-build-probes.py");
+const patcher = path.join(root, "packages", "nemoclaw-hermes", "compat", "profile-policy.py");
+const imageBuildProbes = path.join(root, "packages", "nemoclaw-hermes", "checks", "image-probes.py");
 const dockerfile = fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "Dockerfile"), "utf8");
 const POLICY_SETTINGS: HermesBuildSettings = {
   model: "test-model",
@@ -285,7 +285,7 @@ from types import SimpleNamespace
 
 probe_path = pathlib.Path(sys.argv[1])
 policy_path = pathlib.Path(sys.argv[2])
-sys.path.insert(0, str(probe_path.parent))
+sys.path.insert(0, str(probe_path.parent.parent / "runtime"))
 from managed_policy import profile_default_values
 spec = importlib.util.spec_from_file_location("image_build_probes", probe_path)
 assert spec and spec.loader
@@ -324,7 +324,7 @@ module._verify_session_reset_policy(reset_policy, expected)
 
       expect(dockerfile).toContain(`ARG NEMOCLAW_HERMES_PROFILE_POLICY_PATCHER_SHA256=${digest}`);
       expect(dockerfile).toContain(
-        "COPY packages/nemoclaw-hermes/patch-profile-policy-defaults.py " +
+        "COPY packages/nemoclaw-hermes/compat/profile-policy.py " +
           "/usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py",
       );
 

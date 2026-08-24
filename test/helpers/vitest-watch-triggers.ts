@@ -144,7 +144,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/config\/managed-route\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/host\/managed-route\.cts$/,
     testsToRun: runTests(
       "src/lib/hermes-managed-route.test.ts",
       "src/lib/sandbox/hermes-upstream-header.parity.test.ts",
@@ -153,7 +153,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/host\/base-image-qualification\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/host\/base-qualification\.cts$/,
     testsToRun: runTests(
       "src/lib/agent/base-image-hermes.test.ts",
       "src/lib/agent/base-image-hermes-resolution.test.ts",
@@ -162,7 +162,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/config\/mcp-adapter\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/host\/mcp-adapter\.cts$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/mcp-bridge-adapter-hermes.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
@@ -173,7 +173,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/managed-identity\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/host\/managed-identity\.cts$/,
     testsToRun: runTests(
       "src/lib/inference/managed-dcode/identity.test.ts",
       "test/langchain-deepagents-code-image.test.ts",
@@ -181,8 +181,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern:
-      /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/host\/qualification-probes\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/host\/base-qualification\.cts$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/connect-inference-route-probe.test.ts",
       "src/lib/actions/sandbox/dcode-activity-probe.test.ts",
@@ -193,7 +192,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/mcp-adapter\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-langchain-deepagents-code\/host\/mcp-adapter\.cts$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-legacy-teardown.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-deepagents-projection.test.ts",
@@ -208,7 +207,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/config-runtime\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/host\/config-runtime\.cts$/,
     testsToRun: runTests(
       "src/lib/actions/inference-route-api.test.ts",
       "src/lib/actions/inference-set-reply-budget.test.ts",
@@ -224,7 +223,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/config-restore\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/host\/config-restore\.cts$/,
     testsToRun: runTests(
       "src/lib/openclaw/package-runtime.test.ts",
       "src/lib/state/openclaw-config-merge-tool-search.test.ts",
@@ -233,7 +232,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/scripts\/cli-grammar\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/host\/cli-grammar\.cts$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/agents/apply.test.ts",
       "src/lib/openclaw/agent-json-provenance.test.ts",
@@ -242,7 +241,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/mcp-adapter\.cts$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/host\/mcp-adapter\.cts$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/mcp-bridge-adapter-inspection.test.ts",
       "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.test.ts",
@@ -284,7 +283,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   },
   {
     pattern:
-      /(?:^|\/)packages\/nemoclaw-hermes\/(?:mcp-config-transaction|runtime-config-guard)\.py$/,
+      /(?:^|\/)packages\/nemoclaw-hermes\/runtime\/(?:mcp-transaction|config-guard)\.py$/,
     testsToRun: runTests("src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts"),
   },
   {
@@ -336,7 +335,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/validate-managed-base-index.test.ts"),
   },
   {
-    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/checks\/download-hermes-source-archive[.]sh$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/checks\/download-source[.]sh$/,
     testsToRun: runTests(
       "test/hermes-share-mount-deps.test.ts",
       "test/managed-image-publication-workflow.test.ts",

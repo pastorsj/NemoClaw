@@ -20,14 +20,21 @@ describe("config validation target discovery", () => {
   })
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
     .flatMap((packageDirectory) => {
-      const packageRoot = path.join(repositoryRoot, "packages", packageDirectory.name);
-      return readdirSync(packageRoot, { withFileTypes: true })
-        .filter(
-          (entry) =>
-            entry.isFile() &&
-            /^(?:policy-additions|policy-permissive[^/]*)\.yaml$/u.test(entry.name),
-        )
-        .map((entry) => `packages/${packageDirectory.name}/${entry.name}`);
+      const relativeRoot = `packages/${packageDirectory.name}`;
+      return [relativeRoot, `${relativeRoot}/policies`].flatMap((relativeDirectory) => {
+        const directory = path.join(repositoryRoot, relativeDirectory);
+        return existsSync(directory)
+          ? readdirSync(directory, { withFileTypes: true })
+              .filter(
+                (entry) =>
+                  entry.isFile() &&
+                  /^(?:policy-additions|policy-permissive[^/]*|permissive[^/]*)\.yaml$/u.test(
+                    entry.name,
+                  ),
+              )
+              .map((entry) => `${relativeDirectory}/${entry.name}`)
+          : [];
+      });
     })
     .sort();
   const packagePresetFiles = readdirSync(path.join(repositoryRoot, "packages"), {
@@ -70,13 +77,13 @@ describe("config validation target discovery", () => {
     expect(sandboxPolicyFiles).toEqual(
       expect.arrayContaining([
         "packages/nemoclaw-openclaw/policy-additions.yaml",
-        "packages/nemoclaw-openclaw/policy-permissive-default.yaml",
+        "packages/nemoclaw-openclaw/policies/permissive-default.yaml",
         "agents/nemocua/policy-additions.yaml",
         "agents/pi/policy-additions.yaml",
         "packages/nemoclaw-hermes/policy-additions.yaml",
-        "packages/nemoclaw-hermes/policy-permissive.yaml",
+        "packages/nemoclaw-hermes/policies/permissive.yaml",
         "packages/nemoclaw-langchain-deepagents-code/policy-additions.yaml",
-        "packages/nemoclaw-openclaw/policy-permissive.yaml",
+        "packages/nemoclaw-openclaw/policies/permissive.yaml",
       ]),
     );
   });

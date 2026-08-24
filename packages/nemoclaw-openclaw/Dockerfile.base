@@ -395,17 +395,17 @@ ARG OPENCLAW_2026_3_11_TARBALL=https://registry.npmjs.org/openclaw/-/openclaw-20
 ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
 ARG OPENCLAW_2026_4_24_TARBALL=https://registry.npmjs.org/openclaw/-/openclaw-2026.4.24.tgz
 # Keep the mcporter version, integrity, runtime lock, license, and advisory baseline
-# synchronized with packages/nemoclaw-openclaw/dependency-review.md.
+# synchronized with packages/nemoclaw-openclaw/compat/dependency-review.md.
 ARG MCPORTER_VERSION=0.7.3
 ARG MCPORTER_0_7_3_INTEGRITY=sha512-egoPVYqTnWb3NjRIxo+xc8OrAI0dlPrJm9pAiZx0pImuNIV5rKhGtTnIfH/Y1ldGPVu74ibj3KR5c9U/QSdQFA==
 ARG MCPORTER_0_7_3_TARBALL=https://registry.npmjs.org/mcporter/-/mcporter-0.7.3.tgz
 # Keep paired runtime manifests and remediation helpers in grouped layers so
 # the published base retains its established image layout.
-COPY packages/nemoclaw-openclaw/openclaw-runtime/package.json \
-    packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json \
+COPY packages/nemoclaw-openclaw/runtime/openclaw/package.json \
+    packages/nemoclaw-openclaw/runtime/openclaw/package-lock.json \
     /usr/local/lib/nemoclaw/openclaw-runtime/
-COPY packages/nemoclaw-openclaw/mcporter-runtime/package.json \
-    packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json \
+COPY packages/nemoclaw-openclaw/runtime/mcporter/package.json \
+    packages/nemoclaw-openclaw/runtime/mcporter/package-lock.json \
     /usr/local/lib/nemoclaw/mcporter-runtime/
 COPY ci/npm-audit-exceptions.json /scripts/npm-audit-exceptions.json
 COPY scripts/lib/reviewed-npm-archive.mts \
@@ -414,8 +414,8 @@ COPY scripts/lib/reviewed-npm-archive.mts \
     /scripts/lib/
 COPY packages/nemoclaw-openclaw/manifest.yaml \
     /packages/nemoclaw-openclaw/manifest.yaml
-COPY packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
-    /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
+COPY packages/nemoclaw-openclaw/compat/npm-remediation.mts \
+    /packages/nemoclaw-openclaw/compat/npm-remediation.mts
 COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts
 COPY scripts/lib/patch-bundled-npm-ip-address.mts /scripts/lib/patch-bundled-npm-ip-address.mts
 COPY scripts/patch-bundled-npm-tar.mts /scripts/patch-bundled-npm-tar.mts
@@ -525,7 +525,7 @@ RUN echo "$OPENCLAW_VERSION" | grep -qxE '[0-9]+(\.[0-9]+)*' \
         OPENCLAW_PACK_PATH="$OPENCLAW_SOURCE_PACK_PATH"; \
         OPENCLAW_PACK_DIR="$(dirname "$OPENCLAW_PACK_PATH")"; \
         if [ "$OPENCLAW_VERSION" = "2026.3.11" ]; then \
-            OPENCLAW_REMEDIATION_JSON="$(node --experimental-strip-types /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
+            OPENCLAW_REMEDIATION_JSON="$(node --experimental-strip-types /packages/nemoclaw-openclaw/compat/npm-remediation.mts \
                 --archive "$OPENCLAW_SOURCE_PACK_PATH" --package-spec "openclaw@${OPENCLAW_VERSION}" \
                 --working-directory "$OPENCLAW_PACK_DIR")"; \
             OPENCLAW_PACK_PATH="$(node -e 'const value = JSON.parse(process.argv[1]); if (!value.remediated || typeof value.archivePath !== "string") process.exit(1); process.stdout.write(value.archivePath)' "$OPENCLAW_REMEDIATION_JSON")"; \
@@ -606,7 +606,7 @@ RUN echo "$OPENCLAW_VERSION" | grep -qxE '[0-9]+(\.[0-9]+)*' \
 # this with a service-specific probe; otherwise an unresponsive service
 # will still report healthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-    CMD node -e "process.exit(0)"
+    CMD ["node", "-e", "process.exit(0)"]
 
 # Bake Homebrew core (Linuxbrew) into the sandbox base image (#3913).
 #

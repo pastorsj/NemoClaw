@@ -25,7 +25,7 @@ function installedBackupScript(homeDirectory: string): string {
     ".nemoclaw",
     "harnesses",
     "nemoclaw-openclaw",
-    "scripts",
+    "runtime",
     "backup-workspace.sh",
   );
 }

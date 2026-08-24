@@ -113,7 +113,11 @@ afterEach(() => {
 
 describe("harness MCP runtime boundary", testTimeoutOptions(30_000), () => {
   it("keeps a captured OpenClaw runtime after its installed files change", () => {
-    const installed = writeInstalledRuntime("openclaw", "mcp-adapter.cts", OPENCLAW_RUNTIME_SOURCE);
+    const installed = writeInstalledRuntime(
+      "openclaw",
+      "host/mcp-adapter.cts",
+      OPENCLAW_RUNTIME_SOURCE,
+    );
     vi.stubEnv("HOME", installed.home);
 
     expect(loadOpenClawMcpRuntime().buildRegisterCommand(ENTRY)).toBe("installed-register");
@@ -124,7 +128,7 @@ describe("harness MCP runtime boundary", testTimeoutOptions(30_000), () => {
   it("keeps a captured Hermes runtime after its installed files change", () => {
     const installed = writeInstalledRuntime(
       "hermes",
-      "config/mcp-adapter.cts",
+      "host/mcp-adapter.cts",
       HERMES_RUNTIME_SOURCE,
     );
     vi.stubEnv("HOME", installed.home);
@@ -137,7 +141,7 @@ describe("harness MCP runtime boundary", testTimeoutOptions(30_000), () => {
   it("keeps a captured Deep Agents Code runtime after its installed files change", () => {
     const installed = writeInstalledRuntime(
       "langchain-deepagents-code",
-      "mcp-adapter.cts",
+      "host/mcp-adapter.cts",
       DEEP_AGENTS_RUNTIME_SOURCE,
     );
     vi.stubEnv("HOME", installed.home);
@@ -155,7 +159,7 @@ describe("harness MCP runtime boundary", testTimeoutOptions(30_000), () => {
       "mcporterHeadersMatchExpected() { return true; }",
       "mcporterHeadersMatchExpected() { return 'yes'; }",
     );
-    const installed = writeInstalledRuntime("openclaw", "mcp-adapter.cts", source);
+    const installed = writeInstalledRuntime("openclaw", "host/mcp-adapter.cts", source);
     vi.stubEnv("HOME", installed.home);
     const runtime = loadOpenClawMcpRuntime();
 
@@ -175,7 +179,7 @@ describe("harness MCP runtime boundary", testTimeoutOptions(30_000), () => {
       "return { url: entry.url, enabled: true, timeout: 120, connect_timeout: 60, tools: { resources: true, prompts: true } };",
       "return { url: entry.url, enabled: true, timeout: 120, connect_timeout: 60, tools: { resources: true, prompts: true }, injected: true };",
     );
-    const installed = writeInstalledRuntime("hermes", "config/mcp-adapter.cts", source);
+    const installed = writeInstalledRuntime("hermes", "host/mcp-adapter.cts", source);
     vi.stubEnv("HOME", installed.home);
     const runtime = loadHermesMcpRuntime();
 
@@ -195,7 +199,11 @@ describe("harness MCP runtime boundary", testTimeoutOptions(30_000), () => {
       "parseRemovalOutcome() { return 'removed'; }",
       "parseRemovalOutcome() { return 'destroyed'; }",
     );
-    const installed = writeInstalledRuntime("langchain-deepagents-code", "mcp-adapter.cts", source);
+    const installed = writeInstalledRuntime(
+      "langchain-deepagents-code",
+      "host/mcp-adapter.cts",
+      source,
+    );
     vi.stubEnv("HOME", installed.home);
     const runtime = loadDeepAgentsMcpRuntime();
 

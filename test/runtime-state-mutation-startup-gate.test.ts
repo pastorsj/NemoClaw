@@ -10,8 +10,9 @@ const GATE = path.join(
   "..",
   "packages",
   "nemoclaw-hermes",
-  "scripts",
-  "runtime-state-mutation-startup-gate.py",
+  "runtime",
+  "state",
+  "startup-gate.py",
 );
 
 const HARNESS = String.raw`

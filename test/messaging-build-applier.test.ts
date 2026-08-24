@@ -58,8 +58,8 @@ const GENERATOR_PATH = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "generate-openclaw-config.mts",
+  "config",
+  "generate-config.mts",
 );
 const OPENCLAW_DISCORD_2026_7_1_INTEGRITY =
   "sha512-tZfdC1YA8oVLvc2BK1w0F6rUljS5ugCOp2uWe0vPsbG1fbzVVIO4V32RoqZznGHe5u2R9u4n1aV5Z/qa1m2oFg==";
@@ -77,9 +77,8 @@ const OPENCLAW_REMEDIATION_HELPER = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "openclaw-npm-remediation.mts",
+  "compat",
+  "npm-remediation.mts",
 );
 const OPENCLAW_PACKAGE_BUILD_ENV = {
   NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER: OPENCLAW_REMEDIATION_HELPER,

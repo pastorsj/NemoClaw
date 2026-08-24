@@ -21,20 +21,20 @@ const config = fs.readFileSync(
 );
 const manifest = fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "manifest.yaml"), "utf8");
 const cliAdapter = JSON.parse(
-  fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "hermes-cli-adapter-v1.json"), "utf8"),
+  fs.readFileSync(path.join(root, "packages", "nemoclaw-hermes", "runtime", "cli-adapter.json"), "utf8"),
 );
 const review = fs.readFileSync(
   path.join(root, "internal", "security-reviews", "hermes-0.19.0-dependency-review.md"),
   "utf8",
 );
 const securityDependenciesPatch = fs.readFileSync(
-  path.join(root, "packages", "nemoclaw-hermes", "security-dependencies.patch"),
+  path.join(root, "packages", "nemoclaw-hermes", "compat", "security-dependencies.patch"),
   "utf8",
 );
 const hindsightProbeRequirementsPath = path.join(
   root,
   "packages", "nemoclaw-hermes",
-  "hindsight-client-probe-requirements.txt",
+  "checks", "hindsight-requirements.txt",
 );
 const hindsightProbeRequirements = fs.readFileSync(hindsightProbeRequirementsPath, "utf8");
 
@@ -159,10 +159,10 @@ describe("Hermes 0.19.0 dependency review", () => {
 
   it("ships the reviewed Python dependency remediations and records residual debt", () => {
     expect(dockerfileBase).toContain(
-      "COPY packages/nemoclaw-hermes/security-dependencies.patch /tmp/hermes-security-dependencies.patch",
+      "COPY packages/nemoclaw-hermes/compat/security-dependencies.patch /tmp/hermes-security-dependencies.patch",
     );
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-hermes/security-dependencies.patch /scripts/hermes-security-dependencies.patch",
+      "COPY packages/nemoclaw-hermes/compat/security-dependencies.patch /scripts/hermes-security-dependencies.patch",
     );
     expect(dockerfile).toContain("/scripts/hermes-security-dependencies.patch");
     expect(dockerfileBase).toContain(
@@ -183,7 +183,7 @@ describe("Hermes 0.19.0 dependency review", () => {
       "HERMES_LAZY_INSTALL_TARGET=/tmp/nemoclaw-hindsight-client-probe",
     );
     expect(dockerfileBase).toContain(
-      "COPY --chmod=0444 packages/nemoclaw-hermes/hindsight-client-probe-requirements.txt /tmp/nemoclaw-hindsight-client-probe-requirements.txt",
+      "COPY --chmod=0444 packages/nemoclaw-hermes/checks/hindsight-requirements.txt /tmp/nemoclaw-hindsight-client-probe-requirements.txt",
     );
     expect(dockerfileBase).toContain(
       "ADD --chmod=0444 --checksum=sha256:9fdda176ab50f7cec8d7339c6608c148f0cd9ad7e65d9d76192f2db730bc330a https://files.pythonhosted.org/",

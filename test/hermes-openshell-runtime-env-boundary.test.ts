@@ -11,7 +11,7 @@ const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 const CANONICAL_TLS_KEY_PATH = "/etc/openshell/tls/client/tls.key";
 

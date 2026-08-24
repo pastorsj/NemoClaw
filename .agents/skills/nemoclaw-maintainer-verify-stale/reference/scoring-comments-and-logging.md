@@ -37,7 +37,7 @@ Total is clamped to `[0, 100]`.
 The skill needs to know which path to use with `git log "$REPORTED_VERSION".."$LATEST" -- <path>`. Apply in order and stop at the first non-empty path:
 
 1. **Stack trace / file path mentions in the issue body.** Grep the body for absolute paths under known install roots, then map to repo paths:
-   - `/usr/local/lib/nemoclaw/<file>` → find the matching package-owned source (for example, `patch-openclaw-tool-catalog.mts` maps to `packages/nemoclaw-openclaw/scripts/patch-openclaw-tool-catalog.mts`)
+   - `/usr/local/lib/nemoclaw/<file>` → find the matching package-owned source (for example, `patch-openclaw-tool-catalog.mts` maps to `packages/nemoclaw-openclaw/compat/tool-catalog.mts`)
    - `/usr/local/bin/nemoclaw*` → `bin/`
    - `~/.nemoclaw/<rel>` → most often runtime state, drop unless the bug is config-related → `src/lib/config/`
    - In-repo paths (e.g., `bin/lib/policies.js` mentioned literally) → use as-is

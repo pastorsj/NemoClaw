@@ -18,7 +18,7 @@ import {
   patchOpenClawSharedStatePermissions,
   patchOpenClawStateDbText,
   patchOpenClawStateMigrationText,
-} from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts";
+} from "../packages/nemoclaw-openclaw/compat/state-permissions.mts";
 import { restoreEnv } from "./helpers/env-test-helpers";
 
 const PATCH_SCRIPT = path.join(
@@ -26,8 +26,8 @@ const PATCH_SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-shared-state-permissions.mts",
+  "compat",
+  "state-permissions.mts",
 );
 
 const UPSTREAM_STATE_DB_SOURCE = [

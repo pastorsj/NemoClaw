@@ -26,7 +26,7 @@ const SCRIPT = path.join(
   "..",
   "packages", "nemoclaw-hermes",
   "host",
-  "tool-gateway-broker.ts",
+  "tool-broker.ts",
 );
 const require = createRequire(import.meta.url);
 const BROKER_WRAPPER = path.join(
@@ -41,7 +41,7 @@ const CONTROL_CONTRACT = path.join(
   "..",
   "packages", "nemoclaw-hermes",
   "host",
-  "tool-gateway-control-contract.ts",
+  "tool-contract.ts",
 );
 
 const BROKER_READINESS_TIMEOUT_MS = 15_000;
@@ -130,7 +130,7 @@ async function startBrokerLikeListener(
     "});",
   ].join("\n");
   return startInlineListener(resources, "broker-like listener", source, [
-    "tool-gateway-broker.ts",
+    "tool-broker.ts",
     String(port),
     controlSocket,
   ]);
@@ -479,7 +479,7 @@ describe("Hermes managed-tool gateway broker", () => {
             "--input-type=commonjs",
             "--eval",
             'process.stdout.write("ready\\n"); setInterval(() => {}, 1_000);',
-            "tool-gateway-broker.ts",
+            "tool-broker.ts",
           ],
           { stdio: ["ignore", "pipe", "pipe"] },
         ),
@@ -555,7 +555,7 @@ describe("Hermes managed-tool gateway broker", () => {
             "--input-type=commonjs",
             "--eval",
             'process.stdout.write("ready\\n"); setInterval(() => {}, 1_000);',
-            "tool-gateway-broker.ts",
+            "tool-broker.ts",
           ],
           { stdio: ["ignore", "pipe", "pipe"] },
         ),

@@ -8,8 +8,8 @@ import path from "node:path";
 const DOCKERFILE = path.join(import.meta.dirname, "..", "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 const OPENCLAW_VERSION_EXTRACTOR = path.join(
   path.dirname(DOCKERFILE),
-  "scripts",
-  "extract-semver.sh",
+  "checks",
+  "extract-version.sh",
 );
 
 export const CURRENT_REVIEWED_OPENCLAW_PATCH_CLASSIFIER_VERSION = "2026.7.1";

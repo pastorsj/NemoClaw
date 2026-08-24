@@ -5,7 +5,7 @@ import type { HermesBuildSettings } from "./build-env.ts";
 import {
   effectiveManagedToolGatewayPresets,
   loadManagedToolGatewayMatrix,
-} from "./managed-tool-gateway.ts";
+} from "./tool-gateway.ts";
 
 const TAVILY_API_KEY_PLACEHOLDER = "openshell:resolve:env:TAVILY_API_KEY";
 

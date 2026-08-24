@@ -9,8 +9,10 @@ import { describe, expect, it } from "vitest";
 
 const managedRuntimePath = path.join(
   process.cwd(),
-  "packages", "nemoclaw-langchain-deepagents-code",
-  "managed-dcode-runtime.py",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
+  "runtime",
+  "managed-runtime.py",
 );
 
 function runManagedHelper(source: string) {

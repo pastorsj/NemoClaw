@@ -19,9 +19,8 @@ const NORMALIZER_SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "normalize_mutable_config_perms.py",
+  "runtime",
+  "config-permissions.py",
 );
 const startSource = fs.readFileSync(START_SCRIPT, "utf-8");
 const normalizerSource = fs.readFileSync(NORMALIZER_SCRIPT, "utf-8");

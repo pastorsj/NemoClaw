@@ -49,7 +49,7 @@ NODE
   })"
 fi
 
-backup_script="${package_root}/scripts/backup-workspace.sh"
+backup_script="${package_root}/runtime/backup-workspace.sh"
 if [[ ! -f "${backup_script}" || -L "${backup_script}" || ! -x "${backup_script}" ]]; then
   printf 'OpenClaw harness backup helper is unavailable: %s\n' "${backup_script}" >&2
   exit 1

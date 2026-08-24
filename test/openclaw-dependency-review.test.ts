@@ -44,36 +44,36 @@ const ISSUE_4434_PATCH = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-issue-4434-diagnostics.mts",
+  "compat",
+  "inference-diagnostics.mts",
 );
 const DEVICE_SELF_APPROVAL_PATCH = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-device-self-approval.mts",
+  "compat",
+  "device-approval.mts",
 );
 const SHARED_STATE_PERMISSIONS_PATCH = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-shared-state-permissions.mts",
+  "compat",
+  "state-permissions.mts",
 );
 const MCP_RELIABILITY_PATCH = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-mcp-reliability.mts",
+  "compat",
+  "mcp-reliability.mts",
 );
 const MCP_TOOLS_LIST_TIMEOUT_PATCH = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-mcp-tools-list-timeout.mts",
+  "compat",
+  "mcp-timeout.mts",
 );
 const OPENCLAW_DOCKERFILE = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
 const OPENCLAW_BASE_DOCKERFILE = path.join(
@@ -194,7 +194,7 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
 
     expect(review).toContain("## Transient Remote MCP Startup Recovery");
     expect(review).toContain(
-      "packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts",
+      "packages/nemoclaw-openclaw/compat/mcp-reliability.mts",
     );
     expect(review).toContain(
       'identifies its target by the `"openclaw-bundle-mcp"` client identity',
@@ -222,7 +222,7 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
 
     expect(review).toContain("## Managed Outbound Transport Diagnostics");
     expect(review).toContain(
-      "packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts",
+      "packages/nemoclaw-openclaw/compat/transport-diagnostics.mts",
     );
     expect(review).toContain("The sibling SSE transport boundary is deliberately left unwrapped.");
     expect(review).toContain("Failure-only by default.");
@@ -258,7 +258,7 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
     expect(review).toContain("local 32-character hexadecimal `diagnostic_id`");
     expect(review).toContain("not a distributed trace identifier");
     expect(review).toContain(
-      "Managed transport diagnostics remains separate from `packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts`.",
+      "Managed transport diagnostics remains separate from `packages/nemoclaw-openclaw/compat/mcp-reliability.mts`.",
     );
     expect(review).toContain("wraps every failed remote Streamable HTTP fetch");
     expect(review).toContain("The reliability patch owns startup catalog and retry behavior.");
@@ -276,7 +276,7 @@ describe("OpenClaw 2026.6.10 dependency review contract", () => {
 
     expect(review).toContain("## Bounded MCP Tool Discovery Timeout");
     expect(review).toContain(
-      "packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts",
+      "packages/nemoclaw-openclaw/compat/mcp-timeout.mts",
     );
     expect(review).toContain("OpenClaw `2026.7.1` gives `tools/list` 1,500 ms");
     expect(review).toContain("from 1,500 through 10,000 ms");
@@ -590,7 +590,7 @@ set -euo pipefail
 
 messaging_build_applier=${JSON.stringify(MESSAGING_BUILD_APPLIER)}
 reviewed_archive_helper=scripts/lib/reviewed-npm-archive.mts
-remediation_helper=packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
+remediation_helper=packages/nemoclaw-openclaw/compat/npm-remediation.mts
 messaging_remediation_adapter=src/lib/messaging/applier/build/openclaw-npm-remediation.mts
 openclaw_dockerfile=${JSON.stringify(OPENCLAW_DOCKERFILE)}
 openclaw_base_dockerfile=${JSON.stringify(OPENCLAW_BASE_DOCKERFILE)}
@@ -680,7 +680,7 @@ optional_plugin_block="$(sed -n '/# Install non-messaging OpenClaw plugins that 
 check_contains "$optional_plugin_block" '/scripts/lib/reviewed-npm-archive.mts' "optional plugin shared helper"
 check_contains "$optional_plugin_block" '--package-spec "$plugin_spec" --integrity "$expected_integrity"' "optional plugin reviewed identity"
 check_contains "$optional_plugin_block" '--tarball-url "$expected_tarball"' "optional plugin reviewed tarball"
-check_contains "$optional_plugin_block" '/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts' "optional plugin remediation helper"
+check_contains "$optional_plugin_block" '/packages/nemoclaw-openclaw/compat/npm-remediation.mts' "optional plugin remediation helper"
 check_contains "$optional_plugin_block" '"@openclaw/diagnostics-otel@2026.7.1")' "diagnostics remediation identity"
 check_contains "$optional_plugin_block" '--working-directory "$plugin_work_root"' "diagnostics remediation workspace"
 check_contains "$optional_plugin_block" 'if (!value.remediated || typeof value.archivePath !== "string")' "diagnostics remediation result guard"
@@ -700,7 +700,7 @@ check_not_contains "$optional_plugin_block" 'pack_reviewed_npm_tarball' "optiona
 	grep -Fq 'remediateReviewedOpenClawPluginArchive({' "$messaging_build_applier"
 	grep -Fq 'NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER' "$messaging_remediation_adapter"
 	! grep -Fq '../../../../../packages/nemoclaw-openclaw' "$messaging_remediation_adapter"
-	grep -Fq 'NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts' "$openclaw_dockerfile"
+	grep -Fq 'NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/compat/npm-remediation.mts' "$openclaw_dockerfile"
 	grep -Fq 'spawnSync(' "$messaging_remediation_adapter"
 	grep -Fq 'result.status !== 0' "$messaging_remediation_adapter"
 	grep -Fq 'spawnSync(request.npmExecutable ?? "npm", args' "$reviewed_archive_helper"
@@ -734,16 +734,16 @@ check_not_contains "$optional_plugin_block" 'pack_reviewed_npm_tarball' "optiona
 	grep -Fq 'formatRawAssistantErrorForUi' "$issue_4434_patch"
 	grep -Fq 'OPENSHELL_SANDBOX !== "1"' "$issue_4434_patch"
 		grep -Fq 'nemoclaw: #4434 structured unreachable-inference diagnostic' "$issue_4434_patch"
-		grep -Fq 'COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-issue-4434-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts' "$openclaw_dockerfile"
+		grep -Fq 'COPY packages/nemoclaw-openclaw/compat/inference-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts' "$openclaw_dockerfile"
 		grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts \\' "$openclaw_dockerfile"
-		grep -Fq 'COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-tool-catalog.mts /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts' "$openclaw_dockerfile"
+		grep -Fq 'COPY packages/nemoclaw-openclaw/compat/tool-catalog.mts /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts' "$openclaw_dockerfile"
 		grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts \\' "$openclaw_dockerfile"
 		! grep -Fq 'patch-openclaw-tool-catalog.js' "$openclaw_dockerfile"
 		device_self_approval_patch=${JSON.stringify(DEVICE_SELF_APPROVAL_PATCH)}
 		grep -Fq 'nemoclaw: reach gateway for bounded same-device scope approval' "$device_self_approval_patch"
 		grep -Fq 'nemoclaw: bounded same-device scope approval' "$device_self_approval_patch"
 		grep -Fq 'nemoclaw: validate bounded self-approval inside pairing lock' "$device_self_approval_patch"
-		grep -Fq 'COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts' "$openclaw_dockerfile"
+		grep -Fq 'COPY packages/nemoclaw-openclaw/compat/device-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts' "$openclaw_dockerfile"
 		grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts \\' "$openclaw_dockerfile"
 	shared_state_permissions_patch=${JSON.stringify(SHARED_STATE_PERMISSIONS_PATCH)}
 	grep -Fq 'nemoclaw: group-shared OpenClaw state' "$shared_state_permissions_patch"
@@ -753,20 +753,20 @@ check_not_contains "$optional_plugin_block" 'pack_reviewed_npm_tarball' "optiona
 	! grep -Fq 'nemoclaw: group-shared OpenClaw file-store defaults' "$shared_state_permissions_patch"
 	grep -Fq 'nemoclaw: group-shared OpenClaw models file' "$shared_state_permissions_patch"
 	grep -Fq 'nemoclaw: ignore legacy OpenClaw update-check state' "$shared_state_permissions_patch"
-	grep -Fq 'COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts' "$openclaw_dockerfile"
+	grep -Fq 'COPY packages/nemoclaw-openclaw/compat/state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts' "$openclaw_dockerfile"
 	grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts \\' "$openclaw_dockerfile"
 	mcp_reliability_patch=${JSON.stringify(MCP_RELIABILITY_PATCH)}
 	grep -Fq 'nemoclaw mcp transient startup recovery (#7958)' "$mcp_reliability_patch"
 	grep -Fq 'nemoClawIsTransientMcpStartFailure' "$mcp_reliability_patch"
 	grep -Fq 'nemoClawCatalogHasStartDiagnostics' "$mcp_reliability_patch"
-	grep -Fq 'COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts' "$openclaw_dockerfile"
+	grep -Fq 'COPY packages/nemoclaw-openclaw/compat/mcp-reliability.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts' "$openclaw_dockerfile"
 	grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts \\' "$openclaw_dockerfile"
 	! grep -Fq 'patch-openclaw-mcp-reliability.js' "$openclaw_dockerfile"
 	mcp_tools_list_timeout_patch=${JSON.stringify(MCP_TOOLS_LIST_TIMEOUT_PATCH)}
 	grep -Fq 'NEMOCLAW_MCP_TOOLS_LIST_TIMEOUT_MS' "$mcp_tools_list_timeout_patch"
 	grep -Fq 'TOOLS_LIST_TIMEOUT_MIN_MS = 1500' "$mcp_tools_list_timeout_patch"
 	grep -Fq 'TOOLS_LIST_TIMEOUT_MAX_MS = 10_000' "$mcp_tools_list_timeout_patch"
-	grep -Fq 'COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts' "$openclaw_dockerfile"
+	grep -Fq 'COPY packages/nemoclaw-openclaw/compat/mcp-timeout.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts' "$openclaw_dockerfile"
 	grep -Fq 'node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts \\' "$openclaw_dockerfile"
 	! grep -Fq 'patch-openclaw-mcp-tools-list-timeout.js' "$openclaw_dockerfile"
 

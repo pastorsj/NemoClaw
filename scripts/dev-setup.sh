@@ -644,8 +644,11 @@ run_doctor() {
     "Run: npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts"
   check_build_artifact "CLI build artifacts" "${CLI_BUILD_ARTIFACT}" "Run: npm run build:cli" \
     "${REPO_ROOT}/src" "${REPO_ROOT}/bin" \
-    "${REPO_ROOT}/packages/nemoclaw-openclaw/preloads" \
-    "${REPO_ROOT}/packages/nemoclaw-openclaw/scripts" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/checks" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/compat" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/config" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/host" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/runtime" \
     "${REPO_ROOT}/tsconfig.src.json"
   check_build_artifact "Plugin build artifacts" "${PLUGIN_BUILD_ARTIFACT}" \
     "Run: npm --prefix packages/nemoclaw-openclaw/plugin run build" \

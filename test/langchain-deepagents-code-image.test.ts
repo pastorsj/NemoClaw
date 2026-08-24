@@ -125,7 +125,7 @@ describe("targeted dependency advisory review", () => {
     (distribution, version) => {
       const normalizedDistribution = distribution.replaceAll("-", "[-_]");
       const normalizedVersion = version.replaceAll(".", "\\.");
-      expect(readAgentFile("dependency-review.md")).toMatch(
+      expect(readAgentFile("compat/dependencies.md")).toMatch(
         new RegExp(
           `(?:^|[^A-Za-z0-9_-])${normalizedDistribution}\\s+${normalizedVersion}(?=[^0-9.]|$)`,
           "im",
@@ -169,7 +169,7 @@ with zipfile.ZipFile(wheel_path, "w") as wheel:
 function baseImagePipInstallArgs(dockerfile: string, requirementsPath: string): string[] {
   const logicalDockerfile = dockerfile.replace(/\\\r?\n\s*/g, " ");
   const copiedLock = logicalDockerfile.match(
-    /COPY\s+packages\/nemoclaw-langchain-deepagents-code\/requirements\.lock\s+(\S+)/,
+    /COPY\s+packages\/nemoclaw-langchain-deepagents-code\/runtime\/requirements\.lock\s+(\S+)/,
   );
   expect(copiedLock, "base image must copy the reviewed lockfile").not.toBeNull();
   const invocation = logicalDockerfile.match(/"\$VIRTUAL_ENV\/bin\/pip3" install\s+([^\n]+?)\s+&&/);
@@ -224,18 +224,18 @@ describe("LangChain Deep Agents Code image contracts", () => {
     ].join("\n");
     const managedRuntimeDirectory = "&& install -d -o root -g root -m 0755 /run/nemoclaw";
     const runtimeModeReplay =
-      "&& chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/package.json";
+      "&& chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts /opt/nemoclaw-deepagents-code/package.json";
 
     expect(dockerfile).toContain("ARG BASE_IMAGE\n");
     expect(dockerfile).toContain("ARG NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b");
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts",
+      "COPY packages/nemoclaw-langchain-deepagents-code/config/entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts",
     );
     expect(dockerfile).toContain(
       "COPY packages/nemoclaw-langchain-deepagents-code/package.json /opt/nemoclaw-deepagents-code/package.json",
     );
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts",
+      "COPY packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts",
     );
     expect(dockerfile).toContain("&& /usr/local/lib/nemoclaw/generate-config \\");
     expect(dockerfile).not.toContain("langchain-deepagents-code-sandbox-base:latest");
@@ -323,11 +323,11 @@ describe("LangChain Deep Agents Code image contracts", () => {
 
   it("reserves the first DCode login profile under a sticky root workspace (#8624)", () => {
     const dockerfile = readAgentFile("Dockerfile");
-    const loginProfile = readAgentFile("dcode-login-profile.sh");
+    const loginProfile = readAgentFile("runtime/login-profile.sh");
     const startScript = readAgentFile("start.sh");
 
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-langchain-deepagents-code/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh",
+      "COPY packages/nemoclaw-langchain-deepagents-code/runtime/login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh",
     );
     expect(dockerfile).toContain("chown root:sandbox /sandbox");
     expect(dockerfile).toContain("chmod 1775 /sandbox");
@@ -451,8 +451,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
 
   it("keeps all Deep Agents Code entry points behind the managed wrapper boundary", () => {
     const dockerfile = readAgentFile("Dockerfile");
-    const launcher = readAgentFile("dcode-launcher.sh");
-    const wrapper = readAgentFile("dcode-wrapper.sh");
+    const launcher = readAgentFile("runtime/agent-launcher.sh");
+    const wrapper = readAgentFile("runtime/agent-wrapper.sh");
     const expectedVersion = loadAgent("langchain-deepagents-code").expectedVersion;
 
     expect(dockerfile).not.toContain("NEMOCLAW_WEB_SEARCH_ENABLED");
@@ -488,11 +488,11 @@ describe("LangChain Deep Agents Code image contracts", () => {
     ).toBe(true);
     expect(
       [
-        "managed-dcode-runtime.py",
+        "runtime/managed-runtime.py",
         "dcode-session-supervisor.py",
-        "nemoclaw_observability.py",
+        "runtime/observability.py",
         "nemoclaw_read_only_mcp.py",
-        "patch-managed-deepagents-code.py",
+        "compat/runtime-patch.py",
         "validate-read-only-mcp-call.py",
         "validate-nemotron-ultra-profile.py",
         "DEEPAGENTS_CODE_LANGSMITH_TRACING=false",
@@ -502,7 +502,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
         "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/dcode.real",
         "install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/deepagents-code",
         "install -o root -g root -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-managed-exec",
-        "COPY packages/nemoclaw-langchain-deepagents-code/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py",
+        "COPY packages/nemoclaw-langchain-deepagents-code/runtime/session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py",
         `test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-session-supervisor.py)" = "0:0:755"`,
         "test -f /usr/local/lib/nemoclaw/dcode-managed-exec",
         "test ! -L /usr/local/lib/nemoclaw/dcode-managed-exec",
@@ -520,17 +520,17 @@ describe("LangChain Deep Agents Code image contracts", () => {
       dockerfile
         .split("\n")
         .filter((line) =>
-          line.startsWith("COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin"),
+          line.startsWith("COPY packages/nemoclaw-langchain-deepagents-code/plugin"),
         ),
     ).toEqual([
-      "COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin/pyproject.toml /opt/nemoclaw-deepagents-profile-plugin/",
-      "COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin/src/nemoclaw_deepagents_profile/__init__.py /opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/",
+      "COPY packages/nemoclaw-langchain-deepagents-code/plugin/pyproject.toml /opt/nemoclaw-deepagents-profile-plugin/",
+      "COPY packages/nemoclaw-langchain-deepagents-code/plugin/src/nemoclaw_deepagents_profile/__init__.py /opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/",
     ]);
     expect(dockerfile).toContain(
       "rm -f /usr/local/bin/dcode /usr/local/bin/deepagents-code /opt/venv/bin/dcode /opt/venv/bin/deepagents-code",
     );
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-langchain-deepagents-code/validate-progressive-tool-disclosure.py",
+      "COPY packages/nemoclaw-langchain-deepagents-code/checks/tool-disclosure.py",
     );
     expect(dockerfile).toContain(
       "python3 /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py",
@@ -549,7 +549,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     expect(dockerfile).not.toContain("LICENSE.langchain-deepagents");
     expect(dockerfile).not.toContain("langchain-deepagents-MIT.txt");
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-langchain-deepagents-code/validate-observability.py",
+      "COPY packages/nemoclaw-langchain-deepagents-code/checks/observability.py",
     );
     expect(dockerfile).toContain(
       "/opt/venv/bin/python3 -I /opt/nemoclaw-deepagents-code/validate-observability.py",
@@ -591,9 +591,9 @@ describe("LangChain Deep Agents Code image contracts", () => {
   });
 
   it("keeps NemoClaw MCP state separate from user discovery", () => {
-    const wrapper = readAgentFile("dcode-wrapper.sh");
-    const managedRuntime = readAgentFile("managed-dcode-runtime.py");
-    const patcher = readAgentFile("patch-managed-deepagents-code.py");
+    const wrapper = readAgentFile("runtime/agent-wrapper.sh");
+    const managedRuntime = readAgentFile("runtime/managed-runtime.py");
+    const patcher = readAgentFile("compat/runtime-patch.py");
     const agent = loadAgent("langchain-deepagents-code");
     const managedPath = "/sandbox/.deepagents/.nemoclaw-mcp.json";
 
@@ -619,7 +619,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     const baseDockerfile = readAgentFile("Dockerfile.base");
     const dockerfile = readAgentFile("Dockerfile");
     const startScript = readAgentFile("start.sh");
-    const wrapper = readAgentFile("dcode-wrapper.sh");
+    const wrapper = readAgentFile("runtime/agent-wrapper.sh");
     const pathContractFiles = [baseDockerfile, dockerfile, startScript, wrapper].join("\n");
 
     expect(baseDockerfile).toContain("VIRTUAL_ENV=/opt/venv");
@@ -1132,7 +1132,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
 
   it("makes the base image enforce the reviewed hash-locked dependency set", () => {
     const baseDockerfile = readAgentFile("Dockerfile.base");
-    const requirementsLock = readAgentFile("requirements.lock");
+    const requirementsLock = readAgentFile("runtime/requirements.lock");
 
     assertEveryRequirementIsHashLocked(requirementsLock);
     expect(baseDockerfile).not.toContain("--break-system-packages");
@@ -1177,16 +1177,16 @@ describe("LangChain Deep Agents Code image contracts", () => {
   }, 30_000);
 
   it("keeps image validator versions aligned with the reviewed lockfile", () => {
-    const requirementsLock = readAgentFile("requirements.lock");
-    const progressiveValidator = readAgentFile("validate-progressive-tool-disclosure.py");
-    const pluginMetadata = readAgentFile("profile-plugin/pyproject.toml");
+    const requirementsLock = readAgentFile("runtime/requirements.lock");
+    const progressiveValidator = readAgentFile("checks/tool-disclosure.py");
+    const pluginMetadata = readAgentFile("plugin/pyproject.toml");
     const pluginVersion = pluginMetadata.match(/^version = "([^"]+)"$/m)?.[1];
     expect(pluginVersion).toBe("0.1.0");
 
     const {
       "nemoclaw-deepagents-profile": profileValidatorPluginVersion,
       ...profileValidatorVersions
-    } = pythonStringMap(readAgentFile("validate-nemotron-ultra-profile.py"), "EXPECTED_VERSIONS");
+    } = pythonStringMap(readAgentFile("checks/model-profile.py"), "EXPECTED_VERSIONS");
     expect(profileValidatorPluginVersion).toBe(pluginVersion);
     expectVersionsMatchLock(requirementsLock, profileValidatorVersions);
     expectVersionsMatchLock(
@@ -1194,7 +1194,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
       pythonStringMap(progressiveValidator, "PINNED_VERSIONS"),
     );
 
-    const observabilityValidator = readAgentFile("validate-observability.py");
+    const observabilityValidator = readAgentFile("checks/observability.py");
     const observabilityVersion = observabilityValidator.match(
       /^_EXPECTED_LANGGRAPH_VERSION = "([^"]+)"$/m,
     )?.[1];
@@ -1224,7 +1224,8 @@ describe("LangChain Deep Agents Code image contracts", () => {
       repoRoot,
       "packages",
       "nemoclaw-langchain-deepagents-code",
-      "validate-progressive-tool-disclosure.py",
+      "checks",
+      "tool-disclosure.py",
     );
     const metadata = JSON.parse(
       execFileSync(
@@ -1280,18 +1281,16 @@ print(json.dumps(values, sort_keys=True))`,
   ] as const)(
     "records dependency advisory review for the lockfile [case %#]",
     (name, expectedVersion) => {
-      const review = readAgentFile("dependency-review.md");
-      const requirementsLock = readAgentFile("requirements.lock");
-      const adapterModule = readAgentFile(
-        "profile-plugin/src/nemoclaw_deepagents_profile/__init__.py",
-      );
-      const adapterMetadata = readAgentFile("profile-plugin/pyproject.toml");
+      const review = readAgentFile("compat/dependencies.md");
+      const requirementsLock = readAgentFile("runtime/requirements.lock");
+      const adapterModule = readAgentFile("plugin/src/nemoclaw_deepagents_profile/__init__.py");
+      const adapterMetadata = readAgentFile("plugin/pyproject.toml");
       const dockerfile = readAgentFile("Dockerfile");
-      const profileValidator = readAgentFile("validate-nemotron-ultra-profile.py");
+      const profileValidator = readAgentFile("checks/model-profile.py");
 
       expect(review).toContain(`Lockfile SHA-256: \`${sha256(requirementsLock)}\``);
       expect(review).toContain(
-        "uv tool run --python 3.13 pip-audit -r packages/nemoclaw-langchain-deepagents-code/requirements.lock --progress-spinner off --disable-pip",
+        "uv tool run --python 3.13 pip-audit -r packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock --progress-spinner off --disable-pip",
       );
       expect(review).toMatch(/Targeted audit result:.*no known vulnerabilities/is);
       expect(review).toMatch(

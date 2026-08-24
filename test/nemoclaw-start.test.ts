@@ -12,13 +12,10 @@ import { extractShellFunctionFromSource } from "./helpers/shell-source";
 
 const OPENCLAW_PACKAGE = path.join(import.meta.dirname, "../packages/nemoclaw-openclaw");
 const START_SCRIPT = path.join(OPENCLAW_PACKAGE, "start.sh");
-const APPROVAL_POLICY_DIR = path.join(OPENCLAW_PACKAGE, "scripts", "lib");
-const MUTABLE_CONFIG_NORMALIZER = path.join(
-  APPROVAL_POLICY_DIR,
-  "normalize_mutable_config_perms.py",
-);
+const APPROVAL_POLICY_SOURCE = path.join(OPENCLAW_PACKAGE, "runtime", "device-approval.py");
+const MUTABLE_CONFIG_NORMALIZER = path.join(OPENCLAW_PACKAGE, "runtime", "config-permissions.py");
 const INSTALLED_APPROVAL_POLICY = "/usr/local/lib/nemoclaw/openclaw_device_approval_policy.py";
-const PRELOAD_SCRIPTS = path.join(OPENCLAW_PACKAGE, "preloads");
+const PRELOAD_SCRIPTS = path.join(OPENCLAW_PACKAGE, "runtime", "preloads");
 const CHANNEL_RUNTIME_SCRIPTS = path.join(import.meta.dirname, "..", "src/lib/messaging/channels");
 const JSON5_MODULE = path.join(OPENCLAW_PACKAGE, "plugin", "node_modules", "json5");
 
@@ -168,7 +165,7 @@ function startScriptHeredoc(src: string, marker: string): string {
 function trustedApprovalPolicyFile(tmpDir?: string): string {
   tmpDir ??= fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-helper-"));
   const helperPath = path.join(tmpDir, "openclaw_device_approval_policy.py");
-  fs.copyFileSync(path.join(APPROVAL_POLICY_DIR, "openclaw_device_approval_policy.py"), helperPath);
+  fs.copyFileSync(APPROVAL_POLICY_SOURCE, helperPath);
   fs.chmodSync(helperPath, 0o444);
   return helperPath;
 }

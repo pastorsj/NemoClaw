@@ -94,7 +94,7 @@ describe("package-owned qualification specifications", testTimeoutOptions(30_000
   it("uses the receipt-verified installed Hermes qualification module", () => {
     const installed = writeInstalledHarness(
       "hermes",
-      "host/base-image-qualification.cts",
+      "host/base-qualification.cts",
       [
         '"use strict";',
         "module.exports = {",
@@ -133,7 +133,7 @@ describe("package-owned qualification specifications", testTimeoutOptions(30_000
   it("uses the receipt-verified installed Deep Agents Code qualification module", () => {
     const installed = writeInstalledHarness(
       "langchain-deepagents-code",
-      "host/qualification-probes.cts",
+      "host/base-qualification.cts",
       deepAgentsCodeRuntimeSource("langchain-deepagents-code"),
     );
     vi.stubEnv("HOME", installed.home);
@@ -156,7 +156,7 @@ describe("package-owned qualification specifications", testTimeoutOptions(30_000
   it("rejects Hermes package drift before capturing its qualification module", () => {
     const installed = writeInstalledHarness(
       "hermes",
-      "host/base-image-qualification.cts",
+      "host/base-qualification.cts",
       [
         '"use strict";',
         "module.exports = {",
@@ -180,7 +180,7 @@ describe("package-owned qualification specifications", testTimeoutOptions(30_000
   it("rejects Deep Agents Code package drift before capturing its qualification module", () => {
     const installed = writeInstalledHarness(
       "langchain-deepagents-code",
-      "host/qualification-probes.cts",
+      "host/base-qualification.cts",
       deepAgentsCodeRuntimeSource("langchain-deepagents-code"),
     );
     vi.stubEnv("HOME", installed.home);
@@ -197,13 +197,13 @@ describe("package-owned qualification specifications", testTimeoutOptions(30_000
   ] as const)("rejects a Deep Agents Code %s with a different agent identity", (_label, read) => {
     const installed = writeInstalledHarness(
       "langchain-deepagents-code",
-      "host/qualification-probes.cts",
+      "host/base-qualification.cts",
       deepAgentsCodeRuntimeSource("openclaw"),
     );
     vi.stubEnv("HOME", installed.home);
 
     expect(() => read()).toThrow(
-      "LangChain Deep Agents Code harness qualification-probes module returned an invalid specification.",
+      "LangChain Deep Agents Code qualification module returned an invalid specification.",
     );
   });
 });

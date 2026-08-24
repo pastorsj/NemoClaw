@@ -16,7 +16,7 @@
   },
   "include": [
     "bin/**/*.js",
-    "packages/nemoclaw-openclaw/preloads/**/*.js",
+    "packages/nemoclaw-openclaw/runtime/preloads/**/*.js",
     "scripts/**/*.js",
     "test/**/*.js"
   ],

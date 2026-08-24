@@ -59,14 +59,14 @@ const MANAGED_STARTUP_E2E_JOB_IDS = [
 ] as const;
 const HERMES_CLI_ADAPTER_E2E_JOB_IDS = ["channels-stop-start", "mcp-bridge"] as const;
 const HERMES_CLI_ADAPTER_RUNTIME_FILES = new Set([
-  "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
-  "packages/nemoclaw-hermes/hermes-wrapper.py",
-  "packages/nemoclaw-hermes/validate-cli-adapter.py",
+  "packages/nemoclaw-hermes/runtime/cli-adapter.json",
+  "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+  "packages/nemoclaw-hermes/checks/cli-adapter.py",
 ]);
 const HERMES_CRON_RESTORE_E2E_JOB_IDS = ["rebuild-hermes"] as const;
 const HERMES_CRON_RESTORE_RUNTIME_FILES = new Set([
-  "packages/nemoclaw-hermes/cron-restore-control.py",
-  "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
+  "packages/nemoclaw-hermes/runtime/cron-control.py",
+  "packages/nemoclaw-hermes/compat/cron-drain.py",
   "src/lib/actions/sandbox/rebuild-hermes-post-restore.ts",
   "src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts",
 ]);
@@ -80,12 +80,12 @@ const HERMES_MANAGED_POLICY_E2E_JOB_IDS = [
   "security-posture",
 ] as const;
 const HERMES_MANAGED_POLICY_FILES = new Set([
-  "packages/nemoclaw-hermes/hermes-wrapper.py",
-  "packages/nemoclaw-hermes/image-build-probes.py",
-  "packages/nemoclaw-hermes/config/managed-route.cts",
-  "packages/nemoclaw-hermes/managed_policy.py",
-  "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
-  "packages/nemoclaw-hermes/seed-dashboard-config.py",
+  "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+  "packages/nemoclaw-hermes/checks/image-probes.py",
+  "packages/nemoclaw-hermes/host/managed-route.cts",
+  "packages/nemoclaw-hermes/runtime/managed_policy.py",
+  "packages/nemoclaw-hermes/compat/profile-policy.py",
+  "packages/nemoclaw-hermes/runtime/dashboard-config.py",
   "packages/nemoclaw-hermes/start.sh",
   "src/lib/hermes-managed-route.ts",
 ]);

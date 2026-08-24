@@ -15,7 +15,7 @@ const FINALIZER = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "finalize-tirith-marker.py",
+  "runtime", "tirith-marker.py",
 );
 
 function readRegularFileNoFollow(filePath: string) {

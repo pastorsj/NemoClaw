@@ -9,7 +9,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { buildConfig } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
+import { buildConfig } from "../packages/nemoclaw-openclaw/config/generate-config.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
 const OPENCLAW_AUDIT_TIMEOUT_MS = 120_000;

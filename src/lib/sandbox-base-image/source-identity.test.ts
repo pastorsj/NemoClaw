@@ -98,7 +98,7 @@ function createGitFixture() {
   );
   writeFixture(
     root,
-    "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+    "packages/nemoclaw-openclaw/compat/npm-remediation.mts",
     "export const version = 1;\n",
   );
   writeFixture(root, "src/other.ts", "export const value = 1;\n");
@@ -199,15 +199,15 @@ describe("sandbox base-image source identity", () => {
         "../outside/Dockerfile.base",
       ]),
     ).toEqual([
-      "packages/nemoclaw-openclaw/base-image-inputs.json",
+      "packages/nemoclaw-openclaw/checks/base-inputs.json",
       "packages/nemoclaw-openclaw/Dockerfile.base",
       "packages/nemoclaw-openclaw/manifest.yaml",
       "scripts/lib/sandbox-rlimits.sh",
-      "packages/nemoclaw-openclaw/mcporter-runtime/package.json",
-      "packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json",
+      "packages/nemoclaw-openclaw/runtime/mcporter/package.json",
+      "packages/nemoclaw-openclaw/runtime/mcporter/package-lock.json",
       "scripts/security/build-perl-security-packages.sh",
       "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",
-      "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+      "packages/nemoclaw-openclaw/compat/npm-remediation.mts",
       "scripts/lib/reviewed-npm-archive.mts",
       "scripts/lib/bundled-npm-package.mts",
       "scripts/patch-bundled-npm-brace-expansion.mts",
@@ -441,10 +441,10 @@ describe("sandbox base-image source identity", () => {
     git(root, ["switch", "-c", "feature"]);
     writeFixture(
       root,
-      "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts",
+      "packages/nemoclaw-openclaw/compat/npm-remediation.mts",
       "export const version = 2;\n",
     );
-    git(root, ["add", "packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts"]);
+    git(root, ["add", "packages/nemoclaw-openclaw/compat/npm-remediation.mts"]);
     git(root, ["commit", "-m", "change remediation helper"]);
 
     expect(baseImageInputsDirty(root, gitEnv)).toBe(false);

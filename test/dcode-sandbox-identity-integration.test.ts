@@ -15,8 +15,10 @@ import { makeStartScriptFixture } from "./support/dcode-start-script-fixture.ts"
 const WRAPPER = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-langchain-deepagents-code",
-  "dcode-wrapper.sh",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
+  "runtime",
+  "agent-wrapper.sh",
 );
 
 function replaceOrThrow(source: string, search: string, replacement: string): string {

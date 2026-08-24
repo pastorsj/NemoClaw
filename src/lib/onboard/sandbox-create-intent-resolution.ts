@@ -47,8 +47,7 @@ export interface SandboxCreateIntentResolverDeps<Agent, ResourceProfile> {
   channels: readonly NamedMessagingChannel[];
   messagingPreflightDeps: SandboxMessagingPreflightDeps;
   filterEnabledChannelsByAgent(enabledChannels: string[] | null, agent: Agent): string[] | null;
-  defaultPolicyPath: string;
-  getAgentPolicyPath(agent: Agent): string | null;
+  getAgentPolicyPath(agent: Agent): string;
   resolveGpuPlan(
     config: SandboxGpuCreateConfig,
     agent: Agent,
@@ -128,7 +127,7 @@ export function createSandboxCreateIntentResolver<
     const resourceCreateArgs: string[] = [];
     deps.appendResourceCreateArgs(resourceCreateArgs, input.resourceProfile);
     return resolveSandboxCreateIntent({
-      basePolicyPath: deps.getAgentPolicyPath(input.agent) || deps.defaultPolicyPath,
+      basePolicyPath: deps.getAgentPolicyPath(input.agent),
       sandboxName: input.sandboxName,
       inferenceProvider: input.inferenceProvider,
       hostLocalInferenceRouteOnly: input.hostLocalInferenceRouteOnly === true,

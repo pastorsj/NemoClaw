@@ -6,5 +6,5 @@ set -euo pipefail
 
 exec /usr/local/bin/node \
   --experimental-strip-types \
-  /scripts/generate-openclaw-config.mts \
+  /packages/nemoclaw-openclaw/config/generate-config.mts \
   "$@"

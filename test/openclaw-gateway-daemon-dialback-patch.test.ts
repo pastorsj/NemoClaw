@@ -16,7 +16,7 @@ import {
   patchGatewayToolTargetText,
   patchOpenClawGatewayDaemonDialback,
   TOOL_TARGET_MARKER,
-} from "../packages/nemoclaw-openclaw/scripts/openclaw/patch-gateway-daemon-dialback.mts";
+} from "../packages/nemoclaw-openclaw/compat/gateway-dialback.mts";
 import { restoreEnv } from "./helpers/env-test-helpers";
 
 const PATCH_SCRIPT = path.join(
@@ -24,9 +24,8 @@ const PATCH_SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "openclaw",
-  "patch-gateway-daemon-dialback.mts",
+  "compat",
+  "gateway-dialback.mts",
 );
 const DOCKERFILE = path.join(import.meta.dirname, "..", "packages", "nemoclaw-openclaw", "Dockerfile");
 

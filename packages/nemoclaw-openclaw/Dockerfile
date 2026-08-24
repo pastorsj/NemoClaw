@@ -167,7 +167,7 @@ RUN --network=none set -eu; \
     command -v codex-acp >/dev/null
 
 FROM node:22-trixie-slim@sha256:db8a96a63e5264607ada2d206758876ebbed6a12be2ada7517793cbfb0c2a29c AS wechat-npm-cache
-COPY packages/nemoclaw-openclaw/wechat-runtime/package.json packages/nemoclaw-openclaw/wechat-runtime/package-lock.json /opt/wechat-runtime/
+COPY packages/nemoclaw-openclaw/runtime/wechat/package.json packages/nemoclaw-openclaw/runtime/wechat/package-lock.json /opt/wechat-runtime/
 COPY scripts/checks/materialize-locked-npm-cache-seed.mts /opt/checks/
 COPY scripts/lib/reviewed-npm-archive.mts scripts/lib/seed-reviewed-npm-cache.mts /opt/nemoclaw-build-tools/
 COPY --from=wechat-npm-archives / /opt/wechat-npm-archives/
@@ -488,7 +488,7 @@ ARG TARGETARCH
 ENV NPM_CONFIG_AUDIT=false \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_UPDATE_NOTIFIER=false
-COPY packages/nemoclaw-openclaw/managed-image-messaging-runtime/package.json packages/nemoclaw-openclaw/managed-image-messaging-runtime/package-lock.json /opt/managed-image-messaging-runtime/
+COPY packages/nemoclaw-openclaw/runtime/messaging/package.json packages/nemoclaw-openclaw/runtime/messaging/package-lock.json /opt/managed-image-messaging-runtime/
 COPY scripts/checks/materialize-locked-npm-cache-seed.mts /opt/nemoclaw-build-tools/checks/
 COPY scripts/lib/reviewed-npm-archive.mts scripts/lib/seed-reviewed-npm-cache.mts /opt/nemoclaw-build-tools/lib/
 COPY --from=openclaw-managed-messaging-npm-archives / /opt/nemoclaw-build-tools/npm-cache-seed/
@@ -527,18 +527,18 @@ FROM openclaw-managed-messaging-npm-cache-${NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UN
 # can collapse related payloads without invalidating earlier final-image work.
 FROM scratch AS openclaw-dependency-payload
 
-COPY packages/nemoclaw-openclaw/openclaw-runtime/package.json /usr/local/lib/nemoclaw/openclaw-runtime/package.json
-COPY packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json /usr/local/lib/nemoclaw/openclaw-runtime/package-lock.json
-COPY packages/nemoclaw-openclaw/mcporter-runtime/package.json /usr/local/lib/nemoclaw/mcporter-runtime/package.json
-COPY packages/nemoclaw-openclaw/mcporter-runtime/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/package-lock.json
-COPY packages/nemoclaw-openclaw/wechat-runtime/package.json /usr/local/lib/nemoclaw/wechat-runtime/package.json
-COPY packages/nemoclaw-openclaw/wechat-runtime/package-lock.json /usr/local/lib/nemoclaw/wechat-runtime/package-lock.json
+COPY packages/nemoclaw-openclaw/runtime/openclaw/package.json /usr/local/lib/nemoclaw/openclaw-runtime/package.json
+COPY packages/nemoclaw-openclaw/runtime/openclaw/package-lock.json /usr/local/lib/nemoclaw/openclaw-runtime/package-lock.json
+COPY packages/nemoclaw-openclaw/runtime/mcporter/package.json /usr/local/lib/nemoclaw/mcporter-runtime/package.json
+COPY packages/nemoclaw-openclaw/runtime/mcporter/package-lock.json /usr/local/lib/nemoclaw/mcporter-runtime/package-lock.json
+COPY packages/nemoclaw-openclaw/runtime/wechat/package.json /usr/local/lib/nemoclaw/wechat-runtime/package.json
+COPY packages/nemoclaw-openclaw/runtime/wechat/package-lock.json /usr/local/lib/nemoclaw/wechat-runtime/package-lock.json
 COPY ci/npm-audit-exceptions.json /scripts/npm-audit-exceptions.json
 COPY scripts/lib/reviewed-npm-archive.mts /scripts/lib/reviewed-npm-archive.mts
 COPY scripts/lib/bundled-npm-package.mts /scripts/lib/bundled-npm-package.mts
 COPY scripts/lib/reviewed-npm-audit.mts /scripts/lib/reviewed-npm-audit.mts
 COPY packages/nemoclaw-openclaw/manifest.yaml /packages/nemoclaw-openclaw/manifest.yaml
-COPY packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
+COPY packages/nemoclaw-openclaw/compat/npm-remediation.mts /packages/nemoclaw-openclaw/compat/npm-remediation.mts
 COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts
 COPY scripts/lib/patch-bundled-npm-ip-address.mts /scripts/lib/patch-bundled-npm-ip-address.mts
 COPY scripts/patch-bundled-npm-tar.mts /scripts/patch-bundled-npm-tar.mts
@@ -552,22 +552,22 @@ COPY packages/nemoclaw-openclaw/policies/presets/ /opt/nemoclaw-blueprint/polici
 COPY packages/nemoclaw-openclaw/model-specific-setup/openclaw/ /opt/nemoclaw-blueprint/model-specific-setup/openclaw/
 COPY packages/nemoclaw-openclaw/openclaw-plugins/ /opt/nemoclaw-blueprint/openclaw-plugins/
 COPY packages/nemoclaw-openclaw/policy-additions.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox.yaml
-COPY packages/nemoclaw-openclaw/policy-permissive-default.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml
+COPY packages/nemoclaw-openclaw/policies/permissive-default.yaml /opt/nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml
 
 FROM scratch AS openclaw-patch-payload
 
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-tool-catalog.mts /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-chat-send.mts /usr/local/lib/nemoclaw/patch-openclaw-chat-send.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-npx.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-npx.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-issue-4434-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-managed-transport-diagnostics.mts
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts
-COPY packages/nemoclaw-openclaw/scripts/openclaw/patch-gateway-daemon-dialback.mts /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts
-COPY packages/nemoclaw-openclaw/scripts/extract-semver.sh /usr/local/lib/nemoclaw/extract-semver
-COPY packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts
-COPY packages/nemoclaw-openclaw/scripts/verify-wechat-runtime-lock.mts /usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts
+COPY packages/nemoclaw-openclaw/compat/tool-catalog.mts /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts
+COPY packages/nemoclaw-openclaw/compat/chat-send.mts /usr/local/lib/nemoclaw/patch-openclaw-chat-send.mts
+COPY packages/nemoclaw-openclaw/compat/mcp-npx.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-npx.mts
+COPY packages/nemoclaw-openclaw/compat/mcp-reliability.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-reliability.mts
+COPY packages/nemoclaw-openclaw/compat/mcp-timeout.mts /usr/local/lib/nemoclaw/patch-openclaw-mcp-tools-list-timeout.mts
+COPY packages/nemoclaw-openclaw/compat/inference-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts
+COPY packages/nemoclaw-openclaw/compat/transport-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-managed-transport-diagnostics.mts
+COPY packages/nemoclaw-openclaw/compat/device-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts
+COPY packages/nemoclaw-openclaw/compat/gateway-dialback.mts /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts
+COPY packages/nemoclaw-openclaw/checks/extract-version.sh /usr/local/lib/nemoclaw/extract-semver
+COPY packages/nemoclaw-openclaw/compat/state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts
+COPY packages/nemoclaw-openclaw/checks/wechat-lock.mts /usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts
 
 FROM scratch AS openclaw-runtime-payload
 
@@ -576,25 +576,27 @@ COPY --chmod=0444 scripts/lib/corporate-ca-runtime.sh /usr/local/lib/nemoclaw/co
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY scripts/lib/gateway-supervisor.sh /usr/local/lib/nemoclaw/gateway-supervisor.sh
 COPY scripts/lib/sandbox-rlimits.sh /usr/local/lib/nemoclaw/sandbox-rlimits.sh
-COPY packages/nemoclaw-openclaw/scripts/lib/openclaw_device_approval_policy.py /usr/local/lib/nemoclaw/openclaw_device_approval_policy.py
-COPY packages/nemoclaw-openclaw/scripts/lib/clean_runtime_shell_env_shim.py /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py
-COPY packages/nemoclaw-openclaw/scripts/lib/normalize_mutable_config_perms.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
+COPY packages/nemoclaw-openclaw/runtime/device-approval.py /usr/local/lib/nemoclaw/openclaw_device_approval_policy.py
+COPY packages/nemoclaw-openclaw/compat/shell-env.py /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py
+COPY packages/nemoclaw-openclaw/runtime/config-permissions.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
-COPY packages/nemoclaw-openclaw/state-lock-plan.json /usr/local/share/nemoclaw/state-lock-plan.json
-COPY packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
+COPY packages/nemoclaw-openclaw/runtime/state/plan.json /usr/local/share/nemoclaw/state-lock-plan.json
+COPY packages/nemoclaw-openclaw/runtime/config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
 COPY packages/nemoclaw-openclaw/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
-COPY packages/nemoclaw-openclaw/preloads/*.js /usr/local/lib/nemoclaw/preloads/
+COPY packages/nemoclaw-openclaw/runtime/preloads/*.js /usr/local/lib/nemoclaw/preloads/
 COPY --from=runtime-preload-builder /opt/nemoclaw-root/dist/lib/messaging/channels/ /usr/local/lib/nemoclaw/preloads-compiled-channels/
-COPY packages/nemoclaw-openclaw/scripts/codex-acp-wrapper.sh /usr/local/bin/nemoclaw-codex-acp
+COPY packages/nemoclaw-openclaw/runtime/codex-acp.sh /usr/local/bin/nemoclaw-codex-acp
 COPY packages/nemoclaw-openclaw/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
-COPY packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts /scripts/generate-openclaw-config.mts
-COPY --chmod=0444 packages/nemoclaw-openclaw/scripts/config-runtime.cts /scripts/config-runtime.cts
-COPY packages/nemoclaw-openclaw/scripts/validate-openclaw-tool-search.mts /scripts/validate-openclaw-tool-search.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/config/generate-config.mts /packages/nemoclaw-openclaw/config/generate-config.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/config/agent-config.mts /packages/nemoclaw-openclaw/config/agent-config.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/config/model-setup.mts /packages/nemoclaw-openclaw/config/model-setup.mts
+COPY --chmod=0444 packages/nemoclaw-openclaw/host/config-runtime.cts /packages/nemoclaw-openclaw/host/config-runtime.cts
+COPY packages/nemoclaw-openclaw/checks/tool-search.mts /scripts/validate-openclaw-tool-search.mts
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY src/lib/messaging/ /src/lib/messaging/
@@ -634,7 +636,7 @@ ARG OPENCLAW_2026_3_11_TARBALL=https://registry.npmjs.org/openclaw/-/openclaw-20
 ARG OPENCLAW_2026_4_24_INTEGRITY=sha512-W6u4XeIIP4+uG4DYV9G3JeS6QNuKwfhQIej1GIoL4BdcnUFgrnB8kHYNXL3MxiHRKuhZB9OYwUMGs8jKFZR/Vg==
 ARG OPENCLAW_2026_4_24_TARBALL=https://registry.npmjs.org/openclaw/-/openclaw-2026.4.24.tgz
 # Keep the mcporter version, integrity, runtime lock, license, and advisory baseline
-# synchronized with packages/nemoclaw-openclaw/dependency-review.md.
+# synchronized with packages/nemoclaw-openclaw/compat/dependency-review.md.
 ARG MCPORTER_VERSION=0.7.3
 ARG MCPORTER_0_7_3_INTEGRITY=sha512-egoPVYqTnWb3NjRIxo+xc8OrAI0dlPrJm9pAiZx0pImuNIV5rKhGtTnIfH/Y1ldGPVu74ibj3KR5c9U/QSdQFA==
 ARG MCPORTER_0_7_3_TARBALL=https://registry.npmjs.org/mcporter/-/mcporter-0.7.3.tgz
@@ -976,7 +978,7 @@ RUN --network=default set -eu; \
             OPENCLAW_PACK_PATH="$OPENCLAW_SOURCE_PACK_PATH"; \
             OPENCLAW_PACK_DIR="$(dirname "$OPENCLAW_PACK_PATH")"; \
             if [ "$OPENCLAW_VERSION" = "2026.3.11" ]; then \
-                OPENCLAW_REMEDIATION_JSON="$(node --experimental-strip-types /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
+                OPENCLAW_REMEDIATION_JSON="$(node --experimental-strip-types /packages/nemoclaw-openclaw/compat/npm-remediation.mts \
                     --archive "$OPENCLAW_SOURCE_PACK_PATH" --package-spec "openclaw@${OPENCLAW_VERSION}" \
                     --working-directory "$OPENCLAW_PACK_DIR")"; \
                 OPENCLAW_PACK_PATH="$(node -e 'const value = JSON.parse(process.argv[1]); if (!value.remediated || typeof value.archivePath !== "string") process.exit(1); process.stdout.write(value.archivePath)' "$OPENCLAW_REMEDIATION_JSON")"; \
@@ -1582,7 +1584,7 @@ RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /usr/local/bin/nemoclaw-managed-bootstrap \
         /usr/local/bin/nemoclaw-managed-startup-hold \
         /usr/local/lib/nemoclaw/sandbox-init.sh \
-        /scripts/generate-openclaw-config.mts \
+        /packages/nemoclaw-openclaw/config/generate-config.mts \
         /scripts/validate-openclaw-tool-search.mts \
         /src/lib/messaging/applier/build/messaging-build-applier.mts \
     && chmod 444 /src/lib/tool-disclosure.ts \
@@ -1801,7 +1803,7 @@ USER sandbox
 # block until after build-time OpenClaw doctor/plugin commands complete.
 RUN NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=0 \
     NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 \
-    node --experimental-strip-types /scripts/generate-openclaw-config.mts
+    node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts
 
 # Validate the patched OpenClaw tool-search contract against real generated
 # configs for both supported disclosure modes. This runs at image build time so
@@ -1819,7 +1821,7 @@ RUN set -eu; \
             NEMOCLAW_TOOL_DISCLOSURE="$mode" \
             NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=0 \
             NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 \
-            node --experimental-strip-types /scripts/generate-openclaw-config.mts; \
+            node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts; \
         node --experimental-strip-types /scripts/validate-openclaw-tool-search.mts \
             /usr/local/lib/node_modules/openclaw/dist \
             "$validation_home/.openclaw/openclaw.json" \
@@ -1871,7 +1873,7 @@ RUN --network=none --mount=from=openclaw-optional-plugin-archives,target=/opt/ne
         plugin_install_archive="$plugin_archive"; \
         case "$plugin_spec" in \
             "@openclaw/diagnostics-otel@2026.7.1") \
-                remediation_json="$(node --experimental-strip-types /packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
+                remediation_json="$(node --experimental-strip-types /packages/nemoclaw-openclaw/compat/npm-remediation.mts \
                     --archive "$plugin_archive" --package-spec "$plugin_spec" \
                     --working-directory "$plugin_work_root")"; \
                 plugin_install_archive="$(node -e 'const value = JSON.parse(process.argv[1]); if (!value.remediated || typeof value.archivePath !== "string") process.exit(1); process.stdout.write(value.archivePath)' "$remediation_json")" \
@@ -1935,12 +1937,12 @@ RUN --mount=from=openclaw-managed-messaging-npm-cache,source=/out/npm-cache,targ
         export NPM_CONFIG_FUND=false; \
     fi; \
     NEMOCLAW_WECHAT_NPM_INSTALL_CACHE="$install_cache" \
-        NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
+        NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/compat/npm-remediation.mts \
         OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
         node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts --agent openclaw --phase agent-install; \
     if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
         NEMOCLAW_WECHAT_NPM_INSTALL_CACHE="$install_cache" \
-            NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts \
+            NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER=/packages/nemoclaw-openclaw/compat/npm-remediation.mts \
             OPENCLAW_VERSION="${OPENCLAW_VERSION}" \
             node --experimental-strip-types /src/lib/messaging/applier/build/messaging-build-applier.mts \
                 --agent openclaw --phase managed-image-capability-union; \
@@ -1994,7 +1996,7 @@ RUN OPENCLAW_VERSION="${OPENCLAW_VERSION}" node --experimental-strip-types /src/
 # Validate the exact generated file through the pinned OpenClaw CLI.
 # hadolint ignore=DL3059,DL4006,SC2016
 RUN if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
-        node --experimental-strip-types /scripts/generate-openclaw-config.mts; \
+        node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts; \
         validation="$(openclaw config validate --json)"; \
         node -e 'const result=JSON.parse(process.argv[1]); if (result.valid !== true) process.exit(1)' "$validation"; \
         node -e 'const fs=require("node:fs"), path=require("node:path"); const config=JSON.parse(fs.readFileSync("/sandbox/.openclaw/openclaw.json", "utf8")); const root="/usr/local/lib/node_modules/openclaw/dist/extensions"; const bundled=fs.readdirSync(root, {withFileTypes:true}).filter((entry)=>entry.isDirectory()).map((entry)=>entry.name).flatMap((id)=>{ const packagePath=path.join(root, id, "package.json"); if (!fs.existsSync(packagePath)) return []; const packageManifest=JSON.parse(fs.readFileSync(packagePath, "utf8")); if (!packageManifest.openclaw?.channel?.id) return []; const pluginManifest=JSON.parse(fs.readFileSync(path.join(root, id, "openclaw.plugin.json"), "utf8")); return [{channelId:packageManifest.openclaw.channel.id, pluginId:pluginManifest.id}]; }); if (!bundled.some(({channelId})=>channelId === "imessage") || !bundled.some(({channelId})=>channelId === "telegram")) throw new Error(`unexpected bundled OpenClaw channel inventory: ${bundled.map(({channelId})=>channelId).join(",")}`); for (const {channelId, pluginId} of bundled) { if (config.plugins?.entries?.[pluginId]?.enabled !== false || config.channels?.[channelId]?.enabled !== false) throw new Error(`bundled OpenClaw channel is not neutral: ${channelId}`); }'; \

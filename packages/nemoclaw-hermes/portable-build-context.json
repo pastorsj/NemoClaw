@@ -2,44 +2,44 @@
   "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
   "schemaVersion": 1,
   "dockerfileCopySources": [
-    "packages/nemoclaw-hermes/build-mcp-digest.py",
-    "packages/nemoclaw-hermes/config/",
-    "packages/nemoclaw-hermes/cron-restore-control.py",
-    "packages/nemoclaw-hermes/finalize-tirith-marker.py",
-    "packages/nemoclaw-hermes/generate-config.ts",
-    "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
-    "packages/nemoclaw-hermes/hermes-wrapper.py",
-    "packages/nemoclaw-hermes/host/managed-tool-gateway-matrix.json",
-    "packages/nemoclaw-hermes/image-build-probes.py",
-    "packages/nemoclaw-hermes/managed_policy.py",
-    "packages/nemoclaw-hermes/mcp-config-transaction.py",
-    "packages/nemoclaw-hermes/model-specific-setup/",
-    "packages/nemoclaw-hermes/policies/presets/",
-    "packages/nemoclaw-hermes/patch-cron-execution-runtime.py",
-    "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
-    "packages/nemoclaw-hermes/patch-discord-recovery-permissions.py",
-    "packages/nemoclaw-hermes/patch-gateway-process-identity.py",
-    "packages/nemoclaw-hermes/patch-gateway-runtime-metadata.py",
-    "packages/nemoclaw-hermes/patch-hermes-sqlite-temp-store.py",
-    "packages/nemoclaw-hermes/patch-langfuse-credentials.mts",
-    "packages/nemoclaw-hermes/patch-neutral-platform-env-activation.py",
-    "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
-    "packages/nemoclaw-hermes/patch-session-list-preview.py",
-    "packages/nemoclaw-hermes/plugin/",
-    "packages/nemoclaw-hermes/provider-profiles/",
-    "packages/nemoclaw-hermes/runtime-config-guard.py",
-    "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
-    "packages/nemoclaw-hermes/runtime/generate-config.sh",
-    "packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py",
-    "packages/nemoclaw-hermes/scripts/runtime-state-mutation-startup-gate.py",
-    "packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py",
-    "packages/nemoclaw-hermes/security-dependencies.patch",
-    "packages/nemoclaw-hermes/seed-dashboard-config.py",
-    "packages/nemoclaw-hermes/start.sh",
-    "packages/nemoclaw-hermes/state-lock-plan.json",
-    "packages/nemoclaw-hermes/validate-cli-adapter.py",
-    "packages/nemoclaw-hermes/validate-env-secret-boundary.py",
     "nemoclaw-blueprint/",
+    "packages/nemoclaw-hermes/checks/cli-adapter.py",
+    "packages/nemoclaw-hermes/checks/image-probes.py",
+    "packages/nemoclaw-hermes/compat/cron-drain.py",
+    "packages/nemoclaw-hermes/compat/cron-execution.py",
+    "packages/nemoclaw-hermes/compat/discord-permissions.py",
+    "packages/nemoclaw-hermes/compat/env-activation.py",
+    "packages/nemoclaw-hermes/compat/gateway-identity.py",
+    "packages/nemoclaw-hermes/compat/gateway-metadata.py",
+    "packages/nemoclaw-hermes/compat/langfuse-credentials.mts",
+    "packages/nemoclaw-hermes/compat/profile-policy.py",
+    "packages/nemoclaw-hermes/compat/security-dependencies.patch",
+    "packages/nemoclaw-hermes/compat/session-preview.py",
+    "packages/nemoclaw-hermes/compat/sqlite-store.py",
+    "packages/nemoclaw-hermes/config/",
+    "packages/nemoclaw-hermes/host/managed-route.cts",
+    "packages/nemoclaw-hermes/host/tool-matrix.json",
+    "packages/nemoclaw-hermes/model-specific-setup/",
+    "packages/nemoclaw-hermes/plugin/",
+    "packages/nemoclaw-hermes/policies/presets/",
+    "packages/nemoclaw-hermes/provider-profiles/",
+    "packages/nemoclaw-hermes/runtime/cli-adapter.json",
+    "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+    "packages/nemoclaw-hermes/runtime/config-guard.py",
+    "packages/nemoclaw-hermes/runtime/cron-control.py",
+    "packages/nemoclaw-hermes/runtime/dashboard-config.py",
+    "packages/nemoclaw-hermes/runtime/env-boundary.py",
+    "packages/nemoclaw-hermes/runtime/generate-config.sh",
+    "packages/nemoclaw-hermes/runtime/managed_policy.py",
+    "packages/nemoclaw-hermes/runtime/mcp-digest.py",
+    "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
+    "packages/nemoclaw-hermes/runtime/state/control.py",
+    "packages/nemoclaw-hermes/runtime/state/plan.json",
+    "packages/nemoclaw-hermes/runtime/state/publisher.json",
+    "packages/nemoclaw-hermes/runtime/state/publisher.py",
+    "packages/nemoclaw-hermes/runtime/state/startup-gate.py",
+    "packages/nemoclaw-hermes/runtime/tirith-marker.py",
+    "packages/nemoclaw-hermes/start.sh",
     "scripts/gateway-control.sh",
     "scripts/lib/bundled-npm-package.mts",
     "scripts/lib/corporate-ca-runtime.sh",
@@ -68,211 +68,7 @@
   ],
   "trackedFiles": [
     {
-      "path": "packages/nemoclaw-hermes/build-mcp-digest.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/build-env.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/generate.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/hermes-env.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/managed-policy.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/managed-route.cts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/mcp-adapter.cts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/managed-tool-gateway.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/model-specific-setup.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/object-record.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/upstream-header.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/write-config.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/config/yaml.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/cron-restore-control.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/Dockerfile",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/portable-build-context.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/finalize-tirith-marker.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/generate-config.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/hermes-cli-adapter-v1.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/hermes-wrapper.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/host/managed-tool-gateway-matrix.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/image-build-probes.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/managed_policy.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/mcp-config-transaction.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-cron-execution-runtime.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-cron-restore-drain.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-discord-recovery-permissions.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-gateway-process-identity.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-gateway-runtime-metadata.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-hermes-sqlite-temp-store.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-langfuse-credentials.mts",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-neutral-platform-env-activation.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-profile-policy-defaults.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/patch-session-list-preview.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/plugin/__init__.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/plugin/plugin.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/plugin/test_private_url_opt_in.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/plugin/test_register_tools.py",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime-config-guard.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime-state-mutation-publisher-v1.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime/generate-config.sh",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/scripts/runtime_state_mutation_hermes_publisher.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/scripts/runtime-state-mutation-control.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/scripts/runtime-state-mutation-startup-gate.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/security-dependencies.patch",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/seed-dashboard-config.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/start.sh",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/state-lock-plan.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/validate-cli-adapter.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/validate-env-secret-boundary.py",
-      "mode": "100755"
-    },
-    {
       "path": "nemoclaw-blueprint/blueprint.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/model-specific-setup/hermes/README.md",
       "mode": "100644"
     },
     {
@@ -313,30 +109,6 @@
     },
     {
       "path": "nemoclaw-blueprint/policies/presets/local-inference.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/policies/presets/nous-audio.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/policies/presets/nous-browser.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/policies/presets/nous-code.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/policies/presets/nous-image.yaml",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/policies/presets/nous-web.yaml",
       "mode": "100644"
     },
     {
@@ -392,15 +164,11 @@
       "mode": "100644"
     },
     {
-      "path": "nemoclaw-blueprint/provider-profiles/openai.yaml",
-      "mode": "100644"
-    },
-    {
       "path": "nemoclaw-blueprint/provider-profiles/okta-runtime-v1.yaml",
       "mode": "100644"
     },
     {
-      "path": "packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml",
+      "path": "nemoclaw-blueprint/provider-profiles/openai.yaml",
       "mode": "100644"
     },
     {
@@ -418,6 +186,234 @@
     {
       "path": "nemoclaw-blueprint/tsconfig.json",
       "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/Dockerfile",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/checks/cli-adapter.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/checks/image-probes.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/cron-drain.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/cron-execution.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/discord-permissions.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/env-activation.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/gateway-identity.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/gateway-metadata.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/langfuse-credentials.mts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/profile-policy.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/security-dependencies.patch",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/session-preview.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/sqlite-store.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/build-env.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/generate-config.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/generate.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/hermes-env.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/managed-policy.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/model-setup.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/object-record.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/tool-gateway.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/upstream-header.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/write-config.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/config/yaml.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/host/managed-route.cts",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/host/tool-matrix.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/model-specific-setup/hermes/README.md",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/plugin/__init__.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/plugin/plugin.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/plugin/test_private_url_opt_in.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/plugin/test_register_tools.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/local-memory.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-audio.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-browser.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-code.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-image.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/policies/presets/nous-web.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/portable-build-context.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/cli-adapter.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/config-guard.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/cron-control.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/dashboard-config.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/env-boundary.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/generate-config.sh",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/managed_policy.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/mcp-digest.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/state/control.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/state/plan.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/state/publisher.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/state/publisher.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/state/startup-gate.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/tirith-marker.py",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/start.sh",
+      "mode": "100755"
     },
     {
       "path": "scripts/gateway-control.sh",
@@ -489,6 +485,10 @@
     },
     {
       "path": "src/lib/messaging/AGENTS.md",
+      "mode": "100644"
+    },
+    {
+      "path": "src/lib/messaging/README.md",
       "mode": "100644"
     },
     {
@@ -1280,6 +1280,14 @@
       "mode": "100644"
     },
     {
+      "path": "src/lib/messaging/managed-startup-placeholders.test.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "src/lib/messaging/managed-startup-placeholders.ts",
+      "mode": "100644"
+    },
+    {
       "path": "src/lib/messaging/manifest/index.ts",
       "mode": "100644"
     },
@@ -1297,22 +1305,6 @@
     },
     {
       "path": "src/lib/messaging/manifest/types.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "src/lib/messaging/managed-startup-placeholders.test.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "src/lib/messaging/managed-startup-placeholders.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "src/lib/messaging/provider-profile.test.ts",
-      "mode": "100644"
-    },
-    {
-      "path": "src/lib/messaging/provider-profile.ts",
       "mode": "100644"
     },
     {
@@ -1356,7 +1348,11 @@
       "mode": "100644"
     },
     {
-      "path": "src/lib/messaging/README.md",
+      "path": "src/lib/messaging/provider-profile.test.ts",
+      "mode": "100644"
+    },
+    {
+      "path": "src/lib/messaging/provider-profile.ts",
       "mode": "100644"
     },
     {
@@ -1384,11 +1380,11 @@
       "mode": "100644"
     },
     {
-      "path": "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle",
+      "path": "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/THIRD_PARTY_LICENSES.txt",
       "mode": "100644"
     },
     {
-      "path": "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/THIRD_PARTY_LICENSES.txt",
+      "path": "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle",
       "mode": "100644"
     }
   ]

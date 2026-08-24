@@ -731,7 +731,7 @@ describe("agent base image provisioning", () => {
         expect.objectContaining({
           inputPaths: [
             "/test/root/packages/nemoclaw-langchain-deepagents-code/manifest.yaml",
-            "/test/root/packages/nemoclaw-langchain-deepagents-code/requirements.lock",
+            "/test/root/packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock",
           ],
           validateImage: expect.any(Function),
           validationDescription:

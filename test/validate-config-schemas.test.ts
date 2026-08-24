@@ -1268,7 +1268,7 @@ describe("policy-preset.schema.json", () => {
 
 describe("openclaw-plugin.schema.json", () => {
   const validate = compileSchema(
-    "packages/nemoclaw-openclaw/schemas/openclaw-plugin.schema.json",
+    "packages/nemoclaw-openclaw/config/plugin.schema.json",
   );
   const validPluginFixture = {
     id: "fixture-plugin",

@@ -9,18 +9,18 @@ import { describe, expect, it } from "vitest";
 
 import { bashPrintfQ, extractShellFunction } from "./support/hermes-shell-harness";
 
-const GUARD = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "runtime-config-guard.py");
+const GUARD = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "runtime", "config-guard.py");
 const BUILD_DIGEST = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "build-mcp-digest.py",
+  "runtime", "mcp-digest.py",
 );
 const TRANSACTION = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "mcp-config-transaction.py",
+  "runtime", "mcp-transaction.py",
 );
 const START = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 

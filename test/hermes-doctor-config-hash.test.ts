@@ -10,8 +10,8 @@ import { dockerRunCommandBetween, runDockerShell } from "./helpers/dockerfile-ru
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
-const HERMES_BUILD_MCP_DIGEST = path.join(ROOT, "packages", "nemoclaw-hermes", "build-mcp-digest.py");
-const HERMES_RUNTIME_CONFIG_GUARD = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime-config-guard.py");
+const HERMES_BUILD_MCP_DIGEST = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime", "mcp-digest.py");
+const HERMES_RUNTIME_CONFIG_GUARD = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime", "config-guard.py");
 
 function writeYamlStubPython(root: string): string {
   const bootstrap = path.join(root, "python-yaml-bootstrap.py");
@@ -296,7 +296,7 @@ describe("Hermes doctor and config hash boundary", () => {
       .replaceAll("/sandbox", sandboxRoot)
       .replaceAll("/usr/local/bin/hermes", fakeHermes)
       .replaceAll(
-        "node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts",
+        "node --experimental-strip-types /opt/nemoclaw-hermes-config/config/generate-config.ts",
         fakeGenerateCommand,
       );
     const lockCommand = dockerRunCommandBetween(

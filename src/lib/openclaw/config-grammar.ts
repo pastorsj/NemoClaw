@@ -39,11 +39,7 @@ function loadOpenClawReplyBudgetRuntime(): ReplyBudgetRuntime {
   if (cachedRuntime?.selectionKey === selectionKey) return cachedRuntime.module;
   const harnessPackage = resolveHarnessPackage("openclaw");
   if (!harnessPackage) throw new Error("OpenClaw harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(
-    harnessPackage,
-    "scripts/config-runtime.cts",
-    128 * 1024,
-  );
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/config-runtime.cts", 128 * 1024);
   const runtime = loaded.exports as Partial<ReplyBudgetRuntime>;
   if (
     typeof runtime.DEFAULT_OPENCLAW_MAX_TOKENS !== "number" ||

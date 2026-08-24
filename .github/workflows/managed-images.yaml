@@ -94,7 +94,7 @@ jobs:
             ci/npm-audit-exceptions.json
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
-            packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -182,7 +182,7 @@ jobs:
           staging_root="$GITHUB_WORKSPACE/staging-qa-base-source"
           for relative in \
             packages/nemoclaw-langchain-deepagents-code/Dockerfile.base \
-            packages/nemoclaw-langchain-deepagents-code/requirements.lock
+            packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock
           do
             source_file="$candidate_root/$relative"
             destination_file="$staging_root/$relative"

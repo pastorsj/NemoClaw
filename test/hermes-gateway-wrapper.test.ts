@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Coverage for the hermes CLI wrapper (packages/nemoclaw-hermes/hermes-wrapper.py), which
+// Coverage for the hermes CLI wrapper (packages/nemoclaw-hermes/runtime/cli-wrapper.py), which
 // closes the #4975 bypass: `docker exec ... hermes gateway run` must enforce the
 // same runtime-env secret boundary as the nemoclaw-start entrypoint, refusing
 // raw secret-shaped env vars and never reaching the real gateway.
@@ -24,7 +24,7 @@ import { buildHermesManagedPolicy } from "../packages/nemoclaw-hermes/config/man
 import { buildOpenshellExecArgs } from "../src/lib/actions/sandbox/exec.ts";
 import { canRun, runWrapper, VALIDATOR, WRAPPER } from "./helpers/hermes-wrapper-harness.ts";
 
-describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
+describe.skipIf(!canRun)("packages/nemoclaw-hermes/runtime/cli-wrapper.py", () => {
   // Surface a hard error in CI when the prerequisites are missing instead of
   // silently skipping — a green CI run that never executed any wrapper test
   // would mask regressions in the security boundary. Runs after
@@ -131,7 +131,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
           `_TRUSTED_PYTHON3 = (${JSON.stringify(stubPython)},)`,
         );
       fs.writeFileSync(path.join(dir, "hermes"), wrapperSrc, { mode: 0o755 });
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
       fs.writeFileSync(path.join(dir, "hermes.real"), "#!/usr/bin/env bash\nexit 0\n", {
         mode: 0o755,
       });
@@ -174,7 +174,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
           `_TRUSTED_PYTHON3 = (${JSON.stringify(stubPython)},)`,
         );
       fs.writeFileSync(path.join(dir, "hermes"), wrapperSrc, { mode: 0o755 });
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
       fs.writeFileSync(path.join(dir, "hermes.real"), "#!/usr/bin/env bash\nexit 0\n", {
         mode: 0o755,
       });
@@ -211,7 +211,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
           `_TRUSTED_PYTHON3 = (${JSON.stringify(missingA)}, ${JSON.stringify(missingB)}, ${JSON.stringify(missingC)})`,
         );
       fs.writeFileSync(path.join(dir, "hermes"), wrapperSrc, { mode: 0o755 });
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
       fs.writeFileSync(path.join(dir, "hermes.real"), "#!/usr/bin/env bash\nexit 0\n", {
         mode: 0o755,
       });
@@ -499,8 +499,8 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
     try {
       fs.copyFileSync(WRAPPER, path.join(dir, "hermes"));
       fs.chmodSync(path.join(dir, "hermes"), 0o755);
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
-      fs.chmodSync(path.join(dir, "validate-env-secret-boundary.py"), 0o755);
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
+      fs.chmodSync(path.join(dir, "env-boundary.py"), 0o755);
       const stubScript = [
         "#!/usr/bin/env python3",
         "import sys",
@@ -528,8 +528,8 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
     try {
       fs.copyFileSync(WRAPPER, path.join(dir, "hermes"));
       fs.chmodSync(path.join(dir, "hermes"), 0o755);
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
-      fs.chmodSync(path.join(dir, "validate-env-secret-boundary.py"), 0o755);
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
+      fs.chmodSync(path.join(dir, "env-boundary.py"), 0o755);
       const stubScript = [
         "#!/usr/bin/env python3",
         "import sys",
@@ -732,7 +732,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-wrapper-pathshadow-"));
     try {
       fs.copyFileSync(WRAPPER, path.join(dir, "hermes"));
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
       fs.chmodSync(path.join(dir, "hermes"), 0o755);
       const stubScript = [
         "#!/usr/bin/env bash",
@@ -823,7 +823,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-wrapper-shebang-"));
     try {
       fs.copyFileSync(WRAPPER, path.join(dir, "hermes"));
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
       fs.chmodSync(path.join(dir, "hermes"), 0o755);
       const bashEnvScript = path.join(dir, "bash-env-evil.sh");
       const bashEnvMarker = path.join(dir, "bash-env-evil-marker.txt");
@@ -885,7 +885,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-wrapper-dispatch-"));
     try {
       fs.copyFileSync(WRAPPER, path.join(dir, "hermes"));
-      fs.copyFileSync(VALIDATOR, path.join(dir, "validate-env-secret-boundary.py"));
+      fs.copyFileSync(VALIDATOR, path.join(dir, "env-boundary.py"));
       fs.chmodSync(path.join(dir, "hermes"), 0o755);
       const fixture = [
         "◆ Model",
@@ -1024,7 +1024,7 @@ describe.skipIf(!canRun)("packages/nemoclaw-hermes/hermes-wrapper.py", () => {
         { mode: 0o755 },
       );
       fs.writeFileSync(
-        path.join(decoyDir, "validate-env-secret-boundary.py"),
+        path.join(decoyDir, "env-boundary.py"),
         "#!/usr/bin/env python3\nimport sys\nsys.exit(99)\n",
         { mode: 0o755 },
       );

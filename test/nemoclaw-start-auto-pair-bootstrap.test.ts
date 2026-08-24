@@ -14,13 +14,13 @@ const START_SCRIPT = path.join(
   "nemoclaw-openclaw",
   "start.sh",
 );
-const APPROVAL_POLICY_DIR = path.join(
+const APPROVAL_POLICY = path.join(
   import.meta.dirname,
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
+  "runtime",
+  "device-approval.py",
 );
 
 function startScriptHeredoc(src: string, marker: string): string {
@@ -31,7 +31,7 @@ function startScriptHeredoc(src: string, marker: string): string {
 
 function trustedApprovalPolicyFile(tmpDir: string): string {
   const helperPath = path.join(tmpDir, "openclaw_device_approval_policy.py");
-  fs.copyFileSync(path.join(APPROVAL_POLICY_DIR, "openclaw_device_approval_policy.py"), helperPath);
+  fs.copyFileSync(APPROVAL_POLICY, helperPath);
   fs.chmodSync(helperPath, 0o444);
   return helperPath;
 }

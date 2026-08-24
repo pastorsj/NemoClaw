@@ -53,7 +53,9 @@ describe("LangChain Deep Agents Code managed provider label", () => {
     );
     const generator = path.join(
       process.cwd(),
-      "packages", "nemoclaw-langchain-deepagents-code",
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+      "config",
       "generate-config.ts",
     );
     execFileSync(process.execPath, ["--experimental-strip-types", generator], {

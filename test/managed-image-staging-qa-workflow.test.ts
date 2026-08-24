@@ -80,7 +80,9 @@ describe("managed-image staging QA workflow", () => {
 
     const overlaySource = required(overlay.run, "staging QA dependency overlay is missing");
     expect(overlaySource).toContain("packages/nemoclaw-langchain-deepagents-code/Dockerfile.base");
-    expect(overlaySource).toContain("packages/nemoclaw-langchain-deepagents-code/requirements.lock");
+    expect(overlaySource).toContain(
+      "packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock",
+    );
     expect(overlaySource).toContain("scripts/lib/bundled-npm-package.mts");
     expect(overlaySource).toContain(
       "scripts/security/patches/perl-5.44.0-net-ping-capability-tests.patch",

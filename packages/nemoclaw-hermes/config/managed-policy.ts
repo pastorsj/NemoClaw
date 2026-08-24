@@ -9,7 +9,7 @@ import {
   applyManagedToolConfig,
   effectiveManagedToolGatewayPresets,
   loadManagedToolGatewayMatrix,
-} from "./managed-tool-gateway.ts";
+} from "./tool-gateway.ts";
 import { isObjectRecord } from "./object-record.ts";
 
 export type HermesManagedRoute = {
@@ -56,7 +56,7 @@ type HermesManagedRouteRuntime = {
 };
 
 const require = createRequire(import.meta.url);
-const managedRoute = require("./managed-route.cts") as HermesManagedRouteRuntime;
+const managedRoute = require("../host/managed-route.cts") as HermesManagedRouteRuntime;
 
 export const HERMES_PROXY_REWRITE_SENTINEL = managedRoute.HERMES_PROXY_REWRITE_SENTINEL;
 export const applyHermesManagedRoute: HermesManagedRouteRuntime["applyHermesManagedRoute"] =

@@ -614,8 +614,8 @@ startGateway(null).catch((error) => {
             buildCtx,
             "packages",
             "nemoclaw-openclaw",
-            "scripts",
-            "patch-openclaw-tool-catalog.mts",
+            "compat",
+            "tool-catalog.mts",
           ),
         ),
       ).toBe(true);

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Coverage for the dcode wrapper (packages/nemoclaw-langchain-deepagents-code/dcode-wrapper.sh)
+// Coverage for the dcode wrapper (packages/nemoclaw-langchain-deepagents-code/runtime/agent-wrapper.sh)
 // empty-prompt guard (#5752): `dcode -n ""` and whitespace-only `-n` prompts must
 // fail fast with a non-zero exit and never launch Deep Agents Code, instead of
 // running a task or dropping into the interactive TUI.
@@ -20,8 +20,10 @@ import { describe, expect, it } from "vitest";
 const WRAPPER = path.join(
   import.meta.dirname,
   "..",
-  "packages", "nemoclaw-langchain-deepagents-code",
-  "dcode-wrapper.sh",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
+  "runtime",
+  "agent-wrapper.sh",
 );
 
 function python3Available(): boolean {
@@ -100,7 +102,7 @@ const REJECT_CASES: Array<{ label: string; args: string[] }> = [
 ];
 
 describe.skipIf(!canRun)(
-  "packages/nemoclaw-langchain-deepagents-code/dcode-wrapper.sh empty prompt (#5752)",
+  "packages/nemoclaw-langchain-deepagents-code/runtime/agent-wrapper.sh empty prompt (#5752)",
   () => {
     it.each(REJECT_CASES)("refuses $label with exit 2 and never launches dcode", ({ args }) => {
       const run = runWrapper(args);

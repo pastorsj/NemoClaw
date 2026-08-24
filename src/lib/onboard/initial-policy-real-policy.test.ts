@@ -70,9 +70,7 @@ function filesystemPolicyAncestors(policyPath: string): string[] {
   const segments = normalizeFilesystemPolicyPath(policyPath).split("/").filter(Boolean);
   return [
     "/",
-    ...segments
-      .slice(0, -1)
-      .map((_, index) => `/${segments.slice(0, index + 1).join("/")}`),
+    ...segments.slice(0, -1).map((_, index) => `/${segments.slice(0, index + 1).join("/")}`),
   ];
 }
 
@@ -88,12 +86,12 @@ describe("initial sandbox policy real preset merge", () => {
   const managedImagePolicyPathsByAgent = {
     openclaw: [
       ["packages", "nemoclaw-openclaw", "policy-additions.yaml"],
-      ["packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"],
-      ["packages", "nemoclaw-openclaw", "policy-permissive.yaml"],
+      ["packages", "nemoclaw-openclaw", "policies", "permissive-default.yaml"],
+      ["packages", "nemoclaw-openclaw", "policies", "permissive.yaml"],
     ],
     hermes: [
       ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
-      ["packages", "nemoclaw-hermes", "policy-permissive.yaml"],
+      ["packages", "nemoclaw-hermes", "policies", "permissive.yaml"],
     ],
     "langchain-deepagents-code": [
       ["packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"],
@@ -267,11 +265,11 @@ describe("initial sandbox policy real preset merge", () => {
     expect(managedInference?.endpoints?.[0]).not.toHaveProperty("access");
   });
 
-  it("uses Hermes channel YAML when the Hermes base policy path implies the agent", () => {
+  it("uses Hermes channel YAML when Hermes is the selected agent", () => {
     const prepared = prepareInitialSandboxCreatePolicy(
       repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
       ["discord", "slack"],
-      { sandboxName: "hermes-channel" },
+      { agentName: "hermes", sandboxName: "hermes-channel" },
     );
     const policy = readPreparedPolicy(prepared);
 
@@ -376,8 +374,8 @@ describe("initial sandbox policy real preset merge", () => {
   );
 
   it.each([
-    "packages/nemoclaw-openclaw/policy-permissive-default.yaml",
-    "packages/nemoclaw-openclaw/policy-permissive.yaml",
+    "packages/nemoclaw-openclaw/policies/permissive-default.yaml",
+    "packages/nemoclaw-openclaw/policies/permissive.yaml",
   ])("preserves baseline writable paths in effective OpenClaw permissive policy %s", (policy) => {
     const baseline = readPreparedPolicy(
       prepareInitialSandboxCreatePolicy(
@@ -401,10 +399,13 @@ describe("initial sandbox policy real preset merge", () => {
   it.each(
     [
       {
-        path: repoPath("packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"),
+        path: repoPath("packages", "nemoclaw-openclaw", "policies", "permissive-default.yaml"),
         agent: "openclaw",
       },
-      { path: repoPath("packages", "nemoclaw-hermes", "policy-permissive.yaml"), agent: "hermes" },
+      {
+        path: repoPath("packages", "nemoclaw-hermes", "policies", "permissive.yaml"),
+        agent: "hermes",
+      },
     ].flatMap((policyCase) =>
       ["slack.com", "api.slack.com", "hooks.slack.com"].map((host) => ({ policyCase, host })),
     ),
@@ -452,15 +453,18 @@ describe("initial sandbox policy real preset merge", () => {
   it.each([
     ["missing", undefined],
     ["unsafe", "bad:provider"],
-  ])("rejects a Hermes Discord create policy with a %s target sandbox name", (_case, sandboxName) => {
-    expect(() =>
-      prepareInitialSandboxCreatePolicy(
-        repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
-        ["discord"],
-        { agentName: "hermes", sandboxName },
-      ),
-    ).toThrow("a valid sandbox name is required to materialize credential bindings");
-  });
+  ])(
+    "rejects a Hermes Discord create policy with a %s target sandbox name",
+    (_case, sandboxName) => {
+      expect(() =>
+        prepareInitialSandboxCreatePolicy(
+          repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
+          ["discord"],
+          { agentName: "hermes", sandboxName },
+        ),
+      ).toThrow("a valid sandbox name is required to materialize credential bindings");
+    },
+  );
 
   it.each(shippingPolicyCases.slice(0, 3).concat(shippingPolicyCases.slice(4)))(
     "keeps optional Claude hosts out of $agent create policy $path",
@@ -541,12 +545,12 @@ describe("initial sandbox policy real preset merge", () => {
     },
     {
       label: "permissive OpenClaw blueprint policy",
-      path: ["packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"],
+      path: ["packages", "nemoclaw-openclaw", "policies", "permissive-default.yaml"],
       agent: "openclaw",
     },
     {
       label: "permissive OpenClaw agent policy",
-      path: ["packages", "nemoclaw-openclaw", "policy-permissive.yaml"],
+      path: ["packages", "nemoclaw-openclaw", "policies", "permissive.yaml"],
       agent: "openclaw",
     },
     {
@@ -556,7 +560,7 @@ describe("initial sandbox policy real preset merge", () => {
     },
     {
       label: "permissive Hermes policy",
-      path: ["packages", "nemoclaw-hermes", "policy-permissive.yaml"],
+      path: ["packages", "nemoclaw-hermes", "policies", "permissive.yaml"],
       agent: "hermes",
     },
   ] as const)(

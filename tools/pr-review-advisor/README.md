@@ -106,9 +106,9 @@ Each match selects these focused E2E jobs:
 
 The same risk plan maps these Hermes CLI adapter paths to `focused-e2e`:
 
-- `packages/nemoclaw-hermes/hermes-cli-adapter-v1.json`.
-- `packages/nemoclaw-hermes/hermes-wrapper.py`.
-- `packages/nemoclaw-hermes/validate-cli-adapter.py`.
+- `packages/nemoclaw-hermes/runtime/cli-adapter.json`.
+- `packages/nemoclaw-hermes/runtime/cli-wrapper.py`.
+- `packages/nemoclaw-hermes/checks/cli-adapter.py`.
 
 Each Hermes CLI adapter match selects these focused E2E jobs:
 
@@ -117,8 +117,8 @@ Each Hermes CLI adapter match selects these focused E2E jobs:
 
 The same risk plan maps these Hermes cron restore paths to `focused-e2e`:
 
-- `packages/nemoclaw-hermes/cron-restore-control.py`.
-- `packages/nemoclaw-hermes/patch-cron-restore-drain.py`.
+- `packages/nemoclaw-hermes/runtime/cron-control.py`.
+- `packages/nemoclaw-hermes/compat/cron-drain.py`.
 - `src/lib/actions/sandbox/rebuild-hermes-post-restore.ts`.
 - `src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts`.
 

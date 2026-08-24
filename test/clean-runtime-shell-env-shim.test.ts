@@ -13,9 +13,8 @@ const CLEAN_SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "clean_runtime_shell_env_shim.py",
+  "compat",
+  "shell-env.py",
 );
 const SHIM_TEXT = "[ -f /tmp/nemoclaw-proxy-env.sh ] && . /tmp/nemoclaw-proxy-env.sh";
 const CURRENT_UID = process.getuid?.() ?? 0;

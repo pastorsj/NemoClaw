@@ -12,10 +12,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { extractShellFunction } from "./support/hermes-shell-harness";
 
 const repoRoot = path.join(import.meta.dirname, "..");
-const patcher = path.join(repoRoot, "packages", "nemoclaw-hermes", "patch-discord-recovery-permissions.py");
+const patcher = path.join(repoRoot, "packages", "nemoclaw-hermes", "compat", "discord-permissions.py");
 const dockerfile = fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"), "utf8");
 const imageBuildProbes = fs.readFileSync(
-  path.join(repoRoot, "packages", "nemoclaw-hermes", "image-build-probes.py"),
+  path.join(repoRoot, "packages", "nemoclaw-hermes", "checks", "image-probes.py"),
   "utf8",
 );
 const baseDockerfile = fs.readFileSync(
@@ -141,7 +141,7 @@ describe("Hermes cross-UID ledger permissions", () => {
 
     expect(dockerfile).toContain(`ARG NEMOCLAW_HERMES_DISCORD_RECOVERY_PATCHER_SHA256=${digest}`);
     expect(dockerfile).toContain(
-      "COPY packages/nemoclaw-hermes/patch-discord-recovery-permissions.py " +
+      "COPY packages/nemoclaw-hermes/compat/discord-permissions.py " +
         "/usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py",
     );
     expect(dockerfile).toMatch(

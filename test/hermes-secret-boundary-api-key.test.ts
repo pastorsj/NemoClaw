@@ -11,7 +11,7 @@ const SECRET_BOUNDARY_VALIDATOR_SCRIPT = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 const GENERATED_HEX_TOKEN = Array.from({ length: 64 }, (_value, index) =>
   (index % 16).toString(16),

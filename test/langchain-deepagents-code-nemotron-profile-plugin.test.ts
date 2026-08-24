@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const agentDir = path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code");
-const pluginProjectDir = path.join(agentDir, "profile-plugin");
+const pluginProjectDir = path.join(agentDir, "plugin");
 const pluginSourcePath = path.join(
   pluginProjectDir,
   "src",
@@ -19,7 +19,7 @@ const pluginSourcePath = path.join(
   "__init__.py",
 );
 const pluginProjectPath = path.join(pluginProjectDir, "pyproject.toml");
-const validatorPath = path.join(agentDir, "validate-nemotron-ultra-profile.py");
+const validatorPath = path.join(agentDir, "checks", "model-profile.py");
 const e2eProfileCheckPath = path.join(
   repoRoot,
   "test",
@@ -32,7 +32,10 @@ const pythonBin = execFileSync("python3", ["-c", "import sys; print(sys.executab
   encoding: "utf8",
 }).trim();
 
-const requirementsLock = fs.readFileSync(path.join(agentDir, "requirements.lock"), "utf8");
+const requirementsLock = fs.readFileSync(
+  path.join(agentDir, "runtime", "requirements.lock"),
+  "utf8",
+);
 const EXPECTED_DCODE_VERSION = /^deepagents-code==([^\s;]+)/m.exec(requirementsLock)?.[1];
 const EXPECTED_DEEPAGENTS_VERSION = /^deepagents==([^\s;]+)/m.exec(requirementsLock)?.[1];
 assert(EXPECTED_DCODE_VERSION, "requirements.lock must pin deepagents-code");
@@ -666,8 +669,8 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
   it.each(
     Array.from(
       [
-        path.join(agentDir, "generate-config.ts"),
-        path.join(agentDir, "patch-managed-deepagents-code.py"),
+        path.join(agentDir, "config", "generate-config.ts"),
+        path.join(agentDir, "compat", "runtime-patch.py"),
         validatorPath,
         pluginSourcePath,
         e2eProfileCheckPath,
@@ -825,7 +828,10 @@ describe("LangChain Deep Agents Code managed Nemotron profile plugin (#6424)", (
   it.each([{ scenario: "validator" }, { scenario: "E2E check" }])(
     "pins guard validators to the ToolMessage string-content API [$scenario]",
     ({ scenario }) => {
-      const requirements = fs.readFileSync(path.join(agentDir, "requirements.lock"), "utf8");
+      const requirements = fs.readFileSync(
+        path.join(agentDir, "runtime", "requirements.lock"),
+        "utf8",
+      );
       const validator = fs.readFileSync(validatorPath, "utf8");
       const e2eCheck = fs.readFileSync(e2eProfileCheckPath, "utf8");
 

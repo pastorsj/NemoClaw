@@ -13,7 +13,7 @@ const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "runtime-config-guard.py",
+  "runtime", "config-guard.py",
 );
 
 interface ReconciliationFixture {

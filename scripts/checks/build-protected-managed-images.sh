@@ -98,8 +98,8 @@ source_lockfile="$source_root/packages/nemoclaw-openclaw/plugin/package-lock.jso
 source_seed_dir="$source_root/tools/mcp-tool-discovery-runtime/npm-cache-seed"
 source_mcp_lockfile="$source_root/tools/mcp-tool-discovery-runtime/package-lock.json"
 source_mcp_seed_dir="$source_root/tools/mcp-tool-discovery-runtime/mcp-runtime-npm-cache-seed"
-source_messaging_lockfile="$source_root/packages/nemoclaw-openclaw/managed-image-messaging-runtime/package-lock.json"
-source_messaging_seed_dir="$source_root/packages/nemoclaw-openclaw/managed-image-messaging-runtime/npm-cache-seed"
+source_messaging_lockfile="$source_root/packages/nemoclaw-openclaw/runtime/messaging/package-lock.json"
+source_messaging_seed_dir="$source_root/packages/nemoclaw-openclaw/runtime/messaging/npm-cache-seed"
 [[ -f "$seed_helper" && ! -L "$seed_helper" ]] || usage
 [[ -f "$source_lockfile" && ! -L "$source_lockfile" ]] || usage
 [[ -d "$source_seed_dir" && ! -L "$source_seed_dir" ]] || usage

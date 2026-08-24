@@ -10,7 +10,7 @@ target_root="$(cd "$target_root" && pwd -P)"
 if [[ "$report_dir" != /* ]]; then
   report_dir="$target_root/$report_dir"
 fi
-runtime_dir="$target_root/packages/nemoclaw-openclaw/wechat-runtime"
+runtime_dir="$target_root/packages/nemoclaw-openclaw/runtime/wechat"
 package_json="$runtime_dir/package.json"
 package_lock="$runtime_dir/package-lock.json"
 npm_registry="https://registry.npmjs.org/"

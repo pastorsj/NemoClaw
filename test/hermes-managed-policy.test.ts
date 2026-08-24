@@ -12,18 +12,18 @@ import {
   HERMES_MANAGED_POLICY_SCHEMA_VERSION,
 } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
 
-const READER_PATH = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "managed_policy.py");
+const READER_PATH = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "runtime", "managed_policy.py");
 const PROFILE_PATCHER_PATH = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "patch-profile-policy-defaults.py",
+  "compat", "profile-policy.py",
 );
 const DASHBOARD_SEEDER_PATH = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "seed-dashboard-config.py",
+  "runtime", "dashboard-config.py",
 );
 const SETTINGS: HermesBuildSettings = {
   model: "test-model",

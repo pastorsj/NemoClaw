@@ -69,7 +69,7 @@ describe("sandbox baseline policy resolution (#7194)", () => {
     vi.spyOn(agentDefs, "loadAgent").mockReturnValue({ name: "openclaw", agentDir } as never);
 
     expect(resolvePermissivePolicyPath("alpha")).toBe(
-      path.join(agentDir, "policy-permissive-default.yaml"),
+      path.join(agentDir, "policies", "permissive-default.yaml"),
     );
   });
 

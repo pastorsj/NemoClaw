@@ -454,7 +454,7 @@ await MessagingSetupApplier.applyHealthChecks(plan, hookOptions);
 ```
 
 Build-time code should read `NEMOCLAW_MESSAGING_PLAN_B64` through `applier/build/messaging-build-applier.mts`.
-Do not duplicate channel-specific rendering in `packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts` or `packages/nemoclaw-hermes/generate-config.ts`.
+Do not duplicate channel-specific rendering in `packages/nemoclaw-openclaw/config/generate-config.mts` or `packages/nemoclaw-hermes/config/generate-config.ts`.
 
 ## Adding a Built-In Channel
 

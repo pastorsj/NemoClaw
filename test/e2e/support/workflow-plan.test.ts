@@ -700,7 +700,7 @@ describe("E2E workflow plan", () => {
 
   it.each([
     "scripts/backup-workspace.sh",
-    "packages/nemoclaw-openclaw/scripts/backup-workspace.sh",
+    "packages/nemoclaw-openclaw/runtime/backup-workspace.sh",
   ])("selects backup restore coverage when a backup script changes: %s", (changedFile) => {
     const plan = buildE2eWorkflowPlan({}, { changedFiles: [changedFile] });
 

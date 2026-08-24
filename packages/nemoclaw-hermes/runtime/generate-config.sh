@@ -6,5 +6,5 @@ set -euo pipefail
 
 exec /usr/local/bin/node \
   --experimental-strip-types \
-  /opt/nemoclaw-hermes-config/generate-config.ts \
+  /opt/nemoclaw-hermes-config/config/generate-config.ts \
   "$@"

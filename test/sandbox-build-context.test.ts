@@ -106,23 +106,23 @@ describe("sandbox build context staging", () => {
 
     writeFixture(path.join("packages", "nemoclaw-openclaw", "Dockerfile"));
     writeFixture("tsconfig.runtime-preloads.json", "{}\n");
-    writeFixture(path.join("packages", "nemoclaw-openclaw", "state-lock-plan.json"), "{}\n");
+    writeFixture(
+      path.join("packages", "nemoclaw-openclaw", "runtime", "state", "plan.json"),
+      "{}\n",
+    );
     writeFixture(path.join("packages", "nemoclaw-openclaw", "start.sh"), "#!/bin/sh\n", 0o755);
     writeFixture(path.join("packages", "nemoclaw-openclaw", "policy-additions.yaml"));
-    writeFixture(path.join("packages", "nemoclaw-openclaw", "policy-permissive-default.yaml"));
+    writeFixture(
+      path.join("packages", "nemoclaw-openclaw", "policies", "permissive-default.yaml"),
+    );
     writeFixture(
       path.join("ci", "npm-audit-exceptions.json"),
       `${JSON.stringify({ schemaVersion: 1, exceptions: [] })}\n`,
     );
-    for (const runtimeName of [
-      "managed-image-messaging-runtime",
-      "mcporter-runtime",
-      "openclaw-runtime",
-      "wechat-runtime",
-    ]) {
+    for (const runtimeName of ["messaging", "mcporter", "openclaw", "wechat"]) {
       for (const fileName of ["package.json", "package-lock.json"]) {
         writeFixture(
-          path.join("packages", "nemoclaw-openclaw", runtimeName, fileName),
+          path.join("packages", "nemoclaw-openclaw", "runtime", runtimeName, fileName),
           runtimeManifestFixture(runtimeName, fileName),
         );
       }
@@ -131,7 +131,8 @@ describe("sandbox build context staging", () => {
       path.join(
         "packages",
         "nemoclaw-openclaw",
-        "managed-image-messaging-runtime",
+        "runtime",
+        "messaging",
         "npm-cache-seed",
         ".gitkeep",
       ),
@@ -193,7 +194,7 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("nemoclaw-blueprint", "blueprint.yaml"));
     writeFixture(path.join("nemoclaw-blueprint", "policies", "presets", "fixture.yaml"));
     writeFixture(path.join("nemoclaw-blueprint", "model-specific-setup", "schema.json"), "{}\n");
-    writeFixture(path.join("packages", "nemoclaw-openclaw", "preloads", "http-proxy-fix.js"));
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "runtime", "preloads", "http-proxy-fix.js"));
     writeFixture(
       path.join(
         "packages",
@@ -227,7 +228,7 @@ describe("sandbox build context staging", () => {
       0o600,
     );
     writeFixture(
-      path.join("packages", "nemoclaw-openclaw", "schemas", "openclaw-plugin.schema.json"),
+      path.join("packages", "nemoclaw-openclaw", "config", "plugin.schema.json"),
       "{}\n",
       0o600,
     );
@@ -242,14 +243,14 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("scripts", "gateway-control.sh"));
     writeFixture(path.join("scripts", "managed-gateway-control.py"));
     writeFixture(path.join("scripts", "state-dir-guard.py"));
-    for (const fileName of [
-      "openclaw-config-guard.py",
-      "codex-acp-wrapper.sh",
-      "generate-openclaw-config.mts",
-      "config-runtime.cts",
-      "validate-openclaw-tool-search.mts",
+    for (const [directory, fileName] of [
+      ["runtime", "config-guard.py"],
+      ["runtime", "codex-acp.sh"],
+      ["config", "generate-config.mts"],
+      ["host", "config-runtime.cts"],
+      ["checks", "tool-search.mts"],
     ]) {
-      writeFixture(path.join("packages", "nemoclaw-openclaw", "scripts", fileName));
+      writeFixture(path.join("packages", "nemoclaw-openclaw", directory, fileName));
     }
     writeFixture(
       path.join("scripts", "checks", "verify-openshell-policy-boundary-dependencies.mts"),
@@ -260,15 +261,15 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("scripts", "lib", "entrypoint-env-wrapper.sh"));
     writeFixture(path.join("scripts", "lib", "gateway-supervisor.sh"));
     writeFixture(path.join("scripts", "lib", "sandbox-rlimits.sh"));
-    for (const fileName of [
-      "openclaw_device_approval_policy.py",
-      "clean_runtime_shell_env_shim.py",
-      "normalize_mutable_config_perms.py",
+    for (const [directory, fileName] of [
+      ["runtime", "device-approval.py"],
+      ["compat", "shell-env.py"],
+      ["runtime", "config-permissions.py"],
     ]) {
-      writeFixture(path.join("packages", "nemoclaw-openclaw", "scripts", "lib", fileName));
+      writeFixture(path.join("packages", "nemoclaw-openclaw", directory, fileName));
     }
     writeFixture(
-      path.join("packages", "nemoclaw-openclaw", "scripts", "lib", "openclaw-npm-remediation.mts"),
+      path.join("packages", "nemoclaw-openclaw", "compat", "npm-remediation.mts"),
       "fixture\n",
       0o700,
     );
@@ -298,27 +299,26 @@ describe("sandbox build context staging", () => {
       writeFixture(path.join("src", "lib", relativePath));
     }
     for (const fileName of [
-      "patch-openclaw-tool-catalog.mts",
-      "patch-openclaw-chat-send.mts",
-      "patch-openclaw-mcp-npx.mts",
-      "patch-openclaw-mcp-reliability.mts",
-      "patch-openclaw-mcp-tools-list-timeout.mts",
-      "patch-openclaw-issue-4434-diagnostics.mts",
-      "patch-openclaw-managed-transport-diagnostics.mts",
-      "patch-openclaw-device-self-approval.mts",
-      "patch-openclaw-shared-state-permissions.mts",
-      "extract-semver.sh",
-      "verify-wechat-runtime-lock.mts",
+      "tool-catalog.mts",
+      "chat-send.mts",
+      "mcp-npx.mts",
+      "mcp-reliability.mts",
+      "mcp-timeout.mts",
+      "inference-diagnostics.mts",
+      "transport-diagnostics.mts",
+      "device-approval.mts",
+      "state-permissions.mts",
     ]) {
-      writeFixture(path.join("packages", "nemoclaw-openclaw", "scripts", fileName));
+      writeFixture(path.join("packages", "nemoclaw-openclaw", "compat", fileName));
     }
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "checks", "extract-version.sh"));
+    writeFixture(path.join("packages", "nemoclaw-openclaw", "checks", "wechat-lock.mts"));
     writeFixture(
       path.join(
         "packages",
         "nemoclaw-openclaw",
-        "scripts",
-        "openclaw",
-        "patch-gateway-daemon-dialback.mts",
+        "compat",
+        "gateway-dialback.mts",
       ),
     );
     writeFixture(path.join("scripts", "patch-bundled-npm-brace-expansion.mts"));
@@ -391,9 +391,8 @@ describe("sandbox build context staging", () => {
       buildCtx,
       "packages",
       "nemoclaw-openclaw",
-      "scripts",
-      "lib",
-      "openclaw-npm-remediation.mts",
+      "compat",
+      "npm-remediation.mts",
     );
     expect(fs.readFileSync(remediationHelper, "utf8")).toBe(
       fs.readFileSync(
@@ -401,30 +400,48 @@ describe("sandbox build context staging", () => {
           sourceRoot,
           "packages",
           "nemoclaw-openclaw",
-          "scripts",
-          "lib",
-          "openclaw-npm-remediation.mts",
+          "compat",
+          "npm-remediation.mts",
         ),
         "utf8",
       ),
     );
     expect((fs.statSync(remediationHelper).mode & 0o777).toString(8)).toBe("755");
 
-    for (const fileName of ["policy-additions.yaml", "policy-permissive-default.yaml"]) {
-      const stagedPolicy = path.join(buildCtx, "packages", "nemoclaw-openclaw", fileName);
+    for (const relativePath of [
+      "policy-additions.yaml",
+      path.join("policies", "permissive-default.yaml"),
+    ]) {
+      const stagedPolicy = path.join(buildCtx, "packages", "nemoclaw-openclaw", relativePath);
       expect(fs.readFileSync(stagedPolicy, "utf8")).toBe(
-        fs.readFileSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", fileName), "utf8"),
+        fs.readFileSync(
+          path.join(sourceRoot, "packages", "nemoclaw-openclaw", relativePath),
+          "utf8",
+        ),
       );
       expect((fs.statSync(stagedPolicy).mode & 0o777).toString(8)).toBe("644");
     }
 
-    for (const runtimeName of ["mcporter-runtime", "openclaw-runtime", "wechat-runtime"]) {
-      const runtimeDir = path.join(buildCtx, "packages", "nemoclaw-openclaw", runtimeName);
+    for (const runtimeName of ["mcporter", "openclaw", "wechat"]) {
+      const runtimeDir = path.join(
+        buildCtx,
+        "packages",
+        "nemoclaw-openclaw",
+        "runtime",
+        runtimeName,
+      );
       expect(fs.readdirSync(runtimeDir).sort()).toEqual(["package-lock.json", "package.json"]);
       for (const fileName of ["package.json", "package-lock.json"]) {
         expect(fs.readFileSync(path.join(runtimeDir, fileName), "utf8")).toBe(
           fs.readFileSync(
-            path.join(sourceRoot, "packages", "nemoclaw-openclaw", runtimeName, fileName),
+            path.join(
+              sourceRoot,
+              "packages",
+              "nemoclaw-openclaw",
+              "runtime",
+              runtimeName,
+              fileName,
+            ),
             "utf8",
           ),
         );
@@ -441,7 +458,8 @@ describe("sandbox build context staging", () => {
       buildCtx,
       "packages",
       "nemoclaw-openclaw",
-      "managed-image-messaging-runtime",
+      "runtime",
+      "messaging",
     );
     expect(fs.readdirSync(managedRuntimeDir).sort()).toEqual([
       "npm-cache-seed",
@@ -455,7 +473,8 @@ describe("sandbox build context staging", () => {
             sourceRoot,
             "packages",
             "nemoclaw-openclaw",
-            "managed-image-messaging-runtime",
+            "runtime",
+            "messaging",
             fileName,
           ),
           "utf8",
@@ -470,7 +489,8 @@ describe("sandbox build context staging", () => {
           sourceRoot,
           "packages",
           "nemoclaw-openclaw",
-          "managed-image-messaging-runtime",
+          "runtime",
+          "messaging",
           "npm-cache-seed",
           ".gitkeep",
         ),
@@ -944,7 +964,9 @@ describe("sandbox build context staging", () => {
             path.join(buildCtx, "nemoclaw-blueprint", "policies", "presets", "github.yaml"),
           ),
         ).toBe(true);
-        expect(fs.existsSync(packagePayload("preloads", "http-proxy-fix.js"))).toBe(true);
+        expect(fs.existsSync(packagePayload("runtime", "preloads", "http-proxy-fix.js"))).toBe(
+          true,
+        );
         expect(
           fs.existsSync(
             path.join(
@@ -1022,14 +1044,21 @@ describe("sandbox build context staging", () => {
         expect(fs.existsSync(path.join(buildCtx, "scripts", "state-dir-guard.py"))).toBe(true);
         expect(
           fs.existsSync(
-            path.join(buildCtx, "packages", "nemoclaw-openclaw", "state-lock-plan.json"),
+            path.join(
+              buildCtx,
+              "packages",
+              "nemoclaw-openclaw",
+              "runtime",
+              "state",
+              "plan.json",
+            ),
           ),
         ).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "openclaw-config-guard.py"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "codex-acp-wrapper.sh"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "generate-openclaw-config.mts"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "config-runtime.cts"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "validate-openclaw-tool-search.mts"))).toBe(
+        expect(fs.existsSync(packagePayload("runtime", "config-guard.py"))).toBe(true);
+        expect(fs.existsSync(packagePayload("runtime", "codex-acp.sh"))).toBe(true);
+        expect(fs.existsSync(packagePayload("config", "generate-config.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("host", "config-runtime.cts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("checks", "tool-search.mts"))).toBe(
           true,
         );
         expect(
@@ -1051,42 +1080,42 @@ describe("sandbox build context staging", () => {
           ),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "lib", "openclaw_device_approval_policy.py")),
+          fs.existsSync(packagePayload("runtime", "device-approval.py")),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "lib", "clean_runtime_shell_env_shim.py")),
+          fs.existsSync(packagePayload("compat", "shell-env.py")),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "lib", "normalize_mutable_config_perms.py")),
+          fs.existsSync(packagePayload("runtime", "config-permissions.py")),
         ).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-tool-catalog.mts"))).toBe(
+        expect(fs.existsSync(packagePayload("compat", "tool-catalog.mts"))).toBe(
           true,
         );
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-chat-send.mts"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-chat-send.js"))).toBe(false);
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-npx.mts"))).toBe(true);
-        expect(fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-reliability.mts"))).toBe(
+        expect(fs.existsSync(packagePayload("compat", "chat-send.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("compat", "chat-send.js"))).toBe(false);
+        expect(fs.existsSync(packagePayload("compat", "mcp-npx.mts"))).toBe(true);
+        expect(fs.existsSync(packagePayload("compat", "mcp-reliability.mts"))).toBe(
           true,
         );
         expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-mcp-tools-list-timeout.mts")),
+          fs.existsSync(packagePayload("compat", "mcp-timeout.mts")),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-issue-4434-diagnostics.mts")),
+          fs.existsSync(packagePayload("compat", "inference-diagnostics.mts")),
         ).toBe(true);
         expect(
           fs.existsSync(
-            packagePayload("scripts", "patch-openclaw-managed-transport-diagnostics.mts"),
+            packagePayload("compat", "transport-diagnostics.mts"),
           ),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-device-self-approval.mts")),
+          fs.existsSync(packagePayload("compat", "device-approval.mts")),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "openclaw", "patch-gateway-daemon-dialback.mts")),
+          fs.existsSync(packagePayload("compat", "gateway-dialback.mts")),
         ).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-shared-state-permissions.mts")),
+          fs.existsSync(packagePayload("compat", "state-permissions.mts")),
         ).toBe(true);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "patch-bundled-npm-tar.mts"))).toBe(
           true,
@@ -1099,7 +1128,7 @@ describe("sandbox build context staging", () => {
         ).toBe(true);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "upgrade-bundled-npm.mts"))).toBe(true);
         expect(
-          fs.existsSync(packagePayload("scripts", "patch-openclaw-device-self-approval.ts")),
+          fs.existsSync(packagePayload("compat", "device-approval.ts")),
         ).toBe(false);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "lib", "sandbox-init.sh"))).toBe(true);
         expect(fs.existsSync(path.join(buildCtx, "scripts", "lib", "gateway-supervisor.sh"))).toBe(

@@ -18,44 +18,43 @@ const PATCH_OPENCLAW_CHAT_SEND = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-chat-send.mts",
+  "compat",
+  "chat-send.mts",
 );
 const PATCH_OPENCLAW_ISSUE_4434_DIAGNOSTICS = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-issue-4434-diagnostics.mts",
+  "compat",
+  "inference-diagnostics.mts",
 );
 const PATCH_OPENCLAW_SHARED_STATE_PERMISSIONS = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-shared-state-permissions.mts",
+  "compat",
+  "state-permissions.mts",
 );
 const PATCH_OPENCLAW_GATEWAY_DAEMON_DIALBACK = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "openclaw",
-  "patch-gateway-daemon-dialback.mts",
+  "compat",
+  "gateway-dialback.mts",
 );
 const PATCH_OPENCLAW_MCP_RELIABILITY = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-mcp-reliability.mts",
+  "compat",
+  "mcp-reliability.mts",
 );
 const OPENCLAW_VERSION_EXTRACTOR = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "extract-semver.sh",
+  "checks",
+  "extract-version.sh",
 );
 const REAL_OPENCLAW_NODE_ENV = "NEMOCLAW_REAL_OPENCLAW_NODE";
 // Focused patch scripts also scan the full generated dist. APFS cold-cache
@@ -796,8 +795,8 @@ describe.skipIf(process.env.NEMOCLAW_REAL_OPENCLAW_DIST_HARNESS !== "1")(
             REPO_ROOT,
             "packages",
             "nemoclaw-openclaw",
-            "scripts",
-            "patch-openclaw-device-self-approval.mts",
+            "compat",
+            "device-approval.mts",
           ),
           timeoutMs: PATCH_COMMAND_TIMEOUT_MS,
           tmp,

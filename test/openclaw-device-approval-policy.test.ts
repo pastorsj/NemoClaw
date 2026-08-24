@@ -11,9 +11,8 @@ const POLICY_PATH = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "openclaw_device_approval_policy.py",
+  "runtime",
+  "device-approval.py",
 );
 
 function hasPython3(): boolean {

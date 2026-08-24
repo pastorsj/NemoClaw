@@ -100,8 +100,11 @@ const auditedCommits = [
 describe("OpenShell 0.0.85 migration review", () => {
   it("records every adjacent release range and all 67 audited commits", () => {
     expect(adjacentRanges.reduce((total, range) => total + range.commits, 0)).toBe(67);
-    expect(adjacentRanges.every((range) =>
-        review.includes(`| \`${range.from} -> ${range.to}\` | ${range.commits} | ${range.paths} |`))).toBe(true);
+    expect(
+      adjacentRanges.every((range) =>
+        review.includes(`| \`${range.from} -> ${range.to}\` | ${range.commits} | ${range.paths} |`),
+      ),
+    ).toBe(true);
     expect(auditedCommits.every((commit) => review.includes(commit))).toBe(true);
     expect(review).toContain("283 distinct changed paths");
   });
@@ -329,7 +332,9 @@ describe("OpenShell 0.0.85 migration review", () => {
 
     migratedConsumers.forEach(([relativePath, forbidden]) => {
       const source = fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
-      expect(forbidden.every((obsoleteTransport) => !source.includes(obsoleteTransport))).toBe(true);
+      expect(forbidden.every((obsoleteTransport) => !source.includes(obsoleteTransport))).toBe(
+        true,
+      );
     });
 
     const phase6 = fs.readFileSync(
@@ -349,31 +354,44 @@ describe("OpenShell 0.0.85 migration review", () => {
     expect(pythonEgress).toContain("NATIVE_MULTILINE_ARGV");
   });
 
-  it.each(
-    ["OPENSHELL_TLS_CA", "OPENSHELL_TLS_CERT", "OPENSHELL_TLS_KEY"],
-  )("treats OpenShell TLS identity as supervisor-only in every managed agent [%s]", (name) => {
-    const hermesBoundary = fs.readFileSync(
-      path.join(repoRoot, "packages", "nemoclaw-hermes", "validate-env-secret-boundary.py"),
-      "utf8",
-    );
-    const dcodeWrapper = fs.readFileSync(
-      path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "dcode-wrapper.sh"),
-      "utf8",
-    );
-    const dcodeRuntime = fs.readFileSync(
-      path.join(repoRoot, "packages", "nemoclaw-langchain-deepagents-code", "managed-dcode-runtime.py"),
-      "utf8",
-    );
-    const boundaries = [hermesBoundary, dcodeWrapper, dcodeRuntime];
+  it.each(["OPENSHELL_TLS_CA", "OPENSHELL_TLS_CERT", "OPENSHELL_TLS_KEY"])(
+    "treats OpenShell TLS identity as supervisor-only in every managed agent [%s]",
+    (name) => {
+      const hermesBoundary = fs.readFileSync(
+        path.join(repoRoot, "packages", "nemoclaw-hermes", "runtime", "env-boundary.py"),
+        "utf8",
+      );
+      const dcodeWrapper = fs.readFileSync(
+        path.join(
+          repoRoot,
+          "packages",
+          "nemoclaw-langchain-deepagents-code",
+          "runtime",
+          "agent-wrapper.sh",
+        ),
+        "utf8",
+      );
+      const dcodeRuntime = fs.readFileSync(
+        path.join(
+          repoRoot,
+          "packages",
+          "nemoclaw-langchain-deepagents-code",
+          "runtime",
+          "managed-runtime.py",
+        ),
+        "utf8",
+      );
+      const boundaries = [hermesBoundary, dcodeWrapper, dcodeRuntime];
 
-    expect(
-      boundaries.every((source) => source.includes(name)),
-      name,
-    ).toBe(true);
+      expect(
+        boundaries.every((source) => source.includes(name)),
+        name,
+      ).toBe(true);
 
-    expect(hermesBoundary).not.toContain("RUNTIME_ALLOWED_PLATFORM_PATH_VALUES");
-    expect(dcodeWrapper).not.toContain("is_allowed_openshell_runtime_value");
-    expect(dcodeRuntime).not.toContain("/etc/openshell/tls/client/tls.key");
-    expect(review).toContain("Hermes and Deep Agents now reject all three variables");
-  });
+      expect(hermesBoundary).not.toContain("RUNTIME_ALLOWED_PLATFORM_PATH_VALUES");
+      expect(dcodeWrapper).not.toContain("is_allowed_openshell_runtime_value");
+      expect(dcodeRuntime).not.toContain("/etc/openshell/tls/client/tls.key");
+      expect(review).toContain("Hermes and Deep Agents now reject all three variables");
+    },
+  );
 });

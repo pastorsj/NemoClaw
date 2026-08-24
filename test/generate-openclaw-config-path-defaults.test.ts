@@ -5,9 +5,10 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
+import { main } from "../packages/nemoclaw-openclaw/config/generate-config.mts";
 import { baseOpenClawGenerationEnv, buildOpenClawTestEnv } from "./helpers/openclaw-env-fixture";
 import { withLegacyMessagingPlanEnv } from "./messaging-plan-test-helper";
 
@@ -96,6 +97,55 @@ describe("generate-openclaw-config.mts: extra-agents path defaulting", () => {
       workspace: "/sandbox/.openclaw/workspace-legacy-worker",
       agentDir: "/sandbox/.openclaw/agents/legacy-worker",
       tools: { allow: ["read"] },
+    });
+  });
+
+  it("runs the copied package-relative image layout through the real Node entry point", () => {
+    const imageRoot = path.join(tmpDir, "image-root");
+    const imagePackageRoot = path.join(imageRoot, "packages", "nemoclaw-openclaw");
+    const imageConfigDir = path.join(imagePackageRoot, "config");
+    const imageHostDir = path.join(imagePackageRoot, "host");
+    const imageSourceDir = path.join(imageRoot, "src", "lib");
+    fs.mkdirSync(imageConfigDir, { recursive: true });
+    fs.mkdirSync(imageHostDir, { recursive: true });
+    fs.mkdirSync(imageSourceDir, { recursive: true });
+
+    const packageRoot = path.resolve("packages", "nemoclaw-openclaw");
+    fs.copyFileSync(
+      path.join(packageRoot, "config", "generate-config.mts"),
+      path.join(imageConfigDir, "generate-config.mts"),
+    );
+    fs.copyFileSync(
+      path.join(packageRoot, "config", "agent-config.mts"),
+      path.join(imageConfigDir, "agent-config.mts"),
+    );
+    fs.copyFileSync(
+      path.join(packageRoot, "config", "model-setup.mts"),
+      path.join(imageConfigDir, "model-setup.mts"),
+    );
+    fs.copyFileSync(
+      path.join(packageRoot, "host", "config-runtime.cts"),
+      path.join(imageHostDir, "config-runtime.cts"),
+    );
+    fs.copyFileSync(
+      path.resolve("src", "lib", "tool-disclosure.ts"),
+      path.join(imageSourceDir, "tool-disclosure.ts"),
+    );
+
+    const imageGenerator = fs.realpathSync(path.join(imageConfigDir, "generate-config.mts"));
+    const result = spawnSync(process.execPath, ["--experimental-strip-types", imageGenerator], {
+      cwd: imageRoot,
+      encoding: "utf8",
+      env: buildTestEnv(tmpDir, BASE_ENV),
+    });
+
+    expect(result.status, result.stderr || result.stdout).toBe(0);
+    const config = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, ".openclaw", "openclaw.json"), "utf8"),
+    );
+    expect(config.models.providers[BASE_ENV.NEMOCLAW_PROVIDER_KEY].models[0]).toMatchObject({
+      id: BASE_ENV.NEMOCLAW_MODEL,
+      name: BASE_ENV.NEMOCLAW_PRIMARY_MODEL_REF,
     });
   });
 });

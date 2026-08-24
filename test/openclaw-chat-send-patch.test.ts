@@ -13,8 +13,8 @@ const PATCH_SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "patch-openclaw-chat-send.mts",
+  "compat",
+  "chat-send.mts",
 );
 
 function writeChatSendFixture(dist: string): string {

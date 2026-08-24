@@ -9,7 +9,7 @@ import vm from "node:vm";
 
 const PATCH_SCRIPT = path.resolve(
   import.meta.dirname,
-  "../../packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts",
+  "../../packages/nemoclaw-openclaw/compat/device-approval.mts",
 );
 
 function compiledIndent(source: string): string {

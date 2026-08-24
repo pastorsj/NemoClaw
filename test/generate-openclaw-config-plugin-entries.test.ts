@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Focused tests for the default plugin entries written into openclaw.json by
-// packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts. Split out of generate-openclaw-config
+// packages/nemoclaw-openclaw/config/generate-config.mts. Split out of generate-openclaw-config
 // .test.ts to keep that file within its size budget.
 
 import fs from "node:fs";
@@ -16,7 +16,7 @@ import {
   MANAGED_IMAGE_OPENCLAW_BUNDLED_INERT_CAPABILITIES,
   MANAGED_IMAGE_OPENCLAW_MESSAGING_CAPABILITIES,
   main,
-} from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
+} from "../packages/nemoclaw-openclaw/config/generate-config.mts";
 import { applyMessagingAgentRenderToObject } from "../src/lib/messaging/applier/build/messaging-build-applier.mts";
 import {
   createBuiltInChannelManifestRegistry,

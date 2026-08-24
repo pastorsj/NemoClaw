@@ -18,8 +18,8 @@ const SCRIPT = path.join(
   "..",
   "packages",
   "nemoclaw-hermes",
-  "scripts",
-  "update-hermes-agent.sh",
+  "checks",
+  "update-agent.sh",
 );
 const HERMES_BASE_DOCKERFILE = path.join(
   import.meta.dirname,
@@ -47,14 +47,14 @@ const CURRENT_INSTALLED_BASE = [
 ].join("\n");
 
 const CURRENT_INSTALLED_DOCKERFILE = [
-  "COPY packages/nemoclaw-hermes/validate-hermes-env-secret-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
-  "COPY packages/nemoclaw-hermes/seed-dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py",
-  "COPY packages/nemoclaw-hermes/build-mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py",
+  "COPY packages/nemoclaw-hermes/runtime/env-boundary.py /usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
+  "COPY packages/nemoclaw-hermes/runtime/dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py",
+  "COPY packages/nemoclaw-hermes/runtime/mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py",
   'RUN mcp_digest="$(/opt/hermes/.venv/bin/python -I /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py --guard /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py --config /sandbox/.hermes/config.yaml)"',
-  "COPY packages/nemoclaw-hermes/mcp-config-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+  "COPY packages/nemoclaw-hermes/runtime/mcp-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
   "COPY src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json",
   "RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix \\",
-  "    && node --experimental-strip-types /opt/nemoclaw-hermes-config/generate-config.ts",
+  "    && node --experimental-strip-types /opt/nemoclaw-hermes-config/config/generate-config.ts",
   "RUN mkdir -p /sandbox/.hermes/profiles/dashboard-home",
   "",
 ].join("\n");
@@ -73,7 +73,7 @@ function writeExecutable(file: string, body: string) {
 }
 
 describe(
-  "packages/nemoclaw-hermes/scripts/update-hermes-agent.sh",
+  "packages/nemoclaw-hermes/checks/update-agent.sh",
   testTimeoutOptions(30_000),
   () => {
     it("pins rebuild overrides to the accepted full image-ID local tag family", () => {
@@ -83,8 +83,8 @@ describe(
         repo,
         "packages",
         "nemoclaw-hermes",
-        "scripts",
-        "update-hermes-agent.sh",
+        "checks",
+        "update-agent.sh",
       );
       const fakeBin = path.join(tmp, "bin");
       const dockerLog = path.join(tmp, "docker.log");
@@ -190,8 +190,8 @@ fi
           repo,
           "packages",
           "nemoclaw-hermes",
-          "scripts",
-          "update-hermes-agent.sh",
+          "checks",
+          "update-agent.sh",
         );
         const fakeBin = path.join(tmp, "bin");
         const curlLog = path.join(tmp, "curl-argv.log");
@@ -514,7 +514,7 @@ fi
       );
       const installedAgentDockerfile = path.join(path.dirname(installedDockerfile), "Dockerfile");
       const preMcpDockerfile = CURRENT_INSTALLED_DOCKERFILE.replace(
-        /^(?:COPY (?:packages\/nemoclaw-hermes\/(?:build-mcp-digest|mcp-config-transaction)\.py|src\/lib\/actions\/sandbox\/openshell-child-visible-credentials\.v0\.0\.106\.json) .*|RUN mcp_digest=.*build-hermes-mcp-digest\.py.*)\n/gm,
+        /^(?:COPY (?:packages\/nemoclaw-hermes\/runtime\/(?:mcp-digest|mcp-transaction)\.py|src\/lib\/actions\/sandbox\/openshell-child-visible-credentials\.v0\.0\.106\.json) .*|RUN mcp_digest=.*build-hermes-mcp-digest\.py.*)\n/gm,
         "",
       );
       fs.mkdirSync(path.dirname(installedDockerfile), { recursive: true });
@@ -540,7 +540,7 @@ fi
         expect(run.stdout).toContain("INVALID: installed copy");
         expect(run.stdout).toContain("marker hermes-mcp-config-transaction.py");
         expect(run.stdout).toContain("marker openshell-child-visible-credentials.v0.0.106.json");
-        expect(run.stdout).toContain("marker COPY packages/nemoclaw-hermes/build-mcp-digest.py");
+        expect(run.stdout).toContain("marker COPY packages/nemoclaw-hermes/runtime/mcp-digest.py");
         expect(run.stdout).toContain("marker /opt/hermes/.venv/bin/python -I");
         expect(fs.readFileSync(installedDockerfile, "utf-8")).toBe(CURRENT_INSTALLED_BASE);
         expect(fs.readFileSync(installedAgentDockerfile, "utf-8")).toBe(preMcpDockerfile);

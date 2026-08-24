@@ -57,9 +57,8 @@ const OPENCLAW_REMEDIATION_HELPER = path.join(
   REPO_ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "openclaw-npm-remediation.mts",
+  "compat",
+  "npm-remediation.mts",
 );
 const OPENCLAW_PACKAGE_BUILD_ENV = {
   NEMOCLAW_OPENCLAW_NPM_REMEDIATION_HELPER: OPENCLAW_REMEDIATION_HELPER,

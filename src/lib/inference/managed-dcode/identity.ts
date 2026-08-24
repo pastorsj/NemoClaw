@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  loadHarnessCommonJsModule,
-  resolveHarnessPackage,
-} from "../../harness/commonjs-runtime";
+import { loadHarnessCommonJsModule, resolveHarnessPackage } from "../../harness/commonjs-runtime";
 
 export type ManagedDcodeProvider = "openai" | "openrouter";
 
@@ -37,14 +34,14 @@ function loadManagedDcodeIdentityModule(): RuntimeModule {
   const harnessPackage = resolveHarnessPackage("langchain-deepagents-code");
   if (!harnessPackage)
     throw new Error("LangChain Deep Agents Code harness package is unavailable.");
-  const loaded = loadHarnessCommonJsModule(harnessPackage, "managed-identity.cts", 64 * 1024);
+  const loaded = loadHarnessCommonJsModule(harnessPackage, "host/managed-identity.cts", 64 * 1024);
   const runtime = loaded.exports as Partial<RuntimeModule>;
   if (
     typeof runtime.normalizeManagedDcodeEndpointUrl !== "function" ||
     typeof runtime.normalizeManagedDcodeModelName !== "function" ||
     typeof runtime.resolveManagedDcodeIdentity !== "function"
   ) {
-    throw new Error("LangChain Deep Agents Code managed-identity module has an invalid contract.");
+    throw new Error("LangChain Deep Agents Code identity module has an invalid contract.");
   }
   cachedRuntime = {
     selectionKey,

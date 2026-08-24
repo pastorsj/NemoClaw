@@ -44,9 +44,21 @@ function pathRelativeToRepo(absPath: string): string {
   return relative(REPO_ROOT, absPath).replaceAll("\\", "/");
 }
 
-const HARNESS_POLICY_FILE = /^(?:policy-additions|policy-permissive[^/]*)\.yaml$/u;
+const AGENT_POLICY_FILE = /^(?:policy-additions|policy-permissive[^/]*|permissive[^/]*)\.yaml$/u;
 
-function discoverHarnessPolicyFiles(
+function readAgentPolicyFiles(relativeDirectory: string): string[] {
+  try {
+    return readdirSync(join(REPO_ROOT, relativeDirectory), { withFileTypes: true })
+      .filter((entry) => entry.isFile() && AGENT_POLICY_FILE.test(entry.name))
+      .map((entry) => `${relativeDirectory}/${entry.name}`);
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    return [];
+  }
+}
+
+function discoverAgentPolicyFiles(
   rootDirectory: "agents" | "packages",
   includeDirectory: (name: string) => boolean,
 ): string[] {
@@ -56,9 +68,10 @@ function discoverHarnessPolicyFiles(
       .filter((entry) => entry.isDirectory() && includeDirectory(entry.name))
       .flatMap((directory) => {
         const relativeDirectory = `${rootDirectory}/${directory.name}`;
-        return readdirSync(join(REPO_ROOT, relativeDirectory), { withFileTypes: true })
-          .filter((entry) => entry.isFile() && HARNESS_POLICY_FILE.test(entry.name))
-          .map((entry) => `${relativeDirectory}/${entry.name}`);
+        return [
+          ...readAgentPolicyFiles(relativeDirectory),
+          ...readAgentPolicyFiles(`${relativeDirectory}/policies`),
+        ];
       })
       .sort();
   } catch (err) {
@@ -109,11 +122,11 @@ function discoverTargets(): ConfigTarget[] {
       schema: "schemas/sandbox-policy.schema.json",
       files: [
         "packages/nemoclaw-openclaw/policy-additions.yaml",
-        "packages/nemoclaw-openclaw/policy-permissive-default.yaml",
+        "packages/nemoclaw-openclaw/policies/permissive-default.yaml",
       ],
     },
     {
-      schema: "packages/nemoclaw-openclaw/schemas/openclaw-plugin.schema.json",
+      schema: "packages/nemoclaw-openclaw/config/plugin.schema.json",
       files: ["packages/nemoclaw-openclaw/plugin/openclaw.plugin.json"],
     },
     {
@@ -131,10 +144,10 @@ function discoverTargets(): ConfigTarget[] {
   );
   if (sandboxPolicyTarget) {
     const policyFiles = new Set(sandboxPolicyTarget.files);
-    for (const policyFile of discoverHarnessPolicyFiles("agents", () => true)) {
+    for (const policyFile of discoverAgentPolicyFiles("agents", () => true)) {
       policyFiles.add(policyFile);
     }
-    for (const policyFile of discoverHarnessPolicyFiles("packages", (name) =>
+    for (const policyFile of discoverAgentPolicyFiles("packages", (name) =>
       name.startsWith("nemoclaw-"),
     )) {
       policyFiles.add(policyFile);

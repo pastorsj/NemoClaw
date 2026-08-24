@@ -12,7 +12,7 @@ import {
 const repoRoot = path.join(import.meta.dirname, "..");
 const dockerfile = fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"), "utf8");
 const lockSource = fs.readFileSync(
-  path.join(repoRoot, "packages/nemoclaw-openclaw/managed-image-messaging-runtime/package-lock.json"),
+  path.join(repoRoot, "packages/nemoclaw-openclaw/runtime/messaging/package-lock.json"),
   "utf8",
 );
 

@@ -52,7 +52,7 @@ const HERMES_CONTROL_CONTRACT = path.join(
   "packages",
   "nemoclaw-hermes",
   "host",
-  "tool-gateway-control-contract.ts",
+  "tool-contract.ts",
 );
 const SOURCE_REQUIRE_HOOK = path.join(import.meta.dirname, "helpers", "onboard-script-mocks.cjs");
 const NAME_VALIDATION_CASES: readonly { label: string; value: unknown }[] = [
@@ -134,28 +134,24 @@ describe("Hermes tool-gateway package paths", () => {
     const runtimePaths = installedBroker.HERMES_TOOL_GATEWAY_RUNTIME_PATHS;
     expect(runtimePaths.packageRoot).toBe(installed.rootDir);
     expect(runtimePaths.hostDir).toBe(path.join(runtimePaths.runtimeRoot, "host"));
-    expect(runtimePaths.script).toBe(path.join(runtimePaths.hostDir, "tool-gateway-broker.ts"));
-    expect(runtimePaths.matrix).toBe(
-      path.join(runtimePaths.hostDir, "managed-tool-gateway-matrix.json"),
-    );
+    expect(runtimePaths.script).toBe(path.join(runtimePaths.hostDir, "tool-broker.ts"));
+    expect(runtimePaths.matrix).toBe(path.join(runtimePaths.hostDir, "tool-matrix.json"));
     expect(runtimePaths.runtimeCredentials).toBe(
-      path.join(runtimePaths.hostDir, "runtime-refresh-credentials.ts"),
+      path.join(runtimePaths.hostDir, "refresh-credentials.ts"),
     );
-    expect(runtimePaths.controlContract).toBe(
-      path.join(runtimePaths.hostDir, "tool-gateway-control-contract.ts"),
-    );
+    expect(runtimePaths.controlContract).toBe(path.join(runtimePaths.hostDir, "tool-contract.ts"));
     expect(loadBroker().HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeRoot).toBe(
       runtimePaths.runtimeRoot,
     );
     expect(fs.statSync(runtimePaths.runtimeRoot).mode & 0o777).toBe(0o700);
-    expectCapturedFile(runtimePaths, sourceHostDir, "tool-gateway-broker.ts");
-    expectCapturedFile(runtimePaths, sourceHostDir, "managed-tool-gateway-matrix.json");
-    expectCapturedFile(runtimePaths, sourceHostDir, "runtime-refresh-credentials.ts");
-    expectCapturedFile(runtimePaths, sourceHostDir, "tool-gateway-control-contract.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "tool-broker.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "tool-matrix.json");
+    expectCapturedFile(runtimePaths, sourceHostDir, "refresh-credentials.ts");
+    expectCapturedFile(runtimePaths, sourceHostDir, "tool-contract.ts");
 
     const installedHash = installedBroker.brokerRuntimeHash();
     expect(installedHash).toBe(bundledHash);
-    const sourceRuntimeCredentials = path.join(sourceHostDir, "runtime-refresh-credentials.ts");
+    const sourceRuntimeCredentials = path.join(sourceHostDir, "refresh-credentials.ts");
     fs.appendFileSync(sourceRuntimeCredentials, "\n// test-only installed package change\n");
     expect(installedBroker.brokerRuntimeHash()).toBe(installedHash);
 

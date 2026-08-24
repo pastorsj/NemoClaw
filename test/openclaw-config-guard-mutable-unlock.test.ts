@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterEach, expect, it } from "vitest";
 
 const GUARD_PATH = path.resolve(
-  "packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py",
+  "packages/nemoclaw-openclaw/runtime/config-guard.py",
 );
 const fixtures: string[] = [];
 const RUN_UNLOCK_AS_CURRENT_USER = String.raw`

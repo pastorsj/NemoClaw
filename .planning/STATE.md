@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: agent-runtime-package-migration
 status: executing
-stopped_at: Phase 11 Task 2
-last_updated: "2026-08-23T23:31:00-04:00"
-last_activity: 2026-08-23 - Added one package-owned managed-startup configuration command.
+stopped_at: Phase 11 Task 4
+last_updated: "2026-08-24T00:51:24-04:00"
+last_activity: 2026-08-24 - Reorganized all three packages and removed native generator dispatch from core.
 progress:
   total_phases: 11
   completed_phases: 0
@@ -23,7 +23,7 @@ progress:
 
 Phase: 11 of 11 (Package Workflow)
 Plan: 11-01
-Task: 2 of 4 - Reorganize OpenClaw, Hermes, and LangChain Deep Agents Code
+Task: 4 of 4 - Qualify deterministic checks and no-messaging live journeys
 Status: Executing
 
 The branch is based on `origin/main` commit `67aab7ef57` through local merge commit `fff00cbbfb`.
@@ -32,8 +32,8 @@ The worktree was clean when Phase 11 started. All commits remain local.
 ## Completion Tracker
 
 - [x] Task 1: Freeze the package workflow and configuration command.
-- [ ] Task 2: Reorganize OpenClaw, Hermes, and LangChain Deep Agents Code.
-- [ ] Task 3: Remove proven agent-specific core dispatch.
+- [x] Task 2: Reorganize OpenClaw, Hermes, and LangChain Deep Agents Code.
+- [x] Task 3: Remove proven agent-specific core dispatch.
 - [ ] Task 4: Qualify deterministic checks and one no-messaging live journey.
 
 ## Success Conditions
@@ -88,7 +88,25 @@ Task 1:
 - `npm run typecheck:cli`, `npm run checks:repository`, ShellCheck, Bash syntax checks, and
   `git diff --check` passed.
 
+Tasks 2 and 3:
+
+- OpenClaw, Hermes, and LangChain Deep Agents Code now use the shared `config`, `runtime`, `host`,
+  `compat`, `plugin`, and `checks` directory vocabulary where each responsibility exists.
+- Each package README explains its build, configuration, startup, runtime, compatibility, and
+  check flow.
+- OpenClaw configuration separates agent payload translation and model setup from its workflow
+  entry point. An image-layout subprocess test verifies its package-relative imports.
+- Core no longer selects a native configuration generator by agent ID. Remaining named package
+  helpers retain explicit authorization, transaction, rollback, or runtime-specific behavior.
+- Package contracts passed: 81 common assertions and 15 Hermes packed-artifact and host-boundary
+  assertions. Configuration integration passed: 248 assertions. Source-checkout fallback
+  regression tests passed: 78 assertions.
+- All 55 configuration files validated. CLI and plugin type-checking, repository checks, reviewed
+  runtime bundle verification, and `git diff --check` passed.
+- A default-worker full-suite attempt was stopped after unrelated host load caused widespread
+  timeout failures. Task 4 will rerun the deterministic suite with bounded workers.
+
 ## Resume
 
 Read `.planning/phases/11-package-workflow/11-CONTEXT.md` and execute
-`.planning/phases/11-package-workflow/11-01-PLAN.md` from Task 2.
+`.planning/phases/11-package-workflow/11-01-PLAN.md` from Task 4.

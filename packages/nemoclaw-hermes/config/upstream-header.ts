@@ -8,6 +8,6 @@ type HermesManagedRouteRuntime = {
 };
 
 const require = createRequire(import.meta.url);
-const managedRoute = require("./managed-route.cts") as HermesManagedRouteRuntime;
+const managedRoute = require("../host/managed-route.cts") as HermesManagedRouteRuntime;
 
 export const buildHermesUpstreamHeader = managedRoute.buildHermesUpstreamHeader;

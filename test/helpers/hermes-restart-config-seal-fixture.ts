@@ -13,7 +13,7 @@ export const RUNTIME_CONFIG_GUARD = path.join(
   "..",
   "..",
   "packages", "nemoclaw-hermes",
-  "runtime-config-guard.py",
+  "runtime", "config-guard.py",
 );
 
 const HERMES_GUARD_TIMEOUT_MS = 90_000;

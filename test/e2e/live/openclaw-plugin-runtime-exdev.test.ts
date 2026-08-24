@@ -121,9 +121,9 @@ const EXDEV_TMPFS_DRIVER_CONFIG = JSON.stringify({
 });
 const OPENCLAW_PACKAGE_DIR = path.join(REPO_ROOT, "packages", "nemoclaw-openclaw");
 const STOCK_OPENCLAW_POLICY_PATHS = [
-  path.join(OPENCLAW_PACKAGE_DIR, "policy-permissive.yaml"),
+  path.join(OPENCLAW_PACKAGE_DIR, "policies", "permissive.yaml"),
   path.join(OPENCLAW_PACKAGE_DIR, "policy-additions.yaml"),
-  path.join(OPENCLAW_PACKAGE_DIR, "policy-permissive-default.yaml"),
+  path.join(OPENCLAW_PACKAGE_DIR, "policies", "permissive-default.yaml"),
 ] as const;
 validateSandboxName(SANDBOX_NAME);
 process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;

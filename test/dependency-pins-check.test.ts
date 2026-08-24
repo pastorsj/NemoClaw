@@ -132,12 +132,12 @@ const BUILDS = new Map([
     "packages/nemoclaw-hermes/Dockerfile": `
 COPY src/lib/actions/sandbox/${credentialManifestName} /usr/local/lib/nemoclaw/${`openshell-child-visible-credentials.v${overrides.hermesDockerfileBoundaryVersion ?? openshellMax}.json`}
 `,
-    "packages/nemoclaw-hermes/mcp-config-transaction.py": `
+    "packages/nemoclaw-hermes/runtime/mcp-transaction.py": `
 BOUNDARY_MANIFEST_NAME = "openshell-child-visible-credentials.v${overrides.hermesTransactionBoundaryVersion ?? openshellMax}.json"
 if manifest.get("openshellVersion") != "${overrides.hermesTransactionExpectedVersion ?? openshellMax}":
     raise RuntimeError("invalid")
 `,
-    "packages/nemoclaw-hermes/scripts/update-hermes-agent.sh": `
+    "packages/nemoclaw-hermes/checks/update-agent.sh": `
 "openshell-child-visible-credentials.v${overrides.hermesUpdateBoundaryVersion ?? openshellMax}.json"
 `,
     "packages/nemoclaw-openclaw/Dockerfile.base": `

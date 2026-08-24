@@ -37,16 +37,13 @@ describe("standalone Hermes package", () => {
       const installedRoot = path.join(outputDirectory, "package");
       const hostRoot = path.join(installedRoot, "host");
       expect(
-        [
-          "managed-tool-gateway-matrix.json",
-          "runtime-refresh-credentials.ts",
-          "tool-gateway-broker.ts",
-          "tool-gateway-control-contract.ts",
-        ].map((fileName) => fs.statSync(path.join(hostRoot, fileName)).isFile()),
+        ["tool-matrix.json", "refresh-credentials.ts", "tool-broker.ts", "tool-contract.ts"].map(
+          (fileName) => fs.statSync(path.join(hostRoot, fileName)).isFile(),
+        ),
       ).toEqual([true, true, true, true]);
       expect(fs.existsSync(path.join(outputDirectory, "nemoclaw-openclaw"))).toBe(false);
 
-      const contractPath = path.join(hostRoot, "tool-gateway-control-contract.ts");
+      const contractPath = path.join(hostRoot, "tool-contract.ts");
       const validation = JSON.parse(
         execFileSync(
           process.execPath,

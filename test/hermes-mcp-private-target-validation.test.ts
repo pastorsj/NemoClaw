@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 const TRANSACTION = path.resolve(
   import.meta.dirname,
   "..",
-  "packages/nemoclaw-hermes/mcp-config-transaction.py",
+  "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
 );
 
 function runPython(source: string) {

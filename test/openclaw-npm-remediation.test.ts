@@ -24,7 +24,7 @@ import {
   patchOpenClawDiagnosticsOtelPackageGraph,
   patchOpenClawDiscordPackageGraph,
   patchOpenClawPluginPackageGraph,
-} from "../packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts";
+} from "../packages/nemoclaw-openclaw/compat/npm-remediation.mts";
 
 const temporaryDirectories: string[] = [];
 

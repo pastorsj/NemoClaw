@@ -22,7 +22,7 @@ const TARBALL_URL = "https://registry.npmjs.org/@example/reviewed/-/reviewed-1.2
 const WECHAT_LOCK = path.join(
   import.meta.dirname,
   "..",
-  "packages/nemoclaw-openclaw/wechat-runtime/package-lock.json",
+  "packages/nemoclaw-openclaw/runtime/wechat/package-lock.json",
 );
 const roots: string[] = [];
 

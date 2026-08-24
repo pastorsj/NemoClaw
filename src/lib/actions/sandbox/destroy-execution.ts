@@ -170,7 +170,7 @@ function wipeAndHardenLiveSandbox(
      * sandbox cannot be re-hardened (#7727).
      * Source boundary: the sidecar is removed out of band by host root inside
      * the sandbox (the reporter used a privileged runtime command). The
-     * refusal itself belongs to `packages/nemoclaw-openclaw/scripts/openclaw-config-guard.py`, which
+     * refusal itself belongs to `packages/nemoclaw-openclaw/runtime/config-guard.py`, which
      * repairs an absent hash only in lock-from-mutable mode and fail-stops in
      * the locked posture on purpose.
      * Source-fix constraint: NemoClaw cannot stop host root from deleting a

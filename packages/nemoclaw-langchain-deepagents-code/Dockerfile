@@ -186,25 +186,25 @@ RUN set -eu; \
 # Copy the managed-startup entrypoint, config generator, its package-owned identity contract,
 # wrapper, startup script, and shared blueprint files.
 COPY packages/nemoclaw-langchain-deepagents-code/package.json /opt/nemoclaw-deepagents-code/package.json
-COPY packages/nemoclaw-langchain-deepagents-code/generate-config-entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts
-COPY packages/nemoclaw-langchain-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts
-COPY packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts
-COPY packages/nemoclaw-langchain-deepagents-code/managed-dcode-runtime.py /opt/nemoclaw-deepagents-code/managed-dcode-runtime.py
-COPY packages/nemoclaw-langchain-deepagents-code/patch-managed-deepagents-code.py /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py
+COPY packages/nemoclaw-langchain-deepagents-code/config/entrypoint.ts /opt/nemoclaw-deepagents-code/generate-config.ts
+COPY packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts
+COPY packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/managed-runtime.py /opt/nemoclaw-deepagents-code/runtime/managed-runtime.py
+COPY packages/nemoclaw-langchain-deepagents-code/compat/runtime-patch.py /opt/nemoclaw-deepagents-code/compat/runtime-patch.py
 # SECURITY: copy only the two hash-verified plugin inputs, never the source directory.
-COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin/pyproject.toml /opt/nemoclaw-deepagents-profile-plugin/
-COPY packages/nemoclaw-langchain-deepagents-code/profile-plugin/src/nemoclaw_deepagents_profile/__init__.py /opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/
-COPY packages/nemoclaw-langchain-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py
-COPY packages/nemoclaw-langchain-deepagents-code/progressive_tool_disclosure.py /opt/nemoclaw-deepagents-code/progressive_tool_disclosure.py
-COPY packages/nemoclaw-langchain-deepagents-code/nemoclaw_observability.py /opt/nemoclaw-deepagents-code/nemoclaw_observability.py
-COPY packages/nemoclaw-langchain-deepagents-code/nemoclaw_read_only_mcp.py /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py
-COPY packages/nemoclaw-langchain-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py
-COPY packages/nemoclaw-langchain-deepagents-code/validate-observability.py /opt/nemoclaw-deepagents-code/validate-observability.py
-COPY packages/nemoclaw-langchain-deepagents-code/validate-read-only-mcp-call.py /opt/nemoclaw-deepagents-code/validate-read-only-mcp-call.py
-COPY packages/nemoclaw-langchain-deepagents-code/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-wrapper.sh
-COPY packages/nemoclaw-langchain-deepagents-code/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-launcher.sh
-COPY packages/nemoclaw-langchain-deepagents-code/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh
-COPY packages/nemoclaw-langchain-deepagents-code/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py
+COPY packages/nemoclaw-langchain-deepagents-code/plugin/pyproject.toml /opt/nemoclaw-deepagents-profile-plugin/
+COPY packages/nemoclaw-langchain-deepagents-code/plugin/src/nemoclaw_deepagents_profile/__init__.py /opt/nemoclaw-deepagents-profile-plugin/src/nemoclaw_deepagents_profile/
+COPY packages/nemoclaw-langchain-deepagents-code/checks/model-profile.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/tool-disclosure.py /opt/nemoclaw-deepagents-code/runtime/tool-disclosure.py
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/observability.py /opt/nemoclaw-deepagents-code/runtime/observability.py
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/readonly-mcp.py /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py
+COPY packages/nemoclaw-langchain-deepagents-code/checks/tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py
+COPY packages/nemoclaw-langchain-deepagents-code/checks/observability.py /opt/nemoclaw-deepagents-code/validate-observability.py
+COPY packages/nemoclaw-langchain-deepagents-code/checks/mcp-call.py /opt/nemoclaw-deepagents-code/validate-read-only-mcp-call.py
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/agent-wrapper.sh /usr/local/lib/nemoclaw/dcode-wrapper.sh
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/agent-launcher.sh /usr/local/lib/nemoclaw/dcode-launcher.sh
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh
+COPY packages/nemoclaw-langchain-deepagents-code/runtime/session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY packages/nemoclaw-langchain-deepagents-code/start.sh /usr/local/bin/nemoclaw-start
@@ -234,7 +234,7 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && chown root:root /usr/local/lib/nemoclaw/generate-config \
     && chmod 0555 /usr/local/lib/nemoclaw/generate-config \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config)" = '0:0:555' \
-    && chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/package.json /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/managed-identity.cts /opt/nemoclaw-deepagents-code/managed-dcode-runtime.py /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/progressive_tool_disclosure.py /opt/nemoclaw-deepagents-code/nemoclaw_observability.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-observability.py /opt/nemoclaw-deepagents-code/validate-read-only-mcp-call.py /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py \
+    && chmod 444 /opt/nemoclaw-deepagents-code/generate-config.ts /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts /opt/nemoclaw-deepagents-code/package.json /opt/nemoclaw-deepagents-code/packages/nemoclaw-langchain-deepagents-code/host/managed-identity.cts /opt/nemoclaw-deepagents-code/runtime/managed-runtime.py /opt/nemoclaw-deepagents-code/compat/runtime-patch.py /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py /opt/nemoclaw-deepagents-code/runtime/tool-disclosure.py /opt/nemoclaw-deepagents-code/runtime/observability.py /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py /opt/nemoclaw-deepagents-code/validate-observability.py /opt/nemoclaw-deepagents-code/validate-read-only-mcp-call.py /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh /usr/local/lib/nemoclaw/nemoclaw_read_only_mcp.py \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold /usr/local/bin/nemoclaw-managed-bootstrap /usr/local/lib/nemoclaw/dcode-wrapper.sh /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-session-supervisor.py \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/dcode-session-supervisor.py)" = "0:0:755" \
     && install -o root -g root -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-managed-exec \
@@ -249,7 +249,7 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && /opt/venv/bin/python3 -I -c 'import nemoclaw_deepagents_profile; print("NEMOCLAW_DCODE_PROFILE_" + "IMPORT_GATE", flush=True); import deepagents; import deepagents_code' \
     && /opt/venv/bin/pip3 check \
     && rm -rf /opt/nemoclaw-deepagents-profile-plugin \
-    && python3 /opt/nemoclaw-deepagents-code/patch-managed-deepagents-code.py \
+    && python3 /opt/nemoclaw-deepagents-code/compat/runtime-patch.py \
     && install -d -m 0700 /tmp/nemoclaw-progressive-validation \
     && TMPDIR=/tmp/nemoclaw-progressive-validation python3 /opt/nemoclaw-deepagents-code/validate-progressive-tool-disclosure.py \
     && TMPDIR=/tmp/nemoclaw-progressive-validation /opt/venv/bin/python3 -I /opt/nemoclaw-deepagents-code/validate-nemotron-ultra-profile.py \

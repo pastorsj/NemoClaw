@@ -23,7 +23,7 @@ archive remediation to select `tar@7.5.21`, and select the same first patched
 release in both committed production locks. Do not add an audit exception.
 
 The production OpenClaw install uses the authoritative committed lock at
-`packages/nemoclaw-openclaw/openclaw-runtime/package-lock.json`, with SHA-256
+`packages/nemoclaw-openclaw/runtime/openclaw/package-lock.json`, with SHA-256
 `60f816dcff6f35179b1c48b4c06db9473497760d45ca1831252c27e8b1d2d665`.
 NemoClaw derives that lock from the SRI-verified `openclaw@2026.7.1` archive
 after applying the reviewed dependency remediation.
@@ -304,7 +304,7 @@ The child-process probe confirms these results:
 - valid `uberctx-test` baggage remains available;
 - a valid Jaeger header produces the expected trace and span context.
 
-`packages/nemoclaw-openclaw/scripts/lib/openclaw-npm-remediation.mts` verifies each original package and
+`packages/nemoclaw-openclaw/compat/npm-remediation.mts` verifies each original package and
 replacement package identities before it writes the archive. It rejects an
 upstream graph that no longer resolves the reviewed Axios, Jaeger,
 `brace-expansion`, `fast-uri`, `undici`, or `ip-address` source versions and
@@ -380,14 +380,14 @@ The `2026.7.1` dist changed eight reviewed shapes:
   environment variable for private-interface routing. Explicit gateway URL
   overrides, local port overrides, configured remote URLs, and behavior outside
   this condition are unchanged.
-  `packages/nemoclaw-openclaw/scripts/openclaw/patch-gateway-daemon-dialback.mts` is gated to the exact
+  `packages/nemoclaw-openclaw/compat/gateway-dialback.mts` is gated to the exact
   `2026.7.1` version and rejects missing or ambiguous compiled-dist shapes. Its
   regression test covers the daemon and descendant boundaries.
   Remove the patch when upstream OpenClaw distinguishes gateway daemon
   self-dialback from descendant agent routing without changing the inherited
   gateway URL.
 - queued follow-up execution now resolves inbound context before allocating a
-  run id; `packages/nemoclaw-openclaw/scripts/patch-openclaw-chat-send.mts` preserves the submitted run id
+  run id; `packages/nemoclaw-openclaw/compat/chat-send.mts` preserves the submitted run id
   at that new boundary. It also suppresses the premature empty final event that
   the new queue acknowledgment emits before the correlated follow-up completes;
 - device-token authentication now rejects a requested scope upgrade before the
@@ -397,7 +397,7 @@ The `2026.7.1` dist changed eight reviewed shapes:
   requested operation remains blocked until canonical pairing approval;
 - shared and per-agent SQLite state now run during the required gateway startup
   checkpoint and apply owner-only modes on each open.
-  `packages/nemoclaw-openclaw/scripts/patch-openclaw-shared-state-permissions.mts` keeps the upstream
+  `packages/nemoclaw-openclaw/compat/state-permissions.mts` keeps the upstream
   `0700` directory and `0600` file modes in same-UID OpenShell sandboxes.
   The entrypoint derives `NEMOCLAW_OPENCLAW_SHARED_STATE=1` only for its root,
   split-user topology; it explicitly removes that marker from non-root
@@ -424,7 +424,7 @@ The `2026.7.1` dist changed eight reviewed shapes:
   image; all other startup migrations and the upstream behavior outside
   NemoClaw are unchanged.
 
-`packages/nemoclaw-openclaw/scripts/patch-openclaw-device-self-approval.mts` remains required. Its new
+`packages/nemoclaw-openclaw/compat/device-approval.mts` remains required. Its new
 shape recognizers preserve the bounded stored-device credential flow and keep
 the canonical `approveDevicePairing` transaction fail closed.
 Until the initial `devices list` succeeds, the startup auto-pair watcher keeps
@@ -492,7 +492,7 @@ as synchronized.
 
 ## Transient Remote MCP Startup Recovery
 
-`packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts` is a version-scoped, fail-closed compatibility patch for issue #7958.
+`packages/nemoclaw-openclaw/compat/mcp-reliability.mts` is a version-scoped, fail-closed compatibility patch for issue #7958.
 In `2026.7.1`, the compiled `bundle-mcp` session runtime turns one failed remote server startup into an empty tool set plus catalog diagnostics, caches that degraded catalog for the whole session, and never retries.
 A single transient Streamable HTTP reset or MCP request timeout therefore removes an expected integration until the user starts a new session, and the agent can report the integration or its credentials as unavailable.
 
@@ -534,7 +534,7 @@ Removal criterion: drop this patch when the reviewed OpenClaw release provides e
 
 ## Managed Outbound Transport Diagnostics
 
-`packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts` is a version-scoped, fail-closed compatibility patch for issue #7957.
+`packages/nemoclaw-openclaw/compat/transport-diagnostics.mts` is a version-scoped, fail-closed compatibility patch for issue #7957.
 In `2026.7.1`, a failed remote Streamable HTTP MCP request surfaces only the transport error text, such as `fetch failed` or a request timeout.
 That text does not say whether policy evaluation, proxy CONNECT, TLS setup, the upstream connection, the request, or the response headers failed.
 An operator therefore has to correlate agent output with OpenShell audit logs by hand.
@@ -603,12 +603,12 @@ Reviewed behavior:
 `NVIDIA/OpenShell#2508` tracks span emission from the sandbox supervisor. The OCSF schema vendored by the pinned OpenShell `0.0.99` includes the optional `http_request.uid` field, but OpenShell's Rust `HttpRequest` object and current HTTP audit-event builders neither expose nor populate it. A shared request identifier is therefore not emitted today.
 The local identifier distinguishes application-side diagnostics, but operators still correlate each diagnostic with OpenShell audit events by endpoint and time.
 
-Managed transport diagnostics remains separate from `packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-reliability.mts`.
+Managed transport diagnostics remains separate from `packages/nemoclaw-openclaw/compat/mcp-reliability.mts`.
 The diagnostics patch wraps every failed remote Streamable HTTP fetch and has its own exact-shape audit and removal condition.
 The reliability patch owns startup catalog and retry behavior.
 The two patches compose independently.
 
-The injected helper in `packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts` is the shipped runtime source of truth.
+The injected helper in `packages/nemoclaw-openclaw/compat/transport-diagnostics.mts` is the shipped runtime source of truth.
 `test/openclaw-managed-transport-diagnostics-patch.test.ts` executes that exact helper.
 It pins the compiled preimage, patch idempotence, fail-closed rejection of an unrecognized shape, and the untouched SSE boundary.
 It also covers default failure-only emission, opt-in successful timing events, bounded shadow recommendations, explicit 503 exclusion, no-retry and unchanged-response contracts, validated operation reporting, asynchronous body sampling, byte and time bounds, redaction, the header allowlist, local diagnostic identifiers, session-presence reporting, transport-phase classification, route evidence, and sandbox gating.
@@ -618,7 +618,7 @@ Removal criterion: drop this patch when the reviewed OpenClaw release emits reda
 
 ## Bounded MCP Tool Discovery Timeout
 
-`packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts` is a version-scoped, fail-closed compatibility patch.
+`packages/nemoclaw-openclaw/compat/mcp-timeout.mts` is a version-scoped, fail-closed compatibility patch.
 The transport symptoms investigated in issue #7957 motivated this bounded follow-up; the patch does not change that issue's diagnostics acceptance criteria.
 OpenClaw `2026.7.1` gives `tools/list` 1,500 ms unless an MCP server configuration supplies a request timeout.
 The managed mcporter registration does not expose a tool-discovery-only timeout.
@@ -744,7 +744,7 @@ production build args.
 
 ## Issue #4434 full live acceptance
 
-`packages/nemoclaw-openclaw/scripts/patch-openclaw-issue-4434-diagnostics.mts` and
+`packages/nemoclaw-openclaw/compat/inference-diagnostics.mts` and
 `test/issue-4434-error-fields.test.ts` remain tied to the gateway/upstream
 reporting layer. The #4434 compatibility-shim disposition is explicitly accepted
 for this release. 3/3 fields are present in the NemoClaw-patched runtime output,

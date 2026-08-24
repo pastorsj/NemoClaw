@@ -361,8 +361,13 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     const dockerfileMarker = "# selected-installed-hermes-dockerfile";
     const helperMarker = "# selected-installed-hermes-helper";
     fs.appendFileSync(path.join(installedPackage, "Dockerfile"), `\n${dockerfileMarker}\n`);
-    fs.appendFileSync(path.join(installedPackage, "build-mcp-digest.py"), `\n${helperMarker}\n`);
-    const selectedHelper = fs.readFileSync(path.join(installedPackage, "build-mcp-digest.py"));
+    fs.appendFileSync(
+      path.join(installedPackage, "runtime", "mcp-digest.py"),
+      `\n${helperMarker}\n`,
+    );
+    const selectedHelper = fs.readFileSync(
+      path.join(installedPackage, "runtime", "mcp-digest.py"),
+    );
 
     const result = await withHermesPortableBuildContextPlan(
       source,
@@ -375,18 +380,21 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
           sourceDockerfilePath: plan.sourceDockerfilePath,
           dockerfile: fs.readFileSync(staged.dockerfilePath, "utf8"),
           helper: fs.readFileSync(
-            path.join(staged.buildContextPath, "packages/nemoclaw-hermes/build-mcp-digest.py"),
+            path.join(staged.buildContextPath, "packages/nemoclaw-hermes/runtime/mcp-digest.py"),
             "utf8",
           ),
         };
         fs.appendFileSync(
-          path.join(installedPackage, "build-mcp-digest.py"),
+          path.join(installedPackage, "runtime", "mcp-digest.py"),
           "\n# changed-after-reservation\n",
         );
         expect(() => plan.assertCurrentSource()).toThrow(
           "selected package changed after reservation",
         );
-        fs.writeFileSync(path.join(installedPackage, "build-mcp-digest.py"), selectedHelper);
+        fs.writeFileSync(
+          path.join(installedPackage, "runtime", "mcp-digest.py"),
+          selectedHelper,
+        );
         plan.assertCurrentSource();
         expect(plan.retire(contextInput())).toBe(true);
         return captured;

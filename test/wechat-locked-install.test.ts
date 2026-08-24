@@ -42,9 +42,8 @@ const OPENCLAW_REMEDIATION_HELPER = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "openclaw-npm-remediation.mts",
+  "compat",
+  "npm-remediation.mts",
 );
 
 function executable(file: string, contents: string): void {

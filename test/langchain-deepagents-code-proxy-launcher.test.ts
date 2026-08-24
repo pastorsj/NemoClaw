@@ -70,7 +70,7 @@ function makeLauncherProxyProbeFixture(
     "",
   ].join("\n");
   const fixture = makeLauncherFixtureSource(
-    readAgentFile("dcode-launcher.sh")
+    readAgentFile("runtime/agent-launcher.sh")
       .replace(
         'readonly MANAGED_DCODE_WRAPPER="/usr/local/lib/nemoclaw/dcode-wrapper.sh"',
         `readonly MANAGED_DCODE_WRAPPER="${probePath}"`,
@@ -168,7 +168,7 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
   });
 
   it("keeps read-only identity commands outside the session supervisor", () => {
-    const launcher = readAgentFile("dcode-launcher.sh");
+    const launcher = readAgentFile("runtime/agent-launcher.sh");
     const directIdentity =
       'status | whoami | identity | --version | -v | -V) exec "$MANAGED_DCODE_WRAPPER" "$@"';
     const supervisedSession =
@@ -179,7 +179,7 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
   });
 
   it("routes one-shot non-interactive sessions through the session supervisor (#6720)", () => {
-    const launcher = readAgentFile("dcode-launcher.sh");
+    const launcher = readAgentFile("runtime/agent-launcher.sh");
     const supervisedSession =
       'exec /opt/venv/bin/python3 -I "$MANAGED_SESSION_SUPERVISOR" "$MANAGED_DCODE_WRAPPER" "$@"';
 
@@ -194,14 +194,14 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
       const launcherPath = path.join(tempDir, "dcode-launcher.sh");
       const wrapperPath = path.join(tempDir, "dcode-wrapper.sh");
       const launcher = makeLauncherFixtureSource(
-        readAgentFile("dcode-launcher.sh").replace(
+        readAgentFile("runtime/agent-launcher.sh").replace(
           'readonly MANAGED_DCODE_WRAPPER="/usr/local/lib/nemoclaw/dcode-wrapper.sh"',
           `readonly MANAGED_DCODE_WRAPPER="${wrapperPath}"`,
         ),
         tempDir,
       );
       fs.writeFileSync(launcherPath, launcher, { mode: 0o755 });
-      fs.writeFileSync(wrapperPath, readAgentFile("dcode-wrapper.sh"), { mode: 0o755 });
+      fs.writeFileSync(wrapperPath, readAgentFile("runtime/agent-wrapper.sh"), { mode: 0o755 });
 
       const result = runLauncher(launcherPath, ["-n", ""], {});
 
@@ -272,11 +272,16 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     const lines = result.stdout.trimEnd().split("\n");
     const managedProxy = "http://managed-proxy.internal:65535";
     const managedNoProxy = "localhost,127.0.0.1,::1,managed-proxy.internal";
-    expect(PROXY_URL_ENV_NAMES.every((name) => lines.includes(`LAUNCHER_${name}=${managedProxy}`))).toBe(true);
+    expect(
+      PROXY_URL_ENV_NAMES.every((name) => lines.includes(`LAUNCHER_${name}=${managedProxy}`)),
+    ).toBe(true);
     expect(lines).toContain(`LAUNCHER_${TRUSTED_FETCH_PROXY_ENV_NAME}=${managedProxy}`);
-    expect(NO_PROXY_ENV_NAMES.every((name) =>
-        lines.includes(`LAUNCHER_${name}=${managedNoProxy}`))).toBe(true);
-    expect(CLEARED_PROXY_ENV_NAMES.every((name) => lines.includes(`LAUNCHER_${name}=__unset__`))).toBe(true);
+    expect(
+      NO_PROXY_ENV_NAMES.every((name) => lines.includes(`LAUNCHER_${name}=${managedNoProxy}`)),
+    ).toBe(true);
+    expect(
+      CLEARED_PROXY_ENV_NAMES.every((name) => lines.includes(`LAUNCHER_${name}=__unset__`)),
+    ).toBe(true);
     const output = `${result.stdout}\n${result.stderr}`;
     expect(output).not.toContain("inference.local");
     expect(output).not.toContain("corp-proxy.example");
@@ -404,7 +409,7 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
 
   it("pins validated proxy overrides into direct dcode execution paths (#6191)", () => {
     const dockerfile = readAgentFile("Dockerfile");
-    const launcher = readAgentFile("dcode-launcher.sh");
+    const launcher = readAgentFile("runtime/agent-launcher.sh");
 
     expect(dockerfile).toContain("ARG NEMOCLAW_PROXY_HOST=10.200.0.1");
     expect(dockerfile).toContain("ARG NEMOCLAW_PROXY_PORT=3128");
@@ -644,7 +649,7 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     "keeps dcode shell proxy validators aligned with onboard validation [%s] (#6191)",
     (value) => {
       const start = readAgentFile("start.sh");
-      const launcher = readAgentFile("dcode-launcher.sh");
+      const launcher = readAgentFile("runtime/agent-launcher.sh");
       const hostSamples = [
         "10.200.0.1",
         "managed-proxy.internal",
@@ -669,17 +674,15 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
     },
   );
 
-  it.each(
-    [
-        "# Invalid state:",
-        "# Source boundary:",
-        "# Source-fix constraint:",
-        "# Regression:",
-        "# Removal condition:",
-      ],
-  )("documents the proxy-only source boundary and removal condition [%s] (#6191)", (marker) => {
+  it.each([
+    "# Invalid state:",
+    "# Source boundary:",
+    "# Source-fix constraint:",
+    "# Regression:",
+    "# Removal condition:",
+  ])("documents the proxy-only source boundary and removal condition [%s] (#6191)", (marker) => {
     const start = readAgentFile("start.sh");
-    const launcher = readAgentFile("dcode-launcher.sh");
+    const launcher = readAgentFile("runtime/agent-launcher.sh");
     const headlessCheck = fs.readFileSync(headlessCheckPath, "utf8");
 
     expect(start).toContain(marker);
@@ -713,7 +716,11 @@ describe("Deep Agents Code direct-exec proxy launcher", () => {
       expect(result.status).not.toBe(0);
       expect(startResult.status).not.toBe(0);
       expect(result.stdout).not.toContain("LAUNCHER_");
-      expect(Object.values(managedProxy).every((value) => !`${result.stdout}\n${result.stderr}\n${startResult.stderr}`.includes(value))).toBe(true);
+      expect(
+        Object.values(managedProxy).every(
+          (value) => !`${result.stdout}\n${result.stderr}\n${startResult.stderr}`.includes(value),
+        ),
+      ).toBe(true);
     },
   );
 });

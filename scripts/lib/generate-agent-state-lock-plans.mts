@@ -15,7 +15,9 @@ for (const agentName of listAgents()) {
   const agent = loadAgent(agentName);
   if (!agent.stateLockPlanInImage) continue;
 
-  const outputPath = path.join(agent.agentDir, "state-lock-plan.json");
+  const outputPath = agent.harnessPackageSource
+    ? path.join(agent.agentDir, "runtime", "state", "plan.json")
+    : path.join(agent.agentDir, "state-lock-plan.json");
   const output = `${JSON.stringify(
     {
       $comment: SPDX_COMMENT,
@@ -24,6 +26,7 @@ for (const agentName of listAgents()) {
     null,
     2,
   )}\n`;
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, output);
   process.stdout.write(`${path.relative(REPO_ROOT, outputPath)}\n`);
 }

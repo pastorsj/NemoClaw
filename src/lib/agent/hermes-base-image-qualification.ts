@@ -35,7 +35,7 @@ function loadHermesBaseImageQualificationRuntime(): HermesBaseImageQualification
   if (!harnessPackage) throw new Error("Hermes harness package is unavailable.");
   const loaded = loadHarnessCommonJsModule(
     harnessPackage,
-    "host/base-image-qualification.cts",
+    "host/base-qualification.cts",
     64 * 1024,
   );
   const runtime = loaded.exports as Partial<HermesBaseImageQualificationRuntime>;

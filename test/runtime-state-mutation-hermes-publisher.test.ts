@@ -11,23 +11,27 @@ const PUBLISHER = path.join(
   ROOT,
   "packages",
   "nemoclaw-hermes",
-  "scripts",
-  "runtime_state_mutation_hermes_publisher.py",
+  "runtime",
+  "state",
+  "publisher.py",
 );
 const CAPABILITY = path.join(
   ROOT,
   "packages",
   "nemoclaw-hermes",
-  "runtime-state-mutation-publisher-v1.json",
+  "runtime",
+  "state",
+  "publisher.json",
 );
-const STATE_PLAN = path.join(ROOT, "packages", "nemoclaw-hermes", "state-lock-plan.json");
+const STATE_PLAN = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime", "state", "plan.json");
 const START = path.join(ROOT, "packages", "nemoclaw-hermes", "start.sh");
 const STARTUP_GATE = path.join(
   ROOT,
   "packages",
   "nemoclaw-hermes",
-  "scripts",
-  "runtime-state-mutation-startup-gate.py",
+  "runtime",
+  "state",
+  "startup-gate.py",
 );
 
 const HARNESS = String.raw`

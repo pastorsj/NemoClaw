@@ -49,7 +49,7 @@ function makeWrapperFixture(
   const envFile = path.join(tempDir, ".env");
   const authFile = path.join(tempDir, "auth.json");
   const codexAuthFile = path.join(tempDir, "chatgpt-auth.json");
-  const source = readAgentFile("dcode-wrapper.sh");
+  const source = readAgentFile("runtime/agent-wrapper.sh");
   expect(
     source,
     "managed MCP descriptors must be opened by the long-lived Python process",
@@ -87,8 +87,22 @@ function makeWrapperFixture(
 }
 
 describe("LangChain Deep Agents Code managed entrypoints", () => {
+  it("resolves the resource-limit helper from the source checkout", () => {
+    const launcher = readAgentFile("runtime/agent-launcher.sh");
+    const checkoutHelper = path.resolve(
+      agentDir,
+      "runtime",
+      "../../../scripts/lib/sandbox-rlimits.sh",
+    );
+
+    expect(launcher).toContain(
+      '$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../../scripts/lib/sandbox-rlimits.sh',
+    );
+    expect(fs.existsSync(checkoutHelper)).toBe(true);
+  });
+
   it("uses loopback with a canonical DNS URL when the build validator has no route", () => {
-    const validator = path.join(agentDir, "validate-read-only-mcp-call.py");
+    const validator = path.join(agentDir, "checks", "mcp-call.py");
     const probe = spawnSync(
       "python3",
       [
@@ -116,9 +130,9 @@ describe("LangChain Deep Agents Code managed entrypoints", () => {
   });
 
   it("exposes only the fixed deterministic read-only MCP command (#9889)", () => {
-    const wrapper = readAgentFile("dcode-wrapper.sh");
-    const command = readAgentFile("nemoclaw_read_only_mcp.py");
-    const validator = readAgentFile("validate-read-only-mcp-call.py");
+    const wrapper = readAgentFile("runtime/agent-wrapper.sh");
+    const command = readAgentFile("runtime/readonly-mcp.py");
+    const validator = readAgentFile("checks/mcp-call.py");
 
     expect(wrapper).toContain("list | call-read-only | help");
     expect(wrapper).toContain("dcode tools call-read-only TOOL --json");
@@ -135,7 +149,7 @@ describe("LangChain Deep Agents Code managed entrypoints", () => {
   });
 
   it("keeps deterministic read-only MCP parsing bounded and structured (#9889)", () => {
-    const commandPath = path.join(agentDir, "nemoclaw_read_only_mcp.py");
+    const commandPath = path.join(agentDir, "runtime", "readonly-mcp.py");
     const invalid = spawnSync("python3", [commandPath, "bad/tool", "--json"], {
       encoding: "utf8",
       input: "{}",
@@ -185,7 +199,7 @@ describe("LangChain Deep Agents Code managed entrypoints", () => {
     expect(JSON.parse(nonFinite.stdout).data.code).toBe("malformed_result");
   });
 
-  it.each(["dcode-launcher.sh", "dcode-wrapper.sh", "start.sh"])(
+  it.each(["runtime/agent-launcher.sh", "runtime/agent-wrapper.sh", "start.sh"])(
     "uses trusted privileged-mode Bash for every image entry script [case %#]",
     (name) => {
       const source = readAgentFile(name);
@@ -199,8 +213,8 @@ describe("LangChain Deep Agents Code managed entrypoints", () => {
     (name) => {
       const dockerfile = readAgentFile("Dockerfile");
       const start = readAgentFile("start.sh");
-      const wrapper = readAgentFile("dcode-wrapper.sh");
-      const patcher = readAgentFile("patch-managed-deepagents-code.py");
+      const wrapper = readAgentFile("runtime/agent-wrapper.sh");
+      const patcher = readAgentFile("compat/runtime-patch.py");
 
       expect(dockerfile).toContain(`${name}=false`);
       expect(start).toContain(`export ${name}=false`);

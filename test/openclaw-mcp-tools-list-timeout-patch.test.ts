@@ -8,7 +8,7 @@ import vm from "node:vm";
 
 import { describe, expect, it } from "vitest";
 
-import { patchManagedTransportDiagnosticsText } from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-managed-transport-diagnostics.mts";
+import { patchManagedTransportDiagnosticsText } from "../packages/nemoclaw-openclaw/compat/transport-diagnostics.mts";
 import {
   INJECTED_TOOLS_LIST_TIMEOUT_HELPER,
   MARKER,
@@ -18,7 +18,7 @@ import {
   TOOLS_LIST_TIMEOUT_ENV,
   TOOLS_LIST_TIMEOUT_MAX_MS,
   TOOLS_LIST_TIMEOUT_MIN_MS,
-} from "../packages/nemoclaw-openclaw/scripts/patch-openclaw-mcp-tools-list-timeout.mts";
+} from "../packages/nemoclaw-openclaw/compat/mcp-timeout.mts";
 
 /** Mirrors the reviewed OpenClaw 2026.7.1 bundle-mcp timeout boundary. */
 function bundleMcpRuntimeFixture(): string {

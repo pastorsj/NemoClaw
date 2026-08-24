@@ -17,7 +17,7 @@ import {
   HERMES_PROXY_REWRITE_SENTINEL,
   MANAGED_IMAGE_HERMES_NEUTRAL_PLATFORMS,
 } from "../packages/nemoclaw-hermes/config/managed-policy.ts";
-import { discoverModelSpecificSetups } from "../packages/nemoclaw-hermes/config/model-specific-setup.ts";
+import { discoverModelSpecificSetups } from "../packages/nemoclaw-hermes/config/model-setup.ts";
 import {
   applyCompatibleEndpointContextWindow,
   resetCompatibleEndpointContextWindowAutoState,
@@ -37,6 +37,7 @@ const SCRIPT_PATH = path.join(
   "..",
   "packages",
   "nemoclaw-hermes",
+  "config",
   "generate-config.ts",
 );
 const SCRIPT_DIR = path.dirname(SCRIPT_PATH);
@@ -244,12 +245,18 @@ function copyConfigGeneratorFixture(fixtureRoot: string): string {
     fixtureRoot,
     "packages",
     "nemoclaw-hermes",
+    "config",
     "generate-config.ts",
   );
   const fixtureConfigDir = path.join(fixtureRoot, "packages", "nemoclaw-hermes", "config");
   fs.mkdirSync(path.dirname(fixtureScriptPath), { recursive: true });
   fs.copyFileSync(SCRIPT_PATH, fixtureScriptPath);
   fs.cpSync(CONFIG_MODULE_DIR, fixtureConfigDir, { recursive: true });
+  fs.cpSync(
+    path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "host"),
+    path.join(fixtureRoot, "packages", "nemoclaw-hermes", "host"),
+    { recursive: true },
+  );
   fs.cpSync(
     path.join(import.meta.dirname, "..", "src", "lib", "messaging"),
     path.join(fixtureRoot, "src", "lib", "messaging"),
@@ -319,7 +326,7 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("packages/nemoclaw-hermes/generate-config.ts", () => {
+describe("packages/nemoclaw-hermes/config/generate-config.ts", () => {
   it(
     "matches direct generation as a strip-types executable with an explicit gateway matrix",
     async () => {

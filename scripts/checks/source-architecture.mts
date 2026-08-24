@@ -67,8 +67,11 @@ const BUDGET_PATH = path.join(REPO_ROOT, "ci", "source-architecture-budget.json"
 const DEFAULT_SCAN_ROOTS = [
   "src",
   "packages/nemoclaw-openclaw/plugin/src",
-  "packages/nemoclaw-openclaw/preloads",
-  "packages/nemoclaw-openclaw/scripts",
+  "packages/nemoclaw-openclaw/checks",
+  "packages/nemoclaw-openclaw/compat",
+  "packages/nemoclaw-openclaw/config",
+  "packages/nemoclaw-openclaw/host",
+  "packages/nemoclaw-openclaw/runtime",
   "packages/nemoclaw-hermes",
   "bin",
   "scripts",

@@ -9,7 +9,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PATCHER = path.join(ROOT, "packages", "nemoclaw-hermes", "patch-gateway-process-identity.py");
+const PATCHER = path.join(ROOT, "packages", "nemoclaw-hermes", "compat", "gateway-identity.py");
 
 // The pinned Hermes matcher, reduced to the tokenizing/allowlist shape the
 // patcher rewrites. Keeping the real grammar here means the assertions below

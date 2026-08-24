@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { main } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
+import { main } from "../packages/nemoclaw-openclaw/config/generate-config.mts";
 import { dockerSpawnSync } from "../src/lib/adapters/docker/exec";
 import {
   ensureOpenClawGeminiRuntimeImage,

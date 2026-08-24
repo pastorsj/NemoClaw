@@ -1411,7 +1411,7 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     environmentOrInferenceEndpoint: "Ubuntu; NVIDIA hosted inference",
     owningPaths: [
       "scripts/backup-workspace.sh",
-      "packages/nemoclaw-openclaw/scripts/backup-workspace.sh",
+      "packages/nemoclaw-openclaw/runtime/backup-workspace.sh",
     ],
     profile: "nvidia-inference",
     timeoutMinutes: 60,

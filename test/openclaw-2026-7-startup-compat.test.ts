@@ -15,9 +15,8 @@ const NORMALIZER = path.join(
   ROOT,
   "packages",
   "nemoclaw-openclaw",
-  "scripts",
-  "lib",
-  "normalize_mutable_config_perms.py",
+  "runtime",
+  "config-permissions.py",
 );
 const START_SCRIPT = path.join(ROOT, "packages", "nemoclaw-openclaw", "start.sh");
 const temporaryRoots: string[] = [];

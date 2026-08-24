@@ -8,7 +8,7 @@ import path from "node:path";
 import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
 import { ROOT } from "../runner";
 
-export const OPENCLAW_BASE_IMAGE_INPUTS_FILE = "packages/nemoclaw-openclaw/base-image-inputs.json";
+export const OPENCLAW_BASE_IMAGE_INPUTS_FILE = "packages/nemoclaw-openclaw/checks/base-inputs.json";
 
 const BASE_IMAGE_INPUTS_MAX_BYTES = 64 * 1024;
 const BASE_IMAGE_INPUTS_MAX_PATHS = 128;

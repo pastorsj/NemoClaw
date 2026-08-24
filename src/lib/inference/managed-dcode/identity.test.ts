@@ -16,7 +16,7 @@ function writeInstalledDcodeRuntime(): { home: string; runtimePath: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-runtime-"));
   temporaryHomes.push(home);
   const root = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-langchain-deepagents-code");
-  fs.mkdirSync(root, { recursive: true });
+  fs.mkdirSync(path.join(root, "host"), { recursive: true });
   fs.writeFileSync(
     path.join(root, "package.json"),
     JSON.stringify({
@@ -30,7 +30,7 @@ function writeInstalledDcodeRuntime(): { home: string; runtimePath: string } {
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
-  const runtimePath = path.join(root, "managed-identity.cts");
+  const runtimePath = path.join(root, "host", "managed-identity.cts");
   fs.writeFileSync(
     runtimePath,
     [

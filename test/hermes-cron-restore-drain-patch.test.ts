@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const PATCHER = path.resolve("packages/nemoclaw-hermes/patch-cron-restore-drain.py");
+const PATCHER = path.resolve("packages/nemoclaw-hermes/compat/cron-drain.py");
 
 const DRAIN_SOURCE = `from pathlib import Path
 from utils import atomic_json_write

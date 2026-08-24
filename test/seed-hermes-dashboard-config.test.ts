@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Functional tests for packages/nemoclaw-hermes/seed-dashboard-config.py.
+// Functional tests for packages/nemoclaw-hermes/runtime/dashboard-config.py.
 // Runs the actual Python script against temp config files and asserts on the
 // on-disk YAML it leaves behind. Mirrors the spawn-and-read pattern from
 // seed-wechat-accounts.test.ts and generate-hermes-config.test.ts.
@@ -25,7 +25,7 @@ const SCRIPT_PATH = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "seed-dashboard-config.py",
+  "runtime", "dashboard-config.py",
 );
 
 // PyYAML ships in the Hermes venv at runtime; CI/dev hosts generally have it too.

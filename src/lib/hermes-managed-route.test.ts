@@ -20,8 +20,8 @@ function writeInstalledHermesRuntime(): { home: string; runtimePath: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-runtime-"));
   temporaryHomes.push(home);
   const root = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-hermes");
-  const configDir = path.join(root, "config");
-  fs.mkdirSync(configDir, { recursive: true });
+  const hostDir = path.join(root, "host");
+  fs.mkdirSync(hostDir, { recursive: true });
   fs.writeFileSync(
     path.join(root, "package.json"),
     JSON.stringify({
@@ -35,7 +35,7 @@ function writeInstalledHermesRuntime(): { home: string; runtimePath: string } {
   fs.writeFileSync(path.join(root, "Dockerfile.base"), "FROM scratch\n");
   fs.writeFileSync(path.join(root, "start.sh"), "#!/usr/bin/env bash\n", { mode: 0o755 });
   fs.writeFileSync(path.join(root, "policy-additions.yaml"), "version: 1\n");
-  const runtimePath = path.join(configDir, "managed-route.cts");
+  const runtimePath = path.join(hostDir, "managed-route.cts");
   fs.writeFileSync(
     runtimePath,
     [

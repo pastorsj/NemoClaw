@@ -2548,7 +2548,6 @@ const sandboxCreateIntentResolver = sandboxCreateIntentResolution.createSandboxC
     getMessagingChannelForEnvKey,
   },
   filterEnabledChannelsByAgent,
-  defaultPolicyPath: path.join(ROOT, "packages", "nemoclaw-openclaw", "policy-additions.yaml"),
   getAgentPolicyPath: agentOnboard.getAgentPolicyPath,
   resolveGpuPlan: (config) =>
     dockerGpuSandboxCreate.resolveProfileGpuCreatePlan(config, isLinuxDockerDriverGatewayEnabled()),

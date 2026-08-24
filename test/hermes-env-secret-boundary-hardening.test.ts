@@ -12,7 +12,7 @@ const VALIDATOR = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 const START_SCRIPT = path.join(import.meta.dirname, "..", "packages", "nemoclaw-hermes", "start.sh");
 const MAX_ENV_BYTES = 4 * 1024 * 1024;

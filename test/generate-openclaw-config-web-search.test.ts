@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildConfig } from "../packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts";
+import { buildConfig } from "../packages/nemoclaw-openclaw/config/generate-config.mts";
 import { baseOpenClawGenerationEnv } from "./helpers/openclaw-env-fixture";
 
 const BASE_ENV = baseOpenClawGenerationEnv();

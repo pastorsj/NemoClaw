@@ -10,7 +10,7 @@ const BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 const NONCE = "a".repeat(64);
 

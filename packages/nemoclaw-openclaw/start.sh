@@ -549,11 +549,11 @@ resolve_mutable_config_normalizer() {
     printf '%s\n' "${NEMOCLAW_MUTABLE_CONFIG_NORMALIZER}"
     return 0
   fi
-  if [ -f "packages/nemoclaw-openclaw/scripts/lib/normalize_mutable_config_perms.py" ]; then
-    printf '%s\n' "packages/nemoclaw-openclaw/scripts/lib/normalize_mutable_config_perms.py"
+  if [ -f "packages/nemoclaw-openclaw/runtime/config-permissions.py" ]; then
+    printf '%s\n' "packages/nemoclaw-openclaw/runtime/config-permissions.py"
     return 0
   fi
-  normalizer="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/normalize_mutable_config_perms.py"
+  normalizer="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime/config-permissions.py"
   if [ -f "$normalizer" ]; then
     printf '%s\n' "$normalizer"
     return 0
@@ -3397,7 +3397,7 @@ _PROXY_FIX_SOURCE="/usr/local/lib/nemoclaw/preloads/http-proxy-fix.js"
 # Scoped strictly to known affected models: unrelated requests pass through
 # completely untouched. This sandbox preload is the source-boundary workaround
 # until upstream clients/providers always emit these model-specific kwargs; see
-# packages/nemoclaw-openclaw/preloads/nemotron-inference-fix.js for the invalid state,
+# packages/nemoclaw-openclaw/runtime/preloads/nemotron-inference-fix.js for the invalid state,
 # regression proof, and removal condition.
 _NEMOTRON_FIX_SCRIPT="/tmp/nemoclaw-nemotron-inference-fix.js"
 _NEMOTRON_FIX_SOURCE="/usr/local/lib/nemoclaw/preloads/nemotron-inference-fix.js"
@@ -4206,7 +4206,7 @@ GATEWAYTOKENENVEOF
 # entrypoint versions wrote a two-line shim into .bashrc/.profile; remove that
 # managed stanza before lock_rc_files makes the files read-only again.
 #
-# The Python body lives in packages/nemoclaw-openclaw/scripts/lib/clean_runtime_shell_env_shim.py so it
+# The Python body lives in packages/nemoclaw-openclaw/compat/shell-env.py so it
 # can be unit-tested with controlled rc fixtures. Installed location in the
 # sandbox image: /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py.
 ensure_runtime_shell_env_shim() {
@@ -4221,7 +4221,7 @@ ensure_runtime_shell_env_shim() {
   #
   # The NEMOCLAW_RC_CLEAN_SCRIPT override is consulted ONLY when the installed
   # helper is missing — i.e. running the unit-test wrappers against the
-  # repository tree, where the script lives in this package's scripts/lib/.
+  # repository tree, where the script lives in this package's compat directory.
   # The final fallback resolves the script relative to nemoclaw-start.sh so
   # `bash packages/nemoclaw-openclaw/start.sh` works out-of-the-box for ad-hoc dev runs.
   local clean_script="/usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py"
@@ -4229,7 +4229,7 @@ ensure_runtime_shell_env_shim() {
     if [ -n "${NEMOCLAW_RC_CLEAN_SCRIPT:-}" ] && [ -f "${NEMOCLAW_RC_CLEAN_SCRIPT}" ]; then
       clean_script="${NEMOCLAW_RC_CLEAN_SCRIPT}"
     else
-      clean_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/clean_runtime_shell_env_shim.py"
+      clean_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/compat/shell-env.py"
     fi
   fi
 

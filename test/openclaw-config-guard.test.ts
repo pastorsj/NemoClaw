@@ -9,7 +9,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const OPENCLAW_PACKAGE_ROOT = path.resolve("packages/nemoclaw-openclaw");
-const GUARD_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "scripts/openclaw-config-guard.py");
+const GUARD_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "runtime/config-guard.py");
 const JSON5_MODULE_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "plugin/node_modules/json5");
 const fixtures: string[] = [];
 const RUN_AS_CURRENT_USER = String.raw`

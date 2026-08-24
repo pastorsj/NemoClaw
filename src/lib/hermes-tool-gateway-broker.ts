@@ -20,22 +20,22 @@ const onboardProviders = require("./onboard/providers");
 const HERMES_TOOL_GATEWAY_RUNTIME_FILES = Object.freeze([
   Object.freeze({
     key: "script",
-    relativePath: "host/tool-gateway-broker.ts",
+    relativePath: "host/tool-broker.ts",
     maxBytes: 128 * 1024,
   }),
   Object.freeze({
     key: "matrix",
-    relativePath: "host/managed-tool-gateway-matrix.json",
+    relativePath: "host/tool-matrix.json",
     maxBytes: 64 * 1024,
   }),
   Object.freeze({
     key: "runtimeCredentials",
-    relativePath: "host/runtime-refresh-credentials.ts",
+    relativePath: "host/refresh-credentials.ts",
     maxBytes: 64 * 1024,
   }),
   Object.freeze({
     key: "controlContract",
-    relativePath: "host/tool-gateway-control-contract.ts",
+    relativePath: "host/tool-contract.ts",
     maxBytes: 64 * 1024,
   }),
 ]);
@@ -734,13 +734,13 @@ function brokerRuntimeHash() {
     .update(
       JSON.stringify({
         port: HERMES_TOOL_GATEWAY_PORT,
-        script: "host/tool-gateway-broker.ts",
+        script: "host/tool-broker.ts",
         scriptSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.script,
-        runtimeCredentials: "host/runtime-refresh-credentials.ts",
+        runtimeCredentials: "host/refresh-credentials.ts",
         runtimeCredentialsSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.runtimeCredentials,
-        controlContract: "host/tool-gateway-control-contract.ts",
+        controlContract: "host/tool-contract.ts",
         controlContractSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.controlContract,
-        matrix: "host/managed-tool-gateway-matrix.json",
+        matrix: "host/tool-matrix.json",
         matrixSha256: HERMES_TOOL_GATEWAY_RUNTIME.fileHashes.matrix,
         stateDir: HERMES_TOOL_GATEWAY_STATE_DIR,
         controlSocket: HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH,
@@ -774,7 +774,7 @@ function clearBrokerHash() {
 function isHermesToolGatewayBrokerProcess(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   const cmdline = runCapture(["ps", "-p", String(pid), "-o", "args="], { ignoreError: true });
-  return Boolean(cmdline && cmdline.includes("tool-gateway-broker.ts"));
+  return Boolean(cmdline && cmdline.includes("tool-broker.ts"));
 }
 
 function isHermesToolGatewayBrokerPortOwner(pid, deps = {}) {

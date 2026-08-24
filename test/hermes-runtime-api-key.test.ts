@@ -17,13 +17,13 @@ const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "runtime-config-guard.py",
+  "runtime", "config-guard.py",
 );
 const SECRET_BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "..",
   "packages", "nemoclaw-hermes",
-  "validate-env-secret-boundary.py",
+  "runtime", "env-boundary.py",
 );
 
 function escapeRegExp(value: string): string {

@@ -83,7 +83,7 @@ Start with `channels/<channel>/manifest.ts`.
 - Enrollment, external reachability checks, QR capture, channel-specific conflict checks, runtime status, and health probes belong in hooks.
 - Provider creation/reuse, policy application, config-file writes, plan env encoding, and registry persistence belong in `applier/`.
 - Onboard and `actions/sandbox/policy-channel.ts` should orchestrate planner/applier calls, not grow channel-specific rules.
-- Build-time config generation should use the compiled plan and `applier/build/messaging-build-applier.mts`; do not reintroduce channel-specific config rendering in `packages/nemoclaw-openclaw/scripts/generate-openclaw-config.mts` or `packages/nemoclaw-hermes/generate-config.ts`.
+- Build-time config generation should use the compiled plan and `applier/build/messaging-build-applier.mts`; do not reintroduce channel-specific config rendering in `packages/nemoclaw-openclaw/config/generate-config.mts` or `packages/nemoclaw-hermes/config/generate-config.ts`.
 
 ## Testing Guide
 

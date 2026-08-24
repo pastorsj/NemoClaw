@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // End-to-end test for the FORWARD-mode rewrite in
-// packages/nemoclaw-openclaw/preloads/http-proxy-fix.js.
+// packages/nemoclaw-openclaw/runtime/preloads/http-proxy-fix.js.
 //
 // Spins up a local HTTPS mock server on 127.0.0.1 that pretends to be a
 // custom OpenAI-compatible upstream (deepinfra / OpenRouter / vLLM behind
@@ -29,6 +29,7 @@ const FIX_PATH = path.resolve(
   "..",
   "packages",
   "nemoclaw-openclaw",
+  "runtime",
   "preloads",
   "http-proxy-fix.js",
 );

@@ -21,6 +21,7 @@ const PRELOAD_SCRIPTS = path.join(
   "..",
   "packages",
   "nemoclaw-openclaw",
+  "runtime",
   "preloads",
 );
 

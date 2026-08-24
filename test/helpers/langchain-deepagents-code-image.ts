@@ -45,12 +45,15 @@ function materializeWrapperFixture(
   transform: (source: string) => string,
 ): string {
   const wrapperPath = path.join(tempDir, "dcode-wrapper.sh");
-  const source = mustReplaceOnce(stubManagedMcpValidator(readAgentFile("dcode-wrapper.sh")), [
+  const source = mustReplaceOnce(
+    stubManagedMcpValidator(readAgentFile("runtime/agent-wrapper.sh")),
     [
-      'readonly DEEPAGENTS_ENV_FILE="/sandbox/.deepagents/.env"',
-      `readonly DEEPAGENTS_ENV_FILE="${envFile}"`,
+      [
+        'readonly DEEPAGENTS_ENV_FILE="/sandbox/.deepagents/.env"',
+        `readonly DEEPAGENTS_ENV_FILE="${envFile}"`,
+      ],
     ],
-  ]);
+  );
   fs.writeFileSync(envFile, "", "utf8");
   fs.writeFileSync(wrapperPath, transform(source), "utf8");
   fs.chmodSync(wrapperPath, 0o755);
