@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { loadAgent, type AgentDefinition } from "../agent/defs";
 import { isErrnoException } from "../core/errno";
+import { harnessPackageContentDigest } from "../harness/package-registry";
 import {
   collectBuildContextStats,
   SANDBOX_BUILD_CONTEXT_PREFIX,
@@ -59,6 +60,32 @@ function isSameFile(leftPath: string, rightPath: string): boolean {
   }
 }
 
+function isMatchingRepositoryDockerfile(
+  root: string,
+  selectedDockerfile: string,
+  agent: AgentDefinition,
+): boolean {
+  const packageDirectoryName = `nemoclaw-${agent.name}`;
+  const agentDirectory = typeof agent.agentDir === "string" ? path.resolve(agent.agentDir) : null;
+  const repositoryPackage = path.join(path.resolve(root), "packages", packageDirectoryName);
+  if (
+    !agentDirectory ||
+    path.basename(agentDirectory) !== packageDirectoryName ||
+    !agent.packageContentDigest ||
+    !agent.dockerfilePath ||
+    !isSameFile(agent.dockerfilePath, path.join(agentDirectory, "Dockerfile")) ||
+    !isSameFile(selectedDockerfile, path.join(repositoryPackage, "Dockerfile"))
+  ) {
+    return false;
+  }
+
+  try {
+    return harnessPackageContentDigest(repositoryPackage) === agent.packageContentDigest;
+  } catch {
+    return false;
+  }
+}
+
 function createCleanupBuildContext(buildCtx: string): () => boolean {
   return () => {
     try {
@@ -96,7 +123,12 @@ export function stageCreateSandboxBuildContext(
     // never satisfy it. Stage it exactly like the managed build instead of
     // failing at the first COPY (#7205).
     const agentDockerfile = input.agent?.dockerfilePath ?? null;
-    if (input.agent && agentDockerfile && isSameFile(fromResolved, agentDockerfile)) {
+    const isSelectedAgentDockerfile =
+      input.agent &&
+      agentDockerfile &&
+      (isSameFile(fromResolved, agentDockerfile) ||
+        isMatchingRepositoryDockerfile(input.root, fromResolved, input.agent));
+    if (input.agent && isSelectedAgentDockerfile) {
       log(`  Using trusted ${input.agent.displayName} Dockerfile: ${fromResolved}`);
       log(`  Staging the repository root as the managed ${input.agent.displayName} build context.`);
       try {

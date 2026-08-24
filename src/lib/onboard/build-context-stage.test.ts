@@ -83,7 +83,10 @@ describe("stageCreateSandboxBuildContext", () => {
     const agentDir = path.join(repoRoot, "packages", "nemoclaw-hermes");
     fs.mkdirSync(agentDir, { recursive: true });
     const agentDockerfile = path.join(agentDir, "Dockerfile");
-    fs.writeFileSync(agentDockerfile, "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\n");
+    fs.writeFileSync(
+      agentDockerfile,
+      "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\n",
+    );
     const agentBuild = {
       buildCtx: makeTmpDir("nemoclaw-agent-staged-"),
       stagedDockerfile: path.join(makeTmpDir("nemoclaw-agent-staged-df-"), "agent.Dockerfile"),
@@ -108,6 +111,90 @@ describe("stageCreateSandboxBuildContext", () => {
       `  Using trusted Hermes Dockerfile: ${agentDockerfile}`,
       "  Staging the repository root as the managed Hermes build context.",
     ]);
+  });
+
+  it("stages the repository root when an installed package matches the selected repository Dockerfile", () => {
+    const repoRoot = makeTmpDir("nemoclaw-repository-package-");
+    const sourcePackage = path.join(repoRoot, "packages", "nemoclaw-hermes");
+    const installedPackage = path.join(
+      makeTmpDir("nemoclaw-installed-package-"),
+      ".nemoclaw",
+      "harnesses",
+      "nemoclaw-hermes",
+    );
+    writeFixtureFile(sourcePackage, "manifest.yaml", "name: hermes\n");
+    writeFixtureFile(
+      sourcePackage,
+      "Dockerfile",
+      "FROM scratch\nCOPY src/ /src/\nCOPY packages/nemoclaw-hermes/ /opt/hermes/\n",
+    );
+    fs.cpSync(sourcePackage, installedPackage, { recursive: true });
+    writeFixtureFile(repoRoot, "src/repository-marker.ts", "export const marker = true;\n");
+    const agent = {
+      name: "hermes",
+      displayName: "Hermes",
+      agentDir: installedPackage,
+      manifestPath: path.join(installedPackage, "manifest.yaml"),
+      dockerfileBasePath: null,
+      dockerfilePath: path.join(installedPackage, "Dockerfile"),
+      harnessPackageSource: "installed",
+      packageContentDigest: harnessPackageContentDigest(installedPackage),
+    } as any;
+
+    const result = stageCreateSandboxBuildContext({
+      root: repoRoot,
+      fromDockerfile: path.join(sourcePackage, "Dockerfile"),
+      agent,
+      createAgentSandbox: (selectedAgent) =>
+        createManagedAgentSandbox(selectedAgent, { rootDir: repoRoot }),
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+    tmpDirs.push(result.buildCtx);
+
+    expect(result.origin).toBe("generated");
+    expect(fs.existsSync(path.join(result.buildCtx, "src", "repository-marker.ts"))).toBe(true);
+    expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toContain(
+      "COPY packages/nemoclaw-hermes/ /opt/hermes/",
+    );
+  });
+
+  it("keeps a repository Dockerfile custom when its package differs from the installed package", () => {
+    const repoRoot = makeTmpDir("nemoclaw-divergent-repository-package-");
+    const sourcePackage = path.join(repoRoot, "packages", "nemoclaw-hermes");
+    const installedPackage = path.join(
+      makeTmpDir("nemoclaw-divergent-installed-package-"),
+      ".nemoclaw",
+      "harnesses",
+      "nemoclaw-hermes",
+    );
+    writeFixtureFile(sourcePackage, "manifest.yaml", "name: hermes\n");
+    writeFixtureFile(sourcePackage, "Dockerfile", "FROM source-package\n");
+    fs.cpSync(sourcePackage, installedPackage, { recursive: true });
+    fs.writeFileSync(path.join(installedPackage, "Dockerfile"), "FROM installed-package\n");
+    const createAgentSandbox = vi.fn();
+
+    const result = stageCreateSandboxBuildContext({
+      root: repoRoot,
+      fromDockerfile: path.join(sourcePackage, "Dockerfile"),
+      agent: {
+        name: "hermes",
+        displayName: "Hermes",
+        agentDir: installedPackage,
+        manifestPath: path.join(installedPackage, "manifest.yaml"),
+        dockerfilePath: path.join(installedPackage, "Dockerfile"),
+        harnessPackageSource: "installed",
+        packageContentDigest: harnessPackageContentDigest(installedPackage),
+      } as any,
+      createAgentSandbox,
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+    tmpDirs.push(result.buildCtx);
+
+    expect(createAgentSandbox).not.toHaveBeenCalled();
+    expect(result.origin).toBe("custom");
+    expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toBe("FROM source-package\n");
   });
 
   it("filters checkout credentials from the staged managed repository-root context (#7205)", () => {
@@ -170,8 +257,11 @@ describe("stageCreateSandboxBuildContext", () => {
     tmpDirs.push(result.buildCtx);
 
     const stagedBytes = readStagedBytes(result.buildCtx);
-    expect(requiredFiles.every(([relativePath, contents]) =>
-        Object.is(fs.readFileSync(path.join(result.buildCtx, relativePath), "utf8"), contents))).toBe(true);
+    expect(
+      requiredFiles.every(([relativePath, contents]) =>
+        Object.is(fs.readFileSync(path.join(result.buildCtx, relativePath), "utf8"), contents),
+      ),
+    ).toBe(true);
     credentialFiles.forEach(([relativePath, contents]) => {
       expect(fs.existsSync(path.join(result.buildCtx, relativePath))).toBe(false);
       expect(stagedBytes).not.toContain(contents);
@@ -459,12 +549,7 @@ describe("stageCreateSandboxBuildContext", () => {
   it("stages the selected installed OpenClaw package in the default build context", () => {
     const repoRoot = path.resolve(import.meta.dirname, "../../..");
     const home = makeTmpDir("nemoclaw-selected-openclaw-home-");
-    const installedPackage = path.join(
-      home,
-      ".nemoclaw",
-      "harnesses",
-      "nemoclaw-openclaw",
-    );
+    const installedPackage = path.join(home, ".nemoclaw", "harnesses", "nemoclaw-openclaw");
     const bundledPackage = path.join(repoRoot, "packages", "nemoclaw-openclaw");
     const sentinel = "selected-installed-openclaw-package";
     fs.cpSync(bundledPackage, installedPackage, {
@@ -509,11 +594,7 @@ describe("stageCreateSandboxBuildContext", () => {
         "utf8",
       ),
     ).toBe(sentinel);
-    const stagedPackage = path.join(
-      result.buildCtx,
-      "packages",
-      "nemoclaw-openclaw",
-    );
+    const stagedPackage = path.join(result.buildCtx, "packages", "nemoclaw-openclaw");
     expect(fs.readFileSync(path.join(stagedPackage, "runtime-helper.sh"), "utf8")).toBe(
       "#!/bin/sh\necho selected\n",
     );
