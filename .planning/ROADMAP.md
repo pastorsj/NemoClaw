@@ -7,6 +7,19 @@
 
 The roadmap first records the supported scope and freezes current behavior. It then creates the package contract and registers the current integrations without changing their execution paths. Deep Agents Code and managed Hermes become the two real contract consumers before Contract V1 freezes, followed by OpenClaw extraction. Phase 8 qualifies a complete first-party in-tree release and becomes the rollback point. Only then may a separate maintainer decision convert packages to external integrations and authorize repository handoff and independent compatibility checks. An ordinary reviewed release-set change remains the only way to change supported package identities.
 
+## Current Execution
+
+The branch already contains the in-tree packages, harness commands, package discovery, receipts,
+and package-owned runtime files described by several earlier phases. Phase 11 is the active GSD
+execution list for the current local implementation. The detailed plans for Phases 1-10 remain as
+design history; they do not replace the Phase 11 completion tracker.
+
+- [ ] **Phase 11: Package Workflow** - Give all three packages one readable structure, add the
+  fixed configuration command, remove the proven core dispatch, and qualify one no-messaging live
+  journey.
+
+Plan: `.planning/phases/11-package-workflow/11-01-PLAN.md`
+
 ## Delivery Gates
 
 | Gate | Phase | Decision or evidence required | Failure behavior |
