@@ -3,7 +3,8 @@
 
 # Agent runtime packages
 
-This directory contains the agent runtime packages that ship with NemoClaw.
+This directory contains the in-tree agent runtime package implementation for NemoClaw.
+The implementation is a product-scope candidate, not an approved support or distribution policy.
 The registry discovers packages through data-only manifests and installation receipts.
 Onboarding and lifecycle commands can run package-owned helpers after receipt verification.
 
@@ -48,7 +49,7 @@ The registry rejects credential-shaped build-context paths before installation.
 
 Treat each installed agent runtime package as trusted code.
 Package-owned helpers can receive NemoClaw-held credentials and use the current user's Docker or OpenShell control.
-The receipt detects package changes after installation.
+The receipt detects tracked path, type, content, and executable-bit changes after installation.
 It does not authenticate the package publisher or validate package behavior.
 
 Every agent runtime package must include the agent manifest named by

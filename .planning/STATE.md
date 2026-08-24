@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: agent-runtime-package-migration
-status: executing
-stopped_at: Phase 11 Task 5
-last_updated: "2026-08-24T03:27:51-04:00"
-last_activity: 2026-08-24 - Completed the package readability slice and started final qualification.
+status: completed
+stopped_at: Phase 11 Plan 01 complete
+last_updated: "2026-08-24T13:49:00-04:00"
+last_activity: 2026-08-24 - Completed the in-tree package workflow and no-messaging live qualification.
 progress:
   total_phases: 11
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 51
-  completed_plans: 3
-  percent: 6
+  completed_plans: 4
+  percent: 8
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -24,10 +24,12 @@ progress:
 Phase: 11 of 11 (Package Workflow)
 Plan: 11-01
 Task: 5 of 5 - Qualify deterministic checks and one no-messaging live journey
-Status: Executing
+Status: Complete
 
 The branch is based on `origin/main` commit `67aab7ef57` through local merge commit `fff00cbbfb`.
-The worktree was clean when Phase 11 started. All commits remain local.
+`git status --short` had no entries when Phase 11 started. The local remote-tracking ref
+`pastorsj/agent-runtime-package-migration` points to `72f9622736`. Commits through `fbf3b94280`
+and the closing GSD summary remain local.
 
 ## Completion Tracker
 
@@ -35,7 +37,7 @@ The worktree was clean when Phase 11 started. All commits remain local.
 - [x] Task 2: Reorganize OpenClaw, Hermes, and LangChain Deep Agents Code.
 - [x] Task 3: Remove proven agent-specific core dispatch.
 - [x] Task 4: Make OpenClaw and Hermes startup entrypoints readable.
-- [ ] Task 5: Qualify deterministic checks and one no-messaging live journey.
+- [x] Task 5: Qualify deterministic checks and one no-messaging live journey.
 
 ## Success Conditions
 
@@ -50,8 +52,9 @@ The worktree was clean when Phase 11 started. All commits remain local.
 
 ## Decisions
 
-- Keep the common root contract: `README.md`, `package.json`, `manifest.yaml`, `Dockerfile.base`,
-  `Dockerfile`, `start.sh`, and `policy-additions.yaml`.
+- Keep the registry-required root contract: `package.json`, `manifest.yaml`, `Dockerfile.base`,
+  `Dockerfile`, `start.sh`, and `policy-additions.yaml`. The in-tree authoring template also
+  includes `README.md`.
 - Use responsibility directories only when the package needs them: `config`, `runtime`, `host`,
   `compat`, `plugin`, and `checks`.
 - Use one or two words for file names when that is precise. Permit a third word only when needed.
@@ -126,7 +129,26 @@ Task 4:
   174 assertions with 41 Linux-only skips, OpenClaw plugin 259 assertions, Hermes host broker 31
   assertions, Hermes plugin integration 7 assertions, and Hermes Python plugin 5 assertions.
 
-## Resume
+Task 5:
 
-Read `.planning/phases/11-package-workflow/11-CONTEXT.md` and execute
-`.planning/phases/11-package-workflow/11-01-PLAN.md` from Task 5.
+- The bounded broad deterministic run passed 2,450 files and 38,474 tests. The final package
+  contract run passed 1,346 tests. The final registry change passed 54 focused tests, and six
+  related integration files passed 205 tests with 16 documented skips.
+- Apple silicon macOS listed and installed all three packages in a private temporary home and
+  verified every receipt at commit `fbf3b94280`. OpenShell `0.0.106` could not establish a healthy
+  Homebrew gateway for the separate live sandbox attempt, so no macOS sandbox image was created.
+- Ubuntu 22.04.5 Arm64 on Brev completed the registered `sandbox-survival` OpenClaw target at commit
+  `fbf3b94280` with OpenShell `0.0.106`. Install, onboarding, sandbox creation, live inference,
+  persistent state, gateway restart, post-restart reconciliation, status, destroy, and cleanup
+  passed in 244.82 seconds.
+- The Brev run used the authenticated catalogue-listed model
+  `nvidia/nvidia/nemotron-3-ultra`. It used no messaging environment value, credential, or live
+  messaging-service test.
+- The guardian and an independent audit found no remaining process, listener, container, service,
+  package receipt, registry entry, temporary path, or credential trace. The preexisting
+  `openshell-docker` network retained its pre-run semantic configuration and had no endpoint.
+
+## Completion
+
+Phase 11 Plan 01 is complete. Phases 1-10 remain unchanged as design history and do not establish
+product support or authorize external package distribution.

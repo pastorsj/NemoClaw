@@ -9,14 +9,14 @@ The roadmap first records the supported scope and freezes current behavior. It t
 
 ## Current Execution
 
-The branch already contains the in-tree packages, harness commands, package discovery, receipts,
-and package-owned runtime files described by several earlier phases. Phase 11 is the active GSD
-execution list for the current local implementation. The detailed plans for Phases 1-10 remain as
-design history; they do not replace the Phase 11 completion tracker.
+The branch already contains the in-tree packages, `nemoclaw harness` commands, package discovery,
+receipts, and package-owned runtime files described by several earlier phases. Phase 11 is the
+active GSD execution list for the current local implementation. The detailed plans for Phases 1-10
+remain as design history; they do not replace the Phase 11 completion tracker.
 
-- [ ] **Phase 11: Package Workflow** - Give all three packages one readable structure, add the
-  fixed configuration command, remove the proven core dispatch, and qualify one no-messaging live
-  journey.
+- [x] **Phase 11: Package Workflow** - Give all three packages one responsibility-based structure,
+  add the fixed configuration command, remove the proven core dispatch, and qualify one
+  no-messaging live journey.
 
 Plan: `.planning/phases/11-package-workflow/11-01-PLAN.md`
 
@@ -43,6 +43,7 @@ Plan: `.planning/phases/11-package-workflow/11-01-PLAN.md`
 - [ ] **Phase 8: In-Tree Release Qualification** - Prove the complete package architecture before repository handoff.
 - [ ] **Phase 9: External Repository Handoff** - Publish and consume unchanged packages from independent repositories.
 - [ ] **Phase 10: Transition Cleanup and Continuous Compatibility** - Remove expired migration code and gate ongoing updates.
+- [x] **Phase 11: Package Workflow** - Organize the three in-tree packages and qualify the common workflow.
 
 ## Phase Details
 
@@ -236,6 +237,21 @@ Plans:
 - [ ] 10-03-PLAN.md - Add continuous compatibility gates for reviewed release-set changes.
 - [ ] 10-04-PLAN.md - Prove final architecture, rollback, and supported operator behavior.
 
+### Phase 11: Package Workflow
+**Goal**: OpenClaw, Hermes, and LangChain Deep Agents Code use one readable in-tree package workflow while the existing onboarding experience remains unchanged.
+**Depends on**: Nothing
+**Requirements**: []
+**Success Criteria**:
+  1. The three packages use the same root authoring template and responsibility directories where their integrations have matching work.
+  2. Managed startup invokes one fixed package-owned configuration command without selecting its implementation by agent ID.
+  3. Package entry points show the startup workflow and keep cohesive implementation in named package-owned modules.
+  4. Package contracts, integration tests, type-checks, repository checks, and one live no-messaging OpenClaw lifecycle pass.
+  5. The package authoring guide states the remaining closed core integration points and the steps to add another in-tree agent runtime.
+**Plans**: 1 plan
+
+Plans:
+- [x] 11-01-PLAN.md - Organize and qualify the in-tree agent runtime package workflow.
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -250,6 +266,7 @@ Plans:
 | 8. In-Tree Release Qualification | 0/5 | Not started | - |
 | 9. External Repository Handoff | 0/6 | Not started | - |
 | 10. Transition Cleanup and Continuous Compatibility | 0/4 | Not started | - |
+| 11. Package Workflow | 1/1 | Complete | 2026-08-24 |
 
 ---
 *Roadmap created: 2026-08-21*
