@@ -5,14 +5,16 @@
 
 This package is the OpenClaw integration layer for NemoClaw. The package owns OpenClaw-specific
 configuration, image contents, startup behavior, runtime helpers, plugins, and compatibility code.
-NemoClaw core owns package discovery, onboarding, credentials, policy application, and sandbox
-lifecycle operations.
+NemoClaw core owns package discovery, onboarding, credential collection and selection, OpenShell
+registration, policy requests, and product rollback decisions. OpenShell owns credential custody
+and delivery, sandbox lifecycle, and enforcement authority.
 
 ## Package workflow
 
 The package follows one sequence:
 
-1. `manifest.yaml` describes the agent runtime and its NemoClaw capabilities.
+1. `package.json` identifies the package; `manifest.yaml` identifies the agent runtime and declares
+   its data-only capabilities.
 2. `Dockerfile.base` installs the pinned OpenClaw and Model Context Protocol (MCP) dependency graphs.
 3. `Dockerfile` adds package configuration, runtime helpers, plugins, policies, and compatibility patches.
 4. `config/generate-config.mts` translates managed startup settings into `openclaw.json`.
@@ -65,7 +67,9 @@ sandbox.
 
 NemoClaw core loads `host/` helpers only after it verifies the installed package receipt. These
 helpers describe OpenClaw configuration grammar, restore behavior, CLI grammar, and MCP adapter
-commands. Core retains the lifecycle and credential decisions around those operations.
+commands. Core retains product authorization, transaction, rollback, credential selection, and
+OpenShell registration decisions around those operations. OpenShell retains credential custody and
+delivery, sandbox lifecycle, and enforcement authority.
 
 ## Compatibility debt
 

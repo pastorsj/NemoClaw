@@ -122,10 +122,11 @@ responsibility; it does not add empty folders to resemble another package.
 ## Core and package boundaries
 
 NemoClaw core owns the product workflow: command parsing, package discovery and receipts,
-onboarding, OpenShell lifecycle operations, credential storage and delivery, policy application,
-and persisted product state. The package owns the agent runtime translation: its image, native
-configuration, process startup, native plugin, runtime guards, compatibility patches, and build
-checks.
+onboarding, credential collection and selection, OpenShell registration, policy requests, rollback
+decisions, and persisted product state. OpenShell owns credential custody and delivery, sandbox
+lifecycle, and enforcement authority. The package owns the agent runtime translation: its image,
+native configuration, process startup, native plugin, runtime guards, compatibility patches, and
+build checks.
 
 The `host/` directory is a transition boundary, not a general plugin callback API. Core loads only
 named helpers from a receipt-verified package and retains the authorization, transaction, and

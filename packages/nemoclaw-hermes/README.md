@@ -6,26 +6,28 @@
 This package connects Hermes to the agent-runtime contract described in
 [`packages/README.md`](../README.md). The package owns the Hermes image, native configuration,
 sandbox startup, runtime guards, upstream compatibility work, and package checks. NemoClaw core
-continues to own package discovery, onboarding, credentials, OpenShell lifecycle operations, and
-shared messaging orchestration.
+continues to own package discovery, onboarding, credential collection and selection, OpenShell
+registration, product rollback decisions, and shared messaging orchestration. OpenShell owns
+credential custody and delivery, sandbox lifecycle, and enforcement authority.
 
 ## Package workflow
 
 The workflow reads from top to bottom:
 
-1. `Dockerfile.base` builds the pinned Hermes base and applies reviewed dependency patches.
-2. `Dockerfile` assembles the NemoClaw image from package-owned configuration, runtime, plugin,
+1. `package.json` and `manifest.yaml` identify Hermes and declare its data-only capabilities.
+2. `Dockerfile.base` builds the pinned Hermes base and applies reviewed dependency patches.
+3. `Dockerfile` assembles the NemoClaw image from package-owned configuration, runtime, plugin,
    policy, and compatibility files.
-3. `config/generate-config.ts` translates managed startup inputs into Hermes configuration.
-4. `start.sh` reads as the startup workflow: admit startup, load the package modules, configure the
+4. `config/generate-config.ts` translates managed startup inputs into Hermes configuration.
+5. `start.sh` reads as the startup workflow: admit startup, load the package modules, configure the
    proxy boundary, and execute the root or non-root launch path.
-5. The shell modules in `runtime/` define each startup responsibility without hiding orchestration
+6. The shell modules in `runtime/` define each startup responsibility without hiding orchestration
    or effects inside a framework.
-6. `compat/` adapts the pinned upstream release where its native behavior does not yet meet the
+7. `compat/` adapts the pinned upstream release where its native behavior does not yet meet the
    NemoClaw contract.
-7. `plugin/__init__.py` registers Hermes tools and hooks, then delegates managed-tool compatibility
+8. `plugin/__init__.py` registers Hermes tools and hooks, then delegates managed-tool compatibility
    to `plugin/tool_broker.py`.
-8. `checks/` validates those build and compatibility boundaries.
+9. `checks/` validates those build and compatibility boundaries.
 
 ## Directory guide
 
@@ -39,7 +41,7 @@ The workflow reads from top to bottom:
 | `checks/` | Provides build probes, the CLI contract validator, source download verification, and the release update command. |
 | `policies/` | Contains the permissive policy and Hermes-only policy presets. |
 | `provider-profiles/` | Contains package-owned OpenShell provider profiles. |
-| `model-specific-setup/` | Contains package-owned model compatibility declarations used by existing NemoClaw discovery paths. |
+| `model-specific-setup/` | Reserves the package-owned location for future Hermes model compatibility declarations; no manifest is currently required. |
 
 `manifest.yaml`, the two Dockerfiles, `start.sh`, and `policy-additions.yaml` are the common package
 contract. `portable-build-context.json` stays at the root because the Portable context loader reads

@@ -9,15 +9,16 @@ code that implements each stage of that contract.
 
 ## Package workflow
 
-1. `Dockerfile.base` installs the exact Python dependency set from
+1. `package.json` and `manifest.yaml` identify Deep Agents Code and declare its data-only capabilities.
+2. `Dockerfile.base` installs the exact Python dependency set from
    `runtime/requirements.lock`.
-2. `Dockerfile` installs the package-owned configuration, runtime, plugin, and compatibility code
+3. `Dockerfile` installs the package-owned configuration, runtime, plugin, and compatibility code
    into the final sandbox image.
-3. `runtime/generate-config.sh` runs `config/entrypoint.ts`, which loads
+4. `runtime/generate-config.sh` runs `config/entrypoint.ts`, which loads
    `config/generate-config.ts` and writes the native Deep Agents Code configuration.
-4. `start.sh` prepares writable state and launches the managed startup hold. Interactive and
+5. `start.sh` prepares writable state and launches the managed startup hold. Interactive and
    headless `dcode` commands then pass through the package-owned launch chain.
-5. Image-build checks verify the pinned plugin, runtime patch, tool disclosure, observability, and
+6. Image-build checks verify the pinned plugin, runtime patch, tool disclosure, observability, and
    read-only Model Context Protocol call before the image is accepted.
 
 ## Directory guide
