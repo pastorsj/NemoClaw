@@ -11,14 +11,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { readHermesBuildSettings } from "../packages/nemoclaw-hermes/config/build-env.ts";
 import { buildConfig } from "../packages/nemoclaw-openclaw/config/generate-config.mts";
 import { patchStagedDockerfile } from "../src/lib/onboard/dockerfile-patch";
+import { extractShellFunctionFromSource } from "./helpers/shell-source";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
-const START_SCRIPT = path.join(
-  import.meta.dirname,
-  "..",
-  "packages",
-  "nemoclaw-openclaw",
-  "start.sh",
-);
 const SECRET_BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "..",
@@ -150,9 +145,11 @@ describe("inference provider route identifier rename (#7177)", () => {
 });
 
 describe("write_auth_profile route identifier migration (#7177)", () => {
+  const startupSource = readOpenClawStartupSource();
   const wrapper = [
     "set -euo pipefail",
-    `eval "$(sed -n '/^write_auth_profile() {$/,/^}$/p' "$1")"`,
+    extractShellFunctionFromSource(startupSource, "openclaw_config_dir_owner"),
+    extractShellFunctionFromSource(startupSource, "write_auth_profile"),
     "write_auth_profile",
   ].join("\n");
 
@@ -164,7 +161,7 @@ describe("write_auth_profile route identifier migration (#7177)", () => {
   } {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-provider-id-auth-"));
     tmpDirs.push(home);
-    const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+    const result = spawnSync("bash", ["-s"], {
       input: wrapper,
       env: { PATH: process.env.PATH, HOME: home, ...env },
       encoding: "utf-8",

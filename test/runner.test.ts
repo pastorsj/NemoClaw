@@ -9,6 +9,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { redact, runCapture } from "../src/lib/runner";
+import { readOpenClawStartupSource } from "./support/openclaw-startup";
 
 const runnerPath = path.join(import.meta.dirname, "..", "src", "lib", "runner.ts");
 const platformPath = path.join(import.meta.dirname, "..", "src", "lib", "platform.ts");
@@ -1129,10 +1130,7 @@ describe("regression guards", () => {
         path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"),
         "utf-8",
       );
-      const startSrc = fs.readFileSync(
-        path.join(repoRoot, "packages", "nemoclaw-openclaw", "start.sh"),
-        "utf-8",
-      );
+      const startSrc = readOpenClawStartupSource();
 
       expect(baseSrc).toContain("ENV JITI_FS_CACHE=false");
       expect(runtimeSrc).toContain("ENV JITI_FS_CACHE=false");
@@ -1150,10 +1148,7 @@ describe("regression guards", () => {
           path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"),
           "utf-8",
         );
-        const startSrc = fs.readFileSync(
-          path.join(repoRoot, "packages", "nemoclaw-openclaw", "start.sh"),
-          "utf-8",
-        );
+        const startSrc = readOpenClawStartupSource();
         const hermesBaseSrc = fs.readFileSync(
           path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile.base"),
           "utf-8",

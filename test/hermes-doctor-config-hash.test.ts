@@ -7,11 +7,24 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { dockerRunCommandBetween, runDockerShell } from "./helpers/dockerfile-run-shell";
+import { hermesStartupModuleNames } from "./support/hermes-shell-harness";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
-const HERMES_BUILD_MCP_DIGEST = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime", "mcp-digest.py");
-const HERMES_RUNTIME_CONFIG_GUARD = path.join(ROOT, "packages", "nemoclaw-hermes", "runtime", "config-guard.py");
+const HERMES_BUILD_MCP_DIGEST = path.join(
+  ROOT,
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "mcp-digest.py",
+);
+const HERMES_RUNTIME_CONFIG_GUARD = path.join(
+  ROOT,
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "config-guard.py",
+);
 
 function writeYamlStubPython(root: string): string {
   const bootstrap = path.join(root, "python-yaml-bootstrap.py");
@@ -102,6 +115,10 @@ describe("Hermes doctor and config hash boundary", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-preload-lock-"));
     const binDir = path.join(tmp, "usr-local-bin");
     const libDir = path.join(tmp, "usr-local-lib-nemoclaw");
+    const hermesStartupDir = path.join(libDir, "hermes-startup");
+    const hermesStartupPaths = hermesStartupModuleNames
+      .map((moduleName) => path.join(hermesStartupDir, `${moduleName}.sh`))
+      .sort();
     const preloadsDir = path.join(libDir, "preloads");
     const buildMcpDigestPath = path.join(libDir, "build-hermes-mcp-digest.py");
     const mcpConfigTransactionPath = path.join(libDir, "hermes-mcp-config-transaction.py");
@@ -142,9 +159,11 @@ describe("Hermes doctor and config hash boundary", () => {
 
     try {
       fs.mkdirSync(binDir, { recursive: true });
+      fs.mkdirSync(hermesStartupDir, { recursive: true });
       fs.mkdirSync(nestedDir, { recursive: true, mode: 0o777 });
       fs.mkdirSync(profileDir, { recursive: true });
       for (const fixturePath of [
+        ...hermesStartupPaths,
         path.join(binDir, "nemoclaw-start"),
         path.join(binDir, "nemoclaw-managed-startup-hold"),
         path.join(binDir, "nemoclaw-managed-bootstrap"),
@@ -219,10 +238,12 @@ describe("Hermes doctor and config hash boundary", () => {
       expect(result.stderr).toBe("");
       expect(fs.readFileSync(chownLogPath, "utf-8")).toBe(
         [
-          `root:root ${path.join(binDir, "nemoclaw-gateway-control")} ${path.join(libDir, "gateway-supervisor.sh")} ${path.join(libDir, "state-dir-guard.py")} ${runtimeStateMutationControlPath} ${runtimeStateMutationStartupGatePath} ${runtimeStateMutationPublisherPath} ${stateLockPlanPath} ${runtimeStateMutationCapabilityPath} ${path.join(libDir, "managed-gateway-control.py")} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${mcpCredentialBoundaryPath}`,
+          `root:root ${hermesStartupDir} ${hermesStartupPaths.join(" ")} ${path.join(binDir, "nemoclaw-gateway-control")} ${path.join(libDir, "gateway-supervisor.sh")} ${path.join(libDir, "state-dir-guard.py")} ${runtimeStateMutationControlPath} ${runtimeStateMutationStartupGatePath} ${runtimeStateMutationPublisherPath} ${stateLockPlanPath} ${runtimeStateMutationCapabilityPath} ${path.join(libDir, "managed-gateway-control.py")} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${mcpCredentialBoundaryPath}`,
           "",
         ].join("\n"),
       );
+      expect(mode(hermesStartupDir)).toBe("555");
+      expect(hermesStartupPaths.map(mode)).toEqual(hermesStartupPaths.map(() => "444"));
       expect(mode(path.join(binDir, "nemoclaw-gateway-control"))).toBe("700");
       expect(mode(hermesCronRestoreControlPath)).toBe("700");
       expect(mode(path.join(libDir, "finalize-tirith-marker.py"))).toBe("755");
@@ -243,6 +264,7 @@ describe("Hermes doctor and config hash boundary", () => {
       expect(mode(path.join(libDir, "managed-gateway-control.py"))).toBe("500");
       expect(fs.existsSync(preloadsDir)).toBe(false);
     } finally {
+      fs.existsSync(hermesStartupDir) && fs.chmodSync(hermesStartupDir, 0o700);
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

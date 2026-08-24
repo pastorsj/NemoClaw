@@ -16,7 +16,7 @@ const HERMES_PACKAGE_ROOT = path.join(
   "nemoclaw-hermes",
 );
 export const hermesStartPath = path.join(HERMES_PACKAGE_ROOT, "start.sh");
-const HERMES_STARTUP_MODULES = [
+export const hermesStartupModuleNames = [
   "state-gate",
   "config-setup",
   "service-control",
@@ -47,7 +47,7 @@ export function extractShellFunction(source: string, name: string): string {
 /** Read the package startup workflow with its package-owned modules inlined. */
 export function readHermesStartupSource(startScript = hermesStartPath): string {
   let source = fs.readFileSync(startScript, "utf-8");
-  for (const moduleName of HERMES_STARTUP_MODULES) {
+  for (const moduleName of hermesStartupModuleNames) {
     const begin = `# hermes-startup-module ${moduleName} begin`;
     const end = `# hermes-startup-module ${moduleName} end`;
     const beginIndex = source.indexOf(begin);
@@ -81,7 +81,7 @@ function readHermesModuleLoaderSource(): string {
   const resolverEnd = source.indexOf(resolverEndMarker, resolverStart);
   assert(resolverStart >= 0 && resolverEnd > resolverStart, "Hermes module resolver is missing");
 
-  const moduleLoaders = HERMES_STARTUP_MODULES.map((moduleName) => {
+  const moduleLoaders = hermesStartupModuleNames.map((moduleName) => {
     const beginMarker = `# hermes-startup-module ${moduleName} begin`;
     const endMarker = `# hermes-startup-module ${moduleName} end`;
     const begin = source.indexOf(beginMarker);
@@ -105,7 +105,7 @@ export function runHermesStartupLoader(targetMode: "present" | "missing" | "syml
   const runtimeDir = path.join(temporaryRoot, "hermes-startup");
   const runner = path.join(temporaryRoot, "run.sh");
   fs.mkdirSync(runtimeDir);
-  for (const moduleName of HERMES_STARTUP_MODULES) {
+  for (const moduleName of hermesStartupModuleNames) {
     fs.writeFileSync(path.join(runtimeDir, `${moduleName}.sh`), ":\n");
   }
   const targetPath = path.join(runtimeDir, "service-control.sh");

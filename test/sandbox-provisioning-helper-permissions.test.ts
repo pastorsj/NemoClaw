@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { dockerRunCommandBetween, runLoggedDockerShell } from "./helpers/dockerfile-run-shell";
+import { openClawStartupFiles } from "./support/openclaw-startup";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
@@ -56,6 +57,10 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-helper-mode-"));
     const localBin = path.join(tmp, "usr", "local", "bin");
     const localLib = path.join(tmp, "usr", "local", "lib", "nemoclaw");
+    const openClawStartupDir = path.join(localLib, "openclaw-startup");
+    const openClawStartupPaths = openClawStartupFiles.map((fileName) =>
+      path.join(openClawStartupDir, fileName),
+    );
     const localShare = path.join(tmp, "usr", "local", "share", "nemoclaw");
     const localSrc = path.join(tmp, "src");
     const localScripts = path.join(tmp, "scripts");
@@ -92,6 +97,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const configGuardPath = path.join(localLib, "openclaw-config-guard.py");
     const managedGatewayControlPath = path.join(localLib, "managed-gateway-control.py");
     const files = [
+      ...openClawStartupPaths,
       path.join(localBin, "nemoclaw-start"),
       path.join(localBin, "nemoclaw-codex-acp"),
       path.join(localBin, "nemoclaw-managed-startup-hold"),
@@ -121,6 +127,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     try {
       fs.mkdirSync(localBin, { recursive: true });
       fs.mkdirSync(localLib, { recursive: true });
+      fs.mkdirSync(openClawStartupDir, { recursive: true });
       fs.mkdirSync(localScripts, { recursive: true });
       fs.mkdirSync(path.dirname(generatorPath), { recursive: true });
       fs.mkdirSync(nestedPluginDir, { recursive: true });
@@ -147,6 +154,12 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       ]);
 
       expect(result.status, result.stderr).toBe(0);
+      expect((fs.statSync(openClawStartupDir).mode & 0o777).toString(8)).toBe("755");
+      expect(
+        openClawStartupPaths.map((modulePath) =>
+          (fs.statSync(modulePath).mode & 0o777).toString(8),
+        ),
+      ).toEqual(openClawStartupPaths.map(() => "444"));
       expect(fs.lstatSync(configCommandPath).isSymbolicLink()).toBe(false);
       expect((fs.statSync(configCommandPath).mode & 0o777).toString(8)).toBe("555");
       expect(

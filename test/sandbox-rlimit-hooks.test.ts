@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { dockerRunCommandBetween, runLoggedDockerShell } from "./helpers/dockerfile-run-shell";
+import { hermesStartupModuleNames } from "./support/hermes-shell-harness";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
@@ -594,6 +595,10 @@ describe("sandbox rlimit system hooks (#2173)", () => {
     const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-rlimit-hooks-"));
     const localLib = path.join(tmp, "lib");
+    const hermesStartupDir = path.join(localLib, "hermes-startup");
+    const hermesStartupPaths = hermesStartupModuleNames.map((moduleName) =>
+      path.join(hermesStartupDir, `${moduleName}.sh`),
+    );
     const profileHook = path.join(tmp, "profile.d", "nemoclaw-rlimits.sh");
     const rlimitLib = path.join(localLib, "sandbox-rlimits.sh");
     const initLib = path.join(localLib, "sandbox-init.sh");
@@ -648,7 +653,11 @@ describe("sandbox rlimit system hooks (#2173)", () => {
 
     try {
       fs.mkdirSync(localLib, { recursive: true });
+      fs.mkdirSync(hermesStartupDir, { recursive: true });
       fs.mkdirSync(path.dirname(profileHook), { recursive: true });
+      hermesStartupPaths.forEach((modulePath) => {
+        fs.writeFileSync(modulePath, "# startup module fixture\n");
+      });
       copyRlimitFixture(rlimitLib);
       fs.writeFileSync(initLib, "# init fixture\n");
       fs.writeFileSync(validator, "# validator fixture\n");
@@ -692,6 +701,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
         "# Apply runtime modes to the startup script and secret-boundary validator.",
         "# Wrap the hermes CLI",
       )
+        .replaceAll("/usr/local/lib/nemoclaw/hermes-startup", hermesStartupDir)
         .replaceAll("/usr/local/bin/nemoclaw-start", startBin)
         .replaceAll("/usr/local/bin/nemoclaw-managed-startup-hold", managedStartupHold)
         .replaceAll("/usr/local/bin/nemoclaw-managed-bootstrap", managedBootstrap)
@@ -774,6 +784,10 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expectSystemRlimitHookEnforcesLimits(bashrc);
       expectSystemRlimitHookIsSilentWhenVerificationFails(bashrc, rlimitLib);
       expect(fs.existsSync(preloadDir)).toBe(false);
+      expect(fs.statSync(hermesStartupDir).mode & 0o777).toBe(0o555);
+      expect(hermesStartupPaths.map((modulePath) => fs.statSync(modulePath).mode & 0o777)).toEqual(
+        hermesStartupPaths.map(() => 0o444),
+      );
       expect(fs.statSync(discordRecoveryPatcher).mode & 0o777).toBe(0o755);
       expect(fs.statSync(profilePolicyPatcher).mode & 0o777).toBe(0o755);
       expect(fs.statSync(langfuseCredentialPatcher).mode & 0o777).toBe(0o444);
@@ -786,6 +800,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expect(fs.statSync(runtimeStateMutationCapability).mode & 0o777).toBe(0o444);
       expect(fs.statSync(hermesCronRestoreControl).mode & 0o777).toBe(0o700);
     } finally {
+      fs.existsSync(hermesStartupDir) && fs.chmodSync(hermesStartupDir, 0o700);
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

@@ -19,6 +19,7 @@ import {
   runDockerShell,
   runLoggedDockerShell,
 } from "./helpers/dockerfile-run-shell";
+import { hermesStartupModuleNames } from "./support/hermes-shell-harness";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile");
@@ -28,7 +29,8 @@ const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Docker
 const HERMES_DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base");
 const DEEPAGENTS_DOCKERFILE_BASE = path.join(
   ROOT,
-  "packages", "nemoclaw-langchain-deepagents-code",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
   "Dockerfile.base",
 );
 
@@ -1045,6 +1047,10 @@ describe("Hermes sandbox provisioning", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-helper-modes-"));
     const localBin = path.join(tmp, "usr", "local", "bin");
     const localLib = path.join(tmp, "usr", "local", "lib", "nemoclaw");
+    const hermesStartupDir = path.join(localLib, "hermes-startup");
+    const hermesStartupPaths = hermesStartupModuleNames
+      .map((moduleName) => path.join(hermesStartupDir, `${moduleName}.sh`))
+      .sort();
     const etcDir = path.join(tmp, "etc");
     const profileDir = path.join(etcDir, "profile.d");
     const bashrcPath = path.join(etcDir, "bash.bashrc");
@@ -1091,6 +1097,7 @@ describe("Hermes sandbox provisioning", () => {
     const hermesCronRestoreControlPath = path.join(localLib, "hermes-cron-restore-control.py");
     const corporateCaRuntimePath = path.join(localLib, "corporate-ca-runtime.sh");
     const files = [
+      ...hermesStartupPaths,
       path.join(localBin, "nemoclaw-start"),
       path.join(localBin, "nemoclaw-managed-startup-hold"),
       path.join(localBin, "nemoclaw-managed-bootstrap"),
@@ -1140,6 +1147,7 @@ describe("Hermes sandbox provisioning", () => {
     try {
       fs.mkdirSync(localBin, { recursive: true });
       fs.mkdirSync(localLib, { recursive: true });
+      fs.mkdirSync(hermesStartupDir, { recursive: true });
       fs.mkdirSync(path.dirname(stateLockPlanPath), { recursive: true });
       fs.mkdirSync(etcDir, { recursive: true });
       fs.writeFileSync(bashrcPath, "# fixture\n", { mode: 0o600 });
@@ -1152,8 +1160,12 @@ describe("Hermes sandbox provisioning", () => {
 
       expect(result.status, result.stderr).toBe(0);
       expect(calls).toContain(
-        `chown root:root ${gatewayControlPath} ${gatewaySupervisorPath} ${stateDirGuardPath} ${runtimeStateMutationControlPath} ${runtimeStateMutationStartupGatePath} ${runtimeStateMutationPublisherPath} ${stateLockPlanPath} ${runtimeStateMutationCapabilityPath} ${managedGatewayControlPath} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${mcpManifest}`,
+        `chown root:root ${hermesStartupDir} ${hermesStartupPaths.join(" ")} ${gatewayControlPath} ${gatewaySupervisorPath} ${stateDirGuardPath} ${runtimeStateMutationControlPath} ${runtimeStateMutationStartupGatePath} ${runtimeStateMutationPublisherPath} ${stateLockPlanPath} ${runtimeStateMutationCapabilityPath} ${managedGatewayControlPath} ${buildMcpDigestPath} ${hermesCronRestoreControlPath} ${mcpManifest}`,
       );
+      expect((fs.statSync(hermesStartupDir).mode & 0o777).toString(8)).toBe("555");
+      expect(
+        hermesStartupPaths.map((modulePath) => (fs.statSync(modulePath).mode & 0o777).toString(8)),
+      ).toEqual(hermesStartupPaths.map(() => "444"));
       expect((fs.statSync(gatewayControlPath).mode & 0o777).toString(8)).toBe("700");
       expect((fs.statSync(hermesCronRestoreControlPath).mode & 0o777).toString(8)).toBe("700");
       expect((fs.statSync(mcpConfigTransactionPath).mode & 0o777).toString(8)).toBe("755");
@@ -1175,6 +1187,7 @@ describe("Hermes sandbox provisioning", () => {
       );
       expect((fs.statSync(managedGatewayControlPath).mode & 0o777).toString(8)).toBe("500");
     } finally {
+      fs.existsSync(hermesStartupDir) && fs.chmodSync(hermesStartupDir, 0o700);
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
@@ -1427,8 +1440,19 @@ describe("Hermes sandbox provisioning", () => {
         expect(run.result.status).toBe(0);
         const hermesDir = path.join(run.sandboxRoot, ".hermes");
         expect((fs.statSync(hermesDir).mode & 0o7777).toString(8)).toBe("3770");
-        expect(["logs", "logs/curator", "cache", "hooks", "image_cache", "audio_cache", "platforms"].every((dir) =>
-              Object.is((fs.statSync(path.join(hermesDir, dir)).mode & 0o777).toString(8), "770"))).toBe(true);
+        expect(
+          [
+            "logs",
+            "logs/curator",
+            "cache",
+            "hooks",
+            "image_cache",
+            "audio_cache",
+            "platforms",
+          ].every((dir) =>
+            Object.is((fs.statSync(path.join(hermesDir, dir)).mode & 0o777).toString(8), "770"),
+          ),
+        ).toBe(true);
         expect((fs.statSync(path.join(hermesDir, "platforms")).mode & 0o7777).toString(8)).toBe(
           "2770",
         );
