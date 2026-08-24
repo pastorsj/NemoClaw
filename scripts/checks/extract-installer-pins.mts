@@ -396,54 +396,6 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
     },
     version: "0.0.106",
   },
-  {
-    brevTemplateSha256: [
-      "c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a",
-      "56fc6482d1508b73604099e6fd6c16daea16275cf36cc25c1c5366c82a4394e3",
-      "1ce09fddd97b9809833b408db07db1304fae5a3f7f8bd623d33b1355ddad52ab",
-    ],
-    formula: {
-      asset: "openshell.rb",
-      sha256: "661f2dbba746830d4515f7f112c0f3e9b8969434a535dbd061d034c45811f851",
-      url: "https://github.com/NVIDIA/OpenShell/releases/download/v0.0.111/openshell.rb",
-    },
-    installerTemplateSha256: [
-      "5d4cdb2db60df7539193b486ac15bb9be96ec1d40fc0f739a94d4d2f0bf597a0",
-      "e850e927aab619d52c5de72967137569d65dd7fa669920c7c5b558f0770140d1",
-      "e7d51536442b217e3d5e77c4ba3b7c25e6a74898bf22523f7fb58627d34329cb",
-    ],
-    manifests: [
-      {
-        asset: "openshell-checksums-sha256.txt",
-        sha256: "96b2a897c30b64c56ddeb76ef63a813ea20d945d0f7b20993c38a991a5b32a40",
-      },
-      {
-        asset: "openshell-gateway-checksums-sha256.txt",
-        sha256: "2b11c2580d270b24707c25328ffbb94b176ee53412dd4f530f26b25eb729d86d",
-      },
-      {
-        asset: "openshell-sandbox-checksums-sha256.txt",
-        sha256: "d256fcb114c6875eac9400d3d46ead01199c6937101abb509544770cfd4b6931",
-      },
-    ],
-    sandboxBuilds: [
-      {
-        required: false,
-        sha256: "f465af574cae4d1e6ffc5cab77814719ee0062b23f6058900877de877b2f3169",
-      },
-      {
-        required: false,
-        sha256: "3b012743344517009097d2e3198b21e29bc8ec43fbf712151ee0dd338d3afe83",
-      },
-    ],
-    supervisor: {
-      image: "ghcr.io/nvidia/openshell/supervisor",
-      manifestDigest: "sha256:cdad6b34973c06ea330cbba93e8264b50195de040c1c02f4981a97773603bcfc",
-      required: false,
-      runtimeTemplateSha256: ["c1922eaa4f73c1a05aa8bccf50fc40208d7f71db0e6c110dcd09d0372d1aa068"],
-    },
-    version: "0.0.111",
-  },
 ] as const;
 const EXPECTED_INSTALLER_ASSETS = [
   "openshell-x86_64-unknown-linux-musl.tar.gz",

@@ -13,7 +13,6 @@ import {
   V00103_SANDBOX_BUILD_DIGESTS,
   V00103_SUPERVISOR_MANIFEST_DIGEST,
   V00106_SUPERVISOR_MANIFEST_DIGEST,
-  V00111_SUPERVISOR_MANIFEST_DIGEST,
 } from "./helpers/openshell-release-fixtures";
 
 const REPO_ROOT = path.join(import.meta.dirname, "..");
@@ -207,10 +206,7 @@ describe("OpenShell supervisor manifest trust", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
-  it.each([
-    ["0.0.103", V00103_SUPERVISOR_MANIFEST_DIGEST],
-    ["0.0.111", V00111_SUPERVISOR_MANIFEST_DIGEST],
-  ] as const)(
+  it.each([["0.0.103", V00103_SUPERVISOR_MANIFEST_DIGEST]] as const)(
     "accepts the base-trusted OpenShell %s supervisor identity before version selection (#8893)",
     (version, digest) => {
       const result = runParser({
