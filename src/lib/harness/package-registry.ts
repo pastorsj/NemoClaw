@@ -493,20 +493,32 @@ function visitPackageTree(
   walk(rootDir, "", 0);
 }
 
-function assertInstalledPackageOwnership(rootDir: string): void {
-  if (typeof process.geteuid !== "function") return;
+function installedPackageWritablePath(rootDir: string): string | null {
+  if (typeof process.geteuid !== "function") return null;
   const expectedUid = BigInt(process.geteuid());
-  const assertOwned = (candidate: string, metadata: fs.BigIntStats): void => {
-    if (metadata.uid !== expectedUid || (metadata.mode & 0o022n) !== 0n) {
+  let writablePath: string | null = null;
+  const inspectPath = (candidate: string, metadata: fs.BigIntStats): void => {
+    if (metadata.uid !== expectedUid) {
       throw new Error(
         `Installed harness paths must be owned by the current user and not group or world writable: ${candidate}`,
       );
     }
+    if ((metadata.mode & 0o022n) !== 0n && writablePath === null) writablePath = candidate;
   };
-  assertOwned(rootDir, fs.lstatSync(rootDir, { bigint: true }));
+  inspectPath(rootDir, fs.lstatSync(rootDir, { bigint: true }));
   visitPackageTree(rootDir, (relativePath, metadata) => {
-    assertOwned(path.join(rootDir, ...relativePath.split("/")), metadata);
+    inspectPath(path.join(rootDir, ...relativePath.split("/")), metadata);
   });
+  return writablePath;
+}
+
+function assertInstalledPackageOwnership(rootDir: string): void {
+  const writablePath = installedPackageWritablePath(rootDir);
+  if (writablePath !== null) {
+    throw new Error(
+      `Installed harness paths must be owned by the current user and not group or world writable: ${writablePath}`,
+    );
+  }
 }
 
 function packageTreeSnapshot(
@@ -972,6 +984,23 @@ function assertSafeToReplace(
   );
 }
 
+function copyPackageWithoutSharedWrites(source: string, target: string): void {
+  // fs.cpSync creates nested directories through the process umask. Mask shared
+  // writes without weakening stricter caller settings, then restore the caller's
+  // umask when this synchronous copy finishes.
+  const previousUmask = process.umask();
+  process.umask(previousUmask | 0o022);
+  try {
+    fs.cpSync(source, target, {
+      recursive: true,
+      dereference: false,
+      filter: (sourcePath) => !ignoredTreeEntry(path.basename(sourcePath)),
+    });
+  } finally {
+    process.umask(previousUmask);
+  }
+}
+
 function replaceInstalledPackage(
   target: string,
   stagedPackage: string,
@@ -1117,8 +1146,10 @@ export function installBundledHarness(
   const target = path.join(harnessRoot, `${PACKAGE_DIRECTORY_PREFIX}${bundled.id}`);
   assertInstallPathAuthority(installAuthority);
   const existing = existingInstalledPackage(target, bundled);
+  const existingWritablePath = existing ? installedPackageWritablePath(existing.rootDir) : null;
   if (
     existing &&
+    existingWritablePath === null &&
     assertSafeToReplace(existing, expectedDigest) === "identical" &&
     existing.installedDigest === expectedDigest
   ) {
@@ -1137,18 +1168,16 @@ export function installBundledHarness(
   let newPublishedAuthority: InstallDirectoryAuthority | null = null;
   try {
     assertInstallOperationAuthority(installAuthority, stagingAuthority);
-    fs.cpSync(bundled.rootDir, stagedPackage, {
-      recursive: true,
-      dereference: false,
-      filter: (sourcePath) => !ignoredTreeEntry(path.basename(sourcePath)),
-    });
-    assertInstallOperationAuthority(installAuthority, stagingAuthority);
+    copyPackageWithoutSharedWrites(bundled.rootDir, stagedPackage);
+    const copiedPackageAuthority = secureInstallDirectory(stagedPackage);
+    assertInstallOperationAuthority(installAuthority, stagingAuthority, copiedPackageAuthority);
     const staged = readHarnessPackage(stagedPackage, "installed");
     if (packageTreeDigest(staged.rootDir) !== expectedDigest) {
       throw new Error(`Harness '${normalized}' changed while it was being installed`);
     }
     writeInstallReceipt(staged.rootDir, expectedDigest);
-    assertInstallOperationAuthority(installAuthority, stagingAuthority);
+    assertInstallOperationAuthority(installAuthority, stagingAuthority, copiedPackageAuthority);
+    assertInstalledPackageOwnership(staged.rootDir);
     if (readInstallReceipt(staged.rootDir) !== expectedDigest) {
       throw new Error(`Harness '${normalized}' installation receipt could not be verified`);
     }

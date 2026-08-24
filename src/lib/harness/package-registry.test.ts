@@ -529,6 +529,82 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     expect(resolveHarnessPackage("openclaw", environment)?.source).toBe("installed");
   });
 
+  it("masks shared writes during package copy and restores the host umask", () => {
+    const home = temporaryHome();
+    const environment = { HOME: home };
+    const copySync = fs.cpSync.bind(fs);
+    const copyUmasks: number[] = [];
+    const copy = vi.spyOn(fs, "cpSync").mockImplementation((source, destination, options) => {
+      copyUmasks.push(process.umask());
+      return copySync(source, destination, options);
+    });
+    const previousUmask = process.umask(0o002);
+    let installedRoot = "";
+    let umaskAfterInstall = -1;
+
+    try {
+      installedRoot = installBundledHarness("openclaw", environment).rootDir;
+      umaskAfterInstall = process.umask();
+    } finally {
+      process.umask(previousUmask);
+      copy.mockRestore();
+    }
+
+    expect(copyUmasks).toEqual([0o022]);
+    expect(umaskAfterInstall).toBe(0o002);
+    expect(fs.lstatSync(installedRoot).mode & 0o777).toBe(0o700);
+    expect(fs.lstatSync(path.join(installedRoot, "checks")).mode & 0o022).toBe(0);
+    expect(fs.lstatSync(path.join(installedRoot, "start.sh")).mode & 0o111).not.toBe(0);
+    expect(
+      captureHarnessPackageTextDirectory(
+        resolveHarnessPackage("openclaw", environment)!,
+        "checks",
+        ".json",
+        256 * 1024,
+      ).sources.size,
+    ).toBeGreaterThan(0);
+  });
+
+  it("does not publish a copied package path that remains group-writable", () => {
+    const home = temporaryHome();
+    const environment = { HOME: home };
+    const copySync = fs.cpSync.bind(fs);
+    const copy = vi.spyOn(fs, "cpSync").mockImplementation((source, destination, options) => {
+      copySync(source, destination, options);
+      fs.chmodSync(path.join(destination.toString(), "checks", "base-inputs.json"), 0o664);
+    });
+
+    try {
+      expect(() => installBundledHarness("openclaw", environment)).toThrow(
+        "not group or world writable",
+      );
+    } finally {
+      copy.mockRestore();
+    }
+
+    expect(fs.existsSync(path.join(installedRoot(home), "nemoclaw-openclaw"))).toBe(false);
+    expect(
+      fs.readdirSync(installedRoot(home)).some((name) => name.startsWith(".install-openclaw-")),
+    ).toBe(false);
+  });
+
+  it("atomically refreshes an identical package installed with shared writes", () => {
+    const home = temporaryHome();
+    const environment = { HOME: home };
+    const first = installBundledHarness("openclaw", environment);
+    const firstInode = fs.lstatSync(first.rootDir).ino;
+    const writableFile = path.join(first.rootDir, "checks", "base-inputs.json");
+    fs.chmodSync(writableFile, 0o664);
+
+    const refreshed = installBundledHarness("openclaw", environment);
+
+    expect(fs.lstatSync(refreshed.rootDir).ino).not.toBe(firstInode);
+    expect(fs.lstatSync(writableFile).mode & 0o022).toBe(0);
+    expect(verifyHarnessPackageInstallReceipt(refreshed.rootDir)).toBe(
+      packageDigest(refreshed.rootDir),
+    );
+  });
+
   it("preserves an unknown target that replaces a newly published package", () => {
     const home = temporaryHome();
     const environment = { HOME: home };
