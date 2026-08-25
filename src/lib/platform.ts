@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { dockerSpawnSync } from "./adapters/docker/exec";
+import { isSupportedGatewayDockerHost } from "./domain/docker-host";
 
 export type ContainerRuntime = "podman" | "colima" | "docker-desktop" | "docker" | "unknown";
 
@@ -33,6 +34,12 @@ export interface DockerHostDetection {
   dockerHost: string;
   source: "env" | "socket";
   socketPath: string | null;
+}
+
+export interface DockerContextHostOptions {
+  env?: NodeJS.ProcessEnv;
+  inspectDockerContextHost?: (env: NodeJS.ProcessEnv) => string | null;
+  probeDockerHost?: DockerHostProbe;
 }
 
 export type DockerVersionIdentity = "docker" | "podman" | "unknown";
@@ -158,6 +165,55 @@ function probeDockerHost(
     reachable: true,
     identity: classifyDockerVersionIdentity(String(result.stdout ?? "")),
   };
+}
+
+function inspectDockerContextHost(env: NodeJS.ProcessEnv): string | null {
+  const result = dockerSpawnSync(
+    ["context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"],
+    {
+      encoding: "utf-8",
+      env: buildDockerProbeEnv(env, undefined),
+      timeout: DOCKER_PROBE_TIMEOUT_MS,
+      maxBuffer: DOCKER_PROBE_MAX_BUFFER_BYTES,
+    },
+  );
+  if (!result || result.status !== 0) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(result.stdout ?? "").trim());
+  } catch {
+    return null;
+  }
+  return typeof parsed === "string" ? parsed : null;
+}
+
+/** Resolve and verify the local Unix socket selected by Docker's active context. */
+function resolveDockerContextHost(opts: DockerContextHostOptions = {}): string | null {
+  const env = opts.env ?? process.env;
+  const contextHost = (opts.inspectDockerContextHost ?? inspectDockerContextHost)(env);
+  if (
+    !contextHost ||
+    contextHost !== contextHost.trim() ||
+    !contextHost.startsWith("unix://") ||
+    !isSupportedGatewayDockerHost(contextHost)
+  ) {
+    return null;
+  }
+
+  const probe = opts.probeDockerHost ?? ((dockerHost) => probeDockerHost(dockerHost, env));
+  const selectedContext = probe(undefined);
+  const pinnedSocket = probe(contextHost);
+  if (
+    !selectedContext.reachable ||
+    !pinnedSocket.reachable ||
+    selectedContext.identity === "unknown" ||
+    pinnedSocket.identity !== selectedContext.identity
+  ) {
+    return null;
+  }
+  if ((opts.inspectDockerContextHost ?? inspectDockerContextHost)(env) !== contextHost) return null;
+  return contextHost;
 }
 
 function containerCanReachHostLoopback(
@@ -291,5 +347,6 @@ export {
   getPodmanSocketCandidates,
   inferContainerRuntime,
   isWsl,
+  resolveDockerContextHost,
   shouldPatchCoredns,
 };

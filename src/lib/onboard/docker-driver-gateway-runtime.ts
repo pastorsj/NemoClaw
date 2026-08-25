@@ -87,6 +87,7 @@ export interface DockerDriverGatewayRuntimeDeps {
   loadDockerDriverGatewayEnv?(): DockerDriverGatewayEnvModule;
   runCapture: RunCapture;
   runCaptureEx?: RunCaptureEx;
+  resolveDockerContextHost: typeof import("../platform").resolveDockerContextHost;
   shouldUseOpenshellDevChannel(): boolean;
   supportedOpenshellFallbackVersion: string;
   enableBindMounts?: () => boolean;
@@ -247,8 +248,14 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
     platform: NodeJS.Platform = process.platform,
   ): Record<string, string> {
     const dockerHost = process.env.DOCKER_HOST;
+    const portable = isPortableExperimentalProfile();
+    if (!portable && dockerHost && !isSupportedGatewayDockerHost(dockerHost)) {
+      throw new Error(
+        "Invalid DOCKER_HOST for the OpenShell gateway; only absolute unix:// Docker sockets are supported.",
+      );
+    }
     let podmanSocketPath: string | undefined;
-    if (isPortableExperimentalProfile()) {
+    if (portable) {
       const candidate = dockerHost?.trim();
       if (!candidate || !isSupportedGatewayDockerHost(dockerHost)) {
         throw new Error(
@@ -267,6 +274,14 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
       resolveSandboxBin: resolveOpenShellSandboxBinary,
       enableBindMounts: deps.enableBindMounts?.() === true,
     });
+    // Docker contexts are CLI state; detached OpenShell gateways do not read them.
+    // Pin the verified local socket in the gateway env without changing the CLI process env.
+    const gatewayDockerHost =
+      dockerHost?.trim() ||
+      (!portable ? deps.resolveDockerContextHost({ env: process.env }) : null);
+    if (gatewayDockerHost && isSupportedGatewayDockerHost(gatewayDockerHost)) {
+      gatewayEnv.DOCKER_HOST = gatewayDockerHost;
+    }
     if (gatewayEnv.OPENSHELL_LOCAL_TLS_DIR) {
       process.env.OPENSHELL_LOCAL_TLS_DIR = gatewayEnv.OPENSHELL_LOCAL_TLS_DIR;
     }
@@ -402,7 +417,7 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
             desiredEnv,
             endpoint: dockerDriverGatewayEnv.getDockerDriverGatewayEndpoint(currentGatewayPort()),
             gatewayBin,
-            dockerHost: process.env.DOCKER_HOST || null,
+            dockerHost: desiredEnv.DOCKER_HOST ?? process.env.DOCKER_HOST ?? null,
             platform,
             arch: process.arch,
           },
@@ -442,14 +457,23 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
         gatewayBin,
       });
     }
-    if (
-      platform === "darwin" &&
-      desiredEnv.OPENSHELL_DRIVERS === "docker" &&
-      vmDriverProcess.hasOpenShellVmDriverChildProcess(pid, (args) =>
-        deps.runCapture([...args], { ignoreError: true }),
-      )
-    ) {
-      return { reason: "VM driver child process is still attached to the gateway" };
+    if (platform === "darwin" && desiredEnv.OPENSHELL_DRIVERS === "docker") {
+      const desiredDockerHost = desiredEnv.DOCKER_HOST;
+      if (desiredDockerHost) {
+        const serviceDockerHost = dockerDriverGatewayEnv.readGatewayDockerHost();
+        if (serviceDockerHost !== desiredDockerHost) {
+          return {
+            reason: `managed service DOCKER_HOST=${serviceDockerHost ?? "<unset>"} (expected ${desiredDockerHost})`,
+          };
+        }
+      }
+      if (
+        vmDriverProcess.hasOpenShellVmDriverChildProcess(pid, (args) =>
+          deps.runCapture([...args], { ignoreError: true }),
+        )
+      ) {
+        return { reason: "VM driver child process is still attached to the gateway" };
+      }
     }
     return null;
   }

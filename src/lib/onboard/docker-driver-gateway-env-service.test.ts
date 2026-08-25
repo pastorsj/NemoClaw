@@ -7,18 +7,21 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 import { writeSafeGatewayAuthConfig } from "../../../test/support/docker-driver-gateway-env-test-support";
-import { startPackageManagedDockerDriverGatewayWithEnvOverride } from "./docker-driver-gateway-env";
+import {
+  readGatewayDockerHost,
+  startPackageManagedDockerDriverGatewayWithEnvOverride,
+} from "./docker-driver-gateway-env";
 
 function homeEnv(home: string, xdgConfigHome = ""): NodeJS.ProcessEnv {
   return { HOME: home, XDG_CONFIG_HOME: xdgConfigHome } as NodeJS.ProcessEnv;
 }
 
 describe("package-managed Docker-driver gateway env service", () => {
-  it("stages the service and writes its env under one XDG config root (#6903)", async () => {
+  it("writes the selected Docker context socket into the managed service environment", async () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
     const configHome = path.join(tempHome, "xdg-config");
     const dockerHost = `unix://${path.join(tempHome, ".colima", "default", "docker.sock")}`;
-    const env = { ...homeEnv(tempHome, configHome), DOCKER_HOST: dockerHost };
+    const env = homeEnv(tempHome, configHome);
     const envFile = path.join(configHome, "openshell", "gateway.env");
 
     try {
@@ -28,6 +31,7 @@ describe("package-managed Docker-driver gateway env service", () => {
           env,
           exitOnFailure: false,
           gatewayEnv: {
+            DOCKER_HOST: dockerHost,
             OPENSHELL_BIND_ADDRESS: "127.0.0.1",
             OPENSHELL_GATEWAY_CONFIG: writeSafeGatewayAuthConfig(tempHome),
             OPENSHELL_SERVER_PORT: "8080",
@@ -52,6 +56,7 @@ describe("package-managed Docker-driver gateway env service", () => {
       expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_BIND_ADDRESS=127.0.0.1\n");
       expect(fs.readFileSync(envFile, "utf-8")).toContain("OPENSHELL_SERVER_PORT=8080\n");
       expect(fs.readFileSync(envFile, "utf-8")).toContain(`DOCKER_HOST='${dockerHost}'\n`);
+      expect(readGatewayDockerHost({ env, home: tempHome })).toBe(dockerHost);
       expect(fs.existsSync(path.join(tempHome, ".config", "openshell", "gateway.env"))).toBe(false);
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });

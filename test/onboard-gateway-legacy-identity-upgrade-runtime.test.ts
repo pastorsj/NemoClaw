@@ -183,6 +183,7 @@ describe("legacy Docker-driver gateway identity upgrade", () => {
         getBlueprintMaxOpenshellVersion: () => null,
         getInstalledOpenshellVersion: () => "0.0.72",
         isOpenshellDevVersion: () => false,
+        resolveDockerContextHost: () => null,
         runCapture,
         runCaptureEx,
         shouldUseOpenshellDevChannel: () => false,

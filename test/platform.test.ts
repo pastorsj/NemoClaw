@@ -4,7 +4,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyDockerVersionIdentity,
@@ -15,6 +15,7 @@ import {
   getPodmanSocketCandidates,
   inferContainerRuntime,
   isWsl,
+  resolveDockerContextHost,
   shouldPatchCoredns,
 } from "../src/lib/platform";
 
@@ -342,6 +343,104 @@ describe("platform helpers", () => {
       } finally {
         rmSync(fixtureDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe("resolveDockerContextHost", () => {
+    it("reads the active context without exposing unrelated environment values", () => {
+      const fixtureDir = mkdtempSync(path.join(os.tmpdir(), "nemoclaw-docker-context-"));
+      try {
+        const docker = path.join(fixtureDir, "docker");
+        const dockerHost = `unix://${path.join(fixtureDir, "docker.sock")}`;
+        writeFileSync(
+          docker,
+          [
+            "#!/bin/sh",
+            'test -z "${NVIDIA_INFERENCE_API_KEY:-}" || exit 2',
+            'case "$1" in',
+            "  context)",
+            '    test "$2" = "inspect" || exit 3',
+            '    test "$3" = "--format" || exit 4',
+            '    test "$4" = "{{json .Endpoints.docker.Host}}" || exit 5',
+            '    test "${DOCKER_CONTEXT:-}" = "colima" || exit 6',
+            `    printf '%s\\n' ${JSON.stringify(JSON.stringify(dockerHost))}`,
+            "    ;;",
+            "  version)",
+            '    test "$2" = "--format" || exit 7',
+            '    test "$3" = "{{json .}}" || exit 8',
+            '    if test -n "${DOCKER_HOST:-}"; then',
+            `      test "$DOCKER_HOST" = ${JSON.stringify(dockerHost)} || exit 9`,
+            '      test -z "${DOCKER_CONTEXT:-}" || exit 10',
+            "    else",
+            '      test "${DOCKER_CONTEXT:-}" = "colima" || exit 11',
+            "    fi",
+            '    printf \'%s\\n\' \'{"Server":{"Platform":{"Name":"Docker Engine - Community"}}}\'',
+            "    ;;",
+            "  *) exit 12 ;;",
+            "esac",
+          ].join("\n"),
+        );
+        chmodSync(docker, 0o755);
+
+        expect(
+          resolveDockerContextHost({
+            env: {
+              HOME: fixtureDir,
+              PATH: fixtureDir,
+              DOCKER_CONTEXT: "colima",
+              NVIDIA_INFERENCE_API_KEY: "test-secret-must-not-cross-probe-boundary",
+            },
+          }),
+        ).toBe(dockerHost);
+      } finally {
+        rmSync(fixtureDir, { recursive: true, force: true });
+      }
+    });
+
+    it.each(["tcp://remote.example:2376", "unix://relative/docker.sock"])(
+      "rejects unsupported Docker context endpoint %s",
+      (dockerHost) => {
+        expect(
+          resolveDockerContextHost({
+            env: {},
+            inspectDockerContextHost: () => dockerHost,
+            probeDockerHost: () => ({ reachable: true, identity: "docker" }),
+          }),
+        ).toBe(null);
+      },
+    );
+
+    it("rejects a context socket that resolves to a different engine", () => {
+      const dockerHost = "unix:///Users/test/.colima/default/docker.sock";
+
+      expect(
+        resolveDockerContextHost({
+          env: {},
+          inspectDockerContextHost: () => dockerHost,
+          probeDockerHost: (candidate) => ({
+            reachable: true,
+            identity: candidate ? "podman" : "docker",
+          }),
+        }),
+      ).toBe(null);
+    });
+
+    it("rejects a Docker context that changes during verification", () => {
+      const firstHost = "unix:///Users/test/.colima/default/docker.sock";
+      const secondHost = "unix:///Users/test/.colima/replacement/docker.sock";
+      const inspectDockerContextHost = vi
+        .fn<() => string>()
+        .mockReturnValueOnce(firstHost)
+        .mockReturnValueOnce(secondHost);
+
+      expect(
+        resolveDockerContextHost({
+          env: {},
+          inspectDockerContextHost,
+          probeDockerHost: () => ({ reachable: true, identity: "docker" }),
+        }),
+      ).toBe(null);
+      expect(inspectDockerContextHost).toHaveBeenCalledTimes(2);
     });
   });
 

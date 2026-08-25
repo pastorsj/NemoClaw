@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
+import { openRegularFileNoFollow, type OpenRegularFile } from "../adapters/fs/regular-file";
 import {
   GATEWAY_BIND_ADDRESS,
   getGatewayConnectHost,
@@ -332,6 +332,39 @@ function errnoCode(error: unknown): string | null {
   return error instanceof Error && "code" in error ? String(error.code) : null;
 }
 
+function dockerGatewayEnvPath(env: NodeJS.ProcessEnv, home: string): string {
+  return path.join(getOpenShellUserConfigHome(home, env), "openshell", "gateway.env");
+}
+
+/** Read the exact Docker socket staged for a detached OpenShell gateway service. */
+export function readGatewayDockerHost(
+  opts: { env?: NodeJS.ProcessEnv; home?: string } = {},
+): string | null {
+  const env = opts.env ?? process.env;
+  const home = opts.home ?? opts.env?.HOME ?? os.homedir();
+  const envFile = dockerGatewayEnvPath(env, home);
+  let file: OpenRegularFile;
+  try {
+    file = openRegularFileNoFollow(envFile);
+  } catch (error) {
+    if (errnoCode(error) === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const dockerHostLines = file
+      .readBytes(64 * 1024)
+      .toString("utf-8")
+      .split("\n")
+      .filter((line) => line.startsWith("DOCKER_HOST="));
+    if (dockerHostLines.length !== 1) return null;
+    const match = dockerHostLines[0]?.match(/^DOCKER_HOST='([^']+)'$/u);
+    const dockerHost = match?.[1];
+    return dockerHost && isSupportedGatewayDockerHost(dockerHost) ? dockerHost : null;
+  } finally {
+    file.close();
+  }
+}
+
 function openDockerGatewayEnvFile(envFile: string) {
   try {
     return openRegularFileNoFollow(envFile, { writable: true });
@@ -366,8 +399,8 @@ function writeDockerGatewayDebEnvOverrideFile(
   const override = getOverride();
   const env = opts.env ?? process.env;
   const home = opts.home ?? opts.env?.HOME ?? os.homedir();
-  const envDir = path.join(getOpenShellUserConfigHome(home, env), "openshell");
-  const envFile = path.join(envDir, "gateway.env");
+  const envFile = dockerGatewayEnvPath(env, home);
+  const envDir = path.dirname(envFile);
   fs.mkdirSync(envDir, { recursive: true, mode: 0o700 });
   fs.chmodSync(envDir, 0o700);
   const file = openDockerGatewayEnvFile(envFile);
@@ -416,8 +449,9 @@ export function startPackageManagedDockerDriverGatewayWithEnvOverride(
     prepareOpenShellGatewayUserServiceEnv: () => {
       try {
         const serviceGatewayEnv = { ...gatewayEnv };
+        const selectedDockerHost = serviceGatewayEnv.DOCKER_HOST ?? env.DOCKER_HOST;
         delete serviceGatewayEnv.DOCKER_HOST;
-        const dockerHost = normalizePackageServiceDockerHost(env.DOCKER_HOST);
+        const dockerHost = normalizePackageServiceDockerHost(selectedDockerHost);
         if (dockerHost) serviceGatewayEnv.DOCKER_HOST = dockerHost;
         writeDockerGatewayDebEnvOverrideFile(() => serviceGatewayEnv, {
           env,

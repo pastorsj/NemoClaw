@@ -35,6 +35,7 @@ function makeHelpers(overrides: Partial<DockerDriverGatewayRuntimeDeps> = {}): {
     getInstalledOpenshellVersion: parseVersion,
     isOpenshellDevVersion: () => false,
     loadDockerDriverGatewayEnv: () => dockerDriverGatewayEnv,
+    resolveDockerContextHost: () => null,
     runCapture,
     shouldUseOpenshellDevChannel: () => false,
     supportedOpenshellFallbackVersion: "0.0.44",
@@ -113,6 +114,63 @@ describe("docker-driver gateway runtime helpers", () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("pins the active Docker context socket only in the gateway environment", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-context-runtime-"));
+    const dockerHost = "unix:///Users/test/.colima/default/docker.sock";
+    const resolveDockerContextHost = vi.fn(() => dockerHost);
+    try {
+      withEnv(
+        {
+          DOCKER_CONTEXT: "colima",
+          DOCKER_HOST: undefined,
+          NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
+        },
+        () => {
+          const { helpers } = makeHelpers({ resolveDockerContextHost });
+          const gatewayEnv = helpers.getDockerDriverGatewayEnv(null, "darwin");
+
+          expect(gatewayEnv.DOCKER_HOST).toBe(dockerHost);
+          expect(process.env.DOCKER_HOST).toBeUndefined();
+          expect(process.env.DOCKER_CONTEXT).toBe("colima");
+          expect(resolveDockerContextHost).toHaveBeenCalledOnce();
+        },
+      );
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an explicit Docker host without resolving the active context", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-explicit-runtime-"));
+    const dockerHost = "unix:///tmp/explicit-docker.sock";
+    const resolveDockerContextHost = vi.fn(() => {
+      throw new Error("active context must not replace an explicit Docker host");
+    });
+    try {
+      withEnv(
+        {
+          DOCKER_HOST: dockerHost,
+          NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
+        },
+        () => {
+          const { helpers } = makeHelpers({ resolveDockerContextHost });
+          expect(helpers.getDockerDriverGatewayEnv(null, "darwin").DOCKER_HOST).toBe(dockerHost);
+          expect(resolveDockerContextHost).not.toHaveBeenCalled();
+        },
+      );
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a line break in an explicit Docker host before gateway handoff", () => {
+    withEnv({ DOCKER_HOST: "unix:///tmp/docker.sock\n" }, () => {
+      expect(() => makeHelpers().helpers.getDockerDriverGatewayEnv(null, "darwin")).toThrow(
+        "Invalid DOCKER_HOST for the OpenShell gateway",
+      );
+    });
   });
 
   it("uses the moving dev supervisor image for an explicit or detected dev runtime", () => {
@@ -315,7 +373,7 @@ describe("docker-driver gateway runtime helpers", () => {
     try {
       withEnv(
         {
-          DOCKER_HOST: "unix:///tmp/docker.sock",
+          DOCKER_HOST: undefined,
           NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
         },
         () => {
@@ -330,6 +388,7 @@ describe("docker-driver gateway runtime helpers", () => {
             ],
           ]);
           const { helpers, runCapture } = makeHelpers({
+            resolveDockerContextHost: () => "unix:///tmp/docker.sock",
             runCapture: vi.fn((args) => processOutput.get(args.join(" ")) ?? ""),
           });
           const desiredEnv = helpers.getDockerDriverGatewayEnv(null, "darwin");
@@ -338,7 +397,7 @@ describe("docker-driver gateway runtime helpers", () => {
             desiredEnv,
             endpoint: desiredEnv.OPENSHELL_GRPC_ENDPOINT,
             gatewayBin,
-            dockerHost: process.env.DOCKER_HOST,
+            dockerHost: desiredEnv.DOCKER_HOST,
             platform: "darwin",
             arch: process.arch,
           });
@@ -575,16 +634,45 @@ describe("docker-driver gateway runtime helpers", () => {
   it("reuses the active official Homebrew gateway without detached cleanup identity (#6903)", () => {
     const pid = 12_351;
     const gatewayBin = "/opt/homebrew/bin/openshell-gateway";
-    const { helpers } = makeHelpers();
+    const dockerHost = "unix:///Users/test/.colima/default/docker.sock";
+    const { helpers } = makeHelpers({
+      loadDockerDriverGatewayEnv: () => ({
+        ...dockerDriverGatewayEnv,
+        readGatewayDockerHost: () => dockerHost,
+      }),
+    });
 
     expect(
       helpers.getDockerDriverGatewayReuseDrift(
         pid,
-        { OPENSHELL_DRIVERS: "docker" },
+        { DOCKER_HOST: dockerHost, OPENSHELL_DRIVERS: "docker" },
         gatewayBin,
         pid,
         "darwin",
       ),
     ).toBeNull();
+  });
+
+  it("restarts the Homebrew gateway when the active Docker context socket changes", () => {
+    const pid = 12_352;
+    const gatewayBin = "/opt/homebrew/bin/openshell-gateway";
+    const previousDockerHost = "unix:///Users/test/.colima/old/docker.sock";
+    const desiredDockerHost = "unix:///Users/test/.colima/current/docker.sock";
+    const { helpers } = makeHelpers({
+      loadDockerDriverGatewayEnv: () => ({
+        ...dockerDriverGatewayEnv,
+        readGatewayDockerHost: () => previousDockerHost,
+      }),
+    });
+
+    expect(
+      helpers.getDockerDriverGatewayReuseDrift(
+        pid,
+        { DOCKER_HOST: desiredDockerHost, OPENSHELL_DRIVERS: "docker" },
+        gatewayBin,
+        pid,
+        "darwin",
+      )?.reason,
+    ).toBe(`managed service DOCKER_HOST=${previousDockerHost} (expected ${desiredDockerHost})`);
   });
 });

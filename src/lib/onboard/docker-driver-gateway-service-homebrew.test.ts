@@ -115,6 +115,28 @@ describe("OpenShell Homebrew service boundary", () => {
     );
   });
 
+  it("preserves the service environment when Homebrew cannot stop the gateway", () => {
+    const responses = new Map<string, SpawnSyncLikeResult>([
+      ["info --json=v2 openshell", officialFormulaInfo()],
+      ["services stop openshell", spawnResult(1, "service is still running")],
+    ]);
+    const operation = vi.fn((args: string[]) => responses.get(args.join(" ")) ?? spawnResult());
+    const prepareServiceEnv = vi.fn();
+
+    const result = startOpenShellGatewayUserService({
+      commandExists: (command) => command === "brew",
+      homebrewFormulaOperation: operation,
+      platform: "darwin",
+      prepareServiceEnv,
+    });
+
+    expect(result).toMatchObject({
+      reason: expect.stringContaining("brew services stop openshell failed"),
+      started: false,
+    });
+    expect(prepareServiceEnv).not.toHaveBeenCalled();
+  });
+
   it("skips the managed start when no trusted Homebrew service is selected (#7707)", async () => {
     const startService = vi.fn(() => {
       throw new Error("managed start must not run");

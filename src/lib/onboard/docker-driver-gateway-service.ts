@@ -1189,14 +1189,6 @@ export function startOpenShellGatewayUserService(
     }
   }
 
-  const envFailure = runHook(
-    opts.prepareServiceEnv,
-    service,
-    "failed to prepare OpenShell gateway service environment",
-    true,
-  );
-  if (envFailure) return envFailure;
-
   const stop = runStopService(service, {
     env,
     homebrewFormulaOperation: opts.homebrewFormulaOperation,
@@ -1206,6 +1198,14 @@ export function startOpenShellGatewayUserService(
     const prefix = service.manager === "homebrew" ? "brew services stop" : "systemctl --user stop";
     return serviceFailure(service, `${prefix} ${service.serviceName} failed: ${stop.reason}`);
   }
+
+  const envFailure = runHook(
+    opts.prepareServiceEnv,
+    service,
+    "failed to prepare OpenShell gateway service environment",
+    true,
+  );
+  if (envFailure) return envFailure;
 
   const portFailure = runHook(
     opts.preparePortForServiceStart,

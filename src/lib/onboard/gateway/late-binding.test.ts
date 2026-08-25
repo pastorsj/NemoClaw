@@ -1,7 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
+import * as dockerDriverGatewayCutover from "../docker-driver-gateway-cutover";
+import * as dockerDriverGatewayLaunch from "../docker-driver-gateway-launch";
+import {
+  getDockerDriverGatewayRuntimeMarkerPath,
+  readDockerDriverGatewayRuntimeMarker,
+} from "../docker-driver-gateway-runtime-marker";
 import { createDockerDriverGatewayStart } from "./docker-driver-start";
 import { createGatewayRecoveryOrchestration } from "./recovery";
 import { createGatewayRegistration } from "./registration";
@@ -156,5 +168,111 @@ describe("gateway lifecycle late binding", () => {
 
     expect(managedStart).toHaveBeenCalledWith(expect.objectContaining({ gatewayName: "resumed" }));
     expect(verifyReachability).toHaveBeenCalledWith(false, expect.objectContaining({ port: 9777 }));
+  });
+
+  it("records the selected Docker context socket for a standalone gateway", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-start-"));
+    const gatewayBin = path.join(stateDir, "openshell-gateway");
+    const dockerHost = `unix://${path.join(stateDir, "docker.sock")}`;
+    const gatewayEnv = {
+      DOCKER_HOST: dockerHost,
+      OPENSHELL_DRIVERS: "docker",
+      OPENSHELL_SERVER_PORT: "18080",
+    };
+    const launch: dockerDriverGatewayLaunch.DockerDriverGatewayLaunch = {
+      args: [],
+      command: gatewayBin,
+      env: gatewayEnv,
+      mode: "host",
+      processGatewayBin: gatewayBin,
+    };
+    const child = Object.assign(new EventEmitter(), {
+      pid: 43_210,
+      unref: vi.fn(),
+    }) as unknown as ChildProcess;
+    vi.stubEnv("DOCKER_HOST", undefined);
+
+    try {
+      vi.spyOn(console, "log").mockImplementation(() => undefined);
+      vi.spyOn(
+        dockerDriverGatewayCutover,
+        "runDockerDriverGatewayManagedFallback",
+      ).mockResolvedValue("launch");
+      vi.spyOn(
+        dockerDriverGatewayLaunch,
+        "buildDockerDriverGatewayRuntimeIdentity",
+      ).mockReturnValue({
+        desiredEnv: gatewayEnv,
+        driftGatewayBin: gatewayBin,
+        identityGatewayBin: gatewayBin,
+        launch,
+      });
+      vi.spyOn(dockerDriverGatewayLaunch, "openDockerDriverGatewayLog").mockReturnValue({
+        fd: 123,
+        startOffset: 0,
+      });
+      vi.spyOn(
+        dockerDriverGatewayLaunch,
+        "prepareAndLogDockerDriverGatewayLaunch",
+      ).mockImplementation(() => undefined);
+      vi.spyOn(dockerDriverGatewayLaunch, "spawnDockerDriverGateway").mockReturnValue(child);
+
+      const start = createDockerDriverGatewayStart({
+        SUPPORTED_OPENSHELL_FALLBACK_VERSION: "0.0.106",
+        checkGatewayPortAvailable: async () => ({ ok: true }),
+        clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+        createGatewayServicePortOwnership: () => ({
+          portListenerScan: { complete: true, pids: [], unverifiedPids: [] },
+          preparePort: vi.fn(),
+          reportUntrustedGatewayPort: (message) => {
+            throw new Error(message);
+          },
+          validatePortOwner: vi.fn(),
+        }),
+        dockerDriverGatewayEnv: {} as typeof import("../docker-driver-gateway-env"),
+        envInt: (_name, fallback) => fallback,
+        gatewayBinding: {
+          resolveGatewayCompatContainerName: () => "nemoclaw-openshell-gateway",
+        } as unknown as typeof import("../gateway-binding"),
+        gatewayName: () => "nemoclaw-18080",
+        gatewayPort: () => 18_080,
+        getDockerDriverGatewayEndpoint: () => "https://127.0.0.1:18080",
+        getDockerDriverGatewayEnv: () => gatewayEnv,
+        getDockerDriverGatewayPid: () => null,
+        getDockerDriverGatewayPortListenerScan: () => ({
+          complete: true,
+          pids: [],
+          unverifiedPids: [],
+        }),
+        getDockerDriverGatewayRuntimeDrift: () => null,
+        getDockerDriverGatewayStateDir: () => stateDir,
+        getInstalledOpenshellVersion: () => "0.0.106",
+        isDockerDriverGatewayHttpReady: async () => true,
+        isDockerDriverGatewayProcessAlive: () => false,
+        isDockerDriverGatewayStateInUse: () => false,
+        isGatewayHealthy: () => true,
+        isGatewayTcpReady: async () => true,
+        isPidAlive: () => true,
+        logDockerDriverGatewayRestart: vi.fn(),
+        registerDockerDriverGatewayEndpoint: () => true,
+        rememberDockerDriverGatewayPid: vi.fn(),
+        resolveOpenShellGatewayBinary: () => gatewayBin,
+        resolveOpenShellSandboxBinary: () => null,
+        runCaptureOpenshell: () => "openshell 0.0.106",
+        sleepSeconds: vi.fn(),
+        verifySandboxBridgeGatewayReachableOrExit: async () => undefined,
+      });
+
+      await expect(start.startDockerDriverGateway()).resolves.toBeUndefined();
+
+      expect(
+        readDockerDriverGatewayRuntimeMarker(getDockerDriverGatewayRuntimeMarkerPath(stateDir))
+          ?.dockerHost,
+      ).toBe(dockerHost);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 });

@@ -217,7 +217,7 @@ export function createDockerDriverGatewayStart(
         endpoint: deps.getDockerDriverGatewayEndpoint(),
         gatewayBin: driftGatewayBin,
         openshellVersion: deps.getInstalledOpenshellVersion(openshellVersionOutput),
-        dockerHost: process.env.DOCKER_HOST || null,
+        dockerHost: driftGatewayEnv.DOCKER_HOST ?? process.env.DOCKER_HOST ?? null,
       },
     );
     const pollCount = deps.envInt("NEMOCLAW_HEALTH_POLL_COUNT", 30);

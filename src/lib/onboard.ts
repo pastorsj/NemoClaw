@@ -624,6 +624,7 @@ const {
   isOpenshellDevVersion,
   runCapture,
   runCaptureEx,
+  resolveDockerContextHost: platformUtils.resolveDockerContextHost,
   shouldUseOpenshellDevChannel,
   supportedOpenshellFallbackVersion: SUPPORTED_OPENSHELL_FALLBACK_VERSION,
   enableBindMounts: onboardSessionBootstrap.isDockerBindMountsEnabled,

@@ -72,6 +72,7 @@ describe("OpenShell 0.0.106 TLS server-name boundary", () => {
         getInstalledOpenshellVersion: () => null,
         isOpenshellDevVersion: () => false,
         loadDockerDriverGatewayEnv: () => dockerDriverGatewayEnv,
+        resolveDockerContextHost: () => null,
         runCapture: () => "",
         shouldUseOpenshellDevChannel: () => false,
         supportedOpenshellFallbackVersion: OPENSHELL_V0106_QUALIFICATION.version,

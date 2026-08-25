@@ -245,6 +245,22 @@ describe("docker-driver-gateway-launch", () => {
     });
   });
 
+  it("preserves the selected Colima socket for a standalone macOS gateway", () => {
+    withTempBinaries(({ dir, gatewayBin }) => {
+      const dockerHost = "unix:///Users/test/.colima/default/docker.sock";
+      const launch = buildDockerDriverGatewayLaunch({
+        gatewayBin,
+        stateDir: dir,
+        platform: "darwin",
+        env: {},
+        gatewayEnv: { DOCKER_HOST: dockerHost, OPENSHELL_DRIVERS: "docker" },
+      });
+
+      expect(launch.mode).toBe("host");
+      expect(launch.env.DOCKER_HOST).toBe(dockerHost);
+    });
+  });
+
   it("admits a prepared v0.0.44 pre-auth database only under installer restore authority", () => {
     vi.stubEnv("NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE", "1");
     try {
