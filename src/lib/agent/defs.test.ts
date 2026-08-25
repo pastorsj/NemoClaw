@@ -25,6 +25,7 @@ import {
   AGENTS_DIR,
   getAgentChoices,
   listAgents,
+  listInstalledAgents,
   loadAgent,
   requireAgentPolicyAdditionsPath,
   resolveAgentName,
@@ -183,10 +184,23 @@ describe("agent definitions", () => {
     ]);
   });
 
-  it("orders OpenClaw first in interactive choices", () => {
-    const choices = getAgentChoices();
-    expect(choices[0]?.name).toBe("openclaw");
-    expect(choices.map((choice) => choice.name)).toContain("hermes");
+  it("lists only receipt-verified installed runtimes and orders OpenClaw first", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-installed-agent-choices-"));
+    vi.stubEnv("HOME", home);
+    try {
+      expect(listInstalledAgents()).toEqual([]);
+      expect(getAgentChoices()).toEqual([]);
+
+      installBundledHarness("hermes", { HOME: home });
+      expect(listInstalledAgents()).toEqual(["hermes"]);
+      expect(getAgentChoices().map((choice) => choice.name)).toEqual(["hermes"]);
+
+      installBundledHarness("openclaw", { HOME: home });
+      expect(listInstalledAgents()).toEqual(["hermes", "openclaw"]);
+      expect(getAgentChoices().map((choice) => choice.name)).toEqual(["openclaw", "hermes"]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("lists the standard runtimes from harness packages", () => {
@@ -222,7 +236,7 @@ describe("agent definitions", () => {
     }
   });
 
-  it("keeps an unrelated changed installed harness from blocking agent selection", () => {
+  it("keeps a changed installed package from blocking another installed agent runtime", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agent-selection-isolation-"));
     const environment = { HOME: home };
     vi.stubEnv("HOME", home);
@@ -234,14 +248,14 @@ describe("agent definitions", () => {
         "changed after installation\n",
       );
       const warning = vi.spyOn(console, "error").mockImplementation(() => {});
-
+      expect(listInstalledAgents(environment)).toEqual(["openclaw"]);
       const selected = resolveAgentName({ agentFlag: "openclaw" });
       expect(selected).toBe("openclaw");
       expect(loadAgent(selected)).toMatchObject({
         agentDir: installedOpenClaw.rootDir,
         harnessPackageSource: "installed",
       });
-      expect(getAgentChoices().map((choice) => choice.name)).toEqual(["openclaw", "hermes"]);
+      expect(getAgentChoices().map((choice) => choice.name)).toEqual(["openclaw"]);
       expect(warning).toHaveBeenCalledWith(
         expect.stringContaining("skipping agent 'langchain-deepagents-code'"),
       );

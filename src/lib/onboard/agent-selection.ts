@@ -65,19 +65,28 @@ export function createSelectOnboardAgent(deps: SelectOnboardAgentDeps) {
     // Interactive runs must let the user choose between the available agents
     // (e.g. OpenClaw and Hermes); without this the wizard silently defaulted
     // to OpenClaw and Hermes could only be reached via --agent/NEMOCLAW_AGENT.
-    if (!explicitlySelected && !resume && canPrompt && !deps.isNonInteractive()) {
+    let agent: AgentDefinition | null = null;
+    let selectedFromInstalledChoices = false;
+    if (!explicitlySelected && !resume) {
       const choices = deps.getAgentChoices();
-      if (choices.length > 1) {
+      if (choices.length === 1) {
+        const selected = choices[0]!;
+        agent = selected.name === "openclaw" ? null : deps.loadAgent(selected.name);
+        selectedFromInstalledChoices = true;
+      } else if (choices.length > 1 && canPrompt && !deps.isNonInteractive()) {
         const selected = await promptForAgentChoice(deps, choices);
         // The default OpenClaw path is represented by a null agent downstream.
-        return selected.name === "openclaw" ? null : deps.loadAgent(selected.name);
+        agent = selected.name === "openclaw" ? null : deps.loadAgent(selected.name);
+        selectedFromInstalledChoices = true;
       }
     }
 
-    const agent = deps.resolveAgent({
-      agentFlag,
-      session: session?.agent ? { agent: session.agent } : null,
-    });
+    if (!selectedFromInstalledChoices) {
+      agent = deps.resolveAgent({
+        agentFlag,
+        session: session?.agent ? { agent: session.agent } : null,
+      });
+    }
     if (deps.isNonInteractive()) {
       const displayName = agent?.displayName || deps.loadAgent("openclaw").displayName;
       deps.note(`  [non-interactive] Agent: ${displayName}`);

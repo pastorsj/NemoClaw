@@ -3,6 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
@@ -20,6 +21,12 @@ const BUILD_CREDENTIAL_PATH = path.join(
 );
 const INVALID_KEY = "submitted-invalid-nvidia-key";
 const STACK_TRACE_PATTERNS = [/(^|\s)(TypeError|ReferenceError|SyntaxError):/m, /^\s+at /m];
+const requireCompiled = createRequire(import.meta.url);
+const registry = requireCompiled(
+  path.join(REPO_ROOT, "dist", "lib", "harness", "package-registry.js"),
+) as {
+  installBundledHarness(id: string, env: NodeJS.ProcessEnv): unknown;
+};
 
 describe("compiled CLI invalid NVIDIA credential handling", () => {
   it.each(["curl", "docker", "openshell"])(
@@ -33,6 +40,7 @@ describe("compiled CLI invalid NVIDIA credential handling", () => {
       fs.mkdirSync(home, { recursive: true });
       fs.mkdirSync(blockedBin, { recursive: true });
       fs.writeFileSync(externalCallLog, "");
+      registry.installBundledHarness("openclaw", { ...process.env, HOME: home });
 
       fs.writeFileSync(
         path.join(blockedBin, command),

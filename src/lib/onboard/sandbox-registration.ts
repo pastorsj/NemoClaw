@@ -313,12 +313,14 @@ export function buildCreatedSandboxRegistryEntry(
 
 /** Load the immutable choices needed by command-level resume validation. */
 export function loadOnboardCommandResumeSession(): {
+  agent: onboardSession.Session["agent"];
   servingProfileProvenance: onboardSession.Session["servingProfileProvenance"];
   vllmGpuDevice: onboardSession.Session["vllmGpuDevice"];
 } | null {
   const session = onboardSession.loadSession();
   return session
     ? {
+        agent: session.agent,
         servingProfileProvenance: session.servingProfileProvenance,
         vllmGpuDevice: session.vllmGpuDevice,
       }

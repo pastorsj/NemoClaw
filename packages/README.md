@@ -12,12 +12,17 @@ Run these commands to inspect or install a package:
 
 ```bash
 nemoclaw harness list
+nemoclaw harness install
 nemoclaw harness install <id>
 ```
 
 Installation copies a bundled package to `~/.nemoclaw/harnesses`.
-Onboarding discovers installed packages before bundled packages.
-Existing `nemoclaw onboard --agent <agent>` commands do not change.
+The bare install command presents packages that are available to install.
+`nemoclaw harness list` separates installed packages from packages that remain available.
+`nemoclaw agents list` and onboarding expose only installed agent runtime packages.
+Onboarding stops before configuration begins when no package is installed.
+Onboarding selects one installed agent runtime automatically and presents a picker when multiple
+agent runtimes are installed.
 
 ## Package contract
 

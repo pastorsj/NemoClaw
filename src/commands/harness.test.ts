@@ -18,6 +18,6 @@ describe("harness oclif command", () => {
     await HarnessCommand.run([], rootDir);
 
     expect(log).toHaveBeenNthCalledWith(1, "Usage: nemoclaw harness list");
-    expect(log).toHaveBeenNthCalledWith(2, "       nemoclaw harness install <harness>");
+    expect(log).toHaveBeenNthCalledWith(2, "       nemoclaw harness install [harness]");
   });
 });

@@ -2799,7 +2799,7 @@ sys.exit(exit_code)
       timeout: 30_000,
       killSignal: "SIGKILL",
       env: {
-        HOME: tmp,
+        HOME: tmp, NEMOCLAW_AGENT: "openclaw",
         PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
         // These tests verify the third-party-license flow on non-Spark
         // hardware. On real DGX Spark/Station the express prompt would

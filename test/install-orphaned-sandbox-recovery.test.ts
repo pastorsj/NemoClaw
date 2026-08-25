@@ -69,7 +69,7 @@ function runRecoveryClassification(
   };
 }
 
-function runPrintDone(flags: { recoveryRan: string; orphaned: string }): {
+function runPrintDone(flags: { deferred?: string; recoveryRan: string; orphaned: string }): {
   output: string;
   cleanup: () => void;
 } {
@@ -82,6 +82,7 @@ function runPrintDone(flags: { recoveryRan: string; orphaned: string }): {
     _CLI_DISPLAY="NemoClaw"
     _CLI_BIN="nemoclaw"
     ONBOARD_RAN=false
+    _HARNESS_INSTALL_DEFERRED=${flags.deferred ?? "false"}
     _PREEXISTING_SANDBOX_RECOVERY_RAN=${flags.recoveryRan}
     _PREEXISTING_SANDBOX_ORPHANED=${flags.orphaned}
     _UPGRADE_SANDBOXES_FAILED=false
@@ -250,6 +251,23 @@ describe("install.sh print_done honesty for orphaned sandboxes (#6520)", () => {
     try {
       expect(output).toContain("=== Installation complete ===");
       expect(output).toContain("Existing sandboxes were recovered and upgraded.");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("keeps orphan recovery guidance when agent runtime selection is deferred", () => {
+    const { output, cleanup } = runPrintDone({
+      deferred: "true",
+      recoveryRan: "true",
+      orphaned: "true",
+    });
+    try {
+      expect(output).toContain("nemoclaw <name> destroy");
+      expect(output).toContain("nemoclaw harness install");
+      expect(output.indexOf("nemoclaw <name> destroy")).toBeLessThan(
+        output.indexOf("nemoclaw harness install"),
+      );
     } finally {
       cleanup();
     }

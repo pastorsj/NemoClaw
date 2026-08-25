@@ -92,6 +92,10 @@ preinstall_backup_and_retire_legacy_gateway() {
   printf '{"sandboxes":{}}\\n' >"${registry}"
 }
 install_nemoclaw() {
+  if [ "\${NEMOCLAW_DEFER_OPENSHELL_INSTALL:-}" = "1" ]; then
+    _CLI_PATH="${nemoclawCli}"
+    return 0
+  fi
   printf 'install\\n' >>"${installLog}"
   if ! command_exists openshell; then
     cp "${healthyOpenshell}" "${bin}/openshell"

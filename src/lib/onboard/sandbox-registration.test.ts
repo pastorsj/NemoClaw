@@ -27,6 +27,7 @@ const {
   baselineExclusionsForCreate,
   buildCreatedSandboxRegistryEntry,
   creationFidelity,
+  loadOnboardCommandResumeSession,
   registerCreatedSandbox,
   selection,
 } = requireDist("./sandbox-registration.ts") as typeof import("./sandbox-registration");
@@ -92,6 +93,27 @@ function createdRegistryEntryInput(
     ...overrides,
   };
 }
+
+describe("loadOnboardCommandResumeSession", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns the recorded agent without exposing credential state", () => {
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      agent: "hermes",
+      servingProfileProvenance: null,
+      vllmGpuDevice: "2",
+      credentialEnv: "COMPATIBLE_API_KEY",
+    } as never);
+
+    expect(loadOnboardCommandResumeSession()).toEqual({
+      agent: "hermes",
+      servingProfileProvenance: null,
+      vllmGpuDevice: "2",
+    });
+  });
+});
 
 describe("buildCreatedSandboxRegistryEntry", () => {
   it("records explicit OpenClaw identity for a managed workload receipt (#9356)", () => {

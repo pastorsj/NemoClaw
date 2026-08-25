@@ -149,6 +149,20 @@ export class HostCliClient {
     return result;
   }
 
+  async installAgentRuntimePackage(
+    packageId: string,
+    options: ShellProbeRunOptions = {},
+  ): Promise<ShellProbeResult> {
+    const result = await this.nemoclaw(["harness", "install", packageId], {
+      artifactName: `harness-install-${artifactLabel(packageId)}`,
+      env: buildAvailabilityProbeEnv(),
+      timeoutMs: 120_000,
+      ...options,
+    });
+    assertExitZero(result, `nemoclaw harness install ${packageId}`);
+    return result;
+  }
+
   async expectHarnessInstalled(
     harnessId: string,
     options: ShellProbeRunOptions = {},
@@ -157,8 +171,7 @@ export class HostCliClient {
     agents: ShellProbeResult;
     authority: ShellProbeResult;
   }> {
-    const artifactPrefix =
-      options.artifactName ?? `harness-${artifactLabel(harnessId)}`;
+    const artifactPrefix = options.artifactName ?? `harness-${artifactLabel(harnessId)}`;
     const sharedOptions = {
       env: buildAvailabilityProbeEnv(),
       ...options,
@@ -173,9 +186,7 @@ export class HostCliClient {
       .map((line) => line.trim().split(/\s+/u))
       .some(
         (columns) =>
-          columns.length >= 3 &&
-          columns[0] === harnessId &&
-          columns.at(-1) === "installed",
+          columns.length >= 3 && columns[0] === harnessId && columns.at(-1) === "installed",
       );
     if (!listed) {
       throw new Error(
@@ -192,9 +203,7 @@ export class HostCliClient {
       .split(/\r?\n/u)
       .some((line) => line.trim().split(/\s+/u)[0] === harnessId);
     if (!selectable) {
-      throw new Error(
-        `nemoclaw agents list did not include '${harnessId}': ${resultText(agents)}`,
-      );
+      throw new Error(`nemoclaw agents list did not include '${harnessId}': ${resultText(agents)}`);
     }
 
     const authorityEnv = sharedOptions.env ?? {};

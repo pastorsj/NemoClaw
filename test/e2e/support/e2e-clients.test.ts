@@ -112,6 +112,36 @@ describe("E2E fixture clients", () => {
     ]);
   });
 
+  it("host client installs one agent runtime package", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue({ stdout: "Installed hermes\n" });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await host.installAgentRuntimePackage("hermes");
+
+    expect(runner.calls).toEqual([
+      {
+        command: "nemoclaw",
+        args: ["harness", "install", "hermes"],
+        options: {
+          artifactName: "harness-install-hermes",
+          env: expect.objectContaining({ PATH: expect.any(String) }),
+          timeoutMs: 120_000,
+        },
+      },
+    ]);
+  });
+
+  it("host client rejects a failed agent runtime package install", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue({ exitCode: 1, stderr: "package copy failed" });
+    const host = new HostCliClient(runner, { cliPath: "nemoclaw" });
+
+    await expect(host.installAgentRuntimePackage("hermes")).rejects.toThrow(
+      "nemoclaw harness install hermes failed: package copy failed",
+    );
+  });
+
   it("host client verifies one installed harness remains selectable", async () => {
     const runner = new FakeRunner();
     runner.enqueue({
@@ -191,9 +221,7 @@ describe("E2E fixture clients", () => {
     await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
       "nemoclaw harness list failed: package validation failed",
     );
-    expect(runner.calls.map((call) => call.args)).toEqual([
-      ["harness", "list"],
-    ]);
+    expect(runner.calls.map((call) => call.args)).toEqual([["harness", "list"]]);
   });
 
   it("host client rejects a harness list that does not confirm installation", async () => {
@@ -204,9 +232,7 @@ describe("E2E fixture clients", () => {
     await expect(host.expectHarnessInstalled("hermes")).rejects.toThrow(
       "nemoclaw harness list did not report 'hermes' as installed",
     );
-    expect(runner.calls.map((call) => call.args)).toEqual([
-      ["harness", "list"],
-    ]);
+    expect(runner.calls.map((call) => call.args)).toEqual([["harness", "list"]]);
   });
 
   it("host client rejects an installed harness that onboarding cannot select", async () => {

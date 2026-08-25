@@ -10,15 +10,26 @@ import { NOTICE_ACCEPT_FLAG, NOTICE_ACCEPT_FLAG_NAME } from "./usage-notice";
 type AgentRegistryReader = () => readonly string[];
 
 let agentRegistryReaderForTest: AgentRegistryReader | null = null;
+let installedAgentRegistryReaderForTest: AgentRegistryReader | null = null;
 
 export function setAgentRegistryReaderForTest(reader: AgentRegistryReader | null): void {
   agentRegistryReaderForTest = reader;
+}
+
+export function setInstalledAgentRegistryReaderForTest(reader: AgentRegistryReader | null): void {
+  installedAgentRegistryReaderForTest = reader;
 }
 
 export function readAgentRegistryNames(): readonly string[] {
   if (agentRegistryReaderForTest) return agentRegistryReaderForTest();
   const { listAgents } = require("../agent/defs") as typeof import("../agent/defs");
   return listAgents();
+}
+
+export function readInstalledAgentRegistryNames(): readonly string[] {
+  if (installedAgentRegistryReaderForTest) return installedAgentRegistryReaderForTest();
+  const { listInstalledAgents } = require("../agent/defs") as typeof import("../agent/defs");
+  return listInstalledAgents();
 }
 
 function prioritizeDefaultAgent(names: readonly string[]): string[] {

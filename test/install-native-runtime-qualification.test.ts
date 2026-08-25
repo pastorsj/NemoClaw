@@ -257,10 +257,12 @@ main --non-interactive --yes-i-accept-third-party-software
       "ensure-station-express-pair",
       "step-2-NemoClaw CLI",
       "fix-npm-permissions",
-      "preinstall-backup",
       "install-nemoclaw",
       "verify-nemoclaw",
       "install-selected-harness",
+      "preinstall-backup",
+      "install-nemoclaw",
+      "verify-nemoclaw",
       "require-reportable-openshell-version",
       "step-3-Onboarding",
       "finalize-install",
@@ -484,15 +486,90 @@ main --non-interactive --yes-i-accept-third-party-software
 });
 
 describe("installer agent runtime package selection", () => {
+  it("uses runtime-neutral banner text until the operator selects an agent runtime", () => {
+    const result = phaseHarness(`
+source "$INSTALLER_UNDER_TEST"
+C_GREEN=""; C_BOLD=""; C_DIM=""; C_RESET=""
+print_banner
+`);
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain("Choose an agent runtime for an OpenShell sandbox.");
+    expect(result.stdout).not.toContain("Launch OpenClaw");
+  });
+
+  it("names an explicitly selected agent runtime in the banner", () => {
+    const result = phaseHarness(
+      `
+source "$INSTALLER_UNDER_TEST"
+C_GREEN=""; C_BOLD=""; C_DIM=""; C_RESET=""
+print_banner
+`,
+      { NEMOCLAW_AGENT: "openclaw" },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(result.stdout).toContain("Launch OpenClaw in an OpenShell sandbox.");
+  });
+
+  it("finishes the guarded OpenShell install when package installation is deferred", () => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-deferred-package-boundary-");
+    const setupDirectory = path.join(fixtureRoot, "payload");
+    const callLog = path.join(fixtureRoot, "calls.log");
+    fs.mkdirSync(setupDirectory);
+    writeExecutable(path.join(setupDirectory, "setup-jetson.sh"), "#!/usr/bin/env bash\nexit 0\n");
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+SCRIPT_DIR="$SETUP_DIRECTORY"
+record() { printf '%s\n' "$1" >>"$CALL_LOG"; }
+step() { :; }
+install_nodejs() { :; }
+ensure_supported_runtime() { :; }
+resolve_pending_express_wsl_provider() { :; }
+ensure_station_express_pair() { :; }
+fix_npm_permissions() { :; }
+prepare_cli_without_openshell() { record prepare-core-cli; }
+install_selected_harness() {
+  record select-agent-runtime;
+  _HARNESS_INSTALL_DEFERRED=true;
+}
+preinstall_backup_and_retire_legacy_gateway() { record retire-gateway; }
+install_nemoclaw() { record install-openshell; }
+verify_nemoclaw() { record verify-cli; }
+require_reportable_openshell_version() { record verify-openshell; }
+install_nemoclaw_before_onboarding
+`,
+      { CALL_LOG: callLog, SETUP_DIRECTORY: setupDirectory },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(fs.readFileSync(callLog, "utf8").trim().split("\n")).toEqual([
+      "prepare-core-cli",
+      "select-agent-runtime",
+      "retire-gateway",
+      "install-openshell",
+      "verify-cli",
+      "verify-openshell",
+    ]);
+  });
+
   it.each([
-    { agent: undefined, expected: "openclaw", label: "the default agent runtime" },
+    {
+      agent: undefined,
+      expected: "openclaw",
+      label: "the compatible non-interactive default agent runtime",
+      nonInteractive: true,
+    },
     { agent: "hermes", expected: "hermes", label: "an explicit agent runtime" },
     {
       agent: "langchain-deepagents-code",
       expected: "langchain-deepagents-code",
       label: "the terminal agent runtime",
     },
-  ])("passes $label to harness install", ({ agent, expected }) => {
+  ])("passes $label to harness install", ({ agent, expected, nonInteractive }) => {
     const fixtureRoot = temporaryDirectory("nemoclaw-harness-install-");
     const cli = path.join(fixtureRoot, "nemoclaw");
     const argumentLog = path.join(fixtureRoot, "arguments.log");
@@ -500,7 +577,9 @@ describe("installer agent runtime package selection", () => {
     const environment: NodeJS.ProcessEnv = {
       ARGUMENT_LOG: argumentLog,
       CLI_UNDER_TEST: cli,
-      ...(agent ? { NEMOCLAW_AGENT: agent } : {}),
+      HOME: fixtureRoot,
+      NEMOCLAW_AGENT: agent ?? "",
+      NEMOCLAW_NON_INTERACTIVE: nonInteractive ? "1" : "",
     };
 
     const result = phaseHarness(
@@ -520,6 +599,179 @@ install_selected_harness
       expected,
       "--refresh-installed",
     ]);
+  });
+
+  it("continues an interactive install when an agent runtime package is installed", () => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-installed-harness-");
+    const cli = path.join(fixtureRoot, "nemoclaw");
+    const invocationLog = path.join(fixtureRoot, "invoked");
+    writeExecutable(
+      cli,
+      `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$INVOCATION_LOG"
+if [ "$*" = "harness list --json" ]; then
+  printf '%s\n' '{"installed":[{"id":"hermes"}],"available":[{"id":"openclaw"}]}'
+fi
+`,
+    );
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+_CLI_PATH="$CLI_UNDER_TEST"
+install_selected_harness
+printf 'DEFERRED=%s\n' "$_HARNESS_INSTALL_DEFERRED"
+`,
+      {
+        CLI_UNDER_TEST: cli,
+        HOME: fixtureRoot,
+        INVOCATION_LOG: invocationLog,
+        NEMOCLAW_AGENT: "",
+        NEMOCLAW_NON_INTERACTIVE: "",
+        NON_INTERACTIVE: "",
+      },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(fs.readFileSync(invocationLog, "utf8").trim().split("\n")).toEqual([
+      "harness install --refresh-installed",
+      "harness list --json",
+    ]);
+    expect(result.stdout).toContain("DEFERRED=false");
+  });
+
+  it.each([
+    { recordedAgent: "hermes", expected: "hermes", label: "Hermes" },
+    {
+      recordedAgent: "langchain-deepagents-code",
+      expected: "langchain-deepagents-code",
+      label: "Deep Agents Code",
+    },
+    { recordedAgent: null, expected: "openclaw", label: "legacy OpenClaw" },
+  ])(
+    "installs the $label package recorded by a resumable session",
+    ({ recordedAgent, expected }) => {
+      const fixtureRoot = temporaryDirectory("nemoclaw-resumable-harness-");
+      const cli = path.join(fixtureRoot, "nemoclaw");
+      const argumentLog = path.join(fixtureRoot, "arguments.log");
+      const stateDirectory = path.join(fixtureRoot, ".nemoclaw");
+      fs.mkdirSync(stateDirectory);
+      fs.writeFileSync(
+        path.join(stateDirectory, "onboard-session.json"),
+        JSON.stringify({ status: "in_progress", resumable: true, agent: recordedAgent }),
+      );
+      writeExecutable(cli, '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$ARGUMENT_LOG"\n');
+
+      const result = phaseHarness(
+        `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+_CLI_PATH="$CLI_UNDER_TEST"
+install_selected_harness
+`,
+        {
+          ARGUMENT_LOG: argumentLog,
+          CLI_UNDER_TEST: cli,
+          HOME: fixtureRoot,
+          NEMOCLAW_AGENT: "",
+          NEMOCLAW_NON_INTERACTIVE: "1",
+        },
+      );
+
+      expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+      expect(fs.readFileSync(argumentLog, "utf8").trim().split("\n")).toEqual([
+        "harness",
+        "install",
+        expected,
+        "--refresh-installed",
+      ]);
+    },
+  );
+
+  it("ignores a resumable session package during a fresh install", () => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-fresh-harness-");
+    const cli = path.join(fixtureRoot, "nemoclaw");
+    const argumentLog = path.join(fixtureRoot, "arguments.log");
+    const stateDirectory = path.join(fixtureRoot, ".nemoclaw");
+    fs.mkdirSync(stateDirectory);
+    fs.writeFileSync(
+      path.join(stateDirectory, "onboard-session.json"),
+      JSON.stringify({ status: "in_progress", resumable: true, agent: "hermes" }),
+    );
+    writeExecutable(cli, '#!/usr/bin/env bash\nprintf "%s\\n" "$@" >"$ARGUMENT_LOG"\n');
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+_CLI_PATH="$CLI_UNDER_TEST"
+FRESH=1
+install_selected_harness
+`,
+      {
+        ARGUMENT_LOG: argumentLog,
+        CLI_UNDER_TEST: cli,
+        HOME: fixtureRoot,
+        NEMOCLAW_AGENT: "",
+        NEMOCLAW_NON_INTERACTIVE: "1",
+      },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(fs.readFileSync(argumentLog, "utf8").trim().split("\n")).toEqual([
+      "harness",
+      "install",
+      "openclaw",
+      "--refresh-installed",
+    ]);
+  });
+
+  it("accepts a legacy resumable session without an explicit resumable field", () => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-legacy-resumable-harness-");
+    const stateDirectory = path.join(fixtureRoot, ".nemoclaw");
+    fs.mkdirSync(stateDirectory);
+    fs.writeFileSync(
+      path.join(stateDirectory, "onboard-session.json"),
+      JSON.stringify({ status: "in_progress", agent: "hermes" }),
+    );
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+resolve_resumable_session_harness
+`,
+      { HOME: fixtureRoot },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(result.stdout).toBe("hermes");
+  });
+
+  it.each([
+    { answer: "\n", expectedStatus: 0, label: "the default install-now answer" },
+    { answer: "yes\n", expectedStatus: 0, label: "an explicit install-now answer" },
+    { answer: "no\n", expectedStatus: 1, label: "an install-later answer" },
+    { answer: "cancel\n", expectedStatus: 1, label: "a cancelled answer" },
+  ])("classifies $label", ({ answer, expectedStatus }) => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-harness-prompt-");
+    const promptInput = path.join(fixtureRoot, "prompt-input");
+    fs.writeFileSync(promptInput, answer);
+
+    const result = phaseHarness(
+      `
+source "$INSTALLER_UNDER_TEST"
+exec 9<"$PROMPT_INPUT"
+status=0
+prompt_harness_install_now 9 || status=$?
+exec 9<&-
+exit "$status"
+`,
+      { PROMPT_INPUT: promptInput },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(expectedStatus);
   });
 
   it.each(["pi", "nemocua"])(
@@ -552,4 +804,81 @@ install_selected_harness
       ]);
     },
   );
+});
+
+describe("installer deferred agent runtime package boundary", () => {
+  it.each([
+    { expectedStatus: 0, label: "recovery succeeds", recoveryStatus: 0 },
+    { expectedStatus: 1, label: "recovery fails", recoveryStatus: 23 },
+  ])("finishes without generic onboarding when $label", ({ expectedStatus, recoveryStatus }) => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-deferred-harness-");
+    const setupDirectory = path.join(fixtureRoot, "payload");
+    const callLog = path.join(fixtureRoot, "calls.log");
+    fs.mkdirSync(setupDirectory);
+    writeExecutable(path.join(setupDirectory, "setup-jetson.sh"), "#!/usr/bin/env bash\nexit 0\n");
+
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+SCRIPT_DIR="$SETUP_DIRECTORY"
+record() { printf '%s\n' "$1" >> "$CALL_LOG"; }
+load_station_vllm_conflict_helpers() { :; }
+consume_station_local_vllm_resume() { return 1; }
+resolve_nemoclaw_gateway_port() { printf '8080'; }
+preflight_explicit_express_flags() { :; }
+print_banner() { :; }
+preflight_usage_notice_prompt() { :; }
+prepare_installer_host() { record prepare-installer-host; }
+install_nemoclaw_before_onboarding() {
+  record install-before-onboarding
+  _HARNESS_INSTALL_DEFERRED=true
+  _PREEXISTING_SANDBOX_COUNT=1
+}
+step() { record "step-$1"; }
+registered_sandbox_count() { record registry-inspection; printf '0'; }
+run_installer_host_preflight() { record host-preflight; return 0; }
+recover_preexisting_sandboxes_before_onboard() { record recover-sandboxes; return "$RECOVERY_STATUS"; }
+run_onboard() { record onboard; }
+finalize_install() { record finalize-install; }
+clear_station_resume_after_completed_onboarding() { record clear-station-resume; }
+main --non-interactive --yes-i-accept-third-party-software
+`,
+      {
+        CALL_LOG: callLog,
+        RECOVERY_STATUS: String(recoveryStatus),
+        SETUP_DIRECTORY: setupDirectory,
+      },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(expectedStatus);
+    expect(fs.readFileSync(callLog, "utf8").trim().split("\n")).toEqual([
+      "prepare-installer-host",
+      "install-before-onboarding",
+      "host-preflight",
+      "recover-sandboxes",
+      "finalize-install",
+    ]);
+  });
+
+  it("prints agent runtime package installation before onboarding in the completion guidance", () => {
+    const result = phaseHarness(`
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+C_GREEN=""; C_YELLOW=""; C_BOLD=""; C_DIM=""; C_RESET=""
+_INSTALL_START=$SECONDS
+_CLI_DISPLAY="NemoClaw"
+_CLI_BIN="nemoclaw"
+_HARNESS_INSTALL_DEFERRED=true
+needs_shell_reload() { return 1; }
+print_done
+`);
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    const harnessInstall = result.stdout.indexOf("nemoclaw harness install");
+    const onboard = result.stdout.indexOf("nemoclaw onboard");
+    expect(harnessInstall).toBeGreaterThan(-1);
+    expect(onboard).toBeGreaterThan(harnessInstall);
+    expect(result.stdout).toContain("Agent runtime package installation was deferred.");
+  });
 });

@@ -12,7 +12,11 @@ export function listAgentRuntimeEntries(): AgentRuntimeListEntry[] {
 export function renderAgentRuntimeList(
   entries: readonly AgentRuntimeListEntry[] = listAgentRuntimeEntries(),
 ): string {
-  if (entries.length === 0) return "No agent runtimes are available.";
+  if (entries.length === 0) {
+    return ["No agent runtimes are installed.", "Install one with: nemoclaw harness install"].join(
+      "\n",
+    );
+  }
 
   const nameWidth = Math.max(...entries.map((entry) => entry.name.length));
   return entries

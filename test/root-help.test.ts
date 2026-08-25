@@ -46,7 +46,7 @@ describe("root help", () => {
       "Configure inference endpoint and credentials (--agent to choose runtime)",
     );
     expect(output).toContain("nemoclaw agents list");
-    expect(output).toContain("List available agent runtimes for onboard --agent");
+    expect(output).toContain("List installed agent runtimes available to onboarding");
   });
 
   it.each(["add", "remove", "start", "stop"])(

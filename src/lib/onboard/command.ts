@@ -99,9 +99,12 @@ export interface ResolveOnboardOptionsDeps {
   arch?: NodeJS.Architecture;
   runtimeProviders?: import("./runtime-provider/access").RuntimeProviderBundleRegistry;
   listAgents?: () => string[];
+  listInstalledAgents?: () => string[];
+  canPrompt?: () => boolean;
   listServingProfiles?: () => ServingProfileListEntry[];
   loadServingCatalog?: () => CompiledServingCatalog;
   loadSession?: () => {
+    agent?: string | null;
     servingProfileProvenance?: ServingProfileProvenance | null;
     vllmGpuDevice?: string | null;
   } | null;
@@ -159,10 +162,15 @@ function failUnknownAgent(
   );
 }
 
-function resolveAgent(
+interface ResolvedAgentRequest {
+  readonly fromEnv: boolean;
+  readonly name: string;
+}
+
+function resolveAgentRequest(
   requestedAgent: string | undefined,
   deps: ResolveOnboardOptionsDeps,
-): string | null {
+): ResolvedAgentRequest | null {
   const fromEnv = requestedAgent === undefined;
   const candidate = ((fromEnv ? deps.env.NEMOCLAW_AGENT : requestedAgent) ?? "").trim();
   if (candidate === "") return null;
@@ -171,10 +179,164 @@ function resolveAgent(
   const resolved =
     knownAgents.length === 0 ? candidate : resolveAgentNameAlias(candidate, knownAgents);
   if (!resolved) failUnknownAgent(deps, candidate, fromEnv, knownAgents);
+  return { fromEnv, name: resolved };
+}
+
+function resolveAgent(
+  requestedAgent: string | undefined,
+  deps: ResolveOnboardOptionsDeps,
+): string | null {
+  const request = resolveAgentRequest(requestedAgent, deps);
+  if (!request) return null;
 
   // The env path leaves canonicalization to downstream resolution (returns
   // null); the flag path returns the canonical name as before.
-  return fromEnv ? null : resolved;
+  return request.fromEnv ? null : request.name;
+}
+
+function failAgentRuntimeNotInstalled(
+  deps: ResolveOnboardOptionsDeps,
+  agentName: string,
+  resume: boolean,
+): never {
+  const firstLine = resume
+    ? `  Cannot resume: this session requires agent runtime package '${agentName}', which is not installed.`
+    : `  Agent runtime package '${agentName}' is available but is not installed.`;
+  return fail(
+    deps,
+    [
+      firstLine,
+      "",
+      "  Install it:",
+      `    nemoclaw harness install ${agentName}`,
+      ...(resume ? ["", "  Or start fresh:", "    nemoclaw onboard --fresh"] : []),
+    ].join("\n"),
+  );
+}
+
+function resolveRecordedResumeAgent(
+  deps: ResolveOnboardOptionsDeps,
+  knownAgents: readonly string[],
+): string | null {
+  const session = deps.loadSession?.();
+  if (!session) return null;
+  const recorded = session.agent?.trim() || "openclaw";
+  const resolved =
+    knownAgents.length === 0 ? recorded : resolveAgentNameAlias(recorded, knownAgents);
+  if (resolved) return resolved;
+  return fail(
+    deps,
+    [
+      `  Cannot resume: this session requires unavailable agent runtime '${recorded}'.`,
+      "",
+      "  Start fresh:",
+      "    nemoclaw onboard --fresh",
+    ].join("\n"),
+  );
+}
+
+function resolveResumeAgentSelection(
+  flags: OnboardFlags,
+  deps: RunOnboardCommandDeps,
+  resumeIntent: ResolvedOnboardResumeIntent,
+  knownAgents: readonly string[],
+  installedAgents: readonly string[],
+  requested: ResolvedAgentRequest | null,
+): OnboardFlags | null {
+  if (!resumeIntent.effectiveResume) return null;
+
+  const recorded = resolveRecordedResumeAgent(deps, knownAgents);
+  if (!recorded) return null;
+  if (!installedAgents.includes(recorded)) {
+    return failAgentRuntimeNotInstalled(deps, recorded, true);
+  }
+  if (requested && requested.name !== recorded) {
+    return fail(
+      deps,
+      [
+        `  Session was started with agent runtime '${recorded}', not '${requested.name}'.`,
+        "",
+        "  Resume with the recorded agent runtime or start fresh:",
+        "    nemoclaw onboard --fresh",
+      ].join("\n"),
+    );
+  }
+  return { ...flags, agent: recorded };
+}
+
+function cannotPromptForAgentSelection(flags: OnboardFlags, deps: RunOnboardCommandDeps): boolean {
+  return (
+    flags["non-interactive"] === true ||
+    flags["experimental-profile"] === PORTABLE_EXPERIMENTAL_PROFILE ||
+    deps.env.NEMOCLAW_NON_INTERACTIVE === "1" ||
+    deps.canPrompt?.() === false
+  );
+}
+
+function selectAgentWithoutPrompt(
+  flags: OnboardFlags,
+  deps: RunOnboardCommandDeps,
+  installedAgents: readonly string[],
+): OnboardFlags {
+  if (installedAgents.includes("openclaw")) return { ...flags, agent: "openclaw" };
+  return fail(
+    deps,
+    [
+      "  More than one agent runtime package is installed, and this onboarding run cannot prompt.",
+      `  Installed agent runtime packages: ${installedAgents.join(", ")}`,
+      "  Select one with --agent <name>.",
+    ].join("\n"),
+  );
+}
+
+function requireInstalledAgentSelection(
+  flags: OnboardFlags,
+  deps: RunOnboardCommandDeps,
+  resumeIntent: ResolvedOnboardResumeIntent,
+): OnboardFlags {
+  // Production always supplies this reader. Keeping it injectable lets focused
+  // command tests exercise option handling without reading host installation state.
+  if (!deps.listInstalledAgents) return flags;
+
+  const installedAgents = [...new Set(deps.listInstalledAgents())].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  const knownAgents = deps.listAgents?.() ?? installedAgents;
+  const requested = resolveAgentRequest(flags.agent, deps);
+  const resumeSelection = resolveResumeAgentSelection(
+    flags,
+    deps,
+    resumeIntent,
+    knownAgents,
+    installedAgents,
+    requested,
+  );
+  if (resumeSelection) return resumeSelection;
+
+  if (requested && !installedAgents.includes(requested.name)) {
+    return failAgentRuntimeNotInstalled(deps, requested.name, false);
+  }
+  if (installedAgents.length === 0) {
+    return fail(
+      deps,
+      [
+        "  No agent runtime packages are installed.",
+        "",
+        "  Install one:",
+        "    nemoclaw harness install",
+        "",
+        "  Then continue:",
+        "    nemoclaw onboard",
+      ].join("\n"),
+    );
+  }
+
+  if (requested) return { ...flags, agent: requested.name };
+  if (installedAgents.length === 1) return { ...flags, agent: installedAgents[0] };
+  if (cannotPromptForAgentSelection(flags, deps)) {
+    return selectAgentWithoutPrompt(flags, deps, installedAgents);
+  }
+  return flags;
 }
 
 function resolveAgentsManifest(
@@ -695,7 +857,8 @@ async function runOnboardCommandAttempt(
   attempt: number,
 ): Promise<OnboardCommandAttemptResult> {
   const resumeIntent = resolveCommandResumeIntent(deps);
-  const resolvedOptions = resolveOnboardOptions(deps.flags, { ...deps, resumeIntent });
+  const selectedAgentFlags = requireInstalledAgentSelection(deps.flags, deps, resumeIntent);
+  const resolvedOptions = resolveOnboardOptions(selectedAgentFlags, { ...deps, resumeIntent });
   let restoreServingProfileEnvironment = () => {};
   const environmentSnapshot: OnboardCommandEnvironmentSnapshot = {
     agentsManifest: env.NEMOCLAW_EXTRA_AGENTS_JSON,

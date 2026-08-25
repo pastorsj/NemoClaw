@@ -6,9 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import {
-  ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS,
-} from "../../../tools/e2e/onboard-timeout-contract.mts";
+import { ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS } from "../../../tools/e2e/onboard-timeout-contract.mts";
 import { ArtifactSink } from "../fixtures/artifacts.ts";
 import { type CommandRunner, HostCliClient } from "../fixtures/clients/index.ts";
 import { DCODE_BASE_IMAGE, DCODE_BASE_IMAGE_ENV } from "../fixtures/dcode-base-image.ts";
@@ -69,18 +67,29 @@ function readJson(filePath: string): unknown {
 
 class FakeRunner implements CommandRunner {
   readonly calls: RunnerCall[] = [];
+  readonly commandSequence: RunnerCall[] = [];
+  readonly harnessInstallCalls: RunnerCall[] = [];
   private readonly responses: ShellProbeResult[] = [];
+  private harnessInstallResponse = shellResult(0, "installed\n");
 
   enqueue(response: ShellProbeResult): void {
     this.responses.push(response);
+  }
+
+  failHarnessInstall(output: string): void {
+    this.harnessInstallResponse = shellResult(1, output);
   }
 
   async run(
     command: TrustedShellCommand,
     options?: ShellProbeRunOptions,
   ): Promise<ShellProbeResult> {
-    this.calls.push({ command: command.command, args: [...command.args], options });
-    const response = this.responses.shift();
+    const call = { command: command.command, args: [...command.args], options };
+    this.commandSequence.push(call);
+    const isHarnessInstall =
+      command.args[0] === "harness" && command.args[1] === "install" && command.args.length === 3;
+    (isHarnessInstall ? this.harnessInstallCalls : this.calls).push(call);
+    const response = isHarnessInstall ? this.harnessInstallResponse : this.responses.shift();
     if (!response) {
       throw new Error(
         `FakeRunner response missing for command: ${command.command} ${command.args.join(" ")}`,
@@ -136,6 +145,24 @@ function ready(overrides: Partial<EnvironmentReady> = {}): EnvironmentReady {
 }
 
 describe("onboarding phase fixture", () => {
+  it("stops before onboarding and cleanup registration when package installation fails", async () => {
+    const runner = new FakeRunner();
+    runner.failHarnessInstall("package install failed\n");
+    const cleanup = new FakeCleanup();
+    const secrets = new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" });
+    const onboard = new OnboardingPhaseFixture(new HostCliClient(runner), secrets, cleanup);
+
+    await expect(onboard.from(ready(), { sandboxName: "e2e-install-failure" })).rejects.toThrow(
+      /nemoclaw harness install openclaw failed/i,
+    );
+
+    expect(runner.commandSequence.map((call) => call.args)).toEqual([
+      ["harness", "install", "openclaw"],
+    ]);
+    expect(runner.calls).toEqual([]);
+    expect(cleanup.calls).toEqual([]);
+  });
+
   it("runs cloud OpenClaw onboarding with explicit non-interactive inputs", async () => {
     const runner = new FakeRunner();
     runner.enqueue(shellResult(0, "onboarded\n"));
@@ -173,6 +200,21 @@ describe("onboarding phase fixture", () => {
           timeoutMs: 900_000,
         },
       },
+    ]);
+    expect(runner.harnessInstallCalls).toEqual([
+      {
+        command: "nemoclaw",
+        args: ["harness", "install", "openclaw"],
+        options: {
+          artifactName: "harness-install-openclaw",
+          env: expect.objectContaining({ PATH: expect.any(String) }),
+          timeoutMs: 120_000,
+        },
+      },
+    ]);
+    expect(runner.commandSequence.map((call) => call.args)).toEqual([
+      ["harness", "install", "openclaw"],
+      ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
     ]);
     expect(runner.calls[0]?.options?.env?.[DCODE_BASE_IMAGE_ENV]).toBeUndefined();
   });
@@ -224,6 +266,7 @@ describe("onboarding phase fixture", () => {
       { [DCODE_BASE_IMAGE_ENV]: DCODE_BASE_IMAGE_REF },
       () =>
         onboard.from(ready({ onboarding: "cloud-langchain-deepagents-code" }), {
+          runtimePackageId: "langchain-deepagents-code",
           sandboxName: "e2e-dcode-cloud",
         }),
     );
@@ -252,6 +295,26 @@ describe("onboarding phase fixture", () => {
         timeoutMs: 900_000,
       },
     });
+    expect(runner.harnessInstallCalls.map((call) => call.args)).toEqual([
+      ["harness", "install", "langchain-deepagents-code"],
+    ]);
+    expect(runner.commandSequence.map((call) => call.args[0])).toEqual(["harness", "onboard"]);
+  });
+
+  it("rejects a manifest-selected agent runtime package that conflicts with the onboarding profile", async () => {
+    const runner = new FakeRunner();
+    const secrets = new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" });
+    const onboard = new OnboardingPhaseFixture(new HostCliClient(runner), secrets);
+
+    await expect(
+      onboard.from(ready(), {
+        runtimePackageId: "langchain-deepagents-code",
+        sandboxName: "e2e-wrong-harness",
+      }),
+    ).rejects.toThrow(
+      "Onboarding requires agent runtime package 'openclaw', but 'langchain-deepagents-code' was selected.",
+    );
+    expect(runner.commandSequence).toEqual([]);
   });
 
   it("uses the contract-selected Deep Agents Code base image reference instead of the ambient publication index", async () => {
@@ -464,6 +527,7 @@ describe("onboarding phase fixture", () => {
     expect(secrets.requiredCalls).toEqual(["NVIDIA_INFERENCE_API_KEY"]);
     expect(cleanup.calls).toHaveLength(1);
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-no-docker");
+    expect(runner.harnessInstallCalls.map((call) => call.args[2])).toEqual(["openclaw"]);
   });
 
   it("runs the missing custom policy presets negative path", async () => {
@@ -505,6 +569,7 @@ describe("onboarding phase fixture", () => {
     });
     expect(cleanup.calls).toHaveLength(1);
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-policy-missing");
+    expect(runner.harnessInstallCalls.map((call) => call.args[2])).toEqual(["openclaw"]);
   });
 
   it("rejects unrelated failures for the missing custom policy presets negative path", async () => {

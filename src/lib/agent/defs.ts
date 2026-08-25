@@ -12,6 +12,7 @@ import { isCuaEnabled, requireCuaEnabled } from "../cua/feature";
 import {
   captureHarnessPackageSnapshot,
   listHarnessPackageIds,
+  listInstalledHarnessPackageIds,
   resolveHarnessPackage,
 } from "../harness/package-registry";
 import { ROOT } from "../runner";
@@ -145,6 +146,31 @@ export function listAgents(env: NodeJS.ProcessEnv = process.env): string[] {
   for (const name of legacyAgents) {
     if (names.has(name)) {
       throw new Error(`Duplicate agent id '${name}' is declared by a harness package and agents/`);
+    }
+    names.add(name);
+  }
+  return [...names].sort();
+}
+
+/** List installed agent runtime packages and qualified legacy candidates available to onboard. */
+export function listInstalledAgents(env: NodeJS.ProcessEnv = process.env): string[] {
+  const packageAgents = listInstalledHarnessPackageIds(env).flatMap((name) => {
+    if (!selectableAgent(name, env)) return [];
+    try {
+      return loadAgent(name, env).harnessPackageSource === "installed" ? [name] : [];
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      console.error(`  Warning: skipping agent '${name}' — failed to load manifest: ${reason}`);
+      return [];
+    }
+  });
+  const legacyAgents = listLegacyAgents(env);
+  const names = new Set(packageAgents);
+  for (const name of legacyAgents) {
+    if (names.has(name)) {
+      throw new Error(
+        `Duplicate agent id '${name}' is declared by an installed agent runtime package and agents/`,
+      );
     }
     names.add(name);
   }
@@ -430,7 +456,7 @@ export function getAgentChoices(): AgentChoice[] {
   // Build the menu defensively: a single malformed non-default manifest must
   // not abort interactive onboarding (e.g. an OpenClaw user accepting the
   // default). Skip agents that fail to load and surface a warning instead.
-  const agents = listAgents().flatMap((name) => {
+  const agents = listInstalledAgents().flatMap((name) => {
     try {
       const agent = loadAgent(name);
       return [

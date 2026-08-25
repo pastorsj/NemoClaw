@@ -15,7 +15,7 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
     {
       group: "Getting Started",
       order: 1.5,
-      description: "List available agent runtimes for onboard --agent",
+      description: "List installed agent runtimes available to onboarding",
     },
   ],
   "harness:list": [
@@ -23,15 +23,16 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       group: "Getting Started",
       order: 1.55,
       usage: "nemoclaw harness list",
-      description: "List available harness packages",
+      description: "List installed and available agent runtime packages",
     },
   ],
   "harness:install": [
     {
       group: "Getting Started",
       order: 1.6,
-      usage: "nemoclaw harness install <harness>",
-      description: "Install a bundled harness package",
+      usage: "nemoclaw harness install",
+      description: "Choose and install an agent runtime package",
+      flags: "[<harness>]",
     },
   ],
   ...SANDBOX_SESSIONS_DISPLAY_LAYOUT,

@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
-import { type AgentChoice, getAgentChoices, loadAgent } from "../agent/defs";
+import { type AgentChoice, loadAgent } from "../agent/defs";
 import { resolveAgent } from "../agent/onboard";
 import { createSelectOnboardAgent } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
@@ -26,10 +26,13 @@ const STANDARD_AGENT_CHOICES = [
   },
 ] as const;
 
-// Exercise the real standard agent registry so these tests observe wizard behavior directly.
+// Use explicit installed-choice fixtures so selector behavior does not depend on host state.
 function makeSelectOnboardAgent(
   reply: string,
-  { nonInteractive = false }: { nonInteractive?: boolean } = {},
+  {
+    choices = [...STANDARD_AGENT_CHOICES],
+    nonInteractive = false,
+  }: { choices?: AgentChoice[]; nonInteractive?: boolean } = {},
 ) {
   const prompt = vi.fn(async (_question: string) => reply);
   const log = vi.fn((_message?: string) => {});
@@ -41,7 +44,7 @@ function makeSelectOnboardAgent(
   const select = createSelectOnboardAgent({
     resolveAgent,
     loadAgent,
-    getAgentChoices,
+    getAgentChoices: () => choices,
     isNonInteractive: () => nonInteractive,
     note,
     log,
@@ -68,7 +71,6 @@ describe("selectOnboardAgent behavior", () => {
     const agent = await select({ canPrompt: true });
 
     assert.equal(agent, null);
-    assert.deepEqual(getAgentChoices(), STANDARD_AGENT_CHOICES);
     assert.equal(prompt.mock.calls.length, 1);
     assert.match(prompt.mock.calls[0]?.[0] ?? "", /Choose \[1\]/);
     assert.deepEqual(selectFromNumberedMenu.mock.calls[0], ["", 1, STANDARD_AGENT_CHOICES]);
@@ -87,6 +89,33 @@ describe("selectOnboardAgent behavior", () => {
     const agent = await select({ canPrompt: true });
 
     assert.equal(agent?.name, "langchain-deepagents-code");
+  });
+
+  it("selects the only installed agent runtime without prompting", async () => {
+    const { select, prompt } = makeSelectOnboardAgent("", {
+      choices: [{ ...STANDARD_AGENT_CHOICES[1] }],
+    });
+
+    const agent = await select({ canPrompt: true });
+
+    assert.equal(agent?.name, "hermes");
+    assert.equal(prompt.mock.calls.length, 0);
+  });
+
+  it("shows only the installed agent runtimes", async () => {
+    const installedChoices = [{ ...STANDARD_AGENT_CHOICES[0] }, { ...STANDARD_AGENT_CHOICES[1] }];
+    const { select, log, prompt } = makeSelectOnboardAgent("2", {
+      choices: installedChoices,
+    });
+
+    const agent = await select({ canPrompt: true });
+
+    assert.equal(agent?.name, "hermes");
+    assert.equal(prompt.mock.calls.length, 1);
+    const menu = log.mock.calls.map((call) => call[0]).join("\n");
+    assert.match(menu, /OpenClaw/);
+    assert.match(menu, /Hermes Agent/);
+    assert.doesNotMatch(menu, /LangChain Deep Agents Code/);
   });
 
   it("reports the default OpenClaw selection without prompting in non-interactive mode", async () => {

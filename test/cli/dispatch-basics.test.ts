@@ -151,7 +151,7 @@ describe("CLI dispatch", () => {
       "Configure inference endpoint and credentials (--agent to choose runtime)",
     );
     expect(output).toContain("nemoclaw agents list");
-    expect(output).toContain("List available agent runtimes for onboard --agent");
+    expect(output).toContain("List installed agent runtimes available to onboarding");
     expect(output).toContain("nemoclaw onboard --from");
     expect(output).toContain("Use a custom Dockerfile for the sandbox image");
   });
@@ -163,12 +163,25 @@ describe("CLI dispatch", () => {
     expect(r.out).not.toContain("Sandbox 'agents' does not exist");
   });
 
-  it("agents list exits 0 and lists global agent runtimes", () => {
-    const r = run("agents list");
-    expect(r.code).toBe(0);
-    expect(r.out).toContain("openclaw");
-    expect(r.out).toContain("hermes");
-    expect(r.out).toContain("langchain-deepagents-code");
+  it("agents list shows only installed agent runtimes", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agents-list-"));
+    try {
+      const empty = runWithEnv("agents list", { HOME: home });
+      expect(empty.code).toBe(0);
+      expect(empty.out).toContain("No agent runtimes are installed.");
+      expect(empty.out).toContain("nemoclaw harness install");
+
+      const install = runWithEnv("harness install hermes", { HOME: home });
+      expect(install.code).toBe(0);
+
+      const installed = runWithEnv("agents list", { HOME: home });
+      expect(installed.code).toBe(0);
+      expect(installed.out).toContain("hermes");
+      expect(installed.out).not.toContain("openclaw");
+      expect(installed.out).not.toContain("langchain-deepagents-code");
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("exits 0 for --help", async () => {

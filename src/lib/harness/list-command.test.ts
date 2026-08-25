@@ -4,66 +4,98 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  listHarnessPackages: vi.fn(),
+  listBundledHarnessPackages: vi.fn(),
+  listInstalledHarnessPackages: vi.fn(),
 }));
 
 vi.mock("./package-registry", () => ({
-  listHarnessPackages: mocks.listHarnessPackages,
+  listBundledHarnessPackages: mocks.listBundledHarnessPackages,
+  listInstalledHarnessPackages: mocks.listInstalledHarnessPackages,
 }));
 
-import { printHarnessPackageList, renderHarnessPackageList } from "./list-command";
+import {
+  buildHarnessPackageList,
+  printHarnessPackageList,
+  renderHarnessPackageList,
+} from "./list-command";
+
+function harnessPackage(id: string, source: "bundled" | "installed", version = "1.0.0") {
+  return {
+    id,
+    packageName: `nemoclaw-${id}`,
+    version,
+    rootDir: `/tmp/${source}/${id}`,
+    manifestPath: `/tmp/${source}/${id}/manifest.yaml`,
+    source,
+  } as const;
+}
 
 describe("harness package list command support", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.listHarnessPackages.mockReturnValue([]);
+    mocks.listBundledHarnessPackages.mockReturnValue([]);
+    mocks.listInstalledHarnessPackages.mockReturnValue([]);
   });
 
-  it("renders package identity and source in aligned columns", () => {
+  it("renders installed and available packages in separate sections", () => {
     expect(
-      renderHarnessPackageList([
+      renderHarnessPackageList({
+        installed: [harnessPackage("openclaw", "installed")],
+        available: [harnessPackage("hermes", "bundled", "2.0.0")],
+      }),
+    ).toBe(
+      [
+        "Installed agent runtime packages:",
+        "  openclaw  nemoclaw-openclaw@1.0.0  installed",
+        "",
+        "Available agent runtime packages:",
+        "  hermes    nemoclaw-hermes@2.0.0    bundled",
+      ].join("\n"),
+    );
+  });
+
+  it("excludes an installed bundled package from the available list", () => {
+    mocks.listInstalledHarnessPackages.mockReturnValue([harnessPackage("openclaw", "installed")]);
+    mocks.listBundledHarnessPackages.mockReturnValue([
+      harnessPackage("openclaw", "bundled"),
+      harnessPackage("hermes", "bundled", "2.0.0"),
+    ]);
+
+    expect(buildHarnessPackageList()).toEqual({
+      installed: [
         {
           id: "openclaw",
           packageName: "nemoclaw-openclaw",
           version: "1.0.0",
           source: "installed",
         },
+      ],
+      available: [
         {
           id: "hermes",
           packageName: "nemoclaw-hermes",
           version: "2.0.0",
           source: "bundled",
         },
-      ]),
-    ).toBe(
-      [
-        "openclaw  nemoclaw-openclaw@1.0.0  installed",
-        "hermes    nemoclaw-hermes@2.0.0    bundled",
-      ].join("\n"),
-    );
+      ],
+    });
+    expect(mocks.listInstalledHarnessPackages).toHaveBeenCalledOnce();
+    expect(mocks.listBundledHarnessPackages).toHaveBeenCalledOnce();
   });
 
-  it("renders the packages returned by the registry", () => {
-    mocks.listHarnessPackages.mockReturnValue([
-      {
-        id: "openclaw",
-        packageName: "nemoclaw-openclaw",
-        version: "1.0.0",
-        rootDir: "/tmp/openclaw",
-        manifestPath: "/tmp/openclaw/manifest.yaml",
-        source: "bundled",
-      },
-    ]);
-
-    expect(renderHarnessPackageList()).toBe("openclaw  nemoclaw-openclaw@1.0.0  bundled");
-    expect(mocks.listHarnessPackages).toHaveBeenCalledOnce();
-  });
-
-  it("prints a fallback when the registry has no packages", () => {
+  it("prints both empty sections when the registry has no packages", () => {
     const log = vi.fn();
 
     printHarnessPackageList(log);
 
-    expect(log).toHaveBeenCalledWith("No harness packages are available.");
+    expect(log).toHaveBeenCalledWith(
+      [
+        "Installed agent runtime packages:",
+        "  No agent runtime packages are installed.",
+        "",
+        "Available agent runtime packages:",
+        "  No bundled agent runtime packages are available to install.",
+      ].join("\n"),
+    );
   });
 });

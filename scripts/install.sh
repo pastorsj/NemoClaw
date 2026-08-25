@@ -473,6 +473,25 @@ resolve_onboarded_agent() {
   fi
 }
 
+resolve_resumable_session_harness() {
+  [[ "${FRESH:-}" != "1" ]] || return 1
+  local session_file
+  session_file="$(nemoclaw_state_dir)/onboard-session.json"
+  [[ -f "$session_file" ]] && command_exists node || return 1
+  node -e '
+    const fs = require("fs");
+    try {
+      const data = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (!data || data.resumable === false) process.exit(1);
+      const agent = data.agent == null ? "openclaw" : data.agent;
+      if (typeof agent !== "string" || agent.trim() === "") process.exit(1);
+      process.stdout.write(agent);
+    } catch {
+      process.exit(1);
+    }
+  ' "$session_file" 2>/dev/null
+}
+
 # Read the API port the named sandbox was registered with. Each Hermes sandbox
 # allocates its own, so the forward must target this sandbox's port rather than
 # the default a sibling sandbox may already hold.
@@ -757,10 +776,10 @@ print_banner() {
     printf "  ${C_GREEN}${C_BOLD} ╚═╝  ╚═══╝╚══════╝╚═╝     ╚═╝ ╚═════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝${C_RESET}\n"
   fi
   printf "\n"
-  if [[ -n "${NEMOCLAW_AGENT:-}" && "${NEMOCLAW_AGENT}" != "openclaw" ]]; then
+  if [[ -n "${NEMOCLAW_AGENT:-}" ]]; then
     printf "  ${C_DIM}Launch %s in an OpenShell sandbox.%s${C_RESET}\n" "$(agent_display_name "$NEMOCLAW_AGENT")" "$version_suffix"
   else
-    printf "  ${C_DIM}Launch OpenClaw in an OpenShell sandbox.%s${C_RESET}\n" "$version_suffix"
+    printf "  ${C_DIM}Choose an agent runtime for an OpenShell sandbox.%s${C_RESET}\n" "$version_suffix"
   fi
   printf "\n"
 }
@@ -821,6 +840,12 @@ warn_default_agent_fallback() {
     "$C_GREEN" "$C_RESET"
 }
 
+print_orphaned_sandbox_recovery_guidance() {
+  printf "  ${C_YELLOW}Some recorded sandboxes were not found on their recorded gateway and were not recovered.${C_RESET}\n"
+  printf "  ${C_YELLOW}Their gateway registration or Docker image may have been removed (see the recovery notes above).${C_RESET}\n"
+  printf "  ${C_DIM}Clear a stranded sandbox with '%s <name> destroy', then rebuild it with '%s onboard'.${C_RESET}\n" "$_CLI_BIN" "$_CLI_BIN"
+}
+
 print_done() {
   local elapsed=$((SECONDS - _INSTALL_START))
   local _needs_cli_refresh=false
@@ -842,14 +867,30 @@ print_done() {
   printf "\n"
   printf "  ${C_GREEN}${C_BOLD}%s${C_RESET}  ${C_DIM}(%ss)${C_RESET}\n" "$_CLI_DISPLAY" "$elapsed"
   printf "\n"
-  if [[ "${_PREEXISTING_SANDBOX_RECOVERY_RAN:-false}" == true ]]; then
+  if [[ "${_HARNESS_INSTALL_DEFERRED:-false}" == true ]]; then
+    if [[ "${_PREEXISTING_SANDBOX_ORPHANED:-false}" == true ]]; then
+      print_orphaned_sandbox_recovery_guidance
+      printf "\n"
+    fi
+    if [[ "$_needs_cli_refresh" == true ]]; then
+      printf "  ${C_YELLOW}%s CLI is installed, but this shell needs a PATH refresh before '%s' will run.${C_RESET}\n" "$_CLI_DISPLAY" "$_CLI_BIN"
+    else
+      printf "  ${C_GREEN}%s CLI is installed.${C_RESET}\n" "$_CLI_DISPLAY"
+    fi
+    printf "  ${C_YELLOW}${C_BOLD}Agent runtime package installation was deferred.${C_RESET}\n"
+    printf "\n"
+    printf "  ${C_GREEN}${C_BOLD}To finish setup, run:${C_RESET}\n"
+    if [[ "$_needs_cli_refresh" == true ]]; then
+      print_cli_path_refresh_actions
+    fi
+    printf "  %s$%s %s harness install\n" "$C_GREEN" "$C_RESET" "$_CLI_BIN"
+    printf "  %s$%s %s onboard\n" "$C_GREEN" "$C_RESET" "$_CLI_BIN"
+  elif [[ "${_PREEXISTING_SANDBOX_RECOVERY_RAN:-false}" == true ]]; then
     if [[ "${_PREEXISTING_SANDBOX_ORPHANED:-false}" == true ]]; then
       # #6520: recovery exited 0 but recorded sandboxes were not found on
       # their own recorded gateway; do not report them as recovered, and give
       # a concrete remediation path instead.
-      printf "  ${C_YELLOW}Some recorded sandboxes were not found on their recorded gateway and were not recovered.${C_RESET}\n"
-      printf "  ${C_YELLOW}Their gateway registration or Docker image may have been removed (see the recovery notes above).${C_RESET}\n"
-      printf "  ${C_DIM}Clear a stranded sandbox with '%s <name> destroy', then rebuild it with '%s onboard'.${C_RESET}\n" "$_CLI_BIN" "$_CLI_BIN"
+      print_orphaned_sandbox_recovery_guidance
     else
       printf "  ${C_GREEN}Existing sandboxes were recovered and upgraded.${C_RESET}\n"
     fi
@@ -1266,6 +1307,7 @@ ONBOARD_RAN=false
 _CLI_PATH=""
 _NEMOCLAW_CLI_INSTALL_PREPARED=false
 _NEMOCLAW_CLI_INSTALL_MODE=""
+_HARNESS_INSTALL_DEFERRED=false
 _OPENSHELL_INSTALL_REQUIRED_BEFORE_RECOVERY=false
 _PREEXISTING_SANDBOX_COUNT=0
 _PREEXISTING_SANDBOX_RECOVERY_RAN=false
@@ -2625,11 +2667,104 @@ verify_nemoclaw() {
   error "Installation failed: ${_CLI_BIN} binary not found."
 }
 
+query_installed_harness_count() {
+  local inventory_json=""
+  inventory_json="$("$_CLI_PATH" harness list --json)" || return $?
+  node -e '
+    let inventory;
+    try {
+      inventory = JSON.parse(process.argv[1]);
+    } catch {
+      process.exit(1);
+    }
+    if (
+      !inventory ||
+      typeof inventory !== "object" ||
+      !Array.isArray(inventory.installed) ||
+      !Array.isArray(inventory.available)
+    ) {
+      process.exit(1);
+    }
+    process.stdout.write(String(inventory.installed.length));
+  ' "$inventory_json"
+}
+
+prompt_harness_install_now() {
+  local input_fd="$1"
+  local reply="" normalized_reply=""
+  while :; do
+    printf "  Install an agent runtime package now? [Y/n]: " >&2
+    if ! IFS= read -r reply <&"$input_fd"; then
+      return 1
+    fi
+    normalized_reply="$(printf "%s" "$reply" | tr '[:upper:]' '[:lower:]')"
+    case "$normalized_reply" in
+      "" | y | yes) return 0 ;;
+      n | no | later | cancel | exit | quit) return 1 ;;
+      *) printf "  Please answer 'y' to install now or 'n' to install later.\n" >&2 ;;
+    esac
+  done
+}
+
 install_selected_harness() {
   local selected_harness="${NEMOCLAW_AGENT:-openclaw}"
+  local session_harness=""
   if [[ -z "$_CLI_PATH" ]]; then
     error "Cannot install the ${_AGENT_PRODUCT} agent runtime package because the ${_CLI_DISPLAY} executable was not resolved."
   fi
+
+  # A resumable session owns its runtime choice. Install that package before
+  # onboarding attempts the resume; a null recorded agent is the legacy
+  # OpenClaw representation. Explicit agent intent and --fresh still win.
+  if [[ -z "${NEMOCLAW_AGENT:-}" ]]; then
+    session_harness="$(resolve_resumable_session_harness || true)"
+    if [[ -n "$session_harness" ]]; then
+      selected_harness="$(canonical_agent_name "$session_harness")"
+    fi
+  fi
+
+  # Keep existing unattended installs compatible: an explicit agent selects
+  # that package, while the historical non-interactive default remains
+  # OpenClaw. Interactive core installs preserve existing packages and prompt
+  # only when no agent runtime package is installed.
+  if [[ -z "${NEMOCLAW_AGENT:-}" && -z "$session_harness" ]] && ! installer_non_interactive; then
+    "$_CLI_PATH" harness install --refresh-installed
+
+    local installed_count=""
+    if ! installed_count="$(query_installed_harness_count)"; then
+      error "Could not read the installed agent runtime package inventory."
+    fi
+    if [[ "$installed_count" -gt 0 ]]; then
+      return 0
+    fi
+
+    info "No agent runtime packages are installed."
+    if ! { exec 3</dev/tty; } 2>/dev/null; then
+      info "No interactive terminal is available. Install an agent runtime package later with '${_CLI_BIN} harness install'."
+      _HARNESS_INSTALL_DEFERRED=true
+      return 0
+    fi
+    if ! prompt_harness_install_now 3; then
+      exec 3<&-
+      _HARNESS_INSTALL_DEFERRED=true
+      return 0
+    fi
+
+    local install_status=0
+    "$_CLI_PATH" harness install <&3 || install_status=$?
+    exec 3<&-
+    if [[ "$install_status" -ne 0 ]]; then
+      return "$install_status"
+    fi
+    if ! installed_count="$(query_installed_harness_count)"; then
+      error "Could not read the installed agent runtime package inventory after installation."
+    fi
+    if [[ "$installed_count" -eq 0 ]]; then
+      _HARNESS_INSTALL_DEFERRED=true
+    fi
+    return 0
+  fi
+
   case "$selected_harness" in
     pi | nemocua)
       # Release candidates still live under agents/ and keep their existing
@@ -2775,7 +2910,7 @@ resolve_existing_cli_runner() {
   return 1
 }
 
-prepare_current_cli_for_preupgrade_backup() {
+prepare_cli_without_openshell() {
   local old_defer="${NEMOCLAW_DEFER_OPENSHELL_INSTALL:-}"
   local defer_was_set="${NEMOCLAW_DEFER_OPENSHELL_INSTALL+1}"
   local defer_declaration="" defer_was_exported=false
@@ -2783,7 +2918,6 @@ prepare_current_cli_for_preupgrade_backup() {
     defer_declaration="$(declare -p NEMOCLAW_DEFER_OPENSHELL_INSTALL 2>/dev/null || true)"
     [[ "$defer_declaration" == declare\ -x* ]] && defer_was_exported=true
   fi
-  info "Preparing current ${_CLI_DISPLAY} CLI for pre-upgrade backup…"
   export NEMOCLAW_DEFER_OPENSHELL_INSTALL=1
   install_nemoclaw
   unset NEMOCLAW_DEFER_OPENSHELL_INSTALL
@@ -2792,6 +2926,11 @@ prepare_current_cli_for_preupgrade_backup() {
     [[ "$defer_was_exported" == true ]] && export NEMOCLAW_DEFER_OPENSHELL_INSTALL
   fi
   verify_nemoclaw
+}
+
+prepare_current_cli_for_preupgrade_backup() {
+  info "Preparing current ${_CLI_DISPLAY} CLI for pre-upgrade backup…"
+  prepare_cli_without_openshell
 }
 
 resolve_prepared_cli_runner() {
@@ -3810,6 +3949,13 @@ run_onboard() {
         # #5626: interrupted before sandbox creation; nothing to resume.
         info "Found an interrupted onboarding session with no sandbox yet — starting fresh."
         onboard_cmd+=(--fresh)
+        if [[ -z "${NEMOCLAW_AGENT:-}" ]]; then
+          local recorded_session_harness=""
+          recorded_session_harness="$(resolve_resumable_session_harness || true)"
+          if [[ -n "$recorded_session_harness" ]]; then
+            onboard_cmd+=(--agent "$(canonical_agent_name "$recorded_session_harness")")
+          fi
+        fi
         # Bind this automatic reset to the loaded Station receipt so the CLI
         # clears only the unrelated session, not the accepted reboot choice.
         # An explicit user --fresh never sets this internal child marker.
@@ -5882,10 +6028,17 @@ install_nemoclaw_before_onboarding() {
   # `nemoclaw onboard` (the install-ollama / install-vllm branches).
   # install.sh stays focused on dependency setup.
   fix_npm_permissions
+
+  # Prepare the core CLI without replacing OpenShell so package selection can
+  # happen before gateway retirement. Deferring selection skips onboarding,
+  # but the guarded OpenShell backup, replacement, and recovery still finish.
+  info "Preparing ${_CLI_DISPLAY} CLI before agent runtime package selection…"
+  prepare_cli_without_openshell
+  install_selected_harness
+
   preinstall_backup_and_retire_legacy_gateway
   install_nemoclaw
   verify_nemoclaw
-  install_selected_harness
   require_reportable_openshell_version
 }
 
@@ -6046,6 +6199,21 @@ main() {
     _cli_runner="$_CLI_PATH"
   elif command_exists "$_CLI_BIN"; then
     _cli_runner="$_CLI_BIN"
+  fi
+
+  if [[ "${_HARNESS_INSTALL_DEFERRED:-false}" == true ]]; then
+    if [[ "${_PREEXISTING_SANDBOX_COUNT:-0}" -gt 0 ]]; then
+      [[ -n "$_cli_runner" ]] \
+        || error "Could not locate the ${_CLI_BIN} executable needed to recover existing sandboxes."
+      run_installer_host_preflight \
+        || error "Existing sandboxes cannot be recovered until the host prerequisites above are fixed."
+      if ! recover_preexisting_sandboxes_before_onboard "$_cli_runner"; then
+        finalize_install
+        return 1
+      fi
+    fi
+    finalize_install
+    return 0
   fi
 
   step 3 "Onboarding"

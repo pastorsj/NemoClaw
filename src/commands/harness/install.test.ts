@@ -6,12 +6,17 @@ import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 
 const mocks = vi.hoisted(() => ({
   installBundledHarness: vi.fn(),
+  promptForRuntimePackage: vi.fn(),
   refreshInstalledBundledHarnesses: vi.fn(),
 }));
 
 vi.mock("../../lib/harness/package-registry", () => ({
   installBundledHarness: mocks.installBundledHarness,
   refreshInstalledBundledHarnesses: mocks.refreshInstalledBundledHarnesses,
+}));
+
+vi.mock("../../lib/harness/install-command", () => ({
+  promptForRuntimePackage: mocks.promptForRuntimePackage,
 }));
 
 import HarnessInstallCommand from "./install";
@@ -30,6 +35,7 @@ describe("harness install oclif command", testTimeoutOptions(30_000), () => {
       source: "installed",
     }));
     mocks.refreshInstalledBundledHarnesses.mockReturnValue([]);
+    mocks.promptForRuntimePackage.mockResolvedValue("openclaw");
   });
 
   afterEach(() => {
@@ -74,8 +80,41 @@ describe("harness install oclif command", testTimeoutOptions(30_000), () => {
     expect(mocks.refreshInstalledBundledHarnesses).not.toHaveBeenCalled();
   });
 
-  it("requires a harness id before installation", async () => {
-    await expect(HarnessInstallCommand.run([], rootDir)).rejects.toThrow(/harness/i);
+  it("requires a harness id when input is not a terminal", async () => {
+    await expect(HarnessInstallCommand.run([], rootDir)).rejects.toThrow(
+      /required when input is not a terminal/i,
+    );
+
+    expect(mocks.installBundledHarness).not.toHaveBeenCalled();
+    expect(mocks.promptForRuntimePackage).not.toHaveBeenCalled();
+  });
+
+  it("installs the package selected by the interactive picker", async () => {
+    const stdinTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    try {
+      await HarnessInstallCommand.run([], rootDir);
+    } finally {
+      stdinTty
+        ? Object.defineProperty(process.stdin, "isTTY", stdinTty)
+        : Reflect.deleteProperty(process.stdin, "isTTY");
+    }
+
+    expect(mocks.promptForRuntimePackage).toHaveBeenCalledWith(expect.any(Function));
+    expect(mocks.installBundledHarness).toHaveBeenCalledWith("openclaw");
+  });
+
+  it("returns without installation when the user chooses to install later", async () => {
+    const stdinTty = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    mocks.promptForRuntimePackage.mockResolvedValueOnce(null);
+    try {
+      await HarnessInstallCommand.run([], rootDir);
+    } finally {
+      stdinTty
+        ? Object.defineProperty(process.stdin, "isTTY", stdinTty)
+        : Reflect.deleteProperty(process.stdin, "isTTY");
+    }
 
     expect(mocks.installBundledHarness).not.toHaveBeenCalled();
   });

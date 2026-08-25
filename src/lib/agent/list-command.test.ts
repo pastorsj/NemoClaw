@@ -30,6 +30,8 @@ describe("agent runtime list command support", () => {
   });
 
   it("prints a fallback message when no runtimes are available", () => {
-    expect(renderAgentRuntimeList([])).toBe("No agent runtimes are available.");
+    expect(renderAgentRuntimeList([])).toBe(
+      ["No agent runtimes are installed.", "Install one with: nemoclaw harness install"].join("\n"),
+    );
   });
 });

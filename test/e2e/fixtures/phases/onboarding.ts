@@ -70,6 +70,7 @@ export interface OnboardingCleanup {
 
 export interface OnboardingOptions {
   dcodeBaseImageReference?: string;
+  runtimePackageId?: string;
   sandboxName?: string;
   timeoutMs?: number;
 }
@@ -212,7 +213,6 @@ export class OnboardingPhaseFixture {
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
-    this.registerSandboxCleanup(sandboxName);
     const policyEnv: NodeJS.ProcessEnv = environment.policyTier
       ? {
           NEMOCLAW_POLICY_MODE: "suggested",
@@ -228,6 +228,8 @@ export class OnboardingPhaseFixture {
             : {}),
         }
       : {};
+    await this.installRuntimePackage("openclaw", options);
+    this.registerSandboxCleanup(sandboxName);
     const result = await this.host.nemoclaw(ONBOARD_ARGS, {
       artifactName: "onboard-cloud-openclaw",
       env: commandEnv(sandboxName, { NVIDIA_INFERENCE_API_KEY: apiKey, ...policyEnv }),
@@ -262,6 +264,7 @@ export class OnboardingPhaseFixture {
         : { [DCODE_BASE_IMAGE_ENV]: options.dcodeBaseImageReference },
     );
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    await this.installRuntimePackage("langchain-deepagents-code", options);
     this.registerSandboxCleanup(sandboxName);
     const result = await this.host.nemoclaw([...ONBOARD_ARGS, "--observability"], {
       artifactName: "onboard-cloud-langchain-deepagents-code",
@@ -310,6 +313,7 @@ export class OnboardingPhaseFixture {
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    await this.installRuntimePackage("openclaw", options);
     this.registerSandboxCleanup(sandboxName);
     const shimDir = await mkdtemp(join(tmpdir(), "e2e-no-docker-"));
     const shimPath = join(shimDir, "docker");
@@ -362,6 +366,7 @@ export class OnboardingPhaseFixture {
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    await this.installRuntimePackage("openclaw", options);
     this.registerSandboxCleanup(sandboxName);
     const result = await this.host.nemoclaw(ONBOARD_ARGS, {
       artifactName: "onboard-cloud-openclaw-policy-custom-missing-presets",
@@ -420,6 +425,19 @@ export class OnboardingPhaseFixture {
     this.cleanup.add(`destroy NemoClaw sandbox ${sandboxName}`, async () => {
       await this.destroySandbox(sandboxName);
     });
+  }
+
+  private async installRuntimePackage(
+    expectedPackageId: NemoClawInstance["agent"],
+    options: OnboardingOptions,
+  ): Promise<void> {
+    const selectedPackageId = options.runtimePackageId ?? expectedPackageId;
+    if (selectedPackageId !== expectedPackageId) {
+      throw new Error(
+        `Onboarding requires agent runtime package '${expectedPackageId}', but '${selectedPackageId}' was selected.`,
+      );
+    }
+    await this.host.installAgentRuntimePackage(selectedPackageId);
   }
 
   private redact(text: string, extraValues: string[] = []): string {

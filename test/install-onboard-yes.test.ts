@@ -227,6 +227,24 @@ describe("install.sh run_onboard — session classification (#5626)", () => {
     expect(argv).not.toContain("--resume");
   });
 
+  it("keeps the recorded agent runtime when pre-sandbox recovery starts fresh", () => {
+    const argv = runOnboardWithSession(
+      { NON_INTERACTIVE: "1" },
+      {
+        version: 1,
+        status: "in_progress",
+        agent: "hermes",
+        sandboxName: null,
+        steps: { sandbox: { status: "pending" } },
+      },
+    );
+
+    expect(argv).toContain("--fresh");
+    expect(argv).toContain("--agent");
+    expect(argv).toContain("hermes");
+    expect(argv).not.toContain("--resume");
+  });
+
   it("marks an automatic fresh reset to preserve a loaded Station receipt", () => {
     const generation = "0123456789abcdef0123456789abcdef";
     const argv = runOnboardWithSession(

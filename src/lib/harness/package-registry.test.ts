@@ -16,10 +16,14 @@ import {
   captureHarnessPackageTexts,
   harnessPackageContentDigest,
   installBundledHarness,
+  listBundledHarnessPackages,
   listHarnessPackageIds,
   listHarnessPackages,
+  listInstalledHarnessPackageIds,
+  listInstalledHarnessPackages,
   refreshInstalledBundledHarnesses,
   resolveHarnessPackage,
+  resolveInstalledHarnessPackage,
   verifyHarnessPackageInstallReceipt,
   withCapturedHarnessPackageTextFile,
 } from "./package-registry";
@@ -116,7 +120,7 @@ afterEach(() => {
 
 describe("harness package registry", testTimeoutOptions(30_000), () => {
   it("discovers the three data-only bundled harness packages", () => {
-    const entries = listHarnessPackages({ HOME: temporaryHome() });
+    const entries = listBundledHarnessPackages();
 
     expect(entries.map((entry) => entry.id)).toEqual([
       "hermes",
@@ -134,6 +138,32 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
       ]),
     );
     expect(entries.every((entry) => fs.statSync(entry.manifestPath).isFile())).toBe(true);
+  });
+
+  it("lists and resolves installed packages separately from bundled packages", () => {
+    const home = temporaryHome();
+    const environment = { HOME: home };
+
+    expect(listInstalledHarnessPackages(environment)).toEqual([]);
+    expect(listInstalledHarnessPackageIds(environment)).toEqual([]);
+    expect(resolveInstalledHarnessPackage("openclaw", environment)).toBeNull();
+    expect(resolveHarnessPackage("openclaw", environment)?.source).toBe("bundled");
+
+    const root = writeInstalledPackage(home, "fixture-agent");
+
+    expect(listInstalledHarnessPackageIds(environment)).toEqual(["fixture-agent"]);
+    expect(listInstalledHarnessPackages(environment)).toEqual([
+      expect.objectContaining({ id: "fixture-agent", rootDir: root, source: "installed" }),
+    ]);
+    expect(resolveInstalledHarnessPackage(" fixture-agent ", environment)).toEqual(
+      expect.objectContaining({ id: "fixture-agent", rootDir: root, source: "installed" }),
+    );
+    expect(listHarnessPackages(environment).map((entry) => entry.id)).toEqual([
+      "fixture-agent",
+      "hermes",
+      "langchain-deepagents-code",
+      "openclaw",
+    ]);
   });
 
   it("discovers an installed data package without loading package code", () => {
@@ -172,6 +202,10 @@ describe("harness package registry", testTimeoutOptions(30_000), () => {
     expect(() => listHarnessPackages({ HOME: home })).toThrow(
       "installation receipt does not match package content",
     );
+    expect(listInstalledHarnessPackageIds({ HOME: home })).toEqual([
+      "langchain-deepagents-code",
+      "openclaw",
+    ]);
     expect(() => resolveHarnessPackage("langchain-deepagents-code", { HOME: home })).toThrow(
       "installation receipt does not match package content",
     );

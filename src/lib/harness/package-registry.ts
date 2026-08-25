@@ -774,11 +774,8 @@ function indexById(
 }
 
 export function listHarnessPackages(env: NodeJS.ProcessEnv = process.env): HarnessPackage[] {
-  const bundled = indexById(scanPackageRoot(BUNDLED_PACKAGES_ROOT, "bundled"), "bundled");
-  const installed = indexById(
-    scanPackageRoot(installedPackagesRoot(env), "installed"),
-    "installed",
-  );
+  const bundled = indexById(listBundledHarnessPackages(), "bundled");
+  const installed = indexById(listInstalledHarnessPackages(env), "installed");
 
   for (const id of installed.keys()) {
     bundled.delete(id);
@@ -789,11 +786,38 @@ export function listHarnessPackages(env: NodeJS.ProcessEnv = process.env): Harne
   );
 }
 
+/** List agent runtime packages shipped with this NemoClaw build. */
+export function listBundledHarnessPackages(): HarnessPackage[] {
+  return scanPackageRoot(BUNDLED_PACKAGES_ROOT, "bundled");
+}
+
+/** List agent runtime packages installed in the current user's NemoClaw state. */
+export function listInstalledHarnessPackages(
+  env: NodeJS.ProcessEnv = process.env,
+): HarnessPackage[] {
+  return scanPackageRoot(installedPackagesRoot(env), "installed");
+}
+
 /** List package directory IDs without validating unrelated package contents. */
 export function listHarnessPackageIds(env: NodeJS.ProcessEnv = process.env): string[] {
   const ids = new Set(listPackageDirectoryIds(BUNDLED_PACKAGES_ROOT));
   for (const id of listPackageDirectoryIds(installedPackagesRoot(env))) ids.add(id);
   return [...ids].sort((left, right) => left.localeCompare(right));
+}
+
+/** List installed package directory IDs without validating unrelated package contents. */
+export function listInstalledHarnessPackageIds(env: NodeJS.ProcessEnv = process.env): string[] {
+  return listPackageDirectoryIds(installedPackagesRoot(env));
+}
+
+/** Resolve a harness only when it is installed in the current user's state. */
+export function resolveInstalledHarnessPackage(
+  id: string,
+  env: NodeJS.ProcessEnv = process.env,
+): HarnessPackage | null {
+  const normalized = id.trim();
+  if (!HARNESS_ID.test(normalized)) return null;
+  return resolveHarnessPackageFromRoot(installedPackagesRoot(env), normalized, "installed");
 }
 
 export function resolveHarnessPackage(
@@ -803,7 +827,7 @@ export function resolveHarnessPackage(
   const normalized = id.trim();
   if (!HARNESS_ID.test(normalized)) return null;
   return (
-    resolveHarnessPackageFromRoot(installedPackagesRoot(env), normalized, "installed") ??
+    resolveInstalledHarnessPackage(normalized, env) ??
     resolveHarnessPackageFromRoot(BUNDLED_PACKAGES_ROOT, normalized, "bundled")
   );
 }

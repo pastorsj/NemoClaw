@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as agentDefs from "../agent/defs";
 import { ROOT } from "../runner";
@@ -13,6 +13,12 @@ import * as registry from "../state/registry";
 import { resolvePermissivePolicyPath, resolveSandboxBaselinePolicy } from "./index";
 
 const tempDirs: string[] = [];
+
+beforeEach(() => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-no-installed-packages-"));
+  tempDirs.push(home);
+  vi.stubEnv("HOME", home);
+});
 
 function writePolicy(content: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-baseline-policy-"));
@@ -32,6 +38,7 @@ function useAgentPolicy(content: string): void {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
