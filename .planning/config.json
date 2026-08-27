@@ -1,0 +1,28 @@
+{
+  "model_profile": "balanced",
+  "commit_docs": true,
+  "parallelization": 3,
+  "search_gitignored": false,
+  "brave_search": false,
+  "firecrawl": false,
+  "exa_search": false,
+  "git": {
+    "branching_strategy": "none",
+    "phase_branch_template": "gsd/phase-{phase}-{slug}",
+    "milestone_branch_template": "gsd/{milestone}-{slug}",
+    "quick_branch_template": null
+  },
+  "workflow": {
+    "research": true,
+    "plan_check": true,
+    "verifier": true,
+    "nyquist_validation": true,
+    "auto_advance": false,
+    "code_review": true,
+    "code_review_depth": "standard",
+    "security_enforcement": true,
+    "security_block_on": "high"
+  },
+  "project_code": "NCC",
+  "phase_naming": "sequential"
+}
