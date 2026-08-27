@@ -83,9 +83,12 @@ user explicitly installs one or more harnesses before selecting one for onboardi
   writer lock; it creates no session or registry state and makes no external runtime call.
 - **D-10:** Resume uses the session-pinned digest, never a newer active pointer. A different
   `--agent` on a package-managed resume must match the recorded package or fail before mutation.
-  Cancellation after sandbox creation preserves the incomplete sandbox, session, registry state,
-  and package bytes for an identity-bound resume. Qualified Pi and NemoCUA state continues through
-  its existing gated authority without a package identity.
+  Cancellation or failure after sandbox creation preserves the incomplete sandbox, recovery-only
+  session, registry state, independent retained-sandbox recovery record, and package bytes. The
+  retained record carries exact package identity but no owner-only migration audit metadata;
+  same-name resume, reuse, recreation, and fresh onboarding remain blocked exactly as on current
+  main. Qualified Pi and NemoCUA state continues through its existing gated authority without a
+  package identity.
 - **D-11:** Upgrade resolves current, resumed, and legacy package-managed sandbox identities before
   strict backup and before OpenShell changes. Direct onboarding first prepares the exact reviewed
   mapping without changing owner state, lets portable retirement recover the old durable bytes, and

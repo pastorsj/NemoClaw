@@ -108,7 +108,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 - [ ] `02-14` — Reject resume drift before mutation and preserve candidate behavior.
 - [ ] `02-15` — Carry identity through route, policy, and sandbox creation.
 - [ ] `02-16` — Carry identity through recreate and checkpoint recovery.
-- [ ] `02-17` — Publish exact final registration and preserve resumable cancellation state.
+- [ ] `02-17` — Publish exact final registration and bind recovery-only retained state.
 - [ ] `02-18` — Reconcile legacy owners before installer backup and OpenShell changes.
 - [ ] `02-19` — Persist rebuild-manifest identity and bind snapshot, backup, restore, and clone.
 - [ ] `02-20` — Bind prepared rebuild recovery and target context to exact identity.
@@ -129,8 +129,9 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    route reservation or sandbox mutation. Carry it unchanged through the session, recreate journal,
    pending route reservation, policy checkpoint, and final registry. Resume by the session-pinned
    digest even when the active pointer advanced; fail closed on missing content or identity drift.
-5. Preserve current cancellation behavior: an incomplete created sandbox, its registry and session
-   state, and its package object survive for identity-bound `nemoclaw onboard --resume`.
+5. Preserve current post-create recovery behavior: an incomplete sandbox, registry row,
+   recovery-only Session, independent retained record, and package object survive, while same-name
+   resume, reuse, recreation, and fresh onboarding stay blocked.
 6. Do not add a cross-component selection receipt until a second accepted component kind consumes
    the same identity and compatibility behavior.
 7. Build reviewed bundled agent artifacts from the current source layout as a temporary migration
@@ -144,8 +145,9 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    harness, persist identity and current-bundle migration provenance through same-owner Session CAS
    and locked registry writes, and make that package available to backup and rebuild before OpenShell
    changes. Unrelated sandboxes may pin different exact identities and migration times.
-10. Test cancel after create, active-pointer advancement, exact package resume, missing content,
-    package drift, and policy-source drift without changing the existing recovery transaction.
+10. Test recovery-only cancel after create, active-pointer advancement for ordinary resume, exact
+    package resume, missing content, package drift, and policy-source drift without changing the
+    existing recovery transaction.
 
 ### Phase 3: Agent Runtime Packages
 

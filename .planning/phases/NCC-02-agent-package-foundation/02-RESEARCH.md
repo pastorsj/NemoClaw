@@ -4,7 +4,7 @@
 # Phase 2 Research: Agent Package Foundation
 
 **Researched:** 2026-08-27
-**Source baseline:** `origin/main` at `705372dab8d4d28c0daf058aec1579ffc482db4c`
+**Source baseline:** `origin/main` at `d0d5120cc6d574a5575b322b79b7cd49ca7c269d`
 **Research status:** Complete for planning; implementation still requires the product-scope decision
 
 ## Summary
@@ -23,6 +23,25 @@ manifest-derived paths and image build context, so selection is not cosmetic, wh
 that remains statically linked into NemoClaw is still outside the package digest. The digest must
 therefore not be described as complete runtime provenance. Phase 3 owns full self-containment and
 the physical source/test move.
+
+### Latest-main reconciliation
+
+The final planning refresh rebased onto `d0d5120cc6`. The upstream durable-authority change added
+an independent retained-sandbox recovery record and made post-create cancellation/failure
+recovery-only: same-name resume, reuse, recreation, and fresh onboarding are intentionally blocked.
+Phase 2 therefore binds package identity into that independent record and does not revive the older
+resumable-cancellation behavior. Migration audit metadata remains only on owning Session and
+SandboxEntry state.
+
+The same refresh added inactive Windows MXC observation/onboarding. MXC remains a runtime-provider
+and host-platform concern, not an agent package; Phase 2 preserves its inactive path through the
+existing provider contracts and aggregate tests. It also bound revisioned messaging credentials to
+canonical OpenShell providers. Plans 20 and 21 therefore replace OpenClaw null-sentinel decisions
+with explicit effective-agent identity while preserving credential-family, provider-attachment,
+inactive-preset, and exact custom-policy behavior in deterministic tests. The refreshed E2E
+host-command regression exposes a sanitized-PATH failure in `ShellProbe`. Plan 22 repairs that
+shared boundary before using `HostCliClient` for PATH-resolved `nemoclaw harness` commands, without
+inheriting ambient secrets or importing CLI source.
 
 ## Current Code Evidence
 
@@ -254,7 +273,9 @@ an install script, evaluates a template, or invokes package code.
   the exact same identity.
 - Policy input is read from the receipt-verified object and its digest is checked again at the
   pending verified-create boundary.
-- Cancellation after create retains the incomplete sandbox and all durable identity references.
+- Cancellation or failure after create retains the incomplete sandbox, recovery-only Session,
+  registry row, independent retained record, and package object. The retained record carries exact
+  package identity only; same-name onboarding remains blocked.
 - Qualified Pi and NemoCUA resume, backup, and rebuild through their existing gated authority and do
   not receive package identity.
 
@@ -287,6 +308,11 @@ malformed present identity never enters legacy migration. The mapping records cu
 it does not invent which old bytes created the sandbox. Pi and NemoCUA retain their existing gated
 candidate authority and receive neither package identity nor migration metadata.
 
+Installer reconciliation additionally associates each retained-sandbox recovery record with only
+its same-name registry owner. A legacy retained record gains identity only after that registry owner
+is exact; it never receives migration audit metadata. An orphaned, malformed, or mismatched record
+stops the installer before backup rather than following the active pointer.
+
 ## Plan Decomposition
 
 | Plan | Capability | Why separate |
@@ -307,12 +333,12 @@ candidate authority and receive neither package identity nor migration metadata.
 | 02-14 | Resume conflict and pointer stability | Stops drift before any resume mutation and keeps candidate authority intact. |
 | 02-15 | Route, policy, and create propagation | Carries identity through the pre-create mutation boundaries. |
 | 02-16 | Recreate and checkpoint propagation | Makes resumable recovery records identity-aware. |
-| 02-17 | Registration and cancellation | Publishes exact final identity and retains recoverable incomplete state. |
+| 02-17 | Registration and recovery-only cancellation | Publishes exact final identity and binds the independent retained record without enabling same-name onboarding. |
 | 02-18 | Installer reconciliation | Converges legacy owners before strict backup and preserves fresh installer behavior. |
 | 02-19 | Snapshot manifest, backup, restore, and clone | Persists exact manifest identity before restore consumes it and verifies pinned package authority before lifecycle mutation. |
 | 02-20 | Prepared rebuild recovery and target context | Revalidates manifest, registry, object, and definition authority before deletion and carries one target authority forward. |
 | 02-21 | Downstream rebuild consumers | Carries one pinned definition through every later rebuild stage. |
-| 02-22 | Typed E2E package fixture | Installs the target package and proves receipt/session/registry equality through the existing planner. |
+| 02-22 | Typed E2E package fixture | Repairs the sanitized host PATH boundary, installs the target package, and proves receipt/session/registry equality through the existing planner. |
 | 02-23 | Qualification | Aggregates deterministic and bounded Mac/Brev development evidence. |
 
 ## Validation Architecture
@@ -339,9 +365,11 @@ sandbox boundaries:
 
 - macOS development journey: empty list, no-harness stop, install OpenClaw, automatic selection,
   install Hermes, interactive picker, and a normal no-messaging lifecycle;
-- Linux/Brev development journey: install, onboard, cancel after durable creation, resume by the
-  recorded digest, backup, and rebuild. Deterministic tests prove the separate active-pointer
-  advancement invariant because Phase 2 exposes one reviewed version of each bundled harness;
+- Linux/Brev development journey: install, complete one no-messaging sandbox, run inference,
+  backup, and rebuild, then use a separate final sandbox to prove recovery-only post-create
+  cancellation and same-name refusal. The existing typed resume target and deterministic tests
+  prove ordinary resumable-session and active-pointer-advancement invariants because Phase 2
+  exposes one reviewed version of each bundled harness;
 - exact staging Launchable remains the release lane and is not replaced by either development run.
 
 Do not add a live target if the existing target catalogue can express the missing behavior. Do not

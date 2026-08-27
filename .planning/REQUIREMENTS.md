@@ -128,9 +128,12 @@ while NemoClaw safely composes exact versions without taking ownership away from
   digest under its existing writer lock before route reservation or sandbox mutation. That identity
   remains unchanged through the recreate journal, route reservation, policy checkpoint, and final
   sandbox registration; resume and finalization fail closed on package or session drift.
-- [ ] **COMP-04B**: Cancellation after sandbox creation preserves the incomplete sandbox, registry
-  entry, onboarding session, and referenced package bytes for identity-bound `onboard --resume`;
-  it does not restore the former delete-by-name behavior.
+- [ ] **COMP-04B**: Cancellation or failure after sandbox creation preserves the incomplete sandbox,
+  registry entry, recovery-only onboarding session, independent retained-sandbox recovery record,
+  and referenced package bytes. The independent record carries exact package identity without
+  owner-only migration audit metadata. Automatic or explicit resume, reuse, recreation, and
+  same-name fresh onboarding remain blocked; package adoption does not restore delete-by-name or
+  invent a supported record-clear operation.
 - [ ] **COMP-05**: A core-owned release set pins selected artifact versions and their supported
   compatibility edges. It does not enumerate a Cartesian tuple catalogue. Immutable qualification
   history remains separate from current support status.
@@ -158,7 +161,8 @@ while NemoClaw safely composes exact versions without taking ownership away from
   versions, capabilities, entry points, negative fixtures, artifacts, and compatibility windows.
 - [ ] **TEST-03**: NemoClaw core owns package installation, discovery, composition, credentials,
   policy, state, recovery, cross-package, and installed-artifact tests, including package-identity
-  drift across cancel and resume and policy-source drift at a pending verified-create checkpoint.
+  drift in ordinary resumable sessions, exact recovery-only evidence after post-create cancellation
+  or failure, and policy-source drift at a pending verified-create checkpoint.
 - [ ] **TEST-04**: The existing typed E2E registry, target catalogue, and shared workflow planner
   remain the only central automated live-test authorities. Registered package workflows consume
   exact artifacts and receipts; manual development runs cannot create release evidence.

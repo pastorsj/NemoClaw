@@ -150,6 +150,9 @@ identity or `migratedAt` may cross owner groups. Pi and NemoCUA do not enter thi
 - `src/lib/state/registry/route-reservation.ts` protects pre-create route authority.
 - `src/lib/state/registry/pending-policy-verification.ts` protects verified create state.
 - `src/lib/onboard/cancel-rollback.ts` deliberately preserves some incomplete created sandboxes.
+- `src/lib/state/onboard-session/retained-sandbox-recovery.ts` owns independent recovery-only
+  evidence after durable creation. It carries exact package identity but never Session/SandboxEntry
+  migration audit metadata, and it does not authorize same-name onboarding.
 - `src/lib/actions/sandbox/rebuild-resume-config.ts` resolves recreate authority before deletion.
 - `src/lib/actions/sandbox/snapshot.ts` and `snapshot/restore-authority.ts` own public restore and
   clone mutation authority.

@@ -7,6 +7,10 @@
 **Date:** 2026-08-27
 **Status:** Decision-ready architecture candidate; no product support is implied
 
+> Historical baseline: Phase 2 rebased through
+> `d0d5120cc6d574a5575b322b79b7cd49ca7c269d`. Use Phase 2 research and plans for current
+> post-create recovery-only behavior and the current E2E host-command boundary.
+
 ## Executive Conclusion
 
 NemoClaw is not merely a launcher. It is the trusted composition and product control plane above

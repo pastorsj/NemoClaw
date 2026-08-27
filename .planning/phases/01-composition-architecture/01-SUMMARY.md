@@ -8,6 +8,10 @@
 The architecture baseline is complete through exact current main
 `705372dab8d4d28c0daf058aec1579ffc482db4c`.
 
+This is the historical Phase 1 baseline. Phase 2 rebased through
+`d0d5120cc6d574a5575b322b79b7cd49ca7c269d`; its research and plans supersede later-changed
+onboarding recovery and E2E command-boundary conclusions.
+
 NemoClaw should use one safe distribution envelope with three typed component contracts:
 
 1. agent runtime;
@@ -26,10 +30,10 @@ without losing newer agent, runtime-provider, serving, readiness, and test archi
 package installer, receipt, CLI, onboarding, structure, and test behavior will be ported as small
 capability slices.
 
-The final upstream refresh strengthened receipt-bound onboarding: cancellation now preserves an
-incomplete sandbox and its owning session for `onboard --resume`. The proposed package identity
-therefore follows that existing authority chain and retains its immutable package object until the
-session, pending checkpoint, and recovery references are gone.
+The Phase 1 upstream refresh preserved an incomplete sandbox rather than deleting by mutable name.
+Current main has since made that post-create state recovery-only and added an independent retained
+record; Phase 2 binds package identity into that record and intentionally does not enable same-name
+`onboard --resume`.
 
 ## NeMo Fabric
 

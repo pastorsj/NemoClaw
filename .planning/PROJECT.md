@@ -84,7 +84,10 @@ implementation behind their specific contract.
 ## Baseline
 
 The active branch is reconciled through exact `origin/main` commit
-`705372dab8d4d28c0daf058aec1579ffc482db4c`. The earlier agent-package migration is preserved at
+`d0d5120cc6d574a5575b322b79b7cd49ca7c269d`. Phase 1 originally recorded its historical evidence
+at `705372dab8d4d28c0daf058aec1579ffc482db4c`; Phase 2 re-audited the intervening durable-authority,
+Windows MXC, messaging, test-runtime, and E2E command-boundary changes. The earlier agent-package
+migration is preserved at
 `backup/agent-runtime-package-migration-pre-origin-main-20260827` and will be used as a behavioral
 prototype, not merged mechanically.
 

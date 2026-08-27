@@ -28,15 +28,15 @@ compatibility, validation, and rollback ownership for the exact committed propos
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `705372dab8d4d28c0daf058aec1579ffc482db4c`
+- Exact base: `origin/main` at `d0d5120cc6d574a5575b322b79b7cd49ca7c269d`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
 - Pushes: none
 
-The preserved candidate changed 1,773 files after its common base with current main; current main
+At the Phase 1 baseline, the preserved candidate changed 1,773 files after its common base and main
 changed 1,806. A trial direct merge produced 2,189 unresolved paths, including 1,889 paths under
-`test/` and 213 under `packages/`. The migration strategy is therefore semantic capability-slice
-replay onto current main.
+`test/` and 213 under `packages/`. Phase 2 was then rebased and re-audited through the exact base
+above. The migration strategy remains semantic capability-slice replay onto current main.
 
 The physical `packages/` directories in this checkout are ignored build leftovers from the
 preserved branch. Current `HEAD` tracks no source under `packages/`.
