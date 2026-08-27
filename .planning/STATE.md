@@ -21,9 +21,15 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Ready to execute Plan 02-01. Production implementation remains blocked until that plan
-records an `Accept` decision with reason, placement, accountable maintainer, lifecycle, trust,
-compatibility, validation, and rollback ownership for the exact committed proposal revision.
+Status: Plan 02-01 accepted the exact Phase 2 scope for local fork implementation and development
+evaluation. Plan 02-02 is next. This decision does not activate or support an upstream NemoClaw
+product surface.
+
+Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
+
+Proposal revision: `5802308d09bdb64dba62dd541e42ad6bb223ceb0`
+
+Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 
 ## Repository Reconciliation
 
@@ -74,19 +80,11 @@ preserved branch. Current `HEAD` tracks no source under `packages/`.
 - Keep the NeMo Fabric pilot sandbox-local and let evidence decide whether it remains test-only,
   leaves NemoClaw, or earns a later optional capability proposal.
 
-## Next Gate
+## Next Execution
 
-A recorded decision with status `Accept` must state the reason, repository placement, accountable
-maintainer, and validation plan for the exact proposal revision, including:
-
-1. the three initial package kinds and their owners;
-2. the trusted-code policy for runtime-provider and serving executables;
-3. the in-tree-first migration and external repository handoff criteria;
-4. the supported component set, including whether Pi, NemoCUA, Podman, MXC, and DGX Station host
-   preparation are candidates or supported surfaces;
-
-5. the qualification environments and release-set ownership;
-6. whether the NeMo Fabric pilot is test-only or a candidate product capability.
+Execute Plan 02-02 against the accepted local-fork boundaries. Keep arbitrary installed host code,
+remote package discovery, product activation, and support claims outside this work. An upstream
+contribution still requires its own accepted NVIDIA/NemoClaw product decision.
 
 ## Preserved Local State
 

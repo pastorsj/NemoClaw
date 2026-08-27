@@ -21,8 +21,10 @@ and validation plan for the exact proposal revision before Phase 2 begins.
 
 ## Phase 2 Implementation Decision
 
-- **Status:** Proposed for local fork implementation and development evaluation.
+- **Status:** Accept — local fork implementation and development evaluation only.
 - **Proposal revision:** `5802308d09bdb64dba62dd541e42ad6bb223ceb0`.
+- **Decision record revision:** `4fb6083cb02419d7a3768e9602220a00b361bc63`.
+- **Accepted:** 2026-08-27 after the fork owner explicitly directed execution on this local branch.
 - **Decision owner:** Sam Pastoriza, owner of the local fork branch.
 - **Reason:** Prove the package contract and unchanged user workflow before requesting upstream
   product activation or external package distribution.
