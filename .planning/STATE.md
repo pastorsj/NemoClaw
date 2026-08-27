@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: planning
-stopped_at: Architecture baseline complete; awaiting product-scope decision before implementation
-last_updated: "2026-08-27T17:58:15.000Z"
-last_activity: 2026-08-27 - Reconciled the architecture and test evidence through exact latest main.
+status: executing
+last_updated: "2026-08-27T22:55:03.336Z"
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 8
+  total_plans: 24
   completed_plans: 1
-  percent: 12
+  percent: 4
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -21,11 +19,11 @@ progress:
 
 ## Current Position
 
-Phase: 1 of 8 — Architecture Baseline
+Phase: 2 of 8 — Agent Package Foundation
 
-Status: Research and planning complete. No supported component surface has been implemented on this
-branch. A recorded `Accept` decision with reason, placement, accountable maintainer, and validation
-plan is required before Phase 2.
+Status: Ready to execute Plan 02-01. Production implementation remains blocked until that plan
+records an `Accept` decision with reason, placement, accountable maintainer, lifecycle, trust,
+compatibility, validation, and rollback ownership for the exact committed proposal revision.
 
 ## Repository Reconciliation
 
@@ -55,6 +53,7 @@ preserved branch. Current `HEAD` tracks no source under `packages/`.
 - [x] Preserved package installer, receipts, onboarding gate, structures, and tests audited.
 - [x] NeMo Fabric stable and current-alpha contracts, adapters, versions, and execution boundary
   audited from official documentation and source.
+
 - [x] Common envelope, three typed contracts, folder structures, CLI flow, compatibility model,
   migration order, and test strategy proposed.
 
@@ -64,8 +63,10 @@ preserved branch. Current `HEAD` tracks no source under `packages/`.
 - Keep the CLI word `harness` for installing and listing agent runtime packages.
 - Treat `agent runtime`, `runtime provider`, `serving runtime`, and `platform profile` as different
   concepts.
+
 - Keep platform facts declarative. Split privileged host preparation only when executable behavior
   and ownership justify it.
+
 - Keep installation separate from activation and qualification.
 - Keep current core security, credential, policy, state, transaction, and rollback authorities.
 - Reuse current runtime-provider, serving, readiness, messaging, and E2E registries.
@@ -83,6 +84,7 @@ maintainer, and validation plan for the exact proposal revision, including:
 3. the in-tree-first migration and external repository handoff criteria;
 4. the supported component set, including whether Pi, NemoCUA, Podman, MXC, and DGX Station host
    preparation are candidates or supported surfaces;
+
 5. the qualification environments and release-set ownership;
 6. whether the NeMo Fabric pilot is test-only or a candidate product capability.
 

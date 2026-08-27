@@ -62,8 +62,59 @@ evidence against exact current main.
 
 ### Phase 2: Agent Package Foundation
 
-**Goal:** Install exact in-tree agent packages and resolve compatibility before mutation while all
-current runtime behavior remains on its existing path.
+**Goal:** Install exact in-tree agent packages and resolve compatibility before durable or external
+mutation while current runtime behavior and lifecycle ownership remain unchanged.
+
+**Depends on:** Phase 1
+
+**Requirements:** GOV-01, GOV-02, UX-01, UX-02, UX-03, PKG-01, PKG-02, PKG-03, PKG-03A, PKG-04, PKG-04A, PKG-05, PKG-08, AGENT-01, AGENT-04, COMP-03, COMP-04, COMP-04A, COMP-04B, TEST-03, TEST-04, TEST-06, TEST-07
+
+**Success Criteria:**
+
+1. A recorded product decision accepts this exact phase scope before production implementation
+   begins.
+2. `nemoclaw harness list` distinguishes installed and available packages, and
+   `nemoclaw harness install [id]` installs only a reviewed bundled package through one validated
+   transaction.
+3. Onboarding with no installed harness creates no session, registry, runtime, or external mutation;
+   one installed harness is selected automatically; multiple installed harnesses preserve current
+   interactive and non-interactive behavior.
+4. A new package-managed onboarding session records the selected package ID, version, contract
+   version, and digest under the existing writer lock before external mutation.
+5. Package-managed resume, recreate, route reservation, policy verification, final registration,
+   snapshot, restore, backup, and rebuild agree on that identity or stop before their next mutation;
+   qualified Pi and NemoCUA paths retain their existing non-package authority.
+6. Existing installations and aliases retain their current user behavior, including legacy
+   `agent: null` OpenClaw state and strict pre-upgrade backup.
+7. Deterministic tests pass, followed by one no-messaging macOS development journey and one
+   no-messaging Linux/Brev development journey. Neither development run replaces exact staging
+   Launchable release evidence.
+
+**Plans:** 23 plans
+
+- [ ] `02-01` — Obtain the accepted product-scope decision.
+- [ ] `02-02` — Define and validate the agent package envelope and hostile package tree.
+- [ ] `02-03` — Publish validated artifacts through an immutable store and exact receipts.
+- [ ] `02-04` — Build reviewed bundled artifacts and expose one package catalogue.
+- [ ] `02-05` — Add installed and available inventory plus `harness list`.
+- [ ] `02-06` — Add `harness install`, its prompt, docs, and compiled command contract.
+- [ ] `02-07` — Preserve `agents list` through installed package inventory.
+- [ ] `02-08` — Add strict session identity, migration provenance, and checkpoint v5.
+- [ ] `02-09` — Add strict registry, route, and policy state fields.
+- [ ] `02-10` — Build agent definitions from one explicit, pinned package root.
+- [ ] `02-11` — Route package-managed image and build context through that root.
+- [ ] `02-12` — Select zero, one, or many installed packages while preserving candidate gates.
+- [ ] `02-13` — Bind fresh and legacy session identity under the existing writer lock.
+- [ ] `02-14` — Reject resume drift before mutation and preserve candidate behavior.
+- [ ] `02-15` — Carry identity through route, policy, and sandbox creation.
+- [ ] `02-16` — Carry identity through recreate and checkpoint recovery.
+- [ ] `02-17` — Publish exact final registration and preserve resumable cancellation state.
+- [ ] `02-18` — Reconcile legacy owners before installer backup and OpenShell changes.
+- [ ] `02-19` — Persist rebuild-manifest identity and bind snapshot, backup, restore, and clone.
+- [ ] `02-20` — Bind prepared rebuild recovery and target context to exact identity.
+- [ ] `02-21` — Carry one pinned definition through downstream rebuild consumers.
+- [ ] `02-22` — Extend the existing typed E2E fixture with exact package installation and assertions.
+- [ ] `02-23` — Run deterministic and no-messaging development qualification.
 
 **Implementation slices:**
 
@@ -71,22 +122,28 @@ current runtime behavior remains on its existing path.
    pointer per agent, and exact receipts. Extract package-neutral storage only when a second accepted
    component kind uses it.
 2. Add `nemoclaw harness list/install`; keep `nemoclaw agents list` compatible.
-3. Port zero, one, multiple, non-interactive, and resume selection behavior.
-4. Under the existing onboarding writer lock, record exact agent package identity before route
-   reservation or sandbox mutation. Carry it unchanged through the session, recreate journal,
+3. Port zero, one, multiple, non-interactive, and package-managed resume selection behavior while
+   preserving explicitly qualified Pi and NemoCUA candidate paths without fabricated identity.
+4. Under the existing onboarding writer lock, prove exact package authority before portable
+   recovery, let recovery consume unchanged prior owner state, then record exact identity before
+   route reservation or sandbox mutation. Carry it unchanged through the session, recreate journal,
    pending route reservation, policy checkpoint, and final registry. Resume by the session-pinned
    digest even when the active pointer advanced; fail closed on missing content or identity drift.
 5. Preserve current cancellation behavior: an incomplete created sandbox, its registry and session
    state, and its package object survive for identity-bound `nemoclaw onboard --resume`.
 6. Do not add a cross-component selection receipt until a second accepted component kind consumes
    the same identity and compatibility behavior.
-7. Add package authoring metadata, build output, package-local test configurations, root aggregate
-   discovery, publication paths, and an exactly-once membership check.
-8. Keep runtime-provider and serving host code statically linked and explicitly registered. Only
+7. Build reviewed bundled agent artifacts from the current source layout as a temporary migration
+   adapter. The package identity covers the installed selection and copied asset bytes; it does not
+   claim complete harness runtime provenance while remaining host behavior is statically linked.
+8. Keep runtime-provider, serving, and remaining agent host code statically linked and explicitly
+   registered. Only
    data and agent sandbox code are dynamically installed in this phase.
-9. Preserve installer upgrade semantics: resolve a resumed or legacy `agent: null` identity,
-   reconcile the exact bundled harness before pre-upgrade backup, and make that package available to
-   backup and rebuild before OpenShell changes.
+9. Preserve installer upgrade semantics through one idempotent owner-scoped migration service:
+   resolve a resumed or legacy standard `agent: null` identity, install and re-read the exact bundled
+   harness, persist identity and current-bundle migration provenance through same-owner Session CAS
+   and locked registry writes, and make that package available to backup and rebuild before OpenShell
+   changes. Unrelated sandboxes may pin different exact identities and migration times.
 10. Test cancel after create, active-pointer advancement, exact package resume, missing content,
     package drift, and policy-source drift without changing the existing recovery transaction.
 
@@ -94,13 +151,22 @@ current runtime behavior remains on its existing path.
 
 **Goal:** The standard agent packages are self-contained and readable examples for the next harness.
 
+**Depends on:** Phase 2
+
+**Requirements:** PKG-06, PKG-07, AGENT-02, AGENT-03, AGENT-05, TEST-01, TEST-02,
+TEST-08
+
 **Implementation order:**
 
-1. LangChain Deep Agents Code proves the terminal-agent path.
-2. Hermes proves the gateway, dashboard, state, MCP, and messaging-projection path.
-3. Freeze only the shared operations proven by both.
-4. OpenClaw moves from `_legacy_paths` and remains the default.
-5. Pi and NemoCUA remain legacy built-in candidates until separately accepted and packaged. Their
+1. Establish package-local build and test commands, root aggregate discovery, publication paths,
+   and exactly-once suite membership before moving a harness test.
+2. LangChain Deep Agents Code proves the terminal-agent path.
+3. Hermes proves the gateway, dashboard, state, MCP, and messaging-projection path.
+4. Freeze only the shared operations proven by both.
+5. OpenClaw moves from `_legacy_paths` and remains the default.
+6. Delete the temporary bundled-source adapter once every standard package is authored at its
+   canonical package root and the installed object is the real execution asset root.
+7. Pi and NemoCUA remain legacy built-in candidates until separately accepted and packaged. Their
    existing qualification gates remain reachable without making them standard installed harnesses.
 
 ### Phase 4: Runtime Provider Packages

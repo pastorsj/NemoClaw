@@ -21,10 +21,13 @@ while NemoClaw safely composes exact versions without taking ownership away from
 - [ ] **UX-02**: `nemoclaw harness install` and `nemoclaw harness list` are the agent-package
   management commands. `harness list` shows installed and available sections. Existing
   `nemoclaw agents list` and onboarding use only installed, selectable entries.
-- [ ] **UX-03**: Zero installed harnesses stop before mutation with actionable installation guidance;
-  one is selected automatically; multiple interactive harnesses use a picker; multiple
-  non-interactive harnesses preserve the established OpenClaw default when it is installed and
-  otherwise require `--agent`; resume requires the recorded exact harness.
+- [ ] **UX-03**: The regular package-managed path with zero installed harnesses stops with actionable
+  installation guidance before session, registry, runtime, or external mutation; the writer lock
+  may be created and released. One is selected automatically; multiple interactive harnesses use a
+  picker; multiple non-interactive harnesses preserve the established OpenClaw default when it is
+  installed and otherwise require `--agent`; package-managed resume requires the recorded exact
+  harness. Explicit Pi and NemoCUA paths retain their existing qualification gates without
+  fabricated package identity.
 
 ### Common package envelope
 
@@ -32,9 +35,12 @@ while NemoClaw safely composes exact versions without taking ownership away from
   schema version, kind, ID, display name, package version, contract version, and manifest path.
 - [ ] **PKG-02**: Package installation rejects links, special files, traversal, ownership or mode
   violations, excessive size or depth, identity conflicts, digest mismatches, and unknown contracts.
+  One package kind, agent ID, package version, and contract version tuple cannot bind to multiple
+  content digests; changed bytes require a new adapter package version.
 - [ ] **PKG-03**: Installation copies and verifies immutable content into a digest-addressed object,
   changes one validated active pointer atomically, and records kind, ID, version, source identity,
-  content digest, and installation time in an exact receipt.
+  content digest, and installation time in an exact receipt. The agent inventory is stored under the
+  gateway-independent base NemoClaw state root and does not change with `NEMOCLAW_GATEWAY_PORT`.
 - [ ] **PKG-03A**: Package garbage collection retains immutable content while an active pointer,
   onboarding session, pending route reservation, recreate journal, pending policy checkpoint,
   sandbox, rollback record, snapshot, or supported release references its digest.
@@ -112,8 +118,12 @@ while NemoClaw safely composes exact versions without taking ownership away from
   rollback, and it persists no executable object or credential.
 - [ ] **COMP-03**: Unsupported or ambiguous compositions fail before host, OpenShell, sandbox, policy,
   credential, or serving mutation.
-- [ ] **COMP-04**: New state records exact component and selection identities. Upgrade, rebuild,
-  restore, rollback, and removal verify those identities and fail closed on unknown authority.
+- [ ] **COMP-04**: New package-managed state records exact component and selection identities.
+  Upgrade, rebuild, restore, rollback, and removal verify those identities and fail closed on
+  unknown authority. Legacy standard-agent migration atomically and idempotently records the
+  reviewed current package identity plus strict secret-free migration provenance in its owning
+  session and registry state without claiming historical byte provenance; candidate harnesses keep
+  their existing non-package authority.
 - [ ] **COMP-04A**: The owning onboarding session records the exact agent package ID, version, and
   digest under its existing writer lock before route reservation or sandbox mutation. That identity
   remains unchanged through the recreate journal, route reservation, policy checkpoint, and final
@@ -150,7 +160,8 @@ while NemoClaw safely composes exact versions without taking ownership away from
   policy, state, recovery, cross-package, and installed-artifact tests, including package-identity
   drift across cancel and resume and policy-source drift at a pending verified-create checkpoint.
 - [ ] **TEST-04**: The existing typed E2E registry, target catalogue, and shared workflow planner
-  remain the only central live-test authorities and consume exact artifacts and receipts.
+  remain the only central automated live-test authorities. Registered package workflows consume
+  exact artifacts and receipts; manual development runs cannot create release evidence.
 - [ ] **TEST-05**: Live qualification covers compatibility edges and named supported compositions,
   not the full agent × runtime × serving × OS × hardware Cartesian product.
 - [ ] **TEST-06**: macOS, operator-supplied development Brev/Linux, exact staging Launchable, WSL2,
@@ -194,13 +205,18 @@ while NemoClaw safely composes exact versions without taking ownership away from
 | Requirement group | Owning phase |
 |---|---:|
 | GOV, UX | 2 |
-| Agent PKG foundation | 2 |
-| AGENT | 3 |
+| PKG-01 through PKG-05, PKG-08 | 2 |
+| PKG-06, PKG-07 | 3 |
+| AGENT-01, AGENT-04 | 2 |
+| AGENT-02, AGENT-03, AGENT-05 | 3 |
+| COMP-03, COMP-04, COMP-04A, COMP-04B | 2 |
 | Shared PKG, RUNTIME, COMP | 4 |
 | SERVE, COMP extension | 5 |
 | HOST | 6 |
 | FABRIC | 7 |
-| TEST, DIST, release COMP | 8 |
+| TEST-03, TEST-04, TEST-06, TEST-07 | 2 |
+| TEST-01, TEST-02, TEST-08 | 3 |
+| Remaining TEST, DIST, release COMP | 8 |
 
 ---
 
