@@ -34,7 +34,7 @@ Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `d0d5120cc6d574a5575b322b79b7cd49ca7c269d`
+- Exact base: `origin/main` at `5754b48ffdf6c95a26050ff659fdf1ab558dbc2d`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
 - Pushes: none
