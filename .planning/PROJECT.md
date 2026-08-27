@@ -19,6 +19,37 @@ integration. The repository product scope gate applies before implementation or 
 A recorded decision must have status `Accept` and state reason, placement, accountable maintainer,
 and validation plan for the exact proposal revision before Phase 2 begins.
 
+## Phase 2 Implementation Decision
+
+- **Status:** Proposed for local fork implementation and development evaluation.
+- **Proposal revision:** `5802308d09bdb64dba62dd541e42ad6bb223ceb0`.
+- **Decision owner:** Sam Pastoriza, owner of the local fork branch.
+- **Reason:** Prove the package contract and unchanged user workflow before requesting upstream
+  product activation or external package distribution.
+- **Placement:** Build the foundation in NemoClaw core first. Keep harness assets in-tree until
+  Phase 3 establishes self-contained package roots and package-owned tests.
+- **Initial standard harnesses:** OpenClaw, Hermes, and LangChain Deep Agents Code.
+- **Candidate harnesses:** Pi and NemoCUA retain their existing qualification gates and do not gain
+  fabricated package identities.
+- **Discovery:** Phase 2 exposes only reviewed artifacts bundled with the exact NemoClaw checkout.
+  It does not discover PyPI, npm, URL, global, or remote packages.
+- **Trust boundary:** Installed packages contain validated data plus sandbox or image-build assets.
+  NemoClaw does not import or execute package-authored callbacks in its credential-bearing host
+  process.
+- **Compatibility and lifecycle:** Existing aliases, flags, defaults, onboarding, strict backup,
+  recovery, and OpenShell lifecycle ownership remain available. Exact package identity is durable
+  and drift stops before the next mutation.
+- **Validation:** Deterministic tests precede isolated no-messaging macOS and operator-supplied Brev
+  development runs. Exact staging Launchable evidence remains owned by the release workflow and is
+  not implied by local development results.
+- **Transitional limitation:** The Phase 2 digest covers the copied adapter and asset bundle. It
+  does not claim complete agent-runtime provenance while host behavior remains statically linked.
+- **Rollback:** Revert the local task commits and retain the current repository agent paths as the
+  authority. Do not mutate a remote branch or external package repository.
+- **Product boundary:** Registration, installation, conformance, and development evidence do not
+  activate or support a NemoClaw product surface. Any upstream support claim requires a separate
+  accepted NVIDIA/NemoClaw product decision.
+
 ## Core Value
 
 A contributor can understand where one integration belongs, implement it through a clear typed
