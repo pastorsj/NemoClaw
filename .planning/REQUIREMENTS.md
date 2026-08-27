@@ -11,12 +11,12 @@ while NemoClaw safely composes exact versions without taking ownership away from
 
 ### Product and compatibility
 
-- [ ] **GOV-01**: Before implementation, a recorded design decision has status `Accept` and states
+- [x] **GOV-01**: Before implementation, a recorded design decision has status `Accept` and states
   the reason, repository placement, accountable maintainer, supported initial components, trust and
   compatibility policy, validation plan and environments, and rollback plan, bound to the exact
   proposal revision.
-- [ ] **GOV-02**: Registration and technical conformance do not imply product activation or support.
-- [ ] **UX-01**: Existing install, onboarding, aliases, flags, environment variables, menu labels,
+- [x] **GOV-02**: Registration and technical conformance do not imply product activation or support.
+- [x] **UX-01**: Existing install, onboarding, aliases, flags, environment variables, menu labels,
   defaults, resume behavior, and resulting sandbox behavior remain available during migration.
 - [ ] **UX-02**: `nemoclaw harness install` and `nemoclaw harness list` are the agent-package
   management commands. `harness list` shows installed and available sections. Existing
@@ -46,7 +46,7 @@ while NemoClaw safely composes exact versions without taking ownership away from
   sandbox, rollback record, snapshot, or supported release references its digest.
 - [ ] **PKG-04**: Core package loading performs no arbitrary package import or executable callback.
   Type-specific executable behavior runs only at its accepted trust boundary.
-- [ ] **PKG-04A**: In the first version, installed agent artifacts contain only validated data and
+- [x] **PKG-04A**: In the first version, installed agent artifacts contain only validated data and
   sandbox or image-build code. Runtime-provider and serving host implementations are statically
   linked and explicitly registered at NemoClaw build time. Dynamic external host loading is
   deferred.
