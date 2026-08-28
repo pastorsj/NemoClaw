@@ -20,6 +20,17 @@ export interface HarnessPackageMigration {
   readonly migratedAt: string;
 }
 
+/** Complete durable authority: exact package identity or explicit qualified-agent absence. */
+export type HarnessPackageAuthority =
+  | {
+      readonly harnessPackage: HarnessPackageIdentity;
+      readonly harnessPackageMigration: HarnessPackageMigration | null;
+    }
+  | {
+      readonly harnessPackage: null;
+      readonly harnessPackageMigration: null;
+    };
+
 export type HarnessPackageStateInspection =
   | { readonly status: "absent" }
   | {

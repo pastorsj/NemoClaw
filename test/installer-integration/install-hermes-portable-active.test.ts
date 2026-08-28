@@ -27,6 +27,7 @@ import { createPortableOnboardEnvironmentScope } from "../../src/lib/onboard/ses
 import {
   createHermesPortableTransactionFixture,
   HERMES_PORTABLE_TEST_LIVE_IDENTITY,
+  HERMES_PORTABLE_TEST_PACKAGE,
   hermesPortableDescendantNames,
   hermesPortableTestOpenShellAuthority,
   makeHermesPortableCheckoutPrivate,
@@ -190,6 +191,10 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
 
       vi.stubEnv("NEMOCLAW_EXPERIMENTAL_PROFILE", "portable");
       const session = createSession();
+      const harnessPackageAuthority = {
+        harnessPackage: HERMES_PORTABLE_TEST_PACKAGE,
+        harnessPackageMigration: null,
+      } as const;
       const lifecycleGeneration = "11111111-1111-4111-8111-111111111111";
       expect(
         registry.reserveSandboxInferenceRoute(sandboxName, {
@@ -201,6 +206,7 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
           preferredInferenceApi: BUILD_SETTINGS.preferredInferenceApi,
           gatewayName,
           reservationSessionId: session.sessionId,
+          ...harnessPackageAuthority,
         }),
       ).toBe(true);
       const producedReservation = registry.getSandbox(sandboxName)!;
@@ -216,6 +222,7 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
           gatewayName,
           sessionId: session.sessionId,
           selection,
+          ...harnessPackageAuthority,
         },
         registry.getSandbox(sandboxName),
       );
@@ -277,7 +284,11 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
         createPolicySourceBytes: createPlan.initialSandboxPolicy.sourceBytes,
         buildContext: activeBuildContext,
         startup: { agent: loadAgent("hermes"), sandboxName, startupArgv },
-        inferenceRouteReservation: { sessionId: session.sessionId, selection },
+        inferenceRouteReservation: {
+          sessionId: session.sessionId,
+          selection,
+          ...harnessPackageAuthority,
+        },
       };
       const policyCreationReceipt = {
         schemaVersion: 1 as const,
@@ -290,19 +301,22 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
         policyHash: "sha256:portable-installer-policy",
         policyVersion: 1,
       };
-      const checkpoint = pendingSandboxPolicyVerificationForBoundary({
-        registration: {
-          policyAuthority: "nemoclaw-managed" as const,
-          policyCreationReceipt,
-          observedPolicyAuthority: "owner-unknown" as const,
+      const checkpoint = pendingSandboxPolicyVerificationForBoundary(
+        {
+          registration: {
+            policyAuthority: "nemoclaw-managed" as const,
+            policyCreationReceipt,
+            observedPolicyAuthority: "owner-unknown" as const,
+          },
+          sandboxName,
+          gatewayName,
+          gatewayPort: 8080,
+          lifecycleGeneration,
+          lifecycleLiveIdentityFingerprint: HERMES_PORTABLE_TEST_LIVE_IDENTITY,
+          route: "native" as const,
         },
-        sandboxName,
-        gatewayName,
-        gatewayPort: 8080,
-        lifecycleGeneration,
-        lifecycleLiveIdentityFingerprint: HERMES_PORTABLE_TEST_LIVE_IDENTITY,
-        route: "native" as const,
-      });
+        harnessPackageAuthority,
+      );
       const fixture = createHermesPortableTransactionFixture(transactionInput, {
         omitCleanup: true,
         policySource: createPlan.initialSandboxPolicy.sourceBytes,
@@ -373,9 +387,11 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
         agent: "hermes",
         endpointSource: null,
         gatewayName,
+        harnessPackage: HERMES_PORTABLE_TEST_PACKAGE,
         lifecycleGeneration,
         lifecycleLiveIdentityFingerprint: HERMES_PORTABLE_TEST_LIVE_IDENTITY,
       });
+      expect(registered).not.toHaveProperty("harnessPackageMigration");
       expect(registered).not.toHaveProperty("pendingRouteReservation");
       expect(registered).not.toHaveProperty("reservationSessionId");
       expect(readHermesPortableLifecycleReceipt(sandboxName, stateDir)).toEqual(completed.active);

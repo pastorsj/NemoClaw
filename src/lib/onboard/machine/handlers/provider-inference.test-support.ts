@@ -98,6 +98,10 @@ export function createDeps(
       requiredInferenceApi: null,
     })),
     preflightPolicyRequirements: vi.fn(),
+    revalidateHarnessPackageAuthority: vi.fn(() => ({
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    } as const)),
     setupNim: vi.fn(async () => ({ ...baseSelection })),
     setupInference: vi.fn<
       ProviderInferenceStateOptions<Gpu, Agent, Host>["deps"]["setupInference"]
@@ -157,6 +161,7 @@ export function createDeps(
       checkGatewayRouteCompatibility: calls.checkGatewayRouteCompatibility,
       preflightGatewayRouteDiscovery: calls.preflightGatewayRouteDiscovery,
       preflightPolicyRequirements: calls.preflightPolicyRequirements,
+      revalidateHarnessPackageAuthority: calls.revalidateHarnessPackageAuthority,
       getSandboxRecoveryAuthority: (): "missing" => "missing",
       withGatewayRouteMutationLock: async <T>(
         _gatewayName: string,

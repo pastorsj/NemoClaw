@@ -662,7 +662,11 @@ describe("sandbox registry normalization", () => {
       gatewayName: "nemoclaw",
       reservationSessionId: "session-owner",
     } as const;
-    registry.reserveSandboxInferenceRoute("managed", replacementSelection);
+    registry.reserveSandboxInferenceRoute("managed", {
+      ...replacementSelection,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
     const replacementLifecycle = {
       ...createManagedPolicyEntry("managed", 2),
       ...replacementSelection,
@@ -680,6 +684,8 @@ describe("sandbox registry normalization", () => {
         gatewayName: "nemoclaw",
         sessionId: "session-owner",
         selection: replacementSelection,
+        harnessPackage: null,
+        harnessPackageMigration: null,
       },
       registry.getSandbox("managed"),
     );

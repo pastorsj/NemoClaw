@@ -35,6 +35,11 @@ import type {
 } from "../managed-workload/hermes-state-volume";
 import type { OwnedSandboxRecreateRuntime } from "../onboard-recreate-journal";
 import type { SandboxGpuConfig } from "../sandbox-gpu-mode";
+import {
+  requireCurrentSessionHarnessPackageAuthority,
+  type CurrentSessionHarnessPackageAuthorityDependencies,
+  type HarnessPackageSessionAuthority,
+} from "../package/package-authority";
 import type { PortableOnboardRuntimeContext } from "../session-bootstrap";
 import type {
   InferenceRouteReservationAuthority,
@@ -56,8 +61,34 @@ import {
   publishAttachedProvidersBeforeDockerSandboxCreation,
   validateAttachedMessagingProvidersBeforeSandboxCreation,
 } from "./provider-publication";
-export const createOnboardPolicyAuthorityBindings =
-  policyAuthorityPreflight.createOnboardPolicyAuthorityBindings;
+export function createOnboardPolicyAuthorityBindings(
+  runtime: SandboxCreateOrchestrationRuntime,
+  policyTier: string | null | undefined,
+) {
+  const bindings = policyAuthorityPreflight.createOnboardPolicyAuthorityBindings(
+    runtime,
+    policyTier,
+  );
+  return {
+    ...bindings,
+    packageAuthorityDependencies: {
+      preflightPolicyRequirements: bindings.preflightPolicyRequirements,
+      revalidateHarnessPackageAuthority: (
+        expectedSession: HarnessPackageSessionAuthority,
+        operation: string,
+      ) =>
+        requireCurrentSessionHarnessPackageAuthority(
+          expectedSession,
+          operation,
+          { env: process.env },
+          {
+            loadSession: runtime.onboardSession.loadSession,
+            resolveSandboxAgent: runtime.sandboxAgent.resolveSandboxAgent,
+          },
+        ).authority,
+    },
+  };
+}
 
 /** Confirm that the effective definition still represents the selected harness authority. */
 export function requireSelectedAgentPackageRoot(
@@ -104,6 +135,63 @@ export function requireSandboxDockerfilePatchPackageRoot(
     );
   }
   return requireSelectedAgentPackageRoot(null, openClawAgent);
+}
+
+/** Rebind sandbox creation to the current Session and its exact pinned definition. */
+export function revalidateSelectedHarnessPackageAuthority(
+  input: {
+    readonly expectedSession: HarnessPackageSessionAuthority | null;
+    readonly routeAuthority: InferenceRouteReservationAuthority | null;
+    readonly effectiveAgent: Pick<AgentDefinition, "name" | "packageRoot">;
+    readonly operation: string;
+    readonly options?: import("../sandbox-agent").ResolveSandboxAgentOptions;
+  },
+  deps: CurrentSessionHarnessPackageAuthorityDependencies,
+) {
+  if (!input.routeAuthority) {
+    throw new Error(`Cannot ${input.operation}: inference route package authority is missing`);
+  }
+  if (
+    !input.expectedSession ||
+    input.expectedSession.sessionId !== input.routeAuthority.sessionId
+  ) {
+    throw new Error(`Cannot ${input.operation}: onboarding session package owner is missing`);
+  }
+  const current = requireCurrentSessionHarnessPackageAuthority(
+    input.expectedSession,
+    input.operation,
+    input.options,
+    deps,
+  );
+  if (
+    !isDeepStrictEqual(current.authority.harnessPackage, input.routeAuthority.harnessPackage) ||
+    !isDeepStrictEqual(
+      current.authority.harnessPackageMigration,
+      input.routeAuthority.harnessPackageMigration,
+    ) ||
+    current.resolvedAgent.effectiveAgentId !== input.effectiveAgent.name ||
+    current.resolvedAgent.definition.packageRoot !== input.effectiveAgent.packageRoot
+  ) {
+    throw new Error(`Cannot ${input.operation}: selected harness package authority changed`);
+  }
+  return current.authority;
+}
+
+/** Refuse one durable mutation unless its live harness package authority still matches. */
+export function withHarnessPackageRevalidation<T>(
+  operation: string,
+  revalidateHarnessPackageAuthority: (operation: string) => unknown,
+  mutation: () => T,
+): T {
+  revalidateHarnessPackageAuthority(operation);
+  return mutation();
+}
+
+function revalidateInitialPackageAuthority(
+  routeAuthority: InferenceRouteReservationAuthority | null,
+  revalidate: (operation: string) => unknown,
+): void {
+  if (routeAuthority) revalidate("prepare sandbox creation");
 }
 
 function cancelRecoveryIdentity(
@@ -1255,6 +1343,25 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       process.env,
     );
     const effectiveAgent = selectedEffectiveAgent ?? sandboxAgent.getEffectiveSandboxAgent(agent);
+    const harnessPackageSession = onboardSession.loadSession();
+    const revalidateHarnessPackageAuthority = (operation: string) =>
+      revalidateSelectedHarnessPackageAuthority(
+        {
+          expectedSession: harnessPackageSession,
+          routeAuthority: inferenceRouteReservationAuthority,
+          effectiveAgent,
+          operation,
+          options: { env: process.env },
+        },
+        {
+          loadSession: onboardSession.loadSession,
+          resolveSandboxAgent: sandboxAgent.resolveSandboxAgent,
+        },
+      );
+    revalidateInitialPackageAuthority(
+      inferenceRouteReservationAuthority,
+      revalidateHarnessPackageAuthority,
+    );
     const packageRoot = requireSelectedAgentPackageRoot(agent, effectiveAgent);
     const dockerfilePatchPackageRoot = requireSandboxDockerfilePatchPackageRoot(
       fromDockerfile,
@@ -1536,6 +1643,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       apfInterceptorRequested,
     );
     const revalidatePolicyAuthority = (sandboxIsLive: boolean, operation: string): void => {
+      revalidateHarnessPackageAuthority(operation);
       if (
         sandboxIsLive &&
         !verifiedPolicyRegistrationFinalized &&
@@ -2276,6 +2384,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     const policySourcePathForRoute = (
       route: import("../docker-gpu-route").SelectedDockerGpuRoute,
     ): string => {
+      revalidateHarnessPackageAuthority("read the selected harness policy source");
       const policySourcePath =
         route === "compatibility" ? compatibilityPolicyPath : initialSandboxPolicy.policyPath;
       if (!policySourcePath) {
@@ -2351,12 +2460,12 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       if (!inferenceRouteReservationAuthority?.sessionId) {
         throw new Error("Sandbox creation requires current inference route reservation authority.");
       }
+      revalidateHarnessPackageAuthority("admit the sandbox create route reservation");
       return registry.qualifyPendingSandboxCreateReservation(
         {
           sandboxName,
           gatewayName: GATEWAY_NAME,
-          sessionId: inferenceRouteReservationAuthority.sessionId,
-          selection: inferenceRouteReservationAuthority.selection,
+          ...inferenceRouteReservationAuthority,
         },
         registry.getSandbox(sandboxName),
       );
@@ -2370,7 +2479,15 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       readonly boundary: EffectiveVerifiedSandboxPolicyBoundary;
       readonly checkpoint: PendingSandboxPolicyVerification;
     } => {
-      if (!isDeepStrictEqual(pendingSandboxPolicyVerificationForBoundary(boundary), checkpoint)) {
+      if (
+        !isDeepStrictEqual(
+          pendingSandboxPolicyVerificationForBoundary(
+            boundary,
+            requireCreateReservation().authority,
+          ),
+          checkpoint,
+        )
+      ) {
         throw new PolicyAuthorityRefusalError(
           `Refusing to ${operation}: the verified create policy boundary no longer matches its durable checkpoint.`,
           "owner-unknown",
@@ -2413,11 +2530,16 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         return { boundary, checkpoint };
       }
       const refreshedBoundary = { ...boundary, registration };
-      const refreshedCheckpoint = pendingSandboxPolicyVerificationForBoundary(refreshedBoundary);
-      registry.recordPendingSandboxPolicyVerification(
-        requireCreateReservation(),
-        refreshedCheckpoint,
-        { expected: checkpoint },
+      const refreshedCheckpoint = pendingSandboxPolicyVerificationForBoundary(
+        refreshedBoundary,
+        requireCreateReservation().authority,
+      );
+      withHarnessPackageRevalidation(operation, revalidateHarnessPackageAuthority, () =>
+        registry.recordPendingSandboxPolicyVerification(
+          requireCreateReservation(),
+          refreshedCheckpoint,
+          { expected: checkpoint },
+        ),
       );
       revalidateCreatedSandboxIdentity(boundary.lifecycleLiveIdentityFingerprint, operation);
       registry.requireCurrentPendingSandboxPolicyVerification(
@@ -2461,7 +2583,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         liveIdentityFingerprint: resumed.checkpoint.sandboxIdentityFingerprint,
       };
     })();
-    const revalidateVerifiedPolicyRegistration = (
+    const revalidateVerifiedPolicyRegistrationAfterPackage = (
       boundary: EffectiveVerifiedSandboxPolicyBoundary,
       operation: string,
     ): SandboxEntry => {
@@ -2492,10 +2614,22 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         requirePendingPolicyVerification(),
       );
     };
+    const revalidateVerifiedPolicyRegistration = (
+      boundary: EffectiveVerifiedSandboxPolicyBoundary,
+      operation: string,
+    ): SandboxEntry =>
+      withHarnessPackageRevalidation(operation, revalidateHarnessPackageAuthority, () =>
+        revalidateVerifiedPolicyRegistrationAfterPackage(boundary, operation),
+      );
     const retainedSandboxRecoveryContext = (
       boundary: VerifiedSandboxPolicyBoundary | null,
     ): RetainedSandboxRecoveryContext => {
-      const checkpoint = boundary ? pendingSandboxPolicyVerificationForBoundary(boundary) : null;
+      const checkpoint = boundary
+        ? pendingSandboxPolicyVerificationForBoundary(
+            boundary,
+            requireCreateReservation().authority,
+          )
+        : null;
       return {
         gatewayName: GATEWAY_NAME,
         gatewayPort: GATEWAY_PORT,
@@ -2615,10 +2749,22 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         },
         persistVerifiedPolicy: (_identity, _exactIdentity, boundary) => {
           requireDurableCreatedSandboxIdentity(boundary.lifecycleLiveIdentityFingerprint);
-          const checkpoint = pendingSandboxPolicyVerificationForBoundary(boundary);
-          registry.recordPendingSandboxPolicyVerification(requireCreateReservation(), checkpoint, {
-            ...(pendingPolicyVerification ? { expected: pendingPolicyVerification } : {}),
-          });
+          const checkpoint = pendingSandboxPolicyVerificationForBoundary(
+            boundary,
+            requireCreateReservation().authority,
+          );
+          withHarnessPackageRevalidation(
+            `record verified create checkpoint for sandbox '${sandboxName}'`,
+            revalidateHarnessPackageAuthority,
+            () =>
+              registry.recordPendingSandboxPolicyVerification(
+                requireCreateReservation(),
+                checkpoint,
+                {
+                  ...(pendingPolicyVerification ? { expected: pendingPolicyVerification } : {}),
+                },
+              ),
+          );
           pendingPolicyVerification = checkpoint;
           verifiedPolicyGate = boundary;
           if (apfInterceptorRequested) {
@@ -2844,10 +2990,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           "Hermes portable onboarding is missing current inference route reservation authority.",
         );
       }
-      const inferenceRouteReservation = {
-        sessionId: inferenceRouteReservationAuthority.sessionId,
-        selection: inferenceRouteReservationAuthority.selection,
-      };
+      const inferenceRouteReservation = { ...inferenceRouteReservationAuthority };
       await sandboxGpuCreateFlow.runHermesPortableOnboardingFromOnboard<
         import("../sandbox-gpu-create-flow").SandboxGpuCreateFlowResult
       >({
@@ -2864,6 +3007,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         },
         inferenceRouteReservation,
         withLifecycleLock: sandboxMutationLock.withMcpLifecycleLock,
+        revalidateHarnessPackageAuthority,
         childEnv: sandboxEnv,
         openshellArgv,
         createSandbox: (

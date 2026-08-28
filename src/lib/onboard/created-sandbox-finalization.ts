@@ -528,7 +528,10 @@ function assertVerifiedCreateMatchesPolicyBoundary(
   if (
     !isDeepStrictEqual(
       verifiedCreate.checkpoint,
-      pendingSandboxPolicyVerificationForBoundary(boundary),
+      pendingSandboxPolicyVerificationForBoundary(
+        boundary,
+        verifiedCreate.reservation.authority,
+      ),
     )
   ) {
     throw new Error("Verified sandbox create checkpoint does not match final policy authority.");

@@ -4,6 +4,7 @@
 import { clearAutoDetectedCompatibleContextWindow } from "../../../inference/compatible-endpoint-context";
 import { resolveAgentProviderInferenceApi } from "../../../inference/config";
 import type { TrustedPrivateEndpointCapability } from "../../../inference/endpoint-ssrf-preflight";
+import type { HarnessPackageAuthority } from "../../../harness/package-identity";
 import {
   type CurrentGatewayRouteCompatibilityCheck,
   type CurrentGatewayRouteDiscoveryPreflight,
@@ -58,7 +59,7 @@ import {
 
 export type ProviderInferenceRetry = { retry: "selection" } | { ok: true; retry?: undefined };
 
-export interface ProviderInferenceSetupOptions {
+interface ProviderInferenceSetupOptionsBase {
   gatewayName?: string;
   allowToolsIncompatible?: boolean;
   skipHostInferenceSmoke?: boolean;
@@ -80,8 +81,6 @@ export interface ProviderInferenceSetupOptions {
   endpointTrustedPrivateCapability?: TrustedPrivateEndpointCapability;
   /** One-shot host capability cache carried only through this onboarding run. */
   inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
-  /** Onboard session that owns the route reservation this setup creates. */
-  reservationSessionId?: string;
   /** Recheck recorded-route ownership after acquiring route mutation locks. */
   isRecordedProviderRecoveryAuthorized?: () => boolean;
   /** Recheck the receipt-bound policy requirements at each inference mutation edge. */
@@ -91,6 +90,19 @@ export interface ProviderInferenceSetupOptions {
   /** Proxy token prepared after configuration review; avoids repeating host mutations in setup. */
   preparedOllamaProxyToken?: string;
 }
+
+/** Route ownership is either one complete Session/package tuple or entirely absent. */
+export type ProviderInferenceSetupOptions = ProviderInferenceSetupOptionsBase &
+  (
+    | {
+        readonly reservationSessionId: string;
+        readonly harnessPackageAuthority: HarnessPackageAuthority;
+      }
+    | {
+        readonly reservationSessionId?: never;
+        readonly harnessPackageAuthority?: never;
+      }
+  );
 
 export interface ProviderSelectionResult {
   model: string | null;
@@ -174,6 +186,10 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       observabilityEnabled: boolean;
       operation: string;
     }): void;
+    revalidateHarnessPackageAuthority(
+      session: Session,
+      operation: string,
+    ): HarnessPackageAuthority;
     getSandboxRecoveryAuthority(
       sandboxName: string,
       sessionId: string | null | undefined,
@@ -275,20 +291,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       endpointUrl: string | null,
       credentialEnv: string | null,
     ): { ok: boolean; endpointUrl: string; message?: string; status?: number };
-    reserveSandboxInferenceRoute(
-      sandboxName: string,
-      route: {
-        provider: string | null;
-        model: string | null;
-        endpointUrl: string | null;
-        endpointSource: InferenceEndpointSource | null;
-        credentialEnv: string | null;
-        preferredInferenceApi: string | null;
-        gatewayName: string;
-        reservationSessionId?: string;
-      },
-      options?: { requireAbsent?: boolean },
-    ): boolean;
+    reserveSandboxInferenceRoute: typeof import("../../../state/registry").reserveSandboxInferenceRoute;
     registryUpdateSandbox(sandboxName: string, updates: { nimContainer?: string | null }): void;
     checkpointSandboxIdentity(sandboxName: string, agent: Agent): Promise<void>;
     prepareLocalProviderForInference(provider: string): Promise<string | null>;
@@ -1295,7 +1298,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   const revalidatePolicyRequirements = (
     operation: string,
     requiredProvider: string | null = provider,
-  ): void => {
+  ): HarnessPackageAuthority => {
+    const harnessPackageAuthority = session
+      ? deps.revalidateHarnessPackageAuthority(session, operation)
+      : ({ harnessPackage: null, harnessPackageMigration: null } as const);
     const routeKnownForProvider =
       requiredProvider === provider
         ? hostLocalInferenceRouteKnown
@@ -1313,6 +1319,28 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       observabilityEnabled,
       operation,
     });
+    return harnessPackageAuthority;
+  };
+  const requireSessionRouteAuthority = (
+    operation: string,
+  ): HarnessPackageAuthority & { readonly reservationSessionId: string } => {
+    if (!session?.sessionId) {
+      throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
+    }
+    return {
+      reservationSessionId: session.sessionId,
+      ...revalidatePolicyRequirements(operation),
+    };
+  };
+  const setupInferenceRouteAuthority = (operation: string) => {
+    if (!session?.sessionId) {
+      throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
+    }
+    const harnessPackageAuthority = revalidatePolicyRequirements(operation);
+    return {
+      reservationSessionId: session.sessionId,
+      harnessPackageAuthority,
+    };
   };
 
   revalidatePolicyRequirements("select an inference provider");
@@ -1723,7 +1751,9 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             ...(endpointSource === "onboard" && onboardEndpointUrl ? { onboardEndpointUrl } : {}),
             ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
             ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
-            reservationSessionId: session?.sessionId,
+            ...setupInferenceRouteAuthority(
+              "bind the resumed inference route to its harness package",
+            ),
             ...resolveCachedHostLocalInferenceSetupOptions(confirmedSandboxName),
           };
           await deps.startRecordedStep("inference", { provider, model });
@@ -1822,29 +1852,32 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               credentialEnv,
             );
             if (reupserted.ok && resumeReservationName) {
-              revalidatePolicyRequirements(
+              const routeAuthority = requireSessionRouteAuthority(
                 `reserve routed inference route for sandbox ${JSON.stringify(resumeReservationName)}`,
               );
+              const reservationEndpointSource = endpointSourceForCurrentUrl(
+                endpointSource,
+                reupserted.endpointUrl,
+                onboardEndpointUrl,
+              );
+              const reserved = deps.reserveSandboxInferenceRoute(resumeReservationName, {
+                provider: selectedProvider,
+                model: selectedModel,
+                endpointUrl: reupserted.endpointUrl,
+                endpointSource: reservationEndpointSource,
+                credentialEnv,
+                preferredInferenceApi,
+                gatewayName,
+                ...routeAuthority,
+              });
+              return { reupserted, reservationEndpointSource, reserved };
             }
             const reservationEndpointSource = endpointSourceForCurrentUrl(
               endpointSource,
               reupserted.endpointUrl,
               onboardEndpointUrl,
             );
-            const reserved =
-              reupserted.ok && resumeReservationName
-                ? deps.reserveSandboxInferenceRoute(resumeReservationName, {
-                    provider: selectedProvider,
-                    model: selectedModel,
-                    endpointUrl: reupserted.endpointUrl,
-                    endpointSource: reservationEndpointSource,
-                    credentialEnv,
-                    preferredInferenceApi,
-                    gatewayName,
-                    reservationSessionId: session?.sessionId,
-                  })
-                : null;
-            return { reupserted, reservationEndpointSource, reserved };
+            return { reupserted, reservationEndpointSource, reserved: null };
           }),
         );
         const { reupserted, reservationEndpointSource, reserved } = routedRepair;
@@ -1871,7 +1904,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             credentialEnv,
             preferredInferenceApi,
           });
-          revalidatePolicyRequirements(
+          const routeAuthority = requireSessionRouteAuthority(
             `reserve inference route for sandbox ${JSON.stringify(resumeReservationName)}`,
           );
           return deps.reserveSandboxInferenceRoute(resumeReservationName, {
@@ -1882,7 +1915,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             credentialEnv,
             preferredInferenceApi,
             gatewayName,
-            reservationSessionId: session?.sessionId,
+            ...routeAuthority,
           });
         });
         if (!reserved) {
@@ -2009,7 +2042,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ...(endpointSource === "onboard" && onboardEndpointUrl ? { onboardEndpointUrl } : {}),
         ...(endpointTrustedPrivateCapability ? { endpointTrustedPrivateCapability } : {}),
         ...(inferenceCapabilityCache ? { inferenceCapabilityCache } : {}),
-        ...(freshManagedOllama ? { reservationSessionId: session?.sessionId } : {}),
+        ...setupInferenceRouteAuthority("bind the inference route to its harness package"),
         ...providerRecovery.setupOptions(
           recoveredRecordedProvider,
           confirmedSandboxName,

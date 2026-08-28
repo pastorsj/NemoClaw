@@ -16,6 +16,7 @@ import {
 } from "../../adapters/openshell/policy-authority";
 import { waitUntil } from "../../core/wait";
 import type { NemoClawPolicyCreationReceipt } from "../../policy/merge";
+import type { HarnessPackageAuthority } from "../../harness/package-identity";
 import { normalizePendingSandboxPolicyVerification } from "../../state/registry-normalization";
 import type { PendingSandboxPolicyVerification } from "../../state/registry/types";
 import {
@@ -54,6 +55,7 @@ export interface CreatedSandboxPolicyRegistrationInput extends CreatedSandboxPol
 /** Flatten one in-memory verified boundary into its non-authorizing durable checkpoint. */
 export function pendingSandboxPolicyVerificationForBoundary(
   boundary: VerifiedSandboxPolicyBoundary,
+  harnessPackageAuthority: HarnessPackageAuthority,
 ): PendingSandboxPolicyVerification {
   const common = {
     schemaVersion: 1 as const,
@@ -64,6 +66,9 @@ export function pendingSandboxPolicyVerificationForBoundary(
     lifecycleGeneration: boundary.lifecycleGeneration,
     sandboxIdentityFingerprint: boundary.lifecycleLiveIdentityFingerprint,
     route: boundary.route,
+    ...(harnessPackageAuthority.harnessPackage
+      ? { harnessPackage: harnessPackageAuthority.harnessPackage }
+      : {}),
   };
   const registration = boundary.registration;
   if (registration.policyAuthority === "nemoclaw-managed") {

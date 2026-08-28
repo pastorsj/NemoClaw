@@ -39,6 +39,8 @@ import {
 } from "../sandbox-agent";
 import type { FreshOnboardHarnessBinding } from "../session-bootstrap";
 
+export { requireCurrentSessionHarnessPackageAuthority } from "./package-authority";
+
 type SelectedOnboardHarness = Exclude<
   OnboardHarnessPackageSelection,
   OnboardHarnessInstallGuidance

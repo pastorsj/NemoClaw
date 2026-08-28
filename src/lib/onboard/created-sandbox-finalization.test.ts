@@ -26,6 +26,10 @@ import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
 import type { CreatedSandboxRegistrationInput } from "./sandbox-registration";
 
 const fixtures: string[] = [];
+const TEST_PACKAGE_AUTHORITY = {
+  harnessPackage: null,
+  harnessPackageMigration: null,
+} as const;
 
 afterEach(() => {
   delete process.env.NEMOCLAW_OPENSHELL_BIN;
@@ -404,8 +408,30 @@ describe("created DCode sandbox finalization", () => {
       route: "native" as const,
     };
     const verifiedCreate = {
-      reservation: {} as never,
-      checkpoint: pendingSandboxPolicyVerificationForBoundary(verifiedPolicyBoundary),
+      reservation: {
+        authority: {
+          sandboxName: "dcode",
+          gatewayName: "nemoclaw",
+          sessionId: "session-1",
+          selection: {
+            provider: "compatible-endpoint",
+            model,
+            endpointUrl,
+            endpointSource: "onboard" as const,
+            credentialEnv: "NVIDIA_API_KEY",
+            preferredInferenceApi: "openai-completions",
+            compatibleEndpointReasoning: null,
+            compatibleEndpointReasoningEffort: null,
+            nimContainer: null,
+          },
+          ...TEST_PACKAGE_AUTHORITY,
+        },
+        entry: { name: "dcode" } as SandboxEntry,
+      },
+      checkpoint: pendingSandboxPolicyVerificationForBoundary(
+        verifiedPolicyBoundary,
+        TEST_PACKAGE_AUTHORITY,
+      ),
     } as NonNullable<CreatedSandboxRegistrationInput["verifiedCreate"]>;
     const runCaptureOpenshell = vi.fn(() =>
       [
@@ -1056,6 +1082,7 @@ describe("created sandbox completion actions", () => {
           sandboxName: "hermes",
           gatewayName: "nemoclaw",
           sessionId: "session-1",
+          ...TEST_PACKAGE_AUTHORITY,
           selection: {
             provider: "ollama",
             model: "qwen3-vl:4b",
@@ -1072,7 +1099,10 @@ describe("created sandbox completion actions", () => {
       } satisfies QualifiedSandboxInferenceRouteReservation;
       const verifiedCreate = {
         reservation: inferenceRouteReservation,
-        checkpoint: pendingSandboxPolicyVerificationForBoundary(verifiedPolicyBoundary),
+        checkpoint: pendingSandboxPolicyVerificationForBoundary(
+          verifiedPolicyBoundary,
+          inferenceRouteReservation.authority,
+        ),
       } as NonNullable<CreatedSandboxRegistrationInput["verifiedCreate"]>;
       const completion = createCreatedSandboxCompletionActions(
         {

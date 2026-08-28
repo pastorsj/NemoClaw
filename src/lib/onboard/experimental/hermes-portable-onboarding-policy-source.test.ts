@@ -103,7 +103,7 @@ function checkpointFor(
     lifecycleGeneration: input.lifecycleGeneration,
     lifecycleLiveIdentityFingerprint: liveIdentityFingerprint,
     route: "none" as const,
-  });
+  }, input.inferenceRouteReservation);
 }
 
 function checkpointEntry(
@@ -194,7 +194,10 @@ network_policies:
     };
     const persistVerifiedPolicy = (boundary: EffectiveVerifiedSandboxPolicyBoundary) => {
       persistedPolicySources.push(boundary.policySourcePath);
-      const checkpoint = pendingSandboxPolicyVerificationForBoundary(boundary);
+      const checkpoint = pendingSandboxPolicyVerificationForBoundary(
+        boundary,
+        current.inferenceRouteReservation,
+      );
       recordedCheckpointEntry = checkpointEntry(current, checkpoint);
       const { name, ...updates } = recordedCheckpointEntry;
       expect(updateRegistry(name, updates)).toBe(true);

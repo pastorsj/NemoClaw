@@ -955,6 +955,8 @@ describe("source registry fingerprint", () => {
           preferredInferenceApi: "openai-responses",
           gatewayName: "nemoclaw",
           reservationSessionId: "session-9",
+          harnessPackage: null,
+          harnessPackageMigration: null,
           hostLocalInferenceReceipt,
         }),
       ).toBe(true);
@@ -1021,6 +1023,8 @@ describe("source registry fingerprint", () => {
         registry.reserveSandboxInferenceRoute("alpha", {
           ...route,
           reservationSessionId: "session-llama-rebuild",
+          harnessPackage: null,
+          harnessPackageMigration: null,
         }),
       ).toBe(true);
       const reserved = registry.getSandbox("alpha") as SandboxEntry;

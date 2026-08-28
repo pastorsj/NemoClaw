@@ -15,6 +15,10 @@ import {
 } from "./policy-creation-receipt";
 
 const POLICY = "version: 1\nnetwork_policies:\n  github:\n    endpoints: []\n";
+const TEST_PACKAGE_AUTHORITY = {
+  harnessPackage: null,
+  harnessPackageMigration: null,
+} as const;
 const NATIVE_GPU_POLICY = `version: 1
 filesystem_policy:
   include_workdir: true
@@ -179,12 +183,17 @@ describe("created sandbox policy receipt", () => {
         },
       },
     };
-    const checkpoint = pendingSandboxPolicyVerificationForBoundary(boundary);
+    const checkpoint = pendingSandboxPolicyVerificationForBoundary(
+      boundary,
+      TEST_PACKAGE_AUTHORITY,
+    );
 
     const restored = verifiedSandboxPolicyBoundaryFromPendingCheckpoint(checkpoint);
 
     expect(restored).toEqual(boundary);
-    expect(pendingSandboxPolicyVerificationForBoundary(restored)).toEqual(checkpoint);
+    expect(
+      pendingSandboxPolicyVerificationForBoundary(restored, TEST_PACKAGE_AUTHORITY),
+    ).toEqual(checkpoint);
   });
 
   it.each(["externally-managed", "owner-unknown"] as const)(
@@ -204,12 +213,17 @@ describe("created sandbox policy receipt", () => {
           policyIdentity: { hash: "sha256:effective", activeVersion: 4 },
         },
       };
-      const checkpoint = pendingSandboxPolicyVerificationForBoundary(boundary);
+      const checkpoint = pendingSandboxPolicyVerificationForBoundary(
+        boundary,
+        TEST_PACKAGE_AUTHORITY,
+      );
 
       const restored = verifiedSandboxPolicyBoundaryFromPendingCheckpoint(checkpoint);
 
       expect(restored).toEqual(boundary);
-      expect(pendingSandboxPolicyVerificationForBoundary(restored)).toEqual(checkpoint);
+      expect(
+        pendingSandboxPolicyVerificationForBoundary(restored, TEST_PACKAGE_AUTHORITY),
+      ).toEqual(checkpoint);
     },
   );
 

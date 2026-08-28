@@ -3,6 +3,11 @@
 
 import { isDeepStrictEqual } from "node:util";
 import { PolicyAuthorityRefusalError } from "../adapters/openshell/policy-authority";
+import {
+  type HarnessPackageAuthority,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../harness/package-identity";
 import type { InferenceSelection } from "../inference/selection";
 import {
   inferenceSelectionRegistryFields,
@@ -21,6 +26,8 @@ import {
   isCurrentSandboxInferenceRouteReservation,
   isCurrentPendingSandboxCreateReservation,
   normalizeSandboxInferenceRouteSelection,
+  entryMatchesPackageAuthority,
+  normalizeRoutePackageAuthority,
   sandboxRegistrationMatchesInferenceRouteReservation,
   type QualifiedPendingSandboxCreateReservation,
   type QualifiedSandboxInferenceRouteReservation,
@@ -48,6 +55,7 @@ import {
   normalizeBaselineExclusionTransition,
   normalizeCustomPolicyEntries,
   normalizePendingSandboxPolicyVerification,
+  normalizeSandboxHarnessPackageAuthority,
   normalizeSandboxPolicyAttribution,
   normalizeSandboxPolicyAuthority,
   retainedDefaultSandbox,
@@ -606,6 +614,7 @@ export function registerSandbox(
       // snapshot clone (which spreads the source entry but resets `policies`)
       // cannot inherit a stale finalized marker. See #4621.
       agent: entry.agent || null,
+      ...normalizeSandboxHarnessPackageAuthority(entry),
       agentVersion: entry.agentVersion || null,
       openclawImagePluginInstalls: Array.isArray(entry.openclawImagePluginInstalls)
         ? entry.openclawImagePluginInstalls.map((install) => ({
@@ -653,7 +662,7 @@ export function registerSandbox(
   });
 }
 
-type SandboxInferenceRouteReservation = Pick<
+type SandboxInferenceRouteFields = Pick<
   InferenceSelection,
   | "provider"
   | "model"
@@ -665,14 +674,64 @@ type SandboxInferenceRouteReservation = Pick<
   gatewayName: string;
   gatewayPort?: number;
   openshellDriver?: string;
-  reservationSessionId?: string;
   hostLocalInferenceReceipt?: string | null;
   hostLocalInferenceProvenance?: SandboxEntry["hostLocalInferenceProvenance"];
 };
 
+type SandboxInferenceRouteReservation = SandboxInferenceRouteFields &
+  (
+    | ({ readonly reservationSessionId: string } & HarnessPackageAuthority)
+    | {
+        readonly reservationSessionId?: undefined;
+        readonly harnessPackage?: never;
+        readonly harnessPackageMigration?: never;
+      }
+  );
+
 interface SandboxInferenceRouteReservationOptions {
   /** Refuse instead of changing any existing registry row. */
   requireAbsent?: boolean;
+}
+
+const OWNERLESS_ROUTE_PACKAGE_AUTHORITY = Object.freeze({
+  harnessPackage: null,
+  harnessPackageMigration: null,
+});
+
+function getRoutePackageAuthority(
+  route: SandboxInferenceRouteReservation,
+): HarnessPackageAuthority | null {
+  if (route.reservationSessionId === undefined) {
+    if (
+      Object.prototype.hasOwnProperty.call(route, "harnessPackage") ||
+      Object.prototype.hasOwnProperty.call(route, "harnessPackageMigration")
+    ) {
+      throw new Error("Ownerless inference routes cannot carry session package authority");
+    }
+    return null;
+  }
+  if (
+    typeof route.reservationSessionId !== "string" ||
+    route.reservationSessionId.length === 0 ||
+    route.reservationSessionId.length > 256 ||
+    /[\u0000-\u001f\u007f]/u.test(route.reservationSessionId)
+  ) {
+    throw new Error("Sandbox inference route reservation session is malformed");
+  }
+  return normalizeRoutePackageAuthority(route);
+}
+
+function persistedRoutePackageAuthority(authority: HarnessPackageAuthority | null): {
+  readonly harnessPackage?: HarnessPackageIdentity;
+  readonly harnessPackageMigration?: HarnessPackageMigration;
+} {
+  if (!authority || authority.harnessPackage === null) return {};
+  return {
+    harnessPackage: authority.harnessPackage,
+    ...(authority.harnessPackageMigration
+      ? { harnessPackageMigration: authority.harnessPackageMigration }
+      : {}),
+  };
 }
 
 /**
@@ -689,6 +748,25 @@ export function reserveSandboxInferenceRoute(
     const data = load();
     const existing = data.sandboxes[name];
     if (options.requireAbsent === true && existing !== undefined) return false;
+    const routePackageAuthority = getRoutePackageAuthority(route);
+    if (
+      routePackageAuthority &&
+      existing &&
+      !entryMatchesPackageAuthority(routePackageAuthority, existing)
+    ) {
+      throw new PolicyAuthorityRefusalError(
+        `Cannot replace sandbox '${name}': its harness package authority changed`,
+      );
+    }
+    if (
+      routePackageAuthority === null &&
+      existing &&
+      !entryMatchesPackageAuthority(OWNERLESS_ROUTE_PACKAGE_AUTHORITY, existing)
+    ) {
+      throw new PolicyAuthorityRefusalError(
+        `Cannot replace package-managed sandbox '${name}' through an ownerless route`,
+      );
+    }
     const normalized = normalizeInferenceSelection(route);
     const provenance = cloneSandboxHostLocalInferenceProvenance(route.hostLocalInferenceProvenance);
     if (
@@ -750,7 +828,9 @@ export function reserveSandboxInferenceRoute(
           isDeepStrictEqual(
             normalizeInferenceSelection(existing),
             normalizeInferenceSelection(route),
-          ));
+          ) &&
+          (routePackageAuthority === null ||
+            entryMatchesPackageAuthority(routePackageAuthority, existing)));
       if (!sameReservation) {
         if (existing.pendingPolicyVerification) {
           throw new PolicyAuthorityRefusalError(
@@ -792,6 +872,7 @@ export function reserveSandboxInferenceRoute(
       endpointSource: normalized.endpointSource,
       credentialEnv: normalized.credentialEnv,
       preferredInferenceApi: normalized.preferredInferenceApi,
+      ...persistedRoutePackageAuthority(routePackageAuthority),
       ...(route.hostLocalInferenceReceipt !== undefined
         ? { hostLocalInferenceReceipt: route.hostLocalInferenceReceipt }
         : {}),
@@ -971,11 +1052,23 @@ export function removeSandboxRouteReservationIfCurrent(expected: SandboxEntry): 
 }
 
 /** Publish only the owning route transaction and retain its receipt for exact retries. */
-export function finalizeSandboxRouteReservation(name: string, sessionId: string): boolean {
+export function finalizeSandboxRouteReservation(
+  name: string,
+  sessionId: string,
+  packageAuthority: HarnessPackageAuthority,
+): boolean {
+  const normalizedPackageAuthority = normalizeRoutePackageAuthority(packageAuthority);
   return withLock(() => {
     const data = load();
     const current = data.sandboxes[name];
-    if (!current || !sessionId || current.reservationSessionId !== sessionId) return false;
+    if (
+      !current ||
+      !sessionId ||
+      current.reservationSessionId !== sessionId ||
+      !entryMatchesPackageAuthority(normalizedPackageAuthority, current)
+    ) {
+      return false;
+    }
     if (current.pendingRouteReservation !== true) return true;
     if (current.pendingPolicyVerification) return false;
     data.sandboxes[name] = {

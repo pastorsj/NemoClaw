@@ -36,6 +36,13 @@ export const HERMES_PORTABLE_TEST_LIVE_IDENTITY = createHash("sha256")
   .update(HERMES_PORTABLE_TEST_SANDBOX_ID)
   .digest("hex");
 const ROUTE_SESSION_ID = "session-alpha";
+export const HERMES_PORTABLE_TEST_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "hermes",
+  packageVersion: "1.0.0-test",
+  contractVersion: 1 as const,
+  contentDigest: "8".repeat(64),
+};
 
 export function makeHermesPortableCheckoutPrivate(root: string): void {
   const visit = (target: string): void => {
@@ -194,6 +201,17 @@ function matchingRegistryEntry(
       "openshellVersion" in options
         ? options.openshellVersion
         : input.openshellExecutableAuthority.version,
+    ...(input.inferenceRouteReservation.harnessPackage
+      ? {
+          harnessPackage: input.inferenceRouteReservation.harnessPackage,
+          ...(input.inferenceRouteReservation.harnessPackageMigration
+            ? {
+                harnessPackageMigration:
+                  input.inferenceRouteReservation.harnessPackageMigration,
+              }
+            : {}),
+        }
+      : {}),
   };
 }
 
@@ -257,6 +275,8 @@ export function createHermesPortableTestInput(stateDir: string, policyPath: stri
     inferenceRouteReservation: {
       sessionId: ROUTE_SESSION_ID,
       selection: routeSelection(),
+      harnessPackage: HERMES_PORTABLE_TEST_PACKAGE,
+      harnessPackageMigration: null,
     },
   } satisfies HermesPortableOnboardingInput;
 }
@@ -271,6 +291,17 @@ export function hermesPortableReservationForOnboarding(
     ...normalizeSandboxInferenceRouteSelection(input.inferenceRouteReservation.selection),
     gatewayName: input.gatewayName,
     hostLocalInferenceReceipt: "receipt-1",
+    ...(input.inferenceRouteReservation.harnessPackage
+      ? {
+          harnessPackage: input.inferenceRouteReservation.harnessPackage,
+          ...(input.inferenceRouteReservation.harnessPackageMigration
+            ? {
+                harnessPackageMigration:
+                  input.inferenceRouteReservation.harnessPackageMigration,
+              }
+            : {}),
+        }
+      : {}),
   };
 }
 
@@ -305,6 +336,9 @@ export interface HermesPortableTransactionFixtureOptions {
   revalidatePendingCreateRegistry?: HermesPortableOnboardingDeps<{
     ready: true;
   }>["revalidatePendingCreateRegistry"];
+  revalidateHarnessPackageAuthority?: HermesPortableOnboardingDeps<{
+    ready: true;
+  }>["revalidateHarnessPackageAuthority"];
   compareAndSetRegistryGatewayPort?: HermesPortableOnboardingDeps<{
     ready: true;
   }>["compareAndSetRegistryGatewayPort"];
@@ -373,6 +407,8 @@ export function createHermesPortableTransactionFixture(
         events.push("lock-exit");
       }
     },
+    revalidateHarnessPackageAuthority:
+      options.revalidateHarnessPackageAuthority ?? vi.fn(),
     captureSocketAuthority: (socketPath) => {
       const directories = directoryChain(path.dirname(socketPath));
       return {

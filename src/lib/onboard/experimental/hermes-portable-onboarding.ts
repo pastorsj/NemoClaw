@@ -6,6 +6,7 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { isDeepStrictEqual, TextDecoder } from "node:util";
 
 import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageAuthority } from "../../harness/package-identity";
 import { normalizeInferenceSelection, type InferenceSelection } from "../../inference/selection";
 import {
   fingerprintOpenShellSandboxLiveIdentity,
@@ -120,13 +121,15 @@ export interface HermesPortableOnboardingInput {
   readonly inferenceRouteReservation: HermesPortableInferenceRouteReservationAuthority;
 }
 
-export interface HermesPortableInferenceRouteReservationAuthority {
+export type HermesPortableInferenceRouteReservationAuthority = {
   readonly sessionId: string;
   readonly selection: InferenceSelection;
-}
+} & HarnessPackageAuthority;
 
 export interface HermesPortableOnboardingDeps<T> {
   readonly withLifecycleLock: <R>(sandboxName: string, operation: () => Promise<R>) => Promise<R>;
+  /** Re-read the owning Session and pinned harness object before durable publication. */
+  readonly revalidateHarnessPackageAuthority: (operation: string) => void;
   readonly captureSocketAuthority?: typeof capturePodmanSocketAuthority;
   readonly capturePodmanExecutableAuthority?: (
     socketAuthority: PodmanSocketAuthority,
@@ -587,6 +590,8 @@ function createHermesPortableCreateIntentSha256(
           selection: normalizeSandboxInferenceRouteSelection(
             input.inferenceRouteReservation.selection,
           ),
+          harnessPackage: input.inferenceRouteReservation.harnessPackage,
+          harnessPackageMigration: input.inferenceRouteReservation.harnessPackageMigration,
         },
         startupDescriptorSha256: startup.startupDescriptorSha256,
       }),
@@ -1092,6 +1097,22 @@ export async function runHermesPortableOnboardingTransaction<T>(
       assertOpenShellExecutableAuthority();
       return deps.capturePolicy(args);
     };
+    const publishLifecycleReceipt = (
+      receipt: HermesPortableLifecycleReceipt,
+    ): HermesPortableReceiptSnapshot => {
+      deps.revalidateHarnessPackageAuthority(
+        `publish Hermes portable ${receipt.phase} lifecycle receipt`,
+      );
+      return publishHermesPortableLifecycleReceipt(receipt, input.stateDir);
+    };
+    const publishSuccessorReceipt = (): ReturnType<
+      typeof publishHermesPortableSuccessorReceipt
+    > => {
+      deps.revalidateHarnessPackageAuthority(
+        "publish Hermes portable successor lifecycle receipt",
+      );
+      return publishHermesPortableSuccessorReceipt(input.sandboxName, input.stateDir);
+    };
     const validatedCreateArgv = rewriteHermesPortableCreatePolicyArgv(
       input.createArgv,
       input.createPolicyPath,
@@ -1139,8 +1160,7 @@ export async function runHermesPortableOnboardingTransaction<T>(
     const routeReservationAuthority: SandboxInferenceRouteReservationAuthority = {
       sandboxName: input.sandboxName,
       gatewayName: input.gatewayName,
-      sessionId: input.inferenceRouteReservation.sessionId,
-      selection: input.inferenceRouteReservation.selection,
+      ...input.inferenceRouteReservation,
     };
     const initialRouteReservation = classifySandboxInferenceRouteReservation(
       routeReservationAuthority,
@@ -1316,6 +1336,9 @@ export async function runHermesPortableOnboardingTransaction<T>(
     }
     let createArgv: readonly string[];
     if (snapshot) {
+      deps.revalidateHarnessPackageAuthority(
+        "reconcile Hermes portable lifecycle receipt publication",
+      );
       snapshot = reconcileHermesPortableCurrentPhasePublication(snapshot, input.stateDir);
       assertCurrentTransaction(
         snapshot.receipt,
@@ -1331,6 +1354,7 @@ export async function runHermesPortableOnboardingTransaction<T>(
       );
     } else {
       const transactionId = recoverableTransactionId ?? createHermesPortableTransactionId();
+      deps.revalidateHarnessPackageAuthority("publish Hermes portable durable policy source");
       const policy = publishHermesPortableDurablePolicySource({
         sandboxName: input.sandboxName,
         transactionId,
@@ -1355,7 +1379,7 @@ export async function runHermesPortableOnboardingTransaction<T>(
         phase: "pending",
         policy,
       };
-      snapshot = publishHermesPortableLifecycleReceipt(pending, input.stateDir);
+      snapshot = publishLifecycleReceipt(pending);
     }
     if (deps.cleanupTemporaryPolicy && !deps.cleanupTemporaryPolicy()) {
       fail("temporary policy cleanup did not complete after durable reservation");
@@ -1407,7 +1431,7 @@ export async function runHermesPortableOnboardingTransaction<T>(
         finalIdentity.liveIdentityFingerprint,
       );
       if (activeSnapshot.successor || activeSnapshot.successorPublicationPending) {
-        activeSnapshot = publishHermesPortableSuccessorReceipt(input.sandboxName, input.stateDir);
+        activeSnapshot = publishSuccessorReceipt();
       }
       return { active: activeSnapshot, createResult, created };
     }
@@ -1501,10 +1525,7 @@ export async function runHermesPortableOnboardingTransaction<T>(
         observation.sandboxId,
         containerDeps,
       );
-      snapshot = publishHermesPortableLifecycleReceipt(
-        configuringReceipt(snapshot, livePolicyDigest, container),
-        input.stateDir,
-      );
+      snapshot = publishLifecycleReceipt(configuringReceipt(snapshot, livePolicyDigest, container));
     }
 
     if (snapshot.receipt.phase !== "configuring") fail("transaction has an unsupported phase");
@@ -1622,11 +1643,8 @@ export async function runHermesPortableOnboardingTransaction<T>(
       repairRegistryGatewayPort(configuringSnapshot.receipt, liveIdentity.liveIdentityFingerprint),
       liveIdentity.liveIdentityFingerprint,
     );
-    publishHermesPortableLifecycleReceipt(
-      activeReceipt(configuringSnapshot, currentContainer),
-      input.stateDir,
-    );
-    const active = publishHermesPortableSuccessorReceipt(input.sandboxName, input.stateDir);
+    publishLifecycleReceipt(activeReceipt(configuringSnapshot, currentContainer));
+    const active = publishSuccessorReceipt();
     return { active, createResult, created };
   });
 }
@@ -1641,6 +1659,7 @@ export interface HermesPortableOnboardingFromOnboardInput<T> {
   readonly startup: ResolveHermesPortableStartupContractInput;
   readonly inferenceRouteReservation: HermesPortableInferenceRouteReservationAuthority;
   readonly withLifecycleLock: HermesPortableOnboardingDeps<T>["withLifecycleLock"];
+  readonly revalidateHarnessPackageAuthority: HermesPortableOnboardingDeps<T>["revalidateHarnessPackageAuthority"];
   readonly childEnv: NodeJS.ProcessEnv;
   readonly openshellArgv: (args: string[]) => string[];
   readonly createSandbox: (
@@ -1703,6 +1722,7 @@ export async function runHermesPortableOnboardingFromOnboard<T>(
     startup,
     inferenceRouteReservation,
     withLifecycleLock,
+    revalidateHarnessPackageAuthority,
     childEnv,
     openshellArgv,
     createSandbox,
@@ -1768,6 +1788,7 @@ export async function runHermesPortableOnboardingFromOnboard<T>(
     },
     {
       withLifecycleLock,
+      revalidateHarnessPackageAuthority,
       capturePodmanExecutableAuthority: (socketAuthority) =>
         captureHermesPortablePodmanExecutableAuthority(
           socketAuthority,

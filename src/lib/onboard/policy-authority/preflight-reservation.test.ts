@@ -78,6 +78,8 @@ describe("receipt-bound policy authority during inference route reservation", ()
         preferredInferenceApi: "openai-responses",
         gatewayName: "nemoclaw",
         reservationSessionId: CURRENT_SESSION_ID,
+        harnessPackage: null,
+        harnessPackageMigration: null,
       });
       const inspectSandboxForCreate = vi.fn((name: string) => ({
         existingEntry: registry.getSandbox(name),

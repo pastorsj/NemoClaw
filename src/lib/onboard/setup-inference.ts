@@ -594,6 +594,19 @@ export function createSetupInference(
     if (sandboxName && !options.revalidatePolicyRequirements) {
       throw new Error("Sandbox inference setup requires policy authority revalidation.");
     }
+    const hasReservationSession = options.reservationSessionId !== undefined;
+    const hasHarnessPackageAuthority = options.harnessPackageAuthority !== undefined;
+    if (hasReservationSession !== hasHarnessPackageAuthority) {
+      throw new Error(
+        "Inference setup route ownership requires both Session and harness package authority.",
+      );
+    }
+    const routeReservationAuthority = hasReservationSession && hasHarnessPackageAuthority
+      ? {
+          reservationSessionId: options.reservationSessionId,
+          ...options.harnessPackageAuthority,
+        }
+      : {};
     const revalidatePolicyRequirements = (operation: string): void => {
       if (!sandboxName) return;
       options.revalidatePolicyRequirements?.(operation);
@@ -715,7 +728,7 @@ export function createSetupInference(
             credentialEnv,
             preferredInferenceApi: options.preferredInferenceApi ?? null,
             gatewayName,
-            reservationSessionId: options.reservationSessionId,
+            ...routeReservationAuthority,
             hostLocalInferenceReceipt,
             ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
             ...(hostLocalInferenceProvenance && hostLocalInferenceGatewayPortAuthority !== undefined

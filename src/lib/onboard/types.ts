@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { HarnessPackageAuthority } from "../harness/package-identity";
+
 /**
  * Shared result and failure contracts used by the extracted onboarding helper modules.
  *
@@ -129,10 +131,10 @@ export type VerifiedSandboxCreateEffects = (
 ) => Promise<void>;
 
 /** Durable onboarding-session identity and exact pending inference route. */
-export interface InferenceRouteReservationAuthority {
+export type InferenceRouteReservationAuthority = {
   readonly sessionId: string;
   readonly selection: import("../inference/selection").InferenceSelection;
-}
+} & HarnessPackageAuthority;
 
 export type OnboardOptions = {
   /** Hidden temporary opt-in for new managed-image runtime activation. */

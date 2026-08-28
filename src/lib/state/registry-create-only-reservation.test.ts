@@ -6,6 +6,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "a".repeat(64),
+};
 const PROVIDERLESS_ROUTE = {
   provider: null,
   model: null,
@@ -15,6 +22,8 @@ const PROVIDERLESS_ROUTE = {
   preferredInferenceApi: null,
   gatewayName: "nemoclaw",
   reservationSessionId: "session-apf",
+  harnessPackage: OPENCLAW_PACKAGE,
+  harnessPackageMigration: null,
 } as const;
 
 describe("create-only sandbox route reservation", () => {
@@ -47,6 +56,31 @@ describe("create-only sandbox route reservation", () => {
         registry.reserveSandboxInferenceRoute("alpha", PROVIDERLESS_ROUTE, {
           requireAbsent: true,
         }),
+      ).toBe(false);
+      expect(registry.getSandbox("alpha")).toEqual(before);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("checks create-only row absence before parsing a conflicting package pair", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-create-reservation-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    try {
+      const registry = await import("./registry");
+      registry.registerSandbox({ name: "alpha", provider: "nim", model: "model-a" });
+      const before = registry.getSandbox("alpha");
+
+      expect(
+        registry.reserveSandboxInferenceRoute(
+          "alpha",
+          {
+            ...PROVIDERLESS_ROUTE,
+            harnessPackageMigration: undefined,
+          } as never,
+          { requireAbsent: true },
+        ),
       ).toBe(false);
       expect(registry.getSandbox("alpha")).toEqual(before);
     } finally {

@@ -7,9 +7,61 @@ import type { SandboxEntry } from "../state/registry";
 import { createSetupInference, type SetupInferenceDeps } from "./setup-inference";
 
 const revalidatePolicyRequirements = () => undefined;
+const TEST_PACKAGE_AUTHORITY = {
+  harnessPackage: null,
+  harnessPackageMigration: null,
+} as const;
+
+function reservationEntry(
+  name: string,
+  route: Parameters<SetupInferenceDeps["updateSandbox"]>[1],
+): SandboxEntry {
+  return {
+    name,
+    pendingRouteReservation: true,
+    gatewayName: route.gatewayName,
+    provider: route.provider,
+    model: route.model,
+    endpointUrl: route.endpointUrl,
+    endpointSource: route.endpointSource ?? null,
+    credentialEnv: route.credentialEnv,
+    preferredInferenceApi: route.preferredInferenceApi,
+    ...(route.reservationSessionId
+      ? { reservationSessionId: route.reservationSessionId }
+      : {}),
+    ...(route.harnessPackage ? { harnessPackage: route.harnessPackage } : {}),
+    ...(route.harnessPackageMigration
+      ? { harnessPackageMigration: route.harnessPackageMigration }
+      : {}),
+    ...(route.gatewayPort !== undefined ? { gatewayPort: route.gatewayPort } : {}),
+    ...(route.openshellDriver !== undefined ? { openshellDriver: route.openshellDriver } : {}),
+    ...(route.hostLocalInferenceReceipt !== undefined
+      ? { hostLocalInferenceReceipt: route.hostLocalInferenceReceipt }
+      : {}),
+    ...(route.hostLocalInferenceProvenance
+      ? { hostLocalInferenceProvenance: route.hostLocalInferenceProvenance }
+      : {}),
+  };
+}
 
 describe("onboard shared gateway route containment", () => {
   afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    ["Session only", { reservationSessionId: "session-only" }],
+    ["package authority only", { harnessPackageAuthority: TEST_PACKAGE_AUTHORITY }],
+  ] as const)("rejects %s route ownership before effects", async (_scenario, incompleteAuthority) => {
+    const setupInference = createSetupInference({} as SetupInferenceDeps);
+    const revalidate = vi.fn();
+
+    await expect(
+      setupInference("alpha", "model-a", "provider-a", null, null, null, [], {
+        ...incompleteAuthority,
+        revalidatePolicyRequirements: revalidate,
+      } as never),
+    ).rejects.toThrow(/requires both Session and harness package authority/u);
+    expect(revalidate).not.toHaveBeenCalled();
+  });
 
   it.each([
     {
@@ -342,6 +394,7 @@ describe("onboard shared gateway route containment", () => {
         [],
         {
           reservationSessionId: "session-current",
+          harnessPackageAuthority: TEST_PACKAGE_AUTHORITY,
           revalidatePolicyRequirements,
           isRecordedProviderRecoveryAuthorized: () => {
             events.push("recovery-authority");
@@ -384,7 +437,7 @@ describe("onboard shared gateway route containment", () => {
     };
     const updateSandbox = vi.fn(
       (name: string, route: Parameters<SetupInferenceDeps["updateSandbox"]>[1]) => {
-        reservations.push({ name, pendingRouteReservation: true, ...route });
+        reservations.push(reservationEntry(name, route));
         return true;
       },
     );
@@ -489,7 +542,6 @@ describe("onboard shared gateway route containment", () => {
       credentialEnv: "ROUTER_KEY",
       preferredInferenceApi: null,
       gatewayName: "nemoclaw",
-      reservationSessionId: undefined,
       hostLocalInferenceReceipt: null,
     });
     expect(reservations).toHaveLength(2);
@@ -507,7 +559,7 @@ describe("onboard shared gateway route containment", () => {
     const reservations: SandboxEntry[] = [];
     const updateSandbox = vi.fn(
       (name: string, route: Parameters<SetupInferenceDeps["updateSandbox"]>[1]) => {
-        reservations.push({ name, ...route });
+        reservations.push(reservationEntry(name, route));
         return true;
       },
     );
@@ -560,6 +612,7 @@ describe("onboard shared gateway route containment", () => {
         {
           skipHostInferenceSmoke: true,
           reservationSessionId: "session-gamma",
+          harnessPackageAuthority: TEST_PACKAGE_AUTHORITY,
           revalidatePolicyRequirements,
         },
       ),

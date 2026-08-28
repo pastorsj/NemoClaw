@@ -321,6 +321,10 @@ export function createDeps(
       createSandbox: calls.createSandbox,
       retireReplacedSandboxWorkload: calls.retireReplacedSandboxWorkload,
       finalizeSandboxRouteReservation: calls.finalizeRouteReservation,
+      revalidateHarnessPackageAuthority: () => ({
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      }),
       updateSandboxRegistry: calls.updateSandbox,
       getSandboxAgentRegistryFields: () => ({ agent: null }),
       recordStepComplete: calls.complete,

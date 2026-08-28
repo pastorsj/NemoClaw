@@ -107,6 +107,7 @@ describe("selected agent package authority", () => {
       fs.rmSync(openClawRoot, { recursive: true, force: true });
     }
   });
+
 });
 
 const UNVERIFIED_RECOVERY_CONTEXT = {

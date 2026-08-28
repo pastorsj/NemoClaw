@@ -384,10 +384,17 @@ describe("provider inference recovery gating", () => {
             },
           } as const
         )[scenario]!;
-        registry.reserveSandboxInferenceRoute(sandboxName, {
-          ...route,
-          reservationSessionId,
-        });
+        registry.reserveSandboxInferenceRoute(
+          sandboxName,
+          reservationSessionId
+            ? {
+                ...route,
+                reservationSessionId,
+                harnessPackage: null,
+                harnessPackageMigration: null,
+              }
+            : route,
+        );
         expect(registry.getSandbox(sandboxName)).toMatchObject({
           pendingRouteReservation: true,
           ...(reservationSessionId ? { reservationSessionId } : {}),

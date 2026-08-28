@@ -7,6 +7,7 @@ import { normalizeInferenceSelection, type InferenceSelection } from "../../infe
 import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
+  type HarnessPackageAuthority,
 } from "../../harness/package-identity";
 import { isWebSearchProvider } from "../../inference/web-search/provider";
 import { normalizePendingSandboxPolicyVerification } from "./pending-policy-verification";
@@ -62,6 +63,66 @@ function harnessPackageStatesMatch(left: SandboxEntry, right: SandboxEntry): boo
   return (
     harnessPackageIdentitiesEqual(leftState.harnessPackage, rightState.harnessPackage) &&
     isDeepStrictEqual(leftState.harnessPackageMigration, rightState.harnessPackageMigration)
+  );
+}
+
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+/** Normalize the required package pair carried by one session-owned route operation. */
+export function normalizeRoutePackageAuthority(
+  value: HarnessPackageAuthority,
+): HarnessPackageAuthority {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Sandbox inference route package authority must contain one exact pair");
+  }
+  const raw = value as HarnessPackageAuthority & {
+    readonly harnessPackage?: unknown;
+    readonly harnessPackageMigration?: unknown;
+  };
+  if (
+    !hasOwn(raw, "harnessPackage") ||
+    !hasOwn(raw, "harnessPackageMigration") ||
+    raw.harnessPackage === undefined ||
+    raw.harnessPackageMigration === undefined
+  ) {
+    throw new Error("Sandbox inference route package authority must contain one exact pair");
+  }
+  const state = inspectHarnessPackageState(raw.harnessPackage, raw.harnessPackageMigration);
+  if (state.status === "invalid") {
+    throw new Error("Sandbox inference route package authority is malformed");
+  }
+  if (state.status === "absent") {
+    if (raw.harnessPackage !== null || raw.harnessPackageMigration !== null) {
+      throw new Error("Sandbox inference route package absence must be explicit");
+    }
+    return Object.freeze({ harnessPackage: null, harnessPackageMigration: null });
+  }
+  return Object.freeze({
+    harnessPackage: state.harnessPackage,
+    harnessPackageMigration: state.harnessPackageMigration,
+  });
+}
+
+/** Compare a session-owned route authority with its durable owning row. */
+export function entryMatchesPackageAuthority(
+  authorityValue: HarnessPackageAuthority,
+  entry: SandboxEntry,
+): boolean {
+  let authority: HarnessPackageAuthority;
+  try {
+    authority = normalizeRoutePackageAuthority(authorityValue);
+  } catch {
+    return false;
+  }
+  const state = inspectRegistryHarnessPackageState(entry);
+  if (state.status === "invalid") return false;
+  if (authority.harnessPackage === null) return state.status === "absent";
+  return (
+    state.status === "valid" &&
+    harnessPackageIdentitiesEqual(authority.harnessPackage, state.harnessPackage) &&
+    isDeepStrictEqual(authority.harnessPackageMigration, state.harnessPackageMigration)
   );
 }
 
@@ -161,12 +222,15 @@ function validCarriedRouteMetadata(entry: SandboxEntry): boolean {
   );
 }
 
-export interface SandboxInferenceRouteReservationAuthority {
+interface SandboxInferenceRouteReservationOwner {
   readonly sandboxName: string;
   readonly gatewayName: string;
   readonly sessionId: string;
   readonly selection: InferenceSelection;
 }
+
+export type SandboxInferenceRouteReservationAuthority = SandboxInferenceRouteReservationOwner &
+  HarnessPackageAuthority;
 
 export interface QualifiedSandboxInferenceRouteReservation {
   readonly authority: SandboxInferenceRouteReservationAuthority;
@@ -209,6 +273,7 @@ export function qualifyPendingSandboxCreateReservation(
     entry.reservationSessionId !== authority.sessionId ||
     entry.name !== authority.sandboxName ||
     entry.gatewayName !== authority.gatewayName ||
+    !entryMatchesPackageAuthority(authority, entry) ||
     !isDeepStrictEqual(
       normalizeSandboxInferenceRouteSelection(normalizeInferenceSelection(entry)),
       normalizeSandboxInferenceRouteSelection(authority.selection),
@@ -283,6 +348,12 @@ export function classifySandboxInferenceRouteReservation(
     return {
       kind: "conflict",
       detail: "the inference route reservation belongs to another onboarding session",
+    };
+  }
+  if (!entryMatchesPackageAuthority(authority, entry)) {
+    return {
+      kind: "conflict",
+      detail: "the inference route reservation has another harness package authority",
     };
   }
   if (Object.keys(entry).some((key) => !ROUTE_RESERVATION_KEYS.has(key as keyof SandboxEntry))) {

@@ -376,6 +376,13 @@ export function registerCreatedSandbox(input: CreatedSandboxRegistrationInput): 
       ? {}
       : { hostLocalInferenceProvenance: pendingHostLocalInferenceProvenance }),
   });
+  const reservedPackageAuthority = input.inferenceRouteReservation?.authority;
+  if (reservedPackageAuthority?.harnessPackage) {
+    entry.harnessPackage = reservedPackageAuthority.harnessPackage;
+    if (reservedPackageAuthority.harnessPackageMigration) {
+      entry.harnessPackageMigration = reservedPackageAuthority.harnessPackageMigration;
+    }
+  }
   if (input.portableLifecycle === true) {
     if (getRequestedSandboxAgentName(input.agent) !== "openclaw") {
       throw new RuntimeProviderSelectionError(

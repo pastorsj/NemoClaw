@@ -378,7 +378,15 @@ export interface SandboxStateOptions<
       createIntent: CompleteSandboxCreateIntent,
       runVerifiedSandboxCreateEffects?: import("../../types").VerifiedSandboxCreateEffects,
     ): Promise<string>;
-    finalizeSandboxRouteReservation(sandboxName: string, sessionId: string): boolean;
+    finalizeSandboxRouteReservation(
+      sandboxName: string,
+      sessionId: string,
+      packageAuthority: import("../../../harness/package-identity").HarnessPackageAuthority,
+    ): boolean;
+    revalidateHarnessPackageAuthority(
+      session: Session,
+      operation: string,
+    ): import("../../../harness/package-identity").HarnessPackageAuthority;
     updateSandboxRegistry(sandboxName: string, updates: Record<string, unknown>): void;
     getSandboxAgentRegistryFields(
       agent: Agent,
@@ -1223,7 +1231,17 @@ class SandboxStateFlow<
     const entry = this.deps.getSandboxRegistryEntry(sandboxName);
     if (entry?.pendingRouteReservation !== true) return;
     const sessionId = state.session?.sessionId;
-    if (sessionId && this.deps.finalizeSandboxRouteReservation(sandboxName, sessionId)) return;
+    if (sessionId && state.session) {
+      const packageAuthority = this.deps.revalidateHarnessPackageAuthority(
+        state.session,
+        `finalize inference route reservation for sandbox ${JSON.stringify(sandboxName)}`,
+      );
+      if (
+        this.deps.finalizeSandboxRouteReservation(sandboxName, sessionId, packageAuthority)
+      ) {
+        return;
+      }
+    }
     this.deps.error(
       `  Error: sandbox '${sandboxName}' inference route reservation changed while onboarding was in progress. Retry onboarding.`,
     );
@@ -2323,6 +2341,10 @@ class SandboxStateFlow<
                       compatibleEndpointReasoningEffort: null,
                       nimContainer: this.options.nimContainer,
                     }),
+                    ...this.deps.revalidateHarnessPackageAuthority(
+                      this.options.session,
+                      `bind sandbox ${JSON.stringify(requestedSandboxName)} creation to its harness package`,
+                    ),
                   }
                 : null,
               effectiveCreateIntent,

@@ -3126,7 +3126,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
           deps: {
             checkGatewayRouteCompatibility,
             preflightGatewayRouteDiscovery,
-            preflightPolicyRequirements: policyAuthorityBindings.preflightPolicyRequirements,
+            ...policyAuthorityBindings.packageAuthorityDependencies,
             getSandboxRecoveryAuthority: providerRecovery.getSandboxRecoveryAuthority,
             withGatewayRouteMutationLock: gatewayRouteMutationLock.withGatewayRouteMutationLock,
             normalizeHermesAuthMethod,
@@ -3262,7 +3262,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
             getRegistrySandboxMessagingAuthority:
               messagingChannelSetup.getRegistrySandboxMessagingAuthority,
             providerMatchesGatewayCredential,
-            preflightPolicyRequirements: policyAuthorityBindings.preflightPolicyRequirements,
+            ...policyAuthorityBindings.packageAuthorityDependencies,
             stageSandboxCredentialProviders,
             promptValidatedSandboxName,
             selectResourceProfileForSandbox: () =>

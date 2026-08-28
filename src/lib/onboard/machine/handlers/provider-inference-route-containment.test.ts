@@ -87,6 +87,10 @@ function createDeps() {
     checkGatewayRouteCompatibility: calls.checkGatewayRouteCompatibility,
     preflightGatewayRouteDiscovery: calls.preflightGatewayRouteDiscovery,
     preflightPolicyRequirements: vi.fn(),
+    revalidateHarnessPackageAuthority: () => ({
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    }),
     getSandboxRecoveryAuthority: (): "missing" => "missing",
     withGatewayRouteMutationLock: async (_gatewayName, operation) => await operation(),
     withModelRouterPortLifecycleLock: async (_port, operation) => await operation(),
@@ -382,6 +386,8 @@ describe("provider route containment", () => {
       preferredInferenceApi: null,
       gatewayName: "nemoclaw-9090",
       reservationSessionId: session.sessionId,
+      harnessPackage: null,
+      harnessPackageMigration: null,
     });
     expect(calls.updateSandbox).not.toHaveBeenCalled();
     expect(calls.setupInference).not.toHaveBeenCalled();

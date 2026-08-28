@@ -30,6 +30,10 @@ function setupOptions(
     allowToolsIncompatible: false,
     endpointSource: null,
     reservationSessionId: session.sessionId,
+    harnessPackageAuthority: {
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    },
     revalidatePolicyRequirements: expect.any(Function),
     ...overrides,
   };
@@ -331,6 +335,8 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "openai-completions",
       gatewayName: "nemoclaw",
       reservationSessionId: rebuiltSession.sessionId,
+      harnessPackage: null,
+      harnessPackageMigration: null,
     });
   });
 
@@ -637,6 +643,8 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "openai-responses",
       gatewayName: "nemoclaw",
       reservationSessionId: session.sessionId,
+      harnessPackage: null,
+      harnessPackageMigration: null,
     });
     expect(result.sandboxName).toBe("tm");
   });
@@ -729,6 +737,8 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: "openai-responses",
       gatewayName: "nemoclaw",
       reservationSessionId: "resume-selection-session",
+      harnessPackage: null,
+      harnessPackageMigration: null,
     });
     expect(result.sandboxName).toBe("tm");
   });
@@ -1224,6 +1234,8 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: null,
       gatewayName: "nemoclaw",
       reservationSessionId: session.sessionId,
+      harnessPackage: null,
+      harnessPackageMigration: null,
     });
   });
 
@@ -1345,6 +1357,8 @@ describe("handleProviderInferenceState", () => {
       preferredInferenceApi: null,
       gatewayName: "nemoclaw",
       reservationSessionId: rebuiltSession.sessionId,
+      harnessPackage: null,
+      harnessPackageMigration: null,
     });
   });
 

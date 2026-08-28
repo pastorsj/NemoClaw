@@ -200,8 +200,9 @@ export function createProviderInferenceOnboardFlowPhase<
       }
       const sandboxName =
         context.sandboxName ?? (await options.deps.promptValidatedSandboxName(context.agent));
-      const reservationSessionId = context.session?.sessionId;
-      if (!reservationSessionId) {
+      const owningSession = context.session;
+      const reservationSessionId = owningSession?.sessionId;
+      if (!owningSession || !reservationSessionId) {
         throw new Error(
           "APF interceptor onboarding requires a durable session before providerless sandbox creation.",
         );
@@ -214,20 +215,27 @@ export function createProviderInferenceOnboardFlowPhase<
       }
       await options.deps.checkpointSandboxIdentity(sandboxName, context.agent);
       const reserved = await options.deps.withGatewayRouteMutationLock(options.gatewayName, () =>
-        options.deps.reserveSandboxInferenceRoute(
-          sandboxName,
-          {
-            provider: null,
-            model: null,
-            endpointUrl: null,
-            endpointSource: null,
-            credentialEnv: null,
-            preferredInferenceApi: null,
-            gatewayName: options.gatewayName,
-            reservationSessionId,
-          },
-          { requireAbsent: true },
-        ),
+        {
+          const harnessPackageAuthority = options.deps.revalidateHarnessPackageAuthority(
+            owningSession,
+            `reserve providerless inference route for sandbox ${JSON.stringify(sandboxName)}`,
+          );
+          return options.deps.reserveSandboxInferenceRoute(
+            sandboxName,
+            {
+              provider: null,
+              model: null,
+              endpointUrl: null,
+              endpointSource: null,
+              credentialEnv: null,
+              preferredInferenceApi: null,
+              gatewayName: options.gatewayName,
+              reservationSessionId,
+              ...harnessPackageAuthority,
+            },
+            { requireAbsent: true },
+          );
+        },
       );
       if (!reserved) {
         throw new Error(

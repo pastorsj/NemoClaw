@@ -37,11 +37,15 @@ function prepareVerifiedCreate(
   registry.reserveSandboxInferenceRoute(name, {
     ...route,
     reservationSessionId: CREATE_SESSION_ID,
+    harnessPackage: null,
+    harnessPackageMigration: null,
   });
   const authority = {
     sandboxName: name,
     gatewayName: route.gatewayName,
     sessionId: CREATE_SESSION_ID,
+    harnessPackage: null,
+    harnessPackageMigration: null,
     selection: {
       provider: route.provider,
       model: route.model,
