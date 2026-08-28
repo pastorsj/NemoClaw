@@ -1,0 +1,116 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { PUBLIC_DISPLAY_ENTRIES } from "../../lib/cli/public-display-defaults";
+import type { HarnessInventoryView } from "../../lib/harness/package-list";
+import HarnessCommand from "../harness";
+import HarnessListCommand, { harnessListCommandDependencies } from "./list";
+
+const rootDir = process.cwd();
+const DIGEST = "a".repeat(64);
+const IDENTITY = {
+  kind: "agent-runtime",
+  id: "openclaw",
+  packageVersion: "0.1.0",
+  contractVersion: 1,
+  contentDigest: DIGEST,
+} as const;
+const EMPTY_VIEW: HarnessInventoryView = {
+  schemaVersion: 1,
+  installed: [],
+  available: [{ displayName: "OpenClaw", identity: IDENTITY, installationState: "not-installed" }],
+};
+const DAMAGED_VIEW: HarnessInventoryView = {
+  schemaVersion: 1,
+  installed: [{ id: "openclaw", displayName: "OpenClaw", health: "damaged", identity: null }],
+  available: [{ displayName: "OpenClaw", identity: IDENTITY, installationState: "damaged" }],
+};
+const HEALTHY_VIEW: HarnessInventoryView = {
+  schemaVersion: 1,
+  installed: [
+    { id: "openclaw", displayName: "OpenClaw", health: "healthy", identity: { ...IDENTITY } },
+  ],
+  available: [{ displayName: "OpenClaw", identity: { ...IDENTITY }, installationState: "active" }],
+};
+
+describe("harness inventory oclif commands", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prints only the focused harness topic usage", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await HarnessCommand.run([], rootDir);
+
+    expect(log).toHaveBeenCalledWith("Usage: nemoclaw harness list");
+  });
+
+  it("prints the empty installed state and reviewed available package", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(harnessListCommandDependencies, "createHarnessInventoryView").mockReturnValue(
+      EMPTY_VIEW,
+    );
+
+    await HarnessListCommand.run([], rootDir);
+
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("No harnesses are installed."));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("openclaw | OpenClaw"));
+  });
+
+  it("prints installed and damaged health without package mutation", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(harnessListCommandDependencies, "createHarnessInventoryView").mockReturnValue(
+      DAMAGED_VIEW,
+    );
+
+    await HarnessListCommand.run([], rootDir);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("installed identity could not be verified"),
+    );
+    expect(harnessListCommandDependencies.createHarnessInventoryView).toHaveBeenCalledOnce();
+  });
+
+  it("returns the same closed inventory model through oclif JSON output", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const renderText = vi.spyOn(harnessListCommandDependencies, "renderHarnessInventoryText");
+    vi.spyOn(harnessListCommandDependencies, "createHarnessInventoryView").mockReturnValue(
+      HEALTHY_VIEW,
+    );
+
+    const result = await HarnessListCommand.run(["--json"], rootDir);
+    const output = JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+
+    expect(HarnessListCommand.enableJsonFlag).toBe(true);
+    expect(result).toEqual(HEALTHY_VIEW);
+    expect(output).toEqual(HEALTHY_VIEW);
+    expect(renderText).not.toHaveBeenCalled();
+  });
+
+  it("rejects positional input before reading the catalogue", async () => {
+    const createView = vi.spyOn(harnessListCommandDependencies, "createHarnessInventoryView");
+
+    await expect(HarnessListCommand.run(["openclaw"], rootDir)).rejects.toThrow();
+
+    expect(createView).not.toHaveBeenCalled();
+  });
+
+  it("publishes one list row without a duplicate topic row", () => {
+    expect(PUBLIC_DISPLAY_ENTRIES["harness:list"]).toEqual([
+      {
+        usage: "nemoclaw harness list",
+        description: "List installed and reviewed available harness packages",
+        flags: undefined,
+        group: "Getting Started",
+        deprecated: undefined,
+        hidden: undefined,
+        scope: "global",
+        order: 1.55,
+      },
+    ]);
+    expect(PUBLIC_DISPLAY_ENTRIES.harness).toBeUndefined();
+  });
+});

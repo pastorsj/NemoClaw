@@ -18,6 +18,13 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       description: "List available agent runtimes for onboard --agent",
     },
   ],
+  "harness:list": [
+    {
+      group: "Getting Started",
+      order: 1.55,
+      description: "List installed and reviewed available harness packages",
+    },
+  ],
   ...SANDBOX_SESSIONS_DISPLAY_LAYOUT,
   "backup-all": [
     {
