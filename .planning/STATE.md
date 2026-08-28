@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
 status: Plan 02-03 established immutable harness package storage and one reviewed install transaction
-last_updated: "2026-08-28T01:56:04.000Z"
+last_updated: "2026-08-28T01:58:40.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
@@ -34,7 +34,7 @@ Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `5754b48ffdf6c95a26050ff659fdf1ab558dbc2d`
+- Exact base: `origin/main` at `d63f7b037dbec3d34dba73ed75f09a330d36b36f`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
 - Pushes: none
@@ -46,6 +46,11 @@ above. The migration strategy remains semantic capability-slice replay onto curr
 
 The physical `packages/` directories in this checkout are ignored build leftovers from the
 preserved branch. Current `HEAD` tracks no source under `packages/`.
+
+After Plan 02-03, the branch merged the three newer `origin/main` commits through
+`d63f7b037dbec3d34dba73ed75f09a330d36b36f`. The merge had no conflicts. Package-store,
+image/policy source, integration, E2E-support, and CLI type checks passed against the refreshed
+tree.
 
 ## Completed Evidence
 
