@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 
 const CLI = path.join(import.meta.dirname, "../..", "bin", "nemoclaw.js");
 
@@ -116,6 +118,29 @@ describe("internal oclif namespace", () => {
       installRef: "lkg",
       provider: { normalized: "nim-local", raw: "nim", valid: true },
     });
+  });
+
+  it("exposes a hidden, closed installer harness reconciliation result", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-internal-reconcile-"));
+    onTestFinished(() => fs.rmSync(home, { recursive: true, force: true }));
+    const env = { ...process.env, HOME: home };
+    const help = spawnSync(
+      process.execPath,
+      [CLI, "internal", "installer", "reconcile-harnesses", "--help"],
+      { encoding: "utf-8", env },
+    );
+
+    expect(help.status, `${help.stdout}${help.stderr}`).toBe(0);
+    expect(help.stdout).toContain("Internal: reconcile installer harness package authority");
+
+    const result = spawnSync(
+      process.execPath,
+      [CLI, "internal", "installer", "reconcile-harnesses", "--json"],
+      { encoding: "utf-8", env },
+    );
+
+    expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ schemaVersion: 1, outcome: "empty-store" });
   });
 
   it("fails the experimental voice gateway gate before parsing required flags (#8378)", () => {

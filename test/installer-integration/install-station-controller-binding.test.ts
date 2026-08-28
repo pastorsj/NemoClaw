@@ -54,6 +54,9 @@ install_nodejs() { :; }
 ensure_supported_runtime() { :; }
 ensure_station_express_pair() { record_order qualify; }
 fix_npm_permissions() { :; }
+prepare_current_cli_for_preupgrade_backup() { :; }
+resolve_prepared_cli_runner() { printf 'fixture-cli'; }
+reconcile_and_select_installer_harness() { :; }
 preinstall_backup_and_retire_legacy_gateway() { :; }
 install_nemoclaw() { record_order install; }
 verify_nemoclaw() { :; }

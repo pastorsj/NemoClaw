@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import path from "node:path";
 import { isObjectRecord } from "../../core/json-types";
 import { GATEWAY_PORT } from "../../core/ports";
@@ -87,10 +88,37 @@ export const REGISTRY_FILE = path.join(
   nemoclawStateRoot(process.env.HOME || "/tmp", GATEWAY_PORT),
   "sandboxes.json",
 );
+
+export type SandboxRegistryReadResult =
+  | { readonly status: "absent" }
+  | { readonly status: "valid"; readonly registry: SandboxRegistry }
+  | { readonly status: "invalid" };
+
 export function load(): SandboxRegistry {
   return normalizeRegistry(
     readConfigFile<unknown>(REGISTRY_FILE, { sandboxes: {}, defaultSandbox: null }),
   );
+}
+
+/**
+ * Strict installer-facing read that does not collapse a malformed present
+ * registry or dropped malformed row into an empty valid registry.
+ */
+export function readSandboxRegistryState(): SandboxRegistryReadResult {
+  try {
+    if (!fs.existsSync(REGISTRY_FILE)) return { status: "absent" };
+    const value = readConfigFile<unknown>(REGISTRY_FILE, null);
+    if (!isObjectRecord(value) || !isObjectRecord(value.sandboxes)) {
+      return { status: "invalid" };
+    }
+    const parsedEntries = parseSandboxRegistryEntries(value.sandboxes);
+    if (parsedEntries.length !== Object.keys(value.sandboxes).length) {
+      return { status: "invalid" };
+    }
+    return { status: "valid", registry: normalizeRegistry(value) };
+  } catch {
+    return { status: "invalid" };
+  }
 }
 
 export function save(data: SandboxRegistry): void {

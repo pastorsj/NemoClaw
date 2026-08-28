@@ -594,13 +594,27 @@ preflight_explicit_express_flags() { :; }
 print_banner() { :; }
 preflight_usage_notice_prompt() { :; }
 prepare_installer_host() { record prepare-installer-host; }
-bash() { :; }
+bash() { record setup-jetson; }
 step() { record "step-$1-$2"; }
 install_nodejs() { :; }
 ensure_supported_runtime() { :; }
 resolve_pending_express_wsl_provider() { :; }
 ensure_station_express_pair() { :; }
 fix_npm_permissions() { :; }
+prepare_current_cli_for_preupgrade_backup() { record prepare-current-cli; }
+resolve_prepared_cli_runner() { printf '%s' installer_test_cli; }
+installer_test_cli() {
+  if [[ "$1" == "internal" && "$2" == "installer" && "$3" == "reconcile-harnesses" && "$4" == "--json" ]]; then
+    record harness-reconcile
+    printf '%s\n' '{"schemaVersion":1,"outcome":"ready"}'
+    return 0
+  fi
+  if [[ "$1" == "harness" && "$2" == "install" ]]; then
+    record "harness-install-$3"
+    return 0
+  fi
+  return 99
+}
 preinstall_backup_and_retire_legacy_gateway() { :; }
 install_nemoclaw() { record install-nemoclaw; }
 verify_nemoclaw() {
@@ -681,6 +695,11 @@ describe("Hermes deferred onboarding", () => {
 
       expect(result.result.status, result.output).toBe(0);
       expect(result.calls).toContain("install-nemoclaw");
+      expect(result.calls.filter((call) => call === "harness-reconcile")).toHaveLength(2);
+      expect(result.calls).toContain("harness-install-hermes");
+      expect(result.calls.indexOf("harness-install-hermes")).toBeLessThan(
+        result.calls.indexOf("prepare-installer-host"),
+      );
       expect(result.calls).not.toContain("host-preflight");
       expect(result.calls).not.toContain("onboard");
       expect(result.output).toContain("NVIDIA inference credentials are absent");

@@ -185,10 +185,20 @@ printf 'CONTINUATION no_express=%s args=%s\n' \
 detect_express_platform() { printf 'DGX Station'; }
 print_banner() { :; }
 preflight_usage_notice_prompt() { :; }
+step() { :; }
+install_nodejs() { :; }
+ensure_supported_runtime() { :; }
+resolve_pending_express_wsl_provider() { :; }
+ensure_station_express_pair() { :; }
+fix_npm_permissions() { :; }
+bash() { :; }
 load_station_vllm_conflict_helpers
 station_installer_revision() { printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; }
 ps() { printf '219655 1 docker-init docker-init -- /usr/bin/vllm serve hidden-model\n'; }
 station_existing_vllm_model() { return 1; }
+prepare_current_cli_for_preupgrade_backup() { :; }
+resolve_prepared_cli_runner() { printf 'fixture-cli'; }
+reconcile_and_select_installer_harness() { :; }
 ensure_docker() {
   printf 'RESUMED no_express=%s force=%s args=%s gateway=%s vllm=%s\n' \
     "$NEMOCLAW_NO_EXPRESS" "\${FORCE_STATION_INSTALL:-}" "\${_NEMOCLAW_INSTALLER_ARGS[*]:-}" \

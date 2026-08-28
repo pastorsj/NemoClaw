@@ -49,6 +49,19 @@ afterEach(() => {
 });
 
 describe("sandbox registry normalization", () => {
+  it.each([
+    ["a malformed sandboxes container", { defaultSandbox: null, sandboxes: [] }],
+    [
+      "a dropped malformed row",
+      { defaultSandbox: null, sandboxes: { invalid: { name: "different" } } },
+    ],
+  ])("strictly reports %s as invalid present registry state", async (_case, document) => {
+    await loadRegistryDocument(document);
+    const persistence = await import("./registry/persistence");
+
+    expect(persistence.readSandboxRegistryState()).toEqual({ status: "invalid" });
+  });
+
   const harnessPackage = {
     kind: "agent-runtime" as const,
     id: "hermes",

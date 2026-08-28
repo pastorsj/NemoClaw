@@ -107,6 +107,11 @@ function runStrictBackupRecoveryFlow(): { output: string; cleanup: () => void } 
     `#!/usr/bin/env bash
 printf 'command=%s require_all=%s\\n' "$*" "\${NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS:-}" >> ${JSON.stringify(cliLog)}
 case "\${1:-}" in
+  internal)
+    if [ "$*" = "internal installer reconcile-harnesses --json" ]; then
+      printf '{"schemaVersion":1,"outcome":"ready"}\\n'
+    fi
+    ;;
   backup-all)
     printf '  Pre-upgrade backup: 0 backed up, 0 failed, 0 skipped\\n'
     ;;
@@ -220,8 +225,14 @@ describe("install.sh strict-backup recovery handoff", () => {
       expect(output).toContain("recovery_ran=true");
       expect(output).toContain("orphaned=true");
       expect(output).toContain("=== Installation completed with warnings ===");
+      expect(output).toContain(
+        "command=internal installer reconcile-harnesses --json require_all=",
+      );
       expect(output).toContain("command=backup-all require_all=1");
       expect(output).toContain("command=upgrade-sandboxes --auto require_all=");
+      expect(output.indexOf("command=internal installer reconcile-harnesses")).toBeLessThan(
+        output.indexOf("command=backup-all"),
+      );
       expect(output.indexOf("command=backup-all")).toBeLessThan(
         output.indexOf("command=upgrade-sandboxes --auto"),
       );

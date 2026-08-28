@@ -172,6 +172,18 @@ export type InstallerLinkNpmStubOptions = {
   createCli: boolean;
 };
 
+/** Shell cases required by every fake CLI that the installer invokes. */
+export const INSTALLER_HARNESS_CLI_COMMANDS = `if [ "$1" = "internal" ] && [ "$2" = "installer" ] && [ "$3" = "reconcile-harnesses" ] && [ "$4" = "--json" ]; then
+  printf '%s\\n' '{"schemaVersion":1,"outcome":"ready"}'
+  exit 0
+fi
+if [ "$1" = "harness" ] && [ "$2" = "install" ]; then
+  if [ -n "\${NEMOCLAW_INSTALLER_CLI_LOG:-}" ]; then
+    printf '%s\\n' "$*" >> "$NEMOCLAW_INSTALLER_CLI_LOG"
+  fi
+  exit 0
+fi`;
+
 /**
  * Writes an npm stub that reports a fixed version, resolves the prefix from
  * NPM_PREFIX, runs installSnippet for install-family commands, and fails
@@ -220,6 +232,7 @@ if [ "$1" = "run" ] && { [ "$2" = "build" ] || [ "$2" = "build:cli" ] || [ "$2" 
 if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
+${INSTALLER_HARNESS_CLI_COMMANDS}
 if [ "$1" = "--version" ]; then echo "nemoclaw v0.1.0-test"; exit 0; fi
 ${onboard}
 exit 0
@@ -266,6 +279,7 @@ if [ "$1" = "link" ]; then
     createCli
       ? `cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
+${INSTALLER_HARNESS_CLI_COMMANDS}
 if [ "$1" = "onboard" ]; then exit 0; fi
 if [ "$1" = "--version" ]; then echo "nemoclaw v${cliVersion}"; exit 0; fi
 exit 0

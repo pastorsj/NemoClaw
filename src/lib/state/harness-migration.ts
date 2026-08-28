@@ -57,6 +57,7 @@ export interface PrepareLegacyHarnessMigrationInput {
 }
 
 export interface PreparedLegacyHarnessMigration {
+  readonly packageDisposition: "current-bundle" | "adopted-pinned";
   readonly owner:
     | {
         readonly kind: "session";
@@ -279,15 +280,25 @@ export function prepareLegacyHarnessMigration(
     requireCompatibleAgent(registryEntry.agent ?? null, expectedAgent, "the registry row agent");
   }
 
-  const selected = deps.resolveAvailablePackage(expectedAgent, { bundledRoot, storeRoot });
-  if (selected.id !== expectedAgent || selected.identity.id !== expectedAgent) {
+  const selected = adopted
+    ? null
+    : deps.resolveAvailablePackage(expectedAgent, { bundledRoot, storeRoot });
+  if (selected && (selected.id !== expectedAgent || selected.identity.id !== expectedAgent)) {
     throw migrationError("the reviewed package selection does not match the legacy harness");
   }
-
-  const harnessPackage = adopted?.harnessPackage ?? selected.identity;
-  if (!harnessPackageIdentitiesEqual(harnessPackage, selected.identity)) {
-    throw migrationError("persisted same-owner authority no longer matches the reviewed bundle");
+  const adoptedPinned = adopted
+    ? deps.resolvePinnedPackage(adopted.harnessPackage, { storeRoot })
+    : null;
+  if (
+    adopted &&
+    adoptedPinned &&
+    (!harnessPackageIdentitiesEqual(adoptedPinned.identity, adopted.harnessPackage) ||
+      adoptedPinned.identity.id !== expectedAgent)
+  ) {
+    throw migrationError("the adopted exact package does not match its legacy harness");
   }
+
+  const harnessPackage = adopted?.harnessPackage ?? selected!.identity;
   const harnessPackageMigration = adopted?.harnessPackageMigration ?? {
     schemaVersion: 1,
     source: "legacy-current-bundle",
@@ -297,6 +308,7 @@ export function prepareLegacyHarnessMigration(
   const parsedMigration = cloneMigration(harnessPackageMigration, harnessPackage);
 
   return Object.freeze({
+    packageDisposition: adopted ? "adopted-pinned" : "current-bundle",
     owner:
       input.owner.kind === "session"
         ? Object.freeze({
@@ -311,8 +323,8 @@ export function prepareLegacyHarnessMigration(
     registryEntry: registryEntry ? structuredClone(registryEntry) : null,
     bundledRoot,
     storeRoot,
-    packageRoot: selected.packageRoot,
-    sourceIdentity: structuredClone(sourceIdentity),
+    packageRoot: adoptedPinned?.packageRoot ?? selected!.packageRoot,
+    sourceIdentity: structuredClone(adoptedPinned?.receipt.sourceIdentity ?? sourceIdentity),
     harnessPackage: cloneIdentity(harnessPackage),
     harnessPackageMigration: parsedMigration,
   });
@@ -353,6 +365,18 @@ function assertPreparedBundleStillMatches(
   prepared: PreparedLegacyHarnessMigration,
   deps: LegacyHarnessMigrationDependencies,
 ): void {
+  if (prepared.packageDisposition === "adopted-pinned") {
+    const pinned = deps.resolvePinnedPackage(prepared.harnessPackage, {
+      storeRoot: prepared.storeRoot,
+    });
+    if (
+      pinned.packageRoot !== prepared.packageRoot ||
+      !harnessPackageIdentitiesEqual(pinned.identity, prepared.harnessPackage)
+    ) {
+      throw migrationError("the adopted exact package changed after migration preparation");
+    }
+    return;
+  }
   const selected = deps.resolveAvailablePackage(prepared.harnessPackage.id, {
     bundledRoot: prepared.bundledRoot,
     storeRoot: prepared.storeRoot,
@@ -493,12 +517,14 @@ export function reconcileLegacyHarnessMigration(
   const deps = dependencies(dependencyOverrides);
   deps.assertWriterLockOwned();
   assertPreparedBundleStillMatches(prepared, deps);
-  const installed = deps.installPackage(
-    { packageRoot: prepared.packageRoot, sourceIdentity: prepared.sourceIdentity },
-    { storeRoot: prepared.storeRoot },
-  );
-  if (!harnessPackageIdentitiesEqual(installed.identity, prepared.harnessPackage)) {
-    throw migrationError("package installation returned a different identity");
+  if (prepared.packageDisposition === "current-bundle") {
+    const installed = deps.installPackage(
+      { packageRoot: prepared.packageRoot, sourceIdentity: prepared.sourceIdentity },
+      { storeRoot: prepared.storeRoot },
+    );
+    if (!harnessPackageIdentitiesEqual(installed.identity, prepared.harnessPackage)) {
+      throw migrationError("package installation returned a different identity");
+    }
   }
   const pinned = deps.resolvePinnedPackage(prepared.harnessPackage, {
     storeRoot: prepared.storeRoot,

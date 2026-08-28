@@ -233,6 +233,9 @@ ensure_supported_runtime() { record ensure-supported-runtime; }
 resolve_pending_express_wsl_provider() { record resolve-pending-express-wsl-provider; }
 ensure_station_express_pair() { record ensure-station-express-pair; }
 fix_npm_permissions() { record fix-npm-permissions; }
+prepare_current_cli_for_preupgrade_backup() { record prepare-current-cli; }
+resolve_prepared_cli_runner() { record resolve-prepared-cli; printf 'fixture-cli'; }
+reconcile_and_select_installer_harness() { record reconcile-harnesses; }
 preinstall_backup_and_retire_legacy_gateway() { record preinstall-backup; }
 install_nemoclaw() { record install-nemoclaw; }
 verify_nemoclaw() { record verify-nemoclaw; }
@@ -247,8 +250,6 @@ main --non-interactive --yes-i-accept-third-party-software
 
     expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
     expect(fs.readFileSync(callLog, "utf-8").trim().split("\n")).toEqual([
-      "prepare-installer-host",
-      "setup-jetson",
       "step-1-Node.js",
       "install-nodejs",
       "ensure-supported-runtime",
@@ -256,12 +257,49 @@ main --non-interactive --yes-i-accept-third-party-software
       "ensure-station-express-pair",
       "step-2-NemoClaw CLI",
       "fix-npm-permissions",
+      "prepare-current-cli",
+      "resolve-prepared-cli",
+      "reconcile-harnesses",
+      "setup-jetson",
+      "prepare-installer-host",
       "preinstall-backup",
       "install-nemoclaw",
       "verify-nemoclaw",
       "require-reportable-openshell-version",
       "step-3-Onboarding",
       "finalize-install",
+    ]);
+  });
+
+  it("stops before host preparation when harness reconciliation fails", () => {
+    const fixtureRoot = temporaryDirectory("nemoclaw-native-reconcile-failure-");
+    const callLog = path.join(fixtureRoot, "calls.log");
+    const result = phaseHarness(
+      `
+set -euo pipefail
+source "$INSTALLER_UNDER_TEST"
+record() { printf '%s\n' "$1" >>"$CALL_LOG"; }
+step() { :; }
+install_nodejs() { :; }
+ensure_supported_runtime() { :; }
+resolve_pending_express_wsl_provider() { :; }
+ensure_station_express_pair() { :; }
+fix_npm_permissions() { :; }
+prepare_current_cli_for_preupgrade_backup() { record prepare-current-cli; }
+resolve_prepared_cli_runner() { printf 'fixture-cli'; }
+reconcile_and_select_installer_harness() { record reconcile-harnesses; return 1; }
+prepare_installer_host() { record prepare-installer-host; }
+preinstall_backup_and_retire_legacy_gateway() { record preinstall-backup; }
+install_nemoclaw() { record install-nemoclaw; }
+install_nemoclaw_before_onboarding
+`,
+      { CALL_LOG: callLog },
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(fs.readFileSync(callLog, "utf-8").trim().split("\n")).toEqual([
+      "prepare-current-cli",
+      "reconcile-harnesses",
     ]);
   });
 

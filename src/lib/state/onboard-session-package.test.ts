@@ -27,6 +27,41 @@ afterEach(() => {
 });
 
 describe("onboard session package persistence", () => {
+  it("distinguishes absent, valid, and malformed present Session state", () => {
+    expect(session.readOnboardSessionState()).toEqual({ status: "absent" });
+
+    const saved = session.saveSession(session.createSession({ agent: null }));
+    expect(session.readOnboardSessionState()).toEqual({ status: "valid", session: saved });
+
+    fs.writeFileSync(session.SESSION_FILE, "{not-json\n", { mode: 0o600 });
+    expect(session.readOnboardSessionState()).toEqual({ status: "invalid" });
+  });
+
+  it.each([
+    ["agent", (value: Record<string, unknown>) => Object.assign(value, { agent: 42 })],
+    [
+      "sandbox name",
+      (value: Record<string, unknown>) => Object.assign(value, { sandboxName: ["sandbox"] }),
+    ],
+    [
+      "machine snapshot",
+      (value: Record<string, unknown>) =>
+        Object.assign(value, {
+          machine: { version: 1, state: "preflight", stateEnteredAt: null },
+        }),
+    ],
+  ])("rejects a malformed present %s instead of inferring legacy state", (_field, mutate) => {
+    session.saveSession(session.createSession({ agent: null, sandboxName: "strict-owner" }));
+    const persisted = JSON.parse(fs.readFileSync(session.SESSION_FILE, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    mutate(persisted);
+    fs.writeFileSync(session.SESSION_FILE, `${JSON.stringify(persisted)}\n`, { mode: 0o600 });
+
+    expect(session.readOnboardSessionState()).toEqual({ status: "invalid" });
+  });
+
   it("round-trips exact fresh authority through the real session file", () => {
     const harnessPackage = {
       kind: "agent-runtime" as const,

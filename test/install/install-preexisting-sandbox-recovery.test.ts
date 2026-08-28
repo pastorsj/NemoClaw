@@ -9,6 +9,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const INSTALLER_PAYLOAD = path.join(import.meta.dirname, "../..", "scripts", "install.sh");
+const INSTALLER_HARNESS_PREPARATION_CALLS = [
+  "restore=1 confirmed= argv=internal installer reconcile-harnesses --json",
+  "restore=1 confirmed= argv=harness install openclaw",
+  "restore=1 confirmed= argv=internal installer reconcile-harnesses --json",
+];
 
 function writePendingStationReceiptRetirement(tmp: string): void {
   fs.writeFileSync(
@@ -62,7 +67,15 @@ function runRecoveryBeforeOnboard(
   fs.writeFileSync(
     cli,
     `#!/usr/bin/env bash
+if [ "$*" = "--version" ]; then
+  printf 'nemoclaw v0.0.0\n'
+  exit 0
+fi
 printf 'restore=%s confirmed=%s argv=%s\n' "\${NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE:-}" "\${NEMOCLAW_CONFIRMED_LEGACY_MANAGED_SANDBOXES:-}" "$*" >> "${callLog}"
+if [ "$*" = "internal installer reconcile-harnesses --json" ]; then
+  printf '{"schemaVersion":1,"outcome":"ready"}\n'
+  exit 0
+fi
 if [ "\${1:-}" = "upgrade-sandboxes" ]; then
   recovery_call=0
   if [ -f "${recoveryCallLog}" ]; then
@@ -146,6 +159,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status, result.output).toBe(0);
     expect(result.calls).toEqual([
+      ...INSTALLER_HARNESS_PREPARATION_CALLS,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
       "sleep=10",
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
@@ -165,6 +179,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status, result.output).toBe(0);
     expect(result.calls).toEqual([
+      ...INSTALLER_HARNESS_PREPARATION_CALLS,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
       "sleep=10",
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
@@ -180,6 +195,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
+      ...INSTALLER_HARNESS_PREPARATION_CALLS,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
     ]);
     expect(result.output).toContain("Failed to recover 'broken-box'");
@@ -194,6 +210,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
 
     expect(result.status).toBe(1);
     expect(result.calls).toEqual([
+      ...INSTALLER_HARNESS_PREPARATION_CALLS,
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
       "sleep=10",
       'restore=1 confirmed=["legacy-box"] argv=upgrade-sandboxes --auto',
@@ -207,7 +224,10 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
     const result = runRecoveryBeforeOnboard(0, 7);
 
     expect(result.status, result.output).toBe(0);
-    expect(result.calls).toEqual(["restore=1 confirmed= argv=onboard"]);
+    expect(result.calls).toEqual([
+      ...INSTALLER_HARNESS_PREPARATION_CALLS,
+      "restore=1 confirmed= argv=onboard",
+    ]);
   });
 
   it("does not treat a route-only reservation as an existing session (#6500)", () => {
@@ -217,7 +237,10 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
     });
 
     expect(result.status, result.output).toBe(0);
-    expect(result.calls).toEqual(["restore=1 confirmed= argv=onboard"]);
+    expect(result.calls).toEqual([
+      ...INSTALLER_HARNESS_PREPARATION_CALLS,
+      "restore=1 confirmed= argv=onboard",
+    ]);
     expect(result.output).not.toContain("Existing sandbox sessions detected");
   });
 
@@ -227,7 +250,7 @@ describe("install.sh pre-existing sandbox recovery ordering (#6114)", () => {
     });
 
     expect(result.status).toBe(1);
-    expect(result.calls).toEqual([]);
+    expect(result.calls).toEqual(INSTALLER_HARNESS_PREPARATION_CALLS);
     expect(result.output).toContain(
       "Could not inspect the existing sandbox registry. Onboarding was not started.",
     );

@@ -2865,6 +2865,119 @@ resolve_prepared_cli_runner() {
   resolve_existing_cli_runner
 }
 
+normalize_installer_harness_reconcile_outcome() {
+  [[ "${#1}" -le 256 ]] || return 1
+  node -e '
+    let value;
+    try {
+      value = JSON.parse(process.argv[1]);
+    } catch {
+      process.exit(1);
+    }
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.keys(value).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(value, "schemaVersion") ||
+      !Object.prototype.hasOwnProperty.call(value, "outcome") ||
+      value.schemaVersion !== 1 ||
+      (value.outcome !== "ready" && value.outcome !== "empty-store")
+    ) {
+      process.exit(1);
+    }
+    process.stdout.write(value.outcome);
+  ' "$1"
+}
+
+run_installer_harness_reconciliation() {
+  local cli_runner="$1" output="" outcome=""
+  if ! output="$("$cli_runner" internal installer reconcile-harnesses --json)"; then
+    error "Harness package reconciliation stopped the installer before backup or OpenShell changes. Repair the reported NemoClaw state or package-store issue, then rerun the installer."
+  fi
+  if ! outcome="$(normalize_installer_harness_reconcile_outcome "$output")"; then
+    error "Harness package reconciliation returned an invalid machine outcome. The installer stopped before backup or OpenShell changes."
+  fi
+  _INSTALLER_HARNESS_RECONCILE_OUTCOME="$outcome"
+}
+
+install_reviewed_harness_for_installer() {
+  local cli_runner="$1"
+
+  cat <<EOF
+
+  No harness packages are installed.
+  Install a reviewed harness now, or leave the installer and run
+  'nemoclaw harness install' later.
+
+EOF
+  local answer="" prompt_fd=0
+  if [ -t 0 ]; then
+    printf "  Choose a harness package now? [Y/n]: "
+    IFS= read -r answer || answer="n"
+  elif { exec 3</dev/tty; } 2>/dev/null; then
+    prompt_fd=3
+    info "Installer stdin is piped; prompting for harness installation on /dev/tty…"
+    printf "  Choose a harness package now? [Y/n]: "
+    IFS= read -r answer <&3 || answer="n"
+  else
+    error "Harness selection requires a terminal. Run 'nemoclaw harness install <id>', or rerun non-interactively with NEMOCLAW_AGENT set."
+  fi
+  answer="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]')"
+  case "$answer" in
+    "" | y | yes)
+      if [ "$prompt_fd" -eq 3 ]; then
+        "$cli_runner" harness install <&3
+        exec 3<&-
+      else
+        "$cli_runner" harness install
+      fi
+      ;;
+    *)
+      if [ "$prompt_fd" -eq 3 ]; then exec 3<&-; fi
+      _INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE=true
+      ;;
+  esac
+}
+
+reconcile_and_select_installer_harness() {
+  local cli_runner="$1" selector="${NEMOCLAW_AGENT:-openclaw}"
+  run_installer_harness_reconciliation "$cli_runner"
+
+  # Repository candidates do not participate in the ordinary package store.
+  # The hidden reconciliation command revalidates their qualification and
+  # peer-specific package absence before this selector may bypass installation.
+  case "$selector" in
+    pi | nemocua) return 0 ;;
+  esac
+
+  # Automation and an explicit standard selection preserve the established
+  # requested/default harness result even when another package is installed.
+  if installer_non_interactive || [[ -n "${NEMOCLAW_AGENT:-}" ]]; then
+    info "Installing reviewed harness package '${selector}' before onboarding…"
+    "$cli_runner" harness install "$selector"
+    run_installer_harness_reconciliation "$cli_runner"
+    [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" == "ready" ]] \
+      || error "The reviewed harness install did not produce a verified package-store result."
+    return 0
+  fi
+
+  if [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" != "empty-store" ]]; then return 0; fi
+  install_reviewed_harness_for_installer "$cli_runner"
+  if [[ "${_INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE:-false}" == true ]]; then
+    return 0
+  fi
+  # Re-read the typed store after the public install transaction rather than
+  # trusting child-process output or duplicating package selection in shell.
+  run_installer_harness_reconciliation "$cli_runner"
+  if [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" == "empty-store" ]]; then
+    _INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE=true
+    return 0
+  fi
+  [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" == "ready" ]] \
+    || error "The reviewed harness install did not produce a verified package-store result."
+}
+
 run_preupgrade_backup() {
   if ! prepare_current_cli_for_preupgrade_backup; then
     warn "Could not prepare the current ${_CLI_DISPLAY} CLI for pre-upgrade backup."
@@ -2877,6 +2990,9 @@ run_preupgrade_backup() {
     return 1
   fi
 
+  run_installer_harness_reconciliation "$current_cli_runner"
+  [[ "${_INSTALLER_HARNESS_RECONCILE_OUTCOME:-}" == "ready" ]] \
+    || error "Harness package selection is incomplete. Run 'nemoclaw harness install' before backup."
   NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS=1 "$current_cli_runner" backup-all 2>&1
 }
 
@@ -5659,7 +5775,6 @@ clear_station_dual_pair_resume() {
 }
 
 prepare_installer_host() {
-  maybe_offer_express_install
   # Reject conflicting explicit Station selections and pending-pair bypasses
   # before the local host-preparation helper can mutate packages or Docker.
   validate_station_pair_selection
@@ -5978,19 +6093,36 @@ maybe_offer_express_install() {
 # ---------------------------------------------------------------------------
 install_nemoclaw_before_onboarding() {
   _INSTALL_START=$SECONDS
-  bash "${SCRIPT_DIR}/setup-jetson.sh"
 
   step 1 "Node.js"
   install_nodejs
   ensure_supported_runtime
-  resolve_pending_express_wsl_provider
-  ensure_station_express_pair
 
   step 2 "${_CLI_DISPLAY} CLI"
   # Ollama and vLLM install/upgrade and model pulls are owned by
   # `nemoclaw onboard` (the install-ollama / install-vllm branches).
   # install.sh stays focused on dependency setup.
   fix_npm_permissions
+  prepare_current_cli_for_preupgrade_backup
+
+  local prepared_cli_runner=""
+  if ! prepared_cli_runner="$(resolve_prepared_cli_runner)"; then
+    error "Could not locate the prepared ${_CLI_BIN} CLI for harness package reconciliation."
+  fi
+  reconcile_and_select_installer_harness "$prepared_cli_runner"
+  if [[ "${_INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE:-false}" == true ]]; then
+    return 0
+  fi
+
+  # Express intent was selected before Node.js so WSL could defer Docker-context
+  # inspection. Resolve that selection now, then qualify any Station peer. Both
+  # happen only after durable harness state has reconciled successfully.
+  resolve_pending_express_wsl_provider
+  ensure_station_express_pair
+
+  # Harness choice is complete before Docker, OpenShell, backup, or onboarding.
+  bash "${SCRIPT_DIR}/setup-jetson.sh"
+  prepare_installer_host
   preinstall_backup_and_retire_legacy_gateway
   install_nemoclaw
   verify_nemoclaw
@@ -6019,6 +6151,8 @@ main() {
   FORCE_STATION_INSTALL=""
   LOCAL_MODEL_RUNTIME=""
   EXPERIMENTAL_PROFILE="${NEMOCLAW_EXPERIMENTAL_PROFILE:-}"
+  _INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE=false
+  _INSTALLER_HARNESS_RECONCILE_OUTCOME=""
   local expect_experimental_profile=""
   for arg in "$@"; do
     if [[ "$expect_experimental_profile" == "1" ]]; then
@@ -6140,19 +6274,22 @@ main() {
   # still collect acceptance before Node.js or the CLI are installed.
   preflight_usage_notice_prompt
 
-  # Offer express install on accepted platforms (DGX Spark / Station / N1x / WSL).
-  # Runs AFTER the third-party notice so the user has explicitly accepted the
-  # license before opting into the unattended path. Express only sets the
-  # provider/model/policy + non-interactive vars; license acceptance is
-  # already recorded by preflight above. Station selection runs its pinned
-  # host prerequisite preparation before the generic Docker bootstrap.
-  prepare_installer_host
+  # Express selection remains after notice acceptance but before Node.js. WSL
+  # can therefore defer Docker-context inspection until the runtime exists,
+  # while Station and host mutation remain behind harness reconciliation.
+  maybe_offer_express_install
 
   # Express selection can change the provider after the initial argument
-  # validation. Recheck the deferred-onboarding scope before installation.
+  # validation. Recheck deferred-onboarding scope before installation.
   validate_deferred_hermes_onboarding_request
 
   install_nemoclaw_before_onboarding
+  if [[ "${_INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE:-false}" == true ]]; then
+    echo ""
+    info "${_CLI_DISPLAY} CLI is ready. No harness package was installed."
+    info "Run 'nemoclaw harness install' when you are ready, then rerun the installer."
+    return 0
+  fi
 
   # Gate the onboarding-adjacent steps on the absolute CLI path so a stale
   # shell PATH cache no longer suppresses auto-onboarding (#3276). Falls

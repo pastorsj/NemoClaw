@@ -71,6 +71,76 @@ function runMainOnboardGate(stubExitCode: number): number | null {
   return result.status;
 }
 
+interface HarnessSelectionFlowOptions {
+  readonly outcomes: readonly string[];
+  readonly installExitCode?: number;
+  readonly nonInteractive?: boolean;
+  readonly promptAction?: "install" | "leave";
+  readonly selector?: string;
+}
+
+function runHarnessSelectionFlow(options: HarnessSelectionFlowOptions): {
+  readonly calls: readonly string[];
+  readonly output: string;
+  readonly status: number | null;
+} {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-harness-flow-"));
+  const callsPath = path.join(tmp, "calls.log");
+  const outcomesPath = path.join(tmp, "outcomes.txt");
+  fs.writeFileSync(outcomesPath, `${options.outcomes.join("\n")}\n`, { mode: 0o600 });
+
+  const snippet = `
+    set -e
+    source "${INSTALLER_PAYLOAD}" >/dev/null 2>&1 || true
+    error() { printf 'ERROR:%s\\n' "$1" >&2; exit 1; }
+    info() { :; }
+    installer_non_interactive() { [[ "\${FLOW_NON_INTERACTIVE:-0}" == "1" ]]; }
+    fake_cli() {
+      printf '%s\\n' "$*" >>"$FLOW_CALLS"
+      if [[ "$*" == "internal installer reconcile-harnesses --json" ]]; then
+        local outcome
+        IFS= read -r outcome <"$FLOW_OUTCOMES"
+        tail -n +2 "$FLOW_OUTCOMES" >"$FLOW_OUTCOMES.next"
+        mv "$FLOW_OUTCOMES.next" "$FLOW_OUTCOMES"
+        printf '%s\\n' "$outcome"
+        return 0
+      fi
+      if [[ "$1 $2" == "harness install" ]]; then
+        return "\${FLOW_INSTALL_EXIT:-0}"
+      fi
+      return 64
+    }
+    install_reviewed_harness_for_installer() {
+      if [[ "\${FLOW_PROMPT_ACTION:-install}" == "leave" ]]; then
+        _INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE=true
+        return 0
+      fi
+      "$1" harness install
+    }
+    reconcile_and_select_installer_harness fake_cli
+    printf 'exit_after_guidance=%s\\n' "\${_INSTALLER_EXIT_AFTER_HARNESS_GUIDANCE:-false}"
+  `;
+
+  const env = installerTestEnv(tmp, {
+    FLOW_CALLS: callsPath,
+    FLOW_INSTALL_EXIT: String(options.installExitCode ?? 0),
+    FLOW_NON_INTERACTIVE: options.nonInteractive ? "1" : "0",
+    FLOW_OUTCOMES: outcomesPath,
+    FLOW_PROMPT_ACTION: options.promptAction ?? "install",
+    ...(options.selector === undefined ? {} : { NEMOCLAW_AGENT: options.selector }),
+  });
+  const result = spawnSync("bash", ["-c", snippet], { encoding: "utf-8", env });
+  const calls = fs.existsSync(callsPath)
+    ? fs.readFileSync(callsPath, "utf-8").trim().split("\n").filter(Boolean)
+    : [];
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return {
+    calls,
+    output: `${result.stdout}${result.stderr}`,
+    status: result.status,
+  };
+}
+
 describe("install.sh run_onboard exit propagation (#5029)", () => {
   it("returns non-zero when nemoclaw onboard fails in non-interactive mode", () => {
     expect(runOnboardExitStatus(ACCEPTED_NON_INTERACTIVE_ENV, 1)).toBe(1);
@@ -98,5 +168,77 @@ describe("install.sh run_onboard exit propagation (#5029)", () => {
 
   it("main onboarding gate reports every other failure as 1 (#9121)", () => {
     expect(runMainOnboardGate(2)).toBe(1);
+  });
+});
+
+describe("install.sh harness package selection", () => {
+  const EMPTY_STORE = '{"schemaVersion":1,"outcome":"empty-store"}';
+  const READY = '{"schemaVersion":1,"outcome":"ready"}';
+
+  it("treats a public install cancellation as a clean empty-store exit", () => {
+    const result = runHarnessSelectionFlow({ outcomes: [EMPTY_STORE, EMPTY_STORE] });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.calls).toEqual([
+      "internal installer reconcile-harnesses --json",
+      "harness install",
+      "internal installer reconcile-harnesses --json",
+    ]);
+    expect(result.output).toContain("exit_after_guidance=true");
+  });
+
+  it("continues only after the public install produces a verified package", () => {
+    const result = runHarnessSelectionFlow({ outcomes: [EMPTY_STORE, READY] });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.output).toContain("exit_after_guidance=false");
+  });
+
+  it("installs an explicit standard selector even when another package is ready", () => {
+    const result = runHarnessSelectionFlow({
+      outcomes: [READY, READY],
+      selector: "hermes",
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.calls).toEqual([
+      "internal installer reconcile-harnesses --json",
+      "harness install hermes",
+      "internal installer reconcile-harnesses --json",
+    ]);
+  });
+
+  it("installs the OpenClaw default for non-interactive automation", () => {
+    const result = runHarnessSelectionFlow({
+      outcomes: [READY, READY],
+      nonInteractive: true,
+    });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.calls).toEqual([
+      "internal installer reconcile-harnesses --json",
+      "harness install openclaw",
+      "internal installer reconcile-harnesses --json",
+    ]);
+  });
+
+  it("does not ordinary-install a qualified repository candidate", () => {
+    const result = runHarnessSelectionFlow({ outcomes: [EMPTY_STORE], selector: "pi" });
+
+    expect(result.status, result.output).toBe(0);
+    expect(result.calls).toEqual(["internal installer reconcile-harnesses --json"]);
+  });
+
+  it.each([
+    ["malformed", "not-json"],
+    ["unknown field", '{"schemaVersion":1,"outcome":"ready","extra":true}'],
+    ["unknown outcome", '{"schemaVersion":1,"outcome":"blocked"}'],
+    ["oversized", "x".repeat(257)],
+  ])("fails closed for %s reconciliation output", (_label, outcome) => {
+    const result = runHarnessSelectionFlow({ outcomes: [outcome] });
+
+    expect(result.status).toBe(1);
+    expect(result.calls).toEqual(["internal installer reconcile-harnesses --json"]);
+    expect(result.output).toContain("invalid machine outcome");
   });
 });

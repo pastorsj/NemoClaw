@@ -339,6 +339,11 @@ export interface LockResult {
   holderCommand?: string | null;
 }
 
+export type OnboardSessionReadResult =
+  | { readonly status: "absent" }
+  | { readonly status: "valid"; readonly session: Session }
+  | { readonly status: "invalid" };
+
 export interface SessionUpdates {
   // Nullable fields accept `null` as an explicit clear (e.g. a provider
   // switch from remote→local clears `credentialEnv`). `undefined` means
@@ -597,6 +602,18 @@ function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function hasValidPresentHarnessAgent(source: UnknownRecord): boolean {
+  return !hasOwn(source, "agent") || source.agent === null || typeof source.agent === "string";
+}
+
+function hasValidPresentSandboxName(source: UnknownRecord): boolean {
+  return (
+    !hasOwn(source, "sandboxName") ||
+    source.sandboxName === null ||
+    isValidCheckpointedSandboxName(source.sandboxName)
+  );
+}
+
 function structurallyInvalidHarnessPackageState(source: unknown): boolean {
   if (!isObject(source)) return false;
   const inspected = inspectHarnessPackageState(
@@ -781,6 +798,28 @@ function parseMachineSnapshot(
     revision,
     ...(recoveryReceipt ? { recoveryReceipt } : {}),
   };
+}
+
+function hasValidPresentMachineSnapshot(
+  source: UnknownRecord,
+  sessionId: string,
+): boolean {
+  if (!hasOwn(source, "machine")) return true;
+  const machine = source.machine;
+  if (!isObject(machine)) return false;
+  if (
+    !hasOwn(machine, "stateEnteredAt") ||
+    (machine.stateEnteredAt !== null && typeof machine.stateEnteredAt !== "string") ||
+    !hasOwn(machine, "revision") ||
+    typeof machine.revision !== "number" ||
+    !Number.isInteger(machine.revision) ||
+    machine.revision < 0
+  ) {
+    return false;
+  }
+  const parsed = parseMachineSnapshot(machine, sessionId);
+  if (!parsed) return false;
+  return !hasOwn(machine, "recoveryReceipt") || parsed.recoveryReceipt !== undefined;
 }
 
 function parseStoredCheckpoint(value: unknown): OnboardCheckpoint | null {
@@ -1235,6 +1274,31 @@ export function loadSession(): Session | null {
       throw error;
     }
     return null;
+  }
+}
+
+/**
+ * Distinguish an absent onboarding Session from present state that failed its
+ * owning parser. Installer migration uses this fail-closed boundary instead of
+ * interpreting corrupt recovery state as a fresh machine.
+ */
+export function readOnboardSessionState(): OnboardSessionReadResult {
+  try {
+    if (!fs.existsSync(SESSION_FILE)) return { status: "absent" };
+    const parsed = JSON.parse(fs.readFileSync(SESSION_FILE, "utf-8"));
+    const session = normalizeSession(parsed);
+    if (
+      !session ||
+      !isObject(parsed) ||
+      !hasValidPresentHarnessAgent(parsed) ||
+      !hasValidPresentSandboxName(parsed) ||
+      !hasValidPresentMachineSnapshot(parsed, session.sessionId)
+    ) {
+      return { status: "invalid" };
+    }
+    return { status: "valid", session };
+  } catch {
+    return { status: "invalid" };
   }
 }
 

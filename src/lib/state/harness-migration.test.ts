@@ -405,11 +405,50 @@ describe("legacy harness migration", () => {
     expect(initial.registry.sandboxes.owner?.harnessPackageMigration?.migratedAt).toBe(MIGRATED_AT);
   });
 
+  it("adopts a partial migration's exact pinned object after the reviewed bundle advances", () => {
+    const harness = new MigrationHarness(legacySession("hermes"), [
+      legacyRegistryEntry("owner", "hermes"),
+    ]);
+    const firstPreparation = prepareSession(harness);
+    harness.failRegistryLock = true;
+    expect(() => reconcile(harness, firstPreparation)).toThrow("injected registry lock failure");
+    expect(harness.session?.harnessPackage).toEqual(firstPreparation.harnessPackage);
+    expect(harness.registry.sandboxes.owner?.harnessPackage).toBeUndefined();
+
+    const packageRoot = path.join(bundledRoot, "nemoclaw-hermes");
+    const envelopePath = path.join(packageRoot, "nemoclaw-package.json");
+    const envelope = JSON.parse(fs.readFileSync(envelopePath, "utf8")) as Record<string, unknown>;
+    writeFile(
+      packageRoot,
+      "nemoclaw-package.json",
+      `${JSON.stringify({ ...envelope, packageVersion: "0.2.0" })}\n`,
+    );
+    writeFile(packageRoot, "runtime/payload.txt", "advanced reviewed Hermes bundle\n");
+    harness.events.splice(0);
+
+    const retryPreparation = prepareSession(harness);
+    expect(retryPreparation.packageDisposition).toBe("adopted-pinned");
+    expect(retryPreparation.harnessPackage).toEqual(firstPreparation.harnessPackage);
+    reconcile(harness, retryPreparation);
+
+    expect(harness.registry.sandboxes.owner?.harnessPackage).toEqual(
+      firstPreparation.harnessPackage,
+    );
+    expect(harness.events).not.toContain("package-install");
+  });
+
   it("adopts a migrated registry peer when its paired session remains legacy", () => {
     const harness = new MigrationHarness(legacySession("hermes"), [
       legacyRegistryEntry("owner", "hermes"),
     ]);
     const firstPreparation = prepareSession(harness);
+    installHarnessPackage(
+      {
+        packageRoot: firstPreparation.packageRoot,
+        sourceIdentity: firstPreparation.sourceIdentity,
+      },
+      { storeRoot },
+    );
     harness.registry.sandboxes.owner = {
       ...harness.registry.sandboxes.owner!,
       harnessPackage: firstPreparation.harnessPackage,

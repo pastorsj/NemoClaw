@@ -8,18 +8,19 @@ import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import {
   runStorageRemediationInstallerPreflight,
-  writeFailedOnboardSession,
   writeInstallerReadinessModuleStubs,
   writeNodeStub,
 } from "../helpers/installer-readiness-stubs";
 import {
   createInstallerCheckout,
+  INSTALLER_HARNESS_CLI_COMMANDS,
   type InstallerCheckout,
   writeInstallerLinkNpmStub,
   writeNpmStub,
   writeSourceCheckoutNpmStub,
   writeSourceCheckoutPackages,
 } from "../helpers/installer-run-fixture";
+import { runFailedSessionPromptChoice } from "../helpers/installer-session";
 import {
   INSTALLER_PAYLOAD,
   readShellConstant,
@@ -39,62 +40,7 @@ function installerCheckout(prefix: string): InstallerCheckout {
   onTestFinished(() => checkout.remove());
   return checkout;
 }
-function runFailedSessionPromptChoice(answer: string) {
-  const { root: tmp, binDir: fakeBin } = installerCheckout("nemoclaw-install-failed-choice-");
-  const onboardLog = path.join(tmp, "onboard.log");
-  const promptInput = path.join(tmp, "prompt-input.txt");
-  writeFailedOnboardSession(tmp);
-  fs.writeFileSync(promptInput, answer);
-  writeNodeStub(fakeBin);
-  writeExecutable(
-    path.join(fakeBin, "nemoclaw"),
-    `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "$NEMOCLAW_ONBOARD_LOG"
-exit 0
-`,
-  );
 
-  const result = spawnSync(
-    "bash",
-    [
-      "-c",
-      `
-set -euo pipefail
-source "$INSTALLER_UNDER_TEST"
-show_usage_notice() { :; }
-info() { printf 'INFO: %s\\n' "$*" >&2; }
-warn() { printf 'WARN: %s\\n' "$*" >&2; }
-error() { printf 'ERROR: %s\\n' "$*" >&2; exit 1; }
-function [ {
-  if [[ "$#" -eq 3 && "$1" = "-t" && "$2" = "0" && "$3" = "]" ]]; then
-    return 0
-  fi
-  builtin [ "$@"
-}
-run_onboard < "$PROMPT_INPUT_FILE"
-`,
-    ],
-    {
-      cwd: path.join(import.meta.dirname, "../.."),
-      encoding: "utf-8",
-      env: {
-        ...process.env,
-        FRESH: "",
-        HOME: tmp,
-        NEMOCLAW_AGENT: "openclaw",
-        NEMOCLAW_FRESH: "",
-        NEMOCLAW_NON_INTERACTIVE: "",
-        NON_INTERACTIVE: "",
-        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
-        INSTALLER_UNDER_TEST: INSTALLER_PAYLOAD,
-        NEMOCLAW_ONBOARD_LOG: onboardLog,
-        PROMPT_INPUT_FILE: promptInput,
-      },
-    },
-  );
-
-  return { result, onboardLog };
-}
 // ---------------------------------------------------------------------------
 
 describe("installer runtime preflight", { timeout: 90_000 }, () => {
@@ -183,6 +129,9 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ -n "\${1:-}" ] && [ -f "$1" ]; then
+  exec ${JSON.stringify(process.execPath)} "$@"
+fi
+if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
 if [ "$1" = "-e" ]; then
@@ -1051,6 +1000,9 @@ fi
 if [ -n "\${1:-}" ] && [ -f "$1" ]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
+if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
+  exec ${JSON.stringify(process.execPath)} "$@"
+fi
 if [ "$1" = "-e" ]; then
   exit 1
 fi
@@ -1153,6 +1105,9 @@ fi
 if [ -n "\${1:-}" ] && [ -f "$1" ]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
+if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
+  exec ${JSON.stringify(process.execPath)} "$@"
+fi
 if [ "$1" = "-e" ]; then
   exit 1
 fi
@@ -1243,6 +1198,7 @@ if [ "$1" = "install" ] || [ "$1" = "run" ]; then exit 0; fi
 if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
+${INSTALLER_HARNESS_CLI_COMMANDS}
 if [ "$1" = "--version" ]; then echo "nemoclaw v0.1.0-test"; exit 0; fi
 if [ "$1" = "onboard" ]; then exit 0; fi
 exit 0
@@ -1359,6 +1315,7 @@ if [ "$1" = "install" ] || [ "$1" = "run" ]; then exit 0; fi
 if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
+${INSTALLER_HARNESS_CLI_COMMANDS}
 if [ "$1" = "--version" ]; then echo "nemoclaw v0.1.0-test"; exit 0; fi
 if [ "$1" = "onboard" ]; then exit 0; fi
 exit 0
@@ -1468,6 +1425,7 @@ if [ "$1" = "install" ] || [ "$1" = "run" ]; then exit 0; fi
 if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
+${INSTALLER_HARNESS_CLI_COMMANDS}
 if [ "$1" = "--version" ]; then echo "nemoclaw v0.1.0-test"; exit 0; fi
 if [ "$1" = "onboard" ]; then exit 0; fi
 exit 0
@@ -2320,6 +2278,9 @@ if [ "$1" = "-v" ] || [ "$1" = "--version" ]; then echo "v22.19.0"; exit 0; fi
 if [ -n "\${1:-}" ] && [ -f "$1" ]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
+if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
+  exec ${JSON.stringify(process.execPath)} "$@"
+fi
 if [ "$1" = "-e" ]; then exit 1; fi
 exit 99`,
     );
@@ -2742,6 +2703,7 @@ exit 0`,
       path.join(fakeBin, "nemoclaw"),
       `#!/usr/bin/env bash
 echo "nemoclaw $*" >> ${JSON.stringify(phaseLog)}
+${INSTALLER_HARNESS_CLI_COMMANDS}
 if [ "$1" = "--version" ] || [ "$1" = "version" ]; then echo "nemoclaw v0.5.0"; fi
 exit 0`,
     );

@@ -34,7 +34,9 @@ function runInstallerOpenshellVersionFlow(
   const gatewayState = path.join(tmp, "gateway.state");
   const backupLog = path.join(tmp, "backup.log");
   const installLog = path.join(tmp, "install.log");
+  const workflowLog = path.join(tmp, "workflow.log");
   const healthyOpenshell = path.join(tmp, "healthy-openshell");
+  const preparedCli = path.join(bin, "nemoclaw-test-missing");
 
   fs.mkdirSync(path.dirname(registry), { recursive: true });
   fs.mkdirSync(bin, { recursive: true });
@@ -50,6 +52,26 @@ consume_station_local_vllm_resume() { return 1; }
 `,
   );
   writeExecutable(healthyOpenshell, installedOpenshellBody);
+  writeExecutable(
+    preparedCli,
+    `#!/usr/bin/env bash
+case "\${1:-}" in
+  --version)
+    printf 'nemoclaw-test-missing v0.1.0\n'
+    ;;
+  internal)
+    [ "\${2:-} \${3:-} \${4:-}" = "installer reconcile-harnesses --json" ] || exit 2
+    printf 'reconcile\n' >>"${workflowLog}"
+    printf '{"schemaVersion":1,"outcome":"ready"}\n'
+    ;;
+  harness)
+    [ "\${2:-}" = "install" ] || exit 2
+    printf 'harness-install\n' >>"${workflowLog}"
+    ;;
+  *) exit 2 ;;
+esac
+`,
+  );
   setupOpenshell(bin);
 
   const result = spawnSync(
@@ -58,7 +80,7 @@ consume_station_local_vllm_resume() { return 1; }
       "-c",
       `source "${INSTALLER_PAYLOAD}" >/dev/null 2>&1
 SCRIPT_DIR="${setupDir}"
-_CLI_PATH=""
+_CLI_PATH="${preparedCli}"
 _CLI_BIN="nemoclaw-test-missing"
 resolve_nemoclaw_gateway_port() { printf '8080\\n'; }
 preflight_explicit_express_flags() { :; }
@@ -69,16 +91,26 @@ step() { :; }
 install_nodejs() { :; }
 ensure_supported_runtime() { :; }
 fix_npm_permissions() { :; }
+run_installer_host_preflight() { return 0; }
+recover_preexisting_sandboxes_before_onboard() {
+  _PREEXISTING_SANDBOX_RECOVERY_RAN=true
+  _PREEXISTING_SANDBOX_ORPHANED=false
+}
+run_onboard() { :; }
 preinstall_backup_and_retire_legacy_gateway() {
   command_exists openshell || return 0
   printf 'backup\\n' >>"${backupLog}"
+  printf 'backup\\n' >>"${workflowLog}"
   [ -n "$(installed_openshell_version 2>/dev/null || true)" ] ||
     error "Could not determine the installed OpenShell version. The installer stopped after backup without retiring the gateway."
   printf 'gateway-retired\\n' >"${gatewayState}"
+  printf 'gateway-retired\\n' >>"${workflowLog}"
   printf '{"sandboxes":{}}\\n' >"${registry}"
 }
 install_nemoclaw() {
+  if [ "\${NEMOCLAW_DEFER_OPENSHELL_INSTALL:-}" = "1" ]; then return 0; fi
   printf 'install\\n' >>"${installLog}"
+  printf 'openshell-install\\n' >>"${workflowLog}"
   if ! command_exists openshell; then
     cp "${healthyOpenshell}" "${bin}/openshell"
   fi
@@ -103,6 +135,7 @@ main --non-interactive --yes-i-accept-third-party-software`,
     gatewayState: fs.readFileSync(gatewayState, "utf-8"),
     registry: fs.readFileSync(registry, "utf-8"),
     installLog: fs.existsSync(installLog) ? fs.readFileSync(installLog, "utf-8") : "",
+    workflowLog: fs.existsSync(workflowLog) ? fs.readFileSync(workflowLog, "utf-8") : "",
     openshellBody: fs.readFileSync(path.join(bin, "openshell"), "utf-8"),
   };
 }
@@ -181,6 +214,10 @@ printf 'current:%s\\n' "$*" >> "${cliLog}"
 printf 'require-all-env=%s\\n' "\${NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS:-}" >> "${cliLog}"
 if [ "\${1:-}" = "--version" ]; then
   printf 'nemoclaw v0.1.0\\n'
+  exit 0
+fi
+if [ "\${1:-} \${2:-} \${3:-} \${4:-}" = "internal installer reconcile-harnesses --json" ]; then
+  printf '{"schemaVersion":1,"outcome":"ready"}\\n'
   exit 0
 fi
 if [ "\${1:-}" = "backup-all" ] && [ "${currentBackupSucceeds}" != "1" ]; then
@@ -421,12 +458,22 @@ require_reportable_openshell_version`,
   });
 
   it("preserves a reportable OpenShell through the installer flow (#7300)", () => {
-    const { result, openshellBody } = runInstallerOpenshellVersionFlow((bin) => {
-      writeExecutable(path.join(bin, "openshell"), healthyOpenshell);
-    });
+    const { result, openshellBody, workflowLog } = runInstallerOpenshellVersionFlow(
+      (bin) => {
+        writeExecutable(path.join(bin, "openshell"), healthyOpenshell);
+      },
+    );
 
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(openshellBody).toBe(healthyOpenshell);
+    expect(workflowLog.split(/\r?\n/).filter(Boolean)).toEqual([
+      "reconcile",
+      "harness-install",
+      "reconcile",
+      "backup",
+      "gateway-retired",
+      "openshell-install",
+    ]);
   });
 
   it("installs OpenShell when no binary is present (#7300)", () => {
@@ -649,6 +696,12 @@ esac`,
     expect(result.stdout).toContain('"alpha"');
     expect(cliLog.split(/\r?\n/)).toContain("prepare-current");
     expect(cliLog.split(/\r?\n/)).toContain("current:backup-all");
+    const currentCliCommands = cliLog
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("current:"));
+    expect(
+      currentCliCommands.indexOf("current:internal installer reconcile-harnesses --json"),
+    ).toBeLessThan(currentCliCommands.indexOf("current:backup-all"));
     expect(cliLog).toContain("require-all-env=1");
     expect(cliLog).not.toContain("old:");
     expect(openshellLog).toContain("gateway remove nemoclaw");
