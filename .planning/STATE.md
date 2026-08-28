@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plans 02-05 through 02-13 established harness CLI, pinned definitions, selection, and
-  Session binding
-last_updated: "2026-08-28T06:59:00.000Z"
+status: Plans 02-05 through 02-14 established harness CLI, pinned definitions, selection, Session
+  binding, and exact package-managed resume
+last_updated: "2026-08-28T07:49:58.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 14
-  percent: 58
+  completed_plans: 15
+  percent: 63
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -22,10 +22,11 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plans 02-05 through 02-13 completed the public harness inventory/install workflow,
+Status: Plans 02-05 through 02-14 completed the public harness inventory/install workflow,
 installed-only agent compatibility list, exact registry authority, package-root definitions and
-builds, installed-package selection, and writer-locked Session binding. Plan 02-14 is in progress.
-This work does not activate or support an upstream product surface.
+builds, installed-package selection, writer-locked Session binding, and exact package-managed
+resume. Plan 02-15 is in progress. This work does not activate or support an upstream product
+surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
@@ -90,6 +91,8 @@ tree.
   candidate qualification or accepting damaged package state.
 - [x] Writer-locked onboarding proves exact package authority before portable recovery, then binds
   one complete fresh Session or owner-scoped legacy migration before ordinary onboarding work.
+- [x] Package-managed resume rejects flag, environment, recorded-agent, object, and pointer drift
+  before Session, router, portable-host, or runtime mutation.
 
 ## Architecture Recommendations
 
@@ -110,7 +113,7 @@ tree.
 
 ## Next Execution
 
-Complete Plan 02-14 against the accepted local-fork boundaries, then bind downstream
+Complete Plan 02-15 against the accepted local-fork boundaries, then bind downstream
 lifecycle state in dependency order. Keep arbitrary installed host code, remote package discovery,
 product activation, and support claims outside this work. An upstream contribution still requires
 its own accepted NVIDIA/NemoClaw product decision.

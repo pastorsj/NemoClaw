@@ -90,7 +90,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    no-messaging Linux/Brev development journey. Neither development run replaces exact staging
    Launchable release evidence.
 
-**Plans:** 13/23 plans executed
+**Plans:** 14/23 plans executed
 
 - [x] `02-01` — Obtain the accepted product-scope decision.
 - [x] `02-02` — Define and validate the agent package envelope and hostile package tree.
@@ -105,7 +105,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 - [x] `02-11` — Route package-managed image and build context through that root.
 - [x] `02-12` — Select zero, one, or many installed packages while preserving candidate gates.
 - [x] `02-13` — Bind fresh and legacy session identity under the existing writer lock.
-- [ ] `02-14` — Reject resume drift before mutation and preserve candidate behavior.
+- [x] `02-14` — Reject resume drift before mutation and preserve candidate behavior.
 - [ ] `02-15` — Carry identity through route, policy, and sandbox creation.
 - [ ] `02-16` — Carry identity through recreate and checkpoint recovery.
 - [ ] `02-17` — Publish exact final registration and bind recovery-only retained state.
