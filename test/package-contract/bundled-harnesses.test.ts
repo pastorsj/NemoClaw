@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -15,6 +15,10 @@ import { validateHarnessPackageTree } from "../../dist/lib/harness/package-tree"
 const REPOSITORY_ROOT = path.join(import.meta.dirname, "..", "..");
 const BUNDLED_ROOT = path.join(REPOSITORY_ROOT, "dist", "harnesses");
 const TSX = path.join(REPOSITORY_ROOT, "node_modules", "tsx", "dist", "cli.mjs");
+const PRIVATE_BUILD_EXPRESSION = `
+import { materializeBundledHarnesses } from "./scripts/build-harnesses.mts";
+materializeBundledHarnesses(process.argv[1] ?? "");
+`;
 const EXPECTED_IDS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 const DOCKERFILES = {
   openclaw: ["Dockerfile", "Dockerfile.base"],
@@ -27,25 +31,78 @@ const DOCKERFILES = {
 
 type PackResult = Array<{ files: Array<{ path: string }> }>;
 
-function artifactRoot(id: string): string {
-  return path.join(BUNDLED_ROOT, `nemoclaw-${id}`);
+function artifactRoot(id: string, outputRoot = BUNDLED_ROOT): string {
+  return path.join(outputRoot, `nemoclaw-${id}`);
 }
 
 function artifactPackPrefix(id: string): string {
   return `dist/harnesses/nemoclaw-${id}`;
 }
 
-function packageDigests(): Readonly<Record<string, string>> {
+function packageTreeSnapshots(outputRoot: string): Readonly<Record<string, unknown>> {
   return Object.fromEntries(
-    EXPECTED_IDS.map((id) => [id, validateHarnessPackageTree(artifactRoot(id)).contentDigest]),
+    EXPECTED_IDS.map((id) => {
+      const packageRoot = artifactRoot(id, outputRoot);
+      const validated = validateHarnessPackageTree(packageRoot);
+      const entries = [
+        { relativePath: ".", type: "directory" as const },
+        ...validated.entries.map(({ relativePath, type }) => ({ relativePath, type })),
+      ];
+      return [
+        id,
+        {
+          contentDigest: validated.contentDigest,
+          modes: entries.map(({ relativePath, type }) => ({
+            relativePath,
+            type,
+            mode: fs.statSync(path.join(packageRoot, relativePath)).mode & 0o777,
+          })),
+        },
+      ];
+    }),
   );
 }
 
+function sharedBundleSnapshot(): Readonly<Record<string, unknown>> {
+  const rootStat = fs.lstatSync(BUNDLED_ROOT, { bigint: true });
+  return {
+    rootIdentity: {
+      device: rootStat.dev,
+      inode: rootStat.ino,
+      mode: rootStat.mode,
+      modifiedAt: rootStat.mtimeNs,
+      changedAt: rootStat.ctimeNs,
+    },
+    packages: packageTreeSnapshots(BUNDLED_ROOT),
+  };
+}
+
+function makeTreeWritable(root: string): void {
+  fs.chmodSync(root, 0o700);
+  fs.readdirSync(root, { withFileTypes: true }).forEach((entry) => {
+    const target = path.join(root, entry.name);
+    entry.isDirectory() ? makeTreeWritable(target) : fs.chmodSync(target, 0o600);
+  });
+}
+
 function runBundledBuild(...args: readonly string[]): void {
-  execFileSync(process.execPath, [TSX, "scripts/build-harnesses.mts", ...args], {
+  const result = spawnSync(process.execPath, [TSX, "scripts/build-harnesses.mts", ...args], {
     cwd: REPOSITORY_ROOT,
     encoding: "utf8",
   });
+  expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
+}
+
+function runPrivateBundledBuild(outputRoot: string): void {
+  const result = spawnSync(
+    process.execPath,
+    [TSX, "--eval", PRIVATE_BUILD_EXPRESSION, outputRoot],
+    {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8",
+    },
+  );
+  expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
 }
 
 function packedFileList(): readonly string[] {
@@ -136,13 +193,28 @@ describe("bundled harness package artifacts", () => {
   });
 
   it("produces byte-identical validated package trees on repeated builds", () => {
-    const first = packageDigests();
-    runBundledBuild("--clean");
-    expect(fs.existsSync(BUNDLED_ROOT)).toBe(false);
-    runBundledBuild();
-    expect(packageDigests()).toEqual(first);
-    expect(() => runBundledBuild("--unsupported")).toThrow();
-    expect(packageDigests()).toEqual(first);
+    const sharedBefore = sharedBundleSnapshot();
+    const temporaryRoot = fs.mkdtempSync(
+      path.join(fs.realpathSync.native(path.dirname(REPOSITORY_ROOT)), ".nemoclaw-bundles-"),
+    );
+    const firstRoot = path.join(temporaryRoot, "first");
+    const secondRoot = path.join(temporaryRoot, "second");
+    try {
+      runPrivateBundledBuild(firstRoot);
+      const first = packageTreeSnapshots(firstRoot);
+      expect(sharedBundleSnapshot()).toEqual(sharedBefore);
+
+      runPrivateBundledBuild(secondRoot);
+      expect(packageTreeSnapshots(secondRoot)).toEqual(first);
+      expect(sharedBundleSnapshot()).toEqual(sharedBefore);
+
+      expect(() => runPrivateBundledBuild(firstRoot)).toThrow();
+      expect(() => runBundledBuild("--unsupported")).toThrow();
+      expect(sharedBundleSnapshot()).toEqual(sharedBefore);
+    } finally {
+      makeTreeWritable(temporaryRoot);
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   }, 120_000);
 
   it("publishes every accepted artifact and locally referenced build asset", () => {

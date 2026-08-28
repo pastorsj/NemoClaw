@@ -19,7 +19,7 @@ const { listBundledHarnessSources } = requireModule(
 const { parseHarnessPackageManifest } = requireModule(
   "../src/lib/harness/package-manifest.ts",
 ) as typeof import("../src/lib/harness/package-manifest");
-const { sameSnapshot, validateHarnessPackageTree } = requireModule(
+const { sameDirectoryIdentity, sameSnapshot, validateHarnessPackageTree } = requireModule(
   "../src/lib/harness/package-tree.ts",
 ) as typeof import("../src/lib/harness/package-tree");
 const { isInsideIgnoredCustomBuildContextPath } = requireModule(
@@ -166,6 +166,52 @@ function isOmittedAuthoringPath(relativePath: string, type: "directory" | "file"
     name.endsWith(".pyc") ||
     isInsideIgnoredCustomBuildContextPath(relativePath)
   );
+}
+
+interface OutputAncestorSnapshot {
+  readonly absolutePath: string;
+  readonly stat: fs.BigIntStats;
+}
+
+function captureAbsentCallerOwnedOutputRoot(outputRoot: string): readonly OutputAncestorSnapshot[] {
+  if (!path.isAbsolute(outputRoot) || path.resolve(outputRoot) !== outputRoot) {
+    throw new Error("Bundled harness output root must be one canonical absolute path");
+  }
+  if (fs.existsSync(outputRoot)) {
+    throw new Error("Bundled harness output root must not already exist");
+  }
+
+  const parent = path.dirname(outputRoot);
+  const currentUid = typeof process.geteuid === "function" ? process.geteuid() : undefined;
+  const ancestors: OutputAncestorSnapshot[] = [];
+  let candidate = parent;
+  while (true) {
+    const stat = fs.lstatSync(candidate, { bigint: true });
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error("Bundled harness output ancestors must be regular directories");
+    }
+    if (candidate === parent && currentUid !== undefined && stat.uid !== BigInt(currentUid)) {
+      throw new Error("Bundled harness output parent must be owned by the current user");
+    }
+    ancestors.push(Object.freeze({ absolutePath: candidate, stat }));
+    const next = path.dirname(candidate);
+    if (next === candidate) break;
+    candidate = next;
+  }
+  return Object.freeze(ancestors);
+}
+
+function assertOutputAncestorsUnchanged(ancestors: readonly OutputAncestorSnapshot[]): void {
+  ancestors.forEach(({ absolutePath, stat }) => {
+    const current = fs.lstatSync(absolutePath, { bigint: true });
+    if (
+      current.isSymbolicLink() ||
+      !current.isDirectory() ||
+      !sameDirectoryIdentity(stat, current)
+    ) {
+      throw new Error("Bundled harness output ancestor changed during materialization");
+    }
+  });
 }
 
 function ensureDirectory(destination: string): void {
@@ -356,8 +402,11 @@ function buildEnvelope(source: BundledHarnessSourceDeclaration): HarnessPackageE
   };
 }
 
-function buildArtifact(source: BundledHarnessSourceDeclaration): BuiltHarnessArtifact {
-  const packageRoot = path.join(BUNDLED_HARNESS_OUTPUT_ROOT, `nemoclaw-${source.id}`);
+function buildArtifact(
+  source: BundledHarnessSourceDeclaration,
+  outputRoot: string,
+): BuiltHarnessArtifact {
+  const packageRoot = path.join(outputRoot, `nemoclaw-${source.id}`);
   ensureDirectory(packageRoot);
   assertMappingAuthority(source.mappings);
   const destinationFiles = new Set<string>();
@@ -392,11 +441,26 @@ export function cleanBundledHarnesses(): void {
   fs.rmSync(BUNDLED_HARNESS_OUTPUT_ROOT, { recursive: true, force: true });
 }
 
+/** Materialize reviewed artifacts into one absent, caller-owned output root without replacing it. */
+export function materializeBundledHarnesses(outputRoot: string): readonly BuiltHarnessArtifact[] {
+  const ancestors = captureAbsentCallerOwnedOutputRoot(outputRoot);
+  fs.mkdirSync(outputRoot, { mode: 0o755 });
+  fs.chmodSync(outputRoot, 0o755);
+  const outputStat = fs.lstatSync(outputRoot);
+  if (outputStat.isSymbolicLink() || !outputStat.isDirectory()) {
+    throw new Error("Bundled harness output root must remain one regular directory");
+  }
+  assertOutputAncestorsUnchanged(ancestors);
+  return Object.freeze(
+    listBundledHarnessSources().map((source) => buildArtifact(source, outputRoot)),
+  );
+}
+
 /** Replace only the managed distribution subtree with reviewed bundled harness artifacts. */
 export function buildBundledHarnesses(): readonly BuiltHarnessArtifact[] {
   cleanBundledHarnesses();
-  ensureDirectory(BUNDLED_HARNESS_OUTPUT_ROOT);
-  return Object.freeze(listBundledHarnessSources().map(buildArtifact));
+  ensureDirectory(DISTRIBUTION_ROOT);
+  return materializeBundledHarnesses(BUNDLED_HARNESS_OUTPUT_ROOT);
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
