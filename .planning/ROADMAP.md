@@ -108,7 +108,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 - [x] `02-14` — Reject resume drift before mutation and preserve candidate behavior.
 - [x] `02-15` — Carry identity through route, policy, and sandbox creation.
 - [x] `02-16` — Carry identity through recreate and checkpoint recovery.
-- [ ] `02-17` — Publish exact final registration and bind recovery-only retained state.
+- [x] `02-17` — Publish exact final registration and bind recovery-only retained state.
 - [ ] `02-18` — Reconcile legacy owners before installer backup and OpenShell changes.
 - [ ] `02-19` — Persist rebuild-manifest identity and bind snapshot, backup, restore, and clone.
 - [ ] `02-20` — Bind prepared rebuild recovery and target context to exact identity.
