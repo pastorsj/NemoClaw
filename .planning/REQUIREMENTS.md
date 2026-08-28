@@ -31,9 +31,9 @@ while NemoClaw safely composes exact versions without taking ownership away from
 
 ### Common package envelope
 
-- [ ] **PKG-01**: Every component artifact carries a bounded, language-neutral package envelope with
+- [x] **PKG-01**: Every component artifact carries a bounded, language-neutral package envelope with
   schema version, kind, ID, display name, package version, contract version, and manifest path.
-- [ ] **PKG-02**: Package installation rejects links, special files, traversal, ownership or mode
+- [x] **PKG-02**: Package installation rejects links, special files, traversal, ownership or mode
   violations, excessive size or depth, identity conflicts, digest mismatches, and unknown contracts.
   One package kind, agent ID, package version, and contract version tuple cannot bind to multiple
   content digests; changed bytes require a new adapter package version.
@@ -44,7 +44,7 @@ while NemoClaw safely composes exact versions without taking ownership away from
 - [ ] **PKG-03A**: Package garbage collection retains immutable content while an active pointer,
   onboarding session, pending route reservation, recreate journal, pending policy checkpoint,
   sandbox, rollback record, snapshot, or supported release references its digest.
-- [ ] **PKG-04**: Core package loading performs no arbitrary package import or executable callback.
+- [x] **PKG-04**: Core package loading performs no arbitrary package import or executable callback.
   Type-specific executable behavior runs only at its accepted trust boundary.
 - [x] **PKG-04A**: In the first version, installed agent artifacts contain only validated data and
   sandbox or image-build code. Runtime-provider and serving host implementations are statically
@@ -57,12 +57,12 @@ while NemoClaw safely composes exact versions without taking ownership away from
 - [ ] **PKG-07**: Every in-tree package declares its authoring metadata, build output, package-local
   tests, and compiled entry point where needed. Root build, test, publication, and membership checks
   discover every declared package and fail if one is omitted.
-- [ ] **PKG-08**: The first implementation is agent-specific. Package-neutral storage or discovery
+- [x] **PKG-08**: The first implementation is agent-specific. Package-neutral storage or discovery
   is extracted only after a second accepted component kind consumes the same safe behavior.
 
 ### Agent runtime packages
 
-- [ ] **AGENT-01**: Agent packages extend the current `AgentDefinition` rather than replace it with a
+- [x] **AGENT-01**: Agent packages extend the current `AgentDefinition` rather than replace it with a
   generic callback interface.
 - [ ] **AGENT-02**: The current standard agent assets move under in-tree package roots with a shared
   responsibility structure and no root-relative legacy paths.
