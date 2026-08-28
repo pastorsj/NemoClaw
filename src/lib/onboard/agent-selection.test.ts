@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 import { getAgentChoices, loadAgent } from "../agent/defs";
 import { resolveAgent } from "../agent/onboard";
-import { createSelectOnboardAgent } from "./agent-selection";
+import { createSelectOnboardAgent, resolveQualifiedOnboardAgent } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 
 // Exercises the real agent registry (agents/openclaw + agents/hermes) so the
@@ -80,5 +80,18 @@ describe("selectOnboardAgent interactive agent selection", () => {
 
     assert.equal(agent, null);
     assert.equal(prompt.mock.calls.length, 0);
+  });
+});
+
+describe("resolveQualifiedOnboardAgent", () => {
+  it("keeps NemoCUA behind its existing explicit feature gate", () => {
+    assert.throws(() => resolveQualifiedOnboardAgent("nemocua", {}), /NemoCUA is disabled/u);
+
+    const definition = resolveQualifiedOnboardAgent("nemocua", {
+      NEMOCLAW_CUA_ENABLED: "1",
+    });
+
+    assert.equal(definition?.name, "nemocua");
+    assert.equal(resolveQualifiedOnboardAgent("openclaw", {}), null);
   });
 });

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +14,7 @@ vi.mock("../../agent/candidate-authority", () => ({
 }));
 
 import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import { createHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { createInMemoryRuntimeProviderBundle } from "../../../../test/helpers/runtime-provider-bundle";
 import {
   type CandidateQualificationFixture,
@@ -20,6 +22,7 @@ import {
 } from "../../agent/candidate-test-fixture";
 import { loadAgent } from "../../agent/defs";
 import { createOnboardAgentSelector } from "../../onboard/agent-selection";
+import { selectOnboardHarnessPackage } from "../../onboard/package-selection";
 import { MANAGED_IMAGE_REPOSITORIES } from "../../onboard/managed-image/contract";
 import { encodeManagedStartupProfile } from "../../onboard/managed-startup/profile";
 import { createRuntimeProviderBundleRegistry } from "../../onboard/runtime-provider/registry";
@@ -147,7 +150,9 @@ describe("Pi candidate operational surfaces", () => {
     // source alone and never probe the OpenClaw gateway.
     expect(runOpenshell).toHaveBeenCalled();
     expect(exitCodes).toEqual([0]);
-    expect(runOpenshell.mock.calls.every(([args]) => !args.join(" ").includes("openclaw"))).toBe(true);
+    expect(runOpenshell.mock.calls.every(([args]) => !args.join(" ").includes("openclaw"))).toBe(
+      true,
+    );
     expect(agent.forwardPort).toBe(0);
     expect(agent.healthProbe).toBeNull();
   });
@@ -181,6 +186,44 @@ describe("Pi candidate operational surfaces", () => {
     await expect(selectAgent({ resume: true, session: { agent: "pi" } })).rejects.toThrow(
       "Agent 'pi' is a release candidate and is not selectable in this release",
     );
+  });
+
+  it("keeps an explicitly qualified Pi outside installed package selection (#7927)", async () => {
+    const env = qualify();
+    const packageFixture = createHarnessPackageFixture();
+    const prompt = vi.fn(async () => "1");
+    packageFixture.installMany(["openclaw", "hermes"]);
+
+    try {
+      const selected = await selectOnboardHarnessPackage(
+        {
+          agentFlag: "pi",
+          bundledRoot: packageFixture.bundledRoot,
+          storeRoot: packageFixture.storeRoot,
+          canPrompt: true,
+          environment: env,
+          log: vi.fn(),
+          prompt,
+        },
+        {
+          listHarnessPackageInventory: () => {
+            throw new Error("qualified Pi must not consult standard package inventory");
+          },
+        },
+      );
+
+      expect(selected).toMatchObject({
+        kind: "qualified-agent",
+        recordedAgent: "pi",
+        harnessPackage: null,
+        resolvedPackage: null,
+      });
+      assert.equal(selected.kind, "qualified-agent");
+      expect(selected.effectiveDefinition.name).toBe("pi");
+      expect(prompt).not.toHaveBeenCalled();
+    } finally {
+      packageFixture.cleanup();
+    }
   });
 
   it("delegates Pi destroy cleanup to the selected compute-runtime provider (#7927)", () => {

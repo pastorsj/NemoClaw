@@ -3,6 +3,8 @@
 
 import type { AgentChoice, AgentDefinition } from "../agent/defs";
 import { getAgentChoices, loadAgent } from "../agent/defs";
+import { normalizeAgentSelector } from "../agent/aliases";
+import { isCandidateAgent } from "../agent/candidate";
 import { resolveAgent } from "../agent/onboard";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 
@@ -24,8 +26,14 @@ export interface SelectOnboardAgentDeps {
   ): AgentChoice;
 }
 
-async function promptForAgentChoice(
-  deps: SelectOnboardAgentDeps,
+export type OnboardAgentChoicePromptDeps = Pick<
+  SelectOnboardAgentDeps,
+  "log" | "prompt" | "selectFromNumberedMenu"
+>;
+
+/** Render the established numbered agent menu and return its selected choice. */
+export async function promptForAgentChoice(
+  deps: OnboardAgentChoicePromptDeps,
   choices: AgentChoice[],
 ): Promise<AgentChoice> {
   deps.log("");
@@ -38,6 +46,16 @@ async function promptForAgentChoice(
   // OpenClaw is sorted first (getAgentChoices), so index 1 is the default.
   const reply = await deps.prompt("  Choose [1]: ");
   return deps.selectFromNumberedMenu(reply, 1, choices);
+}
+
+/** Resolve only an explicitly requested, separately qualified repository agent. */
+export function resolveQualifiedOnboardAgent(
+  selector: string,
+  env: NodeJS.ProcessEnv = process.env,
+): AgentDefinition | null {
+  const agentId = normalizeAgentSelector(selector);
+  if (agentId !== "nemocua" && !isCandidateAgent(agentId)) return null;
+  return loadAgent(agentId, env);
 }
 
 export function createSelectOnboardAgent(deps: SelectOnboardAgentDeps) {
