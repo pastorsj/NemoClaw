@@ -14,6 +14,12 @@ import {
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
 } from "../../harness/package-identity";
+import {
+  parseNemoClawPolicyCreationReceipt,
+  type NemoClawPolicyCreationReceipt,
+} from "../../policy/merge";
+
+export { parseNemoClawPolicyCreationReceipt } from "../../policy/merge";
 
 const STATE_SCHEMA_VERSION = 1;
 const LEGACY_RECORD_SCHEMA_VERSION = 1;
@@ -36,7 +42,12 @@ const LEGACY_RECORD_FIELDS = new Set([
   "reason",
   "recordedAt",
 ]);
-const CURRENT_RECORD_FIELDS = new Set([...LEGACY_RECORD_FIELDS, "harnessPackage"]);
+const LEGACY_AUTHORITY_RECORD_FIELDS = new Set([
+  ...LEGACY_RECORD_FIELDS,
+  "createAttemptNonce",
+  "policyCreationReceipt",
+]);
+const CURRENT_RECORD_FIELDS = new Set([...LEGACY_AUTHORITY_RECORD_FIELDS, "harnessPackage"]);
 
 export function retainedSandboxRecoveryFile(sessionDirectory: string): string {
   return path.join(sessionDirectory, "retained-sandbox-recovery.json");
@@ -73,10 +84,16 @@ interface RetainedSandboxRecoveryRecordFields {
 
 export interface LegacyRetainedSandboxRecoveryRecord extends RetainedSandboxRecoveryRecordFields {
   readonly schemaVersion: typeof LEGACY_RECORD_SCHEMA_VERSION;
+  /** Added by #10510; absent on records written before that authority boundary. */
+  readonly createAttemptNonce?: string;
+  readonly policyCreationReceipt?: NemoClawPolicyCreationReceipt | null;
 }
 
 export interface CurrentRetainedSandboxRecoveryRecord extends RetainedSandboxRecoveryRecordFields {
   readonly schemaVersion: typeof RECORD_SCHEMA_VERSION;
+  /** Null only when upgrading a readable pre-#10510 version 1 record. */
+  readonly createAttemptNonce: string | null;
+  readonly policyCreationReceipt: NemoClawPolicyCreationReceipt | null;
   /** Exact package authority, or explicit null for a qualified candidate runtime. */
   readonly harnessPackage: HarnessPackageIdentity | null;
 }
@@ -84,23 +101,9 @@ export interface CurrentRetainedSandboxRecoveryRecord extends RetainedSandboxRec
 export type RetainedSandboxRecoveryRecord =
   | LegacyRetainedSandboxRecoveryRecord
   | CurrentRetainedSandboxRecoveryRecord;
-
-interface RetainedSandboxAdministratorResolutionReceipt {
-  readonly schemaVersion: typeof STATE_SCHEMA_VERSION;
-  readonly receiptId: string;
-  readonly recordId: string;
-  readonly sandboxName: string;
-  readonly sandboxIdentityFingerprint: string | null;
-  readonly gatewayName: string;
-  readonly gatewayPort: number;
-  readonly outcome: "removed_verified_identity" | "confirmed_absent_without_identity";
-  readonly resolvedAt: string;
-}
-
 interface RetainedSandboxRecoveryState {
   readonly schemaVersion: typeof STATE_SCHEMA_VERSION;
   readonly unresolved: readonly RetainedSandboxRecoveryRecord[];
-  readonly resolutions: readonly RetainedSandboxAdministratorResolutionReceipt[];
 }
 
 interface RetainedSandboxStateDirectory {
@@ -118,6 +121,8 @@ export interface RecordRetainedSandboxRecoveryInput {
   readonly lifecycleGeneration: string | null;
   readonly verifiedEffectivePolicyIdentity: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
   readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly createAttemptNonce: string;
+  readonly policyCreationReceipt: NemoClawPolicyCreationReceipt | null;
   readonly resources: RetainedSandboxResourceEvidence;
   readonly reason: RetainedSandboxRecoveryReason;
   readonly recordedAt?: string;
@@ -170,7 +175,6 @@ export function requireRetainedRecoveryPackage(
 const emptyState = (): RetainedSandboxRecoveryState => ({
   schemaVersion: STATE_SCHEMA_VERSION,
   unresolved: [],
-  resolutions: [],
 });
 
 function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
@@ -470,9 +474,14 @@ function parseNullableHarnessPackageIdentity(
 function parseRecord(value: unknown): RetainedSandboxRecoveryRecord | null {
   if (!isObjectRecord(value)) return null;
   const schemaVersion = value.schemaVersion;
+  const legacyHasCreationAuthority =
+    schemaVersion === LEGACY_RECORD_SCHEMA_VERSION &&
+    hasExactFields(value, LEGACY_AUTHORITY_RECORD_FIELDS);
   const fields =
     schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
-      ? LEGACY_RECORD_FIELDS
+      ? legacyHasCreationAuthority
+        ? LEGACY_AUTHORITY_RECORD_FIELDS
+        : LEGACY_RECORD_FIELDS
       : schemaVersion === RECORD_SCHEMA_VERSION
         ? CURRENT_RECORD_FIELDS
         : null;
@@ -487,6 +496,26 @@ function parseRecord(value: unknown): RetainedSandboxRecoveryRecord | null {
     schemaVersion === RECORD_SCHEMA_VERSION
       ? parseNullableHarnessPackageIdentity(value.harnessPackage)
       : undefined;
+  const hasCreationAuthority =
+    schemaVersion === RECORD_SCHEMA_VERSION || legacyHasCreationAuthority;
+  const createAttemptNonce = hasCreationAuthority
+    ? value.createAttemptNonce === null && schemaVersion === RECORD_SCHEMA_VERSION
+      ? null
+      : typeof value.createAttemptNonce === "string" &&
+          /^[0-9a-f]{62}$/u.test(value.createAttemptNonce)
+        ? value.createAttemptNonce
+        : undefined
+    : undefined;
+  let policyCreationReceipt: NemoClawPolicyCreationReceipt | null | undefined = hasCreationAuthority
+    ? null
+    : undefined;
+  if (hasCreationAuthority && value.policyCreationReceipt !== null) {
+    try {
+      policyCreationReceipt = parseNemoClawPolicyCreationReceipt(value.policyCreationReceipt);
+    } catch {
+      return null;
+    }
+  }
   if (
     typeof value.recordId !== "string" ||
     !FINGERPRINT_PATTERN.test(value.recordId) ||
@@ -498,6 +527,16 @@ function parseRecord(value: unknown): RetainedSandboxRecoveryRecord | null {
     !validGatewayPort(value.gatewayPort) ||
     (value.lifecycleGeneration !== null && !validSafeEvidence(value.lifecycleGeneration)) ||
     verifiedEffectivePolicyIdentity === undefined ||
+    (hasCreationAuthority && createAttemptNonce === undefined) ||
+    (policyCreationReceipt !== null &&
+      policyCreationReceipt !== undefined &&
+      (policyCreationReceipt.gatewayName !== value.gatewayName ||
+        policyCreationReceipt.gatewayPort !== value.gatewayPort ||
+        policyCreationReceipt.sandboxName !== value.sandboxName ||
+        policyCreationReceipt.lifecycleGeneration !== value.lifecycleGeneration ||
+        policyCreationReceipt.sandboxIdentityFingerprint !== fingerprint ||
+        policyCreationReceipt.policyHash !== verifiedEffectivePolicyIdentity?.hash ||
+        policyCreationReceipt.policyVersion !== verifiedEffectivePolicyIdentity?.activeVersion)) ||
     !resources ||
     !["cancelled_after_sandbox_creation", "retained_after_sandbox_creation_failure"].includes(
       String(reason),
@@ -507,88 +546,52 @@ function parseRecord(value: unknown): RetainedSandboxRecoveryRecord | null {
     return null;
   }
   if (schemaVersion === RECORD_SCHEMA_VERSION && harnessPackage === undefined) return null;
+  const sharedFields = {
+    recordId: value.recordId,
+    sandboxName: value.sandboxName,
+    sandboxIdentityFingerprint: fingerprint,
+    identityWasUnavailable: fingerprint === null,
+    gatewayName: value.gatewayName,
+    gatewayPort: value.gatewayPort,
+    lifecycleGeneration: value.lifecycleGeneration,
+    verifiedEffectivePolicyIdentity,
+    resources,
+    reason: reason as RetainedSandboxRecoveryReason,
+    recordedAt: value.recordedAt,
+  };
   const record: RetainedSandboxRecoveryRecord =
     schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
       ? {
           schemaVersion: LEGACY_RECORD_SCHEMA_VERSION,
-          recordId: value.recordId,
-          sandboxName: value.sandboxName,
-          sandboxIdentityFingerprint: fingerprint,
-          identityWasUnavailable: fingerprint === null,
-          gatewayName: value.gatewayName,
-          gatewayPort: value.gatewayPort,
-          lifecycleGeneration: value.lifecycleGeneration,
-          verifiedEffectivePolicyIdentity,
-          resources,
-          reason: reason as RetainedSandboxRecoveryReason,
-          recordedAt: value.recordedAt,
+          ...sharedFields,
+          ...(legacyHasCreationAuthority
+            ? {
+                createAttemptNonce: createAttemptNonce as string,
+                policyCreationReceipt: policyCreationReceipt!,
+              }
+            : {}),
         }
       : {
           schemaVersion: RECORD_SCHEMA_VERSION,
-          recordId: value.recordId,
-          sandboxName: value.sandboxName,
-          sandboxIdentityFingerprint: fingerprint,
-          identityWasUnavailable: fingerprint === null,
-          gatewayName: value.gatewayName,
-          gatewayPort: value.gatewayPort,
-          lifecycleGeneration: value.lifecycleGeneration,
-          verifiedEffectivePolicyIdentity,
+          ...sharedFields,
+          createAttemptNonce: createAttemptNonce!,
+          policyCreationReceipt: policyCreationReceipt!,
           harnessPackage: harnessPackage!,
-          resources,
-          reason: reason as RetainedSandboxRecoveryReason,
-          recordedAt: value.recordedAt,
         };
-  if (record.recordId !== recoveryRecordId(record)) return null;
-  return record;
+  return record.recordId === recoveryRecordId(record) ? record : null;
 }
-
-function parseReceipt(value: unknown): RetainedSandboxAdministratorResolutionReceipt | null {
-  if (!isObjectRecord(value)) return null;
-  const fingerprint = value.sandboxIdentityFingerprint;
-  const outcome = value.outcome;
-  if (
-    value.schemaVersion !== STATE_SCHEMA_VERSION ||
-    typeof value.receiptId !== "string" ||
-    !FINGERPRINT_PATTERN.test(value.receiptId) ||
-    typeof value.recordId !== "string" ||
-    !FINGERPRINT_PATTERN.test(value.recordId) ||
-    !validSandboxName(value.sandboxName) ||
-    (fingerprint !== null &&
-      (typeof fingerprint !== "string" || !FINGERPRINT_PATTERN.test(fingerprint))) ||
-    !validSafeEvidence(value.gatewayName) ||
-    !validGatewayPort(value.gatewayPort) ||
-    !["removed_verified_identity", "confirmed_absent_without_identity"].includes(String(outcome)) ||
-    !validTimestamp(value.resolvedAt)
-  ) {
-    return null;
-  }
-  return {
-    schemaVersion: STATE_SCHEMA_VERSION,
-    receiptId: value.receiptId,
-    recordId: value.recordId,
-    sandboxName: value.sandboxName,
-    sandboxIdentityFingerprint: fingerprint,
-    gatewayName: value.gatewayName,
-    gatewayPort: value.gatewayPort,
-    outcome: outcome as RetainedSandboxAdministratorResolutionReceipt["outcome"],
-    resolvedAt: value.resolvedAt,
-  };
-}
-
 function loadState(filePath: string): RetainedSandboxRecoveryState {
   const value = readStateFile(filePath);
   if (!isObjectRecord(value) || value.schemaVersion !== STATE_SCHEMA_VERSION) {
     throw new Error("Retained sandbox recovery state has an unsupported schema.");
   }
   const unresolved = Array.isArray(value.unresolved) ? value.unresolved.map(parseRecord) : null;
-  const resolutions = Array.isArray(value.resolutions) ? value.resolutions.map(parseReceipt) : null;
-  if (!unresolved || unresolved.includes(null) || !resolutions || resolutions.includes(null)) {
+  if (!unresolved || unresolved.includes(null)) {
     throw new Error("Retained sandbox recovery state is invalid; onboarding remains blocked.");
   }
   return {
     schemaVersion: STATE_SCHEMA_VERSION,
     unresolved: unresolved as RetainedSandboxRecoveryRecord[],
-    resolutions: resolutions as RetainedSandboxAdministratorResolutionReceipt[],
   };
 }
 
@@ -607,9 +610,10 @@ function recoveryRecordId(
         input.sandboxIdentityFingerprint,
         input.lifecycleGeneration,
         input.verifiedEffectivePolicyIdentity,
-        ...("schemaVersion" in input && input.schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
-          ? []
-          : [input.harnessPackage]),
+        ...("createAttemptNonce" in input
+          ? [input.createAttemptNonce, input.policyCreationReceipt]
+          : []),
+        ...("harnessPackage" in input ? [input.harnessPackage] : []),
       ]),
     )
     .digest("hex");
@@ -625,9 +629,29 @@ function assertRecordInput(input: RecordRetainedSandboxRecoveryInput): void {
     (input.lifecycleGeneration !== null && !validSafeEvidence(input.lifecycleGeneration)) ||
     parseVerifiedEffectivePolicyIdentity(input.verifiedEffectivePolicyIdentity) === undefined ||
     parseNullableHarnessPackageIdentity(input.harnessPackage) === undefined ||
+    !/^[0-9a-f]{62}$/u.test(input.createAttemptNonce) ||
     !parseEvidence(input.resources)
   ) {
     throw new Error("Cannot persist invalid retained sandbox recovery evidence.");
+  }
+  if (input.policyCreationReceipt !== null) {
+    let receipt: NemoClawPolicyCreationReceipt;
+    try {
+      receipt = parseNemoClawPolicyCreationReceipt(input.policyCreationReceipt);
+    } catch {
+      throw new Error("Cannot persist invalid retained sandbox recovery evidence.");
+    }
+    if (
+      receipt.gatewayName !== input.gatewayName ||
+      receipt.gatewayPort !== input.gatewayPort ||
+      receipt.sandboxName !== input.sandboxName ||
+      receipt.lifecycleGeneration !== input.lifecycleGeneration ||
+      receipt.sandboxIdentityFingerprint !== input.sandboxIdentityFingerprint ||
+      receipt.policyHash !== input.verifiedEffectivePolicyIdentity?.hash ||
+      receipt.policyVersion !== input.verifiedEffectivePolicyIdentity?.activeVersion
+    ) {
+      throw new Error("Cannot persist mismatched retained sandbox recovery evidence.");
+    }
   }
 }
 
@@ -648,6 +672,10 @@ export function recordRetainedSandboxRecovery(
       input.verifiedEffectivePolicyIdentity,
     )!,
     harnessPackage: parseNullableHarnessPackageIdentity(input.harnessPackage)!,
+    createAttemptNonce: input.createAttemptNonce,
+    policyCreationReceipt: input.policyCreationReceipt
+      ? parseNemoClawPolicyCreationReceipt(input.policyCreationReceipt)
+      : null,
     resources: parseEvidence(input.resources)!,
   };
   const record: RetainedSandboxRecoveryRecord = {
@@ -662,6 +690,8 @@ export function recordRetainedSandboxRecovery(
     verifiedEffectivePolicyIdentity: normalizedInput.verifiedEffectivePolicyIdentity
       ? { ...normalizedInput.verifiedEffectivePolicyIdentity }
       : null,
+    createAttemptNonce: normalizedInput.createAttemptNonce,
+    policyCreationReceipt: normalizedInput.policyCreationReceipt,
     harnessPackage: normalizedInput.harnessPackage,
     resources: normalizedInput.resources,
     reason: normalizedInput.reason,
@@ -682,7 +712,7 @@ export function recordRetainedSandboxRecovery(
   const reread = loadState(filePath).unresolved.find(
     (candidate) => candidate.recordId === record.recordId,
   );
-  if (!reread || JSON.stringify(reread) !== JSON.stringify(record)) {
+  if (!reread || !isDeepStrictEqual(reread, record)) {
     throw new Error("Retained sandbox recovery record did not survive durable readback.");
   }
   return reread;
@@ -692,21 +722,9 @@ function bindPackageToLegacyRecord(
   legacy: LegacyRetainedSandboxRecoveryRecord,
   harnessPackage: HarnessPackageIdentity | null,
 ): CurrentRetainedSandboxRecoveryRecord {
-  const currentInput: RecordRetainedSandboxRecoveryInput = {
-    sandboxName: legacy.sandboxName,
-    sandboxIdentityFingerprint: legacy.sandboxIdentityFingerprint,
-    gatewayName: legacy.gatewayName,
-    gatewayPort: legacy.gatewayPort,
-    lifecycleGeneration: legacy.lifecycleGeneration,
-    verifiedEffectivePolicyIdentity: legacy.verifiedEffectivePolicyIdentity,
-    harnessPackage,
-    resources: legacy.resources,
-    reason: legacy.reason,
-    recordedAt: legacy.recordedAt,
-  };
-  return {
+  const current: CurrentRetainedSandboxRecoveryRecord = {
     schemaVersion: RECORD_SCHEMA_VERSION,
-    recordId: recoveryRecordId(currentInput),
+    recordId: "",
     sandboxName: legacy.sandboxName,
     sandboxIdentityFingerprint: legacy.sandboxIdentityFingerprint,
     identityWasUnavailable: legacy.identityWasUnavailable,
@@ -714,11 +732,14 @@ function bindPackageToLegacyRecord(
     gatewayPort: legacy.gatewayPort,
     lifecycleGeneration: legacy.lifecycleGeneration,
     verifiedEffectivePolicyIdentity: legacy.verifiedEffectivePolicyIdentity,
+    createAttemptNonce: legacy.createAttemptNonce ?? null,
+    policyCreationReceipt: legacy.policyCreationReceipt ?? null,
     harnessPackage,
     resources: legacy.resources,
     reason: legacy.reason,
     recordedAt: legacy.recordedAt,
   };
+  return { ...current, recordId: recoveryRecordId(current) };
 }
 
 /**

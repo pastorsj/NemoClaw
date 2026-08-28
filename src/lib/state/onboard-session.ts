@@ -18,6 +18,7 @@ import { GATEWAY_PORT } from "../core/ports";
 import {
   harnessPackageAuthoritiesEqual,
   inspectHarnessPackageState,
+  parseHarnessPackageId,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
 } from "../harness/package-identity";
@@ -69,6 +70,7 @@ import {
 import { nextMachineStateAfterCompletedStep } from "./onboard-step-state";
 import {
   listRetainedSandboxRecoveryRecords as readRetainedSandboxRecoveryRecords,
+  parseNemoClawPolicyCreationReceipt,
   reconcileRetainedRecoveryPackage as writeRetainedRecoveryPackage,
   recordRetainedSandboxRecovery as writeRetainedSandboxRecovery,
   requireRetainedRecoveryPackage,
@@ -100,6 +102,7 @@ const SAFE_VLLM_INSTALL_MODEL = /^[A-Za-z0-9._:/-]+$/;
 export class InvalidPersistedPolicyAuthorityError extends Error {}
 export class InvalidPersistedApfInterceptorIntentError extends Error {}
 export class InvalidPersistedHarnessPackageError extends Error {}
+export class InvalidPersistedCancellationRecoveryError extends Error {}
 
 // Session-specific aliases for the shared JSON types.
 type SessionJsonValue = JsonValue;
@@ -138,7 +141,51 @@ export interface SessionCancellationRecovery {
   readonly reason: "cancelled_after_sandbox_creation" | "retained_after_sandbox_creation_failure";
   readonly sandboxName: string;
   readonly sandboxIdentityFingerprint: string | null;
+  readonly gatewayName: string;
+  readonly gatewayPort: number;
+  readonly lifecycleGeneration: string;
+  readonly verifiedEffectivePolicyIdentity: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
+  readonly createAttemptNonce: string;
+  readonly policyCreationReceipt:
+    | NonNullable<RetainedSandboxRecoveryRecord["policyCreationReceipt"]>
+    | null;
   readonly recordedAt: string;
+}
+
+function sameCancellationRecovery(
+  left: SessionCancellationRecovery | null,
+  right: SessionCancellationRecovery | null,
+): boolean {
+  if (left === null || right === null) return left === right;
+  const leftPolicy = left.verifiedEffectivePolicyIdentity;
+  const rightPolicy = right.verifiedEffectivePolicyIdentity;
+  const leftReceipt = left.policyCreationReceipt;
+  const rightReceipt = right.policyCreationReceipt;
+  return (
+    left.reason === right.reason &&
+    left.sandboxName === right.sandboxName &&
+    left.sandboxIdentityFingerprint === right.sandboxIdentityFingerprint &&
+    left.gatewayName === right.gatewayName &&
+    left.gatewayPort === right.gatewayPort &&
+    left.lifecycleGeneration === right.lifecycleGeneration &&
+    left.createAttemptNonce === right.createAttemptNonce &&
+    left.recordedAt === right.recordedAt &&
+    (leftPolicy === null || rightPolicy === null
+      ? leftPolicy === rightPolicy
+      : leftPolicy.hash === rightPolicy.hash &&
+        leftPolicy.activeVersion === rightPolicy.activeVersion) &&
+    (leftReceipt === null || rightReceipt === null
+      ? leftReceipt === rightReceipt
+      : leftReceipt.schemaVersion === rightReceipt.schemaVersion &&
+        leftReceipt.origin === rightReceipt.origin &&
+        leftReceipt.gatewayName === rightReceipt.gatewayName &&
+        leftReceipt.gatewayPort === rightReceipt.gatewayPort &&
+        leftReceipt.sandboxName === rightReceipt.sandboxName &&
+        leftReceipt.lifecycleGeneration === rightReceipt.lifecycleGeneration &&
+        leftReceipt.sandboxIdentityFingerprint === rightReceipt.sandboxIdentityFingerprint &&
+        leftReceipt.policyHash === rightReceipt.policyHash &&
+        leftReceipt.policyVersion === rightReceipt.policyVersion)
+  );
 }
 
 export interface SessionMetadata {
@@ -484,9 +531,9 @@ function openPinnedSessionDirectory(): PinnedSessionDirectory {
   }
 }
 
-function assertTemporarySessionFile(descriptor: number, temporary: string): fs.Stats {
+function assertSessionFileIdentity(descriptor: number, filePath: string): fs.Stats {
   const descriptorStat = fs.fstatSync(descriptor);
-  const pathStat = fs.lstatSync(temporary);
+  const pathStat = fs.lstatSync(filePath);
   if (
     !descriptorStat.isFile() ||
     descriptorStat.nlink !== 1 ||
@@ -495,7 +542,7 @@ function assertTemporarySessionFile(descriptor: number, temporary: string): fs.S
     pathStat.nlink !== 1 ||
     !sameSessionFileIdentity(descriptorStat, pathStat)
   ) {
-    throw new Error("NemoClaw onboarding temporary state changed during validation.");
+    throw new Error("NemoClaw onboarding session state changed during validation.");
   }
   return descriptorStat;
 }
@@ -603,7 +650,13 @@ function hasOwn(value: object, key: string): boolean {
 }
 
 function hasValidPresentHarnessAgent(source: UnknownRecord): boolean {
-  return !hasOwn(source, "agent") || source.agent === null || typeof source.agent === "string";
+  if (!hasOwn(source, "agent") || source.agent === null) return true;
+  try {
+    parseHarnessPackageId(source.agent);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function hasValidPresentSandboxName(source: UnknownRecord): boolean {
@@ -872,12 +925,51 @@ function parseSessionCancellationRecovery(
   const recordedAt = readCanonicalIsoTimestamp(value.recordedAt);
   const fingerprint =
     value.sandboxIdentityFingerprint === null ? null : readString(value.sandboxIdentityFingerprint);
+  const gatewayName = readString(value.gatewayName);
+  const gatewayPort = value.gatewayPort;
+  const lifecycleGeneration = readString(value.lifecycleGeneration);
+  const createAttemptNonce = readString(value.createAttemptNonce);
+  const verifiedEffectivePolicyIdentity = (() => {
+    if (value.verifiedEffectivePolicyIdentity === null) return null;
+    if (!isObject(value.verifiedEffectivePolicyIdentity)) return undefined;
+    const hash = readString(value.verifiedEffectivePolicyIdentity.hash);
+    const activeVersion = value.verifiedEffectivePolicyIdentity.activeVersion;
+    return hash && Number.isSafeInteger(activeVersion) && Number(activeVersion) > 0
+      ? { hash, activeVersion: Number(activeVersion) }
+      : undefined;
+  })();
+  let policyCreationReceipt:
+    | NonNullable<RetainedSandboxRecoveryRecord["policyCreationReceipt"]>
+    | null = null;
+  if (value.policyCreationReceipt !== null) {
+    try {
+      policyCreationReceipt = parseNemoClawPolicyCreationReceipt(value.policyCreationReceipt);
+    } catch {
+      return null;
+    }
+  }
   if (
     !sandboxName ||
     sandboxName.length > NAME_MAX_LENGTH ||
     !NAME_VALID_PATTERN.test(sandboxName) ||
     !recordedAt ||
-    (fingerprint !== null && !/^[0-9a-f]{64}$/u.test(fingerprint))
+    (fingerprint !== null && !/^[0-9a-f]{64}$/u.test(fingerprint)) ||
+    !gatewayName ||
+    !Number.isSafeInteger(gatewayPort) ||
+    Number(gatewayPort) < 1024 ||
+    Number(gatewayPort) > 65_535 ||
+    !lifecycleGeneration ||
+    verifiedEffectivePolicyIdentity === undefined ||
+    !createAttemptNonce ||
+    !/^[0-9a-f]{62}$/u.test(createAttemptNonce) ||
+    (policyCreationReceipt !== null &&
+      (policyCreationReceipt.gatewayName !== gatewayName ||
+        policyCreationReceipt.gatewayPort !== Number(gatewayPort) ||
+        policyCreationReceipt.sandboxName !== sandboxName ||
+        policyCreationReceipt.lifecycleGeneration !== lifecycleGeneration ||
+        policyCreationReceipt.sandboxIdentityFingerprint !== fingerprint ||
+        policyCreationReceipt.policyHash !== verifiedEffectivePolicyIdentity?.hash ||
+        policyCreationReceipt.policyVersion !== verifiedEffectivePolicyIdentity?.activeVersion))
   ) {
     return null;
   }
@@ -885,6 +977,12 @@ function parseSessionCancellationRecovery(
     reason: value.reason,
     sandboxName,
     sandboxIdentityFingerprint: fingerprint,
+    gatewayName,
+    gatewayPort: Number(gatewayPort),
+    lifecycleGeneration,
+    verifiedEffectivePolicyIdentity,
+    createAttemptNonce,
+    policyCreationReceipt,
     recordedAt,
   };
 }
@@ -1129,7 +1227,9 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     data.cancellationRecovery !== null &&
     !cancellationRecovery
   ) {
-    return null;
+    throw new InvalidPersistedCancellationRecoveryError(
+      "Refusing to load the onboarding session: saved recovery authority is incomplete.",
+    );
   }
 
   const normalized = createSession({
@@ -1191,7 +1291,9 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
       (normalized.resumable !== false ||
         normalized.sandboxName !== cancellationRecovery.sandboxName))
   ) {
-    return null;
+    throw new InvalidPersistedCancellationRecoveryError(
+      "Refusing to load the onboarding session: saved recovery authority is incomplete.",
+    );
   }
   if (
     normalized.stationExpressIntent &&
@@ -1260,20 +1362,47 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
 }
 
 export function loadSession(): Session | null {
+  const lockOwned = heldLockFd !== null;
+  let descriptor: number | null = null;
   try {
-    if (!fs.existsSync(SESSION_FILE)) {
-      return null;
+    if (lockOwned) assertOnboardLockOwned();
+    let contents: string;
+    if (lockOwned) {
+      try {
+        descriptor = fs.openSync(
+          SESSION_FILE,
+          fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
+        );
+      } catch (error) {
+        if (isErrnoException(error) && error.code === "ENOENT") {
+          assertOnboardLockOwned();
+          return null;
+        }
+        throw error;
+      }
+      assertSessionFileIdentity(descriptor, SESSION_FILE);
+      contents = String(fs.readFileSync(descriptor, "utf-8"));
+      assertSessionFileIdentity(descriptor, SESSION_FILE);
+    } else {
+      if (!fs.existsSync(SESSION_FILE)) return null;
+      contents = fs.readFileSync(SESSION_FILE, "utf-8");
     }
-    const parsed = JSON.parse(fs.readFileSync(SESSION_FILE, "utf-8"));
-    return normalizeSession(parsed);
+    const parsed = JSON.parse(contents);
+    const normalized = normalizeSession(parsed);
+    if (lockOwned) assertOnboardLockOwned();
+    return normalized;
   } catch (error) {
     if (
       error instanceof InvalidPersistedPolicyAuthorityError ||
-      error instanceof InvalidPersistedApfInterceptorIntentError
+      error instanceof InvalidPersistedApfInterceptorIntentError ||
+      error instanceof InvalidPersistedCancellationRecoveryError
     ) {
       throw error;
     }
+    if (lockOwned) throw error;
     return null;
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
   }
 }
 
@@ -1283,22 +1412,49 @@ export function loadSession(): Session | null {
  * interpreting corrupt recovery state as a fresh machine.
  */
 export function readOnboardSessionState(): OnboardSessionReadResult {
+  const lockOwned = heldLockFd !== null;
+  let descriptor: number | null = null;
   try {
-    if (!fs.existsSync(SESSION_FILE)) return { status: "absent" };
-    const parsed = JSON.parse(fs.readFileSync(SESSION_FILE, "utf-8"));
+    if (lockOwned) assertOnboardLockOwned();
+    let contents: string;
+    if (lockOwned) {
+      try {
+        descriptor = fs.openSync(
+          SESSION_FILE,
+          fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
+        );
+      } catch (error) {
+        if (isErrnoException(error) && error.code === "ENOENT") {
+          assertOnboardLockOwned();
+          return { status: "absent" };
+        }
+        throw error;
+      }
+      assertSessionFileIdentity(descriptor, SESSION_FILE);
+      contents = String(fs.readFileSync(descriptor, "utf-8"));
+      assertSessionFileIdentity(descriptor, SESSION_FILE);
+    } else {
+      if (!fs.existsSync(SESSION_FILE)) return { status: "absent" };
+      contents = fs.readFileSync(SESSION_FILE, "utf-8");
+    }
+    const parsed = JSON.parse(contents);
     const session = normalizeSession(parsed);
     if (
       !session ||
       !isObject(parsed) ||
+      hasInvalidSessionHarnessPackage(session) ||
       !hasValidPresentHarnessAgent(parsed) ||
       !hasValidPresentSandboxName(parsed) ||
       !hasValidPresentMachineSnapshot(parsed, session.sessionId)
     ) {
       return { status: "invalid" };
     }
+    if (lockOwned) assertOnboardLockOwned();
     return { status: "valid", session };
   } catch {
     return { status: "invalid" };
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
   }
 }
 
@@ -1325,7 +1481,9 @@ export function saveSession(session: Session): Session {
     );
   }
   normalized.updatedAt = new Date().toISOString();
-  const directory = openPinnedSessionDirectory();
+  const lockOwned = heldLockFd !== null;
+  if (lockOwned) assertOnboardLockOwned();
+  const directory = lockOwned ? heldLockDirectory! : openPinnedSessionDirectory();
   const tmpFile = path.join(
     SESSION_DIR,
     `.onboard-session.${process.pid}.${Date.now()}.${randomUUID()}.tmp`,
@@ -1342,16 +1500,15 @@ export function saveSession(session: Session): Session {
       0o600,
     );
     revalidatePinnedSessionDirectory(directory);
-    temporaryStat = assertTemporarySessionFile(descriptor, tmpFile);
+    temporaryStat = assertSessionFileIdentity(descriptor, tmpFile);
     fs.writeFileSync(descriptor, JSON.stringify(serializeSessionForDisk(normalized), null, 2));
     fs.fchmodSync(descriptor, 0o600);
     fs.fsyncSync(descriptor);
-    temporaryStat = assertTemporarySessionFile(descriptor, tmpFile);
-    fs.closeSync(descriptor);
-    descriptor = null;
+    temporaryStat = assertSessionFileIdentity(descriptor, tmpFile);
     revalidatePinnedSessionDirectory(directory);
     fs.renameSync(tmpFile, SESSION_FILE);
     revalidatePinnedSessionDirectory(directory);
+    assertSessionFileIdentity(descriptor, SESSION_FILE);
     fs.fsyncSync(directory.descriptor);
     return normalized;
   } finally {
@@ -1370,17 +1527,50 @@ export function saveSession(session: Session): Session {
     } catch {
       // Preserve the original result. Ambiguous paths are left untouched.
     }
-    fs.closeSync(directory.descriptor);
+    if (!lockOwned) fs.closeSync(directory.descriptor);
   }
 }
 
 export function clearSession(): void {
+  const lockOwned = heldLockFd !== null;
+  let descriptor: number | null = null;
   try {
-    if (fs.existsSync(SESSION_FILE)) {
-      fs.unlinkSync(SESSION_FILE);
+    if (lockOwned) {
+      assertOnboardLockOwned();
+      try {
+        descriptor = fs.openSync(
+          SESSION_FILE,
+          fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
+        );
+      } catch (error) {
+        if (isErrnoException(error) && error.code === "ENOENT") {
+          assertOnboardLockOwned();
+          return;
+        }
+        throw error;
+      }
+      assertSessionFileIdentity(descriptor, SESSION_FILE);
     }
-  } catch {
+    try {
+      fs.unlinkSync(SESSION_FILE);
+    } catch (error) {
+      if (!(isErrnoException(error) && error.code === "ENOENT")) throw error;
+    }
+    if (lockOwned) {
+      assertOnboardLockOwned();
+      try {
+        fs.lstatSync(SESSION_FILE);
+      } catch (error) {
+        if (isErrnoException(error) && error.code === "ENOENT") return;
+        throw error;
+      }
+      throw new Error("NemoClaw onboarding session state changed during deletion.");
+    }
+  } catch (error) {
+    if (lockOwned) throw error;
     return;
+  } finally {
+    if (descriptor !== null) fs.closeSync(descriptor);
   }
 }
 
@@ -1478,11 +1668,13 @@ function lockHolderStillMatches(lock: LockInfo): boolean {
 // window in the inode-only check by tying ownership to a live
 // descriptor rather than a value re-read from disk. See #1281.
 let heldLockFd: number | null = null;
+let heldLockDirectory: PinnedSessionDirectory | null = null;
 
 export function assertOnboardLockOwned(): void {
-  if (heldLockFd === null) {
+  if (heldLockFd === null || heldLockDirectory === null) {
     throw new Error("This process does not own the NemoClaw onboarding lock.");
   }
+  revalidatePinnedSessionDirectory(heldLockDirectory);
   assertSessionDirectoryHasNoSymlinks();
   const descriptorStat = fs.fstatSync(heldLockFd);
   const pathStat = fs.lstatSync(LOCK_FILE);
@@ -1634,9 +1826,12 @@ export function acquireOnboardLock(command: string | null = null): LockResult {
     }
     heldLockFd = fd;
     try {
+      heldLockDirectory = openPinnedSessionDirectory();
       assertOnboardLockOwned();
     } catch (error) {
       heldLockFd = null;
+      if (heldLockDirectory !== null) fs.closeSync(heldLockDirectory.descriptor);
+      heldLockDirectory = null;
       fs.closeSync(fd);
       throw error;
     }
@@ -1688,7 +1883,9 @@ export function releaseOnboardLock(): void {
   // has already replaced the lock and we must NOT touch their file.
   if (heldLockFd !== null) {
     const fd = heldLockFd;
+    const directory = heldLockDirectory;
     heldLockFd = null;
+    heldLockDirectory = null;
     try {
       const fdStat = fs.fstatSync(fd, { bigint: true });
       let pathInode: bigint | null = null;
@@ -1717,6 +1914,13 @@ export function releaseOnboardLock(): void {
         fs.closeSync(fd);
       } catch {
         // ignore
+      }
+      if (directory !== null) {
+        try {
+          fs.closeSync(directory.descriptor);
+        } catch {
+          // ignore
+        }
       }
     }
     return;
@@ -1956,10 +2160,30 @@ export function updateSession(mutator: (session: Session) => Session | void): Se
 }
 
 export interface RetainedSandboxRecoveryContext {
-  readonly gatewayName?: string;
-  readonly gatewayPort?: number;
-  readonly lifecycleGeneration?: string | null;
-  readonly verifiedEffectivePolicyIdentity?: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
+  readonly gatewayName: string;
+  readonly gatewayPort: number;
+  readonly lifecycleGeneration: string;
+  readonly verifiedEffectivePolicyIdentity: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
+  readonly createAttemptNonce: string;
+  readonly policyCreationReceipt:
+    | NonNullable<RetainedSandboxRecoveryRecord["policyCreationReceipt"]>
+    | null;
+}
+
+function retainedSandboxResourceEvidence(session: Session) {
+  const messagingCredentialEnvironmentVariables =
+    session.messagingPlan?.credentialBindings.map((binding) => binding.providerEnvKey) ?? [];
+  return {
+    sharedInferenceProviders: session.provider ? [session.provider] : [],
+    sandboxScopedProviders: session.stagedCredentialProviders,
+    credentialEnvironmentVariables: [
+      ...(session.credentialEnv ? [session.credentialEnv] : []),
+      ...(session.webSearchConfig
+        ? [webSearchEnvFor(webSearchProviderForConfig(session.webSearchConfig))]
+        : []),
+      ...messagingCredentialEnvironmentVariables,
+    ],
+  };
 }
 
 function persistIndependentRetainedSandboxRecovery(
@@ -1972,28 +2196,17 @@ function persistIndependentRetainedSandboxRecovery(
     throw new Error("Cannot persist retained recovery with malformed harness package authority.");
   }
   const harnessPackage = requireRetainedRecoveryPackage(session);
-  const messagingCredentialEnvironmentVariables =
-    session.messagingPlan?.credentialBindings.map((binding) => binding.providerEnvKey) ?? [];
-  const credentialEnvironmentVariables = [
-    ...(session.credentialEnv ? [session.credentialEnv] : []),
-    ...(session.webSearchConfig
-      ? [webSearchEnvFor(webSearchProviderForConfig(session.webSearchConfig))]
-      : []),
-    ...messagingCredentialEnvironmentVariables,
-  ];
   writeRetainedSandboxRecovery(RETAINED_SANDBOX_RECOVERY_FILE, {
     sandboxName: session.sandboxName!,
     sandboxIdentityFingerprint,
-    gatewayName: context.gatewayName ?? session.metadata.gatewayName,
-    gatewayPort: context.gatewayPort ?? GATEWAY_PORT,
-    lifecycleGeneration: context.lifecycleGeneration ?? null,
-    verifiedEffectivePolicyIdentity: context.verifiedEffectivePolicyIdentity ?? null,
+    gatewayName: context.gatewayName,
+    gatewayPort: context.gatewayPort,
+    lifecycleGeneration: context.lifecycleGeneration,
+    verifiedEffectivePolicyIdentity: context.verifiedEffectivePolicyIdentity,
+    createAttemptNonce: context.createAttemptNonce,
+    policyCreationReceipt: context.policyCreationReceipt,
     harnessPackage,
-    resources: {
-      sharedInferenceProviders: session.provider ? [session.provider] : [],
-      sandboxScopedProviders: session.stagedCredentialProviders,
-      credentialEnvironmentVariables,
-    },
+    resources: retainedSandboxResourceEvidence(session),
     reason,
   });
 }
@@ -2013,6 +2226,7 @@ function readDurableRecoverySession(
     reread.cancellationRecovery?.reason !== reason ||
     reread.cancellationRecovery.sandboxName !== sandboxName ||
     reread.cancellationRecovery.sandboxIdentityFingerprint !== sandboxIdentityFingerprint ||
+    !sameCancellationRecovery(reread.cancellationRecovery, saved.cancellationRecovery) ||
     !harnessPackageAuthoritiesEqual(reread, saved)
   ) {
     throw new Error("Retained sandbox recovery did not survive durable readback.");
@@ -2021,10 +2235,44 @@ function readDurableRecoverySession(
 }
 
 export function listRetainedSandboxRecoveryRecords(): readonly RetainedSandboxRecoveryRecord[] {
-  if (heldLockFd !== null) assertOnboardLockOwned();
-  const records = readRetainedSandboxRecoveryRecords(RETAINED_SANDBOX_RECOVERY_FILE);
-  if (heldLockFd !== null) assertOnboardLockOwned();
-  return records;
+  return withOwnedOnboardLock("nemoclaw retained sandbox recovery read", () => {
+    let records = readRetainedSandboxRecoveryRecords(RETAINED_SANDBOX_RECOVERY_FILE);
+    const current = loadSession();
+    const recovery = current?.cancellationRecovery ?? null;
+    if (
+      current &&
+      recovery &&
+      !records.some(
+        (record) =>
+          record.sandboxName === recovery.sandboxName &&
+          record.sandboxIdentityFingerprint === recovery.sandboxIdentityFingerprint &&
+          record.createAttemptNonce === recovery.createAttemptNonce,
+      )
+    ) {
+      try {
+        writeRetainedSandboxRecovery(RETAINED_SANDBOX_RECOVERY_FILE, {
+          sandboxName: recovery.sandboxName,
+          sandboxIdentityFingerprint: recovery.sandboxIdentityFingerprint,
+          gatewayName: recovery.gatewayName,
+          gatewayPort: recovery.gatewayPort,
+          lifecycleGeneration: recovery.lifecycleGeneration,
+          verifiedEffectivePolicyIdentity: recovery.verifiedEffectivePolicyIdentity,
+          createAttemptNonce: recovery.createAttemptNonce,
+          policyCreationReceipt: recovery.policyCreationReceipt,
+          harnessPackage: requireRetainedRecoveryPackage(current),
+          resources: retainedSandboxResourceEvidence(current),
+          reason: recovery.reason,
+          recordedAt: recovery.recordedAt,
+        });
+        records = readRetainedSandboxRecoveryRecords(RETAINED_SANDBOX_RECOVERY_FILE);
+      } catch {
+        // Keep the recovery-only session authoritative. A different-name run
+        // remains blocked until a later read can durably reconstruct the
+        // independent record.
+      }
+    }
+    return records;
+  });
 }
 
 export function recordRetainedSandboxRecovery(
@@ -2045,8 +2293,8 @@ export function reconcileRetainedRecoveryPackage(
 
 export function markCancellationRecovery(
   sandboxName: string,
-  sandboxIdentityFingerprint?: string,
-  context: RetainedSandboxRecoveryContext = {},
+  sandboxIdentityFingerprint: string | undefined,
+  context: RetainedSandboxRecoveryContext,
 ): Session {
   if (
     sandboxName.length > NAME_MAX_LENGTH ||
@@ -2069,6 +2317,7 @@ export function markCancellationRecovery(
         reason: "cancelled_after_sandbox_creation",
         sandboxName,
         sandboxIdentityFingerprint: sandboxIdentityFingerprint ?? null,
+        ...context,
         recordedAt,
       };
       session.failure = {
@@ -2099,8 +2348,8 @@ export function markCancellationRecovery(
 export function markRetainedSandboxRecovery(
   sandboxName: string,
   message: string,
-  sandboxIdentityFingerprint?: string,
-  context: RetainedSandboxRecoveryContext = {},
+  sandboxIdentityFingerprint: string | undefined,
+  context: RetainedSandboxRecoveryContext,
 ): Session {
   if (
     sandboxName.length > NAME_MAX_LENGTH ||
@@ -2126,6 +2375,7 @@ export function markRetainedSandboxRecovery(
         reason: "retained_after_sandbox_creation_failure",
         sandboxName,
         sandboxIdentityFingerprint: sandboxIdentityFingerprint ?? null,
+        ...context,
         recordedAt,
       };
       session.failure = {

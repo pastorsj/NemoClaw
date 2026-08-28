@@ -10,6 +10,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type OnboardSessionModule = typeof import("./onboard-session");
 let session: OnboardSessionModule;
 let temporaryHome: string;
+const retainedRecoveryContext = {
+  gatewayName: "nemoclaw",
+  gatewayPort: 8080,
+  lifecycleGeneration: "generation-1",
+  verifiedEffectivePolicyIdentity: null,
+  createAttemptNonce: "c".repeat(62),
+  policyCreationReceipt: null,
+} as const;
 
 beforeEach(async () => {
   temporaryHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-session-"));
@@ -86,7 +94,8 @@ describe("onboard session package persistence", () => {
   it.each([
     [
       "cancellation",
-      (fingerprint: string) => session.markCancellationRecovery("retained-sb", fingerprint),
+      (fingerprint: string) =>
+        session.markCancellationRecovery("retained-sb", fingerprint, retainedRecoveryContext),
     ],
     [
       "post-create failure",
@@ -95,6 +104,7 @@ describe("onboard session package persistence", () => {
           "retained-sb",
           "Sandbox creation failed after identity verification.",
           fingerprint,
+          retainedRecoveryContext,
         ),
     ],
   ])("copies exact package authority into independent %s recovery", (_case, markRecovery) => {
@@ -153,9 +163,9 @@ describe("onboard session package persistence", () => {
       }),
     );
 
-    expect(() => session.markCancellationRecovery("retained-sb", "7".repeat(64))).toThrow(
-      /without exact harness package authority/u,
-    );
+    expect(() =>
+      session.markCancellationRecovery("retained-sb", "7".repeat(64), retainedRecoveryContext),
+    ).toThrow(/without exact harness package authority/u);
     expect(session.listRetainedSandboxRecoveryRecords()).toEqual([]);
   });
 
@@ -169,7 +179,7 @@ describe("onboard session package persistence", () => {
       }),
     );
 
-    session.markCancellationRecovery("retained-sb", "6".repeat(64));
+    session.markCancellationRecovery("retained-sb", "6".repeat(64), retainedRecoveryContext);
 
     expect(session.listRetainedSandboxRecoveryRecords()).toMatchObject([
       { schemaVersion: 2, harnessPackage: null },

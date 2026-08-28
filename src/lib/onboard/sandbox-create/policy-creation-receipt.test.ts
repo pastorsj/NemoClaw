@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as openshellRuntimeModule from "../../adapters/openshell/runtime";
+import { parseOpenShellPolicy } from "../../policy/merge";
 import {
   type CreatedSandboxPolicyReceiptDeps,
   pendingSandboxPolicyVerificationForBoundary,
@@ -19,6 +20,8 @@ const TEST_PACKAGE_AUTHORITY = {
   harnessPackage: null,
   harnessPackageMigration: null,
 } as const;
+const REPLACEMENT_POLICY =
+  "version: 1\nnetwork_policies:\n  github:\n    endpoints:\n      - host: replacement.example\n";
 const NATIVE_GPU_POLICY = `version: 1
 filesystem_policy:
   include_workdir: true
@@ -191,9 +194,9 @@ describe("created sandbox policy receipt", () => {
     const restored = verifiedSandboxPolicyBoundaryFromPendingCheckpoint(checkpoint);
 
     expect(restored).toEqual(boundary);
-    expect(
-      pendingSandboxPolicyVerificationForBoundary(restored, TEST_PACKAGE_AUTHORITY),
-    ).toEqual(checkpoint);
+    expect(pendingSandboxPolicyVerificationForBoundary(restored, TEST_PACKAGE_AUTHORITY)).toEqual(
+      checkpoint,
+    );
   });
 
   it.each(["externally-managed", "owner-unknown"] as const)(
@@ -221,9 +224,9 @@ describe("created sandbox policy receipt", () => {
       const restored = verifiedSandboxPolicyBoundaryFromPendingCheckpoint(checkpoint);
 
       expect(restored).toEqual(boundary);
-      expect(
-        pendingSandboxPolicyVerificationForBoundary(restored, TEST_PACKAGE_AUTHORITY),
-      ).toEqual(checkpoint);
+      expect(pendingSandboxPolicyVerificationForBoundary(restored, TEST_PACKAGE_AUTHORITY)).toEqual(
+        checkpoint,
+      );
     },
   );
 
@@ -270,14 +273,18 @@ describe("created sandbox policy receipt", () => {
     const captureOpenshell = vi
       .spyOn(openshellRuntimeModule, "captureResolvedOpenshell")
       .mockReturnValueOnce(gatewayInfo())
-      .mockReturnValueOnce(metadata())
+      .mockReturnValueOnce(
+        metadata({ policy: parseOpenShellPolicy("version: 1\nnetwork_policies: {}\n").policy }),
+      )
       .mockReturnValueOnce({
         status: 0,
         output: "version: 1\nnetwork_policies: {}\n",
         stdout: "version: 1\nnetwork_policies: {}\n",
         stderr: "",
       })
-      .mockReturnValueOnce(metadata());
+      .mockReturnValueOnce(
+        metadata({ policy: parseOpenShellPolicy("version: 1\nnetwork_policies: {}\n").policy }),
+      );
     expect(() =>
       verifyCreatedSandboxPolicyCreationReceipt(INPUT, {
         readFile: vi.fn(() => POLICY) as never,
@@ -309,14 +316,14 @@ describe("created sandbox policy receipt", () => {
     ({ route, intendedPolicy, livePolicy }) => {
       vi.spyOn(openshellRuntimeModule, "captureResolvedOpenshell")
         .mockReturnValueOnce(gatewayInfo())
-        .mockReturnValueOnce(metadata())
+        .mockReturnValueOnce(metadata({ policy: parseOpenShellPolicy(livePolicy).policy }))
         .mockReturnValueOnce({
           status: 0,
           output: livePolicy,
           stdout: livePolicy,
           stderr: "",
         })
-        .mockReturnValueOnce(metadata());
+        .mockReturnValueOnce(metadata({ policy: parseOpenShellPolicy(livePolicy).policy }));
 
       expect(
         verifyCreatedSandboxPolicyCreationReceipt(
@@ -361,9 +368,9 @@ describe("created sandbox policy receipt", () => {
   ])("refuses native-GPU policy enrichment when $label (#9833)", ({ input, livePolicy }) => {
     vi.spyOn(openshellRuntimeModule, "captureResolvedOpenshell")
       .mockReturnValueOnce(gatewayInfo())
-      .mockReturnValueOnce(metadata())
+      .mockReturnValueOnce(metadata({ policy: parseOpenShellPolicy(livePolicy).policy }))
       .mockReturnValueOnce({ status: 0, output: livePolicy, stdout: livePolicy, stderr: "" })
-      .mockReturnValueOnce(metadata());
+      .mockReturnValueOnce(metadata({ policy: parseOpenShellPolicy(livePolicy).policy }));
 
     expect(() =>
       verifyCreatedSandboxPolicyCreationReceipt(input, {
@@ -452,6 +459,27 @@ describe("created sandbox policy receipt", () => {
       "policy-later",
     ]);
     expect(sleep).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
+  it("refuses replacement policy bytes between stable identity observations (#9833)", () => {
+    vi.spyOn(openshellRuntimeModule, "captureResolvedOpenshell")
+      .mockReturnValueOnce(gatewayInfo())
+      .mockReturnValueOnce(metadata())
+      .mockReturnValueOnce({
+        status: 0,
+        output: REPLACEMENT_POLICY,
+        stdout: REPLACEMENT_POLICY,
+        stderr: "",
+      })
+      .mockReturnValueOnce(metadata());
+
+    expect(() =>
+      verifyCreatedSandboxPolicyCreationReceipt(INPUT, {
+        readFile: vi.fn(() => REPLACEMENT_POLICY) as never,
+        inspectPolicyReadiness: readyPolicy,
+        sleep: vi.fn(),
+      }),
+    ).toThrow(/policy evidence changed during receipt verification/u);
   });
 
   it("fails closed when the exact sandbox never activates the policy version (#9833)", () => {

@@ -15,6 +15,7 @@ export type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
 } from "./package-types";
+export { parseHarnessPackageId } from "./package-receipt";
 
 const MIGRATION_FIELDS = new Set(["schemaVersion", "source", "legacyAgent", "migratedAt"]);
 const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);

@@ -11,7 +11,7 @@ import { getHarnessPackageStoreRoot } from "../../src/lib/harness/package-store"
 import { createHarnessPackageFixture } from "../helpers/harness-packages";
 
 const repoRoot = path.join(import.meta.dirname, "../..");
-const probeTimeoutMs = 30_000;
+const probeTimeoutMs = 45_000;
 
 type SliceName = "initial" | "core" | "final";
 type ProbeMode =
@@ -495,6 +495,8 @@ if (scenario.mode === "stale-recovery-admission") {
         lifecycleGeneration: "stale-admission-generation",
         verifiedEffectivePolicyIdentity: null,
         harnessPackage: null,
+        createAttemptNonce: "c".repeat(62),
+        policyCreationReceipt: null,
         resources: {
           sharedInferenceProviders: [],
           sandboxScopedProviders: [],

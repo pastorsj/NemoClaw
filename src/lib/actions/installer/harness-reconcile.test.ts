@@ -173,6 +173,8 @@ class InstallerStateHarness {
             ...legacy,
             schemaVersion: 2 as const,
             recordId: `current-${legacy.sandboxName}`,
+            createAttemptNonce: legacy.createAttemptNonce ?? null,
+            policyCreationReceipt: legacy.policyCreationReceipt ?? null,
             harnessPackage: structuredClone(harnessPackage),
           };
           this.retained.splice(selectedIndex, 1, upgraded);

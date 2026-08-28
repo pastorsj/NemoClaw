@@ -265,7 +265,14 @@ describe("incomplete-onboard --resume backstop (#6003)", () => {
         },
       }),
     );
-    session.markCancellationRecovery("retained-sb", fingerprint);
+    session.markCancellationRecovery("retained-sb", fingerprint, {
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      lifecycleGeneration: "generation-1",
+      verifiedEffectivePolicyIdentity: null,
+      createAttemptNonce: "c".repeat(62),
+      policyCreationReceipt: null,
+    });
     const beforeExit = requireLoadedSession();
 
     const output = runExitHandler(1);
