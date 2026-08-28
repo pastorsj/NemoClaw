@@ -6,7 +6,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_GATEWAY_PORT } from "../core/ports";
-import { GATEWAYS_SUBDIR, nemoclawStateRoot } from "./state-root";
+import {
+  GATEWAYS_SUBDIR,
+  getNemoclawBaseStateRoot,
+  nemoclawBaseStateRoot,
+  nemoclawStateRoot,
+} from "./state-root";
 
 const HOME = "/home/alice";
 
@@ -46,4 +51,23 @@ describe("getNemoclawStateRoot", () => {
     const { getNemoclawStateRoot: freshGetNemoclawStateRoot } = await import("./state-root");
     expect(freshGetNemoclawStateRoot(HOME)).toBe(path.join(HOME, ".nemoclaw"));
   });
+});
+
+describe("gateway-independent NemoClaw state root", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("resolves the base state root without a gateway segment", () => {
+    expect(nemoclawBaseStateRoot(HOME)).toBe(path.join(HOME, ".nemoclaw"));
+    expect(getNemoclawBaseStateRoot(HOME)).toBe(path.join(HOME, ".nemoclaw"));
+  });
+
+  it.each(["", "8091", "9000"])(
+    "keeps the base state root unchanged for gateway-port value %j",
+    (gatewayPort) => {
+      vi.stubEnv("NEMOCLAW_GATEWAY_PORT", gatewayPort);
+      expect(getNemoclawBaseStateRoot(HOME)).toBe(path.join(HOME, ".nemoclaw"));
+    },
+  );
 });

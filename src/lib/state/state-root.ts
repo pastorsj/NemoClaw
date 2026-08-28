@@ -9,8 +9,12 @@ import { DEFAULT_GATEWAY_PORT, GATEWAY_PORT } from "../core/ports";
 export const STATE_DIR_NAME = ".nemoclaw";
 export const GATEWAYS_SUBDIR = "gateways";
 
+export function nemoclawBaseStateRoot(home: string): string {
+  return path.join(home, STATE_DIR_NAME);
+}
+
 export function nemoclawStateRoot(home: string, gatewayPort: number = GATEWAY_PORT): string {
-  const base = path.join(home, STATE_DIR_NAME);
+  const base = nemoclawBaseStateRoot(home);
   return gatewayPort === DEFAULT_GATEWAY_PORT
     ? base
     : path.join(base, GATEWAYS_SUBDIR, String(gatewayPort));
@@ -22,4 +26,8 @@ export function resolveHome(env: NodeJS.ProcessEnv = process.env): string {
 
 export function getNemoclawStateRoot(home: string = resolveHome()): string {
   return nemoclawStateRoot(home, GATEWAY_PORT);
+}
+
+export function getNemoclawBaseStateRoot(home: string = resolveHome()): string {
+  return nemoclawBaseStateRoot(home);
 }
