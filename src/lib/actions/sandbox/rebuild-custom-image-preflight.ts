@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { dockerBuild, dockerRmi } from "../../adapters/docker";
 import { fingerprintBuildContext } from "../../adapters/fs/build-context-fingerprint";
-import type { AgentDefinition } from "../../agent/defs";
+import { loadAgent, type AgentDefinition } from "../../agent/defs";
 import { createAgentSandbox } from "../../agent/onboard";
 import type { WebSearchConfig } from "../../inference/web-search";
 import type { SandboxMessagingPlan } from "../../messaging";
@@ -22,7 +22,6 @@ import {
 } from "../../onboard/reasoning-mode";
 import { prepareSandboxDockerfilePatch } from "../../onboard/sandbox-dockerfile-patch-flow";
 import type { SandboxGpuConfig } from "../../onboard/sandbox-gpu-mode";
-import { ROOT } from "../../runner";
 import {
   formatBuildFailureDiagnostics,
   OPENCLAW_SANDBOX_BASE_IMAGE,
@@ -169,6 +168,8 @@ export async function preflightRebuildImage(
   const previousReasoning = process.env.NEMOCLAW_REASONING;
   const previousReasoningEffort = process.env[REASONING_EFFORT_ENV];
   try {
+    const effectiveAgent = input.agent ?? loadAgent("openclaw");
+    const openClawPackageRoot = loadAgent("openclaw").packageRoot;
     if (input.provider === "compatible-endpoint") {
       process.env.NEMOCLAW_REASONING = input.compatibleEndpointReasoning ?? "false";
       applyReasoningEffortEnv(input.compatibleEndpointReasoningEffort);
@@ -177,7 +178,7 @@ export async function preflightRebuildImage(
       delete process.env[REASONING_EFFORT_ENV];
     }
     const staged = stage({
-      root: ROOT,
+      root: effectiveAgent.packageRoot,
       fromDockerfile: input.fromDockerfile,
       agent: input.agent,
       createAgentSandbox,
@@ -191,6 +192,7 @@ export async function preflightRebuildImage(
     cleanup = createIdempotentBuildContextCleanup(staged.cleanupBuildCtx);
     const { buildId, dashboardRemoteBindPrepared } = await preparePatch({
       agent: input.agent,
+      rootDir: openClawPackageRoot,
       fromDockerfile: input.fromDockerfile,
       sandboxBaseImage: OPENCLAW_SANDBOX_BASE_IMAGE,
       sandboxBaseTag: SANDBOX_BASE_TAG,

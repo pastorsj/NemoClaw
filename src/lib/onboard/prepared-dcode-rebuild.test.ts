@@ -73,6 +73,7 @@ const sandboxGpuConfig: SandboxGpuConfig = {
 const preparedBuildIdInput = {
   preparedBuildContext,
   agent: dcodeAgent,
+  rootDir: "/tmp/nemoclaw-dcode-package",
   fromDockerfile: null,
   stagedDockerfile: preparedBuildContext.stagedDockerfile,
   model: "nvidia/test-model",
@@ -303,7 +304,12 @@ describe("prepared DCode rebuild adapter", () => {
 
     expect(
       resolveSandboxBuildContext(
-        { preparedBuildContext, agent: dcodeAgent, fromDockerfile: null },
+        {
+          preparedBuildContext,
+          agent: dcodeAgent,
+          packageRoot: "/tmp/nemoclaw-dcode-package",
+          fromDockerfile: null,
+        },
         { stageCreateSandboxBuildContext: stage, onExit },
       ),
     ).toBe(preparedBuildContext);
@@ -311,7 +317,12 @@ describe("prepared DCode rebuild adapter", () => {
     expect(onExit).not.toHaveBeenCalled();
 
     const ordinary = resolveSandboxBuildContext(
-      { preparedBuildContext: null, agent: dcodeAgent, fromDockerfile: null },
+      {
+        preparedBuildContext: null,
+        agent: dcodeAgent,
+        packageRoot: "/tmp/nemoclaw-dcode-package",
+        fromDockerfile: null,
+      },
       {
         stageCreateSandboxBuildContext: stage,
         createAgentSandbox: vi.fn(),
@@ -320,6 +331,9 @@ describe("prepared DCode rebuild adapter", () => {
     );
     expect(ordinary.buildCtx).toBe("/tmp/ordinary");
     expect(stage).toHaveBeenCalledOnce();
+    expect(stage).toHaveBeenCalledWith(
+      expect.objectContaining({ root: "/tmp/nemoclaw-dcode-package" }),
+    );
     expect(onExit).toHaveBeenCalledWith(ordinary.cleanupBuildCtx);
   });
 
@@ -333,6 +347,7 @@ describe("prepared DCode rebuild adapter", () => {
       resolveSandboxBuildContext(
         {
           preparedBuildContext,
+          packageRoot: "/tmp/nemoclaw-dcode-package",
           ...target,
         },
         { stageCreateSandboxBuildContext: stage },

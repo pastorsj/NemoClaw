@@ -34,6 +34,8 @@ export type SandboxDockerfilePatchDeps = {
 
 export type PrepareSandboxDockerfilePatchInput = {
   agent: AgentDefinition | null | undefined;
+  /** Trusted package root for the effective definition, including OpenClaw's null sentinel. */
+  rootDir: string;
   fromDockerfile: string | null;
   sandboxBaseImage: string;
   sandboxBaseTag: string;
@@ -109,6 +111,7 @@ function patchStagedDockerfile(
 
 export async function prepareSandboxDockerfilePatch({
   agent,
+  rootDir,
   fromDockerfile,
   sandboxBaseImage,
   sandboxBaseTag,
@@ -140,6 +143,7 @@ export async function prepareSandboxDockerfilePatch({
   const dockerDriverGateway = getDockerDriverGateway();
   const resolved = shouldResolveBaseImage
     ? (deps.pullAndResolveBaseImageDigest ?? pullAndResolveBaseImageDigest)({
+        rootDir,
         requireOpenshellSandboxAbi: dockerDriverGateway,
         ...(resolutionHint ? { resolutionHint } : {}),
         ...(forceBaseImageRefresh ? { forceRefresh: true } : {}),

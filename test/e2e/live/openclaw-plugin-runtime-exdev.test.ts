@@ -339,7 +339,9 @@ test(
           (marker) => `${DELEGATED_CAPABILITY_COMMENT_PREFIX}${marker}`,
         ),
       );
-      expect(REQUIRED_OPENSHELL_MCP_FEATURES.every((marker) => wrapperSource.split(marker).length === 2)).toBe(true);
+      expect(
+        REQUIRED_OPENSHELL_MCP_FEATURES.every((marker) => wrapperSource.split(marker).length === 2),
+      ).toBe(true);
       expect(components).toEqual({
         cli: fs.realpathSync(delegate),
         gateway: fs.realpathSync(gateway),
@@ -1310,6 +1312,7 @@ test(
 
     progress.phase("build and onboard plugin v1");
     const baseImageResolution = pullAndResolveBaseImageDigest({
+      rootDir: REPO_ROOT,
       forceRefresh: true,
       requireOpenshellSandboxAbi: true,
     });

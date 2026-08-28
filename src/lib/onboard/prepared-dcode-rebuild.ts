@@ -4,7 +4,6 @@
 import path from "node:path";
 
 import type { AgentDefinition } from "../agent/defs";
-import { ROOT } from "../runner";
 import { OPENCLAW_SANDBOX_BASE_IMAGE, SANDBOX_BASE_TAG } from "../sandbox-base-image";
 import type {
   CreateSandboxBuildContextInput,
@@ -217,11 +216,12 @@ export function resolveSandboxBuildContext(
   input: {
     preparedBuildContext: PreparedSandboxBuildContext | null;
     agent: AgentDefinition | null | undefined;
+    packageRoot: string;
     fromDockerfile: string | null;
   },
   deps: PreparedDcodeRebuildDeps = {},
 ): CreateSandboxBuildContextResult {
-  const { preparedBuildContext, agent, fromDockerfile } = input;
+  const { preparedBuildContext, agent, packageRoot, fromDockerfile } = input;
   assertPreparedDcodeTarget(preparedBuildContext, agent, fromDockerfile);
   if (preparedBuildContext) {
     verifyPreparedBuildContextForUse(preparedBuildContext);
@@ -229,7 +229,7 @@ export function resolveSandboxBuildContext(
   }
 
   const staged = (deps.stageCreateSandboxBuildContext ?? loadStageCreateSandboxBuildContext())({
-    root: ROOT,
+    root: packageRoot,
     fromDockerfile,
     agent,
     createAgentSandbox: deps.createAgentSandbox ?? loadCreateAgentSandbox(),

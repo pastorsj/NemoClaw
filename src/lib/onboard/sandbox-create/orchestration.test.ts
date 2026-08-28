@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { PolicyAuthorityRefusalError } from "../../adapters/openshell/policy-authority";
+import type { AgentDefinition } from "../../agent/defs";
 import type { SandboxEntry } from "../../state/registry";
 import {
   applyManagedSandboxRebuildPolicyCarryForward,
@@ -22,12 +23,91 @@ import {
   persistRetainedSandboxRecoveryMessage,
   readManagedDcodeCreateSelectionDrift,
   readSandboxRecreateRegistryEntry,
+  requireSandboxDockerfilePatchPackageRoot,
   reconcileCreatedHermesCredentialEnvironment,
+  requireSelectedAgentPackageRoot,
   resolveSandboxCreatePolicyAuthority,
   runAsyncWithPostCreateRecovery,
   runSandboxCreateWithPolicyAuthorityChecks,
   runWithPostCreateRecovery,
 } from "./orchestration";
+
+describe("selected agent package authority", () => {
+  it("keeps the OpenClaw null sentinel separate from its effective package root", () => {
+    const packageRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-")),
+    );
+    try {
+      const effectiveAgent = {
+        name: "openclaw",
+        displayName: "OpenClaw",
+        packageRoot,
+      } as AgentDefinition;
+      expect(requireSelectedAgentPackageRoot(null, effectiveAgent)).toBe(packageRoot);
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects mismatched and missing package authority before creation", () => {
+    const missingRoot = path.join(os.tmpdir(), `nemoclaw-missing-package-${String(process.pid)}`);
+    expect(() =>
+      requireSelectedAgentPackageRoot(
+        { name: "hermes" } as AgentDefinition,
+        { name: "openclaw", packageRoot: missingRoot } as AgentDefinition,
+      ),
+    ).toThrow("does not match effective definition");
+    expect(() =>
+      requireSelectedAgentPackageRoot(null, {
+        name: "openclaw",
+        packageRoot: missingRoot,
+      } as AgentDefinition),
+    ).toThrow("package root is missing");
+  });
+
+  it("rejects a same-name definition from a different package root", () => {
+    const recordedRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-recorded-package-")),
+    );
+    const effectiveRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-effective-package-")),
+    );
+    try {
+      expect(() =>
+        requireSelectedAgentPackageRoot(
+          { name: "hermes", packageRoot: recordedRoot } as AgentDefinition,
+          { name: "hermes", packageRoot: effectiveRoot } as AgentDefinition,
+        ),
+      ).toThrow("package root does not match its effective definition");
+    } finally {
+      fs.rmSync(recordedRoot, { recursive: true, force: true });
+      fs.rmSync(effectiveRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the separately trusted OpenClaw root to patch a Hermes custom Dockerfile", () => {
+    const hermesRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-package-")),
+    );
+    const openClawRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-")),
+    );
+    try {
+      const hermes = { name: "hermes", packageRoot: hermesRoot } as AgentDefinition;
+      const openClaw = {
+        name: "openclaw",
+        packageRoot: openClawRoot,
+      } as AgentDefinition;
+      expect(requireSandboxDockerfilePatchPackageRoot("/tmp/Containerfile", hermes, openClaw)).toBe(
+        openClawRoot,
+      );
+      expect(requireSandboxDockerfilePatchPackageRoot(null, hermes, openClaw)).toBe(hermesRoot);
+    } finally {
+      fs.rmSync(hermesRoot, { recursive: true, force: true });
+      fs.rmSync(openClawRoot, { recursive: true, force: true });
+    }
+  });
+});
 
 const UNVERIFIED_RECOVERY_CONTEXT = {
   gatewayName: "nemoclaw",

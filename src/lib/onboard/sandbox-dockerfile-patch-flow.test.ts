@@ -70,6 +70,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const patchStagedDockerfile = vi.fn();
     await prepareSandboxDockerfilePatch({
       agent: null,
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       fromDockerfile: null,
       sandboxBaseImage: resolutionMetadata.imageName,
       sandboxBaseTag: "latest",
@@ -93,6 +94,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     });
 
     expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       requireOpenshellSandboxAbi: true,
       resolutionHint: resolutionMetadata,
     });
@@ -118,6 +120,7 @@ describe("prepareSandboxDockerfilePatch", () => {
 
     await prepareSandboxDockerfilePatch({
       agent: { name: "hermes", displayName: "Hermes" } as never,
+      rootDir: "/tmp/nemoclaw-hermes-package",
       fromDockerfile: null,
       sandboxBaseImage: resolutionMetadata.imageName,
       sandboxBaseTag: "latest",
@@ -149,6 +152,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const enforceDockerGpuPatchPreserveNetwork = vi.fn(async () => false);
     const result = await prepareSandboxDockerfilePatch({
       agent: null,
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -223,6 +227,7 @@ describe("prepareSandboxDockerfilePatch", () => {
 
     await prepareSandboxDockerfilePatch({
       agent: { name: "openclaw" } as any,
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -255,6 +260,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const patchStagedDockerfile = vi.fn();
     const result = await prepareSandboxDockerfilePatch({
       agent: { name: "hermes" } as any,
+      rootDir: "/tmp/nemoclaw-hermes-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -293,6 +299,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const patchStagedDockerfile = vi.fn();
     await prepareSandboxDockerfilePatch({
       agent: { name: "hermes" } as any,
+      rootDir: "/tmp/nemoclaw-hermes-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
       sandboxBaseTag: "latest",
@@ -330,6 +337,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const patchStagedDockerfile = vi.fn();
     await prepareSandboxDockerfilePatch({
       agent: { name: "langchain-deepagents-code" } as any,
+      rootDir: "/tmp/nemoclaw-dcode-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -365,6 +373,7 @@ describe("prepareSandboxDockerfilePatch", () => {
 
     const result = await prepareSandboxDockerfilePatch({
       agent: { name: "hermes" } as any,
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       fromDockerfile: "/repo/Containerfile",
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -392,6 +401,7 @@ describe("prepareSandboxDockerfilePatch", () => {
       ref: "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:customagent",
     });
     expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       requireOpenshellSandboxAbi: false,
     });
     expect(patchStagedDockerfile.mock.calls[0]?.[7]).toBe(
@@ -410,6 +420,7 @@ describe("prepareSandboxDockerfilePatch", () => {
 
     await prepareSandboxDockerfilePatch({
       agent: { name: "langchain-deepagents-code" } as any,
+      rootDir: "/tmp/nemoclaw-dcode-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -442,6 +453,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const warn = vi.fn();
     await prepareSandboxDockerfilePatch({
       agent: null,
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",
@@ -473,6 +485,7 @@ describe("prepareSandboxDockerfilePatch", () => {
     const warn = vi.fn();
     await prepareSandboxDockerfilePatch({
       agent: null,
+      rootDir: "/tmp/nemoclaw-openclaw-package",
       fromDockerfile: null,
       sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
       sandboxBaseTag: "latest",

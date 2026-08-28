@@ -100,6 +100,7 @@ export interface WebSearchFlowHelpers {
     existingConfig?: WebSearchConfig | null,
     agent?: AgentDefinition | null,
     dockerfilePathOverride?: string | null,
+    packageRootOverride?: string,
   ): Promise<WebSearchConfig | null>;
   verifyWebSearchInsideSandbox(
     sandboxName: string,
@@ -373,16 +374,18 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     provider: WebSearchProvider,
     agent: AgentDefinition | null,
     dockerfilePathOverride: string | null,
+    packageRoot: string,
   ): boolean {
-    return agentSupportsWebSearchProvider(agent, provider, dockerfilePathOverride, ROOT);
+    return agentSupportsWebSearchProvider(agent, provider, dockerfilePathOverride, packageRoot);
   }
 
   function providerSupported(
     provider: WebSearchProvider,
     agent: AgentDefinition | null,
     dockerfilePathOverride: string | null,
+    packageRoot: string,
   ): boolean {
-    if (providerIsSupported(provider, agent, dockerfilePathOverride)) return true;
+    if (providerIsSupported(provider, agent, dockerfilePathOverride, packageRoot)) return true;
     deps.note(
       `  ${providerSpec(provider).label} is not supported by ${agent?.displayName ?? "this sandbox image"}. Skipping.`,
     );
@@ -393,6 +396,7 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     existingConfig: WebSearchConfig | null,
     agent: AgentDefinition | null,
     dockerfilePathOverride: string | null,
+    packageRoot: string,
   ): Promise<WebSearchConfig | null> {
     const explicit = parseExplicitWebSearchProvider(env[WEB_SEARCH_PROVIDER_ENV]);
     if (explicit.specified && !explicit.provider) return null;
@@ -411,11 +415,11 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
         (["brave", "tavily"] as const).find(
           (candidate) =>
             Boolean(configuredCredential(candidate)) &&
-            providerIsSupported(candidate, agent, dockerfilePathOverride),
+            providerIsSupported(candidate, agent, dockerfilePathOverride, packageRoot),
         ) ?? provider;
     }
     if (!provider) return null;
-    if (!providerSupported(provider, agent, dockerfilePathOverride)) return null;
+    if (!providerSupported(provider, agent, dockerfilePathOverride, packageRoot)) return null;
 
     const spec = providerSpec(provider);
     const apiKey = configuredCredential(provider);
@@ -445,8 +449,10 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     existingConfig: WebSearchConfig | null = null,
     agent: AgentDefinition | null = null,
     dockerfilePathOverride: string | null = null,
+    packageRootOverride?: string,
   ): Promise<WebSearchConfig | null> {
-    if (!agentSupportsWebSearch(agent, dockerfilePathOverride, ROOT)) {
+    const packageRoot = packageRootOverride ?? agent?.packageRoot ?? ROOT;
+    if (!agentSupportsWebSearch(agent, dockerfilePathOverride, packageRoot)) {
       deps.note(
         `  Web search is not yet supported by ${agent?.displayName ?? "this agent"}. Skipping.`,
       );
@@ -456,13 +462,18 @@ export function createWebSearchFlowHelpers(deps: WebSearchFlowDeps): WebSearchFl
     existingConfig = normalizeWebSearchConfig(existingConfig);
 
     if (deps.isNonInteractive()) {
-      return configureNonInteractiveWebSearch(existingConfig, agent, dockerfilePathOverride);
+      return configureNonInteractiveWebSearch(
+        existingConfig,
+        agent,
+        dockerfilePathOverride,
+        packageRoot,
+      );
     }
 
     if (existingConfig) return normalizeWebSearchConfig(existingConfig);
 
     const supportedProviders = WEB_SEARCH_PROVIDERS.filter((provider) =>
-      providerIsSupported(provider, agent, dockerfilePathOverride),
+      providerIsSupported(provider, agent, dockerfilePathOverride, packageRoot),
     );
     while (true) {
       const provider = await promptWebSearchProvider(supportedProviders);

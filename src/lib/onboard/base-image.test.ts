@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const dockerMocks = vi.hoisted(() => ({
@@ -12,7 +16,7 @@ vi.mock("../adapters/docker", async (importOriginal) => ({
   dockerCapture: dockerMocks.capture,
 }));
 
-import { openClawBaseImageHasSecurityInventory } from "./base-image";
+import { openClawBaseImageHasSecurityInventory, pullAndResolveBaseImageDigest } from "./base-image";
 
 describe("OpenClaw sandbox base image validation", () => {
   beforeEach(() => {
@@ -56,4 +60,40 @@ describe("OpenClaw sandbox base image validation", () => {
 
     expect(openClawBaseImageHasSecurityInventory("nemoclaw:v0.0.95")).toBe(false);
   });
+
+  it("rejects a missing package-owned base Dockerfile before Docker resolution", () => {
+    const packageRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-base-")),
+    );
+    try {
+      expect(() => pullAndResolveBaseImageDigest({ rootDir: packageRoot })).toThrow(
+        `OpenClaw base Dockerfile is missing: ${path.join(packageRoot, "Dockerfile.base")}`,
+      );
+      expect(dockerMocks.capture).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "rejects a base Dockerfile that escapes through a symlink before Docker resolution",
+    () => {
+      const testRoot = fs.realpathSync(
+        fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-base-link-")),
+      );
+      const packageRoot = path.join(testRoot, "package");
+      const outsideDockerfile = path.join(testRoot, "Dockerfile.outside");
+      fs.mkdirSync(packageRoot);
+      fs.writeFileSync(outsideDockerfile, "FROM scratch\n");
+      fs.symlinkSync(outsideDockerfile, path.join(packageRoot, "Dockerfile.base"));
+      try {
+        expect(() => pullAndResolveBaseImageDigest({ rootDir: packageRoot })).toThrow(
+          "OpenClaw base Dockerfile escapes its package root",
+        );
+        expect(dockerMocks.capture).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(testRoot, { recursive: true, force: true });
+      }
+    },
+  );
 });

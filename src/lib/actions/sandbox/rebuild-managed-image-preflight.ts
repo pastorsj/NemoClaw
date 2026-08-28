@@ -14,7 +14,7 @@ import { stageCreateSandboxBuildContext } from "../../onboard/build-context-stag
 import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
 import { prepareSandboxDockerfilePatch } from "../../onboard/sandbox-dockerfile-patch-flow";
 import type { SandboxGpuConfig } from "../../onboard/sandbox-gpu-mode";
-import { ROOT, redact } from "../../runner";
+import { redact } from "../../runner";
 import {
   formatBuildFailureDiagnostics,
   OPENCLAW_SANDBOX_BASE_IMAGE,
@@ -157,7 +157,7 @@ export async function prepareManagedDcodeRebuildImage(
     }
 
     const staged = stage({
-      root: ROOT,
+      root: input.agent.packageRoot,
       fromDockerfile: null,
       agent: input.agent,
       createAgentSandbox,
@@ -173,6 +173,7 @@ export async function prepareManagedDcodeRebuildImage(
 
     const { buildId, dashboardRemoteBindPrepared } = await preparePatch({
       agent: input.agent,
+      rootDir: input.agent.packageRoot,
       fromDockerfile: null,
       sandboxBaseImage: OPENCLAW_SANDBOX_BASE_IMAGE,
       sandboxBaseTag: SANDBOX_BASE_TAG,

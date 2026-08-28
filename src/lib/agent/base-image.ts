@@ -17,7 +17,6 @@ import {
 import { CUA_SANDBOX_IMAGE_ENV, requireCuaSandboxImageRef } from "../cua/feature";
 import { encodeCorporateCaArg, resolveCorporateCa } from "../onboard/corporate-ca";
 import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
-import { ROOT } from "../runner";
 import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
 import {
   buildLocalBaseTag,
@@ -87,7 +86,56 @@ export interface EnsureAgentBaseImageOptions {
 }
 
 export interface CreateAgentSandboxOptions extends EnsureAgentBaseImageOptions {
+  /** @deprecated The selected definition owns its build-context root. */
   rootDir?: string;
+}
+
+function requireAgentPackageRoot(agent: AgentDefinition): string {
+  const packageRoot = agent.packageRoot;
+  if (!path.isAbsolute(packageRoot) || path.resolve(packageRoot) !== packageRoot) {
+    throw new Error(`${agent.displayName} package root is not a canonical absolute path`);
+  }
+  let rootStats: fs.Stats;
+  try {
+    rootStats = fs.lstatSync(packageRoot);
+  } catch {
+    throw new Error(`${agent.displayName} package root is missing: ${packageRoot}`);
+  }
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw new Error(`${agent.displayName} package root is not a trusted directory: ${packageRoot}`);
+  }
+  return packageRoot;
+}
+
+function requireAgentPackageAsset(
+  agent: AgentDefinition,
+  packageRoot: string,
+  assetPath: string,
+  label: string,
+): void {
+  const relative = path.relative(packageRoot, assetPath);
+  if (
+    !relative ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`${agent.displayName} ${label} escapes its package root`);
+  }
+  let resolvedAsset: string;
+  try {
+    resolvedAsset = fs.realpathSync(assetPath);
+  } catch {
+    throw new Error(`${agent.displayName} ${label} is missing: ${assetPath}`);
+  }
+  const resolvedRelative = path.relative(packageRoot, resolvedAsset);
+  if (
+    resolvedRelative === ".." ||
+    resolvedRelative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(resolvedRelative)
+  ) {
+    throw new Error(`${agent.displayName} ${label} escapes its package root`);
+  }
 }
 
 export interface EnsureAgentBaseImageResult {
@@ -328,13 +376,14 @@ function createAgentBaseImageResolutionOptions(
   dockerfilePath: string,
   options: EnsureAgentBaseImageOptions,
 ): ResolveBaseImageOptions {
+  const packageRoot = requireAgentPackageRoot(agent);
+  requireAgentPackageAsset(agent, packageRoot, dockerfilePath, "base Dockerfile");
   const imageName = `ghcr.io/nvidia/nemoclaw/${agent.name}-sandbox-base`;
   const validationOptions =
     agent.name === "hermes"
       ? {
           validateImage: (imageRef: string) =>
-            hermesBaseImageSupportsMcp(imageRef) &&
-            sandboxBaseImageHasSecurityInventory(imageRef),
+            hermesBaseImageSupportsMcp(imageRef) && sandboxBaseImageHasSecurityInventory(imageRef),
           validationDescription:
             "the required MCP Streamable HTTP and ACP runtimes and the immutable security package inventory",
         }
@@ -349,13 +398,13 @@ function createAgentBaseImageResolutionOptions(
     imageName,
     dockerfilePath,
     buildArgs: agentBaseImageBuildArgs(agent),
-    localTag: buildLocalBaseTag(`nemoclaw-${agent.name}-sandbox-base-local`, ROOT),
+    localTag: buildLocalBaseTag(`nemoclaw-${agent.name}-sandbox-base-local`, packageRoot),
     envVar: getAgentSandboxBaseImageEnvVar(agent.name),
     label: `${agent.displayName} sandbox base image`,
     requireOpenshellSandboxAbi: process.platform === "linux",
     resolutionHint: options.resolutionHint,
     forceRefresh: options.forceBaseImageRefresh,
-    rootDir: ROOT,
+    rootDir: packageRoot,
     pinnedRemoteRef,
     preferPinnedRemoteRef: agent.name === "hermes" && pinnedRemoteRef !== undefined,
     ...validationOptions,
@@ -589,7 +638,7 @@ export function ensureAgentBaseImage(
     const forceBuildTag = `nemoclaw-${agent.name}-sandbox-base-local:build-${process.pid}-${crypto.randomBytes(8).toString("hex")}`;
     const buildProvenance = localBaseImageBuildProvenance(resolutionOptions);
     console.log(`  Rebuilding ${agent.displayName} base image...`);
-    const buildResult = dockerBuild(baseDockerfile, forceBuildTag, ROOT, {
+    const buildResult = dockerBuild(baseDockerfile, forceBuildTag, agent.packageRoot, {
       buildArgs: resolutionOptions.buildArgs,
 
       ignoreError: true,
@@ -698,7 +747,7 @@ export function ensureAgentBaseImage(
   if (inspectResult?.status !== 0) {
     console.log(`  Building ${agent.displayName} base image (first time only)...`);
     const buildProvenance = localBaseImageBuildProvenance(resolutionOptions);
-    const buildResult = dockerBuild(baseDockerfile, baseImageTag, ROOT, {
+    const buildResult = dockerBuild(baseDockerfile, baseImageTag, agent.packageRoot, {
       buildArgs: resolutionOptions.buildArgs,
 
       ignoreError: true,
@@ -740,7 +789,12 @@ export function createAgentSandbox(
     throw new Error(`${agent.displayName} is missing a sandbox Dockerfile`);
   }
 
-  const { rootDir = ROOT, ...baseImageOptions } = options;
+  const packageRoot = requireAgentPackageRoot(agent);
+  requireAgentPackageAsset(agent, packageRoot, agentDockerfile, "sandbox Dockerfile");
+  const { rootDir, ...baseImageOptions } = options;
+  if (agent.name !== "nemocua" && rootDir !== undefined && path.resolve(rootDir) !== packageRoot) {
+    throw new Error(`${agent.displayName} build context does not match its package root`);
+  }
   const { imageTag: baseImageRef, resolutionMetadata } = ensureAgentBaseImage(
     agent,
     baseImageOptions,
@@ -749,8 +803,8 @@ export function createAgentSandbox(
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   try {
     if (agent.name !== "nemocua") {
-      const shouldIncludeBuildContextPath = createCustomBuildContextFilter(rootDir);
-      fs.cpSync(rootDir, buildCtx, {
+      const shouldIncludeBuildContextPath = createCustomBuildContextFilter(packageRoot);
+      fs.cpSync(packageRoot, buildCtx, {
         recursive: true,
         filter: (src) => path.basename(src) !== ".claude" && shouldIncludeBuildContextPath(src),
       });

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import nodePath from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { createHermesCredentialEnvReconciliationRuntime } from "../../actions/sandbox/runtime/hermes-lifecycle";
@@ -56,6 +58,53 @@ import {
 } from "./provider-publication";
 export const createOnboardPolicyAuthorityBindings =
   policyAuthorityPreflight.createOnboardPolicyAuthorityBindings;
+
+/** Confirm that the effective definition still represents the selected harness authority. */
+export function requireSelectedAgentPackageRoot(
+  recordedAgent: AgentDefinition | null | undefined,
+  effectiveAgent: AgentDefinition,
+): string {
+  const expectedName = recordedAgent?.name ?? "openclaw";
+  if (effectiveAgent.name !== expectedName) {
+    throw new Error(
+      `Selected agent '${expectedName}' does not match effective definition '${effectiveAgent.name}'.`,
+    );
+  }
+  const packageRoot = effectiveAgent.packageRoot;
+  if (!nodePath.isAbsolute(packageRoot) || nodePath.resolve(packageRoot) !== packageRoot) {
+    throw new Error(`Selected agent '${expectedName}' has an invalid package root.`);
+  }
+  let rootStats: fs.Stats;
+  try {
+    rootStats = fs.lstatSync(packageRoot);
+  } catch {
+    throw new Error(`Selected agent '${expectedName}' package root is missing: ${packageRoot}`);
+  }
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw new Error(`Selected agent '${expectedName}' package root is not trusted: ${packageRoot}`);
+  }
+  if (recordedAgent && recordedAgent.packageRoot !== packageRoot) {
+    throw new Error(
+      `Selected agent '${expectedName}' package root does not match its effective definition.`,
+    );
+  }
+  return packageRoot;
+}
+
+/** Select the separately trusted OpenClaw root used to patch custom Dockerfiles. */
+export function requireSandboxDockerfilePatchPackageRoot(
+  fromDockerfile: string | null,
+  selectedAgent: AgentDefinition,
+  openClawAgent: AgentDefinition,
+): string {
+  if (!fromDockerfile || selectedAgent.name === "openclaw") {
+    return requireSelectedAgentPackageRoot(
+      selectedAgent.name === "openclaw" ? null : selectedAgent,
+      selectedAgent,
+    );
+  }
+  return requireSelectedAgentPackageRoot(null, openClawAgent);
+}
 
 function cancelRecoveryIdentity(
   liveExists: boolean,
@@ -1083,6 +1132,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     createIntent: import("../types").SandboxCreateIntent | null = null,
     runVerifiedSandboxCreateEffects: import("../types").VerifiedSandboxCreateEffects | null = null,
     preparedBuildContext: PreparedSandboxBuildContext | null = null,
+    selectedEffectiveAgent: AgentDefinition | null = null,
   ) {
     const portableRuntimeAuthority = portableRuntimeContext?.authority ?? null;
     const {
@@ -1204,18 +1254,26 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       createIntent?.apfInterceptorRequested === true,
       process.env,
     );
+    const effectiveAgent = selectedEffectiveAgent ?? sandboxAgent.getEffectiveSandboxAgent(agent);
+    const packageRoot = requireSelectedAgentPackageRoot(agent, effectiveAgent);
+    const dockerfilePatchPackageRoot = requireSandboxDockerfilePatchPackageRoot(
+      fromDockerfile,
+      effectiveAgent,
+      fromDockerfile && effectiveAgent.name !== "openclaw"
+        ? sandboxAgent.getEffectiveSandboxAgent(null)
+        : effectiveAgent,
+    );
     step(6, 8, "Creating sandbox");
     const sandboxName = validateName(
       sandboxNameOverride ?? (await promptValidatedSandboxName(agent)),
       "sandbox name",
     );
     preparedDcodeRebuild.assertPreparedDcodeTarget(preparedBuildContext, agent, fromDockerfile);
-    const effectiveAgent = sandboxAgent.getEffectiveSandboxAgent(agent);
     const requestedAgentName = getRequestedSandboxAgentName(effectiveAgent);
     const legacyDockerfilePath =
       effectiveAgent.dockerfilePath ??
       effectiveAgent.legacyPaths?.dockerfile ??
-      path.join(ROOT, "Dockerfile");
+      path.join(packageRoot, "Dockerfile");
     enabledChannels = filterEnabledChannelsByAgent(enabledChannels, agent);
     const effectiveSandboxGpuConfig =
       sandboxGpuConfig ?? resolveSandboxGpuConfig(gpu, { flag: null, device: null });
@@ -2024,6 +2082,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
             legacy: {
               preparedBuildContext,
               agent,
+              packageRoot,
               fromDockerfile,
               createAgentSandbox: (selectedAgent) =>
                 baseImageResolutionFlow.createAgentSandboxWithResolution(
@@ -2034,6 +2093,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
               resolvePatchInput: () => ({
                 preparedBuildContext,
                 agent,
+                rootDir: dockerfilePatchPackageRoot,
                 fromDockerfile,
                 model,
                 chatUiUrl,

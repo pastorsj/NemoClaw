@@ -35,6 +35,7 @@ const sandboxGpuConfig: SandboxGpuConfig = {
 
 const baseInput: Omit<PrepareSandboxDockerfilePatchInput, "deps"> = {
   agent: null,
+  rootDir: "/tmp/nemoclaw-openclaw-package",
   fromDockerfile: null,
   sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
   sandboxBaseTag: "latest",

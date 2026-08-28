@@ -57,6 +57,14 @@ beforeEach(() => {
 });
 
 describe("sandbox base-image resolution key", () => {
+  it("isolates identical package inputs installed at distinct trusted roots", () => {
+    const firstRoot = fixture();
+    const secondRoot = fixture();
+    expect(createSandboxBaseImageResolutionKey(options(secondRoot))).not.toBe(
+      createSandboxBaseImageResolutionKey(options(firstRoot)),
+    );
+  });
+
   it("changes when a relevant base input changes (#4680)", () => {
     const root = fixture();
     const before = createSandboxBaseImageResolutionKey(options(root));

@@ -19,6 +19,7 @@ type SourceIdentityModule = typeof import("../../src/lib/sandbox-base-image/sour
 const requireSource = createRequire(
   new URL("../../src/lib/agent/base-image.test.ts", import.meta.url),
 );
+const TEST_REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../..");
 
 /** Build a minimal Hermes manifest for base-image provisioning tests. */
 export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
@@ -69,16 +70,16 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
     expectedVersion: "2026.4.30",
     hasDevicePairing: false,
     phoneHomeHosts: [],
-    dockerfileBasePath: "/test/root/agents/hermes/Dockerfile.base",
+    dockerfileBasePath: path.join(TEST_REPOSITORY_ROOT, "agents/hermes/Dockerfile.base"),
     dockerfilePath: path.resolve(import.meta.dirname, "../../agents/hermes/Dockerfile"),
     startScriptPath: null,
     policyAdditionsPath: null,
     policyPermissivePath: null,
     pluginDir: null,
     legacyPaths: null,
-    agentDir: "/repo/root/agents/hermes",
-    manifestPath: "/repo/root/agents/hermes/manifest.yaml",
-    packageRoot: "/repo/root",
+    agentDir: path.join(TEST_REPOSITORY_ROOT, "agents/hermes"),
+    manifestPath: path.join(TEST_REPOSITORY_ROOT, "agents/hermes/manifest.yaml"),
+    packageRoot: TEST_REPOSITORY_ROOT,
     ...overrides,
   };
 }

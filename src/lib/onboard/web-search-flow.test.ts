@@ -106,36 +106,39 @@ describe("web search provider validation", () => {
   it.each([
     ["brave", "brv-secret", "X-Subscription-Token: brv-secret"],
     ["tavily", "tvly-secret", "Authorization: Bearer tvly-secret"],
-  ] as const)("keeps the %s key out of curl argv in a temporary 0600 config", (provider, apiKey, header) => {
-    let configPath = "";
-    vi.mocked(runCurlProbe).mockImplementationOnce((args, options) => {
-      configPath = String(options?.trustedConfigFiles?.[0] ?? "");
-      expect(configPath).not.toBe("");
-      expect(args.join(" ")).not.toContain(apiKey);
-      expect(args).toContain(configPath);
-      const configFd = fs.openSync(
-        configPath,
-        fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
-      );
-      try {
-        expect(fs.fstatSync(configFd).mode & 0o777).toBe(0o600);
-        expect(fs.readFileSync(configFd, "utf8")).toContain(header);
-      } finally {
-        fs.closeSync(configFd);
-      }
-      return {
-        ok: true,
-        httpStatus: 200,
-        curlStatus: 0,
-        body: "{}",
-        stderr: "",
-        message: "ok",
-      };
-    });
+  ] as const)(
+    "keeps the %s key out of curl argv in a temporary 0600 config",
+    (provider, apiKey, header) => {
+      let configPath = "";
+      vi.mocked(runCurlProbe).mockImplementationOnce((args, options) => {
+        configPath = String(options?.trustedConfigFiles?.[0] ?? "");
+        expect(configPath).not.toBe("");
+        expect(args.join(" ")).not.toContain(apiKey);
+        expect(args).toContain(configPath);
+        const configFd = fs.openSync(
+          configPath,
+          fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0),
+        );
+        try {
+          expect(fs.fstatSync(configFd).mode & 0o777).toBe(0o600);
+          expect(fs.readFileSync(configFd, "utf8")).toContain(header);
+        } finally {
+          fs.closeSync(configFd);
+        }
+        return {
+          ok: true,
+          httpStatus: 200,
+          curlStatus: 0,
+          body: "{}",
+          stderr: "",
+          message: "ok",
+        };
+      });
 
-    expect(helpers().validateWebSearchApiKey(provider, apiKey).ok).toBe(true);
-    expect(fs.existsSync(configPath)).toBe(false);
-  });
+      expect(helpers().validateWebSearchApiKey(provider, apiKey).ok).toBe(true);
+      expect(fs.existsSync(configPath)).toBe(false);
+    },
+  );
 
   it("uses a POST JSON probe for Tavily", () => {
     helpers().validateTavilySearchApiKey("tvly-secret");
@@ -205,6 +208,26 @@ describe("web search provider selection", () => {
       ).resolves.toEqual({ fetchEnabled: true, provider: "tavily" });
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reads OpenClaw capability from the selected package root", async () => {
+    const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-search-root-"));
+    fs.writeFileSync(
+      path.join(packageRoot, "Dockerfile"),
+      "ARG NEMOCLAW_WEB_SEARCH_ENABLED=0\nARG NEMOCLAW_WEB_SEARCH_PROVIDER=brave\n",
+    );
+    try {
+      await expect(
+        helpers({ env: { BRAVE_API_KEY: "brv-key" } }).configureWebSearch(
+          null,
+          null,
+          null,
+          packageRoot,
+        ),
+      ).resolves.toEqual({ fetchEnabled: true, provider: "brave" });
+    } finally {
+      fs.rmSync(packageRoot, { recursive: true, force: true });
     }
   });
 

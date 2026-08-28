@@ -99,6 +99,7 @@ describe("remote dashboard bind production lifecycle", () => {
       await expect(
         prepareSandboxDockerfilePatch({
           agent: { name: "openclaw" } as never,
+          rootDir: process.cwd(),
           fromDockerfile: dockerfile,
           sandboxBaseImage: "ghcr.io/nvidia/nemoclaw/sandbox-base",
           sandboxBaseTag: "latest",

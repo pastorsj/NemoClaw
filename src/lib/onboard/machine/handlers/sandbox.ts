@@ -288,6 +288,7 @@ export interface SandboxStateOptions<
       existingConfig: WebSearchConfig | null,
       agent: Agent,
       dockerfilePathOverride: string | null,
+      packageRoot: string,
     ): Promise<WebSearchConfig | null>;
     startRecordedStep(
       stepName: string,
@@ -1477,6 +1478,7 @@ class SandboxStateFlow<
         null,
         this.options.agent,
         state.webSearchSupportProbePath,
+        this.options.rootDir,
       );
     }
     const checkpointedValue = checkpoint

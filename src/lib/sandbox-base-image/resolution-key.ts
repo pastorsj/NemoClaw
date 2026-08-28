@@ -54,6 +54,14 @@ function hashBuildArgs(buildArgs: Record<string, string> | undefined): string | 
   return hash.digest("hex");
 }
 
+function canonicalRootIdentity(rootDir: string): string {
+  try {
+    return fs.realpathSync(rootDir);
+  } catch {
+    return path.resolve(rootDir);
+  }
+}
+
 function dockerPlatform(): string {
   const reported = dockerInfoFormat("{{.OSType}}/{{.Architecture}}", {
     ignoreError: true,
@@ -68,6 +76,7 @@ export function createSandboxBaseImageBuildProvenanceKey(options: ResolveBaseIma
   const material = {
     schema: SANDBOX_BASE_RESOLUTION_SCHEMA,
     imageName: options.imageName,
+    rootIdentity: canonicalRootIdentity(rootDir),
     sourceRevisions: getSourceRevisionIds(rootDir, env),
     inputFingerprint: hashBaseImageInputs(rootDir, options.dockerfilePath, options.inputPaths),
 
@@ -87,6 +96,7 @@ export function createSandboxBaseImageResolutionKey(options: ResolveBaseImageOpt
   const material = {
     schema: SANDBOX_BASE_RESOLUTION_SCHEMA,
     imageName: options.imageName,
+    rootIdentity: canonicalRootIdentity(rootDir),
     override,
     pinnedRemoteRef: options.pinnedRemoteRef || null,
     ...(options.preferPinnedRemoteRef === true ? { preferPinnedRemoteRef: true } : {}),

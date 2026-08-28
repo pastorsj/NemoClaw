@@ -947,7 +947,6 @@ const { inspectSandboxForCreate, confirmRecreateForSelectionDrift, isOpenclawRea
     prompt,
     isAffirmativeAnswer,
   });
-
 const {
   ensureValidatedWebSearchCredential,
   ensureValidatedBraveSearchCredential,
@@ -955,7 +954,6 @@ const {
   verifyWebSearchInsideSandbox,
   webSearchProviderForConfig,
 } = createWebSearchFlowHelpers({ prompt, note, isNonInteractive, cliName, runCaptureOpenshell });
-
 const {
   hasResponsesToolCall,
   hasChatCompletionsToolCall,
@@ -2909,6 +2907,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         resume,
         canPrompt: !cannotPrompt,
       });
+      const selectedEffectiveAgent = sandboxAgent.getEffectiveSandboxAgent(agent);
       const recordedSandboxName =
         session?.steps?.sandbox?.status === "complete" ? session?.sandboxName || null : null;
       const checkpointedSandboxName = onboardSessionBootstrap.getCheckpointedSandboxName(
@@ -3220,7 +3219,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
           endpointProvenance,
           recreateSandbox: isRecreateSandbox,
           controlUiPort: _preflightDashboardPort,
-          rootDir: ROOT,
+          rootDir: selectedEffectiveAgent.packageRoot,
           env: process.env,
           deps: {
             checkGatewayRouteCompatibility,
@@ -3284,6 +3283,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
                   dashboardPortReservationScope,
                   hermesApiPortReservationScope,
                   ...createArgs,
+                  selectedEffectiveAgent,
                 ),
               ),
             ),

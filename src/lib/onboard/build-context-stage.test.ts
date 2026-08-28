@@ -110,7 +110,7 @@ describe("stageCreateSandboxBuildContext", () => {
   });
 
   it("filters checkout credentials from the staged managed repository-root context (#7205)", () => {
-    const repoRoot = makeTmpDir("nemoclaw-managed-context-security-");
+    const repoRoot = fs.realpathSync(makeTmpDir("nemoclaw-managed-context-security-"));
     const requiredFiles = [
       ["agents/hermes/plugin/entry.py", "required-plugin-bytes"],
       ["src/lib/tool-disclosure.ts", "required-tool-disclosure-bytes"],
@@ -159,6 +159,7 @@ describe("stageCreateSandboxBuildContext", () => {
       agent: {
         name: "hermes",
         displayName: "Hermes",
+        packageRoot: repoRoot,
         dockerfileBasePath: null,
         dockerfilePath: agentDockerfile,
       } as any,
@@ -169,8 +170,11 @@ describe("stageCreateSandboxBuildContext", () => {
     tmpDirs.push(result.buildCtx);
 
     const stagedBytes = readStagedBytes(result.buildCtx);
-    expect(requiredFiles.every(([relativePath, contents]) =>
-        Object.is(fs.readFileSync(path.join(result.buildCtx, relativePath), "utf8"), contents))).toBe(true);
+    expect(
+      requiredFiles.every(([relativePath, contents]) =>
+        Object.is(fs.readFileSync(path.join(result.buildCtx, relativePath), "utf8"), contents),
+      ),
+    ).toBe(true);
     credentialFiles.forEach(([relativePath, contents]) => {
       expect(fs.existsSync(path.join(result.buildCtx, relativePath))).toBe(false);
       expect(stagedBytes).not.toContain(contents);
