@@ -1,0 +1,396 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import fs from "node:fs";
+import path from "node:path";
+import { TextDecoder } from "node:util";
+import { parseDocument } from "yaml";
+import { openRegularFileNoFollow } from "../adapters/fs/regular-file";
+import type { ManifestRecord, ManifestValue } from "../agent/definition-types";
+import { readString } from "../agent/manifest-readers";
+import type { HarnessPackageEnvelopeV1 } from "./package-types";
+
+export const HARNESS_PACKAGE_METADATA_FILE = "nemoclaw-package.json";
+export const HARNESS_PACKAGE_METADATA_MAX_BYTES = 64 * 1024;
+export const HARNESS_PACKAGE_MANIFEST_MAX_BYTES = 256 * 1024;
+
+const HARNESS_ID_MAX_LENGTH = 63;
+const DISPLAY_NAME_MAX_LENGTH = 128;
+const DISPLAY_NAME_MAX_BYTES = 512;
+const DESCRIPTION_MAX_LENGTH = 2048;
+const DESCRIPTION_MAX_BYTES = 8192;
+const PACKAGE_VERSION_MAX_LENGTH = 128;
+const MANIFEST_PATH_MAX_BYTES = 512;
+const MANIFEST_PATH_MAX_DEPTH = 32;
+const MANIFEST_DATA_MAX_DEPTH = 64;
+const MANIFEST_DATA_MAX_VALUES = 8192;
+const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const SEMVER_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+const UNSAFE_METADATA_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[A-Za-z]:/u;
+const WINDOWS_RESERVED_PATH_PATTERN = /^(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+const WINDOWS_RESERVED_CHARACTER_PATTERN = /[<>:"|?*]/u;
+const ENVELOPE_FIELDS = new Set([
+  "schemaVersion",
+  "kind",
+  "id",
+  "displayName",
+  "packageVersion",
+  "contractVersion",
+  "manifest",
+]);
+const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+
+export interface ParsedHarnessPackageManifest {
+  readonly packageRoot: string;
+  readonly metadataPath: string;
+  readonly manifestPath: string;
+  readonly envelope: HarnessPackageEnvelopeV1;
+  readonly manifest: ManifestRecord;
+}
+
+interface DirectoryAuthority {
+  readonly target: string;
+  readonly device: bigint;
+  readonly inode: bigint;
+  readonly mode: bigint;
+  readonly links: bigint;
+  readonly owner: bigint;
+  readonly group: bigint;
+  readonly size: bigint;
+  readonly modifiedAt: bigint;
+  readonly changedAt: bigint;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function captureDirectoryAuthority(target: string, label: string): DirectoryAuthority {
+  let stats: fs.BigIntStats;
+  try {
+    stats = fs.lstatSync(target, { bigint: true });
+  } catch {
+    throw new Error(`${label} is invalid`);
+  }
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new Error(`${label} is invalid`);
+  }
+  return {
+    target,
+    device: stats.dev,
+    inode: stats.ino,
+    mode: stats.mode,
+    links: stats.nlink,
+    owner: stats.uid,
+    group: stats.gid,
+    size: stats.size,
+    modifiedAt: stats.mtimeNs,
+    changedAt: stats.ctimeNs,
+  };
+}
+
+function assertDirectoryAuthority(authority: DirectoryAuthority, label: string): void {
+  let current: DirectoryAuthority;
+  try {
+    current = captureDirectoryAuthority(authority.target, label);
+  } catch {
+    throw new Error(`${label} changed while reading`);
+  }
+  if (
+    current.device !== authority.device ||
+    current.inode !== authority.inode ||
+    current.mode !== authority.mode ||
+    current.links !== authority.links ||
+    current.owner !== authority.owner ||
+    current.group !== authority.group ||
+    current.size !== authority.size ||
+    current.modifiedAt !== authority.modifiedAt ||
+    current.changedAt !== authority.changedAt
+  ) {
+    throw new Error(`${label} changed while reading`);
+  }
+}
+
+function assertDirectoryChain(authorities: readonly DirectoryAuthority[]): void {
+  for (const authority of authorities) {
+    assertDirectoryAuthority(authority, "Harness package manifest directory authority");
+  }
+}
+
+function captureManifestDirectoryChain(
+  rootAuthority: DirectoryAuthority,
+  manifest: string,
+): DirectoryAuthority[] {
+  const authorities = [rootAuthority];
+  let currentPath = rootAuthority.target;
+  for (const segment of manifest.split("/").slice(0, -1)) {
+    assertDirectoryChain(authorities);
+    currentPath = path.join(currentPath, segment);
+    const authority = captureDirectoryAuthority(
+      currentPath,
+      "Harness package manifest directory authority",
+    );
+    assertDirectoryChain(authorities);
+    authorities.push(authority);
+  }
+  return authorities;
+}
+
+function readBoundedUtf8(target: string, label: string, maxBytes: number): string {
+  let opened: ReturnType<typeof openRegularFileNoFollow>;
+  try {
+    opened = openRegularFileNoFollow(target);
+  } catch {
+    throw new Error(`${label} must be one regular file`);
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = opened.readBytes(maxBytes);
+  } catch {
+    throw new Error(`${label} exceeds its read boundary or changed while reading`);
+  } finally {
+    opened.close();
+  }
+
+  try {
+    return UTF8_DECODER.decode(bytes);
+  } catch {
+    throw new Error(`${label} must contain valid UTF-8`);
+  }
+}
+
+function requireExactEnvelopeRecord(value: unknown): Record<string, unknown> {
+  if (!isPlainRecord(value)) {
+    throw new Error("Harness package metadata must contain one JSON object");
+  }
+  const keys = Object.keys(value);
+  if (keys.length !== ENVELOPE_FIELDS.size || keys.some((key) => !ENVELOPE_FIELDS.has(key))) {
+    throw new Error("Harness package metadata fields do not match schema version 1");
+  }
+  return value;
+}
+
+function requireHarnessId(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > HARNESS_ID_MAX_LENGTH ||
+    !HARNESS_ID_PATTERN.test(value)
+  ) {
+    throw new Error("Harness package id must be a lowercase hyphen-separated identifier");
+  }
+  return value;
+}
+
+function requireDisplayName(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    Array.from(value).length > DISPLAY_NAME_MAX_LENGTH ||
+    Buffer.byteLength(value, "utf8") > DISPLAY_NAME_MAX_BYTES ||
+    value !== value.trim() ||
+    UNSAFE_METADATA_TEXT_PATTERN.test(value)
+  ) {
+    throw new Error("Harness package displayName must be bounded text without control characters");
+  }
+  return value;
+}
+
+function requirePackageVersion(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > PACKAGE_VERSION_MAX_LENGTH ||
+    !SEMVER_PATTERN.test(value)
+  ) {
+    throw new Error("Harness package packageVersion must be a canonical SemVer version");
+  }
+  return value;
+}
+
+function requireManifestPath(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    Buffer.byteLength(value, "utf8") > MANIFEST_PATH_MAX_BYTES ||
+    value !== value.normalize("NFC") ||
+    UNSAFE_METADATA_TEXT_PATTERN.test(value) ||
+    value.includes("\\") ||
+    path.posix.isAbsolute(value) ||
+    WINDOWS_ABSOLUTE_PATH_PATTERN.test(value)
+  ) {
+    throw new Error("Harness package manifest must be a canonical relative path");
+  }
+  const segments = value.split("/");
+  if (
+    segments.length > MANIFEST_PATH_MAX_DEPTH ||
+    segments.some(
+      (segment) =>
+        segment.length === 0 ||
+        segment === "." ||
+        segment === ".." ||
+        Buffer.byteLength(segment, "utf8") > 255 ||
+        segment.startsWith(" ") ||
+        segment.endsWith(" ") ||
+        segment.endsWith(".") ||
+        WINDOWS_RESERVED_CHARACTER_PATTERN.test(segment) ||
+        WINDOWS_RESERVED_PATH_PATTERN.test(segment),
+    ) ||
+    path.posix.normalize(value) !== value
+  ) {
+    throw new Error("Harness package manifest must be a canonical relative path");
+  }
+  return value;
+}
+
+function parseEnvelope(source: string): HarnessPackageEnvelopeV1 {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    throw new Error("Harness package metadata must contain valid JSON");
+  }
+  const jsonDocument = parseDocument(source, { schema: "json", strict: true, uniqueKeys: true });
+  if (jsonDocument.errors.length > 0 || jsonDocument.warnings.length > 0) {
+    throw new Error("Harness package metadata must not contain duplicate fields");
+  }
+  const value = requireExactEnvelopeRecord(parsed);
+  if (value.schemaVersion !== 1) {
+    throw new Error("Harness package schemaVersion must be 1");
+  }
+  if (value.kind !== "agent-runtime") {
+    throw new Error("Harness package kind must be agent-runtime");
+  }
+  if (value.contractVersion !== 1) {
+    throw new Error("Harness package contractVersion must be 1");
+  }
+  return {
+    schemaVersion: 1,
+    kind: "agent-runtime",
+    id: requireHarnessId(value.id),
+    displayName: requireDisplayName(value.displayName),
+    packageVersion: requirePackageVersion(value.packageVersion),
+    contractVersion: 1,
+    manifest: requireManifestPath(value.manifest),
+  };
+}
+
+function isManifestScalar(value: unknown): value is ManifestValue {
+  return (
+    value === null ||
+    value instanceof Date ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function requireManifestRecord(value: unknown): ManifestRecord {
+  if (!isPlainRecord(value)) {
+    throw new Error("Harness agent manifest must contain one YAML mapping");
+  }
+  let valueCount = 0;
+  const pending: Array<{ depth: number; value: unknown }> = [{ depth: 0, value }];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) break;
+    valueCount += 1;
+    if (valueCount > MANIFEST_DATA_MAX_VALUES || current.depth > MANIFEST_DATA_MAX_DEPTH) {
+      throw new Error("Harness agent manifest exceeds its data boundary");
+    }
+    if (isManifestScalar(current.value)) continue;
+    if (Array.isArray(current.value)) {
+      for (const entry of current.value) {
+        pending.push({ depth: current.depth + 1, value: entry });
+      }
+      continue;
+    }
+    if (!isPlainRecord(current.value)) {
+      throw new Error("Harness agent manifest contains an unsupported YAML value");
+    }
+    for (const [key, entry] of Object.entries(current.value)) {
+      if (UNSAFE_METADATA_TEXT_PATTERN.test(key)) {
+        throw new Error("Harness agent manifest contains an invalid field name");
+      }
+      pending.push({ depth: current.depth + 1, value: entry });
+    }
+  }
+  return value as ManifestRecord;
+}
+
+function parseAgentManifest(source: string): ManifestRecord {
+  let document;
+  try {
+    document = parseDocument(source, { strict: true, uniqueKeys: true });
+  } catch {
+    throw new Error("Harness agent manifest must contain valid YAML");
+  }
+  if (document.errors.length > 0 || document.warnings.length > 0) {
+    throw new Error("Harness agent manifest must contain valid YAML");
+  }
+
+  let value: unknown;
+  try {
+    value = document.toJS({ maxAliasCount: 0 });
+  } catch {
+    throw new Error("Harness agent manifest cannot use YAML aliases");
+  }
+  return requireManifestRecord(value);
+}
+
+function requireManifestDisplayText(
+  manifest: ManifestRecord,
+  field: "description" | "display_name",
+  maxLength: number,
+  maxBytes: number,
+): void {
+  if (manifest[field] === undefined) return;
+  const value = readString(manifest, field);
+  if (
+    value === undefined ||
+    value.length === 0 ||
+    value !== value.trim() ||
+    Array.from(value).length > maxLength ||
+    Buffer.byteLength(value, "utf8") > maxBytes ||
+    UNSAFE_METADATA_TEXT_PATTERN.test(value)
+  ) {
+    throw new Error(`Harness agent manifest ${field} must be bounded terminal-safe text`);
+  }
+}
+
+export function parseHarnessPackageManifest(packageRoot: string): ParsedHarnessPackageManifest {
+  const resolvedRoot = path.resolve(packageRoot);
+  const rootAuthority = captureDirectoryAuthority(resolvedRoot, "Harness package root authority");
+  const metadataPath = path.join(resolvedRoot, HARNESS_PACKAGE_METADATA_FILE);
+  const envelope = parseEnvelope(
+    readBoundedUtf8(metadataPath, "Harness package metadata", HARNESS_PACKAGE_METADATA_MAX_BYTES),
+  );
+  assertDirectoryAuthority(rootAuthority, "Harness package root authority");
+  const directoryAuthorities = captureManifestDirectoryChain(rootAuthority, envelope.manifest);
+  const manifestPath = path.join(resolvedRoot, ...envelope.manifest.split("/"));
+  const manifest = parseAgentManifest(
+    readBoundedUtf8(manifestPath, "Harness agent manifest", HARNESS_PACKAGE_MANIFEST_MAX_BYTES),
+  );
+  assertDirectoryChain(directoryAuthorities);
+  const manifestId = readString(manifest, "name");
+  if (manifestId !== envelope.id) {
+    throw new Error("Harness agent manifest name must match the package id");
+  }
+  requireManifestDisplayText(
+    manifest,
+    "display_name",
+    DISPLAY_NAME_MAX_LENGTH,
+    DISPLAY_NAME_MAX_BYTES,
+  );
+  requireManifestDisplayText(
+    manifest,
+    "description",
+    DESCRIPTION_MAX_LENGTH,
+    DESCRIPTION_MAX_BYTES,
+  );
+  assertDirectoryChain(directoryAuthorities);
+  return { packageRoot: resolvedRoot, metadataPath, manifestPath, envelope, manifest };
+}
