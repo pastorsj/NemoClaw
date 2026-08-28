@@ -90,7 +90,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    no-messaging Linux/Brev development journey. Neither development run replaces exact staging
    Launchable release evidence.
 
-**Plans:** 4/23 plans executed
+**Plans:** 5/23 plans executed
 
 - [x] `02-01` — Obtain the accepted product-scope decision.
 - [x] `02-02` — Define and validate the agent package envelope and hostile package tree.
@@ -99,7 +99,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 - [ ] `02-05` — Add installed and available inventory plus `harness list`.
 - [ ] `02-06` — Add `harness install`, its prompt, docs, and compiled command contract.
 - [ ] `02-07` — Preserve `agents list` through installed package inventory.
-- [ ] `02-08` — Add strict session identity, migration provenance, and checkpoint v5.
+- [x] `02-08` — Add strict session identity, migration provenance, and checkpoint v5.
 - [ ] `02-09` — Add strict registry, route, and policy state fields.
 - [ ] `02-10` — Build agent definitions from one explicit, pinned package root.
 - [ ] `02-11` — Route package-managed image and build context through that root.

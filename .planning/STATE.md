@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plan 02-04 built reviewed harness artifacts and one fail-closed package catalogue
-last_updated: "2026-08-28T03:35:00.000Z"
+status: Plan 02-08 added strict Session package authority and checkpoint schema v5
+last_updated: "2026-08-28T03:37:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 5
-  percent: 21
+  completed_plans: 6
+  percent: 25
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -21,9 +21,9 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plan 02-04 completed reviewed deterministic harness artifacts, packed-output validation,
-and one available/installed/damaged catalogue. Plans 02-05 and 02-08 are next. This work does not
-activate or support an upstream NemoClaw product surface.
+Status: Plan 02-08 completed strict package identity and migration-provenance normalization,
+Session persistence, checkpoint schema v5, v4 migration, and fail-closed resume comparison. Plans
+02-05 and 02-09 are next. This work does not activate or support an upstream product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
@@ -74,6 +74,8 @@ tree.
   data-only installation transaction implemented with 105 focused tests.
 - [x] Three accepted standard harnesses build as validated read-only artifacts, and one catalogue
   reports available, healthy installed, and damaged state without fallback.
+- [x] Session state can retain exact package identity and secret-free migration provenance;
+  checkpoint v5 carries exact identity and explicitly migrates active v4 state without inference.
 
 ## Architecture Recommendations
 
@@ -94,7 +96,7 @@ tree.
 
 ## Next Execution
 
-Execute Plans 02-05 and 02-08 against the accepted local-fork boundaries. Keep arbitrary installed
+Execute Plans 02-05 and 02-09 against the accepted local-fork boundaries. Keep arbitrary installed
 host code, remote package discovery, product activation, and support claims outside this work. An
 upstream contribution still requires its own accepted NVIDIA/NemoClaw product decision.
 
