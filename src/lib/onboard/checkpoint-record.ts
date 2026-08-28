@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
+import { harnessPackageIdentitiesEqual } from "../harness/package-identity";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
 import {
   getActiveChannelIdsFromPlan,
@@ -18,7 +19,29 @@ import type {
 import type { Session } from "../state/onboard-session";
 
 function baseCheckpoint(session: Session): OnboardCheckpoint {
-  return session.checkpoint ?? deriveCheckpointFromSession(session);
+  const checkpoint = session.checkpoint ?? deriveCheckpointFromSession(session);
+  const identityMatches =
+    session.harnessPackage === null
+      ? checkpoint.harnessPackage === null
+      : checkpoint.harnessPackage !== null &&
+        harnessPackageIdentitiesEqual(session.harnessPackage, checkpoint.harnessPackage);
+  if (!identityMatches) {
+    throw new Error("Cannot record checkpoint: harness package authority does not match Session");
+  }
+  const transaction = checkpoint.sandboxRecreate;
+  if (transaction?.version === 1) {
+    throw new Error("Cannot record checkpoint: recreate transaction requires authority migration");
+  }
+  if (
+    transaction &&
+    (transaction.harnessPackage === null
+      ? session.harnessPackage !== null
+      : session.harnessPackage === null ||
+        !harnessPackageIdentitiesEqual(transaction.harnessPackage, session.harnessPackage))
+  ) {
+    throw new Error("Cannot record checkpoint: recreate transaction package authority drifted");
+  }
+  return checkpoint;
 }
 
 type ProviderEffectGroupName = Extract<

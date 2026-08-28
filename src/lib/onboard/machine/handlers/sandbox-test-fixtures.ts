@@ -3,6 +3,7 @@
 
 import { expect, vi } from "vitest";
 
+import type { HarnessPackageAuthority } from "../../../harness/package-identity";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import { decisionSelected } from "../../../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../../../state/onboard-checkpoint-migrate";
@@ -87,6 +88,19 @@ export async function withEnv<T>(key: string, value: string, run: () => Promise<
 }
 
 type UpdateSession = (mutator: (value: Session) => Session | void) => Session;
+
+export function expectedSessionPackageAuthority(session: Session): HarnessPackageAuthority {
+  if (session.harnessPackage === null) {
+    if (session.harnessPackageMigration !== null) {
+      throw new Error("A Session package migration requires a package identity");
+    }
+    return { harnessPackage: null, harnessPackageMigration: null };
+  }
+  return {
+    harnessPackage: session.harnessPackage,
+    harnessPackageMigration: session.harnessPackageMigration,
+  };
+}
 
 export function bindJournaledRecreate(
   session: Session,

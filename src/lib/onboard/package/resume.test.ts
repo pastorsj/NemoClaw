@@ -43,6 +43,7 @@ function preparePackageResume(
     },
     {
       assertWriterLockOwned: vi.fn(),
+      compareAndSwapSession: vi.fn(() => "mismatch" as const),
       loadSession,
       getStoreRoot: () => fixture.storeRoot,
       resolveSandboxAgent,

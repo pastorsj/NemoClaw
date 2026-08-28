@@ -50,6 +50,7 @@ describe("createSandboxRecreateProtection", () => {
       sourceLiveIdentityFingerprint: null,
       sourceConfirmedAbsent: true,
       targetGeneration: "3c9a1b7e-target",
+      harnessPackage: null,
     };
     const observation = { state: "missing" as const, liveIdentityFingerprint: null };
     const readRegistryEntry = vi.fn(() => sandboxEntry);
@@ -105,6 +106,7 @@ describe("createSandboxRecreateProtection", () => {
       sourceLiveIdentityFingerprint: null,
       sourceConfirmedAbsent: true,
       targetGeneration: "3c9a1b7e-target",
+      harnessPackage: null,
     };
 
     function protectionWith(

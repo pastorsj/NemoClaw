@@ -36,7 +36,7 @@ const HOST_MOUNT = {
   readOnly: true,
   sourceIdentity: { device: "66306", inode: "12345" },
 } as const;
-const PRE_HOST_MOUNT_FINGERPRINT =
+const PRE_PACKAGE_FINGERPRINT =
   "99603c8bf987561b783e2f38a1dcf260703537e5a680cae2198605ab13e181fe";
 
 const NON_DEFAULT_TARGET = {
@@ -55,6 +55,11 @@ const STANDALONE_GATEWAY_AUTHORITY: CheckpointGatewayAuthority = {
   supervisor: null,
   requiredCapabilities: [],
 };
+
+const NULL_PACKAGE_AUTHORITY = {
+  harnessPackage: null,
+  harnessPackageMigration: null,
+} as const;
 
 const recreateOptions: RebuildRecreateOnboardOpts = {
   resume: true,
@@ -82,6 +87,8 @@ const recreateOptions: RebuildRecreateOnboardOpts = {
   observabilityRequestedExplicitly: true,
   policyTier: "restricted",
   baseImageResolutionHint: null,
+  harnessPackage: null,
+  harnessPackageMigration: null,
 };
 
 function livePresentProbe(phase = "Ready") {
@@ -142,15 +149,15 @@ describe("rebuild replacement target fingerprint", () => {
     ).not.toBe(fingerprintRebuildRecreateTargetIntent(recreateOptions));
   });
 
-  it("preserves the previous fingerprint for a replacement without host mounts (#9451)", () => {
-    expect(fingerprintRebuildRecreateTargetIntent({ ...recreateOptions, hostMounts: [] })).toBe(
-      PRE_HOST_MOUNT_FINGERPRINT,
+  it("does not reuse the pre-package fingerprint without host mounts (#9451)", () => {
+    expect(fingerprintRebuildRecreateTargetIntent({ ...recreateOptions, hostMounts: [] })).not.toBe(
+      PRE_PACKAGE_FINGERPRINT,
     );
   });
 
   it("separates a mounted replacement from the pre-binding fingerprint (#9451)", () => {
     expect(fingerprintRebuildRecreateTargetIntent(recreateOptions)).not.toBe(
-      PRE_HOST_MOUNT_FINGERPRINT,
+      PRE_PACKAGE_FINGERPRINT,
     );
   });
 
@@ -272,6 +279,7 @@ describe("rebuild replacement journal", () => {
       expectedGatewayAuthority: STANDALONE_GATEWAY_AUTHORITY,
       agentName: "langchain-deepagents-code",
       targetIntentFingerprint: fingerprintRebuildRecreateTargetIntent(recreateOptions),
+      packageAuthority: NULL_PACKAGE_AUTHORITY,
       log: vi.fn(),
     });
   }
@@ -315,6 +323,7 @@ describe("rebuild replacement journal", () => {
         expectedGatewayAuthority: STANDALONE_GATEWAY_AUTHORITY,
         agentName: "langchain-deepagents-code",
         targetIntentFingerprint: fingerprintRebuildRecreateTargetIntent(recreateOptions),
+        packageAuthority: NULL_PACKAGE_AUTHORITY,
         log: vi.fn(),
         onAuthorityRefusal,
       }),
@@ -336,6 +345,7 @@ describe("rebuild replacement journal", () => {
       },
       agentName: "langchain-deepagents-code",
       targetIntentFingerprint: fingerprintRebuildRecreateTargetIntent(recreateOptions),
+      packageAuthority: NULL_PACKAGE_AUTHORITY,
       log: vi.fn(),
       onAuthorityRefusal,
     });
@@ -411,6 +421,7 @@ describe("rebuild replacement journal", () => {
           ...recreateOptions,
           dcodeAutoApprovalMode: "thread-opt-in",
         }),
+        packageAuthority: NULL_PACKAGE_AUTHORITY,
         log: vi.fn(),
       }),
     ).toThrow(/different recreate transaction in progress/);
@@ -433,6 +444,7 @@ describe("rebuild replacement journal", () => {
             },
           ],
         }),
+        packageAuthority: NULL_PACKAGE_AUTHORITY,
         log: vi.fn(),
       }),
     ).toThrow(/different recreate transaction in progress/);
@@ -450,6 +462,7 @@ describe("rebuild replacement journal", () => {
           ...recreateOptions,
           endpointSource: "onboard",
         }),
+        packageAuthority: NULL_PACKAGE_AUTHORITY,
         log: vi.fn(),
       }),
     ).toThrow(/different recreate transaction in progress/);
@@ -471,6 +484,7 @@ describe("rebuild replacement journal", () => {
           ...recreateOptions,
           ...drift,
         }),
+        packageAuthority: NULL_PACKAGE_AUTHORITY,
         log: vi.fn(),
       }),
     ).toThrow(/different recreate transaction in progress/);

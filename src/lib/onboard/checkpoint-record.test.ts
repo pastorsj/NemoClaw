@@ -23,6 +23,7 @@ function sessionWithProviderReceipts() {
     schemaVersion: CHECKPOINT_SCHEMA_VERSION,
     profile: { kind: "selected", value: "default" },
     runtimeAuthority: { kind: "unset" },
+    harnessPackage: null,
     sessionId: session.sessionId,
     machineState: "sandbox",
     updatedAt: ISO,

@@ -84,6 +84,8 @@ const recreateOptions: RebuildRecreateOnboardOpts = {
   policyTier: null,
   baseImageResolutionHint: null,
   rebuildGatewayAuthority: GATEWAY_AUTHORITY,
+  harnessPackage: null,
+  harnessPackageMigration: null,
 };
 
 const recreateJournal: RebuildRecreateJournal = {
@@ -93,6 +95,7 @@ const recreateJournal: RebuildRecreateJournal = {
   gatewayAuthority: GATEWAY_AUTHORITY,
   targetGeneration: "22222222-2222-4222-8222-222222222222",
   targetIntentFingerprint: "rebuild-reasoning-target",
+  harnessPackage: null,
   markDeleting: vi.fn(),
   observeSourceForDelete: vi.fn((): "missing" => "missing"),
   confirmDeleted: vi.fn(),
@@ -147,7 +150,7 @@ describe("rebuild recreate compatible-endpoint reasoning handoff (#7940)", () =>
       sandboxIdentity: decisionSelected({ name: SANDBOX_NAME, agent: "openclaw" }),
       gatewayAuthority: decisionSelected(GATEWAY_AUTHORITY),
       sandboxRecreate: {
-        version: 1,
+        version: 2,
         id: recreateJournal.id,
         revision: 3,
         sandboxName: SANDBOX_NAME,
@@ -162,6 +165,7 @@ describe("rebuild recreate compatible-endpoint reasoning handoff (#7940)", () =>
         phase: "deleted",
         startedAt: "2026-08-07T00:00:00.000Z",
         updatedAt: "2026-08-07T00:00:01.000Z",
+        harnessPackage: null,
       },
     };
     vi.spyOn(console, "log").mockImplementation(() => undefined);

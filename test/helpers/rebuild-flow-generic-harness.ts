@@ -18,6 +18,7 @@ import {
   gatewayState,
   gatewayTeardownAuthority,
   hermesProviderAuth,
+  installRebuildHarnessPackage,
   installTerminalStepFailureMock,
   loadRebuildSandbox,
   mcpBridge,
@@ -78,6 +79,12 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     expectedVersion: "0.2.0",
     policyAdditionsPath,
   };
+  const harnessPackage = Object.hasOwn(overrides, "harnessPackage")
+    ? (overrides.harnessPackage ?? null)
+    : installRebuildHarnessPackage(agentDef.name);
+  session.agent = agentDef.name === "openclaw" ? null : agentDef.name;
+  session.harnessPackage = harnessPackage;
+  session.harnessPackageMigration = null;
   const resolveGatewayAuthority = ({
     gatewayName,
     gatewayPort,
@@ -258,6 +265,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     dashboardPort: 18789,
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
+    ...(harnessPackage ? { harnessPackage } : {}),
     ...customOpenClawPluginProvenance,
     ...(overrides.sandboxEntry ?? {}),
   };
@@ -271,7 +279,12 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const initialDefaultSelectionRevision = overrides.defaultSelectionRevision ?? 10;
   const preDeleteDefaultSelectionRevision =
     overrides.preDeleteDefaultSelectionRevision ?? initialDefaultSelectionRevision;
-  const preDeleteSandboxEntry = overrides.preDeleteSandboxEntry ?? currentSandboxEntry;
+  const preDeleteSandboxEntry = overrides.preDeleteSandboxEntry
+    ? {
+        ...currentSandboxEntry,
+        ...overrides.preDeleteSandboxEntry,
+      }
+    : currentSandboxEntry;
   let currentDefaultSandbox = initialDefaultSandbox;
   let currentDefaultSelectionRevision = initialDefaultSelectionRevision;
   const currentRegistryEntryNames = new Set([String(currentSandboxEntry.name)]);

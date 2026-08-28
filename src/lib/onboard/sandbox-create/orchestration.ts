@@ -1111,6 +1111,17 @@ function pendingVerifiedCreateCheckpointForSession(input: {
     transaction.gatewayName !== input.gatewayName ||
     transaction.targetIntentFingerprint !== input.request.targetIntentFingerprint ||
     transaction.targetGeneration !== input.request.targetGeneration ||
+    transaction.version !== input.request.version ||
+    transaction.version !== 2 ||
+    !isDeepStrictEqual(transaction.harnessPackage, input.request.harnessPackage) ||
+    !isDeepStrictEqual(transaction.harnessPackage, input.session.harnessPackage) ||
+    !isDeepStrictEqual(transaction.harnessPackage, input.session.checkpoint?.harnessPackage) ||
+    !isDeepStrictEqual(transaction.harnessPackage, checkpoint.harnessPackage ?? null) ||
+    !isDeepStrictEqual(transaction.harnessPackage, input.entry.harnessPackage ?? null) ||
+    !isDeepStrictEqual(
+      input.session.harnessPackageMigration,
+      input.entry.harnessPackageMigration ?? null,
+    ) ||
     transaction.phase !== "created" ||
     transaction.targetLiveIdentityFingerprint !== checkpoint.sandboxIdentityFingerprint ||
     transaction.targetGeneration !== checkpoint.lifecycleGeneration ||
@@ -1704,6 +1715,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           recreateRegistryEntry,
           getSandboxRecreateObservation,
           note,
+          registry.getSandbox,
         ),
       carryForward: () =>
         applyAbsentSandboxRebuildPolicyCarryForward(
@@ -1772,6 +1784,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         observe: (probeTarget) =>
           getSandboxRecreateObservation(probeTarget.sandboxName, probeTarget.gatewayName),
         intent: {
+          harnessPackage: inferenceRouteReservationAuthority?.harnessPackage ?? null,
           agent: getRequestedSandboxAgentName(agent) || null,
           fromDockerfile: fromDockerfile ?? null,
           provider: provider ?? null,

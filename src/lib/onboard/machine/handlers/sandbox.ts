@@ -54,6 +54,8 @@ import {
   recordCheckpointWebSearch,
 } from "../../checkpoint-record";
 import {
+  assertCheckpointPackageAuthorityChain,
+  checkpointPackageOwnerAuthorityMatches,
   checkpointProvesSandboxStepComplete,
   observeProviderEffectFingerprint,
   planEffectGroupReplay,
@@ -139,6 +141,15 @@ const SANDBOX_RECREATE_WORKLOAD_SKIP_DIAGNOSTIC = {
   "no-owned-image": "  Obsolete sandbox image retirement skipped: no-owned-image",
   "image-reused": "  Obsolete sandbox image retirement skipped: image-reused",
 } as const satisfies Record<SandboxRecreateWorkloadSkipReason, string>;
+
+function sessionCheckpointPackageAuthorityMatches(session: Session): boolean {
+  try {
+    assertCheckpointPackageAuthorityChain(session, null);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function isAdvisoryPeerRouteDifference(
   result: Exclude<GatewayRouteCompatibilityResult, { ok: true }>,
@@ -1236,9 +1247,7 @@ class SandboxStateFlow<
         state.session,
         `finalize inference route reservation for sandbox ${JSON.stringify(sandboxName)}`,
       );
-      if (
-        this.deps.finalizeSandboxRouteReservation(sandboxName, sessionId, packageAuthority)
-      ) {
+      if (this.deps.finalizeSandboxRouteReservation(sandboxName, sessionId, packageAuthority)) {
         return;
       }
     }
@@ -1438,8 +1447,11 @@ class SandboxStateFlow<
     const handoff = this.options.recreateJournalTargetIntentFingerprint;
     const recreate = state.session?.checkpoint?.sandboxRecreate;
     return Boolean(
+      state.session &&
       handoff &&
       recreate &&
+      recreate.version === 2 &&
+      sessionCheckpointPackageAuthorityMatches(state.session) &&
       recreate.sandboxName === sandboxName &&
       recreate.targetIntentFingerprint === handoff &&
       sandboxRecreatePhaseReached(recreate.phase, "deleted"),
@@ -1993,58 +2005,112 @@ class SandboxStateFlow<
     state: SandboxStepState<WebSearchConfig>,
     sandboxName: string,
     createIntent: CompleteSandboxCreateIntent,
-    sourceEntry: SandboxEntry | null,
-  ): CheckpointSandboxRecreateTransaction | null {
-    const existing = state.session?.checkpoint?.sandboxRecreate ?? null;
-    const ownsPendingCreateReservation =
-      sourceEntry?.pendingRouteReservation === true &&
-      sourceEntry.reservationSessionId === state.session?.sessionId;
-    if (!this.options.resume && !existing && sourceEntry && !ownsPendingCreateReservation) {
-      return null;
-    }
-    const gateway = selectedGatewayForSandboxRecreate(
-      state.session?.checkpoint,
+  ): {
+    readonly transaction: CheckpointSandboxRecreateTransaction;
+    readonly sourceEntry: SandboxEntry | null;
+  } | null {
+    const ownerSnapshot = state.session;
+    if (!ownerSnapshot) return null;
+    const snapshotTransaction = ownerSnapshot.checkpoint?.sandboxRecreate ?? null;
+    const snapshotGateway = selectedGatewayForSandboxRecreate(
+      ownerSnapshot.checkpoint,
       this.options.gatewayName,
     );
     if (
-      existing &&
-      (!gateway ||
-        existing.gatewayName !== gateway.gatewayName ||
-        existing.gatewayPort !== gateway.gatewayPort)
+      snapshotTransaction &&
+      (!snapshotGateway ||
+        snapshotTransaction.gatewayName !== snapshotGateway.gatewayName ||
+        snapshotTransaction.gatewayPort !== snapshotGateway.gatewayPort)
     ) {
       throw new Error(
-        `Cannot resume sandbox '${existing.sandboxName}' recreation: journaled gateway '${existing.gatewayName}:${String(existing.gatewayPort)}' does not match the selected gateway authority.`,
+        `Cannot resume sandbox '${snapshotTransaction.sandboxName}' recreation: journaled gateway '${snapshotTransaction.gatewayName}:${String(snapshotTransaction.gatewayPort)}' does not match the selected gateway authority.`,
       );
     }
-    if (!gateway) return null;
+    if (!snapshotGateway) return null;
     const observation = this.deps.getSandboxRecreateObservation(sandboxName);
+    let journalSourceEntry: SandboxEntry | null = null;
+    let journalSkipped = false;
     const updated = this.deps.updateSession((current) => {
+      if (
+        current.sessionId !== ownerSnapshot.sessionId ||
+        !checkpointPackageOwnerAuthorityMatches(current, ownerSnapshot)
+      ) {
+        throw new Error("Cannot start sandbox recreate: owning Session authority changed");
+      }
+      const currentSourceEntry = this.deps.getSandboxRegistryEntry(sandboxName);
+      assertCheckpointPackageAuthorityChain(current, currentSourceEntry);
+      const existing = current.checkpoint?.sandboxRecreate ?? null;
+      const ownsPendingCreateReservation =
+        currentSourceEntry?.pendingRouteReservation === true &&
+        currentSourceEntry.reservationSessionId === current.sessionId;
+      if (
+        !this.options.resume &&
+        !existing &&
+        currentSourceEntry &&
+        !ownsPendingCreateReservation
+      ) {
+        journalSkipped = true;
+        return current;
+      }
+      const gateway = selectedGatewayForSandboxRecreate(
+        current.checkpoint,
+        this.options.gatewayName,
+      );
+      if (
+        existing &&
+        (!gateway ||
+          existing.gatewayName !== gateway.gatewayName ||
+          existing.gatewayPort !== gateway.gatewayPort)
+      ) {
+        throw new Error(
+          `Cannot resume sandbox '${existing.sandboxName}' recreation: journaled gateway '${existing.gatewayName}:${String(existing.gatewayPort)}' does not match the selected gateway authority.`,
+        );
+      }
+      if (!gateway) {
+        journalSkipped = true;
+        return current;
+      }
+      journalSourceEntry = currentSourceEntry;
       beginSandboxRecreateTransaction(current, {
         sandboxName,
         gatewayName: gateway.gatewayName,
         gatewayPort: gateway.gatewayPort,
-        sourceEntry,
+        sourceEntry: currentSourceEntry,
         observation,
         targetIntentFingerprint: selectSandboxRecreateTargetIntentFingerprint(
           existing,
-          this.sandboxRecreateTargetIntentFingerprint(sandboxName, createIntent),
+          this.sandboxRecreateTargetIntentFingerprint(
+            sandboxName,
+            createIntent,
+            current.harnessPackage,
+          ),
           this.options.recreateJournalTargetIntentFingerprint,
+          fingerprintSandboxRecreateValue(
+            this.currentSandboxCreateFingerprint(sandboxName, createIntent.resolved),
+          ),
         ),
       });
       return current;
     });
-    return updated.checkpoint?.sandboxRecreate ?? null;
+    const transaction = journalSkipped ? null : (updated.checkpoint?.sandboxRecreate ?? null);
+    return transaction ? { transaction, sourceEntry: journalSourceEntry } : null;
   }
 
   private sandboxRecreateTargetIntentFingerprint(
     sandboxName: string,
     createIntent: CompleteSandboxCreateIntent,
+    harnessPackage: Session["harnessPackage"],
   ): string {
     const journaled = this.options.recreateJournalTargetIntentFingerprint;
     if (journaled) return journaled;
-    return fingerprintSandboxRecreateValue(
-      this.currentSandboxCreateFingerprint(sandboxName, createIntent.resolved),
-    );
+    return fingerprintSandboxRecreateValue({
+      version: 2,
+      createIntentFingerprint: this.currentSandboxCreateFingerprint(
+        sandboxName,
+        createIntent.resolved,
+      ),
+      harnessPackage,
+    });
   }
 
   private recordSandboxRecreatePhase(
@@ -2057,11 +2123,24 @@ class SandboxStateFlow<
     });
   }
 
-  private clearSandboxRecreateJournal(transaction: CheckpointSandboxRecreateTransaction): Session {
-    return this.deps.updateSession((current) => {
-      clearCompletedSandboxRecreateTransaction(current, transaction.id);
-      return current;
-    });
+  private prepareSandboxWithoutRecreateTransaction(
+    requestedSandboxName: string,
+    createIntent: CompleteSandboxCreateIntent,
+    decision: SandboxCreationDecision,
+    repairMetadata: SandboxRecreateRepairMetadata | null,
+  ): SandboxRecreatePreparation {
+    if (replacesSameNameSandbox(decision)) {
+      throw new Error(
+        `Cannot replace same-name sandbox '${requestedSandboxName}': no recreate transaction proves ownership of the source sandbox and its registry row.`,
+      );
+    }
+    if (decision.kind === "recreate") this.deps.note(decision.note);
+    return {
+      transaction: null,
+      sourceEntry: null,
+      effectiveCreateIntent: createIntent,
+      repairMetadata,
+    };
   }
 
   private async prepareSandboxRecreate(
@@ -2073,34 +2152,34 @@ class SandboxStateFlow<
     const sourceEntry = this.deps.getSandboxRegistryEntry(requestedSandboxName);
     const continueHermesPortableLifecycle =
       decision.kind === "create" && decision.continueHermesPortableLifecycle === true;
-    const transaction = continueHermesPortableLifecycle
+    const openedJournal = continueHermesPortableLifecycle
       ? null
-      : this.beginSandboxRecreateJournal(state, requestedSandboxName, createIntent, sourceEntry);
+      : this.beginSandboxRecreateJournal(state, requestedSandboxName, createIntent);
+    const transaction = openedJournal?.transaction ?? null;
     const repairMetadata: SandboxRecreateRepairMetadata | null =
       decision.kind === "repair-and-recreate"
         ? { repair: "recorded-sandbox-cleanup", sandboxName: state.sandboxName }
         : null;
     if (!transaction) {
-      if (replacesSameNameSandbox(decision)) {
-        throw new Error(
-          `Cannot replace same-name sandbox '${requestedSandboxName}': no recreate transaction proves ownership of the source sandbox and its registry row.`,
-        );
-      }
-      if (decision.kind === "recreate") this.deps.note(decision.note);
-      return {
-        transaction,
-        sourceEntry: null,
-        effectiveCreateIntent: createIntent,
+      return this.prepareSandboxWithoutRecreateTransaction(
+        requestedSandboxName,
+        createIntent,
+        decision,
         repairMetadata,
-      };
+      );
+    }
+    if (transaction.version !== 2) {
+      throw new Error("Sandbox recreate transaction requires package authority migration");
     }
     const effectiveCreateIntent: CompleteSandboxCreateIntent = {
       ...createIntent,
       recreate: true,
       recreateTransaction: {
+        version: 2,
         id: transaction.id,
         targetGeneration: transaction.targetGeneration,
         targetIntentFingerprint: transaction.targetIntentFingerprint,
+        harnessPackage: transaction.harnessPackage,
       },
     };
     if (repairMetadata) {
@@ -2116,7 +2195,8 @@ class SandboxStateFlow<
     }
     return {
       transaction,
-      sourceEntry: sandboxRecreateSourceWorkloadEntry(transaction) ?? sourceEntry,
+      sourceEntry:
+        sandboxRecreateSourceWorkloadEntry(transaction) ?? openedJournal?.sourceEntry ?? sourceEntry,
       effectiveCreateIntent,
       repairMetadata,
     };
@@ -2196,6 +2276,21 @@ class SandboxStateFlow<
     createIntent: CompleteSandboxCreateIntent,
   ): Session {
     const recordedSession = this.deps.updateSession((current) => {
+      if (transaction) {
+        const currentTransaction = current.checkpoint?.sandboxRecreate;
+        const replacement = this.deps.getSandboxRegistryEntry(sandboxName);
+        assertCheckpointPackageAuthorityChain(current, replacement);
+        if (
+          !replacement ||
+          !currentTransaction ||
+          currentTransaction.version !== 2 ||
+          currentTransaction.id !== transaction.id
+        ) {
+          throw new Error(
+            "Cannot complete sandbox recreate: replacement registry authority changed",
+          );
+        }
+      }
       recordCheckpointEffectGroup(
         current,
         "sandbox_create",
@@ -2207,7 +2302,22 @@ class SandboxStateFlow<
       }
       return current;
     });
-    return transaction ? this.clearSandboxRecreateJournal(transaction) : recordedSession;
+    if (!transaction) return recordedSession;
+    return this.deps.updateSession((current) => {
+      const currentTransaction = current.checkpoint?.sandboxRecreate;
+      const replacement = this.deps.getSandboxRegistryEntry(sandboxName);
+      assertCheckpointPackageAuthorityChain(current, replacement);
+      if (
+        !replacement ||
+        !currentTransaction ||
+        currentTransaction.version !== 2 ||
+        currentTransaction.id !== transaction.id
+      ) {
+        throw new Error("Cannot clear sandbox recreate: replacement registry authority changed");
+      }
+      clearCompletedSandboxRecreateTransaction(current, transaction.id);
+      return current;
+    });
   }
 
   private async createAndRecordSandbox(

@@ -9,6 +9,7 @@ import {
   baseOptions,
   bindJournaledRecreate,
   createDeps,
+  expectedSessionPackageAuthority,
   makeMinimalPlan,
 } from "./sandbox-test-fixtures";
 
@@ -71,6 +72,7 @@ describe("handleSandboxState resume recreation", () => {
       null,
       {
         sessionId: session.sessionId,
+        ...expectedSessionPackageAuthority(session),
         selection: {
           provider: "compatible-endpoint",
           model: "model",
@@ -135,6 +137,7 @@ describe("handleSandboxState resume recreation", () => {
     expect(createSandboxCall[4]).toBe("saved");
     expect(createSandboxCall[14]).toEqual({
       sessionId: session.sessionId,
+      ...expectedSessionPackageAuthority(session),
       selection: {
         provider: "provider",
         model: "model",
@@ -185,6 +188,7 @@ describe("handleSandboxState resume recreation", () => {
     const createSandboxCall = journal.completeCreate.mock.calls[0] as unknown[];
     expect(createSandboxCall[14]).toEqual({
       sessionId: session.sessionId,
+      ...expectedSessionPackageAuthority(session),
       selection: {
         provider: "provider",
         model: "model",

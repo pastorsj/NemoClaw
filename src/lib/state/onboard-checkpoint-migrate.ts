@@ -7,6 +7,7 @@ import { isObjectRecord, type JsonValue } from "../core/json-types";
 import {
   harnessPackageIdentitiesEqual,
   parseHarnessPackageIdentity,
+  type HarnessPackageIdentity,
 } from "../harness/package-identity";
 import type { WebSearchConfig } from "../inference/web-search";
 import {
@@ -44,6 +45,53 @@ export function migrateCheckpointVersion4(raw: unknown): OnboardCheckpoint | nul
   if (!isObjectRecord(raw) || raw.schemaVersion !== 4) return null;
   const inspected = inspectCheckpoint(raw);
   return inspected.status === "loaded" ? inspected.checkpoint : null;
+}
+
+function nullableHarnessPackagesEqual(
+  left: HarnessPackageIdentity | null,
+  right: HarnessPackageIdentity | null,
+): boolean {
+  return left === null
+    ? right === null
+    : right !== null && harnessPackageIdentitiesEqual(left, right);
+}
+
+/**
+ * Bind a legacy checkpoint to authority already established by its owning
+ * Session. This is the only v1 recreate migration: it adds identity without
+ * changing any journal progress, timestamp, generation, or fingerprint.
+ */
+export function bindCheckpointHarnessPackageAuthority(
+  checkpoint: OnboardCheckpoint | null,
+  desiredIdentity: HarnessPackageIdentity | null,
+): OnboardCheckpoint | null {
+  if (checkpoint === null) return null;
+  if (
+    checkpoint.harnessPackage !== null &&
+    !nullableHarnessPackagesEqual(checkpoint.harnessPackage, desiredIdentity)
+  ) {
+    throw new Error("Checkpoint harness package authority does not match its Session");
+  }
+
+  const transaction = checkpoint.sandboxRecreate;
+  if (
+    transaction?.version === 2 &&
+    !nullableHarnessPackagesEqual(transaction.harnessPackage, desiredIdentity)
+  ) {
+    throw new Error("Recreate transaction harness package authority does not match its Session");
+  }
+  const harnessPackage = desiredIdentity ? structuredClone(desiredIdentity) : null;
+  const sandboxRecreate =
+    transaction?.version === 1
+      ? { ...transaction, version: 2 as const, harnessPackage }
+      : transaction;
+  if (
+    nullableHarnessPackagesEqual(checkpoint.harnessPackage, desiredIdentity) &&
+    sandboxRecreate === transaction
+  ) {
+    return checkpoint;
+  }
+  return { ...checkpoint, harnessPackage, sandboxRecreate };
 }
 
 function inspectResumeCheckpoint(raw: unknown): CheckpointLoadResult {

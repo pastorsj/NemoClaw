@@ -19,8 +19,18 @@ import {
   prepareRebuildRecreateOptions,
 } from "./rebuild-target-staging";
 
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime",
+  id: "openclaw",
+  packageVersion: "0.1.0",
+  contractVersion: 1,
+  contentDigest: "a".repeat(64),
+} as const;
+
 const SANDBOX_ENTRY = {
   name: "alpha",
+  agent: null,
+  harnessPackage: OPENCLAW_PACKAGE,
   dashboardPort: 18789,
   gatewayName: "nemoclaw",
   gatewayPort: 8080,

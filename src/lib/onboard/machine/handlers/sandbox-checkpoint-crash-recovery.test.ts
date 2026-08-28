@@ -17,7 +17,12 @@ import {
 import { detectMessagingChannelsFromEnv } from "../../messaging-channel-setup";
 import type { MessagingTokenDef } from "../../messaging-prep";
 import { handleSandboxState } from "./sandbox";
-import { baseOptions, createDeps, makeMinimalPlan } from "./sandbox-test-fixtures";
+import {
+  baseOptions,
+  createDeps,
+  expectedSessionPackageAuthority,
+  makeMinimalPlan,
+} from "./sandbox-test-fixtures";
 
 vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
@@ -64,6 +69,7 @@ function crashedCheckpoint(overrides: Partial<OnboardCheckpoint> = {}): OnboardC
     bindings: { credentialEnvs: [], registeredProviders: [] },
     sandboxRecreate: null,
     ...overrides,
+    harnessPackage: overrides.harnessPackage ?? null,
   };
 }
 
@@ -241,6 +247,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
     expect(calls.finalizeRouteReservation).toHaveBeenCalledExactlyOnceWith(
       "my-assistant",
       session.sessionId,
+      expectedSessionPackageAuthority(session),
     );
     expect(calls.recordSkip).toHaveBeenCalled();
   });
@@ -1358,6 +1365,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
     expect(resumedRun.calls.finalizeRouteReservation).toHaveBeenCalledExactlyOnceWith(
       "my-assistant",
       persistedSession.sessionId,
+      expectedSessionPackageAuthority(persistedSession),
     );
     expect(
       resumedRun.calls.updateSandbox.mock.calls.some(([, updates]) =>

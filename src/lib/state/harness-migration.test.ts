@@ -17,6 +17,8 @@ import {
   type InstalledHarnessPackage,
 } from "../harness/package-store";
 import type { HarnessPackageIdentity } from "../harness/package-types";
+import { decisionSelected } from "./onboard-checkpoint-decision";
+import { deriveCheckpointFromSession } from "./onboard-checkpoint-migrate";
 import { createSession, type Session } from "./onboard-session";
 import type { SandboxEntry, SandboxRegistry } from "./registry/types";
 import {
@@ -80,13 +82,15 @@ function writeReviewedBundle(): void {
 }
 
 function legacySession(agent: string | null, sandboxName: string | null = "owner"): Session {
-  return createSession({
+  const session = createSession({
     agent,
     sandboxName,
     sessionId: "migration-session",
     startedAt: "2026-08-28T10:00:00.000Z",
     updatedAt: "2026-08-28T10:00:00.000Z",
   });
+  session.checkpoint = deriveCheckpointFromSession(session);
+  return session;
 }
 
 function legacyRegistryEntry(name: string, agent: string | null): SandboxEntry {
@@ -99,6 +103,40 @@ function migrationRecord(legacyAgent: string | null, migratedAt = MIGRATED_AT) {
     source: "legacy-current-bundle" as const,
     legacyAgent,
     migratedAt,
+  };
+}
+
+function attachLegacyRecreate(session: Session): void {
+  session.checkpoint = {
+    ...session.checkpoint!,
+    sandboxIdentity: decisionSelected({ name: "owner", agent: session.agent ?? "openclaw" }),
+    gatewayAuthority: decisionSelected({
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      mode: "nemoclaw-managed",
+      source: "standalone",
+      endpoint: null,
+      stateDir: null,
+      supervisor: null,
+      requiredCapabilities: [],
+    }),
+    sandboxRecreate: {
+      version: 1,
+      id: "11111111-1111-4111-8111-111111111111",
+      revision: 2,
+      sandboxName: "owner",
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      sourceRegistryFingerprint: "a".repeat(64),
+      sourceLiveIdentityFingerprint: null,
+      sourceWorkload: null,
+      targetIntentFingerprint: "b".repeat(64),
+      targetGeneration: "22222222-2222-4222-8222-222222222222",
+      targetLiveIdentityFingerprint: null,
+      phase: "deleted",
+      startedAt: MIGRATED_AT,
+      updatedAt: MIGRATED_AT,
+    },
   };
 }
 
@@ -245,6 +283,7 @@ describe("legacy harness migration", () => {
     ["langchain-deepagents-code", "langchain-deepagents-code"],
   ] as const)("maps legacy agent %s to the exact reviewed %s package", (agent, expectedId) => {
     const session = legacySession(agent);
+    attachLegacyRecreate(session);
     const harness = new MigrationHarness(session, [
       legacyRegistryEntry("owner", agent ?? "openclaw"),
     ]);
@@ -264,6 +303,13 @@ describe("legacy harness migration", () => {
 
     expect(harness.session?.harnessPackage).toEqual(prepared.harnessPackage);
     expect(harness.session?.harnessPackageMigration).toEqual(prepared.harnessPackageMigration);
+    expect(harness.session?.checkpoint?.harnessPackage).toEqual(prepared.harnessPackage);
+    expect(harness.session?.checkpoint?.sandboxRecreate).toMatchObject({
+      version: 2,
+      harnessPackage: prepared.harnessPackage,
+      revision: 2,
+      phase: "deleted",
+    });
     expect(harness.registry.sandboxes.owner?.harnessPackage).toEqual(prepared.harnessPackage);
     expect(harness.registry.sandboxes.owner?.harnessPackageMigration).toEqual(
       prepared.harnessPackageMigration,

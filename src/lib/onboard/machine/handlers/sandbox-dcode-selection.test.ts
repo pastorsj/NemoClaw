@@ -6,7 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createSession, type Session } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
-import { baseOptions, bindJournaledRecreate, createDeps } from "./sandbox-test-fixtures";
+import {
+  baseOptions,
+  bindJournaledRecreate,
+  createDeps,
+  expectedSessionPackageAuthority,
+} from "./sandbox-test-fixtures";
 
 vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
@@ -341,6 +346,7 @@ describe("handleSandboxState live DCode selection", () => {
     expect(finalizeSandboxRouteReservation).toHaveBeenCalledExactlyOnceWith(
       "saved",
       session.sessionId,
+      expectedSessionPackageAuthority(session),
     );
     expect(registryEntry.pendingRouteReservation).toBeUndefined();
     expect(registryEntry.reservationSessionId).toBe(session.sessionId);
@@ -400,6 +406,7 @@ describe("handleSandboxState live DCode selection", () => {
     expect(finalizeSandboxRouteReservation).toHaveBeenCalledExactlyOnceWith(
       "saved",
       session.sessionId,
+      expectedSessionPackageAuthority(session),
     );
     expect(registryEntry).toMatchObject({
       provider: "provider",

@@ -102,6 +102,7 @@ describe("selectPreUpgradeBackupForCreate", () => {
       sourceConfirmedAbsent: true,
       targetGeneration: "3c9a1b7e-target",
       ...overrides,
+      harnessPackage: overrides.harnessPackage ?? null,
     };
   }
 

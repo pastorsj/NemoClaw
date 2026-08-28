@@ -8,6 +8,7 @@ import {
   CHECKPOINT_SCHEMA_VERSION,
   type CheckpointSandboxRecreatePhase,
   type CheckpointSandboxRecreateTransaction,
+  type CheckpointSandboxRecreateTransactionV2,
   type OnboardCheckpoint,
 } from "../../../state/onboard-checkpoint-types";
 import { createSession, type Session } from "../../../state/onboard-session";
@@ -27,10 +28,11 @@ const AT = "2026-01-01T00:00:00.000Z";
 const TARGET_INTENT_FINGERPRINT = "target-intent";
 
 function recreateTransaction(
-  overrides: Partial<CheckpointSandboxRecreateTransaction> = {},
-): CheckpointSandboxRecreateTransaction {
+  overrides: Partial<CheckpointSandboxRecreateTransactionV2> = {},
+): CheckpointSandboxRecreateTransactionV2 {
   return {
-    version: 1,
+    version: 2,
+    harnessPackage: null,
     id: "recreate-1",
     revision: 1,
     sandboxName: SANDBOX_NAME,
@@ -56,6 +58,7 @@ function rebuiltCheckpoint(
     schemaVersion: CHECKPOINT_SCHEMA_VERSION,
     profile: { kind: "selected", value: "default" },
     runtimeAuthority: { kind: "unset" },
+    harnessPackage: null,
     sessionId: "sess-1",
     machineState: "sandbox",
     updatedAt: AT,

@@ -2785,7 +2785,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
       isNonInteractive() && !resume && opts.experimentalProfile !== "portable";
     const harnessPackageOperation = await onboardPackageBoundary.prepareOnboardHarnessOperation(
       { agentFlag: opts.agent || null, canPrompt: !cannotPrompt, prompt, resume, rootDir: ROOT },
-      { assertWriterLockOwned: onboardSession.assertOnboardLockOwned, loadSession: onboardSession.loadSession },
+      { assertWriterLockOwned: onboardSession.assertOnboardLockOwned, compareAndSwapSession: onboardSession.compareAndSwapSession, loadSession: onboardSession.loadSession },
     );
     await portableRetirementEntry.run(async () => {
       if (validatePolicyTierBeforeRuntime) validatePolicyTierEnvEarly();

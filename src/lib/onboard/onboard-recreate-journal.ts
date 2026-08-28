@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import { decisionSelected } from "../state/onboard-checkpoint-decision";
+import {
+  harnessPackageIdentitiesEqual,
+  type HarnessPackageIdentity,
+} from "../harness/package-identity";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
@@ -18,6 +24,7 @@ import {
   beginSandboxRecreateTransaction,
   clearCompletedSandboxRecreateTransaction,
   createSandboxRecreateRuntime,
+  fingerprintSandboxRegistryEntry,
   fingerprintSandboxRecreateValue,
   planSandboxRecreateRecovery,
   type SandboxRecreateRuntime,
@@ -25,6 +32,7 @@ import {
 } from "./sandbox-recreate-transaction";
 
 export interface OnboardRecreateTargetIntent {
+  readonly harnessPackage: HarnessPackageIdentity | null;
   readonly agent: string | null;
   readonly fromDockerfile: string | null;
   readonly provider: string | null;
@@ -42,7 +50,12 @@ export interface OnboardRecreateTargetIntent {
 export function fingerprintOnboardRecreateTargetIntent(
   intent: OnboardRecreateTargetIntent,
 ): string {
-  return fingerprintSandboxRecreateValue({ version: 1, ...intent });
+  return fingerprintSandboxRecreateValue({ version: 2, ...intent });
+}
+
+function fingerprintLegacyOnboardRecreateTargetIntent(intent: OnboardRecreateTargetIntent): string {
+  const { harnessPackage: _harnessPackage, ...legacyIntent } = intent;
+  return fingerprintSandboxRecreateValue({ version: 1, ...legacyIntent });
 }
 
 export interface ManagedMcpRecreateRefusal {
@@ -74,24 +87,61 @@ export type OwnedSandboxRecreateRuntime = SandboxRecreateRuntime & {
   abandon(): void;
 };
 
+function requireCurrentRegistryPackageOwner(
+  session: onboardSession.Session,
+  target: SandboxRecreateTarget,
+  agentName: string,
+  operation: string,
+): registry.SandboxEntry {
+  const entry = registry.getSandbox(target.sandboxName);
+  if (!entry) {
+    throw new Error(`Cannot ${operation}: sandbox '${target.sandboxName}' registry owner is absent`);
+  }
+  if (
+    (entry.agent ?? "openclaw") !== agentName ||
+    !isDeepStrictEqual(session.harnessPackage, entry.harnessPackage ?? null) ||
+    !isDeepStrictEqual(session.harnessPackageMigration, entry.harnessPackageMigration ?? null)
+  ) {
+    throw new Error(`Cannot ${operation}: sandbox registry package authority changed`);
+  }
+  return entry;
+}
+
 export function openOnboardRecreateJournal(
   input: OpenOnboardRecreateJournalInput,
 ): OwnedSandboxRecreateRuntime {
   const { target, agentName, note } = input;
-  const targetIntentFingerprint = fingerprintOnboardRecreateTargetIntent(input.intent);
+  const openingSession = onboardSession.loadSession();
+  if (!openingSession) {
+    throw new Error(`Cannot start sandbox '${target.sandboxName}' recreate without its Session.`);
+  }
+  const sessionPackageMatches =
+    openingSession.harnessPackage === null
+      ? input.intent.harnessPackage === null
+      : input.intent.harnessPackage !== null &&
+        harnessPackageIdentitiesEqual(openingSession.harnessPackage, input.intent.harnessPackage);
+  if (!sessionPackageMatches) {
+    throw new Error("Cannot start sandbox recreate: target package authority changed");
+  }
+  const requestedTargetIntentFingerprint = fingerprintOnboardRecreateTargetIntent(input.intent);
   const observe = input.observe ?? observeSandboxOnGateway;
   const authority = resolveGatewayTeardownAuthority({
     gatewayName: target.gatewayName,
     gatewayPort: target.gatewayPort,
   });
-  const sourceEntry = registry.getSandbox(target.sandboxName);
-  if (!sourceEntry) {
-    throw new Error(
-      `Cannot start sandbox '${target.sandboxName}' recreate transaction without its source registry row.`,
-    );
-  }
+  const sourceEntry = requireCurrentRegistryPackageOwner(
+    openingSession,
+    target,
+    agentName,
+    "start sandbox recreate without its source registry row",
+  );
   const observation = observe(target);
-  const active = onboardSession.loadSession()?.checkpoint?.sandboxRecreate ?? null;
+  const active = openingSession.checkpoint?.sandboxRecreate ?? null;
+  const legacyTargetIntentFingerprint = fingerprintLegacyOnboardRecreateTargetIntent(input.intent);
+  const targetIntentFingerprint =
+    active?.targetIntentFingerprint === legacyTargetIntentFingerprint
+      ? active.targetIntentFingerprint
+      : requestedTargetIntentFingerprint;
   if (active) {
     const recovery = planSandboxRecreateRecovery(active, observation, sourceEntry);
     if (recovery.action === "reject") {
@@ -102,6 +152,25 @@ export function openOnboardRecreateJournal(
   }
 
   const session = onboardSession.updateSession((current) => {
+    if (
+      current.sessionId !== openingSession.sessionId ||
+      !isDeepStrictEqual(current.harnessPackage, openingSession.harnessPackage) ||
+      !isDeepStrictEqual(current.harnessPackageMigration, openingSession.harnessPackageMigration)
+    ) {
+      throw new Error("Cannot start sandbox recreate: owning Session authority changed");
+    }
+    if (!isDeepStrictEqual(current.checkpoint, openingSession.checkpoint)) {
+      throw new Error("Cannot start sandbox recreate: owning Session checkpoint changed");
+    }
+    const mutationSourceEntry = requireCurrentRegistryPackageOwner(
+      current,
+      target,
+      agentName,
+      "open sandbox recreate journal",
+    );
+    if (!isDeepStrictEqual(mutationSourceEntry, sourceEntry)) {
+      throw new Error("Cannot start sandbox recreate: source registry owner changed");
+    }
     const checkpoint = current.checkpoint ?? deriveCheckpointFromSession(current);
     current.checkpoint = {
       ...checkpoint,
@@ -114,7 +183,7 @@ export function openOnboardRecreateJournal(
       sandboxName: target.sandboxName,
       gatewayName: target.gatewayName,
       gatewayPort: target.gatewayPort,
-      sourceEntry,
+      sourceEntry: mutationSourceEntry,
       observation,
       targetIntentFingerprint,
     });
@@ -138,15 +207,18 @@ export function openOnboardRecreateJournal(
       compareAndSwapSession: onboardSession.compareAndSwapSession,
     },
     {
+      version: 2,
       id: transaction.id,
       targetGeneration: transaction.targetGeneration,
       targetIntentFingerprint: transaction.targetIntentFingerprint,
+      harnessPackage: transaction.version === 2 ? transaction.harnessPackage : null,
     },
     target.sandboxName,
     target.gatewayName,
     sourceEntry,
     (sandboxName, gatewayName) => observe({ ...target, sandboxName, gatewayName }),
     note,
+    registry.getSandbox,
   );
 
   return {
@@ -156,6 +228,22 @@ export function openOnboardRecreateJournal(
     },
     abandon: () => {
       onboardSession.updateSession((current) => {
+        const currentTransaction = current.checkpoint?.sandboxRecreate;
+        if (!currentTransaction || currentTransaction.id !== transaction.id) {
+          throw new Error("Cannot abandon sandbox recreate: transaction ownership changed");
+        }
+        const currentSource = requireCurrentRegistryPackageOwner(
+          current,
+          target,
+          agentName,
+          "abandon sandbox recreate",
+        );
+        if (
+          fingerprintSandboxRegistryEntry(currentSource) !==
+          currentTransaction.sourceRegistryFingerprint
+        ) {
+          throw new Error("Cannot abandon sandbox recreate: source registry owner changed");
+        }
         abandonSandboxRecreateTransaction(current, transaction.id);
         return current;
       });
@@ -164,6 +252,23 @@ export function openOnboardRecreateJournal(
     // the replacement registry row commits.
     complete: () => {
       onboardSession.updateSession((current) => {
+        const currentTransaction = current.checkpoint?.sandboxRecreate;
+        if (
+          !currentTransaction ||
+          currentTransaction.version !== 2 ||
+          currentTransaction.id !== transaction.id
+        ) {
+          throw new Error("Cannot complete sandbox recreate: transaction ownership changed");
+        }
+        const replacement = requireCurrentRegistryPackageOwner(
+          current,
+          target,
+          agentName,
+          "complete sandbox recreate",
+        );
+        if (!isDeepStrictEqual(currentTransaction.harnessPackage, replacement.harnessPackage ?? null)) {
+          throw new Error("Cannot complete sandbox recreate: replacement registry owner changed");
+        }
         for (const next of ["registry_committing", "completed"] as const) {
           const phase = current.checkpoint?.sandboxRecreate?.phase;
           if (phase && sandboxRecreatePhaseReached(phase, next)) continue;

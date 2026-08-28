@@ -35,6 +35,7 @@ const portableCheckpointWithoutAuthority: OnboardCheckpoint = {
   schemaVersion: CHECKPOINT_SCHEMA_VERSION,
   profile: { kind: "selected", value: "portable" },
   runtimeAuthority: { kind: "unset" },
+  harnessPackage: null,
   sessionId: "portable-missing-authority",
   machineState: "preflight",
   updatedAt: "2026-08-13T20:00:00.000Z",

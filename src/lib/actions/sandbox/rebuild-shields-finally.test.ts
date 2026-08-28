@@ -23,6 +23,8 @@ const gatewayAuthority = {
 } as const;
 
 vi.mock("./rebuild-recreate-journal", () => ({
+  assertCurrentRebuildPackageAuthority: () => ({ name: "alpha" }),
+  fingerprintLegacyRebuildRecreateTargetIntent: () => "legacy-intent-1",
   fingerprintRebuildRecreateTargetIntent: () => "intent-1",
   openRebuildRecreateJournal: phaseMocks.openRecreateJournal,
 }));

@@ -6,6 +6,11 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
+import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
+import {
+  createHarnessPackageFixture,
+  type HarnessPackageFixture,
+} from "./harness-packages";
 import { type RebuildSandbox, snapshotEnv } from "./rebuild-flow-test-support";
 
 export * from "./rebuild-flow-test-support";
@@ -85,11 +90,54 @@ export function sourceSandboxGateway(argv: string[], verb: string): string | nul
 }
 
 const harnessTempDirs: string[] = [];
+const harnessCleanupCallbacks: Array<() => void> = [];
+const REBUILD_HOME_PARENT = path.join(
+  process.cwd(),
+  "node_modules/.cache/nemoclaw-rebuild-homes",
+);
+const harnessPackageFixtures = new Map<
+  string,
+  {
+    readonly fixture: HarnessPackageFixture;
+    readonly identities: Map<string, HarnessPackageIdentity>;
+  }
+>();
 
 export function createHarnessTempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   harnessTempDirs.push(dir);
   return dir;
+}
+
+const STANDARD_REBUILD_HARNESS_IDS = new Set([
+  "openclaw",
+  "hermes",
+  "langchain-deepagents-code",
+]);
+
+/** Install exact standard-harness authority under an isolated rebuild-test home. */
+export function installRebuildHarnessPackage(agentName: string): HarnessPackageIdentity | null {
+  if (!STANDARD_REBUILD_HARNESS_IDS.has(agentName)) return null;
+  const testHome = process.env.HOME?.trim();
+  if (!testHome) throw new Error("Rebuild harness tests require an isolated HOME.");
+  const storeRoot = path.join(fs.realpathSync(testHome), ".nemoclaw", "harnesses");
+  let state = harnessPackageFixtures.get(storeRoot);
+  if (!state) {
+    const fixture = createHarnessPackageFixture({ storeRoot });
+    state = { fixture, identities: new Map() };
+    harnessPackageFixtures.set(storeRoot, state);
+    harnessCleanupCallbacks.push(() => {
+      fixture.cleanup();
+      harnessPackageFixtures.delete(storeRoot);
+    });
+  }
+  const installed = state.identities.get(agentName);
+  if (installed) return installed;
+  const identity = state.fixture.install(
+    agentName as "openclaw" | "hermes" | "langchain-deepagents-code",
+  ).identity;
+  state.identities.set(agentName, identity);
+  return identity;
 }
 
 export type RebuildFlowTestHookOptions = {
@@ -98,10 +146,17 @@ export type RebuildFlowTestHookOptions = {
 
 export function installRebuildFlowTestHooks(options: RebuildFlowTestHookOptions = {}): void {
   const restoreRebuildFlowEnv = snapshotEnv([
+    "HOME",
     "NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE",
     "NEMOCLAW_SANDBOX_NAME",
   ]);
   beforeEach(() => {
+    fs.mkdirSync(REBUILD_HOME_PARENT, { recursive: true, mode: 0o700 });
+    fs.chmodSync(REBUILD_HOME_PARENT, 0o700);
+    const testHome = fs.mkdtempSync(path.join(REBUILD_HOME_PARENT, "home-"));
+    fs.chmodSync(testHome, 0o700);
+    harnessTempDirs.push(testHome);
+    process.env.HOME = testHome;
     delete process.env.NEMOCLAW_SANDBOX_NAME;
     if (options.acceptThirdPartySoftware) {
       process.env.NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE = "1";
@@ -115,6 +170,7 @@ export function installRebuildFlowTestHooks(options: RebuildFlowTestHookOptions 
     for (const dir of harnessTempDirs.splice(0)) {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+    for (const cleanup of harnessCleanupCallbacks.splice(0)) cleanup();
     restoreRebuildFlowEnv();
   });
 }

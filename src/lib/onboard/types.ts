@@ -82,9 +82,11 @@ export interface SandboxCreateIntent {
   readonly reuseRegisteredCredentials?: true;
   /** Internal durable handoff for one journaled same-name replacement. */
   readonly recreateTransaction?: {
+    readonly version: 2;
     readonly id: string;
     readonly targetGeneration: string;
     readonly targetIntentFingerprint: string;
+    readonly harnessPackage: import("../harness/package-identity").HarnessPackageIdentity | null;
   };
   /** Internal outer-rebuild authority for carrying managed MCP state through replacement. */
   readonly recreateJournalTargetIntentFingerprint?: string;

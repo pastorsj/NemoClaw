@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createSession } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
-import { baseOptions, createDeps } from "./sandbox-test-fixtures";
+import {
+  baseOptions,
+  createDeps,
+  expectedSessionPackageAuthority,
+} from "./sandbox-test-fixtures";
 
 vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
@@ -84,6 +88,7 @@ describe("sandbox route publication", () => {
     expect(finalizeSandboxRouteReservation).toHaveBeenCalledExactlyOnceWith(
       "saved",
       session.sessionId,
+      expectedSessionPackageAuthority(session),
     );
     expect(finalizeSandboxRouteReservation.mock.invocationCallOrder[0]).toBeGreaterThan(
       updateSandboxRegistry.mock.invocationCallOrder[0]!,
@@ -144,6 +149,7 @@ describe("sandbox route publication", () => {
     const createSandbox = vi.fn(async (...args: unknown[]) => {
       expect(args[14]).toEqual({
         sessionId: session.sessionId,
+        ...expectedSessionPackageAuthority(session),
         selection: {
           provider: "provider",
           model: "model",

@@ -96,7 +96,8 @@ function transactionAt(
   phase: CheckpointSandboxRecreatePhase,
 ): CheckpointSandboxRecreateTransaction {
   return {
-    version: 1,
+    version: 2,
+    harnessPackage: null,
     id: TX_ID,
     revision: 3,
     sandboxName: "alpha",
@@ -119,6 +120,16 @@ function transactionAt(
     phase,
     startedAt: ISO,
     updatedAt: ISO,
+  };
+}
+
+function recreateHandoff() {
+  return {
+    version: 2 as const,
+    id: TX_ID,
+    targetGeneration: TARGET_GENERATION,
+    targetIntentFingerprint: TARGET_INTENT,
+    harnessPackage: null,
   };
 }
 
@@ -151,11 +162,7 @@ function creatingLifecycleFixture(generationOverride?: string) {
         return session;
       },
     },
-    {
-      id: TX_ID,
-      targetGeneration: TARGET_GENERATION,
-      targetIntentFingerprint: TARGET_INTENT,
-    },
+    recreateHandoff(),
     "alpha",
     "nemoclaw-31818",
     SOURCE_ENTRY,
@@ -181,7 +188,7 @@ function creatingLifecycleFixture(generationOverride?: string) {
 }
 
 describe("sandbox recreate target intent selection", () => {
-  it("keeps the active transaction target when the requested target changes", () => {
+  it("keeps a migrated legacy transaction target when the versioned target changes", () => {
     const transaction = transactionAt("planned");
     const changedTarget = fingerprintSandboxRecreateValue({
       agent: "hermes",
@@ -189,7 +196,7 @@ describe("sandbox recreate target intent selection", () => {
     });
 
     expect(
-      selectSandboxRecreateTargetIntentFingerprint(transaction, changedTarget, TARGET_INTENT),
+      selectSandboxRecreateTargetIntentFingerprint(transaction, changedTarget, null, TARGET_INTENT),
     ).toBe(TARGET_INTENT);
   });
 
@@ -454,11 +461,7 @@ describe("sandbox recreate journal", () => {
           return session;
         },
       },
-      {
-        id: TX_ID,
-        targetGeneration: TARGET_GENERATION,
-        targetIntentFingerprint: TARGET_INTENT,
-      },
+      recreateHandoff(),
       "alpha",
       "nemoclaw-31818",
       SOURCE_ENTRY,
@@ -506,11 +509,7 @@ describe("sandbox recreate journal", () => {
           return session;
         },
       },
-      {
-        id: TX_ID,
-        targetGeneration: TARGET_GENERATION,
-        targetIntentFingerprint: TARGET_INTENT,
-      },
+      recreateHandoff(),
       "alpha",
       "nemoclaw-31818",
       SOURCE_ENTRY,
@@ -553,11 +552,7 @@ describe("sandbox recreate journal", () => {
           return session;
         },
       },
-      {
-        id: TX_ID,
-        targetGeneration: TARGET_GENERATION,
-        targetIntentFingerprint: TARGET_INTENT,
-      },
+      recreateHandoff(),
       "alpha",
       "nemoclaw-31818",
       SOURCE_ENTRY,
@@ -614,11 +609,7 @@ describe("sandbox recreate journal", () => {
         return session;
       },
     };
-    const request = {
-      id: TX_ID,
-      targetGeneration: TARGET_GENERATION,
-      targetIntentFingerprint: TARGET_INTENT,
-    };
+    const request = recreateHandoff();
     const observe = (_sandboxName: string, gatewayName: string): SandboxRecreateObservation => {
       probedGateways.push(gatewayName);
       return { state: "ready", liveIdentityFingerprint: SOURCE_ID };
@@ -668,11 +659,7 @@ describe("sandbox recreate journal", () => {
         return session;
       },
     };
-    const request = {
-      id: TX_ID,
-      targetGeneration: TARGET_GENERATION,
-      targetIntentFingerprint: TARGET_INTENT,
-    };
+    const request = recreateHandoff();
     const restart = () =>
       createSandboxRecreateRuntime(
         sessionStore,

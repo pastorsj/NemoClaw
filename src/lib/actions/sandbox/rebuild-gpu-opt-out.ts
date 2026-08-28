@@ -1,7 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import { loadAgent } from "../../agent/defs";
+import {
+  harnessPackageIdentitiesEqual,
+  inspectHarnessPackageState,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../../harness/package-identity";
 import {
   type InferenceEndpointSource,
   normalizeInferenceEndpointSource,
@@ -27,12 +35,51 @@ import type {
   RebuildRouteHandoff,
 } from "../../onboard/rebuild-route-handoff";
 import { normalizeSandboxGpuMode } from "../../onboard/sandbox-gpu-mode";
+import {
+  normalizeSandboxAgentName,
+  resolveSandboxAgent,
+} from "../../onboard/sandbox-agent";
 import type { ManagedWorkloadRebuildHandoff } from "../../onboard/workload/rebuild";
 import { getTier } from "../../policy/tiers";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
 import type { PreservedEnvFile } from "../../state/preserved-env";
 import { type ToolDisclosure, toolDisclosureOrDefault } from "../../tool-disclosure";
+
+export interface RebuildPackageAuthority {
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly harnessPackageMigration: HarnessPackageMigration | null;
+}
+
+export function rebuildPackageIdentityMatches(
+  left: HarnessPackageIdentity | null,
+  right: HarnessPackageIdentity | null,
+): boolean {
+  return left === null
+    ? right === null
+    : right !== null && harnessPackageIdentitiesEqual(left, right);
+}
+
+export function rebuildPackageAuthorityMatches(
+  owner: {
+    readonly harnessPackage?: HarnessPackageIdentity | null;
+    readonly harnessPackageMigration?: HarnessPackageMigration | null;
+  },
+  expected: RebuildPackageAuthority,
+): boolean {
+  const inspected = inspectHarnessPackageState(
+    owner.harnessPackage,
+    owner.harnessPackageMigration,
+  );
+  if (inspected.status === "invalid") return false;
+  if (inspected.status === "absent") {
+    return expected.harnessPackage === null && expected.harnessPackageMigration === null;
+  }
+  return (
+    rebuildPackageIdentityMatches(inspected.harnessPackage, expected.harnessPackage) &&
+    isDeepStrictEqual(inspected.harnessPackageMigration, expected.harnessPackageMigration)
+  );
+}
 
 export type RebuildGpuOptOutEntry = {
   sandboxGpuMode?: string | null;
@@ -51,6 +98,8 @@ export type RebuildGpuOptOutEntry = {
   model?: string | null;
   preferredInferenceApi?: string | null;
   hostMounts?: import("../../state/registry/types").SandboxHostMount[];
+  harnessPackage?: HarnessPackageIdentity;
+  harnessPackageMigration?: HarnessPackageMigration;
 };
 
 // Modern source of truth is the persisted `sandboxGpuMode` string ("0" / "1" /
@@ -123,6 +172,10 @@ export type RebuildRecreateOnboardOpts = {
   onboardLockAlreadyHeld: true;
   /** Target fingerprint of the replacement journal opened before deletion. */
   recreateJournalTargetIntentFingerprint?: string;
+  /** Exact source package authority retained across the outer rebuild. */
+  harnessPackage: HarnessPackageIdentity | null;
+  /** Owner-only migration audit retained on the rebuilt Session and registry row. */
+  harnessPackageMigration: HarnessPackageMigration | null;
   preparedDcodeRebuild?: PreparedDcodeRebuildHandoff;
   rebuildRegistryInferenceRoute?: RebuildRouteHandoff;
   rebuildProviderReconfigure?: RebuildProviderReconfigureHandoff;
@@ -165,6 +218,32 @@ export function buildRebuildRecreateOnboardOpts(args: {
     );
   }
   const gpuOverrides = getRebuildSandboxGpuOverrides(args.sb);
+  const packageState = inspectHarnessPackageState(
+    args.sb?.harnessPackage,
+    args.sb?.harnessPackageMigration,
+  );
+  if (packageState.status === "invalid") {
+    throw new Error("Recorded harness package authority is invalid.");
+  }
+  if (packageState.status === "absent") {
+    // The shared sandbox authority boundary owns qualified-agent admission.
+    // It rejects ordinary harnesses without package authority while keeping
+    // separately qualified candidates on their repository-owned null identity.
+    resolveSandboxAgent({ agent: args.rebuildAgent });
+  }
+  if (
+    packageState.status === "valid" &&
+    packageState.harnessPackage.id !== normalizeSandboxAgentName(args.rebuildAgent)
+  ) {
+    throw new Error("Recorded harness package authority does not match its agent.");
+  }
+  const packageAuthority =
+    packageState.status === "valid"
+      ? {
+          harnessPackage: packageState.harnessPackage,
+          harnessPackageMigration: packageState.harnessPackageMigration,
+        }
+      : { harnessPackage: null, harnessPackageMigration: null };
   const hostMounts = normalizePersistedSandboxHostMounts(args.sb?.hostMounts);
   const rawPolicyTier = args.sb?.policyTier?.trim().toLowerCase() || null;
   if (rawPolicyTier && !getTier(rawPolicyTier)) {
@@ -209,6 +288,7 @@ export function buildRebuildRecreateOnboardOpts(args: {
     targetGatewayName,
     targetGatewayPort,
     onboardLockAlreadyHeld: true,
+    ...packageAuthority,
     ...(args.preparedDcodeRebuild ? { preparedDcodeRebuild: args.preparedDcodeRebuild } : {}),
     autoYes: args.autoYes,
     toolDisclosure: toolDisclosureOrDefault(args.sb?.toolDisclosure),

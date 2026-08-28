@@ -56,6 +56,8 @@ import {
 } from "./rebuild-prepared-recovery";
 import { inspectRebuildGatewayProviderRegistration } from "./rebuild-provider-preflight";
 import {
+  assertCurrentRebuildPackageAuthority,
+  fingerprintLegacyRebuildRecreateTargetIntent,
   fingerprintRebuildRecreateTargetIntent,
   openRebuildRecreateJournal,
 } from "./rebuild-recreate-journal";
@@ -169,8 +171,18 @@ async function rebuildSandboxUnlocked(
   let recoveryManifest = validatedRecoveryManifest;
   const preparedBackupRecovery = recoveryManifest !== null;
   const recoveryRecreate = staleRecovery || preparedBackupRecovery;
+  const rebuildPackageAuthority = {
+    harnessPackage: recreateOptions.harnessPackage,
+    harnessPackageMigration: recreateOptions.harnessPackageMigration,
+  };
   try {
     if (blockRebuildOnPendingBaselineTransition(sandboxEntry, sandboxName, bail)) return;
+    try {
+      assertCurrentRebuildPackageAuthority(sandboxName, rebuildPackageAuthority);
+    } catch (error) {
+      bail(error instanceof Error ? error.message : String(error));
+      return;
+    }
     let recoveryRegistrySnapshot = preparedBackupRecovery
       ? JSON.parse(JSON.stringify(loadRegistry()))
       : liveState.staleRegistrySnapshot;
@@ -315,6 +327,9 @@ async function rebuildSandboxUnlocked(
         expectedGatewayAuthority,
         agentName: rebuildAgent || "openclaw",
         targetIntentFingerprint: fingerprintRebuildRecreateTargetIntent(recreateOptions),
+        legacyTargetIntentFingerprint:
+          fingerprintLegacyRebuildRecreateTargetIntent(recreateOptions),
+        packageAuthority: rebuildPackageAuthority,
         log,
         onAuthorityRefusal: (lines) => bail(lines.join("\n")),
       });

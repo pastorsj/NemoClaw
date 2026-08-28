@@ -1,7 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import type { SandboxMessagingPlan } from "../messaging/manifest";
+import {
+  harnessPackageIdentitiesEqual,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../harness/package-identity";
 import { MESSAGING_CREDENTIAL_PROVIDER_TYPE } from "../messaging/provider-profile";
 import { getActiveChannelIdsFromPlan } from "../messaging/plan-validation";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
@@ -11,6 +18,7 @@ import type {
   CheckpointSandboxIdentity,
   OnboardCheckpoint,
 } from "../state/onboard-checkpoint-types";
+import type { SandboxEntry } from "../state/registry/types";
 import { HERMES_TAVILY_PROVIDER_PROFILE_ID } from "./brave-provider-profile";
 import type { OnboardMachineState } from "./machine/types";
 import { ONBOARD_MACHINE_STATES } from "./machine/types";
@@ -23,6 +31,63 @@ import {
 export interface CheckpointedMachineSession {
   readonly checkpoint: OnboardCheckpoint | null;
   readonly machine: { readonly state: OnboardMachineState };
+}
+
+interface CheckpointPackageOwner extends CheckpointedMachineSession {
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly harnessPackageMigration: HarnessPackageMigration | null;
+}
+
+function nullableHarnessPackagesEqual(
+  left: HarnessPackageIdentity | null,
+  right: HarnessPackageIdentity | null,
+): boolean {
+  return left === null
+    ? right === null
+    : right !== null && harnessPackageIdentitiesEqual(left, right);
+}
+
+export function checkpointPackageOwnerAuthorityMatches(
+  left: Pick<CheckpointPackageOwner, "harnessPackage" | "harnessPackageMigration">,
+  right: Pick<CheckpointPackageOwner, "harnessPackage" | "harnessPackageMigration">,
+): boolean {
+  return (
+    nullableHarnessPackagesEqual(left.harnessPackage, right.harnessPackage) &&
+    isDeepStrictEqual(left.harnessPackageMigration, right.harnessPackageMigration)
+  );
+}
+
+/** Fail closed before replay when any durable owner changed package authority. */
+export function assertCheckpointPackageAuthorityChain(
+  session: CheckpointPackageOwner,
+  registryEntry: SandboxEntry | null,
+): void {
+  const checkpoint = session.checkpoint;
+  if (checkpoint) {
+    if (!nullableHarnessPackagesEqual(session.harnessPackage, checkpoint.harnessPackage)) {
+      throw new Error("Checkpoint package authority does not match its Session");
+    }
+    const transaction = checkpoint.sandboxRecreate;
+    if (transaction?.version === 1) {
+      throw new Error("Recreate transaction requires package authority migration before replay");
+    }
+    if (
+      transaction &&
+      !nullableHarnessPackagesEqual(session.harnessPackage, transaction.harnessPackage)
+    ) {
+      throw new Error("Recreate transaction package authority does not match its Session");
+    }
+  }
+  if (
+    registryEntry &&
+    (!nullableHarnessPackagesEqual(session.harnessPackage, registryEntry.harnessPackage ?? null) ||
+      !isDeepStrictEqual(
+        session.harnessPackageMigration,
+        registryEntry.harnessPackageMigration ?? null,
+      ))
+  ) {
+    throw new Error("Registry package authority does not match its onboarding Session");
+  }
 }
 
 export function checkpointSandboxIdentityMatches(

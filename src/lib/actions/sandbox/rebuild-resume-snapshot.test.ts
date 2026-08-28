@@ -31,6 +31,14 @@ function cloneSession(session: Session): Session {
   return JSON.parse(JSON.stringify(session));
 }
 
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime",
+  id: "openclaw",
+  packageVersion: "0.1.0",
+  contractVersion: 1,
+  contentDigest: "a".repeat(64),
+} as const;
+
 describe("rebuild resume snapshot repair", () => {
   let spies: MockInstance[];
   let errorSpy: MockInstance;
@@ -63,6 +71,9 @@ describe("rebuild resume snapshot repair", () => {
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     session = onboardSession.createSession({
+      agent: null,
+      harnessPackage: OPENCLAW_PACKAGE,
+      harnessPackageMigration: null,
       sandboxName: "alpha",
       provider: "ollama-local",
       model: "nvidia/nemotron",
@@ -151,6 +162,8 @@ describe("rebuild resume snapshot repair", () => {
         model: "nvidia/nemotron",
         policies: [],
         agent: null,
+        harnessPackage: OPENCLAW_PACKAGE,
+        harnessPackageMigration: null,
         nimContainer: null,
         nemoclawVersion: "0.1.0",
         dashboardPort: 18789,
@@ -215,6 +228,7 @@ describe("rebuild resume snapshot repair", () => {
         entry: {
           name: "alpha",
           agent: null,
+          harnessPackage: OPENCLAW_PACKAGE,
         } as never,
         wasDefault: true,
         fallbackDefault: null,

@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash, randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
+import {
+  harnessPackageIdentitiesEqual,
+  type HarnessPackageIdentity,
+} from "../harness/package-identity";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import type {
@@ -402,6 +407,7 @@ export interface SandboxRecreateSourceProof {
   readonly sourceLiveIdentityFingerprint: string | null;
   readonly sourceConfirmedAbsent: boolean;
   readonly targetGeneration: string;
+  readonly harnessPackage: HarnessPackageIdentity | null;
 }
 
 export class SandboxRecreateSourceMismatchError extends Error {
@@ -419,6 +425,9 @@ export class SandboxRecreateSourceMismatchError extends Error {
 export function sandboxRecreateSourceProof(
   transaction: CheckpointSandboxRecreateTransaction,
 ): SandboxRecreateSourceProof {
+  if (transaction.version !== 2) {
+    throw new Error("Recreate transaction requires package authority migration");
+  }
   return {
     transactionId: transaction.id,
     sandboxName: transaction.sandboxName,
@@ -428,6 +437,7 @@ export function sandboxRecreateSourceProof(
     sourceLiveIdentityFingerprint: transaction.sourceLiveIdentityFingerprint,
     sourceConfirmedAbsent: sandboxRecreatePhaseReached(transaction.phase, "deleted"),
     targetGeneration: transaction.targetGeneration,
+    harnessPackage: transaction.harnessPackage,
   };
 }
 
@@ -456,6 +466,13 @@ export function assertSandboxRecreateSourceProof(
     );
   }
   if (!check.registryEntry) return fail("the source registry row is absent");
+  if (
+    !nullableHarnessPackagesEqual(proof.harnessPackage, check.registryEntry.harnessPackage ?? null)
+  ) {
+    return fail(
+      "the source registry row package authority changed after the transaction recorded it",
+    );
+  }
   if (fingerprintSandboxRegistryEntry(check.registryEntry) !== proof.sourceRegistryFingerprint) {
     return fail("the source registry row changed after the transaction recorded it");
   }
@@ -475,7 +492,55 @@ export function assertSandboxRecreateSourceProof(
 }
 
 function baseCheckpoint(session: Session): OnboardCheckpoint {
-  return session.checkpoint ?? deriveCheckpointFromSession(session);
+  const checkpoint = session.checkpoint ?? deriveCheckpointFromSession(session);
+  if (!nullableHarnessPackagesEqual(session.harnessPackage, checkpoint.harnessPackage)) {
+    throw new Error("Sandbox recreate checkpoint package authority does not match its Session");
+  }
+  const transaction = checkpoint.sandboxRecreate;
+  if (transaction?.version === 1) {
+    throw new Error("Recreate transaction requires package authority migration");
+  }
+  if (
+    transaction &&
+    !nullableHarnessPackagesEqual(transaction.harnessPackage, session.harnessPackage)
+  ) {
+    throw new Error("Sandbox recreate transaction package authority does not match its Session");
+  }
+  return checkpoint;
+}
+
+function nullableHarnessPackagesEqual(
+  left: HarnessPackageIdentity | null,
+  right: HarnessPackageIdentity | null,
+): boolean {
+  return left === null
+    ? right === null
+    : right !== null && harnessPackageIdentitiesEqual(left, right);
+}
+
+function assertCurrentRecreateRegistryAuthority(
+  session: Session,
+  transaction: CheckpointSandboxRecreateTransaction,
+  entry: SandboxEntry | null,
+  allowAbsent: boolean,
+): void {
+  if (transaction.version !== 2) {
+    throw new Error("Recreate transaction requires package authority migration");
+  }
+  if (!entry) {
+    if (allowAbsent) return;
+    throw new Error(
+      `Sandbox '${transaction.sandboxName}' recreate source registry owner disappeared before deletion.`,
+    );
+  }
+  if (
+    !nullableHarnessPackagesEqual(transaction.harnessPackage, entry.harnessPackage ?? null) ||
+    !isDeepStrictEqual(session.harnessPackageMigration, entry.harnessPackageMigration ?? null)
+  ) {
+    throw new Error(
+      `Sandbox '${transaction.sandboxName}' recreate registry package authority changed.`,
+    );
+  }
 }
 
 function activeTransaction(session: Session): CheckpointSandboxRecreateTransaction | null {
@@ -486,8 +551,11 @@ export function selectSandboxRecreateTargetIntentFingerprint(
   transaction: CheckpointSandboxRecreateTransaction | null,
   requestedTargetIntentFingerprint: string,
   handedOffTargetIntentFingerprint: string | null | undefined,
+  legacyTargetIntentFingerprint?: string,
 ): string {
-  return transaction && transaction.targetIntentFingerprint === handedOffTargetIntentFingerprint
+  return transaction &&
+    (transaction.targetIntentFingerprint === handedOffTargetIntentFingerprint ||
+      transaction.targetIntentFingerprint === legacyTargetIntentFingerprint)
     ? transaction.targetIntentFingerprint
     : requestedTargetIntentFingerprint;
 }
@@ -542,7 +610,7 @@ export function beginSandboxRecreateTransaction(
     );
   }
   const transaction: CheckpointSandboxRecreateTransaction = {
-    version: 1,
+    version: 2,
     id: input.id ?? randomUUID(),
     revision: 0,
     sandboxName: input.sandboxName,
@@ -559,6 +627,7 @@ export function beginSandboxRecreateTransaction(
     phase: input.observation.state === "missing" ? "deleted" : "planned",
     startedAt: now,
     updatedAt: now,
+    harnessPackage: checkpoint.harnessPackage ? structuredClone(checkpoint.harnessPackage) : null,
   };
   session.checkpoint = {
     ...checkpoint,
@@ -719,6 +788,15 @@ export function planSandboxRecreateRecovery(
   observation: SandboxRecreateObservation,
   registryEntry: SandboxEntry | null,
 ): SandboxRecreateRecoveryPlan {
+  if (transaction.version !== 2) {
+    return reject("the recreate transaction requires package authority migration");
+  }
+  if (
+    registryEntry &&
+    !nullableHarnessPackagesEqual(transaction.harnessPackage, registryEntry.harnessPackage ?? null)
+  ) {
+    return reject("the registry row package authority does not match the recreate transaction");
+  }
   if (registryEntry?.lifecycleGeneration === transaction.targetGeneration) {
     if (!transaction.targetLiveIdentityFingerprint) {
       return reject("the journal did not record the replacement live identity");
@@ -797,6 +875,8 @@ export function matchingSandboxRecreateTransaction(
     targetIntentFingerprint: string;
     transactionId: string;
     targetGeneration: string;
+    version?: 2;
+    harnessPackage?: HarnessPackageIdentity | null;
   },
 ): CheckpointSandboxRecreateTransaction {
   const transaction = session?.checkpoint?.sandboxRecreate;
@@ -806,7 +886,17 @@ export function matchingSandboxRecreateTransaction(
     transaction.sandboxName !== input.sandboxName ||
     transaction.gatewayName !== input.gatewayName ||
     transaction.targetIntentFingerprint !== input.targetIntentFingerprint ||
-    transaction.targetGeneration !== input.targetGeneration
+    transaction.targetGeneration !== input.targetGeneration ||
+    transaction.version !== 2 ||
+    (input.version !== undefined && input.version !== transaction.version) ||
+    (input.harnessPackage !== undefined &&
+      !nullableHarnessPackagesEqual(input.harnessPackage, transaction.harnessPackage)) ||
+    !session ||
+    !nullableHarnessPackagesEqual(session.harnessPackage, transaction.harnessPackage) ||
+    !nullableHarnessPackagesEqual(
+      session.checkpoint?.harnessPackage ?? null,
+      transaction.harnessPackage,
+    )
   ) {
     throw new Error(
       `Sandbox '${input.sandboxName}' recreate journal does not match the requested replacement.`,
@@ -900,6 +990,7 @@ export function createSandboxRecreateRuntime(
   registryEntry: SandboxEntry | null,
   observe: (sandboxName: string, gatewayName: string) => SandboxRecreateObservation,
   note: (message: string) => void,
+  loadRegistryEntry: (sandboxName: string) => SandboxEntry | null = () => registryEntry,
 ): SandboxRecreateRuntime {
   if (!request) return NO_SANDBOX_RECREATE;
   const openingSession = sessionStore.loadSession();
@@ -909,6 +1000,8 @@ export function createSandboxRecreateRuntime(
     targetIntentFingerprint: request.targetIntentFingerprint,
     transactionId: request.id,
     targetGeneration: request.targetGeneration,
+    version: request.version,
+    harnessPackage: request.harnessPackage,
   });
   if (!openingSession) {
     throw new Error(`Sandbox '${sandboxName}' recreate journal has no owning session.`);
@@ -954,6 +1047,25 @@ export function createSandboxRecreateRuntime(
     advance,
     beginDelete: () => {
       const live = observe(sandboxName, transaction.gatewayName);
+      const currentSession = sessionStore.loadSession();
+      const currentTransaction = matchingSandboxRecreateTransaction(currentSession, {
+        sandboxName,
+        gatewayName,
+        targetIntentFingerprint: request.targetIntentFingerprint,
+        transactionId: request.id,
+        targetGeneration: request.targetGeneration,
+        version: request.version,
+        harnessPackage: request.harnessPackage,
+      });
+      if (!currentSession) {
+        throw new Error(`Sandbox '${sandboxName}' recreate journal has no owning session.`);
+      }
+      assertCurrentRecreateRegistryAuthority(
+        currentSession,
+        currentTransaction,
+        loadRegistryEntry(sandboxName),
+        live.state === "missing",
+      );
       if (live.state !== "missing") {
         if (
           !transaction.sourceLiveIdentityFingerprint ||
@@ -973,6 +1085,25 @@ export function createSandboxRecreateRuntime(
           `Cannot continue sandbox '${sandboxName}' recreation: OpenShell still reports the journaled source after delete.`,
         );
       }
+      const currentSession = sessionStore.loadSession();
+      const currentTransaction = matchingSandboxRecreateTransaction(currentSession, {
+        sandboxName,
+        gatewayName,
+        targetIntentFingerprint: request.targetIntentFingerprint,
+        transactionId: request.id,
+        targetGeneration: request.targetGeneration,
+        version: request.version,
+        harnessPackage: request.harnessPackage,
+      });
+      if (!currentSession) {
+        throw new Error(`Sandbox '${sandboxName}' recreate journal has no owning session.`);
+      }
+      assertCurrentRecreateRegistryAuthority(
+        currentSession,
+        currentTransaction,
+        loadRegistryEntry(sandboxName),
+        true,
+      );
       advance("deleted");
     },
     recordExactIdentity: (liveIdentityFingerprint) => {
@@ -994,6 +1125,8 @@ export function createSandboxRecreateRuntime(
         targetIntentFingerprint: request.targetIntentFingerprint,
         transactionId: request.id,
         targetGeneration: request.targetGeneration,
+        version: request.version,
+        harnessPackage: request.harnessPackage,
       });
       requireRecordableCreatedIdentity(beforeWriteTransaction, liveIdentityFingerprint);
       const expectedTransactionFingerprint =
@@ -1039,6 +1172,8 @@ export function createSandboxRecreateRuntime(
         targetIntentFingerprint: request.targetIntentFingerprint,
         transactionId: request.id,
         targetGeneration: request.targetGeneration,
+        version: request.version,
+        harnessPackage: request.harnessPackage,
       });
       if (
         !sandboxRecreatePhaseReached(storedTransaction.phase, "created") ||

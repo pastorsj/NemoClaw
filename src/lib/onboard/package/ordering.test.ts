@@ -65,10 +65,14 @@ function legacySession(agent: string | null, sandboxName: string | null = null):
 function boundaryDependencies(
   getSession: () => Session | null,
   overrides: Partial<OnboardHarnessPackageBoundaryDependencies> = {},
-): Pick<OnboardHarnessPackageBoundaryDependencies, "assertWriterLockOwned" | "loadSession"> &
+): Pick<
+  OnboardHarnessPackageBoundaryDependencies,
+  "assertWriterLockOwned" | "compareAndSwapSession" | "loadSession"
+> &
   Partial<OnboardHarnessPackageBoundaryDependencies> {
   return {
     assertWriterLockOwned: vi.fn(),
+    compareAndSwapSession: vi.fn(() => "mismatch" as const),
     loadSession: getSession,
     getBundledRoot: () => fixture.bundledRoot,
     getSourceIdentity: vi.fn(() => ({

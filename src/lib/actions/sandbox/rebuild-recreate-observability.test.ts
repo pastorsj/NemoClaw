@@ -88,6 +88,8 @@ const recreateOptions: RebuildRecreateOnboardOpts = {
   policyTier: "restricted",
   baseImageResolutionHint: null,
   rebuildGatewayAuthority: STANDALONE_GATEWAY_AUTHORITY,
+  harnessPackage: null,
+  harnessPackageMigration: null,
 };
 
 function seedRecreateJournalCheckpoint(
@@ -99,7 +101,7 @@ function seedRecreateJournalCheckpoint(
     sandboxIdentity: decisionSelected({ name: "alpha", agent: DCODE_AGENT }),
     gatewayAuthority: decisionSelected(gatewayAuthority),
     sandboxRecreate: {
-      version: 1,
+      version: 2,
       id: "journal-1",
       revision: 3,
       sandboxName: "alpha",
@@ -114,6 +116,7 @@ function seedRecreateJournalCheckpoint(
       phase: "deleted",
       startedAt: "2026-07-28T00:00:00.000Z",
       updatedAt: "2026-07-28T00:00:01.000Z",
+      harnessPackage: null,
     },
   };
 }
@@ -142,6 +145,7 @@ function makeInput(overrides: Partial<RebuildRecreatePhaseInput> = {}): RebuildR
       gatewayAuthority: STANDALONE_GATEWAY_AUTHORITY,
       targetGeneration: "generation-1",
       targetIntentFingerprint: "intent-1",
+      harnessPackage: null,
       markDeleting: vi.fn(),
       observeSourceForDelete: vi.fn(() => "source" as const),
       confirmDeleted: vi.fn(),

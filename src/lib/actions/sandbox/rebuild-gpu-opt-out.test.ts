@@ -1,8 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
+
+vi.mock("../../onboard/sandbox-agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../onboard/sandbox-agent")>()),
+  // This suite owns GPU/recreate option projection. Package qualification has
+  // focused coverage in rebuild-authority.test.ts.
+  resolveSandboxAgent: vi.fn(() => ({ harnessPackage: null, harnessPackageMigration: null })),
+}));
 
 import {
   buildRebuildRecreateOnboardOpts,

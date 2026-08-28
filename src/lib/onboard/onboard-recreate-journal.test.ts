@@ -28,6 +28,7 @@ import {
 } from "./onboard-recreate-journal";
 
 const BASE_INTENT: OnboardRecreateTargetIntent = {
+  harnessPackage: null,
   agent: "openclaw",
   fromDockerfile: null,
   provider: "nvidia-prod",
@@ -50,6 +51,15 @@ describe("non-resumed replacement target fingerprint (#7735)", () => {
   });
 
   it.each([
+    {
+      harnessPackage: {
+        kind: "agent-runtime" as const,
+        id: "openclaw",
+        packageVersion: "1.2.3",
+        contractVersion: 1 as const,
+        contentDigest: "a".repeat(64),
+      },
+    },
     { observabilityEnabled: true },
     { toolDisclosure: "direct" },
     { sandboxGpuConfig: { sandboxGpuEnabled: true, mode: "all" } },
@@ -75,6 +85,13 @@ describe("non-resumed replacement target fingerprint (#7735)", () => {
 const SANDBOX_ID = "sbx-71c9a4e08b";
 const SANDBOX_FINGERPRINT = fingerprintSandboxRecreateValue(SANDBOX_ID);
 const REPLACEMENT_FINGERPRINT = fingerprintSandboxRecreateValue("sbx-2f80d5a613");
+const DRIFTED_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "9.9.9",
+  contractVersion: 1 as const,
+  contentDigest: "d".repeat(64),
+};
 
 const NON_DEFAULT_TARGET = {
   sandboxName: "alpha",
@@ -318,6 +335,50 @@ describe("non-resumed onboard replacement journal (#7735)", () => {
 
     expect(() => open()).toThrow(/without its source registry row/);
     expect(session.checkpoint?.sandboxRecreate ?? null).toBeNull();
+  });
+
+  it("rechecks source authority immediately before opening the journal", () => {
+    const source = {
+      name: "alpha",
+      agent: "openclaw",
+      gatewayName: "nemoclaw-9090",
+      gatewayPort: 9090,
+    } as registry.SandboxEntry;
+    vi.mocked(registry.getSandbox)
+      .mockReturnValueOnce(source)
+      .mockReturnValue({ ...source, harnessPackage: DRIFTED_PACKAGE });
+
+    expect(() => open()).toThrow(/registry package authority changed/u);
+    expect(session.checkpoint?.sandboxRecreate ?? null).toBeNull();
+  });
+
+  it("keeps the journal when source authority drifts before abandon", () => {
+    const runtime = open();
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: DRIFTED_PACKAGE,
+    } as registry.SandboxEntry);
+
+    expect(() => runtime.abandon()).toThrow(/registry package authority changed/u);
+    expect(session.checkpoint?.sandboxRecreate).not.toBeNull();
+  });
+
+  it("keeps the journal when replacement authority drifts before completion", () => {
+    const runtime = open();
+    runtime.advance("deleting");
+    mocks.captureOpenshell.mockReturnValue(absentProbe());
+    runtime.confirmDeleted();
+    runtime.advance("creating");
+    runtime.recordCreated({ state: "ready", liveIdentityFingerprint: SANDBOX_FINGERPRINT });
+    vi.mocked(registry.getSandbox).mockReturnValue({
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: DRIFTED_PACKAGE,
+    } as registry.SandboxEntry);
+
+    expect(() => runtime.complete()).toThrow(/registry package authority changed/u);
+    expect(session.checkpoint?.sandboxRecreate).not.toBeNull();
   });
 
   it("fails closed when the gateway reports neither a live sandbox nor explicit absence", () => {

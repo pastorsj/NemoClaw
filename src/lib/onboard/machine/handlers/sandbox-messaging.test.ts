@@ -191,10 +191,7 @@ function discordPlan(
   };
 }
 
-function withChannelDisabled(
-  plan: SandboxMessagingPlan,
-  channelId: string,
-): SandboxMessagingPlan {
+function withChannelDisabled(plan: SandboxMessagingPlan, channelId: string): SandboxMessagingPlan {
   return {
     ...plan,
     channels: plan.channels.map((channel) =>
@@ -322,6 +319,7 @@ function withMessagingCheckpoint(
     schemaVersion: CHECKPOINT_SCHEMA_VERSION,
     profile: { kind: "selected", value: "default" },
     runtimeAuthority: { kind: "unset" },
+    harnessPackage: null,
     sessionId: session.sessionId,
     machineState: session.machine.state,
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -697,7 +695,9 @@ describe("reconcileSandboxMessaging plan authority", () => {
     // input; a channel the environment no longer configures must not re-enter
     // the selection, or its egress preset is re-applied.
     expect(deps.setupMessagingChannels).not.toHaveBeenCalled();
-    expect(deps.note).toHaveBeenCalledWith(expect.stringContaining("No host inputs configure discord"));
+    expect(deps.note).toHaveBeenCalledWith(
+      expect.stringContaining("No host inputs configure discord"),
+    );
     expect(deps.clearPlanEnv).toHaveBeenCalledOnce();
     expect(deps.writePlanToEnv).not.toHaveBeenCalled();
     expect(result).toEqual({ plan: null, selectedChannels: [] });

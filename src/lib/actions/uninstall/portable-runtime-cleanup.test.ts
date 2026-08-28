@@ -442,6 +442,7 @@ function completedOnboardAuthority(test: ReturnType<typeof fixture>, portable: b
     updatedAt: "2026-08-15T00:00:00.000Z",
     profile: { kind: "selected", value: portable ? "portable" : "default" },
     runtimeAuthority: portable ? { kind: "selected", value: test.authority } : { kind: "unset" },
+    harnessPackage: null,
     sandboxIdentity: { kind: "selected", value: { name: sandboxName, agent: "openclaw" } },
     webSearch: { kind: "unset" },
     messaging: { kind: "unset" },

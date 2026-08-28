@@ -117,8 +117,7 @@ export interface CheckpointSandboxRecreateSourceWorkload {
  * containing checkpoint supplies the session identity; the generation stamped
  * into the registry row proves which same-name sandbox this run created.
  */
-export interface CheckpointSandboxRecreateTransaction {
-  readonly version: 1;
+interface CheckpointSandboxRecreateTransactionFields {
   readonly id: string;
   readonly revision: number;
   readonly sandboxName: string;
@@ -135,6 +134,21 @@ export interface CheckpointSandboxRecreateTransaction {
   readonly updatedAt: string;
 }
 
+/** Legacy recreate journal accepted only long enough to bind explicit package authority. */
+export interface CheckpointSandboxRecreateTransactionV1 extends CheckpointSandboxRecreateTransactionFields {
+  readonly version: 1;
+}
+
+/** Current recreate journal, bound to the same package authority as its checkpoint. */
+export interface CheckpointSandboxRecreateTransactionV2 extends CheckpointSandboxRecreateTransactionFields {
+  readonly version: 2;
+  readonly harnessPackage: HarnessPackageIdentity | null;
+}
+
+export type CheckpointSandboxRecreateTransaction =
+  | CheckpointSandboxRecreateTransactionV1
+  | CheckpointSandboxRecreateTransactionV2;
+
 export interface OnboardCheckpoint {
   readonly schemaVersion: CheckpointSchemaVersion;
   readonly sessionId: string;
@@ -143,7 +157,7 @@ export interface OnboardCheckpoint {
   readonly profile: CheckpointProfileDecision;
   readonly runtimeAuthority: CheckpointRuntimeAuthorityDecision;
   /** Exact package authority, or null for migrated legacy and qualified candidate state. */
-  readonly harnessPackage?: HarnessPackageIdentity | null;
+  readonly harnessPackage: HarnessPackageIdentity | null;
   readonly sandboxIdentity: CheckpointDecision<CheckpointSandboxIdentity>;
   readonly webSearch: CheckpointDecision<WebSearchConfig>;
   readonly messaging: CheckpointDecision<CheckpointMessagingSelection>;

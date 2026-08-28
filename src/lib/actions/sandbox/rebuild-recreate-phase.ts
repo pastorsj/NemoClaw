@@ -26,6 +26,8 @@ import {
 } from "./rebuild-flow-helpers";
 import {
   getRebuildSandboxGpuOverrides,
+  rebuildPackageAuthorityMatches,
+  rebuildPackageIdentityMatches,
   type RebuildRecreateOnboardOpts,
 } from "./rebuild-gpu-opt-out";
 import {
@@ -102,6 +104,14 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     log,
     bail,
   } = input;
+  if (
+    !rebuildPackageIdentityMatches(
+      recreateJournal.harnessPackage,
+      recreateOptions.harnessPackage,
+    )
+  ) {
+    return bail("Authoritative rebuild journal package identity changed before sandbox recreation.");
+  }
   console.log("");
   console.log("  Creating new sandbox with current image...");
 
@@ -124,7 +134,20 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   ) {
     return bail("Authoritative rebuild journal authority does not match the target gateway.");
   }
-  const journaledCheckpoint = onboardSession.loadSession()?.checkpoint ?? null;
+  const journaledSession = onboardSession.loadSession();
+  if (
+    !journaledSession ||
+    !rebuildPackageAuthorityMatches(
+      journaledSession,
+      {
+        harnessPackage: recreateOptions.harnessPackage,
+        harnessPackageMigration: recreateOptions.harnessPackageMigration,
+      },
+    )
+  ) {
+    return bail("Authoritative rebuild session package authority changed before sandbox recreation.");
+  }
+  const journaledCheckpoint = journaledSession.checkpoint;
   if (!journaledCheckpoint) {
     return bail("Authoritative rebuild journal does not identify the target sandbox.");
   }
@@ -141,7 +164,16 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     journaledRecreate.gatewayName !== recreateOptions.targetGatewayName ||
     journaledRecreate.gatewayPort !== recreateOptions.targetGatewayPort ||
     journaledRecreate.targetGeneration !== recreateJournal.targetGeneration ||
-    journaledRecreate.targetIntentFingerprint !== recreateJournal.targetIntentFingerprint
+    journaledRecreate.targetIntentFingerprint !== recreateJournal.targetIntentFingerprint ||
+    journaledRecreate.version !== 2 ||
+    !rebuildPackageIdentityMatches(
+      journaledCheckpoint.harnessPackage,
+      recreateOptions.harnessPackage,
+    ) ||
+    !rebuildPackageIdentityMatches(
+      journaledRecreate.version === 2 ? journaledRecreate.harnessPackage : null,
+      recreateOptions.harnessPackage,
+    )
   ) {
     return bail("Authoritative rebuild journal does not match the target replacement.");
   }
@@ -161,6 +193,8 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
       s,
       onboardSession.createSession({
         mode: "non-interactive",
+        harnessPackage: recreateOptions.harnessPackage,
+        harnessPackageMigration: recreateOptions.harnessPackageMigration,
         hermesAuthMethod: rebuildDurableConfig.hermesAuthMethod,
         webSearchConfig: rebuildDurableConfig.webSearchConfig,
         toolDisclosure: rebuildDurableConfig.toolDisclosure,

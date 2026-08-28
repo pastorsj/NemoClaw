@@ -7,6 +7,7 @@ import { SUPPORTED_GATEWAY_CAPABILITIES } from "../core/gateway-capabilities";
 import { isObjectRecord } from "../core/json-types";
 import { DEFAULT_GATEWAY_PORT } from "../core/ports";
 import {
+  harnessPackageIdentitiesEqual,
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
 } from "../harness/package-identity";
@@ -402,28 +403,30 @@ function parseSandboxRecreateSourceWorkload(
 function parseSandboxRecreateTransaction(
   value: unknown,
 ): CheckpointSandboxRecreateTransaction | null {
+  if (!isObjectRecord(value)) return null;
+  const commonKeys = [
+    "version",
+    "id",
+    "revision",
+    "sandboxName",
+    "gatewayName",
+    "gatewayPort",
+    "sourceRegistryFingerprint",
+    "sourceLiveIdentityFingerprint",
+    "sourceWorkload",
+    "targetIntentFingerprint",
+    "targetGeneration",
+    "targetLiveIdentityFingerprint",
+    "phase",
+    "startedAt",
+    "updatedAt",
+  ] as const;
   if (
-    !isObjectRecord(value) ||
-    !hasExactKeys(value, [
-      "version",
-      "id",
-      "revision",
-      "sandboxName",
-      "gatewayName",
-      "gatewayPort",
-      "sourceRegistryFingerprint",
-      "sourceLiveIdentityFingerprint",
-      "sourceWorkload",
-      "targetIntentFingerprint",
-      "targetGeneration",
-      "targetLiveIdentityFingerprint",
-      "phase",
-      "startedAt",
-      "updatedAt",
-    ])
-  ) {
+    (value.version === 1 && !hasExactKeys(value, commonKeys)) ||
+    (value.version === 2 && !hasExactKeys(value, [...commonKeys, "harnessPackage"])) ||
+    (value.version !== 1 && value.version !== 2)
+  )
     return null;
-  }
   const id = readString(value.id);
   const sandboxName = readString(value.sandboxName);
   const gatewayName = readString(value.gatewayName);
@@ -439,7 +442,6 @@ function parseSandboxRecreateTransaction(
   const updatedAt = readCanonicalIsoTimestamp(value.updatedAt);
   const revision = value.revision;
   if (
-    value.version !== 1 ||
     !id ||
     !UUID_PATTERN.test(id) ||
     !sandboxName ||
@@ -468,8 +470,10 @@ function parseSandboxRecreateTransaction(
   ) {
     return null;
   }
-  return {
-    version: 1,
+  const harnessPackage =
+    value.version === 2 ? parseHarnessPackage(value.harnessPackage) : undefined;
+  if (value.version === 2 && harnessPackage === undefined) return null;
+  const fields = {
     id,
     revision: Number(revision),
     sandboxName,
@@ -484,6 +488,13 @@ function parseSandboxRecreateTransaction(
     phase: phase as CheckpointSandboxRecreatePhase,
     startedAt,
     updatedAt,
+  };
+  if (value.version === 2) {
+    return { version: 2, ...fields, harnessPackage: harnessPackage ?? null };
+  }
+  return {
+    version: 1,
+    ...fields,
   };
 }
 
@@ -546,6 +557,15 @@ function parseSchema(
     ) {
       return null;
     }
+    if (
+      sandboxRecreate.version === 2 &&
+      ((harnessPackage === null) !== (sandboxRecreate.harnessPackage === null) ||
+        (harnessPackage !== null &&
+          sandboxRecreate.harnessPackage !== null &&
+          !harnessPackageIdentitiesEqual(harnessPackage, sandboxRecreate.harnessPackage)))
+    ) {
+      return null;
+    }
   }
 
   return {
@@ -597,6 +617,9 @@ export function inspectCheckpoint(raw: unknown): CheckpointLoadResult {
 }
 
 export function serializeCheckpoint(checkpoint: OnboardCheckpoint): Record<string, unknown> {
+  if (checkpoint.harnessPackage === undefined) {
+    throw new Error("Checkpoint v5 requires explicit harness package authority");
+  }
   return {
     schemaVersion: checkpoint.schemaVersion,
     sessionId: checkpoint.sessionId,

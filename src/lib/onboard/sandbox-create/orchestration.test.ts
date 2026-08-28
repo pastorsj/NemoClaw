@@ -107,7 +107,6 @@ describe("selected agent package authority", () => {
       fs.rmSync(openClawRoot, { recursive: true, force: true });
     }
   });
-
 });
 
 const UNVERIFIED_RECOVERY_CONTEXT = {
@@ -596,9 +595,11 @@ describe("policy authority backfill", () => {
 describe("managed MCP rebuild handoff", () => {
   const targetIntentFingerprint = "a".repeat(64);
   const recreateTransaction = {
+    version: 2 as const,
     id: "recreate-1",
     targetGeneration: "generation-1",
     targetIntentFingerprint,
+    harnessPackage: null,
   };
 
   it("accepts only a handoff bound to the same recreate transaction", () => {

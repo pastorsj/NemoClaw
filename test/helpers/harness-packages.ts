@@ -114,12 +114,14 @@ function writePackageArtifact(input: {
 }
 
 /** Create reviewed package bytes and an installed store under one exact private test root. */
-export function createHarnessPackageFixture(): HarnessPackageFixture {
+export function createHarnessPackageFixture(
+  options: { readonly storeRoot?: string } = {},
+): HarnessPackageFixture {
   privateDirectory(FIXTURE_PARENT);
   const fixtureRoot = fs.mkdtempSync(path.join(FIXTURE_PARENT, "fixture-"));
   fs.chmodSync(fixtureRoot, 0o700);
   const bundledRoot = path.join(fixtureRoot, "bundled");
-  const storeRoot = path.join(fixtureRoot, "store");
+  const storeRoot = options.storeRoot ?? path.join(fixtureRoot, "store");
   const versionRoot = path.join(fixtureRoot, "versions");
   const executionSentinel = path.join(fixtureRoot, "package-code-ran");
   privateDirectory(bundledRoot);

@@ -656,6 +656,7 @@ describe("portable resume command lock boundary", () => {
     let innerObserved = false;
     let innerError = "";
     const harness = harnessModule.createRebuildFlowHarness({
+      harnessPackage: installedOpenclaw.identity,
       onboard: async (_session, options) => {
         const lockPath = retirement.portableHostFencePath(tempHome);
         const outerInode = fs.lstatSync(lockPath, { bigint: true }).ino;

@@ -91,6 +91,7 @@ function stubRecreateJournal(): RebuildRecreateJournal {
     },
     targetGeneration: "generation-1",
     targetIntentFingerprint: "intent-1",
+    harnessPackage: null,
     markDeleting: vi.fn(),
     observeSourceForDelete: vi.fn(() => "source" as const),
     confirmDeleted: vi.fn(),

@@ -38,6 +38,7 @@ import {
   type CompareAndSwapSessionResult,
   type Session,
 } from "./onboard-session";
+import { bindCheckpointHarnessPackageAuthority } from "./onboard-checkpoint-migrate";
 import { withLock } from "./registry/lock";
 import { load as loadRegistry, save as saveRegistry } from "./registry/persistence";
 import type { SandboxEntry, SandboxRegistry } from "./registry/types";
@@ -381,17 +382,27 @@ function reconcileSession(
   if (current.agent !== sessionOwner.session.agent) {
     throw migrationError("the prepared onboarding session compatibility agent changed");
   }
-  if (authorityMatchesDesired(current.harnessPackage, current.harnessPackageMigration, prepared)) {
+  const ownerAuthorityIsDesired = authorityMatchesDesired(
+    current.harnessPackage,
+    current.harnessPackageMigration,
+    prepared,
+  );
+  const repairedCheckpoint = bindCheckpointHarnessPackageAuthority(
+    current.checkpoint,
+    prepared.harnessPackage,
+  );
+  if (ownerAuthorityIsDesired && isDeepStrictEqual(repairedCheckpoint, current.checkpoint)) {
     return;
   }
-  if (!packageOwnerFieldsMatch(current, sessionOwner.session)) {
+  if (!ownerAuthorityIsDesired && !packageOwnerFieldsMatch(current, sessionOwner.session)) {
     throw migrationError("the prepared onboarding session package owner changed before migration");
   }
   const result = deps.compareAndSwapSession(
     (candidate) =>
       candidate.sessionId === sessionOwner.session.sessionId &&
       candidate.sandboxName === sessionOwner.sandboxName &&
-      packageOwnerFieldsMatch(candidate, sessionOwner.session),
+      packageOwnerFieldsMatch(candidate, current) &&
+      isDeepStrictEqual(candidate.checkpoint, current.checkpoint),
     (candidate) => ({
       ...candidate,
       harnessPackage: cloneIdentity(prepared.harnessPackage),
@@ -399,6 +410,7 @@ function reconcileSession(
         prepared.harnessPackageMigration,
         prepared.harnessPackage,
       ),
+      checkpoint: repairedCheckpoint,
     }),
     "nemoclaw legacy harness migration",
   );
@@ -409,7 +421,11 @@ function reconcileSession(
   if (
     !reread ||
     reread.sessionId !== sessionOwner.session.sessionId ||
-    !authorityMatchesDesired(reread.harnessPackage, reread.harnessPackageMigration, prepared)
+    !authorityMatchesDesired(reread.harnessPackage, reread.harnessPackageMigration, prepared) ||
+    !isDeepStrictEqual(
+      reread.checkpoint,
+      bindCheckpointHarnessPackageAuthority(reread.checkpoint, prepared.harnessPackage),
+    )
   ) {
     throw migrationError("the onboarding session package authority did not survive readback");
   }

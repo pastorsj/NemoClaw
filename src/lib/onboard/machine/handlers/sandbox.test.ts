@@ -170,6 +170,7 @@ describe("handleSandboxState", () => {
       schemaVersion: CHECKPOINT_SCHEMA_VERSION,
       profile: { kind: "selected", value: "default" },
       runtimeAuthority: { kind: "unset" },
+      harnessPackage: null,
       sessionId: session.sessionId,
       machineState: "sandbox",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -620,6 +621,7 @@ describe("handleSandboxState", () => {
     expect(calls.finalizeRouteReservation).toHaveBeenCalledExactlyOnceWith(
       "saved",
       session.sessionId,
+      { harnessPackage: null, harnessPackageMigration: null },
     );
     expect(calls.skipped).toHaveBeenCalledWith("sandbox", "saved", "reuse");
     expect(recordStateSkipped).toHaveBeenCalledWith("sandbox", {
@@ -640,6 +642,7 @@ describe("handleSandboxState", () => {
       schemaVersion: CHECKPOINT_SCHEMA_VERSION,
       profile: { kind: "selected", value: "default" },
       runtimeAuthority: { kind: "unset" },
+      harnessPackage: null,
       sessionId: session.sessionId,
       machineState: "agent_setup",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -684,6 +687,7 @@ describe("handleSandboxState", () => {
       schemaVersion: CHECKPOINT_SCHEMA_VERSION,
       profile: { kind: "selected", value: "default" },
       runtimeAuthority: { kind: "unset" },
+      harnessPackage: null,
       sessionId: session.sessionId,
       machineState: "sandbox",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -721,6 +725,7 @@ describe("handleSandboxState", () => {
       schemaVersion: CHECKPOINT_SCHEMA_VERSION,
       profile: { kind: "selected", value: "default" },
       runtimeAuthority: { kind: "unset" },
+      harnessPackage: null,
       sessionId: session.sessionId,
       machineState: "sandbox",
       updatedAt: "2026-01-01T00:00:00.000Z",
@@ -766,6 +771,7 @@ describe("handleSandboxState", () => {
       schemaVersion: CHECKPOINT_SCHEMA_VERSION,
       profile: { kind: "selected", value: "default" },
       runtimeAuthority: { kind: "unset" },
+      harnessPackage: null,
       sessionId: session.sessionId,
       machineState: "sandbox",
       updatedAt: "2026-01-01T00:00:00.000Z",

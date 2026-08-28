@@ -13,6 +13,7 @@ import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/r
 import type { VersionCheckResult } from "../../src/lib/sandbox/version";
 import type { PreservedEnvFile } from "../../src/lib/state/preserved-env";
 import type { SandboxRemovalReceipt } from "../../src/lib/state/registry";
+import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
 
 export type RebuildSandbox =
   (typeof import("../../src/lib/actions/sandbox/rebuild"))["rebuildSandbox"];
@@ -79,6 +80,7 @@ export type RebuildFlowOverrides = {
     receipt: Record<string, unknown>,
   ) => { ok: true; receipt: Record<string, unknown> } | { ok: false; message: string };
   sandboxEntry?: Record<string, unknown>;
+  harnessPackage?: HarnessPackageIdentity | null;
   sandboxBaseImageLabelsOutput?: string;
   sessionSandboxName?: string;
   sandboxInventory?: OpenShellSandboxInventory;

@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createSession, type Session } from "../../../state/onboard-session";
 import { handleSandboxState } from "./sandbox";
-import { baseOptions, createDeps } from "./sandbox-test-fixtures";
+import {
+  baseOptions,
+  createDeps,
+  expectedSessionPackageAuthority,
+} from "./sandbox-test-fixtures";
 
 vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
@@ -110,6 +114,7 @@ describe("handleSandboxState tool disclosure", () => {
     const createSandboxCall = calls.createSandbox.mock.calls[0] as unknown[];
     expect(createSandboxCall[14]).toEqual({
       sessionId: session.sessionId,
+      ...expectedSessionPackageAuthority(session),
       selection: {
         provider: "provider",
         model: "model",

@@ -38,6 +38,7 @@ function checkpoint(overrides: Partial<OnboardCheckpoint> = {}): OnboardCheckpoi
     bindings: { credentialEnvs: [], registeredProviders: [] },
     sandboxRecreate: null,
     ...overrides,
+    harnessPackage: overrides.harnessPackage ?? null,
   };
 }
 

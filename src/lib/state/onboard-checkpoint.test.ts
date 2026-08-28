@@ -304,13 +304,15 @@ describe("checkpoint schema inspection", () => {
     });
   });
 
-  it("serializes an omitted legacy-compatible package identity as explicit null", () => {
+  it("rejects a v5 checkpoint that omits explicit package authority on write", () => {
     const { harnessPackage: _harnessPackage, ...checkpoint } = baseCheckpoint();
 
-    expect(serializeCheckpoint(checkpoint).harnessPackage).toBeNull();
+    expect(() => serializeCheckpoint(checkpoint as OnboardCheckpoint)).toThrow(
+      "requires explicit harness package authority",
+    );
   });
 
-  it("normalizes an omitted v5 package identity to explicit null on read", () => {
+  it("normalizes an omitted existing v5 package identity to explicit null on read", () => {
     const serialized = serializeCheckpoint(baseCheckpoint());
     delete serialized.harnessPackage;
 

@@ -81,9 +81,11 @@ function createdIdentityFixture() {
   const runtime = createSandboxRecreateRuntime(
     sessionStore,
     {
+      version: 2,
       id: TRANSACTION_ID,
       targetGeneration: TARGET_GENERATION,
       targetIntentFingerprint: TARGET_INTENT,
+      harnessPackage: null,
     },
     "alpha",
     "nemoclaw-31818",
@@ -138,7 +140,7 @@ describe("created sandbox exact identity journal", () => {
       targetGeneration: TARGET_GENERATION,
       targetLiveIdentityFingerprint: TARGET_ID,
     });
-    expect(fixture.sessionStore.loadSession).toHaveBeenCalledTimes(3);
+    expect(fixture.sessionStore.loadSession).toHaveBeenCalledTimes(4);
 
     const revision = fixture.session.checkpoint?.sandboxRecreate?.revision;
     expect(fixture.lifecycle.recordExactIdentity(TARGET_ID)).toEqual(recorded);

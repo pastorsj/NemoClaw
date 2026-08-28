@@ -12,6 +12,7 @@ import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
+import { registry } from "../../../../test/helpers/rebuild-flow-harness";
 import { revalidateDcodeReplacementAtMutationEdge } from "./rebuild-dcode-preflight";
 
 describe("rebuildSandbox DCode flow: pre-delete drift", () => {
@@ -132,6 +133,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
         originalEntry, // Exact post-confirmation lock guard.
         originalEntry, // Messaging config hydration.
         originalEntry, // Messaging-conflict gateway lookup (#5954).
+        originalEntry, // Package authority fence.
         driftedEntry, // Final pre-backup target verification.
       ],
       dcodeRouteResults: [{ ok: true }, { ok: true }],
@@ -174,18 +176,19 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
   it("preserves the live DCode sandbox when its registry target drifts after backup (#6195)", async () => {
     const originalEntry = makeDcodeSandboxEntry();
     const driftedEntry = { ...originalEntry, model: "nvidia/changed-at-delete-edge" };
+    let backupCompleted = false;
     const harness = createRebuildFlowHarness({
       agentName: "langchain-deepagents-code",
       sandboxEntry: originalEntry,
-      sandboxEntryReads: [
-        originalEntry, // Initial rebuild target.
-        originalEntry, // Exact post-confirmation lock guard.
-        originalEntry, // Messaging config hydration.
-        originalEntry, // Messaging-conflict gateway lookup (#5954).
-        originalEntry, // Final pre-backup target verification.
-        driftedEntry, // Registry reread at the destructive boundary.
-      ],
+      beforeBackup: () => {
+        backupCompleted = true;
+      },
       dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }],
+    });
+    const readSandbox = vi.mocked(registry.getSandbox).getMockImplementation();
+    vi.mocked(registry.getSandbox).mockImplementation((...args: unknown[]) => {
+      const current = readSandbox?.(...args);
+      return backupCompleted && current ? { ...current, ...driftedEntry } : current;
     });
     configureDcodeSession(harness);
 

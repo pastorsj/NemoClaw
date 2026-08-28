@@ -21,7 +21,10 @@ import {
   reconcileLegacyHarnessMigration,
   type PreparedLegacyHarnessMigration,
 } from "../../state/harness-migration";
-import type { Session } from "../../state/onboard-session";
+import { bindCheckpointHarnessPackageAuthority } from "../../state/onboard-checkpoint-migrate";
+import { type CompareAndSwapSessionResult, type Session } from "../../state/onboard-session";
+import { load as loadRegistry } from "../../state/registry/persistence";
+import type { SandboxRegistry } from "../../state/registry/types";
 import { resolveQualifiedOnboardAgent } from "../agent-selection";
 import {
   prepare as prepareLockedOnboardRuntime,
@@ -38,6 +41,7 @@ import {
   type ResolvedSandboxAgent,
 } from "../sandbox-agent";
 import type { FreshOnboardHarnessBinding } from "../session-bootstrap";
+import { assertCheckpointPackageAuthorityChain } from "../checkpoint-replay";
 
 export { requireCurrentSessionHarnessPackageAuthority } from "./package-authority";
 
@@ -89,7 +93,13 @@ export interface OnboardHarnessPackageBoundaryInput {
 
 export interface OnboardHarnessPackageBoundaryDependencies {
   readonly assertWriterLockOwned: () => void;
+  readonly compareAndSwapSession: (
+    matches: (session: Session) => boolean,
+    mutator: (session: Session) => Session | void,
+    command?: string,
+  ) => CompareAndSwapSessionResult;
   readonly loadSession: () => Session | null;
+  readonly loadRegistry: () => SandboxRegistry;
   readonly getBundledRoot: typeof getBundledHarnessPackageRoot;
   readonly getSourceIdentity: typeof getBundledHarnessPackageSourceIdentity;
   readonly getStoreRoot: typeof getHarnessPackageStoreRoot;
@@ -144,6 +154,7 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
   getBundledRoot: getBundledHarnessPackageRoot,
   getSourceIdentity: getBundledHarnessPackageSourceIdentity,
   getStoreRoot: getHarnessPackageStoreRoot,
+  loadRegistry,
   prepareLegacyMigration: prepareLegacyHarnessMigration,
   reconcileLegacyMigration: reconcileLegacyHarnessMigration,
   resolveQualifiedAgent: resolveQualifiedOnboardAgent,
@@ -204,6 +215,47 @@ function requireUnchangedQualifiedOwner(expected: Session, current: Session | nu
     throw new Error("Qualified onboarding session authority changed during portable recovery");
   }
   return current;
+}
+
+function reconcileCheckpointAuthority(
+  current: Session,
+  harnessPackage: HarnessPackageIdentity | null,
+  deps: OnboardHarnessPackageBoundaryDependencies,
+): Session {
+  const checkpoint = bindCheckpointHarnessPackageAuthority(current.checkpoint, harnessPackage);
+  if (isDeepStrictEqual(checkpoint, current.checkpoint)) return current;
+  const result = deps.compareAndSwapSession(
+    (candidate) =>
+      candidate.sessionId === current.sessionId &&
+      candidate.agent === current.agent &&
+      isDeepStrictEqual(candidate.harnessPackage, current.harnessPackage) &&
+      isDeepStrictEqual(candidate.harnessPackageMigration, current.harnessPackageMigration) &&
+      isDeepStrictEqual(candidate.checkpoint, current.checkpoint),
+    (candidate) => ({ ...candidate, checkpoint }),
+    "nemoclaw checkpoint package authority migration",
+  );
+  if (result !== "updated") {
+    throw new Error(`Onboarding checkpoint authority compare-and-swap returned ${result}`);
+  }
+  const reread = deps.loadSession();
+  if (
+    !reread ||
+    reread.sessionId !== current.sessionId ||
+    !isDeepStrictEqual(reread.checkpoint, checkpoint)
+  ) {
+    throw new Error("Onboarding checkpoint package authority did not survive readback");
+  }
+  return reread;
+}
+
+function assertOwningRegistryAuthority(
+  session: Session,
+  deps: OnboardHarnessPackageBoundaryDependencies,
+): void {
+  const entry = session.sandboxName
+    ? (deps.loadRegistry().sandboxes[session.sandboxName] ?? null)
+    : null;
+  assertCheckpointPackageAuthorityChain(session, entry);
 }
 
 function packageEntry(session: Session): {
@@ -303,6 +355,29 @@ async function prepareBoundary(
   );
   if (packageState.status === "valid") {
     assertResumeSelectionMatches(packageState.harnessPackage.id, input);
+    const owningEntry = session.sandboxName
+      ? deps.loadRegistry().sandboxes[session.sandboxName]
+      : undefined;
+    if (
+      packageState.harnessPackageMigration &&
+      owningEntry &&
+      (!isDeepStrictEqual(owningEntry.harnessPackage, packageState.harnessPackage) ||
+        !isDeepStrictEqual(
+          owningEntry.harnessPackageMigration,
+          packageState.harnessPackageMigration,
+        ))
+    ) {
+      return {
+        kind: "legacy-resume",
+        migration: deps.prepareLegacyMigration({
+          owner: { kind: "session", session },
+          bundledRoot: deps.getBundledRoot(),
+          storeRoot: context.storeRoot,
+          sourceIdentity: bundledSourceIdentity(input, deps),
+        }),
+        ...context,
+      };
+    }
     deps.resolveSandboxAgent(packageEntry(session), {
       storeRoot: context.storeRoot,
       env: input.environment,
@@ -346,7 +421,9 @@ function bindBoundary(
     return bindFreshSelection(prepared, deps);
   }
   if (prepared.kind === "package-resume") {
-    const owner = requireUnchangedPackageOwner(prepared.ownerSnapshot, deps.loadSession());
+    const unchanged = requireUnchangedPackageOwner(prepared.ownerSnapshot, deps.loadSession());
+    const owner = reconcileCheckpointAuthority(unchanged, unchanged.harnessPackage, deps);
+    assertOwningRegistryAuthority(owner, deps);
     const resolved = deps.resolveSandboxAgent(packageEntry(owner), {
       storeRoot: prepared.storeRoot,
       env: prepared.environment,
@@ -355,7 +432,9 @@ function bindBoundary(
     return boundResolvedAgent(resolved);
   }
   if (prepared.kind === "qualified-resume") {
-    const owner = requireUnchangedQualifiedOwner(prepared.ownerSnapshot, deps.loadSession());
+    const unchanged = requireUnchangedQualifiedOwner(prepared.ownerSnapshot, deps.loadSession());
+    const owner = reconcileCheckpointAuthority(unchanged, null, deps);
+    assertOwningRegistryAuthority(owner, deps);
     const definition = owner.agent
       ? deps.resolveQualifiedAgent(owner.agent, prepared.environment)
       : null;
@@ -398,7 +477,7 @@ function bindBoundary(
 export function createOnboardHarnessPackageBoundary(
   overrides: Pick<
     OnboardHarnessPackageBoundaryDependencies,
-    "assertWriterLockOwned" | "loadSession"
+    "assertWriterLockOwned" | "compareAndSwapSession" | "loadSession"
   > &
     Partial<OnboardHarnessPackageBoundaryDependencies>,
 ): OnboardHarnessPackageBoundary {
@@ -417,7 +496,7 @@ export async function prepareOnboardHarnessOperation(
   input: PrepareOnboardHarnessOperationInput,
   dependencyOverrides: Pick<
     OnboardHarnessPackageBoundaryDependencies,
-    "assertWriterLockOwned" | "loadSession"
+    "assertWriterLockOwned" | "compareAndSwapSession" | "loadSession"
   > &
     Partial<OnboardHarnessPackageBoundaryDependencies>,
 ): Promise<PreparedOnboardHarnessOperation> {

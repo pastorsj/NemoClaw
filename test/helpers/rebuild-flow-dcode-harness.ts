@@ -5,6 +5,7 @@ import { type MockInstance, vi } from "vitest";
 import type { GatewayRestartResult } from "../../src/lib/actions/sandbox/gateway-restart";
 import type { OpenShellSandboxInventory } from "../../src/lib/adapters/openshell/sandbox-observer";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
+import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
 import {
   agentDefs,
   agentOnboard,
@@ -17,6 +18,7 @@ import {
   gatewayRuntime,
   gatewayState,
   gatewayTeardownAuthority,
+  installRebuildHarnessPackage,
   installTerminalStepFailureMock,
   loadRebuildSandbox,
   mcpBridge,
@@ -80,6 +82,8 @@ export type RebuildFlowOverrides = {
     mcpReconciliationRefused?: boolean;
   };
   restartSandboxGateway?: () => GatewayRestartResult;
+  beforeBackup?: () => void;
+  harnessPackage?: HarnessPackageIdentity | null;
   onboard?: (session: RebuildFlowSession) => Promise<void> | void;
   repairMutableConfigPerms?: () =>
     | { applied: false; skipReason: "agent" | "locked" | "unreadable"; reason: string }
@@ -213,6 +217,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     dockerfileBasePath: "/tmp/Dockerfile.base",
     runtime: { kind: "terminal" },
   };
+  const harnessPackage = Object.hasOwn(overrides, "harnessPackage")
+    ? (overrides.harnessPackage ?? null)
+    : installRebuildHarnessPackage(agentName);
 
   const resolveGatewayAuthority = ({
     gatewayName,
@@ -311,6 +318,10 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       ? null
       : ({ name: sessionAgentName } as never),
   );
+  session.agent =
+    sessionAgentName === null || sessionAgentName === "openclaw" ? null : sessionAgentName;
+  session.harnessPackage = harnessPackage;
+  session.harnessPackageMigration = null;
   vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue(agentDisplayName);
   vi.spyOn(gatewayRuntime, "recoverNamedGatewayRuntime").mockImplementation(
     async (...args: unknown[]) => {
@@ -356,18 +367,23 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     // Tests that exercise the legacy ambiguous-image path override this explicitly.
     nemoclawVersion: "0.0.71",
     nimContainer: null,
+    ...(harnessPackage ? { harnessPackage } : {}),
     ...(overrides.sandboxEntry ?? {}),
   };
+  const withHarnessPackageAuthority = (entry: Record<string, unknown>) => ({
+    ...(harnessPackage ? { harnessPackage } : {}),
+    ...entry,
+  });
   const preDeleteDefaultSandbox =
     overrides.preDeleteDefaultSandbox === undefined ? "alpha" : overrides.preDeleteDefaultSandbox;
   let sandboxEntryReadCount = 0;
   vi.spyOn(registry, "getSandbox").mockImplementation(() => {
     const configuredReads = overrides.sandboxEntryReads ?? [];
-    return (
-      sandboxEntryReadCount < configuredReads.length
-        ? configuredReads[sandboxEntryReadCount++]
-        : sandboxEntry
-    ) as never;
+    if (sandboxEntryReadCount >= configuredReads.length) return sandboxEntry as never;
+    const configuredEntry = configuredReads[sandboxEntryReadCount++];
+    return (configuredEntry === null
+      ? null
+      : withHarnessPackageAuthority(configuredEntry)) as never;
   });
   let registryLoadCount = 0;
   vi.spyOn(registryPersistence, "load").mockImplementation(() => {
@@ -378,7 +394,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       sandboxes: {
         alpha:
           isPreDeleteRead && overrides.preDeleteSandboxEntry
-            ? overrides.preDeleteSandboxEntry
+            ? withHarnessPackageAuthority(overrides.preDeleteSandboxEntry)
             : sandboxEntry,
       },
     };
@@ -476,19 +492,24 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       window.relocked = true;
       return true;
     });
-  const backupSandboxStateSpy = vi.spyOn(sandboxState, "backupSandboxState").mockReturnValue({
-    success: true,
-    backedUpDirs: ["workspace"],
-    backedUpFiles: ["user.md"],
-    failedDirs: [],
-    failedFiles: [],
-    manifest: {
-      agentType: overrides.agentName ?? "openclaw",
-      backupPath: "/tmp/nemoclaw-rebuild-backup",
-      timestamp: "2026-06-01T00:00:00.000Z",
-      policyPresets: overrides.backupPolicyPresets ?? ["npm", "bad", "throw"],
-    },
-  });
+  const backupSandboxStateSpy = vi
+    .spyOn(sandboxState, "backupSandboxState")
+    .mockImplementation(() => {
+      overrides.beforeBackup?.();
+      return {
+        success: true,
+        backedUpDirs: ["workspace"],
+        backedUpFiles: ["user.md"],
+        failedDirs: [],
+        failedFiles: [],
+        manifest: {
+          agentType: overrides.agentName ?? "openclaw",
+          backupPath: "/tmp/nemoclaw-rebuild-backup",
+          timestamp: "2026-06-01T00:00:00.000Z",
+          policyPresets: overrides.backupPolicyPresets ?? ["npm", "bad", "throw"],
+        },
+      };
+    });
   vi.spyOn(sandboxState, "validateRebuildRecoveryManifest").mockImplementation(
     (...args: unknown[]) => {
       const manifest = args[2] as Record<string, unknown>;
@@ -565,7 +586,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const removeSandboxRegistryEntrySpy = vi
     .spyOn(destroy, "removeSandboxRegistryEntryWithReceipt")
     .mockReturnValue({
-      entry: { name: "alpha", imageTag: "old-image" },
+      entry: { ...sandboxEntry, imageTag: "old-image" },
       wasDefault: preDeleteDefaultSandbox === "alpha",
       fallbackDefault: null,
       postRemovalDefaultSelectionRevision: 1,
