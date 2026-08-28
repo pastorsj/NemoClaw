@@ -10,6 +10,7 @@ import { decisionDeclined, decisionSelected, decisionUnset } from "./onboard-che
 import {
   deriveCheckpointFromSession,
   loadResumeCheckpoint,
+  migrateCheckpointVersion4,
   resolveCheckpointForResume,
 } from "./onboard-checkpoint-migrate";
 import { CHECKPOINT_SCHEMA_VERSION, type OnboardCheckpoint } from "./onboard-checkpoint-types";
@@ -74,6 +75,13 @@ describe("deriveCheckpointFromSession", () => {
 });
 
 describe("resolveCheckpointForResume", () => {
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "1.2.3",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  };
   const validCheckpoint: OnboardCheckpoint = {
     schemaVersion: CHECKPOINT_SCHEMA_VERSION,
     profile: { kind: "selected", value: "default" },
@@ -81,6 +89,7 @@ describe("resolveCheckpointForResume", () => {
     sessionId: "sess-1",
     machineState: "init",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    harnessPackage: null,
     sandboxIdentity: decisionSelected({ name: "my-sandbox", agent: "openclaw" }),
     webSearch: decisionUnset(),
     messaging: decisionUnset(),
@@ -98,6 +107,66 @@ describe("resolveCheckpointForResume", () => {
     };
     const result = resolveCheckpointForResume(raw as Record<string, unknown>);
     expect(result.status).toBe("loaded");
+  });
+
+  it("returns loaded when Session and checkpoint package identities match exactly", () => {
+    const raw = {
+      ...rawJson(completedSession({ harnessPackage })),
+      checkpoint: serializeCheckpoint({ ...validCheckpoint, harnessPackage }),
+    };
+
+    expect(resolveCheckpointForResume(raw)).toMatchObject({
+      status: "loaded",
+      checkpoint: { harnessPackage },
+    });
+  });
+
+  it("rejects mismatched Session and checkpoint package identities", () => {
+    const raw = {
+      ...rawJson(completedSession({ harnessPackage })),
+      checkpoint: serializeCheckpoint({
+        ...validCheckpoint,
+        harnessPackage: { ...harnessPackage, contentDigest: "b".repeat(64) },
+      }),
+    };
+
+    expect(resolveCheckpointForResume(raw)).toEqual({ status: "corrupt" });
+  });
+
+  it("rejects malformed present Session package identity", () => {
+    const raw = {
+      ...rawJson(completedSession()),
+      harnessPackage: { id: "openclaw" },
+      checkpoint: serializeCheckpoint(validCheckpoint),
+    };
+
+    expect(resolveCheckpointForResume(raw)).toEqual({ status: "corrupt" });
+  });
+
+  it("rejects malformed present Session package migration provenance", () => {
+    const raw = {
+      ...rawJson(
+        completedSession({
+          harnessPackage,
+          harnessPackageMigration: {
+            schemaVersion: 1,
+            source: "legacy-current-bundle",
+            legacyAgent: null,
+            migratedAt: "2026-08-28T02:00:00.000Z",
+          },
+        }),
+      ),
+      harnessPackageMigration: {
+        schemaVersion: 1,
+        source: "legacy-current-bundle",
+        legacyAgent: null,
+        migratedAt: "2026-08-28T02:00:00.000Z",
+        token: "secret",
+      },
+      checkpoint: serializeCheckpoint({ ...validCheckpoint, harnessPackage }),
+    };
+
+    expect(resolveCheckpointForResume(raw)).toEqual({ status: "corrupt" });
   });
 
   it("fails safe on an unsupported future checkpoint version instead of a fresh start (#6228)", () => {
@@ -138,6 +207,61 @@ describe("resolveCheckpointForResume", () => {
       decisionSelected({ name: "my-sandbox", agent: "openclaw" }),
     );
     expect(reloaded?.checkpoint?.webSearch).toEqual(decisionDeclined());
+  });
+
+  it("copies exact Session identity without copying Session migration provenance", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "2.0.0",
+      contractVersion: 1 as const,
+      contentDigest: "d".repeat(64),
+    };
+    const session = completedSession({
+      agent: "hermes",
+      harnessPackage,
+      harnessPackageMigration: {
+        schemaVersion: 1,
+        source: "legacy-current-bundle",
+        legacyAgent: "hermes",
+        migratedAt: "2026-08-28T02:00:00.000Z",
+      },
+    });
+
+    const checkpoint = deriveCheckpointFromSession(session);
+    expect(checkpoint.harnessPackage).toEqual(harnessPackage);
+    expect("harnessPackageMigration" in checkpoint).toBe(false);
+    expect("harnessPackageMigration" in serializeCheckpoint(checkpoint)).toBe(false);
+  });
+
+  it("explicitly migrates v4 without inferring package identity from the agent", () => {
+    const serialized = serializeCheckpoint({
+      ...validCheckpoint,
+      sandboxIdentity: decisionSelected({ name: "my-sandbox", agent: "hermes" }),
+    });
+    serialized.schemaVersion = 4;
+    delete serialized.harnessPackage;
+
+    expect(migrateCheckpointVersion4(serialized)).toEqual({
+      ...validCheckpoint,
+      sandboxIdentity: decisionSelected({ name: "my-sandbox", agent: "hermes" }),
+      harnessPackage: null,
+    });
+  });
+
+  it("keeps an exact Session identity readable when its v4 checkpoint migrates to null", () => {
+    const serialized = serializeCheckpoint(validCheckpoint);
+    serialized.schemaVersion = 4;
+    delete serialized.harnessPackage;
+    const raw = {
+      ...rawJson(completedSession({ harnessPackage })),
+      checkpoint: serialized,
+    };
+
+    expect(resolveCheckpointForResume(raw)).toMatchObject({
+      status: "loaded",
+      checkpoint: { schemaVersion: 5, harnessPackage: null },
+    });
   });
 });
 

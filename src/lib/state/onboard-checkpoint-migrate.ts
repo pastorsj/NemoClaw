@@ -4,6 +4,10 @@
 import fs from "node:fs";
 
 import { isObjectRecord, type JsonValue } from "../core/json-types";
+import {
+  harnessPackageIdentitiesEqual,
+  parseHarnessPackageIdentity,
+} from "../harness/package-identity";
 import type { WebSearchConfig } from "../inference/web-search";
 import {
   getActiveChannelIdsFromPlan,
@@ -26,9 +30,29 @@ import {
   type CheckpointSandboxIdentity,
   type OnboardCheckpoint,
 } from "./onboard-checkpoint-types";
-import { normalizeSession, SESSION_FILE, type Session } from "./onboard-session";
+import {
+  hasInvalidSessionHarnessPackage,
+  normalizeSession,
+  SESSION_FILE,
+  type Session,
+} from "./onboard-session";
 
 export { SESSION_FILE as ONBOARD_CHECKPOINT_SESSION_FILE };
+
+/** Validate and migrate one complete v4 checkpoint without inferring package authority. */
+export function migrateCheckpointVersion4(raw: unknown): OnboardCheckpoint | null {
+  if (!isObjectRecord(raw) || raw.schemaVersion !== 4) return null;
+  const inspected = inspectCheckpoint(raw);
+  return inspected.status === "loaded" ? inspected.checkpoint : null;
+}
+
+function inspectResumeCheckpoint(raw: unknown): CheckpointLoadResult {
+  if (isObjectRecord(raw) && raw.schemaVersion === 4) {
+    const checkpoint = migrateCheckpointVersion4(raw);
+    return checkpoint ? { status: "loaded", checkpoint } : { status: "corrupt" };
+  }
+  return inspectCheckpoint(raw);
+}
 
 function identityDecision(session: Session): CheckpointDecision<CheckpointSandboxIdentity> {
   const { sandboxName, agent } = session;
@@ -78,6 +102,9 @@ export function deriveCheckpointFromSession(
     runtimeAuthority?: CheckpointPortableRuntimeAuthority | null;
   } = {},
 ): OnboardCheckpoint {
+  if (hasInvalidSessionHarnessPackage(session)) {
+    throw new Error("Cannot derive a checkpoint from invalid harness package authority.");
+  }
   const profile = options.profile ?? "default";
   const runtimeAuthority = options.runtimeAuthority ?? null;
   if ((profile === "portable") !== (runtimeAuthority !== null)) {
@@ -92,6 +119,8 @@ export function deriveCheckpointFromSession(
     runtimeAuthority: runtimeAuthority
       ? { kind: "selected", value: runtimeAuthority }
       : { kind: "unset" },
+    harnessPackage:
+      session.harnessPackage === null ? null : parseHarnessPackageIdentity(session.harnessPackage),
     sandboxIdentity: identityDecision(session),
     webSearch: webSearchDecision(session),
     messaging: messagingDecision(session),
@@ -111,8 +140,9 @@ export function deriveCheckpointFromSession(
 
 export function resolveCheckpointForResume(rawSession: unknown): CheckpointLoadResult {
   if (!isObjectRecord(rawSession)) return { status: "none" };
+  if (hasInvalidSessionHarnessPackage(rawSession)) return { status: "corrupt" };
 
-  const inspected = inspectCheckpoint(rawSession.checkpoint);
+  const inspected = inspectResumeCheckpoint(rawSession.checkpoint);
   if (
     inspected.status === "unsupported_future" ||
     inspected.status === "corrupt" ||
@@ -140,6 +170,13 @@ export function resolveCheckpointForResume(rawSession: unknown): CheckpointLoadR
     if (
       inspected.checkpoint.sessionId !== session.sessionId ||
       inspected.checkpoint.machineState !== session.machine.state
+    ) {
+      return { status: "corrupt" };
+    }
+    if (
+      session.harnessPackage !== null &&
+      inspected.checkpoint.harnessPackage != null &&
+      !harnessPackageIdentitiesEqual(session.harnessPackage, inspected.checkpoint.harnessPackage)
     ) {
       return { status: "corrupt" };
     }

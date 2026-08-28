@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
+import type { HarnessPackageIdentity } from "../harness/package-types";
 import type { OnboardMachineState } from "../onboard/machine/types";
 
-export const CHECKPOINT_SCHEMA_VERSION = 4 as const;
+export const CHECKPOINT_SCHEMA_VERSION = 5 as const;
 
 export type CheckpointSchemaVersion = typeof CHECKPOINT_SCHEMA_VERSION;
 
@@ -141,6 +142,8 @@ export interface OnboardCheckpoint {
   readonly updatedAt: string;
   readonly profile: CheckpointProfileDecision;
   readonly runtimeAuthority: CheckpointRuntimeAuthorityDecision;
+  /** Exact package authority, or null for migrated legacy and qualified candidate state. */
+  readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly sandboxIdentity: CheckpointDecision<CheckpointSandboxIdentity>;
   readonly webSearch: CheckpointDecision<WebSearchConfig>;
   readonly messaging: CheckpointDecision<CheckpointMessagingSelection>;
@@ -156,6 +159,6 @@ export interface OnboardCheckpoint {
 export type CheckpointLoadResult =
   | { readonly status: "none" }
   | { readonly status: "loaded"; readonly checkpoint: OnboardCheckpoint }
-  | { readonly status: "legacy"; readonly foundVersion?: 1 | 2 | 3 }
+  | { readonly status: "legacy"; readonly foundVersion?: 1 | 2 | 3 | 4 }
   | { readonly status: "unsupported_future"; readonly foundVersion: number }
   | { readonly status: "corrupt" };

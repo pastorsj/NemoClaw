@@ -3,7 +3,9 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { serializeCheckpoint } from "../state/onboard-checkpoint";
 import { decisionUnset } from "../state/onboard-checkpoint-decision";
+import { resolveCheckpointForResume } from "../state/onboard-checkpoint-migrate";
 import {
   CHECKPOINT_SCHEMA_VERSION,
   type CheckpointLoadResult,
@@ -34,6 +36,7 @@ const loadedCheckpoint: OnboardCheckpoint = {
   sessionId: "s1",
   machineState: "sandbox",
   updatedAt: "2026-01-01T00:00:00.000Z",
+  harnessPackage: null,
   sandboxIdentity: decisionUnset(),
   webSearch: decisionUnset(),
   messaging: decisionUnset(),
@@ -133,5 +136,28 @@ describe("resume checkpoint fail-safe (#6228)", () => {
     await expect(prepareOnboardSession(resumeInput, deps)).rejects.toThrow();
     expect(updateSession).not.toHaveBeenCalled();
     expect(persistedSession.checkpoint).toBeNull();
+  });
+
+  it("continues past the guard after an active v4 checkpoint migrates to v5", async () => {
+    const rawCheckpoint = serializeCheckpoint(loadedCheckpoint);
+    rawCheckpoint.schemaVersion = 4;
+    delete rawCheckpoint.harnessPackage;
+    const rawSession = {
+      ...createSession({ sessionId: "s1", agent: "openclaw" }),
+      machine: { version: 1, state: "sandbox", stateEnteredAt: null, revision: 1 },
+      checkpoint: rawCheckpoint,
+    };
+    const deps = makeDeps({
+      resolveResumeCheckpoint: () => resolveCheckpointForResume(rawSession),
+      getResumeConfigConflicts: () => {
+        throw new Error("PAST_GUARD");
+      },
+    });
+
+    await expect(prepareOnboardSession(resumeInput, deps)).rejects.toThrow("PAST_GUARD");
+    expect(resolveCheckpointForResume(rawSession)).toMatchObject({
+      status: "loaded",
+      checkpoint: { schemaVersion: 5, harnessPackage: null },
+    });
   });
 });

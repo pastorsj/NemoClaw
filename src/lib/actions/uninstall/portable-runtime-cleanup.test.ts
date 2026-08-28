@@ -436,7 +436,7 @@ function completedOnboardAuthority(test: ReturnType<typeof fixture>, portable: b
     revision: 1,
   };
   session.checkpoint = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     sessionId,
     machineState: "complete",
     updatedAt: "2026-08-15T00:00:00.000Z",
@@ -451,8 +451,10 @@ function completedOnboardAuthority(test: ReturnType<typeof fixture>, portable: b
     bindings: { credentialEnvs: [], registeredProviders: [] },
     sandboxRecreate: null,
   };
+  const persistedCheckpoint = { ...session.checkpoint, schemaVersion: 4 };
+  const persistedSession = { ...session, checkpoint: persistedCheckpoint };
   fs.mkdirSync(test.stateDir, { recursive: true });
-  fs.writeFileSync(sessionFile, `${JSON.stringify(session)}\n`, { mode: 0o600 });
+  fs.writeFileSync(sessionFile, `${JSON.stringify(persistedSession)}\n`, { mode: 0o600 });
   fs.writeFileSync(
     test.registryFile,
     `${JSON.stringify({

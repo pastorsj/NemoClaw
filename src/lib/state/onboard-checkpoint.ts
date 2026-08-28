@@ -6,6 +6,10 @@ import path from "node:path";
 import { SUPPORTED_GATEWAY_CAPABILITIES } from "../core/gateway-capabilities";
 import { isObjectRecord } from "../core/json-types";
 import { DEFAULT_GATEWAY_PORT } from "../core/ports";
+import {
+  parseHarnessPackageIdentity,
+  type HarnessPackageIdentity,
+} from "../harness/package-identity";
 import { normalizeWebSearchConfig, type WebSearchConfig } from "../inference/web-search";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../name-validation";
 import { isOnboardMachineState } from "../onboard/machine/transitions";
@@ -50,7 +54,7 @@ const SANDBOX_RECREATE_PHASES = new Set<CheckpointSandboxRecreatePhase>([
 ]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const CHECKPOINT_KEYS = [
+const CHECKPOINT_V4_KEYS = [
   "schemaVersion",
   "sessionId",
   "machineState",
@@ -66,6 +70,7 @@ const CHECKPOINT_KEYS = [
   "bindings",
   "sandboxRecreate",
 ] as const;
+const CHECKPOINT_KEYS = [...CHECKPOINT_V4_KEYS, "harnessPackage"] as const;
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
@@ -87,6 +92,15 @@ function parseRuntimeAuthority(value: unknown): CheckpointRuntimeAuthorityDecisi
   if (!hasExactKeys(value, ["kind", "value"]) || value.kind !== "selected") return null;
   const authority = parsePortableRuntimeAuthority(value.value);
   return authority ? { kind: "selected", value: authority } : null;
+}
+
+function parseHarnessPackage(value: unknown): HarnessPackageIdentity | null | undefined {
+  if (value === null) return null;
+  try {
+    return parseHarnessPackageIdentity(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function readString(value: unknown): string | null {
@@ -484,8 +498,12 @@ function parseSchema(
   value: Record<string, unknown>,
   gatewayAuthorityRaw: unknown,
   sandboxRecreateRaw: unknown,
+  sourceVersion: 4 | typeof CHECKPOINT_SCHEMA_VERSION,
 ): OnboardCheckpoint | null {
-  if (!hasExactKeys(value, CHECKPOINT_KEYS)) return null;
+  const hasHarnessPackage = Object.prototype.hasOwnProperty.call(value, "harnessPackage");
+  const expectedKeys =
+    sourceVersion === 4 || !hasHarnessPackage ? CHECKPOINT_V4_KEYS : CHECKPOINT_KEYS;
+  if (!hasExactKeys(value, expectedKeys)) return null;
   const sessionId = readString(value.sessionId);
   const machineState = value.machineState;
   const updatedAt = readCanonicalIsoTimestamp(value.updatedAt);
@@ -494,7 +512,10 @@ function parseSchema(
 
   const profile = parseProfile(value.profile);
   const runtimeAuthority = parseRuntimeAuthority(value.runtimeAuthority);
+  const harnessPackage =
+    sourceVersion === 4 || !hasHarnessPackage ? null : parseHarnessPackage(value.harnessPackage);
   if (!profile || !runtimeAuthority) return null;
+  if (harnessPackage === undefined) return null;
   if (
     (profile.value === "default" && runtimeAuthority.kind !== "unset") ||
     (profile.value === "portable" && runtimeAuthority.kind !== "selected")
@@ -534,6 +555,7 @@ function parseSchema(
     updatedAt,
     profile,
     runtimeAuthority,
+    harnessPackage,
     sandboxIdentity,
     webSearch,
     messaging,
@@ -557,7 +579,16 @@ export function inspectCheckpoint(raw: unknown): CheckpointLoadResult {
     return { status: "unsupported_future", foundVersion: version };
   }
   if (version === CHECKPOINT_SCHEMA_VERSION) {
-    const checkpoint = parseSchema(raw, raw.gatewayAuthority, raw.sandboxRecreate);
+    const checkpoint = parseSchema(
+      raw,
+      raw.gatewayAuthority,
+      raw.sandboxRecreate,
+      CHECKPOINT_SCHEMA_VERSION,
+    );
+    return checkpoint ? { status: "loaded", checkpoint } : { status: "corrupt" };
+  }
+  if (version === 4) {
+    const checkpoint = parseSchema(raw, raw.gatewayAuthority, raw.sandboxRecreate, 4);
     return checkpoint ? { status: "loaded", checkpoint } : { status: "corrupt" };
   }
   if (version === 1 || version === 2 || version === 3)
@@ -573,6 +604,10 @@ export function serializeCheckpoint(checkpoint: OnboardCheckpoint): Record<strin
     updatedAt: checkpoint.updatedAt,
     profile: checkpoint.profile,
     runtimeAuthority: checkpoint.runtimeAuthority,
+    harnessPackage:
+      checkpoint.harnessPackage == null
+        ? null
+        : parseHarnessPackageIdentity(checkpoint.harnessPackage),
     sandboxIdentity: checkpoint.sandboxIdentity,
     webSearch: checkpoint.webSearch,
     messaging: checkpoint.messaging,

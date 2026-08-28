@@ -30,6 +30,7 @@ function baseCheckpoint(overrides: Partial<OnboardCheckpoint> = {}): OnboardChec
     sessionId: "s1",
     machineState: "sandbox",
     updatedAt: ISO,
+    harnessPackage: null,
     sandboxIdentity: decisionSelected({ name: "my-sandbox", agent: "openclaw" }),
     webSearch: decisionUnset(),
     messaging: decisionUnset(),
@@ -256,7 +257,7 @@ describe("checkpoint schema inspection", () => {
         checkpoint.effectGroups = { unexpected_effect: { completedAt: ISO, fingerprint: "x" } };
       },
     },
-  ])("rejects invalid v4 cross-field authority: $label", ({ mutate }) => {
+  ])("rejects invalid v5 cross-field authority: $label", ({ mutate }) => {
     const serialized = serializeCheckpoint(baseCheckpoint());
     mutate(serialized);
     expect(inspectCheckpoint(serialized)).toEqual({ status: "corrupt" });
@@ -270,6 +271,82 @@ describe("checkpoint schema inspection", () => {
     const result = inspectCheckpoint(serialized);
 
     expect(result).toEqual({ status: "legacy", foundVersion: 2 });
+  });
+
+  it("migrates a complete v4 checkpoint to v5 with package authority absent", () => {
+    const serialized = serializeCheckpoint(baseCheckpoint());
+    serialized.schemaVersion = 4;
+    delete serialized.harnessPackage;
+
+    const result = inspectCheckpoint(serialized);
+
+    expect(result).toEqual({
+      status: "loaded",
+      checkpoint: { ...baseCheckpoint(), harnessPackage: null },
+    });
+  });
+
+  it("round-trips exact v5 package identity without migration audit metadata", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "2.0.0",
+      contractVersion: 1 as const,
+      contentDigest: "d".repeat(64),
+    };
+    const serialized = serializeCheckpoint(baseCheckpoint({ harnessPackage }));
+
+    expect(serialized.harnessPackage).toEqual(harnessPackage);
+    expect(serialized.harnessPackageMigration).toBeUndefined();
+    expect(inspectCheckpoint(serialized)).toEqual({
+      status: "loaded",
+      checkpoint: baseCheckpoint({ harnessPackage }),
+    });
+  });
+
+  it("serializes an omitted legacy-compatible package identity as explicit null", () => {
+    const { harnessPackage: _harnessPackage, ...checkpoint } = baseCheckpoint();
+
+    expect(serializeCheckpoint(checkpoint).harnessPackage).toBeNull();
+  });
+
+  it("normalizes an omitted v5 package identity to explicit null on read", () => {
+    const serialized = serializeCheckpoint(baseCheckpoint());
+    delete serialized.harnessPackage;
+
+    expect(inspectCheckpoint(serialized)).toEqual({
+      status: "loaded",
+      checkpoint: baseCheckpoint({ harnessPackage: null }),
+    });
+  });
+
+  it.each([
+    { id: "hermes" },
+    {
+      kind: "agent-runtime",
+      id: "hermes",
+      packageVersion: "2.0.0",
+      contractVersion: 1,
+      contentDigest: "d".repeat(64),
+      apiKey: "secret",
+    },
+  ])("rejects malformed present v5 package identity", (harnessPackage) => {
+    const serialized = serializeCheckpoint(baseCheckpoint());
+    serialized.harnessPackage = harnessPackage;
+
+    expect(inspectCheckpoint(serialized)).toEqual({ status: "corrupt" });
+  });
+
+  it("rejects Session-only migration audit metadata in a checkpoint", () => {
+    const serialized = serializeCheckpoint(baseCheckpoint());
+    serialized.harnessPackageMigration = {
+      schemaVersion: 1,
+      source: "legacy-current-bundle",
+      legacyAgent: "openclaw",
+      migratedAt: ISO,
+    };
+
+    expect(inspectCheckpoint(serialized)).toEqual({ status: "corrupt" });
   });
 
   it("classifies a v1 checkpoint as legacy without inventing runtime authority", () => {
@@ -403,15 +480,15 @@ describe("checkpoint schema inspection", () => {
     expect(inspectCheckpoint(serialized)).toEqual({ status: "corrupt" });
   });
 
-  it.each([
-    "sourceLiveIdentityFingerprint",
-    "targetLiveIdentityFingerprint",
-  ])("rejects a malformed nullable recreate journal field: %s", (field) => {
-    const serialized = serializedRecreateCheckpoint();
-    (serialized.sandboxRecreate as Record<string, unknown>)[field] = 42;
+  it.each(["sourceLiveIdentityFingerprint", "targetLiveIdentityFingerprint"])(
+    "rejects a malformed nullable recreate journal field: %s",
+    (field) => {
+      const serialized = serializedRecreateCheckpoint();
+      (serialized.sandboxRecreate as Record<string, unknown>)[field] = 42;
 
-    expect(inspectCheckpoint(serialized)).toEqual({ status: "corrupt" });
-  });
+      expect(inspectCheckpoint(serialized)).toEqual({ status: "corrupt" });
+    },
+  );
 
   it("rejects a checkpoint whose external authority targets a different port", () => {
     const serialized = serializeCheckpoint(
