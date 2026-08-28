@@ -14,6 +14,8 @@ import {
   visibleCommands,
 } from "../../../dist/lib/cli/command-registry";
 import { getRegisteredOclifCommandsMetadata } from "../../../dist/lib/cli/oclif-metadata";
+import { PUBLIC_DISPLAY_ENTRIES } from "../../../dist/lib/cli/public-display-defaults";
+import { globalRouteTokenVariants } from "../../../dist/lib/cli/public-route-metadata";
 
 describe("command-registry", () => {
   describe("COMMANDS array", () => {
@@ -121,6 +123,23 @@ describe("command-registry", () => {
       const discoveredIds = new Set(Object.keys(getRegisteredOclifCommandsMetadata()));
       expect(discoveredIds.has(command.commandId), command.usage).toBe(true);
     });
+
+    it("publishes the harness topic once", () => {
+      expect(discoveredIds.filter((commandId) => commandId === "harness")).toEqual(["harness"]);
+      expect(globalRouteTokenVariants("harness")).toEqual([["harness"]]);
+      expect([...globalCommandTokens()].filter((token) => token === "harness")).toEqual([
+        "harness",
+      ]);
+      expect(COMMANDS.filter((command) => command.commandId === "harness")).toEqual([]);
+    });
+
+    it.each(["harness:list", "harness:install"])(
+      "%s publishes one public display row",
+      (commandId) => {
+        expect(COMMANDS.filter((command) => command.commandId === commandId)).toHaveLength(1);
+        expect(PUBLIC_DISPLAY_ENTRIES[commandId]).toHaveLength(1);
+      },
+    );
   });
 
   describe("deprecated commands", () => {
@@ -170,10 +189,11 @@ describe("command-registry", () => {
   });
 
   describe("globalCommandTokens()", () => {
-    it("returns the exact set of 30 tokens matching the global dispatch commands", () => {
+    it("returns the exact set of 31 tokens matching the global dispatch commands", () => {
       const tokens = globalCommandTokens();
       const expected = new Set([
         "agents",
+        "harness",
         "completion",
         "host",
         "onboard",

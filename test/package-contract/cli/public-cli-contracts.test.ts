@@ -3,7 +3,6 @@
 
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -19,8 +18,20 @@ type CliParityFixture = {
   root: string;
 };
 
+type HarnessPackageIdentity = {
+  kind: string;
+  id: string;
+  packageVersion: string;
+  contractVersion: number;
+  contentDigest: string;
+};
+
 function createCliParityFixture(): CliParityFixture {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-docs-cli-parity-"));
+  const fixtureParent = path.join(REPO_ROOT, "node_modules/.cache/nemoclaw-docs-cli-parity");
+  fs.mkdirSync(fixtureParent, { recursive: true, mode: 0o700 });
+  fs.chmodSync(fixtureParent, 0o700);
+  const root = fs.mkdtempSync(path.join(fs.realpathSync.native(fixtureParent), "fixture-"));
+  fs.chmodSync(root, 0o700);
   const binDir = path.join(root, "bin");
   const shim = path.join(binDir, "nemoclaw");
   const nodeShim = path.join(binDir, "node");
@@ -67,6 +78,22 @@ exec "$NEMOCLAW_TEST_NODE" "$_entrypoint" "$@"
   return { binDir, nodeInvocationLog, nodeShim, root };
 }
 
+function runInstalledCli(fixture: CliParityFixture, args: readonly string[]) {
+  return spawnSync(path.join(fixture.binDir, "nemoclaw"), args, {
+    cwd: REPO_ROOT,
+    encoding: "utf-8",
+    env: {
+      ...process.env,
+      HOME: fixture.root,
+      NEMOCLAW_TEST_CLI_ENTRYPOINT: CLI_ENTRYPOINT,
+      NEMOCLAW_TEST_NODE: process.execPath,
+      PATH: `${fixture.binDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    },
+    killSignal: "SIGKILL",
+    timeout: 120_000,
+  });
+}
+
 function runCliParity(fixture: CliParityFixture, env: NodeJS.ProcessEnv = {}) {
   return spawnSync("bash", [CHECK_DOCS, "--only-cli"], {
     cwd: REPO_ROOT,
@@ -105,73 +132,175 @@ describe("public compiled CLI contracts", () => {
     expect(result.stdout).toMatch(/^nemoclaw v/);
   });
 
-  it("keeps compiled CLI commands aligned with their documentation headings (#7616)", {
-    timeout: 150_000,
-  }, () => {
-    // `npm run test:package` builds the CLI before this project. Empty one
-    // custom-help metadata row to prove its code-owned classification still
-    // selects rendered help without returning to one start per command.
-    const fixture = createCliParityFixture();
+  it(
+    "installs one reviewed harness and lists its receipt-bound identity",
+    { timeout: 30_000 },
+    () => {
+      const fixture = createCliParityFixture();
 
-    try {
-      const result = runCliParity(fixture, { NEMOCLAW_TEST_EMPTY_AGENT_METADATA: "1" });
+      try {
+        const emptyList = runInstalledCli(fixture, ["harness", "list", "--json"]);
+        expect(emptyList.error).toBeUndefined();
+        expect(emptyList.signal).toBeNull();
+        expect(emptyList.status, emptyList.stderr).toBe(0);
+
+        const emptyInventory = JSON.parse(emptyList.stdout) as {
+          schemaVersion: number;
+          installed: unknown[];
+          available: Array<{
+            displayName: string;
+            identity: HarnessPackageIdentity;
+            installationState: string;
+          }>;
+        };
+        expect(emptyInventory.schemaVersion).toBe(1);
+        expect(emptyInventory.installed).toEqual([]);
+        const reviewedPackage = emptyInventory.available.find(
+          ({ identity }) => identity.id === "openclaw",
+        );
+        expect(reviewedPackage).toBeDefined();
+        const reviewedOpenClaw = reviewedPackage!;
+        expect(reviewedOpenClaw.installationState).toBe("not-installed");
+
+        const install = runInstalledCli(fixture, [
+          "harness",
+          "install",
+          reviewedOpenClaw.identity.id,
+        ]);
+        expect(install.error).toBeUndefined();
+        expect(install.signal).toBeNull();
+        expect(install.status, install.stderr).toBe(0);
+        expect(install.stdout).toContain("Installed harness package 'openclaw'");
+
+        const installedList = runInstalledCli(fixture, ["harness", "list", "--json"]);
+        expect(installedList.error).toBeUndefined();
+        expect(installedList.signal).toBeNull();
+        expect(installedList.status, installedList.stderr).toBe(0);
+        const installedInventory = JSON.parse(installedList.stdout) as {
+          installed: Array<{
+            id: string;
+            displayName: string;
+            health: string;
+            identity: HarnessPackageIdentity;
+          }>;
+          available: Array<{
+            identity: HarnessPackageIdentity;
+            installationState: string;
+          }>;
+        };
+        expect(installedInventory.installed).toEqual([
+          {
+            id: reviewedOpenClaw.identity.id,
+            displayName: reviewedOpenClaw.displayName,
+            health: "healthy",
+            identity: reviewedOpenClaw.identity,
+          },
+        ]);
+        expect(
+          installedInventory.available.find(
+            ({ identity }) => identity.id === reviewedOpenClaw.identity.id,
+          )?.installationState,
+        ).toBe("active");
+
+        const receiptPath = path.join(
+          fixture.root,
+          ".nemoclaw",
+          "harnesses",
+          "receipts",
+          reviewedOpenClaw.identity.id,
+          "sha256",
+          `${reviewedOpenClaw.identity.contentDigest}.json`,
+        );
+        const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf-8")) as {
+          identity: HarnessPackageIdentity;
+        };
+        expect(receipt.identity).toEqual(reviewedOpenClaw.identity);
+        expect(installedInventory.installed[0]?.identity).toEqual(receipt.identity);
+      } finally {
+        fs.rmSync(fixture.root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it(
+    "keeps compiled CLI commands aligned with their documentation headings (#7616)",
+    {
+      timeout: 150_000,
+    },
+    () => {
+      // `npm run test:package` builds the CLI before this project. Empty one
+      // custom-help metadata row to prove its code-owned classification still
+      // selects rendered help without returning to one start per command.
+      const fixture = createCliParityFixture();
+
+      try {
+        const result = runCliParity(fixture, { NEMOCLAW_TEST_EMPTY_AGENT_METADATA: "1" });
+
+        expect(result.error).toBeUndefined();
+        expect(result.signal).toBeNull();
+        expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+        expect(result.stdout).toContain("check-docs: running: [cli]");
+        expect(result.stdout).toContain("command-level parity OK");
+        expect(result.stdout).toContain("flag-level parity OK");
+        const invocations = readCliInvocations(fixture);
+        expect(invocations.filter((invocation) => invocation === "dump-commands")).toHaveLength(1);
+        expect(
+          invocations.filter((invocation) => invocation === "dump-command-flags"),
+        ).toHaveLength(1);
+        expect(invocations).toContain("custom-help");
+        expect(invocations.length).toBeLessThanOrEqual(20);
+      } finally {
+        fs.rmSync(fixture.root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it(
+    "rejects an undocumented flag from custom rendered help (#7616)",
+    {
+      timeout: 150_000,
+    },
+    () => {
+      const fixture = createCliParityFixture();
+
+      try {
+        const result = runCliParity(fixture, { NEMOCLAW_TEST_ADD_AGENT_HELP_FLAG: "1" });
+
+        expect(result.error).toBeUndefined();
+        expect(result.signal).toBeNull();
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain("flag --synthetic-undocumented");
+        expect(result.stderr).toContain("not in 'nemoclaw <name> agent' section");
+        expect(readCliInvocations(fixture)).toContain("custom-help");
+      } finally {
+        fs.rmSync(fixture.root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it(
+    "validates every repository-local documentation link (#7616)",
+    {
+      timeout: 150_000,
+    },
+    () => {
+      const result = spawnSync("bash", [CHECK_DOCS, "--only-links", "--local-only"], {
+        cwd: REPO_ROOT,
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          CHECK_DOC_LINKS_REMOTE: "0",
+        },
+        killSignal: "SIGKILL",
+        timeout: 120_000,
+      });
 
       expect(result.error).toBeUndefined();
       expect(result.signal).toBeNull();
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stdout).toContain("check-docs: running: [cli]");
-      expect(result.stdout).toContain("command-level parity OK");
-      expect(result.stdout).toContain("flag-level parity OK");
-      const invocations = readCliInvocations(fixture);
-      expect(invocations.filter((invocation) => invocation === "dump-commands")).toHaveLength(1);
-      expect(invocations.filter((invocation) => invocation === "dump-command-flags")).toHaveLength(
-        1,
-      );
-      expect(invocations).toContain("custom-help");
-      expect(invocations.length).toBeLessThanOrEqual(20);
-    } finally {
-      fs.rmSync(fixture.root, { force: true, recursive: true });
-    }
-  });
-
-  it("rejects an undocumented flag from custom rendered help (#7616)", {
-    timeout: 150_000,
-  }, () => {
-    const fixture = createCliParityFixture();
-
-    try {
-      const result = runCliParity(fixture, { NEMOCLAW_TEST_ADD_AGENT_HELP_FLAG: "1" });
-
-      expect(result.error).toBeUndefined();
-      expect(result.signal).toBeNull();
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain("flag --synthetic-undocumented");
-      expect(result.stderr).toContain("not in 'nemoclaw <name> agent' section");
-      expect(readCliInvocations(fixture)).toContain("custom-help");
-    } finally {
-      fs.rmSync(fixture.root, { force: true, recursive: true });
-    }
-  });
-
-  it("validates every repository-local documentation link (#7616)", {
-    timeout: 150_000,
-  }, () => {
-    const result = spawnSync("bash", [CHECK_DOCS, "--only-links", "--local-only"], {
-      cwd: REPO_ROOT,
-      encoding: "utf-8",
-      env: {
-        ...process.env,
-        CHECK_DOC_LINKS_REMOTE: "0",
-      },
-      killSignal: "SIGKILL",
-      timeout: 120_000,
-    });
-
-    expect(result.error).toBeUndefined();
-    expect(result.signal).toBeNull();
-    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(result.stdout).toContain("check-docs: running: [links]");
-    expect(result.stdout).toContain("remote: skipped (local paths only)");
-    expect(result.stdout).toContain("phase 2/2: skipped");
-  });
+      expect(result.stdout).toContain("check-docs: running: [links]");
+      expect(result.stdout).toContain("remote: skipped (local paths only)");
+      expect(result.stdout).toContain("phase 2/2: skipped");
+    },
+  );
 });

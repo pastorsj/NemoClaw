@@ -25,6 +25,14 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       description: "List installed and reviewed available harness packages",
     },
   ],
+  "harness:install": [
+    {
+      group: "Getting Started",
+      order: 1.6,
+      description: "Install a reviewed harness package",
+      flags: "[id]",
+    },
+  ],
   ...SANDBOX_SESSIONS_DISPLAY_LAYOUT,
   "backup-all": [
     {

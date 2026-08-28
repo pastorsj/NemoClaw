@@ -236,6 +236,35 @@ $$nemoclaw host probe [--json]
 
 For capability IDs, evidence bounds, and compatibility guidance, refer to [System Readiness](system-readiness).
 
+### `nemoclaw harness list`
+
+List the harness packages installed for the current user and the reviewed packages bundled with this NemoClaw build.
+An installed row identifies a package whose stored receipt and content passed verification.
+An available row identifies a reviewed package that NemoClaw can install; it does not mean that package is installed.
+
+```bash
+nemoclaw harness list [--json]
+```
+
+On a fresh installation, the `Installed` section says `No harnesses are installed.` and the `Available` section shows the reviewed choices.
+Use `--json` to receive the same installed and available inventory as a schema-versioned object.
+
+### `nemoclaw harness install [id]`
+
+Install one reviewed harness package bundled with the current NemoClaw build.
+Pass the exact ID shown by `nemoclaw harness list` for scripts and other non-interactive sessions.
+
+```bash
+nemoclaw harness install openclaw
+```
+
+In an interactive terminal, omit `[id]` to choose from reviewed packages that are not already installed.
+The command copies and verifies the selected package, then records its exact identity in the current user's NemoClaw state.
+Installing the same exact package again is safe and keeps that identity active.
+
+The install command does not accept a filesystem path, URL, remote package source, or catalog-refresh option.
+It installs only the reviewed artifacts carried by the installed NemoClaw build, and it does not run package lifecycle scripts or package tests.
+
 ### `$$nemoclaw agents list`
 
 List the installed agent runtimes that can be selected with `$$nemoclaw onboard --agent <name>`.
