@@ -98,7 +98,7 @@ describe("E2E workflow plan", () => {
       }, {}),
     ).toEqual({
       catalogue: E2E_TARGET_CATALOGUE.length,
-      "typed-registry": 4,
+      "typed-registry": 5,
       "shared-e2e": 2,
       "retained-workflow": 19,
       staging: 1,
@@ -132,15 +132,18 @@ describe("E2E workflow plan", () => {
     expect(() => validateE2eWorkflowPlan(plan)).not.toThrow();
   });
 
-  it("keeps multiple inert declarations visibly unresolved without treating them as evidence (#9167)", () => {
+  it("resolves base Hermes while keeping the credentialed Hermes declaration inert (#9167)", () => {
     const plan = buildE2eWorkflowPlan({
       targets: "ubuntu-repo-cloud-hermes,ubuntu-repo-cloud-hermes-slack",
     });
 
     expect(plan.matrix).toHaveLength(2);
-    expect(plan.matrix.every((row) => !row.supported)).toBe(true);
+    expect(plan.matrix.find((row) => row.id === "ubuntu-repo-cloud-hermes")?.supported).toBe(true);
+    expect(plan.matrix.find((row) => row.id === "ubuntu-repo-cloud-hermes-slack")?.supported).toBe(
+      false,
+    );
     expect(plan.coverageMatrix).toEqual([
-      expect.objectContaining({ id: "ubuntu-repo-cloud-hermes", agentRuntime: "unresolved" }),
+      expect.objectContaining({ id: "ubuntu-repo-cloud-hermes", agentRuntime: "hermes" }),
       expect.objectContaining({
         id: "ubuntu-repo-cloud-hermes-slack",
         agentRuntime: "unresolved",
@@ -1285,7 +1288,7 @@ describe("E2E workflow plan", () => {
     );
     expect(complete.stdout).toContain("### Repeated outcomes with distinct evidence");
     expect(complete.stdout).toContain(
-      "| Repository install onboarding and hosted inference succeed | `ubuntu-repo-cloud-langchain-deepagents-code`, `ubuntu-repo-cloud-openclaw` | agent runtime |",
+      "| Repository install onboarding and hosted inference succeed | `ubuntu-repo-cloud-hermes`, `ubuntu-repo-cloud-langchain-deepagents-code`, `ubuntu-repo-cloud-openclaw` | agent runtime |",
     );
     expect(complete.stdout).toContain("### Intentional exclusions");
     expect(complete.stdout).toContain(

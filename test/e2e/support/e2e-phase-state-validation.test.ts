@@ -15,6 +15,10 @@ import {
   SandboxClient,
 } from "../fixtures/clients/index.ts";
 import type { E2ETargetFixtures } from "../fixtures/e2e-test.ts";
+import type {
+  HarnessPackageEvidence,
+  HarnessPackageIdentity,
+} from "../fixtures/harness-package.ts";
 import { type NemoClawInstance, StateValidationPhaseFixture } from "../fixtures/phases/index.ts";
 import {
   latestRebuildBackupDir,
@@ -84,6 +88,74 @@ function shellResult(exitCode: number, output = ""): ShellProbeResult {
   };
 }
 
+function packageIdentity(
+  id: "openclaw" | "hermes" | "langchain-deepagents-code" = "openclaw",
+  digest = "a".repeat(64),
+): HarnessPackageIdentity {
+  return {
+    kind: "agent-runtime",
+    id,
+    packageVersion: "1.0.0",
+    contractVersion: 1,
+    contentDigest: digest,
+  };
+}
+
+function packageInventory(identity: HarnessPackageIdentity): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    installed: [
+      {
+        id: identity.id,
+        displayName: `Display ${identity.id}`,
+        health: "healthy",
+        identity,
+      },
+    ],
+    available: [
+      {
+        displayName: `Display ${identity.id}`,
+        identity,
+        installationState: "active",
+      },
+    ],
+  });
+}
+
+function packageEvidence(identity: HarnessPackageIdentity): HarnessPackageEvidence {
+  return {
+    identity,
+    installResult: shellResult(0, "installed\n"),
+    inventoryResult: shellResult(0, packageInventory(identity)),
+  };
+}
+
+function packageStateIo(
+  identity: HarnessPackageIdentity,
+  options: {
+    registryAgent?: unknown;
+    registryIdentity?: unknown;
+    sessionAgent?: unknown;
+    sessionIdentity?: unknown;
+  } = {},
+) {
+  return {
+    readOnboardSession: () => ({
+      agent: options.sessionAgent === undefined ? identity.id : options.sessionAgent,
+      harnessPackage: options.sessionIdentity === undefined ? identity : options.sessionIdentity,
+    }),
+    readRegistry: () => ({
+      entries: {
+        "e2e-cloud-oc": {
+          agent: options.registryAgent === undefined ? identity.id : options.registryAgent,
+          harnessPackage:
+            options.registryIdentity === undefined ? identity : options.registryIdentity,
+        },
+      },
+    }),
+  };
+}
+
 function readJson(filePath: string): unknown {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -125,6 +197,7 @@ function instance(overrides: Partial<NemoClawInstance> = {}): NemoClawInstance {
     provider: "nvidia",
     providerEnv: "cloud",
     gatewayUrl: "http://127.0.0.1:18789",
+    harnessPackage: null,
     result: shellResult(0),
     ...overrides,
   };
@@ -549,6 +622,154 @@ describe("state-validation phase fixture", () => {
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
+  });
+
+  it("requires final inventory, Session, and registry to retain one exact package identity", async () => {
+    const identity = packageIdentity();
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, packageInventory(identity)));
+    const io = packageStateIo(identity, { registryAgent: null, sessionAgent: null });
+
+    const result = await fixture(runner, io).from(
+      { id: "synthetic-package-identity-ready" },
+      instance({ harnessPackage: packageEvidence(identity) }),
+    );
+
+    expect(result.harnessPackage).toEqual(identity);
+    expect(result.harnessPackage?.contentDigest).toHaveLength(64);
+    expect(runner.calls).toEqual([
+      {
+        command: "nemoclaw",
+        args: ["harness", "list", "--json"],
+        options: {
+          artifactName: "harness-list-openclaw",
+          env: expect.objectContaining({ PATH: expect.any(String) }),
+          timeoutMs: 30_000,
+        },
+      },
+    ]);
+  });
+
+  it.each([
+    {
+      authority: "inventory",
+      finalIdentity: packageIdentity("openclaw", "b".repeat(64)),
+      io: packageStateIo(packageIdentity()),
+    },
+    {
+      authority: "session",
+      finalIdentity: packageIdentity(),
+      io: packageStateIo(packageIdentity(), {
+        sessionIdentity: packageIdentity("openclaw", "b".repeat(64)),
+      }),
+    },
+    {
+      authority: "registry",
+      finalIdentity: packageIdentity(),
+      io: packageStateIo(packageIdentity(), {
+        registryIdentity: packageIdentity("openclaw", "b".repeat(64)),
+      }),
+    },
+  ])("rejects package digest drift in $authority authority", async (scenario) => {
+    const identity = packageIdentity();
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, packageInventory(scenario.finalIdentity)));
+
+    await expect(
+      fixture(runner, scenario.io).from(
+        { id: "synthetic-package-identity-drift" },
+        instance({ harnessPackage: packageEvidence(identity) }),
+      ),
+    ).rejects.toThrow(new RegExp(`Harness package ${scenario.authority} identity`));
+  });
+
+  it.each([
+    {
+      authority: "session",
+      io: {
+        readOnboardSession: () => null,
+        readRegistry: packageStateIo(packageIdentity()).readRegistry,
+      },
+    },
+    {
+      authority: "registry",
+      io: {
+        readOnboardSession: packageStateIo(packageIdentity()).readOnboardSession,
+        readRegistry: () => ({ entries: {} }),
+      },
+    },
+  ])("rejects an absent $authority package identity", async (scenario) => {
+    const identity = packageIdentity();
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, packageInventory(identity)));
+
+    await expect(
+      fixture(runner, scenario.io).from(
+        { id: "synthetic-package-identity-absent" },
+        instance({ harnessPackage: packageEvidence(identity) }),
+      ),
+    ).rejects.toThrow(new RegExp(`Harness package ${scenario.authority} identity`));
+  });
+
+  it("rejects a durable agent that disagrees with the effective package id", async () => {
+    const identity = packageIdentity("hermes", "b".repeat(64));
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, packageInventory(identity)));
+    const io = packageStateIo(identity, { sessionAgent: "openclaw" });
+
+    await expect(
+      fixture(runner, io).from(
+        { id: "synthetic-package-agent-drift" },
+        instance({
+          agent: "hermes",
+          harnessPackage: packageEvidence(identity),
+        }),
+      ),
+    ).rejects.toThrow(/Harness package session agent/);
+  });
+
+  it("keeps malformed durable-identity diagnostics free of paths and secrets", async () => {
+    const identity = packageIdentity();
+    const secret = `nvapi-${"q".repeat(24)}`;
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, packageInventory(identity)));
+    const io = packageStateIo(identity, {
+      sessionIdentity: {
+        ...identity,
+        packageRoot: `/private/store/${secret}`,
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      await fixture(runner, io).from(
+        { id: "synthetic-package-identity-malformed" },
+        instance({ harnessPackage: packageEvidence(identity) }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain("Harness package session identity");
+    expect(message).not.toContain("/private/store");
+    expect(message).not.toContain(secret);
+  });
+
+  it("explicitly skips standard package assertions for a candidate instance", async () => {
+    const runner = new FakeRunner();
+    const result = await fixture(runner, {
+      readOnboardSession: () => {
+        throw new Error("candidate validation must not read Session package state");
+      },
+      readRegistry: () => {
+        throw new Error("candidate validation must not read registry package state");
+      },
+    }).from({ id: "synthetic-candidate-ready" }, instance({ harnessPackage: null }));
+
+    expect(result.harnessPackage).toBeUndefined();
+    expect(runner.calls).toEqual([]);
   });
 
   it("exposes the state-validation phase on the E2E target context", () => {

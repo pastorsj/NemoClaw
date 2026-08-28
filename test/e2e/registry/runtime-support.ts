@@ -14,6 +14,7 @@ const SUPPORTED_RUNTIMES = new Set(["docker-running"]);
 const SUPPORTED_ONBOARDING = new Set([
   "cloud-openclaw",
   "cloud-openclaw-policy-custom-missing-presets",
+  "cloud-hermes",
   "cloud-langchain-deepagents-code",
 ]);
 const SUPPORTED_POLICY_TIERS = new Set(["balanced", "open", "personal"]);

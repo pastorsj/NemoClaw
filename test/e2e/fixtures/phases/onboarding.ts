@@ -16,6 +16,7 @@ import {
   HOSTED_INFERENCE_CREDENTIAL_ENV,
   HOSTED_INFERENCE_PROVIDER,
 } from "../hosted-inference.ts";
+import { type HarnessPackageEvidence, installHarnessPackage } from "../harness-package.ts";
 import { redactString } from "../redaction.ts";
 import type { ShellProbeResult } from "../shell-probe.ts";
 import type { EnvironmentReady } from "./environment.ts";
@@ -86,6 +87,8 @@ export interface NemoClawInstance {
   providerEnv: "cloud" | "local";
   platformOs?: "ubuntu" | "macos" | "windows";
   gatewayUrl: string;
+  /** Exact package evidence for standard harnesses; null is reserved for qualified candidates. */
+  harnessPackage: HarnessPackageEvidence | null;
   result: ShellProbeResult;
   expectedFailure?: OnboardingExpectedFailure;
 }
@@ -189,6 +192,9 @@ export class OnboardingPhaseFixture {
         case "cloud-openclaw-no-docker":
           result = await this.cloudOpenClawNoDocker(environment, options);
           break;
+        case "cloud-hermes":
+          result = await this.cloudHermes(environment, options);
+          break;
         case "cloud-langchain-deepagents-code":
           result = await this.cloudLangchainDeepAgentsCode(environment, options);
           break;
@@ -212,6 +218,7 @@ export class OnboardingPhaseFixture {
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const harnessPackage = await installHarnessPackage(this.host, "openclaw");
     this.registerSandboxCleanup(sandboxName);
     const policyEnv: NodeJS.ProcessEnv = environment.policyTier
       ? {
@@ -242,6 +249,40 @@ export class OnboardingPhaseFixture {
       provider: "nvidia",
       providerEnv: "cloud",
       gatewayUrl: OPENCLAW_GATEWAY_URL,
+      harnessPackage,
+      result,
+    };
+  }
+
+  async cloudHermes(
+    environment: EnvironmentReady,
+    options: OnboardingOptions = {},
+  ): Promise<NemoClawInstance> {
+    if (!environment.docker.available) {
+      throw new Error("cloud-hermes onboarding requires an available Docker runtime.");
+    }
+    const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
+    const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const harnessPackage = await installHarnessPackage(this.host, "hermes");
+    this.registerSandboxCleanup(sandboxName);
+    const result = await this.host.nemoclaw(ONBOARD_ARGS, {
+      artifactName: "onboard-cloud-hermes",
+      env: commandEnv(sandboxName, {
+        NEMOCLAW_AGENT: "hermes",
+        NVIDIA_INFERENCE_API_KEY: apiKey,
+      }),
+      redactionValues: [apiKey],
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+    assertExitZero(result, "cloud-hermes onboarding");
+    return {
+      onboarding: environment.onboarding,
+      sandboxName,
+      agent: "hermes",
+      provider: "nvidia",
+      providerEnv: "cloud",
+      gatewayUrl: OPENCLAW_GATEWAY_URL,
+      harnessPackage,
       result,
     };
   }
@@ -262,6 +303,7 @@ export class OnboardingPhaseFixture {
         : { [DCODE_BASE_IMAGE_ENV]: options.dcodeBaseImageReference },
     );
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const harnessPackage = await installHarnessPackage(this.host, "langchain-deepagents-code");
     this.registerSandboxCleanup(sandboxName);
     const result = await this.host.nemoclaw([...ONBOARD_ARGS, "--observability"], {
       artifactName: "onboard-cloud-langchain-deepagents-code",
@@ -295,6 +337,7 @@ export class OnboardingPhaseFixture {
       provider: "nvidia",
       providerEnv: "cloud",
       gatewayUrl: OPENCLAW_GATEWAY_URL,
+      harnessPackage,
       result,
     };
   }
@@ -310,6 +353,7 @@ export class OnboardingPhaseFixture {
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const harnessPackage = await installHarnessPackage(this.host, "openclaw");
     this.registerSandboxCleanup(sandboxName);
     const shimDir = await mkdtemp(join(tmpdir(), "e2e-no-docker-"));
     const shimPath = join(shimDir, "docker");
@@ -340,6 +384,7 @@ export class OnboardingPhaseFixture {
         provider: "nvidia",
         providerEnv: "cloud",
         gatewayUrl: OPENCLAW_GATEWAY_URL,
+        harnessPackage,
         result,
         expectedFailure: {
           phase: "preflight",
@@ -362,6 +407,7 @@ export class OnboardingPhaseFixture {
     }
     const sandboxName = sandboxNameFromOptions(environment.onboarding, options);
     const apiKey = this.secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const harnessPackage = await installHarnessPackage(this.host, "openclaw");
     this.registerSandboxCleanup(sandboxName);
     const result = await this.host.nemoclaw(ONBOARD_ARGS, {
       artifactName: "onboard-cloud-openclaw-policy-custom-missing-presets",
@@ -394,6 +440,7 @@ export class OnboardingPhaseFixture {
       provider: "nvidia",
       providerEnv: "cloud",
       gatewayUrl: OPENCLAW_GATEWAY_URL,
+      harnessPackage,
       result,
       expectedFailure: {
         phase: "onboarding",
@@ -453,6 +500,7 @@ export class OnboardingPhaseFixture {
       agent: instance?.agent,
       provider: instance?.provider,
       providerEnv: instance?.providerEnv,
+      harnessPackage: instance?.harnessPackage?.identity,
       expectedFailure: instance?.expectedFailure,
       ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
     });

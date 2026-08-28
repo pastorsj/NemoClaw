@@ -198,6 +198,7 @@ async function onboardWithCompatibleEndpoint(
     provider: "nvidia",
     providerEnv: "cloud",
     gatewayUrl: "http://127.0.0.1:18789",
+    harnessPackage: null,
     result,
   };
 }

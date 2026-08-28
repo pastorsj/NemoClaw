@@ -14,6 +14,12 @@ import {
   type HostCliClient,
   type SandboxClient,
 } from "../clients/index.ts";
+import {
+  harnessPackageIdentitiesEqual,
+  type HarnessPackageIdentity,
+  parseHarnessPackageIdentity,
+  readInstalledHarnessPackage,
+} from "../harness-package.ts";
 import type { ShellProbeResult } from "../shell-probe.ts";
 import { probesForState, requireExpectedState } from "../../registry/expected-states.ts";
 import type { ExpectedState, StateProbeId } from "../../registry/types.ts";
@@ -31,6 +37,7 @@ const OPENSHELL_SANDBOX_NAME_LABEL = "openshell.ai/sandbox-name";
 
 export interface ProbeIO {
   readRegistry?(): { entries: Record<string, unknown> } | null;
+  readOnboardSession?(): unknown | null;
 }
 
 function defaultRegistryPath(): string {
@@ -62,6 +69,16 @@ function defaultReadRegistry(): { entries: Record<string, unknown> } | null {
   }
 }
 
+function defaultReadOnboardSession(): unknown | null {
+  const file = defaultOnboardSessionPath();
+  if (!fs.existsSync(file)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 export interface StateValidationProbeResult {
   id: StateProbeId;
   status: "passed";
@@ -71,6 +88,7 @@ export interface StateValidationProbeResult {
 export interface StateValidationResult {
   state: ExpectedState;
   probes: StateValidationProbeResult[];
+  harnessPackage?: HarnessPackageIdentity;
 }
 
 function requireInstance(
@@ -125,6 +143,47 @@ function isMissingOpenShellError(error: unknown): boolean {
   const code =
     typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
   return code === "ENOENT" || /\bENOENT\b/.test(errorMessage(error));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function requireAuthorityIdentity(
+  authority: "session" | "registry",
+  value: unknown,
+): HarnessPackageIdentity {
+  if (!isPlainRecord(value) || !Object.prototype.hasOwnProperty.call(value, "harnessPackage")) {
+    throw new Error(`Harness package ${authority} identity is absent or malformed`);
+  }
+  try {
+    return parseHarnessPackageIdentity(value.harnessPackage);
+  } catch {
+    throw new Error(`Harness package ${authority} identity is absent or malformed`);
+  }
+}
+
+function requireAuthorityAgent(
+  authority: "installation" | "session" | "registry",
+  value: unknown,
+  expectedId: string,
+): void {
+  const openClawCompatibilityAgent = expectedId === "openclaw" && value === null;
+  if (value !== expectedId && !openClawCompatibilityAgent) {
+    throw new Error(`Harness package ${authority} agent does not match package identity`);
+  }
+}
+
+function requireMatchingIdentity(
+  authority: "inventory" | "session" | "registry",
+  actual: HarnessPackageIdentity,
+  expected: HarnessPackageIdentity,
+): void {
+  if (!harnessPackageIdentitiesEqual(actual, expected)) {
+    throw new Error(`Harness package ${authority} identity does not match installation evidence`);
+  }
 }
 
 export interface FileSnapshot {
@@ -374,7 +433,10 @@ export class StateValidationPhaseFixture {
       for (const probe of probesForState(state)) {
         probes.push(await this.runProbe(probe, instance));
       }
-      const result = { state, probes };
+      const harnessPackage = instance
+        ? await this.expectHarnessPackageIdentity(instance)
+        : undefined;
+      const result = { state, probes, ...(harnessPackage ? { harnessPackage } : {}) };
       await this.writeResult("passed", state, result);
       return result;
     } catch (error) {
@@ -398,6 +460,42 @@ export class StateValidationPhaseFixture {
         `expected local registry entry for '${sandboxName}', but registry contains: ${present}`,
       );
     }
+  }
+
+  private async expectHarnessPackageIdentity(
+    instance: NemoClawInstance,
+  ): Promise<HarnessPackageIdentity | undefined> {
+    if (instance.harnessPackage === null || instance.expectedFailure) return undefined;
+
+    const expected = parseHarnessPackageIdentity(instance.harnessPackage.identity);
+    requireAuthorityAgent("installation", instance.agent, expected.id);
+
+    const finalInventory = await readInstalledHarnessPackage(this.host, instance.agent);
+    requireMatchingIdentity("inventory", finalInventory.identity, expected);
+
+    const sessionReader = this.io.readOnboardSession ?? defaultReadOnboardSession;
+    const session = sessionReader();
+    const sessionIdentity = requireAuthorityIdentity("session", session);
+    requireAuthorityAgent(
+      "session",
+      isPlainRecord(session) ? session.agent : undefined,
+      expected.id,
+    );
+    requireMatchingIdentity("session", sessionIdentity, expected);
+
+    const registryReader = this.io.readRegistry ?? defaultReadRegistry;
+    const registry = registryReader();
+    if (
+      !registry ||
+      !Object.prototype.hasOwnProperty.call(registry.entries, instance.sandboxName)
+    ) {
+      throw new Error("Harness package registry identity is absent or malformed");
+    }
+    const entry = registry.entries[instance.sandboxName];
+    const registryIdentity = requireAuthorityIdentity("registry", entry);
+    requireAuthorityAgent("registry", isPlainRecord(entry) ? entry.agent : undefined, expected.id);
+    requireMatchingIdentity("registry", registryIdentity, expected);
+    return expected;
   }
 
   async writeSandboxMarkers(
@@ -482,6 +580,7 @@ export class StateValidationPhaseFixture {
       status,
       expectedStateId: typeof expectedState === "string" ? expectedState : expectedState.id,
       probes: result?.probes.map((probe) => probe.id) ?? [],
+      harnessPackage: result?.harnessPackage,
       ...(error ? { error: errorMessage(error) } : {}),
     });
   }

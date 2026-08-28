@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { ArtifactSink, createArtifactSink } from "../fixtures/artifacts.ts";
 import { assertCleanupPassed, CleanupRegistry } from "../fixtures/cleanup.ts";
@@ -120,10 +120,16 @@ describe("E2E fixture primitives", () => {
 
       expect(shellResult.exitCode).toBe(0);
 
-      expect(allowlistedFiles.every((file) =>
-          Object.is(fs.existsSync(path.join(artifactParent, targetId, file)), true))).toBe(true);
-      expect(shellEvidenceFiles.every((file) =>
-          Object.is(fs.existsSync(path.join(artifactParent, targetId, file)), true))).toBe(true);
+      expect(
+        allowlistedFiles.every((file) =>
+          Object.is(fs.existsSync(path.join(artifactParent, targetId, file)), true),
+        ),
+      ).toBe(true);
+      expect(
+        shellEvidenceFiles.every((file) =>
+          Object.is(fs.existsSync(path.join(artifactParent, targetId, file)), true),
+        ),
+      ).toBe(true);
       expect(fs.existsSync(path.join(artifactParent, targetId, targetId, "run-plan.json"))).toBe(
         false,
       );
@@ -351,6 +357,93 @@ describe("E2E fixture primitives", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("present");
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("shell probe applies an explicit environment value over the sanitized host value", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-e2e-shell-probe-overlay-"));
+    vi.stubEnv("NEMOCLAW_NON_INTERACTIVE", "ambient");
+    try {
+      const probe = new ShellProbe({
+        artifacts: new ArtifactSink(tmp),
+        progress: supportProgress(),
+        redact: (text) => text,
+        signal: new AbortController().signal,
+      });
+      const result = await probe.run(
+        trustedShellCommand({
+          command: process.execPath,
+          args: ["-e", "process.stdout.write(process.env.NEMOCLAW_NON_INTERACTIVE ?? '')"],
+          reason: "verify command environment precedence",
+        }),
+        { env: { NEMOCLAW_NON_INTERACTIVE: "overlay" }, timeoutMs: 5_000 },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("overlay");
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("shell probe keeps PATH absent when neither PATH nor HOME can supply command discovery", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-e2e-shell-probe-no-path-"));
+    vi.stubEnv("HOME", undefined);
+    vi.stubEnv("PATH", undefined);
+    try {
+      const probe = new ShellProbe({
+        artifacts: new ArtifactSink(tmp),
+        progress: supportProgress(),
+        redact: (text) => text,
+        signal: new AbortController().signal,
+      });
+      const result = await probe.run(
+        trustedShellCommand({
+          command: process.execPath,
+          args: ["-e", "process.stdout.write(process.env.PATH ?? 'missing')"],
+          reason: "verify absent PATH behavior",
+        }),
+        { env: { PROBE_VALUE: "present" }, timeoutMs: 5_000 },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("missing");
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("shell probe does not merge an ambient credential into an explicit command environment", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-e2e-shell-probe-secret-env-"));
+    const secret = `nvapi-${"s".repeat(24)}`;
+    vi.stubEnv("NVIDIA_INFERENCE_API_KEY", secret);
+    try {
+      const probe = new ShellProbe({
+        artifacts: new ArtifactSink(tmp),
+        progress: supportProgress(),
+        redact: (text) => text,
+        signal: new AbortController().signal,
+      });
+      const result = await probe.run(
+        trustedShellCommand({
+          command: process.execPath,
+          args: [
+            "-e",
+            "process.stdout.write(process.env.NVIDIA_INFERENCE_API_KEY ?? 'credential-absent')",
+          ],
+          reason: "verify ambient credential exclusion",
+        }),
+        { env: { PROBE_VALUE: "present" }, redactionValues: [secret], timeoutMs: 5_000 },
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("credential-absent");
+      expect(result.stdout).not.toContain(secret);
+    } finally {
+      vi.unstubAllEnvs();
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

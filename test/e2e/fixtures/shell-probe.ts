@@ -3,6 +3,7 @@
 
 import type { ArtifactSink } from "./artifacts.ts";
 import { type ChildProcessProgress, spawnObservedChild } from "./observed-child-process.ts";
+import { buildChildEnv } from "./redaction.ts";
 import { superviseChild } from "./shell/supervisor.ts";
 import type { TrustedShellCommand } from "./shell/trusted-command.ts";
 
@@ -216,10 +217,9 @@ export class ShellProbe {
     const startedAtMs = Date.now();
     const commandOutputObserver =
       options.onOutput === this.progress.onOutput ? undefined : options.onOutput;
-    const commandEnv: NodeJS.ProcessEnv = {
-      ...(process.env.PATH === undefined ? {} : { PATH: process.env.PATH }),
-      ...(options.env ?? {}),
-    };
+    const commandEnv = buildChildEnv(process.env, {
+      fixtureOverlay: options.env ?? {},
+    });
     const child = spawnObservedChild(command, args, {
       activityLabel: `command: ${activityName}`,
       progress: this.progress,

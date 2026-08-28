@@ -356,6 +356,7 @@ test(
       providerEnv: "cloud",
       platformOs: "ubuntu",
       gatewayUrl: "http://127.0.0.1:18789",
+      harnessPackage: null,
       result: install,
     };
 

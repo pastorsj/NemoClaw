@@ -6,13 +6,12 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
-import {
-  ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS,
-} from "../../../tools/e2e/onboard-timeout-contract.mts";
+import { ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS } from "../../../tools/e2e/onboard-timeout-contract.mts";
 import { ArtifactSink } from "../fixtures/artifacts.ts";
 import { type CommandRunner, HostCliClient } from "../fixtures/clients/index.ts";
 import { DCODE_BASE_IMAGE, DCODE_BASE_IMAGE_ENV } from "../fixtures/dcode-base-image.ts";
 import type { E2ETargetFixtures } from "../fixtures/e2e-test.ts";
+import type { HarnessPackageIdentity, StandardHarnessId } from "../fixtures/harness-package.ts";
 import type { EnvironmentReady } from "../fixtures/phases/index.ts";
 import { OnboardingPhaseFixture, type OnboardingSecrets } from "../fixtures/phases/index.ts";
 import type {
@@ -34,6 +33,34 @@ interface CleanupCall {
 
 const DCODE_BASE_IMAGE_REF = `${DCODE_BASE_IMAGE}@sha256:${"a".repeat(64)}`;
 const DCODE_BASE_IMAGE_INDEX_REF = `${DCODE_BASE_IMAGE}@sha256:${"b".repeat(64)}`;
+
+function packageIdentity(id: StandardHarnessId): HarnessPackageIdentity {
+  const digestByte = id === "openclaw" ? "1" : id === "hermes" ? "2" : "3";
+  return {
+    kind: "agent-runtime",
+    id,
+    packageVersion: "1.0.0",
+    contractVersion: 1,
+    contentDigest: digestByte.repeat(64),
+  };
+}
+
+function packageInventory(ids: readonly StandardHarnessId[]): string {
+  return JSON.stringify({
+    schemaVersion: 1,
+    installed: ids.map((id) => ({
+      id,
+      displayName: `Display ${id}`,
+      health: "healthy",
+      identity: packageIdentity(id),
+    })),
+    available: ids.map((id) => ({
+      displayName: `Display ${id}`,
+      identity: packageIdentity(id),
+      installationState: "active",
+    })),
+  });
+}
 
 async function withProcessEnvironment<T>(
   values: Record<string, string | undefined>,
@@ -70,6 +97,7 @@ function readJson(filePath: string): unknown {
 class FakeRunner implements CommandRunner {
   readonly calls: RunnerCall[] = [];
   private readonly responses: ShellProbeResult[] = [];
+  private readonly installedHarnesses = new Set<StandardHarnessId>();
 
   enqueue(response: ShellProbeResult): void {
     this.responses.push(response);
@@ -80,6 +108,15 @@ class FakeRunner implements CommandRunner {
     options?: ShellProbeRunOptions,
   ): Promise<ShellProbeResult> {
     this.calls.push({ command: command.command, args: [...command.args], options });
+    switch (`${command.command} ${command.args[0]} ${command.args[1]}`) {
+      case "nemoclaw harness install": {
+        const id = command.args[2] as StandardHarnessId;
+        this.installedHarnesses.add(id);
+        return shellResult(0, `Installed harness package '${id}'.\n`);
+      }
+      case "nemoclaw harness list":
+        return shellResult(0, packageInventory([...this.installedHarnesses]));
+    }
     const response = this.responses.shift();
     if (!response) {
       throw new Error(
@@ -88,6 +125,10 @@ class FakeRunner implements CommandRunner {
     }
     return response;
   }
+}
+
+function onboardingCalls(runner: FakeRunner): RunnerCall[] {
+  return runner.calls.filter(({ args }) => args[0] !== "harness");
 }
 
 class FakeCleanup {
@@ -155,8 +196,27 @@ describe("onboarding phase fixture", () => {
       providerEnv: "cloud",
       gatewayUrl: "http://127.0.0.1:18789",
     });
+    expect(instance.harnessPackage?.identity).toEqual(packageIdentity("openclaw"));
     expect(secrets.requiredCalls).toEqual(["NVIDIA_INFERENCE_API_KEY"]);
     expect(runner.calls).toEqual([
+      {
+        command: "nemoclaw",
+        args: ["harness", "install", "openclaw"],
+        options: {
+          artifactName: "harness-install-openclaw",
+          env: expect.objectContaining({ PATH: expect.any(String) }),
+          timeoutMs: 300_000,
+        },
+      },
+      {
+        command: "nemoclaw",
+        args: ["harness", "list", "--json"],
+        options: {
+          artifactName: "harness-list-openclaw",
+          env: expect.objectContaining({ PATH: expect.any(String) }),
+          timeoutMs: 30_000,
+        },
+      },
       {
         command: "nemoclaw",
         args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
@@ -174,7 +234,7 @@ describe("onboarding phase fixture", () => {
         },
       },
     ]);
-    expect(runner.calls[0]?.options?.env?.[DCODE_BASE_IMAGE_ENV]).toBeUndefined();
+    expect(onboardingCalls(runner)[0]?.options?.env?.[DCODE_BASE_IMAGE_ENV]).toBeUndefined();
   });
 
   it("passes a caller-selected final-handoff timeout to the public command (#9622)", async () => {
@@ -188,7 +248,7 @@ describe("onboarding phase fixture", () => {
       timeoutMs: ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS,
     });
 
-    expect(runner.calls[0]?.options?.timeoutMs).toBe(40 * 60_000);
+    expect(onboardingCalls(runner)[0]?.options?.timeoutMs).toBe(40 * 60_000);
   });
 
   it("runs the Personal cloud OpenClaw target without search-provider credentials", async () => {
@@ -201,7 +261,7 @@ describe("onboarding phase fixture", () => {
       sandboxName: "e2e-personal-oc",
     });
 
-    expect(runner.calls[0]?.options?.env).toEqual(
+    expect(onboardingCalls(runner)[0]?.options?.env).toEqual(
       expect.objectContaining({
         BRAVE_API_KEY: "",
         NEMOCLAW_POLICY_MODE: "suggested",
@@ -232,7 +292,7 @@ describe("onboarding phase fixture", () => {
       agent: "langchain-deepagents-code",
       sandboxName: "e2e-dcode-cloud",
     });
-    expect(runner.calls[0]).toMatchObject({
+    expect(onboardingCalls(runner)[0]).toMatchObject({
       command: "nemoclaw",
       args: [
         "onboard",
@@ -267,7 +327,9 @@ describe("onboarding phase fixture", () => {
       }),
     );
 
-    expect(runner.calls[0]?.options?.env?.[DCODE_BASE_IMAGE_ENV]).toBe(DCODE_BASE_IMAGE_REF);
+    expect(onboardingCalls(runner)[0]?.options?.env?.[DCODE_BASE_IMAGE_ENV]).toBe(
+      DCODE_BASE_IMAGE_REF,
+    );
   });
 
   it("rejects an invalid explicit Deep Agents Code base image reference before onboarding side effects", async () => {
@@ -342,7 +404,7 @@ describe("onboarding phase fixture", () => {
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-partial-onboard");
     runner.enqueue(shellResult(1, "Error: sandbox e2e-partial-onboard not found"));
     await cleanup.calls[0]?.run();
-    expect(runner.calls[1]).toMatchObject({
+    expect(onboardingCalls(runner)[1]).toMatchObject({
       command: "nemoclaw",
       args: ["e2e-partial-onboard", "destroy", "--yes"],
       options: {
@@ -408,7 +470,7 @@ describe("onboarding phase fixture", () => {
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-cleanup");
     runner.enqueue(shellResult(0, "destroyed\n"));
     await cleanup.calls[0]?.run();
-    expect(runner.calls[1]).toMatchObject({
+    expect(onboardingCalls(runner)[1]).toMatchObject({
       command: "nemoclaw",
       args: ["e2e-cleanup", "destroy", "--yes"],
       options: {
@@ -416,7 +478,7 @@ describe("onboarding phase fixture", () => {
         timeoutMs: 900_000,
       },
     });
-    expect(runner.calls[1]?.options?.env).toMatchObject({
+    expect(onboardingCalls(runner)[1]?.options?.env).toMatchObject({
       PATH: expect.any(String),
     });
   });
@@ -445,7 +507,7 @@ describe("onboarding phase fixture", () => {
         errorClass: "docker-missing",
       },
     });
-    expect(runner.calls[0]).toMatchObject({
+    expect(onboardingCalls(runner)[0]).toMatchObject({
       command: "nemoclaw",
       args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
       options: {
@@ -453,14 +515,14 @@ describe("onboarding phase fixture", () => {
         timeoutMs: 900_000,
       },
     });
-    expect(runner.calls[0]?.options?.redactionValues).toEqual(["secret-token"]);
-    expect(runner.calls[0]?.options?.env).toMatchObject({
+    expect(onboardingCalls(runner)[0]?.options?.redactionValues).toEqual(["secret-token"]);
+    expect(onboardingCalls(runner)[0]?.options?.env).toMatchObject({
       NEMOCLAW_AGENT: "openclaw",
       NEMOCLAW_PROVIDER: "cloud",
       NEMOCLAW_SANDBOX_NAME: "e2e-no-docker",
       NVIDIA_INFERENCE_API_KEY: "secret-token",
     });
-    expect(runner.calls[0]?.options?.env?.PATH).toContain("e2e-no-docker-");
+    expect(onboardingCalls(runner)[0]?.options?.env?.PATH).toContain("e2e-no-docker-");
     expect(secrets.requiredCalls).toEqual(["NVIDIA_INFERENCE_API_KEY"]);
     expect(cleanup.calls).toHaveLength(1);
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-no-docker");
@@ -488,7 +550,7 @@ describe("onboarding phase fixture", () => {
         errorClass: "policy-presets-required",
       },
     });
-    expect(runner.calls[0]).toMatchObject({
+    expect(onboardingCalls(runner)[0]).toMatchObject({
       command: "nemoclaw",
       args: ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
       options: {
@@ -635,7 +697,7 @@ describe("onboarding phase fixture", () => {
         { sandboxName: "e2e-no-docker" },
       );
 
-      const pathValue = runner.calls[0]?.options?.env?.PATH;
+      const pathValue = onboardingCalls(runner)[0]?.options?.env?.PATH;
       expect(pathValue).toContain("e2e-no-docker-");
       expect(pathValue?.split(":")).not.toContain("");
     } finally {
@@ -677,7 +739,7 @@ describe("onboarding phase fixture", () => {
     expect(cleanup.calls[0]?.name).toBe("destroy NemoClaw sandbox e2e-no-docker-ok");
     runner.enqueue(shellResult(0, "destroyed\n"));
     await cleanup.calls[0]?.run();
-    expect(runner.calls[1]).toMatchObject({
+    expect(onboardingCalls(runner)[1]).toMatchObject({
       command: "nemoclaw",
       args: ["e2e-no-docker-ok", "destroy", "--yes"],
       options: {
@@ -707,14 +769,72 @@ describe("onboarding phase fixture", () => {
     ).rejects.toThrow(/without Docker-missing preflight signature/);
   });
 
+  it("installs Hermes before running the existing non-messaging Hermes onboarding", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, "onboarded\n"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" }),
+    );
+
+    const instance = await onboard.from(ready({ onboarding: "cloud-hermes" }), {
+      sandboxName: "e2e-cloud-hermes",
+    });
+
+    expect(instance).toMatchObject({
+      onboarding: "cloud-hermes",
+      sandboxName: "e2e-cloud-hermes",
+      agent: "hermes",
+      harnessPackage: { identity: packageIdentity("hermes") },
+    });
+    expect(runner.calls.map(({ args }) => args)).toEqual([
+      ["harness", "install", "hermes"],
+      ["harness", "list", "--json"],
+      ["onboard", "--non-interactive", "--yes", "--yes-i-accept-third-party-software"],
+    ]);
+    expect(onboardingCalls(runner)[0]).toMatchObject({
+      options: {
+        artifactName: "onboard-cloud-hermes",
+        env: expect.objectContaining({
+          NEMOCLAW_AGENT: "hermes",
+          NEMOCLAW_SANDBOX_NAME: "e2e-cloud-hermes",
+          NVIDIA_INFERENCE_API_KEY: "secret-token",
+        }),
+      },
+    });
+  });
+
+  it("keeps package identity stable across repeated standard onboarding", async () => {
+    const runner = new FakeRunner();
+    runner.enqueue(shellResult(0, "first onboard\n"));
+    runner.enqueue(shellResult(0, "second onboard\n"));
+    const onboard = new OnboardingPhaseFixture(
+      new HostCliClient(runner),
+      new FakeSecrets({ NVIDIA_INFERENCE_API_KEY: "secret-token" }),
+    );
+
+    const first = await onboard.from(ready(), { sandboxName: "e2e-repeat-first" });
+    const second = await onboard.from(ready(), { sandboxName: "e2e-repeat-second" });
+
+    expect(second.harnessPackage?.identity).toEqual(first.harnessPackage?.identity);
+    expect(
+      runner.calls.filter(({ args }) => args[0] === "harness").map(({ args }) => args),
+    ).toEqual([
+      ["harness", "install", "openclaw"],
+      ["harness", "list", "--json"],
+      ["harness", "install", "openclaw"],
+      ["harness", "list", "--json"],
+    ]);
+  });
+
   it("rejects unsupported onboarding profiles", async () => {
     const onboard = new OnboardingPhaseFixture(
       new HostCliClient(new FakeRunner()),
       new FakeSecrets(),
     );
 
-    await expect(onboard.from(ready({ onboarding: "cloud-hermes" }))).rejects.toThrow(
-      /Unsupported onboarding profile 'cloud-hermes'/,
+    await expect(onboard.from(ready({ onboarding: "cloud-unknown" }))).rejects.toThrow(
+      /Unsupported onboarding profile 'cloud-unknown'/,
     );
   });
 

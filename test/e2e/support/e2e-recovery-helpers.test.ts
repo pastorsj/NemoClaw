@@ -138,6 +138,7 @@ function fakeInstance(sandboxName = "e2e-2701"): NemoClawInstance {
     providerEnv: "cloud",
     platformOs: "ubuntu",
     gatewayUrl: "https://localhost:18789",
+    harnessPackage: null,
     result: {
       command: ["nemoclaw", "onboard"],
       exitCode: 0,

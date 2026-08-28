@@ -95,6 +95,13 @@ const canonicalTargetInputs: CanonicalTargetInput[] = [
     environment: ubuntuRepoDocker("cloud-hermes"),
     expectedStateId: "cloud-hermes-ready",
     suiteIds: ["smoke", "inference", "hermes-specific"],
+    description: "Ubuntu repo checkout with Docker and cloud Hermes onboarding.",
+    executionCoverage: {
+      agentRuntime: "hermes",
+      observableOutcome: "Repository install onboarding and hosted inference succeed",
+      environmentOrInferenceEndpoint: "Ubuntu Docker host; NVIDIA hosted inference",
+      unresolvedReason: "",
+    },
     requiredSecrets: ["NVIDIA_INFERENCE_API_KEY"],
   },
   {

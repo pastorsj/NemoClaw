@@ -78,6 +78,7 @@ function instance(overrides: Partial<NemoClawInstance> = {}): NemoClawInstance {
     provider: "nvidia",
     providerEnv: "cloud",
     gatewayUrl: "http://127.0.0.1:18789",
+    harnessPackage: null,
     result: shellResult(0),
     ...overrides,
   };
