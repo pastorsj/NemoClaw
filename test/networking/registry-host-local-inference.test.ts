@@ -167,7 +167,10 @@ describe("registry host-local inference authority", () => {
         ...verified.registration,
       },
       verified.reservation,
-      { verifiedCreate: verified },
+      {
+        verifiedCreate: verified,
+        finalPackageAuthority: verified.reservation.authority,
+      },
     );
 
     expect(registry.getSandbox("llama-clone")).toMatchObject({
@@ -213,7 +216,10 @@ describe("registry host-local inference authority", () => {
           ...drift,
         },
         verified.reservation,
-        { verifiedCreate: verified },
+        {
+          verifiedCreate: verified,
+          finalPackageAuthority: verified.reservation.authority,
+        },
       ),
     ).toThrow(
       label === "gateway port" ? /policy creation receipt does not match/u : /reservation changed/u,
@@ -249,7 +255,10 @@ describe("registry host-local inference authority", () => {
           ),
         },
         ownerVerified.reservation,
-        { verifiedCreate: ownerVerified },
+        {
+          verifiedCreate: ownerVerified,
+          finalPackageAuthority: ownerVerified.reservation.authority,
+        },
       ),
     ).toThrow(/reservation changed/);
 
@@ -269,7 +278,10 @@ describe("registry host-local inference authority", () => {
           ),
         },
         receiptVerified.reservation,
-        { verifiedCreate: receiptVerified },
+        {
+          verifiedCreate: receiptVerified,
+          finalPackageAuthority: receiptVerified.reservation.authority,
+        },
       ),
     ).toThrow(/reservation changed/);
   });

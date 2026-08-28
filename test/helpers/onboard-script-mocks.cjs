@@ -455,12 +455,21 @@ function installVerifiedSandboxCreateFixture(registry, options) {
     compatibleEndpointReasoningEffort: options.compatibleEndpointReasoningEffort || null,
     nimContainer: options.nimContainer || null,
   };
+  const packageAuthority = options.harnessPackage
+    ? {
+        harnessPackage: structuredClone(options.harnessPackage),
+        ...(options.harnessPackageMigration
+          ? { harnessPackageMigration: structuredClone(options.harnessPackageMigration) }
+          : {}),
+      }
+    : {};
   const reservationEntry = {
     name: sandboxName,
     gatewayName,
     pendingRouteReservation: true,
     reservationSessionId: sessionId,
     ...selection,
+    ...packageAuthority,
   };
   let pendingCheckpoint = null;
   let pendingEntry = null;
@@ -479,7 +488,9 @@ function installVerifiedSandboxCreateFixture(registry, options) {
       authority.sandboxName !== sandboxName ||
       authority.gatewayName !== gatewayName ||
       authority.sessionId !== sessionId ||
-      !selectionMatches
+      !selectionMatches ||
+      (options.harnessPackage &&
+        JSON.stringify(authority.harnessPackage) !== JSON.stringify(options.harnessPackage))
     ) {
       throw new Error("integration fixture received unexpected create reservation authority");
     }
@@ -643,6 +654,8 @@ function installVerifiedSandboxCreateFixture(registry, options) {
         sessionId,
         sandboxName,
         agent: options.agentName || "openclaw",
+        harnessPackage: options.harnessPackage || null,
+        harnessPackageMigration: options.harnessPackageMigration || null,
       });
       const sourceIdentity =
         currentEntry?.lifecycleLiveIdentityFingerprint ||
@@ -697,13 +710,24 @@ function installVerifiedSandboxCreateFixture(registry, options) {
       },
     };
   };
-  return { sessionId, selection, prepareCreateIntent };
+  return {
+    sessionId,
+    selection,
+    harnessPackage: options.harnessPackage || null,
+    harnessPackageMigration: options.harnessPackageMigration || null,
+    prepareCreateIntent,
+  };
 }
 
 function sandboxCreateArgsWithVerifiedReservation(args, fixture) {
   const createArgs = [...args];
   while (createArgs.length < 16) createArgs.push(null);
-  createArgs[14] = { sessionId: fixture.sessionId, selection: fixture.selection };
+  createArgs[14] = {
+    sessionId: fixture.sessionId,
+    selection: fixture.selection,
+    harnessPackage: fixture.harnessPackage,
+    harnessPackageMigration: fixture.harnessPackageMigration,
+  };
   const fixtureIntent = fixture.prepareCreateIntent();
   const requestedIntent = createArgs[15];
   createArgs[15] =

@@ -5,13 +5,29 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
-import { beforeEach, describe, it, vi } from "vitest";
+import { beforeEach, describe, it, onTestFinished, vi } from "vitest";
+import { getHarnessPackageStoreRoot } from "../../src/lib/harness/package-store";
+import { createHarnessPackageFixture } from "../helpers/harness-packages";
 import { writeOkOpenshell } from "../helpers/onboard-openshell-fixture";
 import { type CommandEntry, onboardScriptMocksPath } from "../helpers/onboard-split-context";
 import { encodeMessagingPlan, makeMessagingPlan } from "../helpers/messaging-plan-fixtures";
+
+const repoRoot = path.join(import.meta.dirname, "../..");
+const privateCaseParent = path.join(
+  repoRoot,
+  "node_modules",
+  ".cache",
+  "nemoclaw-onboard-create",
+  String(process.pid),
+);
+
+function createPrivateCaseRoot(): string {
+  fs.mkdirSync(privateCaseParent, { recursive: true, mode: 0o700 });
+  fs.chmodSync(privateCaseParent, 0o700);
+  return fs.realpathSync(fs.mkdtempSync(path.join(privateCaseParent, "case-")));
+}
 
 beforeEach(() => {
   vi.stubEnv("NEMOCLAW_TEST_MANAGED_IMAGE_CATALOG", "1");
@@ -139,11 +155,29 @@ describe("fresh create identity", () => {
       timeout: 45000,
     },
     async ({ agent, apfInterceptorRequested, expectedOutcome, model, provider }) => {
-      const repoRoot = path.join(import.meta.dirname, "../..");
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-create-ready-"));
-      const fakeBin = path.join(tmpDir, "bin");
-      const scriptPath = path.join(tmpDir, "create-sandbox-ready-check.js");
-      const payloadPath = path.join(tmpDir, "payload.json");
+      const tmpRoot = createPrivateCaseRoot();
+      const tmpDir = path.join(tmpRoot, "home");
+      const workDir = path.join(tmpRoot, "work");
+      fs.mkdirSync(path.join(tmpDir, ".nemoclaw", "gateways", "18080"), {
+        recursive: true,
+        mode: 0o700,
+      });
+      fs.mkdirSync(workDir, { mode: 0o700 });
+      const harnessFixture = createHarnessPackageFixture({
+        fixtureParent: workDir,
+        storeRoot: getHarnessPackageStoreRoot(tmpDir),
+      });
+      const selectedHarnessId: "openclaw" | "hermes" =
+        agent?.name === "hermes" ? "hermes" : "openclaw";
+      const installedHarness = harnessFixture.install(selectedHarnessId);
+      const harnessPackage = installedHarness.identity;
+      onTestFinished(() => {
+        harnessFixture.cleanup();
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+      });
+      const fakeBin = path.join(workDir, "bin");
+      const scriptPath = path.join(workDir, "create-sandbox-ready-check.js");
+      const payloadPath = path.join(workDir, "payload.json");
       const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
       const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
       const registryPath = JSON.stringify(
@@ -160,6 +194,9 @@ describe("fresh create identity", () => {
       );
       const entryOptionsPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "onboard", "entry-options.ts"),
+      );
+      const sandboxAgentPath = JSON.stringify(
+        path.join(repoRoot, "src", "lib", "onboard", "sandbox-agent.ts"),
       );
       const retainedRecoveryPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "state", "onboard-session.ts"),
@@ -185,6 +222,7 @@ const recreateJournal = require(${recreateJournalPath});
 const preflight = require(${preflightPath});
 const credentials = require(${credentialsPath});
 const entryOptions = require(${entryOptionsPath});
+const sandboxAgent = require(${sandboxAgentPath});
 const retainedRecovery = require(${retainedRecoveryPath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
@@ -210,6 +248,7 @@ const apfInterceptorRequested = ${JSON.stringify(apfInterceptorRequested)};
 const agent = ${JSON.stringify(agent)};
 const model = ${JSON.stringify(model)};
 const provider = ${JSON.stringify(provider)};
+const harnessPackage = ${JSON.stringify(harnessPackage)};
 const selectedChannels = ${JSON.stringify(expectedOutcome === "provider-refusal" ? ["telegram"] : null)};
 const cancellationSelector = ${JSON.stringify(
         expectedOutcome.startsWith("cancel-after-create-")
@@ -309,6 +348,7 @@ runner.run = (command, opts = {}) => {
 	    sessionId: "session-owner",
 	    sandboxName: "my-assistant",
 	    agent: agent?.name ?? "openclaw",
+	    harnessPackage,
 	  });
 	  retainedRecovery.saveSession(session);
 	  registry.save({
@@ -316,6 +356,7 @@ runner.run = (command, opts = {}) => {
 	    sandboxes: {
 	      "my-assistant": {
 	        name: "my-assistant",
+	        agent: agent?.name ?? null,
 	        gatewayName: "nemoclaw-18080",
 	        gatewayPort: 18080,
 	        provider,
@@ -326,6 +367,7 @@ runner.run = (command, opts = {}) => {
 	        preferredInferenceApi: null,
 	        pendingRouteReservation: true,
 	        reservationSessionId: "session-owner",
+	        harnessPackage,
 	      },
 	    },
 	  });
@@ -339,6 +381,7 @@ runner.run = (command, opts = {}) => {
 	    note: () => {},
 	    observe: () => ({ state: "missing", liveIdentityFingerprint: null }),
 	    intent: {
+	      harnessPackage,
 	      agent: agent?.name ?? "openclaw",
 	      fromDockerfile: null,
 	      provider,
@@ -363,6 +406,7 @@ runner.run = (command, opts = {}) => {
 	  model,
 	  sessionId: "session-owner",
 	  apfInterceptorRequested,
+	  harnessPackage,
 	  getSandbox: (name) => retainedRegistryEntry ?? durableGetSandbox(name),
 	  onVerifyCreatedPolicy: (input) => {
 	    if (postCreateAuthorityRefusal) {
@@ -585,7 +629,24 @@ if (${JSON.stringify(
 	    return;
 	  }
 	  const createArgs = fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
-	    [null, model, provider, null, null, null, selectedChannels, null, agent, null, null, null, []],
+	    [
+	      null,
+	      model,
+	      provider,
+	      null,
+	      null,
+	      null,
+	      selectedChannels,
+	      null,
+	      sandboxAgent.resolveSandboxAgent({
+	        agent: agent?.name ?? null,
+	        harnessPackage,
+	      }).definition,
+	      null,
+	      null,
+	      null,
+	      [],
+	    ],
 	    createFixture,
 	  );
 	  createArgs[15] = {
@@ -673,7 +734,15 @@ if (${JSON.stringify(
         ),
       );
       const identityFingerprint = createHash("sha256").update("sbx-fresh-create").digest("hex");
+      const assertRecoveryPackage = (record: Record<string, unknown>) => {
+        assert.deepEqual(payload.savedSession.harnessPackage, harnessPackage);
+        assert.deepEqual(payload.recoveryRegistryEntry.harnessPackage, harnessPackage);
+        assert.equal(record.schemaVersion, 2);
+        assert.deepEqual(record.harnessPackage, harnessPackage);
+        assert.equal(Object.hasOwn(record, "harnessPackageMigration"), false);
+      };
       const assertRecoveryTuple = (record: Record<string, unknown>) => {
+        assertRecoveryPackage(record);
         assert.equal(record.gatewayName, "nemoclaw-18080");
         assert.equal(record.gatewayPort, 18080);
         assert.equal(record.sandboxIdentityFingerprint, identityFingerprint);
@@ -735,6 +804,7 @@ if (${JSON.stringify(
         assert.equal(payload.stdoutDestroyCalls, 0);
         assert.equal(payload.stderrDestroyCalls, 0);
         assert.equal(payload.registeredSandbox.workload.kind, "managed-image");
+        assert.deepEqual(payload.registeredSandbox.harnessPackage, harnessPackage);
         assert.match(payload.registeredSandbox.lifecycleGeneration, /^[0-9a-f-]{36}$/u);
         assert.equal(
           payload.registeredSandbox.lifecycleLiveIdentityFingerprint,
@@ -811,6 +881,7 @@ if (${JSON.stringify(
         assert.match(record.lifecycleGeneration, /^[0-9a-f-]{36}$/u);
         assert.equal(record.verifiedEffectivePolicyIdentity, null);
         assert.equal(record.reason, "retained_after_sandbox_creation_failure");
+        assertRecoveryPackage(record);
       };
       const assertPostCreateRunnerRefusal = () => {
         assert.equal(payload.sandboxName, null);
@@ -920,11 +991,11 @@ if (${JSON.stringify(
         assert.equal(payload.sandboxName, null);
         assert.equal(payload.sandboxCreated, true);
         assert.equal(payload.deleted, false);
-        assert.equal(payload.registeredSandbox.name, "my-assistant");
         assert.match(
           payload.creationError,
           /OpenShell sandbox policy authority inspection failed/u,
         );
+        assert.equal(payload.registeredSandbox.name, "my-assistant");
         assert.equal(payload.savedSession.status, "recovery_required");
         assert.equal(payload.savedSession.resumable, false);
         assert.equal(
@@ -973,6 +1044,9 @@ if (${JSON.stringify(
           /rotate a credential only when identity-bound inspection proves/u,
         );
         assert.doesNotMatch(result.stderr, /rotate any credential/u);
+
+        harnessFixture.advanceActivePointer(selectedHarnessId, "9.9.9");
+        fs.rmSync(installedHarness.packageRoot, { recursive: true, force: true });
 
         const differentName = spawnSync(process.execPath, [scriptPath], {
           cwd: repoRoot,

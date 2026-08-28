@@ -4,32 +4,22 @@
 import { isPlainObject } from "../core/json-types";
 import { AGENT_ALIASES } from "../agent/aliases";
 import { parseHarnessPackageIdentity as parseReceiptHarnessPackageIdentity } from "./package-receipt";
-import type { HarnessPackageIdentity } from "./package-types";
+import type {
+  HarnessPackageAuthority,
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
+} from "./package-types";
 
-export type { HarnessPackageIdentity } from "./package-types";
+export type {
+  HarnessPackageAuthority,
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
+} from "./package-types";
 
 const MIGRATION_FIELDS = new Set(["schemaVersion", "source", "legacyAgent", "migratedAt"]);
 const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);
 const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UNSAFE_STRING_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-
-export interface HarnessPackageMigration {
-  readonly schemaVersion: 1;
-  readonly source: "legacy-current-bundle";
-  readonly legacyAgent: string | null;
-  readonly migratedAt: string;
-}
-
-/** Complete durable authority: exact package identity or explicit qualified-agent absence. */
-export type HarnessPackageAuthority =
-  | {
-      readonly harnessPackage: HarnessPackageIdentity;
-      readonly harnessPackageMigration: HarnessPackageMigration | null;
-    }
-  | {
-      readonly harnessPackage: null;
-      readonly harnessPackageMigration: null;
-    };
 
 export type HarnessPackageStateInspection =
   | { readonly status: "absent" }
@@ -39,6 +29,11 @@ export type HarnessPackageStateInspection =
       readonly harnessPackageMigration: HarnessPackageMigration | null;
     }
   | { readonly status: "invalid" };
+
+interface ComparableHarnessPackageAuthority {
+  readonly harnessPackage?: unknown;
+  readonly harnessPackageMigration?: unknown;
+}
 
 function requireExactMigrationRecord(value: unknown): Record<string, unknown> {
   if (!isPlainObject(value)) {
@@ -116,6 +111,48 @@ export function harnessPackageIdentitiesEqual(leftValue: unknown, rightValue: un
     left.packageVersion === right.packageVersion &&
     left.contractVersion === right.contractVersion &&
     left.contentDigest === right.contentDigest
+  );
+}
+
+/** Compare complete persisted package authority without collapsing omission into null. */
+export function harnessPackageAuthoritiesEqual(
+  left: ComparableHarnessPackageAuthority,
+  right: ComparableHarnessPackageAuthority,
+): boolean {
+  const leftHasIdentity = Object.prototype.hasOwnProperty.call(left, "harnessPackage");
+  const rightHasIdentity = Object.prototype.hasOwnProperty.call(right, "harnessPackage");
+  const leftHasMigration = Object.prototype.hasOwnProperty.call(left, "harnessPackageMigration");
+  const rightHasMigration = Object.prototype.hasOwnProperty.call(right, "harnessPackageMigration");
+  if (leftHasIdentity !== rightHasIdentity || leftHasMigration !== rightHasMigration) return false;
+  if (!leftHasIdentity && !leftHasMigration) return true;
+
+  const leftState = inspectHarnessPackageState(left.harnessPackage, left.harnessPackageMigration);
+  const rightState = inspectHarnessPackageState(
+    right.harnessPackage,
+    right.harnessPackageMigration,
+  );
+  if (leftState.status === "invalid" || rightState.status === "invalid") return false;
+  if (leftState.status !== rightState.status) return false;
+  if (leftState.status === "absent") {
+    return (
+      left.harnessPackage === right.harnessPackage &&
+      left.harnessPackageMigration === right.harnessPackageMigration
+    );
+  }
+  if (rightState.status !== "valid") return false;
+  if (!harnessPackageIdentitiesEqual(leftState.harnessPackage, rightState.harnessPackage)) {
+    return false;
+  }
+  const leftMigration = leftState.harnessPackageMigration;
+  const rightMigration = rightState.harnessPackageMigration;
+  return (
+    leftMigration === rightMigration ||
+    (leftMigration !== null &&
+      rightMigration !== null &&
+      leftMigration.schemaVersion === rightMigration.schemaVersion &&
+      leftMigration.source === rightMigration.source &&
+      leftMigration.legacyAgent === rightMigration.legacyAgent &&
+      leftMigration.migratedAt === rightMigration.migratedAt)
   );
 }
 

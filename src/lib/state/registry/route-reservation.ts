@@ -48,7 +48,10 @@ function inspectRegistryHarnessPackageState(entry: SandboxEntry) {
     harnessPackage?: unknown;
     harnessPackageMigration?: unknown;
   };
-  return raw.harnessPackage === null || raw.harnessPackageMigration === null
+  return (hasOwn(raw, "harnessPackage") && raw.harnessPackage === undefined) ||
+    (hasOwn(raw, "harnessPackageMigration") && raw.harnessPackageMigration === undefined) ||
+    raw.harnessPackage === null ||
+    raw.harnessPackageMigration === null
     ? ({ status: "invalid" } as const)
     : inspectHarnessPackageState(raw.harnessPackage, raw.harnessPackageMigration);
 }

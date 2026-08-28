@@ -212,6 +212,7 @@ describe("cross-process onboard lock", () => {
           gatewayPort: 8080,
           lifecycleGeneration: "generation-" + role,
           verifiedEffectivePolicyIdentity: null,
+          harnessPackage: null,
           resources: {
             sharedInferenceProviders: [],
             sandboxScopedProviders: [],

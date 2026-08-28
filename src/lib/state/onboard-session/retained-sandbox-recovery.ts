@@ -4,14 +4,39 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
+import { isCandidateAgent } from "../../agent/candidate";
 import { openRegularFileNoFollow } from "../../adapters/fs/regular-file";
+import {
+  inspectHarnessPackageState,
+  parseHarnessPackageIdentity,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../../harness/package-identity";
 
-const SCHEMA_VERSION = 1;
+const STATE_SCHEMA_VERSION = 1;
+const LEGACY_RECORD_SCHEMA_VERSION = 1;
+const RECORD_SCHEMA_VERSION = 2;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const SAFE_EVIDENCE_PATTERN = /^[A-Za-z0-9._:@/-]{1,256}$/u;
 const NAME_MAX_LENGTH = 63;
 const NAME_VALID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u;
+const LEGACY_RECORD_FIELDS = new Set([
+  "schemaVersion",
+  "recordId",
+  "sandboxName",
+  "sandboxIdentityFingerprint",
+  "identityWasUnavailable",
+  "gatewayName",
+  "gatewayPort",
+  "lifecycleGeneration",
+  "verifiedEffectivePolicyIdentity",
+  "resources",
+  "reason",
+  "recordedAt",
+]);
+const CURRENT_RECORD_FIELDS = new Set([...LEGACY_RECORD_FIELDS, "harnessPackage"]);
 
 export function retainedSandboxRecoveryFile(sessionDirectory: string): string {
   return path.join(sessionDirectory, "retained-sandbox-recovery.json");
@@ -32,8 +57,7 @@ export interface RetainedSandboxVerifiedEffectivePolicyIdentity {
   readonly activeVersion: number;
 }
 
-export interface RetainedSandboxRecoveryRecord {
-  readonly schemaVersion: typeof SCHEMA_VERSION;
+interface RetainedSandboxRecoveryRecordFields {
   readonly recordId: string;
   readonly sandboxName: string;
   readonly sandboxIdentityFingerprint: string | null;
@@ -47,8 +71,22 @@ export interface RetainedSandboxRecoveryRecord {
   readonly recordedAt: string;
 }
 
+export interface LegacyRetainedSandboxRecoveryRecord extends RetainedSandboxRecoveryRecordFields {
+  readonly schemaVersion: typeof LEGACY_RECORD_SCHEMA_VERSION;
+}
+
+export interface CurrentRetainedSandboxRecoveryRecord extends RetainedSandboxRecoveryRecordFields {
+  readonly schemaVersion: typeof RECORD_SCHEMA_VERSION;
+  /** Exact package authority, or explicit null for a qualified candidate runtime. */
+  readonly harnessPackage: HarnessPackageIdentity | null;
+}
+
+export type RetainedSandboxRecoveryRecord =
+  | LegacyRetainedSandboxRecoveryRecord
+  | CurrentRetainedSandboxRecoveryRecord;
+
 interface RetainedSandboxAdministratorResolutionReceipt {
-  readonly schemaVersion: typeof SCHEMA_VERSION;
+  readonly schemaVersion: typeof STATE_SCHEMA_VERSION;
   readonly receiptId: string;
   readonly recordId: string;
   readonly sandboxName: string;
@@ -60,7 +98,7 @@ interface RetainedSandboxAdministratorResolutionReceipt {
 }
 
 interface RetainedSandboxRecoveryState {
-  readonly schemaVersion: typeof SCHEMA_VERSION;
+  readonly schemaVersion: typeof STATE_SCHEMA_VERSION;
   readonly unresolved: readonly RetainedSandboxRecoveryRecord[];
   readonly resolutions: readonly RetainedSandboxAdministratorResolutionReceipt[];
 }
@@ -79,13 +117,58 @@ export interface RecordRetainedSandboxRecoveryInput {
   readonly gatewayPort: number;
   readonly lifecycleGeneration: string | null;
   readonly verifiedEffectivePolicyIdentity: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
+  readonly harnessPackage: HarnessPackageIdentity | null;
   readonly resources: RetainedSandboxResourceEvidence;
   readonly reason: RetainedSandboxRecoveryReason;
   readonly recordedAt?: string;
 }
 
+export interface ReconcileRetainedPackageInput {
+  readonly expectedRecord: RetainedSandboxRecoveryRecord;
+  readonly harnessPackage: HarnessPackageIdentity | null;
+}
+
+export interface ReconciledRetainedPackage {
+  readonly status: "verified" | "upgraded";
+  readonly record: CurrentRetainedSandboxRecoveryRecord;
+}
+
+interface RetainedPackageOwner {
+  readonly agent: string | null;
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly harnessPackageMigration: HarnessPackageMigration | null;
+}
+
+/** Require exact package authority, or explicit null for a qualified repository agent. */
+export function requireRetainedRecoveryPackage(
+  owner: RetainedPackageOwner,
+): HarnessPackageIdentity | null {
+  const trimmedAgent = typeof owner.agent === "string" ? owner.agent.trim() : "";
+  const effectiveAgentId = trimmedAgent && trimmedAgent !== "openclaw" ? trimmedAgent : "openclaw";
+  const packageState = inspectHarnessPackageState(
+    owner.harnessPackage,
+    owner.harnessPackageMigration,
+  );
+  if (effectiveAgentId === "nemocua" || isCandidateAgent(effectiveAgentId)) {
+    if (
+      packageState.status !== "absent" ||
+      owner.harnessPackage !== null ||
+      owner.harnessPackageMigration !== null
+    ) {
+      throw new Error(
+        "Cannot persist retained recovery with fabricated qualified-agent package authority.",
+      );
+    }
+    return null;
+  }
+  if (packageState.status !== "valid" || packageState.harnessPackage.id !== effectiveAgentId) {
+    throw new Error("Cannot persist retained recovery without exact harness package authority.");
+  }
+  return packageState.harnessPackage;
+}
+
 const emptyState = (): RetainedSandboxRecoveryState => ({
-  schemaVersion: SCHEMA_VERSION,
+  schemaVersion: STATE_SCHEMA_VERSION,
   unresolved: [],
   resolutions: [],
 });
@@ -202,6 +285,11 @@ function revalidateStateDirectory(directory: RetainedSandboxStateDirectory): voi
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactFields(value: Record<string, unknown>, fields: ReadonlySet<string>): boolean {
+  const keys = Object.keys(value);
+  return keys.length === fields.size && keys.every((key) => fields.has(key));
 }
 
 function readStateFile(filePath: string): unknown {
@@ -368,16 +456,38 @@ function parseVerifiedEffectivePolicyIdentity(
   return { hash: value.hash, activeVersion: Number(value.activeVersion) };
 }
 
+function parseNullableHarnessPackageIdentity(
+  value: unknown,
+): HarnessPackageIdentity | null | undefined {
+  if (value === null) return null;
+  try {
+    return parseHarnessPackageIdentity(value);
+  } catch {
+    return undefined;
+  }
+}
+
 function parseRecord(value: unknown): RetainedSandboxRecoveryRecord | null {
   if (!isObjectRecord(value)) return null;
+  const schemaVersion = value.schemaVersion;
+  const fields =
+    schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
+      ? LEGACY_RECORD_FIELDS
+      : schemaVersion === RECORD_SCHEMA_VERSION
+        ? CURRENT_RECORD_FIELDS
+        : null;
+  if (fields === null || !hasExactFields(value, fields)) return null;
   const resources = parseEvidence(value.resources);
   const fingerprint = value.sandboxIdentityFingerprint;
   const verifiedEffectivePolicyIdentity = parseVerifiedEffectivePolicyIdentity(
     value.verifiedEffectivePolicyIdentity,
   );
   const reason = value.reason;
+  const harnessPackage =
+    schemaVersion === RECORD_SCHEMA_VERSION
+      ? parseNullableHarnessPackageIdentity(value.harnessPackage)
+      : undefined;
   if (
-    value.schemaVersion !== SCHEMA_VERSION ||
     typeof value.recordId !== "string" ||
     !FINGERPRINT_PATTERN.test(value.recordId) ||
     !validSandboxName(value.sandboxName) ||
@@ -396,20 +506,40 @@ function parseRecord(value: unknown): RetainedSandboxRecoveryRecord | null {
   ) {
     return null;
   }
-  return {
-    schemaVersion: SCHEMA_VERSION,
-    recordId: value.recordId,
-    sandboxName: value.sandboxName,
-    sandboxIdentityFingerprint: fingerprint,
-    identityWasUnavailable: fingerprint === null,
-    gatewayName: value.gatewayName,
-    gatewayPort: value.gatewayPort,
-    lifecycleGeneration: value.lifecycleGeneration,
-    verifiedEffectivePolicyIdentity,
-    resources,
-    reason: reason as RetainedSandboxRecoveryReason,
-    recordedAt: value.recordedAt,
-  };
+  if (schemaVersion === RECORD_SCHEMA_VERSION && harnessPackage === undefined) return null;
+  const record: RetainedSandboxRecoveryRecord =
+    schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
+      ? {
+          schemaVersion: LEGACY_RECORD_SCHEMA_VERSION,
+          recordId: value.recordId,
+          sandboxName: value.sandboxName,
+          sandboxIdentityFingerprint: fingerprint,
+          identityWasUnavailable: fingerprint === null,
+          gatewayName: value.gatewayName,
+          gatewayPort: value.gatewayPort,
+          lifecycleGeneration: value.lifecycleGeneration,
+          verifiedEffectivePolicyIdentity,
+          resources,
+          reason: reason as RetainedSandboxRecoveryReason,
+          recordedAt: value.recordedAt,
+        }
+      : {
+          schemaVersion: RECORD_SCHEMA_VERSION,
+          recordId: value.recordId,
+          sandboxName: value.sandboxName,
+          sandboxIdentityFingerprint: fingerprint,
+          identityWasUnavailable: fingerprint === null,
+          gatewayName: value.gatewayName,
+          gatewayPort: value.gatewayPort,
+          lifecycleGeneration: value.lifecycleGeneration,
+          verifiedEffectivePolicyIdentity,
+          harnessPackage: harnessPackage!,
+          resources,
+          reason: reason as RetainedSandboxRecoveryReason,
+          recordedAt: value.recordedAt,
+        };
+  if (record.recordId !== recoveryRecordId(record)) return null;
+  return record;
 }
 
 function parseReceipt(value: unknown): RetainedSandboxAdministratorResolutionReceipt | null {
@@ -417,7 +547,7 @@ function parseReceipt(value: unknown): RetainedSandboxAdministratorResolutionRec
   const fingerprint = value.sandboxIdentityFingerprint;
   const outcome = value.outcome;
   if (
-    value.schemaVersion !== SCHEMA_VERSION ||
+    value.schemaVersion !== STATE_SCHEMA_VERSION ||
     typeof value.receiptId !== "string" ||
     !FINGERPRINT_PATTERN.test(value.receiptId) ||
     typeof value.recordId !== "string" ||
@@ -433,7 +563,7 @@ function parseReceipt(value: unknown): RetainedSandboxAdministratorResolutionRec
     return null;
   }
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: STATE_SCHEMA_VERSION,
     receiptId: value.receiptId,
     recordId: value.recordId,
     sandboxName: value.sandboxName,
@@ -447,7 +577,7 @@ function parseReceipt(value: unknown): RetainedSandboxAdministratorResolutionRec
 
 function loadState(filePath: string): RetainedSandboxRecoveryState {
   const value = readStateFile(filePath);
-  if (!isObjectRecord(value) || value.schemaVersion !== SCHEMA_VERSION) {
+  if (!isObjectRecord(value) || value.schemaVersion !== STATE_SCHEMA_VERSION) {
     throw new Error("Retained sandbox recovery state has an unsupported schema.");
   }
   const unresolved = Array.isArray(value.unresolved) ? value.unresolved.map(parseRecord) : null;
@@ -456,13 +586,18 @@ function loadState(filePath: string): RetainedSandboxRecoveryState {
     throw new Error("Retained sandbox recovery state is invalid; onboarding remains blocked.");
   }
   return {
-    schemaVersion: SCHEMA_VERSION,
+    schemaVersion: STATE_SCHEMA_VERSION,
     unresolved: unresolved as RetainedSandboxRecoveryRecord[],
     resolutions: resolutions as RetainedSandboxAdministratorResolutionReceipt[],
   };
 }
 
-function recoveryRecordId(input: RecordRetainedSandboxRecoveryInput): string {
+function recoveryRecordId(
+  input:
+    | RecordRetainedSandboxRecoveryInput
+    | LegacyRetainedSandboxRecoveryRecord
+    | CurrentRetainedSandboxRecoveryRecord,
+): string {
   return createHash("sha256")
     .update(
       JSON.stringify([
@@ -472,6 +607,9 @@ function recoveryRecordId(input: RecordRetainedSandboxRecoveryInput): string {
         input.sandboxIdentityFingerprint,
         input.lifecycleGeneration,
         input.verifiedEffectivePolicyIdentity,
+        ...("schemaVersion" in input && input.schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
+          ? []
+          : [input.harnessPackage]),
       ]),
     )
     .digest("hex");
@@ -486,6 +624,7 @@ function assertRecordInput(input: RecordRetainedSandboxRecoveryInput): void {
     !validGatewayPort(input.gatewayPort) ||
     (input.lifecycleGeneration !== null && !validSafeEvidence(input.lifecycleGeneration)) ||
     parseVerifiedEffectivePolicyIdentity(input.verifiedEffectivePolicyIdentity) === undefined ||
+    parseNullableHarnessPackageIdentity(input.harnessPackage) === undefined ||
     !parseEvidence(input.resources)
   ) {
     throw new Error("Cannot persist invalid retained sandbox recovery evidence.");
@@ -503,21 +642,30 @@ export function recordRetainedSandboxRecovery(
   input: RecordRetainedSandboxRecoveryInput,
 ): RetainedSandboxRecoveryRecord {
   assertRecordInput(input);
-  const record: RetainedSandboxRecoveryRecord = {
-    schemaVersion: SCHEMA_VERSION,
-    recordId: recoveryRecordId(input),
-    sandboxName: input.sandboxName,
-    sandboxIdentityFingerprint: input.sandboxIdentityFingerprint,
-    identityWasUnavailable: input.sandboxIdentityFingerprint === null,
-    gatewayName: input.gatewayName,
-    gatewayPort: input.gatewayPort,
-    lifecycleGeneration: input.lifecycleGeneration,
-    verifiedEffectivePolicyIdentity: input.verifiedEffectivePolicyIdentity
-      ? { ...input.verifiedEffectivePolicyIdentity }
-      : null,
+  const normalizedInput: RecordRetainedSandboxRecoveryInput = {
+    ...input,
+    verifiedEffectivePolicyIdentity: parseVerifiedEffectivePolicyIdentity(
+      input.verifiedEffectivePolicyIdentity,
+    )!,
+    harnessPackage: parseNullableHarnessPackageIdentity(input.harnessPackage)!,
     resources: parseEvidence(input.resources)!,
-    reason: input.reason,
-    recordedAt: input.recordedAt ?? new Date().toISOString(),
+  };
+  const record: RetainedSandboxRecoveryRecord = {
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    recordId: recoveryRecordId(normalizedInput),
+    sandboxName: normalizedInput.sandboxName,
+    sandboxIdentityFingerprint: normalizedInput.sandboxIdentityFingerprint,
+    identityWasUnavailable: normalizedInput.sandboxIdentityFingerprint === null,
+    gatewayName: normalizedInput.gatewayName,
+    gatewayPort: normalizedInput.gatewayPort,
+    lifecycleGeneration: normalizedInput.lifecycleGeneration,
+    verifiedEffectivePolicyIdentity: normalizedInput.verifiedEffectivePolicyIdentity
+      ? { ...normalizedInput.verifiedEffectivePolicyIdentity }
+      : null,
+    harnessPackage: normalizedInput.harnessPackage,
+    resources: normalizedInput.resources,
+    reason: normalizedInput.reason,
+    recordedAt: normalizedInput.recordedAt ?? new Date().toISOString(),
   };
   if (!validTimestamp(record.recordedAt)) {
     throw new Error("Cannot persist retained sandbox recovery with an invalid timestamp.");
@@ -538,4 +686,114 @@ export function recordRetainedSandboxRecovery(
     throw new Error("Retained sandbox recovery record did not survive durable readback.");
   }
   return reread;
+}
+
+function bindPackageToLegacyRecord(
+  legacy: LegacyRetainedSandboxRecoveryRecord,
+  harnessPackage: HarnessPackageIdentity | null,
+): CurrentRetainedSandboxRecoveryRecord {
+  const currentInput: RecordRetainedSandboxRecoveryInput = {
+    sandboxName: legacy.sandboxName,
+    sandboxIdentityFingerprint: legacy.sandboxIdentityFingerprint,
+    gatewayName: legacy.gatewayName,
+    gatewayPort: legacy.gatewayPort,
+    lifecycleGeneration: legacy.lifecycleGeneration,
+    verifiedEffectivePolicyIdentity: legacy.verifiedEffectivePolicyIdentity,
+    harnessPackage,
+    resources: legacy.resources,
+    reason: legacy.reason,
+    recordedAt: legacy.recordedAt,
+  };
+  return {
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    recordId: recoveryRecordId(currentInput),
+    sandboxName: legacy.sandboxName,
+    sandboxIdentityFingerprint: legacy.sandboxIdentityFingerprint,
+    identityWasUnavailable: legacy.identityWasUnavailable,
+    gatewayName: legacy.gatewayName,
+    gatewayPort: legacy.gatewayPort,
+    lifecycleGeneration: legacy.lifecycleGeneration,
+    verifiedEffectivePolicyIdentity: legacy.verifiedEffectivePolicyIdentity,
+    harnessPackage,
+    resources: legacy.resources,
+    reason: legacy.reason,
+    recordedAt: legacy.recordedAt,
+  };
+}
+
+/**
+ * Bind one explicitly selected legacy record to package authority after its
+ * owning state has been reconciled. This store does not choose that authority.
+ */
+export function reconcileRetainedRecoveryPackage(
+  filePath: string,
+  input: ReconcileRetainedPackageInput,
+): ReconciledRetainedPackage {
+  const expectedRecord = parseRecord(input.expectedRecord);
+  const harnessPackage = parseNullableHarnessPackageIdentity(input.harnessPackage);
+  if (!expectedRecord || harnessPackage === undefined) {
+    throw new Error("Cannot reconcile invalid retained sandbox package authority.");
+  }
+  const current = loadState(filePath);
+  const desiredRecord =
+    expectedRecord.schemaVersion === LEGACY_RECORD_SCHEMA_VERSION
+      ? bindPackageToLegacyRecord(expectedRecord, harnessPackage)
+      : null;
+  const selected = current.unresolved.find((record) => record.recordId === expectedRecord.recordId);
+  if (!selected && desiredRecord) {
+    const alreadyReconciled = current.unresolved.filter(
+      (record) => record.recordId === desiredRecord.recordId,
+    );
+    if (
+      alreadyReconciled.length === 1 &&
+      alreadyReconciled[0]?.schemaVersion === RECORD_SCHEMA_VERSION &&
+      isDeepStrictEqual(alreadyReconciled[0], desiredRecord)
+    ) {
+      return { status: "verified", record: alreadyReconciled[0] };
+    }
+  }
+  if (
+    !selected ||
+    current.unresolved.filter((record) => record.recordId === expectedRecord.recordId).length !==
+      1 ||
+    !isDeepStrictEqual(selected, expectedRecord)
+  ) {
+    throw new Error("Retained sandbox recovery record changed before package reconciliation.");
+  }
+  if (selected.schemaVersion === RECORD_SCHEMA_VERSION) {
+    if (!isDeepStrictEqual(selected.harnessPackage, harnessPackage)) {
+      throw new Error("Retained sandbox package authority does not match its current record.");
+    }
+    return { status: "verified", record: selected };
+  }
+  const legacy = selected;
+  const nextRecord = desiredRecord!;
+  const collision = current.unresolved.find(
+    (record) => record.recordId === nextRecord.recordId && record.recordId !== legacy.recordId,
+  );
+  if (collision && !isDeepStrictEqual(collision, nextRecord)) {
+    throw new Error("Retained sandbox package reconciliation conflicts with another record.");
+  }
+  const next: RetainedSandboxRecoveryState = {
+    ...current,
+    unresolved: [
+      ...current.unresolved.filter(
+        (record) => record.recordId !== legacy.recordId && record.recordId !== nextRecord.recordId,
+      ),
+      nextRecord,
+    ],
+  };
+  writeStateFile(filePath, next);
+  const durable = loadState(filePath).unresolved;
+  const reread = durable.find((record) => record.recordId === nextRecord.recordId);
+  if (
+    !reread ||
+    reread.schemaVersion !== RECORD_SCHEMA_VERSION ||
+    !isDeepStrictEqual(reread, nextRecord) ||
+    durable.some((record) => record.recordId === legacy.recordId) ||
+    durable.filter((record) => record.recordId === nextRecord.recordId).length !== 1
+  ) {
+    throw new Error("Retained sandbox package binding did not survive durable readback.");
+  }
+  return { status: "upgraded", record: reread };
 }

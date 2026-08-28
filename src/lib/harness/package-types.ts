@@ -18,3 +18,21 @@ export interface HarnessPackageIdentity {
   readonly contractVersion: 1;
   readonly contentDigest: string;
 }
+
+export interface HarnessPackageMigration {
+  readonly schemaVersion: 1;
+  readonly source: "legacy-current-bundle";
+  readonly legacyAgent: string | null;
+  readonly migratedAt: string;
+}
+
+/** Complete durable authority: exact package identity or explicit qualified-agent absence. */
+export type HarnessPackageAuthority =
+  | {
+      readonly harnessPackage: HarnessPackageIdentity;
+      readonly harnessPackageMigration: HarnessPackageMigration | null;
+    }
+  | {
+      readonly harnessPackage: null;
+      readonly harnessPackageMigration: null;
+    };

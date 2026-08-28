@@ -22,6 +22,9 @@ import { encodeManagedStartupProfile } from "./managed-startup/profile";
 
 const requireDist = createRequire(import.meta.url);
 const onboardSession = requireDist("../state/onboard-session.js");
+const harnessPackageStore = requireDist(
+  "../harness/package-store.js",
+) as typeof import("../harness/package-store");
 const {
   assertBaselineExclusionsMatchCreateIntent,
   baselineExclusionsForCreate,
@@ -40,6 +43,107 @@ const runtimeFields = {
   openshellDriver: "docker",
   openshellVersion: "0.1.2",
 };
+
+const OPENCLAW_PACKAGE_IDENTITY = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.0.0",
+  contractVersion: 1 as const,
+  contentDigest: "c".repeat(64),
+};
+const OPENCLAW_PACKAGE_MIGRATION = {
+  schemaVersion: 1 as const,
+  source: "legacy-current-bundle" as const,
+  legacyAgent: null,
+  migratedAt: "2026-08-28T00:00:00.000Z",
+};
+
+function verifiedPackageCreateFixture() {
+  const selection = {
+    provider: "openai-compatible",
+    model: "llama",
+    endpointUrl: null,
+    endpointSource: null,
+    credentialEnv: null,
+    preferredInferenceApi: null,
+    compatibleEndpointReasoning: null,
+    compatibleEndpointReasoningEffort: null,
+    nimContainer: null,
+  } as const;
+  const checkpoint = {
+    schemaVersion: 1 as const,
+    state: "verified-create" as const,
+    harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+    gatewayName: "nemoclaw",
+    gatewayPort: 8080,
+    sandboxName: "demo",
+    lifecycleGeneration: "generation-1",
+    sandboxIdentityFingerprint: "d".repeat(64),
+    route: "none" as const,
+    policyHash: "sha256:effective",
+    policyVersion: 1,
+    policyAuthority: "externally-managed" as const,
+    observedPolicyAuthority: "externally-managed" as const,
+  };
+  const reservation = {
+    authority: {
+      sandboxName: "demo",
+      gatewayName: "nemoclaw",
+      sessionId: "session-1",
+      selection,
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+    },
+    entry: {
+      name: "demo",
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      ...selection,
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      pendingRouteReservation: true as const,
+      reservationSessionId: "session-1",
+    },
+  };
+  return { checkpoint, reservation, verifiedCreate: { reservation, checkpoint } };
+}
+
+function verifiedCandidateCreateFixture() {
+  const selection = verifiedPackageCreateFixture().reservation.authority.selection;
+  const checkpoint = {
+    schemaVersion: 1 as const,
+    state: "verified-create" as const,
+    gatewayName: "nemoclaw",
+    gatewayPort: 8080,
+    sandboxName: "demo",
+    lifecycleGeneration: "generation-1",
+    sandboxIdentityFingerprint: "d".repeat(64),
+    route: "none" as const,
+    policyHash: "sha256:effective",
+    policyVersion: 1,
+    policyAuthority: "externally-managed" as const,
+    observedPolicyAuthority: "externally-managed" as const,
+  };
+  const reservation = {
+    authority: {
+      sandboxName: "demo",
+      gatewayName: "nemoclaw",
+      sessionId: "session-1",
+      selection,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    },
+    entry: {
+      name: "demo",
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      ...selection,
+      pendingRouteReservation: true as const,
+      reservationSessionId: "session-1",
+    },
+  };
+  return { checkpoint, reservation, verifiedCreate: { reservation, checkpoint } };
+}
 
 function managedWorkloadReceipt(
   agent: ManagedImageAgent,
@@ -633,7 +737,249 @@ describe("registerCreatedSandbox", () => {
     socketPath: "/run/user/1001/podman/podman.sock",
   };
 
-  it("persists explicit OpenClaw identity for a matching Portable lifecycle receipt (#9207)", () => {
+  it("publishes only after every final package authority matches", () => {
+    const fixture = verifiedPackageCreateFixture();
+    const currentEntry = {
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingPolicyVerification: fixture.checkpoint,
+    };
+    const registry = requireDist("../state/registry.js") as typeof import("../state/registry");
+    const getSandbox = vi.spyOn(registry, "getSandbox").mockReturnValue(currentEntry);
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+        sandboxRecreate: null,
+      },
+    });
+    const resolvePinned = vi
+      .spyOn(harnessPackageStore, "resolvePinnedHarnessPackage")
+      .mockReturnValue({ identity: OPENCLAW_PACKAGE_IDENTITY } as never);
+    const registerSandbox = vi.fn();
+    try {
+      const entry = registerCreatedSandbox({
+        ...createdRegistryEntryInput({
+          lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+          lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+          policyAuthority: "externally-managed",
+        }),
+        inferenceRouteReservation: fixture.reservation,
+        verifiedCreate: fixture.verifiedCreate,
+        registerSandbox,
+      });
+
+      expect(entry.agent).toBeNull();
+      expect(entry.harnessPackage).toEqual(OPENCLAW_PACKAGE_IDENTITY);
+      expect(resolvePinned).toHaveBeenCalledExactlyOnceWith(OPENCLAW_PACKAGE_IDENTITY);
+      expect(registerSandbox).toHaveBeenCalledExactlyOnceWith(entry, fixture.reservation, {
+        verifiedCreate: fixture.verifiedCreate,
+        finalPackageAuthority: {
+          harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+          harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+        },
+      });
+    } finally {
+      resolvePinned.mockRestore();
+      loadSession.mockRestore();
+      getSandbox.mockRestore();
+    }
+  });
+
+  it("refuses final publication when checkpoint package authority drifts", () => {
+    const fixture = verifiedPackageCreateFixture();
+    const registry = requireDist("../state/registry.js") as typeof import("../state/registry");
+    const getSandbox = vi.spyOn(registry, "getSandbox").mockReturnValue({
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingPolicyVerification: fixture.checkpoint,
+    });
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: { ...OPENCLAW_PACKAGE_IDENTITY, contentDigest: "e".repeat(64) },
+        sandboxRecreate: null,
+      },
+    });
+    const resolvePinned = vi.spyOn(harnessPackageStore, "resolvePinnedHarnessPackage");
+    const registerSandbox = vi.fn();
+    try {
+      expect(() =>
+        registerCreatedSandbox({
+          ...createdRegistryEntryInput({
+            lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+            lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+            policyAuthority: "externally-managed",
+          }),
+          inferenceRouteReservation: fixture.reservation,
+          verifiedCreate: fixture.verifiedCreate,
+          registerSandbox,
+        }),
+      ).toThrow(/checkpoint harness package changed/u);
+      expect(resolvePinned).not.toHaveBeenCalled();
+      expect(registerSandbox).not.toHaveBeenCalled();
+    } finally {
+      resolvePinned.mockRestore();
+      loadSession.mockRestore();
+      getSandbox.mockRestore();
+    }
+  });
+
+  it("refuses final publication when the owning Session agent drifts", () => {
+    const fixture = verifiedPackageCreateFixture();
+    const registry = requireDist("../state/registry.js") as typeof import("../state/registry");
+    const getSandbox = vi.spyOn(registry, "getSandbox").mockReturnValue({
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingPolicyVerification: fixture.checkpoint,
+    });
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "hermes",
+      harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+      harnessPackageMigration: OPENCLAW_PACKAGE_MIGRATION,
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+        sandboxRecreate: null,
+      },
+    });
+    const resolvePinned = vi.spyOn(harnessPackageStore, "resolvePinnedHarnessPackage");
+    const registerSandbox = vi.fn();
+    try {
+      expect(() =>
+        registerCreatedSandbox({
+          ...createdRegistryEntryInput({
+            lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+            lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+            policyAuthority: "externally-managed",
+          }),
+          inferenceRouteReservation: fixture.reservation,
+          verifiedCreate: fixture.verifiedCreate,
+          registerSandbox,
+        }),
+      ).toThrow(/owning Session agent changed/u);
+      expect(resolvePinned).not.toHaveBeenCalled();
+      expect(registerSandbox).not.toHaveBeenCalled();
+    } finally {
+      resolvePinned.mockRestore();
+      loadSession.mockRestore();
+      getSandbox.mockRestore();
+    }
+  });
+
+  it("refuses a Pi Session being finalized as NemoCUA", () => {
+    const fixture = verifiedCandidateCreateFixture();
+    const registry = requireDist("../state/registry.js") as typeof import("../state/registry");
+    const currentEntry = {
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingPolicyVerification: fixture.checkpoint,
+    };
+    const getSandbox = vi.spyOn(registry, "getSandbox").mockReturnValue(currentEntry);
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "pi",
+      harnessPackage: null,
+      harnessPackageMigration: null,
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: null,
+        sandboxRecreate: null,
+      },
+    });
+    const registerSandbox = vi.fn();
+    try {
+      expect(() =>
+        registerCreatedSandbox({
+          ...createdRegistryEntryInput({
+            agent: { name: "nemocua" } as never,
+            lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+            lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+            policyAuthority: "externally-managed",
+          }),
+          inferenceRouteReservation: fixture.reservation,
+          verifiedCreate: fixture.verifiedCreate,
+          registerSandbox,
+        }),
+      ).toThrow(/owning Session agent changed/u);
+      expect(registerSandbox).not.toHaveBeenCalled();
+    } finally {
+      loadSession.mockRestore();
+      getSandbox.mockRestore();
+    }
+  });
+
+  it("refuses candidate authority fields that are present with undefined values", () => {
+    const fixture = verifiedCandidateCreateFixture();
+    const reservation = {
+      ...fixture.reservation,
+      entry: { ...fixture.reservation.entry, harnessPackage: undefined },
+    };
+    const verifiedCreate = { reservation, checkpoint: fixture.checkpoint };
+    const registry = requireDist("../state/registry.js") as typeof import("../state/registry");
+    const getSandbox = vi.spyOn(registry, "getSandbox").mockReturnValue({
+      ...fixture.reservation.entry,
+      lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+      pendingPolicyVerification: fixture.checkpoint,
+    });
+    const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
+      sessionId: "session-1",
+      sandboxName: "demo",
+      agent: "pi",
+      harnessPackage: null,
+      harnessPackageMigration: null,
+      checkpoint: {
+        schemaVersion: 5,
+        sessionId: "session-1",
+        harnessPackage: null,
+        sandboxRecreate: null,
+      },
+    });
+    const registerSandbox = vi.fn();
+    try {
+      expect(() =>
+        registerCreatedSandbox({
+          ...createdRegistryEntryInput({
+            agent: { name: "pi" } as never,
+            lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
+            lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
+            policyAuthority: "externally-managed",
+          }),
+          inferenceRouteReservation: reservation,
+          verifiedCreate,
+          registerSandbox,
+        }),
+      ).toThrow(/fabricated candidate package authority/u);
+      expect(registerSandbox).not.toHaveBeenCalled();
+    } finally {
+      loadSession.mockRestore();
+      getSandbox.mockRestore();
+    }
+  });
+
+  it("preserves the OpenClaw null sentinel for a matching Portable lifecycle receipt (#9207)", () => {
     const registerSandbox = vi.fn();
     const env = { NEMOCLAW_EXPERIMENTAL_PROFILE: "portable" };
     const classifyPortableLifecycleReceipt = vi.fn(() => ({
@@ -650,7 +996,7 @@ describe("registerCreatedSandbox", () => {
       registerSandbox,
     });
 
-    expect(entry.agent).toBe("openclaw");
+    expect(entry.agent).toBeNull();
     expect(classifyPortableLifecycleReceipt).toHaveBeenCalledExactlyOnceWith("demo", { env });
     expect(registerSandbox).toHaveBeenCalledExactlyOnceWith(entry);
   });

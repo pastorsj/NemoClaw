@@ -1024,9 +1024,9 @@ describe("sandbox inference route reservation", () => {
       const { route, create } = reserveQualifiedCreate(registry);
       const checkpoint = managedCheckpoint();
       registry.recordPendingSandboxPolicyVerification(create, checkpoint);
-
       const registered = registry.registerSandbox(completedEntry(checkpoint), route, {
         verifiedCreate: { reservation: create, checkpoint },
+        finalPackageAuthority: create.authority,
       });
 
       expect(registered).toMatchObject({
@@ -1167,8 +1167,9 @@ describe("sandbox inference route reservation", () => {
       expect(() =>
         registry.registerSandbox(completedEntry(checkpoint), route, {
           verifiedCreate: { reservation: create, checkpoint },
+          finalPackageAuthority: create.authority,
         }),
-      ).toThrow(/verified create checkpoint changed/u);
+      ).toThrow(/verified create checkpoint changed|final harness package authority changed/u);
     } finally {
       await fs.rm(home, { recursive: true, force: true });
     }
@@ -1207,14 +1208,15 @@ describe("sandbox inference route reservation", () => {
       const registry = await import("./registry");
       const { route, create } = reserveQualifiedCreate(registry);
       const checkpoint = externalCheckpoint();
+      const finalPackageAuthority = create.authority;
       registry.recordPendingSandboxPolicyVerification(create, checkpoint);
-
       expect(() =>
         registry.registerSandbox(completedEntry(checkpoint), route, {
           verifiedCreate: {
             reservation: create,
             checkpoint: externalCheckpoint({ policyHash: "sha256:changed" }),
           },
+          finalPackageAuthority,
         }),
       ).toThrow(/verified create checkpoint changed/u);
       expect(() =>
@@ -1224,7 +1226,7 @@ describe("sandbox inference route reservation", () => {
             lifecycleGeneration: "223e4567-e89b-42d3-a456-426614174983",
           },
           route,
-          { verifiedCreate: { reservation: create, checkpoint } },
+          { verifiedCreate: { reservation: create, checkpoint }, finalPackageAuthority },
         ),
       ).toThrow(/requested lifecycle generation/u);
       expect(() =>
@@ -1234,7 +1236,7 @@ describe("sandbox inference route reservation", () => {
             lifecycleLiveIdentityFingerprint: "c".repeat(64),
           },
           route,
-          { verifiedCreate: { reservation: create, checkpoint } },
+          { verifiedCreate: { reservation: create, checkpoint }, finalPackageAuthority },
         ),
       ).toThrow(/requested lifecycle identity/u);
     } finally {

@@ -253,7 +253,17 @@ describe("incomplete-onboard --resume backstop (#6003)", () => {
   it("preserves recovery-only cancellation through the later exit backstop (#9833)", () => {
     const fingerprint = "a".repeat(64);
     session.saveSession(
-      session.createSession({ lastStepStarted: "sandbox", sandboxName: "retained-sb" }),
+      session.createSession({
+        lastStepStarted: "sandbox",
+        sandboxName: "retained-sb",
+        harnessPackage: {
+          kind: "agent-runtime",
+          id: "openclaw",
+          packageVersion: "1.2.3",
+          contractVersion: 1,
+          contentDigest: "c".repeat(64),
+        },
+      }),
     );
     session.markCancellationRecovery("retained-sb", fingerprint);
     const beforeExit = requireLoadedSession();

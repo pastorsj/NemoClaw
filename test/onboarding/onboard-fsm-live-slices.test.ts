@@ -7,9 +7,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeAll, describe, it } from "vitest";
+import { getHarnessPackageStoreRoot } from "../../src/lib/harness/package-store";
+import { createHarnessPackageFixture } from "../helpers/harness-packages";
 
 const repoRoot = path.join(import.meta.dirname, "../..");
-const probeTimeoutMs = 10_000;
+const probeTimeoutMs = 30_000;
 
 type SliceName = "initial" | "core" | "final";
 type ProbeMode =
@@ -172,9 +174,15 @@ function probeFailureMessage(result: SpawnSyncReturns<string>): string {
 
 function runSliceProbe(options: ProbeOptions) {
   const scenario = { mode: options.mode ?? "fresh", slice: options.slice };
-  const tmpDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), `nemoclaw-onboard-fsm-${scenario.mode}-${scenario.slice}-`),
+  const tmpDir = fs.realpathSync(
+    fs.mkdtempSync(
+      path.join(os.tmpdir(), `nemoclaw-onboard-fsm-${scenario.mode}-${scenario.slice}-`),
+    ),
   );
+  const harnessFixture = createHarnessPackageFixture({
+    storeRoot: getHarnessPackageStoreRoot(tmpDir),
+  });
+  harnessFixture.install(scenario.mode === "dashboard-port-composition" ? "hermes" : "openclaw");
   const scriptPath = path.join(tmpDir, `probe-${scenario.mode}-${scenario.slice}.js`);
   const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
   const flowSlicesPath = JSON.stringify(
@@ -218,6 +226,9 @@ function runSliceProbe(options: ProbeOptions) {
   const finalizationDepsPath = JSON.stringify(
     path.join(repoRoot, "src", "lib", "onboard", "machine", "finalization-deps.ts"),
   );
+  const packageBoundaryPath = JSON.stringify(
+    path.join(repoRoot, "src", "lib", "onboard", "package", "boundary.ts"),
+  );
 
   fs.writeFileSync(
     scriptPath,
@@ -233,6 +244,13 @@ const providerHandlers = require(${providerHandlerPath});
 const gatewayHandlers = require(${gatewayHandlerPath});
 const coreFlowPhases = require(${coreFlowPhasesPath});
 const registry = require(${registryPath});
+const packageBoundary = require(${packageBoundaryPath});
+const prepareHarnessOperation = packageBoundary.prepareOnboardHarnessOperation;
+packageBoundary.prepareOnboardHarnessOperation = (input, overrides) =>
+  prepareHarnessOperation(input, {
+    ...overrides,
+    getBundledRoot: () => ${JSON.stringify(harnessFixture.bundledRoot)},
+  });
 const called = [];
 const sentinel = new Error("slice-called");
 const staleAdmissionExit = new Error("stale recovery admission refused");
@@ -476,6 +494,7 @@ if (scenario.mode === "stale-recovery-admission") {
         gatewayPort: 8080,
         lifecycleGeneration: "stale-admission-generation",
         verifiedEffectivePolicyIdentity: null,
+        harnessPackage: null,
         resources: {
           sharedInferenceProviders: [],
           sandboxScopedProviders: [],
@@ -603,11 +622,12 @@ const { onboard } = require(${onboardPath});
     );
     return payload.called as string[];
   } finally {
+    harnessFixture.cleanup();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 
-describe("live onboard FSM slice boundaries", () => {
+describe("live onboard FSM slice boundaries", { timeout: 60_000 }, () => {
   /*
    * The live dispatcher is still loaded from compiled CommonJS:
    * src/lib/onboard.ts captures these helpers through require-time bindings,

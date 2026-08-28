@@ -47,4 +47,97 @@ describe("onboard session package persistence", () => {
     expect(loaded?.harnessPackageMigration).toBeNull();
     expect(session.hasInvalidSessionHarnessPackage(loaded)).toBe(false);
   });
+
+  it.each([
+    [
+      "cancellation",
+      (fingerprint: string) => session.markCancellationRecovery("retained-sb", fingerprint),
+    ],
+    [
+      "post-create failure",
+      (fingerprint: string) =>
+        session.markRetainedSandboxRecovery(
+          "retained-sb",
+          "Sandbox creation failed after identity verification.",
+          fingerprint,
+        ),
+    ],
+  ])("copies exact package authority into independent %s recovery", (_case, markRecovery) => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contractVersion: 1,
+      contentDigest: "c".repeat(64),
+    } as const;
+    const harnessPackageMigration = {
+      schemaVersion: 1,
+      source: "legacy-current-bundle",
+      legacyAgent: "openclaw",
+      migratedAt: "2026-08-27T00:00:00.000Z",
+    } as const;
+    session.saveSession(
+      session.createSession({
+        sandboxName: "retained-sb",
+        harnessPackage,
+        harnessPackageMigration,
+      }),
+    );
+
+    const saved = markRecovery("8".repeat(64));
+    const [record] = session.listRetainedSandboxRecoveryRecords();
+
+    expect(saved).toMatchObject({
+      status: "recovery_required",
+      resumable: false,
+      harnessPackage,
+      harnessPackageMigration,
+    });
+    expect(record).toMatchObject({ schemaVersion: 2, harnessPackage });
+    expect(record).not.toHaveProperty("harnessPackageMigration");
+  });
+
+  it.each([
+    ["missing", null],
+    [
+      "mismatched",
+      {
+        kind: "agent-runtime" as const,
+        id: "openclaw",
+        packageVersion: "1.2.3",
+        contractVersion: 1 as const,
+        contentDigest: "d".repeat(64),
+      },
+    ],
+  ])("refuses %s standard package authority in a current recovery record", (_case, authority) => {
+    session.saveSession(
+      session.createSession({
+        agent: "hermes",
+        sandboxName: "retained-sb",
+        harnessPackage: authority,
+      }),
+    );
+
+    expect(() => session.markCancellationRecovery("retained-sb", "7".repeat(64))).toThrow(
+      /without exact harness package authority/u,
+    );
+    expect(session.listRetainedSandboxRecoveryRecords()).toEqual([]);
+  });
+
+  it("records explicit null only for a qualified candidate recovery", () => {
+    session.saveSession(
+      session.createSession({
+        agent: "pi",
+        sandboxName: "retained-sb",
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      }),
+    );
+
+    session.markCancellationRecovery("retained-sb", "6".repeat(64));
+
+    expect(session.listRetainedSandboxRecoveryRecords()).toMatchObject([
+      { schemaVersion: 2, harnessPackage: null },
+    ]);
+  });
 });

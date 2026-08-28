@@ -369,6 +369,7 @@ export function registerSandbox(
   options: {
     pending?: boolean;
     reservationSessionId?: string;
+    finalPackageAuthority?: HarnessPackageAuthority;
     verifiedCreate?: {
       readonly reservation: QualifiedPendingSandboxCreateReservation;
       readonly checkpoint: PendingSandboxPolicyVerification;
@@ -397,6 +398,11 @@ export function registerSandbox(
         "Cannot publish a verified sandbox create with a different route reservation authority",
       );
     }
+    if (options.verifiedCreate && !options.finalPackageAuthority) {
+      throw new PolicyAuthorityRefusalError(
+        "Cannot publish a verified sandbox create without explicit final harness package authority",
+      );
+    }
     if (
       routeReservation &&
       ((!options.verifiedCreate &&
@@ -407,6 +413,19 @@ export function registerSandbox(
         !sandboxRegistrationMatchesInferenceRouteReservation(entry, routeReservation))
     ) {
       throw new Error("Cannot register a sandbox after its inference route reservation changed");
+    }
+    if (options.finalPackageAuthority) {
+      const finalPackageAuthority = normalizeRoutePackageAuthority(options.finalPackageAuthority);
+      if (
+        !options.verifiedCreate ||
+        !recordedEntry ||
+        !entryMatchesPackageAuthority(finalPackageAuthority, recordedEntry) ||
+        !entryMatchesPackageAuthority(finalPackageAuthority, entry)
+      ) {
+        throw new PolicyAuthorityRefusalError(
+          "Cannot publish a sandbox registration after its final harness package authority changed",
+        );
+      }
     }
     if (
       !routeReservation &&
@@ -613,7 +632,7 @@ export function registerSandbox(
       // the post-policy registry write (see policy-preset-persistence), so a
       // snapshot clone (which spreads the source entry but resets `policies`)
       // cannot inherit a stale finalized marker. See #4621.
-      agent: entry.agent || null,
+      agent: entry.agent === "openclaw" ? null : entry.agent || null,
       ...normalizeSandboxHarnessPackageAuthority(entry),
       agentVersion: entry.agentVersion || null,
       openclawImagePluginInstalls: Array.isArray(entry.openclawImagePluginInstalls)
@@ -652,6 +671,14 @@ export function registerSandbox(
       pendingRouteReservation: options.pending === true ? true : undefined,
       reservationSessionId: options.pending === true ? options.reservationSessionId : undefined,
     };
+    if (
+      options.finalPackageAuthority &&
+      !entryMatchesPackageAuthority(options.finalPackageAuthority, registered)
+    ) {
+      throw new PolicyAuthorityRefusalError(
+        "Cannot publish a sandbox registration that drops final harness package authority",
+      );
+    }
     data.sandboxes[entry.name] = registered;
     save(
       options.pending === true

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { HarnessPackageAuthority } from "../harness/package-identity";
+import type { HarnessPackageAuthority } from "../harness/package-types";
 
 /**
  * Shared result and failure contracts used by the extracted onboarding helper modules.
@@ -86,7 +86,7 @@ export interface SandboxCreateIntent {
     readonly id: string;
     readonly targetGeneration: string;
     readonly targetIntentFingerprint: string;
-    readonly harnessPackage: import("../harness/package-identity").HarnessPackageIdentity | null;
+    readonly harnessPackage: import("../harness/package-types").HarnessPackageIdentity | null;
   };
   /** Internal outer-rebuild authority for carrying managed MCP state through replacement. */
   readonly recreateJournalTargetIntentFingerprint?: string;

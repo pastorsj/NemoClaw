@@ -16,6 +16,7 @@ import { isErrnoException } from "../core/errno";
 import { isObjectRecord, type JsonObject, type JsonValue } from "../core/json-types";
 import { GATEWAY_PORT } from "../core/ports";
 import {
+  harnessPackageAuthoritiesEqual,
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
@@ -68,8 +69,12 @@ import {
 import { nextMachineStateAfterCompletedStep } from "./onboard-step-state";
 import {
   listRetainedSandboxRecoveryRecords as readRetainedSandboxRecoveryRecords,
+  reconcileRetainedRecoveryPackage as writeRetainedRecoveryPackage,
   recordRetainedSandboxRecovery as writeRetainedSandboxRecovery,
+  requireRetainedRecoveryPackage,
   retainedSandboxRecoveryFile,
+  type ReconcileRetainedPackageInput,
+  type ReconciledRetainedPackage,
   type RecordRetainedSandboxRecoveryInput,
   type RetainedSandboxRecoveryRecord,
   type RetainedSandboxRecoveryReason,
@@ -1899,6 +1904,10 @@ function persistIndependentRetainedSandboxRecovery(
   sandboxIdentityFingerprint: string | null,
   context: RetainedSandboxRecoveryContext,
 ): void {
+  if (hasInvalidSessionHarnessPackage(session)) {
+    throw new Error("Cannot persist retained recovery with malformed harness package authority.");
+  }
+  const harnessPackage = requireRetainedRecoveryPackage(session);
   const messagingCredentialEnvironmentVariables =
     session.messagingPlan?.credentialBindings.map((binding) => binding.providerEnvKey) ?? [];
   const credentialEnvironmentVariables = [
@@ -1915,6 +1924,7 @@ function persistIndependentRetainedSandboxRecovery(
     gatewayPort: context.gatewayPort ?? GATEWAY_PORT,
     lifecycleGeneration: context.lifecycleGeneration ?? null,
     verifiedEffectivePolicyIdentity: context.verifiedEffectivePolicyIdentity ?? null,
+    harnessPackage,
     resources: {
       sharedInferenceProviders: session.provider ? [session.provider] : [],
       sandboxScopedProviders: session.stagedCredentialProviders,
@@ -1922,6 +1932,28 @@ function persistIndependentRetainedSandboxRecovery(
     },
     reason,
   });
+}
+
+function readDurableRecoverySession(
+  saved: Session,
+  reason: RetainedSandboxRecoveryReason,
+  sandboxName: string,
+  sandboxIdentityFingerprint: string | null,
+): Session {
+  const reread = loadSession();
+  if (
+    reread?.sessionId !== saved.sessionId ||
+    reread.status !== CANCELLATION_RECOVERY_STATUS ||
+    reread.resumable !== false ||
+    reread.sandboxName !== sandboxName ||
+    reread.cancellationRecovery?.reason !== reason ||
+    reread.cancellationRecovery.sandboxName !== sandboxName ||
+    reread.cancellationRecovery.sandboxIdentityFingerprint !== sandboxIdentityFingerprint ||
+    !harnessPackageAuthoritiesEqual(reread, saved)
+  ) {
+    throw new Error("Retained sandbox recovery did not survive durable readback.");
+  }
+  return reread;
 }
 
 export function listRetainedSandboxRecoveryRecords(): readonly RetainedSandboxRecoveryRecord[] {
@@ -1936,6 +1968,14 @@ export function recordRetainedSandboxRecovery(
 ): RetainedSandboxRecoveryRecord {
   return withOwnedOnboardLock("nemoclaw retained sandbox recovery", () =>
     writeRetainedSandboxRecovery(RETAINED_SANDBOX_RECOVERY_FILE, input),
+  );
+}
+
+export function reconcileRetainedRecoveryPackage(
+  input: ReconcileRetainedPackageInput,
+): ReconciledRetainedPackage {
+  return withOwnedOnboardLock("nemoclaw retained package reconciliation", () =>
+    writeRetainedRecoveryPackage(RETAINED_SANDBOX_RECOVERY_FILE, input),
   );
 }
 
@@ -1976,13 +2016,19 @@ export function markCancellationRecovery(
       };
       return session;
     });
-    persistIndependentRetainedSandboxRecovery(
+    const reread = readDurableRecoverySession(
       saved,
+      "cancelled_after_sandbox_creation",
+      sandboxName,
+      sandboxIdentityFingerprint ?? null,
+    );
+    persistIndependentRetainedSandboxRecovery(
+      reread,
       "cancelled_after_sandbox_creation",
       sandboxIdentityFingerprint ?? null,
       context,
     );
-    return saved;
+    return reread;
   });
 }
 
@@ -2028,18 +2074,12 @@ export function markRetainedSandboxRecovery(
       if (sandboxStep) sandboxStep.error = sanitizedMessage;
       return session;
     });
-    const reread = loadSession();
-    if (
-      reread?.sessionId !== saved.sessionId ||
-      reread.status !== CANCELLATION_RECOVERY_STATUS ||
-      reread.resumable !== false ||
-      reread.cancellationRecovery?.reason !== "retained_after_sandbox_creation_failure" ||
-      reread.cancellationRecovery.sandboxName !== sandboxName ||
-      reread.cancellationRecovery.sandboxIdentityFingerprint !==
-        (sandboxIdentityFingerprint ?? null)
-    ) {
-      throw new Error("Retained sandbox recovery did not survive durable readback.");
-    }
+    const reread = readDurableRecoverySession(
+      saved,
+      "retained_after_sandbox_creation_failure",
+      sandboxName,
+      sandboxIdentityFingerprint ?? null,
+    );
     persistIndependentRetainedSandboxRecovery(
       reread,
       "retained_after_sandbox_creation_failure",

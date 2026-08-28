@@ -14,6 +14,11 @@ import type { InstalledHarnessPackage } from "../../src/lib/harness/package-stor
 
 export type HarnessPackageFixtureId = BundledHarnessSourceDeclaration["id"];
 
+export interface HarnessPackageFixtureOptions {
+  readonly fixtureParent?: string;
+  readonly storeRoot?: string;
+}
+
 export interface HarnessPackageFixture {
   readonly fixtureRoot: string;
   readonly bundledRoot: string;
@@ -115,10 +120,11 @@ function writePackageArtifact(input: {
 
 /** Create reviewed package bytes and an installed store under one exact private test root. */
 export function createHarnessPackageFixture(
-  options: { readonly storeRoot?: string } = {},
+  options: HarnessPackageFixtureOptions = {},
 ): HarnessPackageFixture {
-  privateDirectory(FIXTURE_PARENT);
-  const fixtureRoot = fs.mkdtempSync(path.join(FIXTURE_PARENT, "fixture-"));
+  const fixtureParent = options.fixtureParent ?? FIXTURE_PARENT;
+  privateDirectory(fixtureParent);
+  const fixtureRoot = fs.mkdtempSync(path.join(fixtureParent, "fixture-"));
   fs.chmodSync(fixtureRoot, 0o700);
   const bundledRoot = path.join(fixtureRoot, "bundled");
   const storeRoot = options.storeRoot ?? path.join(fixtureRoot, "store");

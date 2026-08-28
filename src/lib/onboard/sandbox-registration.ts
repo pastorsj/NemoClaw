@@ -3,7 +3,10 @@
 
 import { isDeepStrictEqual } from "node:util";
 
+import { isCandidateAgent } from "../agent/candidate";
 import type { AgentDefinition } from "../agent/defs";
+import type { HarnessPackageAuthority, HarnessPackageIdentity } from "../harness/package-types";
+import * as harnessPackageStore from "../harness/package-store";
 import type {
   InferenceEndpointSource,
   InferenceSelection,
@@ -28,7 +31,10 @@ import {
   cloneSandboxHostLocalInferenceReceipt,
   requireSandboxHostLocalInferenceProvenance,
 } from "../state/registry/host-local-inference";
-import type { QualifiedSandboxInferenceRouteReservation } from "../state/registry/route-reservation";
+import {
+  normalizeRoutePackageAuthority,
+  type QualifiedSandboxInferenceRouteReservation,
+} from "../state/registry/route-reservation";
 import { cloneSandboxWorkloadReceipt } from "../state/registry/workload";
 import { DEFAULT_TOOL_DISCLOSURE, type ToolDisclosure } from "../tool-disclosure";
 import type { DcodeAutoApprovalMode } from "./dcode-auto-approval";
@@ -46,7 +52,11 @@ import {
   requireRuntimeProviderBundleForSandbox,
   requireRuntimeProviderMutationAuthority,
 } from "./runtime-provider/access";
-import { getRequestedSandboxAgentName, getSandboxAgentRegistryFields } from "./sandbox-agent";
+import {
+  getRequestedSandboxAgentName,
+  getSandboxAgentRegistryFields,
+  normalizeSandboxAgentName,
+} from "./sandbox-agent";
 import {
   classifyPortableLifecycleReceipt,
   portableLifecycleReceiptMatchesGeneration,
@@ -123,6 +133,160 @@ export interface CreatedSandboxRegistrationInput extends CreatedSandboxRegistryE
     options?: Parameters<typeof registry.registerSandbox>[2],
   ): SandboxEntry | void;
   runtimeProviders?: RuntimeProviderBundleRegistry;
+}
+
+function registrationAuthorityError(detail: string): Error {
+  return new Error(`Cannot publish sandbox registration: ${detail}`);
+}
+
+function requireMatchingPackageIdentity(
+  detail: string,
+  expected: HarnessPackageIdentity,
+  actual: unknown,
+): void {
+  if (!isDeepStrictEqual(expected, actual)) {
+    throw registrationAuthorityError(detail);
+  }
+}
+
+function requireAbsentPackageAuthority(
+  detail: string,
+  value: Pick<SandboxEntry, "harnessPackage" | "harnessPackageMigration">,
+): void {
+  if (
+    Object.prototype.hasOwnProperty.call(value, "harnessPackage") ||
+    Object.prototype.hasOwnProperty.call(value, "harnessPackageMigration")
+  ) {
+    throw registrationAuthorityError(detail);
+  }
+}
+
+/** Prove every final package owner again immediately before registry publication. */
+function assertFinalHarnessPackageAuthority(
+  input: CreatedSandboxRegistrationInput,
+  requestedEntry: SandboxEntry,
+): HarnessPackageAuthority | null {
+  const verifiedCreate = input.verifiedCreate;
+  if (!verifiedCreate) return null;
+
+  const routeAuthority = normalizeRoutePackageAuthority(verifiedCreate.reservation.authority);
+  const session = onboardSession.loadSession();
+  if (
+    !session ||
+    session.sessionId !== verifiedCreate.reservation.authority.sessionId ||
+    session.sandboxName !== input.sandboxName
+  ) {
+    throw registrationAuthorityError("the owning onboarding Session changed");
+  }
+  if (!session.checkpoint || session.checkpoint.sessionId !== session.sessionId) {
+    throw registrationAuthorityError("the owning onboarding checkpoint is unavailable");
+  }
+
+  const currentEntry = registry.getSandbox(input.sandboxName);
+  if (!currentEntry) {
+    throw registrationAuthorityError("the created-sandbox registry row is unavailable");
+  }
+  const recreate = session.checkpoint.sandboxRecreate;
+  const requestedAgentId = getRequestedSandboxAgentName(input.agent);
+  if (normalizeSandboxAgentName(session.agent) !== requestedAgentId) {
+    throw registrationAuthorityError("the owning Session agent changed");
+  }
+
+  if (routeAuthority.harnessPackage === null) {
+    if (requestedAgentId !== "nemocua" && !isCandidateAgent(requestedAgentId)) {
+      throw registrationAuthorityError(
+        `standard agent '${requestedAgentId}' has no exact harness package authority`,
+      );
+    }
+    if (
+      session.harnessPackage !== null ||
+      session.harnessPackageMigration !== null ||
+      session.checkpoint.harnessPackage !== null ||
+      (recreate !== null && (recreate.version !== 2 || recreate.harnessPackage !== null)) ||
+      Object.prototype.hasOwnProperty.call(verifiedCreate.checkpoint, "harnessPackage")
+    ) {
+      throw registrationAuthorityError("qualified-agent package absence changed");
+    }
+    requireAbsentPackageAuthority(
+      "the route reservation fabricated candidate package authority",
+      verifiedCreate.reservation.entry,
+    );
+    requireAbsentPackageAuthority(
+      "the created-sandbox row fabricated candidate package authority",
+      currentEntry,
+    );
+    requireAbsentPackageAuthority(
+      "the requested final row fabricated candidate package authority",
+      requestedEntry,
+    );
+    return routeAuthority;
+  }
+
+  const expected = routeAuthority.harnessPackage;
+  if (requestedAgentId !== expected.id) {
+    throw registrationAuthorityError("the requested agent differs from its harness package");
+  }
+  requireMatchingPackageIdentity(
+    "the Session harness package changed",
+    expected,
+    session.harnessPackage,
+  );
+  requireMatchingPackageIdentity(
+    "the checkpoint harness package changed",
+    expected,
+    session.checkpoint.harnessPackage,
+  );
+  if (recreate !== null) {
+    if (recreate.version !== 2) {
+      throw registrationAuthorityError("the recreate transaction requires package migration");
+    }
+    requireMatchingPackageIdentity(
+      "the recreate transaction harness package changed",
+      expected,
+      recreate.harnessPackage,
+    );
+  }
+  requireMatchingPackageIdentity(
+    "the route reservation harness package changed",
+    expected,
+    verifiedCreate.reservation.entry.harnessPackage,
+  );
+  requireMatchingPackageIdentity(
+    "the verified policy checkpoint harness package changed",
+    expected,
+    verifiedCreate.checkpoint.harnessPackage,
+  );
+  requireMatchingPackageIdentity(
+    "the created-sandbox row harness package changed",
+    expected,
+    currentEntry.harnessPackage,
+  );
+  requireMatchingPackageIdentity(
+    "the requested final row harness package changed",
+    expected,
+    requestedEntry.harnessPackage,
+  );
+  if (
+    !isDeepStrictEqual(routeAuthority.harnessPackageMigration, session.harnessPackageMigration) ||
+    !isDeepStrictEqual(
+      session.harnessPackageMigration,
+      currentEntry.harnessPackageMigration ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      session.harnessPackageMigration,
+      requestedEntry.harnessPackageMigration ?? null,
+    )
+  ) {
+    throw registrationAuthorityError("the owning harness package migration provenance changed");
+  }
+
+  const pinned = harnessPackageStore.resolvePinnedHarnessPackage(expected);
+  requireMatchingPackageIdentity(
+    "the immutable harness package object changed",
+    expected,
+    pinned.identity,
+  );
+  return routeAuthority;
 }
 
 export function creationFidelity(
@@ -398,7 +562,7 @@ export function registerCreatedSandbox(input: CreatedSandboxRegistrationInput): 
         "Portable OpenClaw registration requires a current lifecycle receipt that matches the registry generation.",
       );
     }
-    entry.agent = "openclaw";
+    entry.agent = null;
   }
   const provider = requireRuntimeProviderBundleForSandbox(
     entry,
@@ -410,6 +574,7 @@ export function registerCreatedSandbox(input: CreatedSandboxRegistrationInput): 
       `Runtime provider '${provider.identity.id}' does not accept the registered workload receipt.`,
     );
   }
+  const finalPackageAuthority = assertFinalHarnessPackageAuthority(input, entry);
   const writeRegistry = input.registerSandbox ?? registry.registerSandbox;
   const pendingOptions =
     input.reservationSessionId && !input.verifiedCreate
@@ -419,7 +584,10 @@ export function registerCreatedSandbox(input: CreatedSandboxRegistrationInput): 
         }
       : undefined;
   const registrationOptions = input.verifiedCreate
-    ? { verifiedCreate: input.verifiedCreate }
+    ? {
+        verifiedCreate: input.verifiedCreate,
+        ...(finalPackageAuthority ? { finalPackageAuthority } : {}),
+      }
     : pendingOptions;
   const registered =
     input.inferenceRouteReservation || registrationOptions

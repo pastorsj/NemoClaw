@@ -705,9 +705,15 @@ describe("sandbox registry normalization", () => {
       policyCreationReceipt: replacementLifecycle.policyCreationReceipt,
     };
     registry.recordPendingSandboxPolicyVerification(createReservation, checkpoint);
+    expect(() =>
+      registry.registerSandbox(replacementLifecycle, undefined, {
+        verifiedCreate: { reservation: createReservation, checkpoint },
+      }),
+    ).toThrow(/without explicit final harness package authority/u);
     expect(
       registry.registerSandbox(replacementLifecycle, undefined, {
         verifiedCreate: { reservation: createReservation, checkpoint },
+        finalPackageAuthority: createReservation.authority,
       }),
     ).toMatchObject({
       lifecycleGeneration: replacementLifecycle.lifecycleGeneration,
