@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseNemoClawPolicyCreationReceipt } from "../../policy/merge";
+import { parseHarnessPackageIdentity } from "../../harness/package-identity";
 import type { PendingSandboxPolicyVerification } from "./types";
 
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const PENDING_POLICY_VERIFICATION_KEYS = new Set([
   "schemaVersion",
   "state",
+  "harnessPackage",
   "policyAuthority",
   "observedPolicyAuthority",
   "gatewayName",
@@ -77,6 +79,16 @@ export function normalizePendingSandboxPolicyVerification(
       "Sandbox registry contains an invalid pending policy verification identity; repair the registry before continuing",
     );
   }
+  let harnessPackage;
+  if (Object.prototype.hasOwnProperty.call(value, "harnessPackage")) {
+    try {
+      harnessPackage = parseHarnessPackageIdentity(value.harnessPackage);
+    } catch {
+      throw new Error(
+        "Sandbox registry contains invalid harness package authority in pending policy verification; repair the registry before continuing",
+      );
+    }
+  }
   if (value.policyAuthority === "nemoclaw-managed") {
     if (value.observedPolicyAuthority !== "owner-unknown") {
       throw new Error(
@@ -109,6 +121,7 @@ export function normalizePendingSandboxPolicyVerification(
       state: "verified-create",
       policyAuthority: "nemoclaw-managed",
       observedPolicyAuthority: "owner-unknown",
+      ...(harnessPackage ? { harnessPackage } : {}),
       gatewayName: boundary.gatewayName,
       gatewayPort: boundary.gatewayPort,
       sandboxName: boundary.sandboxName,
@@ -130,6 +143,7 @@ export function normalizePendingSandboxPolicyVerification(
     state: "verified-create",
     policyAuthority: "externally-managed",
     observedPolicyAuthority: value.observedPolicyAuthority,
+    ...(harnessPackage ? { harnessPackage } : {}),
     gatewayName: boundary.gatewayName,
     gatewayPort: boundary.gatewayPort,
     sandboxName: boundary.sandboxName,

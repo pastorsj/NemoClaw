@@ -39,11 +39,25 @@ const EXACT_ROUTE_RESERVATION = {
 };
 const LIFECYCLE_GENERATION = "123e4567-e89b-42d3-a456-426614174983";
 const LIVE_IDENTITY_FINGERPRINT = "a".repeat(64);
+const HARNESS_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "hermes",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "c".repeat(64),
+};
+const HARNESS_PACKAGE_MIGRATION = {
+  schemaVersion: 1 as const,
+  source: "legacy-current-bundle" as const,
+  legacyAgent: "hermes",
+  migratedAt: "2026-08-28T04:00:00.000Z",
+};
 function managedCheckpoint(
   overrides: Partial<
     Pick<
       PendingSandboxPolicyVerification,
       | "gatewayPort"
+      | "harnessPackage"
       | "lifecycleGeneration"
       | "sandboxIdentityFingerprint"
       | "route"
@@ -229,6 +243,66 @@ describe("sandbox inference route reservation", () => {
       expect(registry.isRouteOnlySandboxReservation(reservedEntry)).toBe(true);
       expect(registry.getDefault()).toBeNull();
       expect(registry.setDefault("alpha")).toBe(false);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+  it("preserves exact package authority through route and policy checkpoints", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-route-package-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    try {
+      const registry = await import("./registry");
+      registry.restoreSandboxEntry({
+        name: "alpha",
+        harnessPackage: HARNESS_PACKAGE,
+        harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
+      });
+      const { route, create } = reserveQualifiedCreate(registry);
+      expect(route.entry).toMatchObject({
+        harnessPackage: HARNESS_PACKAGE,
+        harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
+      });
+
+      const checkpoint = managedCheckpoint({ harnessPackage: HARNESS_PACKAGE });
+      const pending = registry.recordPendingSandboxPolicyVerification(create, checkpoint);
+      expect(pending).toMatchObject({
+        harnessPackage: HARNESS_PACKAGE,
+        harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
+        pendingPolicyVerification: { harnessPackage: HARNESS_PACKAGE },
+      });
+      expect(pending.pendingPolicyVerification).not.toHaveProperty("harnessPackageMigration");
+      expect(registry.isCurrentSandboxInferenceRouteReservation(route, pending)).toBe(true);
+
+      const completed = {
+        ...completedEntry(checkpoint),
+        harnessPackage: HARNESS_PACKAGE,
+        harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
+      };
+      expect(registry.sandboxRegistrationMatchesInferenceRouteReservation(completed, route)).toBe(
+        true,
+      );
+      expect(
+        registry.sandboxRegistrationMatchesInferenceRouteReservation(
+          {
+            ...completed,
+            harnessPackage: { ...HARNESS_PACKAGE, contentDigest: "d".repeat(64) },
+          },
+          route,
+        ),
+      ).toBe(false);
+      expect(
+        registry.sandboxRegistrationMatchesInferenceRouteReservation(
+          {
+            ...completed,
+            harnessPackageMigration: {
+              ...HARNESS_PACKAGE_MIGRATION,
+              migratedAt: "2026-08-28T04:00:01.000Z",
+            },
+          },
+          route,
+        ),
+      ).toBe(false);
     } finally {
       await fs.rm(home, { recursive: true, force: true });
     }

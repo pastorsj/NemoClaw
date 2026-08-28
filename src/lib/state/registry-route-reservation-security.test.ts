@@ -17,11 +17,132 @@ const EXACT_ROUTE_SELECTION = {
   compatibleEndpointReasoningEffort: null,
   nimContainer: null,
 } as const;
+const HARNESS_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "e".repeat(64),
+};
+const HARNESS_PACKAGE_MIGRATION = {
+  schemaVersion: 1 as const,
+  source: "legacy-current-bundle" as const,
+  legacyAgent: null,
+  migratedAt: "2026-08-28T04:00:00.000Z",
+};
+
+function managedCheckpoint(packageFields: Record<string, unknown> = {}) {
+  const lifecycleGeneration = "123e4567-e89b-42d3-a456-426614174983";
+  const sandboxIdentityFingerprint = "a".repeat(64);
+  const policyHash = "sha256:policy-1";
+  const policyVersion = 1;
+  return {
+    schemaVersion: 1 as const,
+    state: "verified-create" as const,
+    policyAuthority: "nemoclaw-managed" as const,
+    observedPolicyAuthority: "owner-unknown" as const,
+    gatewayName: "nemoclaw",
+    gatewayPort: 8080,
+    sandboxName: "alpha",
+    lifecycleGeneration,
+    sandboxIdentityFingerprint,
+    route: "none" as const,
+    policyHash,
+    policyVersion,
+    policyCreationReceipt: {
+      schemaVersion: 1 as const,
+      origin: "sandbox-create" as const,
+      gatewayName: "nemoclaw",
+      gatewayPort: 8080,
+      sandboxName: "alpha",
+      lifecycleGeneration,
+      sandboxIdentityFingerprint,
+      policyHash,
+      policyVersion,
+    },
+    ...packageFields,
+  };
+}
 
 describe("sandbox inference route reservation security", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
+  });
+
+  it.each([
+    ["credential-shaped identity", { harnessPackage: { ...HARNESS_PACKAGE, token: "secret" } }],
+    ["partial identity", { harnessPackage: { id: "openclaw" } }],
+    ["migration without identity", { harnessPackageMigration: HARNESS_PACKAGE_MIGRATION }],
+    [
+      "identity and migration disagreement",
+      {
+        harnessPackage: { ...HARNESS_PACKAGE, id: "hermes" },
+        harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
+      },
+    ],
+  ])("rejects %s before changing a registry row", async (_case, packageFields) => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-route-package-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    try {
+      const registry = await import("./registry");
+      registry.registerSandbox({ name: "alpha", model: "safe" });
+      const before = registry.getSandbox("alpha");
+
+      expect(() =>
+        registry.restoreSandboxEntry({ name: "alpha", ...packageFields } as never),
+      ).toThrow(/invalid harness package authority/u);
+      expect(registry.getSandbox("alpha")).toEqual(before);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["partial nested identity", { harnessPackage: { id: "openclaw" } }],
+    [
+      "credential-shaped nested identity",
+      { harnessPackage: { ...HARNESS_PACKAGE, apiKey: "secret" } },
+    ],
+    [
+      "nested migration provenance",
+      { harnessPackage: HARNESS_PACKAGE, harnessPackageMigration: HARNESS_PACKAGE_MIGRATION },
+    ],
+    ["identity drift", { harnessPackage: { ...HARNESS_PACKAGE, contentDigest: "f".repeat(64) } }],
+  ])("rejects %s before recording a policy checkpoint", async (_case, packageFields) => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-policy-package-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    try {
+      const registry = await import("./registry");
+      registry.restoreSandboxEntry({ name: "alpha", harnessPackage: HARNESS_PACKAGE });
+      registry.reserveSandboxInferenceRoute("alpha", {
+        ...EXACT_ROUTE_SELECTION,
+        gatewayName: "nemoclaw",
+        reservationSessionId: "session-owner",
+      });
+      const reservation = registry.qualifyPendingSandboxCreateReservation(
+        {
+          sandboxName: "alpha",
+          gatewayName: "nemoclaw",
+          sessionId: "session-owner",
+          selection: EXACT_ROUTE_SELECTION,
+        },
+        registry.getSandbox("alpha"),
+      );
+      const before = registry.getSandbox("alpha");
+
+      expect(() =>
+        registry.recordPendingSandboxPolicyVerification(
+          reservation,
+          managedCheckpoint(packageFields) as never,
+        ),
+      ).toThrow(/(?:harness package authority|pending policy verification)/u);
+      expect(registry.getSandbox("alpha")).toEqual(before);
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
   });
 
   it("keeps a live reservation immutable until its row is explicitly abandoned (#9833)", async () => {

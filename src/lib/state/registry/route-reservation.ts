@@ -4,6 +4,10 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { normalizeInferenceSelection, type InferenceSelection } from "../../inference/selection";
+import {
+  harnessPackageIdentitiesEqual,
+  inspectHarnessPackageState,
+} from "../../harness/package-identity";
 import { isWebSearchProvider } from "../../inference/web-search/provider";
 import { normalizePendingSandboxPolicyVerification } from "./pending-policy-verification";
 import type { PendingSandboxPolicyVerification, SandboxEntry } from "./types";
@@ -15,6 +19,8 @@ const ROUTE_RESERVATION_KEYS = new Set<keyof SandboxEntry>([
   "endpointUrl",
   "gatewayName",
   "gatewayPort",
+  "harnessPackage",
+  "harnessPackageMigration",
   "hostLocalInferenceProvenance",
   "hostLocalInferenceReceipt",
   "lifecycleGeneration",
@@ -36,6 +42,42 @@ const ROUTE_RESERVATION_KEYS = new Set<keyof SandboxEntry>([
 
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
 
+function inspectRegistryHarnessPackageState(entry: SandboxEntry) {
+  const raw = entry as SandboxEntry & {
+    harnessPackage?: unknown;
+    harnessPackageMigration?: unknown;
+  };
+  return raw.harnessPackage === null || raw.harnessPackageMigration === null
+    ? ({ status: "invalid" } as const)
+    : inspectHarnessPackageState(raw.harnessPackage, raw.harnessPackageMigration);
+}
+
+function harnessPackageStatesMatch(left: SandboxEntry, right: SandboxEntry): boolean {
+  const leftState = inspectRegistryHarnessPackageState(left);
+  const rightState = inspectRegistryHarnessPackageState(right);
+  if (leftState.status === "invalid" || rightState.status === "invalid") return false;
+  if (leftState.status === "absent" || rightState.status === "absent") {
+    return leftState.status === rightState.status;
+  }
+  return (
+    harnessPackageIdentitiesEqual(leftState.harnessPackage, rightState.harnessPackage) &&
+    isDeepStrictEqual(leftState.harnessPackageMigration, rightState.harnessPackageMigration)
+  );
+}
+
+function checkpointMatchesHarnessPackage(
+  entry: SandboxEntry,
+  checkpoint: PendingSandboxPolicyVerification,
+): boolean {
+  const ownerState = inspectRegistryHarnessPackageState(entry);
+  if (ownerState.status === "invalid") return false;
+  if (ownerState.status === "absent") return checkpoint.harnessPackage === undefined;
+  return (
+    checkpoint.harnessPackage !== undefined &&
+    harnessPackageIdentitiesEqual(ownerState.harnessPackage, checkpoint.harnessPackage)
+  );
+}
+
 function verifiedCreateCheckpointClass(
   entry: SandboxEntry,
 ): "absent" | "valid" | "malformed" | "sandbox-authority" {
@@ -52,7 +94,8 @@ function verifiedCreateCheckpointClass(
     entry.gatewayName === checkpoint.gatewayName &&
     entry.gatewayPort === checkpoint.gatewayPort &&
     entry.lifecycleGeneration === checkpoint.lifecycleGeneration &&
-    entry.lifecycleLiveIdentityFingerprint === checkpoint.sandboxIdentityFingerprint
+    entry.lifecycleLiveIdentityFingerprint === checkpoint.sandboxIdentityFingerprint &&
+    checkpointMatchesHarnessPackage(entry, checkpoint)
     ? "valid"
     : "malformed";
 }
@@ -71,6 +114,9 @@ function withVerifiedCreateCheckpoint(
 }
 
 function validCarriedRouteMetadata(entry: SandboxEntry): boolean {
+  if (inspectRegistryHarnessPackageState(entry).status === "invalid") {
+    return false;
+  }
   if (
     entry.dashboardPort !== undefined &&
     entry.dashboardPort !== null &&
@@ -166,7 +212,9 @@ export function qualifyPendingSandboxCreateReservation(
     !isDeepStrictEqual(
       normalizeSandboxInferenceRouteSelection(normalizeInferenceSelection(entry)),
       normalizeSandboxInferenceRouteSelection(authority.selection),
-    )
+    ) ||
+    !validCarriedRouteMetadata(entry) ||
+    verifiedCreateCheckpointClass(entry) === "malformed"
   ) {
     throw new Error("The sandbox create route reservation is not owned by this onboarding session");
   }
@@ -345,6 +393,7 @@ export function sandboxRegistrationMatchesInferenceRouteReservation(
     entry.name === reservation.authority.sandboxName &&
     entry.gatewayName === reservation.authority.gatewayName &&
     entry.pendingRouteReservation !== true &&
+    harnessPackageStatesMatch(entry, reservation.entry) &&
     isDeepStrictEqual(
       normalizeSandboxInferenceRouteSelection(normalizeInferenceSelection(entry)),
       normalizeSandboxInferenceRouteSelection(reservation.authority.selection),
