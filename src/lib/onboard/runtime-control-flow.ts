@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type Session, updateSession } from "../state/onboard-session";
+import { inspectHarnessPackageState } from "../harness/package-identity";
 import { clearAgentScopedResumeState } from "./agent-resume-state";
 import { isDcodeAutoApprovalMode } from "./dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";
@@ -89,6 +90,33 @@ export interface SelectedAgentTransitionPlan {
   commit(): Promise<Session>;
 }
 
+function assertPackageResumeTransition(
+  resume: boolean,
+  session: Session,
+  selectedAgentName: string | null | undefined,
+): void {
+  if (!resume) return;
+  const packageState = inspectHarnessPackageState(
+    session.harnessPackage,
+    session.harnessPackageMigration,
+  );
+  if (packageState.status === "invalid") {
+    throw new Error("Resumed harness package authority is malformed");
+  }
+  if (packageState.status === "absent") return;
+
+  const selectedAgent = normalizeSandboxAgentName(selectedAgentName);
+  const recordedAgent = normalizeSandboxAgentName(session.agent);
+  if (
+    packageState.harnessPackage.id !== recordedAgent ||
+    packageState.harnessPackage.id !== selectedAgent
+  ) {
+    throw new Error(
+      `Resumed harness package '${packageState.harnessPackage.id}' cannot transition to '${selectedAgent}'`,
+    );
+  }
+}
+
 /** Plan an agent transition without changing durable state or stopping a router. */
 export function planSelectedAgentTransition(
   input: {
@@ -109,8 +137,9 @@ export function planSelectedAgentTransition(
     exitProcess: (code) => process.exit(code),
     ...overrides,
   };
-  validateSessionAgentObservability(input.session, input.selectedAgentName, deps);
   if (!input.session) throw new Error("Agent transition requires an active onboarding session.");
+  assertPackageResumeTransition(input.resume, input.session, input.selectedAgentName);
+  validateSessionAgentObservability(input.session, input.selectedAgentName, deps);
 
   const selectedAgentName = normalizeSandboxAgentName(input.selectedAgentName);
   const recordedAgentName = normalizeSandboxAgentName(input.session?.agent);

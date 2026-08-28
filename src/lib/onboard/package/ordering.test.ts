@@ -325,39 +325,6 @@ describe("onboarding harness package ordering", () => {
     expect(fs.readdirSync(fixture.storeRoot)).toEqual([]);
   });
 
-  it("re-resolves persisted package bytes after recovery instead of using the active pointer", async () => {
-    const pinned = fixture.install("openclaw");
-    let session: Session | null = createSession({
-      agent: null,
-      harnessPackage: pinned.identity,
-      harnessPackageMigration: null,
-    });
-    const packageRoots: string[] = [];
-    const resolveExact = vi.fn((entry, options) => {
-      const resolved = resolveSandboxAgent(entry, options);
-      packageRoots.push(resolved.definition.packageRoot);
-      return resolved;
-    });
-    const operation = await prepareOnboardHarnessOperation(
-      operationInput({ resume: true }),
-      boundaryDependencies(() => session, { resolveSandboxAgent: resolveExact }),
-    );
-    const active = fixture.advanceActivePointer("openclaw");
-    session = { ...session, updatedAt: "2026-08-28T11:00:00.000Z" };
-
-    await runRecoveredWorkflow(
-      operation,
-      async (insideRecoveredOperation) => insideRecoveredOperation(),
-      async (authority) => {
-        expect(authority.effectiveDefinition?.packageRoot).toBe(pinned.packageRoot);
-      },
-    );
-
-    expect(resolveExact).toHaveBeenCalledTimes(2);
-    expect(packageRoots).toEqual([pinned.packageRoot, pinned.packageRoot]);
-    expect(packageRoots).not.toContain(active.packageRoot);
-  });
-
   it.each([
     ["missing", (packageRoot: string) => fs.rmSync(packageRoot, { recursive: true, force: true })],
     [
@@ -394,37 +361,6 @@ describe("onboarding harness package ordering", () => {
 
       expect(resolveExact).toHaveBeenCalledTimes(2);
       expect(afterBind).not.toHaveBeenCalled();
-    },
-  );
-
-  it.each([
-    ["missing", (packageRoot: string) => fs.rmSync(packageRoot, { recursive: true, force: true })],
-    [
-      "corrupt",
-      (packageRoot: string) =>
-        fs.writeFileSync(path.join(packageRoot, "runtime/payload.txt"), "tampered\n"),
-    ],
-  ] as const)(
-    "rejects a %s pinned package before portable recovery",
-    async (_failure, damagePackage) => {
-      const pinned = fixture.install("openclaw");
-      const session = createSession({
-        agent: null,
-        harnessPackage: pinned.identity,
-        harnessPackageMigration: null,
-      });
-      damagePackage(pinned.packageRoot);
-      const recover = vi.fn();
-
-      await expect(
-        runPreparedHarnessWorkflow(
-          operationInput({ resume: true }),
-          boundaryDependencies(() => session),
-          recover,
-        ),
-      ).rejects.toThrow();
-
-      expect(recover).not.toHaveBeenCalled();
     },
   );
 

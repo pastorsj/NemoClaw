@@ -3577,7 +3577,7 @@ module.exports = {
   startDockerDriverGateway,
   findAvailableDashboardPort,
   startGatewayForRecovery,
-  ...{ openshellArgv, runOpenshell, runCaptureOpenshell, sleepSeconds },
+  ...{ onboardPackageBoundary, openshellArgv, runOpenshell, runCaptureOpenshell, sleepSeconds },
   agentSupportsWebSearch,
   agentSupportsWebSearchProvider,
   createSetupInference,

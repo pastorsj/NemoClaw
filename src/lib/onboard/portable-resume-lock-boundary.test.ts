@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { HarnessPackageFixture } from "../../../test/helpers/harness-packages";
 import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 
 const originalEnv = { ...process.env };
@@ -19,6 +20,8 @@ let socketActivationMarker: string;
 let preparationObservedLock = false;
 let preparationObservedHostFence = false;
 let activeLockFile = "";
+let harnessFixture: HarnessPackageFixture;
+let installedOpenclaw: ReturnType<HarnessPackageFixture["install"]>;
 let boundaryModules: Awaited<ReturnType<typeof loadBoundaryModules>>;
 const preparePortableHost = vi.fn((): never => {
   fs.writeFileSync(configWriteMarker, "prepared", { mode: 0o600 });
@@ -35,6 +38,9 @@ beforeAll(async () => {
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
   };
   try {
+    const { createHarnessPackageFixture } = await import("../../../test/helpers/harness-packages");
+    harnessFixture = createHarnessPackageFixture();
+    installedOpenclaw = harnessFixture.install("openclaw");
     boundaryModules = await loadBoundaryModules();
   } finally {
     process.env = { ...originalEnv };
@@ -42,6 +48,16 @@ beforeAll(async () => {
 }, 30_000);
 
 beforeEach(() => {
+  vi.spyOn(
+    boundaryModules.onboardModule.onboardPackageBoundary,
+    "prepareOnboardHarnessOperation",
+  ).mockImplementation((input, dependencies) =>
+    boundaryModules.prepareHarnessOperation(input, {
+      ...dependencies,
+      getBundledRoot: () => harnessFixture.bundledRoot,
+      getStoreRoot: () => harnessFixture.storeRoot,
+    }),
+  );
   for (const directory of [".nemoclaw", ".nemoclaw/gateways/19093"]) {
     fs.mkdirSync(path.join(tempHome, directory), { mode: 0o700, recursive: true });
     fs.chmodSync(path.join(tempHome, directory), 0o700);
@@ -68,6 +84,7 @@ afterEach(() => {
 
 afterAll(() => {
   fs.rmSync(tempHome, { recursive: true, force: true });
+  harnessFixture.cleanup();
 });
 
 async function loadBoundaryModules() {
@@ -77,19 +94,37 @@ async function loadBoundaryModules() {
   const onboardModule = (await import("../onboard")) as {
     onboard(options?: import("./types").OnboardOptions): Promise<void>;
     onboardSession: typeof import("../state/onboard-session");
+    onboardPackageBoundary: typeof import("./package/boundary");
   };
+  const prepareHarnessOperation = onboardModule.onboardPackageBoundary.prepareOnboardHarnessOperation;
   const checkpointMigration = await import("../state/onboard-checkpoint-migrate");
   const resumeIntent = await import("./resume/portable-resume-intent");
   const retirement = await import("../state/portable-uninstall-retirement");
   return {
     command,
     onboardModule,
+    prepareHarnessOperation,
     session,
     checkpointMigration,
     resumeIntent,
     retirement,
   };
 }
+
+function currentUserPortableAuthority() {
+  const currentUser = os.userInfo();
+  return {
+    schemaVersion: 1 as const,
+    kind: "podman" as const,
+    ownership: "current-user" as const,
+    uid: currentUser.uid,
+    homeDir: currentUser.homedir,
+    configHome: path.join(currentUser.homedir, ".config"),
+    runtimeDir: `/run/user/${String(currentUser.uid)}`,
+    socketPath: `/run/user/${String(currentUser.uid)}/podman/podman.sock`,
+  };
+}
+
 function replacementReentryState(profile: "default" | "portable", phase: string) {
   const { checkpointMigration, retirement, session } = boundaryModules;
   const stateDir = path.join(tempHome, ".nemoclaw");
@@ -231,18 +266,13 @@ describe("portable resume command lock boundary", () => {
     const { command, onboardModule, session, checkpointMigration, resumeIntent } = boundaryModules;
     expect(onboardModule.onboardSession.SESSION_FILE).toBe(session.SESSION_FILE);
     expect(onboardModule.onboardSession.LOCK_FILE).toBe(session.LOCK_FILE);
-    const currentUser = os.userInfo();
-    const authority = {
-      schemaVersion: 1 as const,
-      kind: "podman" as const,
-      ownership: "current-user" as const,
-      uid: currentUser.uid,
-      homeDir: currentUser.homedir,
-      configHome: path.join(currentUser.homedir, ".config"),
-      runtimeDir: `/run/user/${String(currentUser.uid)}`,
-      socketPath: `/run/user/${String(currentUser.uid)}/podman/podman.sock`,
-    };
-    const stored = session.createSession({ sessionId: "portable-lock-race" });
+    const authority = currentUserPortableAuthority();
+    const stored = session.createSession({
+      agent: null,
+      harnessPackage: installedOpenclaw.identity,
+      harnessPackageMigration: null,
+      sessionId: "portable-lock-race",
+    });
     stored.status = "failed";
     stored.resumable = true;
     stored.checkpoint = checkpointMigration.deriveCheckpointFromSession(stored, {
@@ -313,6 +343,97 @@ describe("portable resume command lock boundary", () => {
     expect(preparationObservedHostFence).toBe(true);
     expect(fs.readFileSync(configWriteMarker, "utf8")).toBe("prepared");
     expect(fs.readFileSync(socketActivationMarker, "utf8")).toBe("activated");
+    expect(fs.existsSync(session.LOCK_FILE)).toBe(false);
+  });
+
+  it.each([
+    ["--agent", { agent: "hermes", resume: true }, {}],
+    ["NEMOCLAW_AGENT", { resume: true }, { NEMOCLAW_AGENT: "hermes" }],
+  ] as const)(
+    "rejects a different harness from %s before real portable host preparation",
+    async (_source, flags, environmentOverlay) => {
+      const { checkpointMigration, command, onboardModule, resumeIntent, session } =
+        boundaryModules;
+      fs.rmSync(path.join(tempHome, ".nemoclaw"), { recursive: true, force: true });
+      delete process.env.NEMOCLAW_AGENT;
+      Object.assign(process.env, environmentOverlay);
+      const stored = session.createSession({
+        agent: null,
+        harnessPackage: installedOpenclaw.identity,
+        harnessPackageMigration: null,
+        sessionId: "portable-package-selector-mismatch",
+      });
+      stored.status = "failed";
+      stored.resumable = true;
+      stored.checkpoint = checkpointMigration.deriveCheckpointFromSession(stored, {
+        profile: "portable",
+        runtimeAuthority: currentUserPortableAuthority(),
+      });
+      session.saveSession(stored);
+      const sessionBytes = fs.readFileSync(session.SESSION_FILE);
+
+      await expect(
+        command.runOnboardCommand({
+          flags,
+          env: process.env,
+          loadPortableInferenceDescriptor: async () => null,
+          resolveResumeIntent: (intent) =>
+            resumeIntent.resolveOnboardResumeIntent({
+              ...intent,
+              sessionFile: session.SESSION_FILE,
+            }),
+          runOnboard: (options) => runWithObservedPreparation(onboardModule, options),
+        }),
+      ).rejects.toThrow("does not match resumed harness 'openclaw'");
+
+      expect(preparePortableHost).not.toHaveBeenCalled();
+      expect(fs.existsSync(configWriteMarker)).toBe(false);
+      expect(fs.existsSync(socketActivationMarker)).toBe(false);
+      expect(fs.readFileSync(session.SESSION_FILE)).toEqual(sessionBytes);
+      expect(fs.existsSync(session.LOCK_FILE)).toBe(false);
+    },
+  );
+
+  it("commits direct legacy package authority inside the real portable resume boundary", async () => {
+    const { checkpointMigration, command, onboardModule, resumeIntent, session } = boundaryModules;
+    fs.rmSync(path.join(tempHome, ".nemoclaw"), { recursive: true, force: true });
+    const stored = session.createSession({
+      agent: null,
+      sessionId: "portable-legacy-package-migration",
+    });
+    stored.status = "failed";
+    stored.resumable = true;
+    stored.checkpoint = checkpointMigration.deriveCheckpointFromSession(stored, {
+      profile: "portable",
+      runtimeAuthority: currentUserPortableAuthority(),
+    });
+    session.saveSession(stored);
+    expect(session.loadSession()?.harnessPackage).toBeNull();
+
+    await expect(
+      command.runOnboardCommand({
+        flags: { resume: true },
+        env: process.env,
+        loadPortableInferenceDescriptor: async () => null,
+        resolveResumeIntent: (intent) =>
+          resumeIntent.resolveOnboardResumeIntent({
+            ...intent,
+            sessionFile: session.SESSION_FILE,
+          }),
+        runOnboard: (options) => runWithObservedPreparation(onboardModule, options),
+      }),
+    ).rejects.toThrow(STOP_AFTER_PREPARATION);
+
+    const migrated = session.loadSession();
+    expect(preparePortableHost).toHaveBeenCalledOnce();
+    expect(preparationObservedLock).toBe(true);
+    expect(preparationObservedHostFence).toBe(true);
+    expect(migrated?.harnessPackage).toEqual(installedOpenclaw.identity);
+    expect(migrated?.harnessPackageMigration).toMatchObject({
+      schemaVersion: 1,
+      source: "legacy-current-bundle",
+      legacyAgent: null,
+    });
     expect(fs.existsSync(session.LOCK_FILE)).toBe(false);
   });
 
