@@ -255,9 +255,14 @@ describe("MCP lifecycle lock acquisition", () => {
       await fs.promises.rm(targetPath);
       writeOwnerAt(String(targetPath), "replacement-generation");
     });
+    let tick = 0;
 
     await expect(
-      withMcpLifecycleLock(SANDBOX_NAME, operation, { ...options(), timeoutMs: 10 }),
+      withMcpLifecycleLock(SANDBOX_NAME, operation, {
+        ...options(),
+        timeoutMs: 100,
+        monotonicNow: () => tick++,
+      }),
     ).rejects.toThrow("Timed out waiting for the sandbox mutation lock");
 
     expect(operation).not.toHaveBeenCalled();
@@ -289,9 +294,14 @@ describe("MCP lifecycle lock acquisition", () => {
       fs.rmSync(targetPath);
       writeOwnerAt(String(targetPath), "replacement-generation");
     });
+    let tick = 0;
 
     expect(() =>
-      withMcpLifecycleLockSync(SANDBOX_NAME, operation, { ...options(), timeoutMs: 10 }),
+      withMcpLifecycleLockSync(SANDBOX_NAME, operation, {
+        ...options(),
+        timeoutMs: 100,
+        monotonicNow: () => tick++,
+      }),
     ).toThrow("Timed out waiting for sandbox mutation lock");
 
     expect(operation).not.toHaveBeenCalled();

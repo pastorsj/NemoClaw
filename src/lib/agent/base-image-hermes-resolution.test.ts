@@ -58,7 +58,21 @@ let trackedRef = "";
 let testRoot = "";
 
 function stageHermesSandbox() {
-  const result = createAgentSandbox(makeAgent(), { rootDir: testRoot });
+  const sourceAgent = makeAgent();
+  const packageRoot = fs.realpathSync(testRoot);
+  const dockerfileBasePath = path.join(packageRoot, "Dockerfile.base");
+  const dockerfilePath = path.join(packageRoot, "Dockerfile");
+  fs.copyFileSync(sourceAgent.dockerfileBasePath ?? "", dockerfileBasePath);
+  fs.copyFileSync(sourceAgent.dockerfilePath ?? "", dockerfilePath);
+  const result = createAgentSandbox(
+    makeAgent({
+      agentDir: packageRoot,
+      dockerfileBasePath,
+      dockerfilePath,
+      manifestPath: path.join(packageRoot, "manifest.yaml"),
+      packageRoot,
+    }),
+  );
   createdBuildContexts.push(result.buildCtx);
   return result;
 }
