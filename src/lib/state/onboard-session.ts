@@ -16,6 +16,11 @@ import { isErrnoException } from "../core/errno";
 import { isObjectRecord, type JsonObject, type JsonValue } from "../core/json-types";
 import { GATEWAY_PORT } from "../core/ports";
 import {
+  inspectHarnessPackageState,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../harness/package-identity";
+import {
   parseServingProfileProvenance,
   type ServingProfileProvenance,
 } from "../inference/serving/profile-provenance";
@@ -80,6 +85,7 @@ export const SESSION_VERSION = 1;
 export const MACHINE_SNAPSHOT_VERSION = 1;
 export const CANCELLATION_RECOVERY_STATUS = "recovery_required";
 const INVALID_HOST_MOUNT_SESSIONS = new WeakSet<object>();
+const INVALID_HARNESS_PACKAGE_SESSIONS = new WeakSet<object>();
 export const SESSION_DIR = nemoclawStateRoot(process.env.HOME || "/tmp", GATEWAY_PORT);
 export const SESSION_FILE = path.join(SESSION_DIR, "onboard-session.json");
 export const LOCK_FILE = path.join(SESSION_DIR, "onboard.lock");
@@ -88,6 +94,7 @@ const SAFE_VLLM_INSTALL_MODEL = /^[A-Za-z0-9._:/-]+$/;
 
 export class InvalidPersistedPolicyAuthorityError extends Error {}
 export class InvalidPersistedApfInterceptorIntentError extends Error {}
+export class InvalidPersistedHarnessPackageError extends Error {}
 
 // Session-specific aliases for the shared JSON types.
 type SessionJsonValue = JsonValue;
@@ -229,6 +236,10 @@ export interface Session {
   failure: SessionFailure | null;
   cancellationRecovery: SessionCancellationRecovery | null;
   agent: string | null;
+  /** Exact immutable agent-runtime package authority; null preserves legacy and candidate state. */
+  harnessPackage: HarnessPackageIdentity | null;
+  /** Session-owned audit provenance for an explicit standard legacy migration. */
+  harnessPackageMigration: HarnessPackageMigration | null;
   sandboxName: string | null;
   provider: string | null;
   model: string | null;
@@ -581,6 +592,28 @@ function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
+function structurallyInvalidHarnessPackageState(source: unknown): boolean {
+  if (!isObject(source)) return false;
+  const inspected = inspectHarnessPackageState(
+    hasOwn(source, "harnessPackage") ? source.harnessPackage : undefined,
+    hasOwn(source, "harnessPackageMigration") ? source.harnessPackageMigration : undefined,
+  );
+  return inspected.status === "invalid";
+}
+
+export function hasInvalidSessionHarnessPackage(session: unknown): boolean {
+  return (
+    (typeof session === "object" &&
+      session !== null &&
+      INVALID_HARNESS_PACKAGE_SESSIONS.has(session)) ||
+    structurallyInvalidHarnessPackageState(session)
+  );
+}
+
+function preserveInvalidSessionHarnessPackage(source: unknown, target: object): void {
+  if (hasInvalidSessionHarnessPackage(source)) INVALID_HARNESS_PACKAGE_SESSIONS.add(target);
+}
+
 function isValidCheckpointedSandboxName(value: unknown): boolean {
   return (
     typeof value === "string" && value.length <= NAME_MAX_LENGTH && NAME_VALID_PATTERN.test(value)
@@ -898,6 +931,10 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     ...(overrides.steps ?? {}),
   };
   const policyAuthority = readPolicyAuthority(overrides.policyAuthority);
+  const harnessPackageState = inspectHarnessPackageState(
+    overrides.harnessPackage,
+    overrides.harnessPackageMigration,
+  );
   const session: Session = {
     version: SESSION_VERSION,
     sessionId,
@@ -913,6 +950,10 @@ export function createSession(overrides: Partial<Session> = {}): Session {
       overrides.cancellationRecovery as SessionJsonValue | undefined,
     ),
     agent: overrides.agent ?? null,
+    harnessPackage:
+      harnessPackageState.status === "valid" ? harnessPackageState.harnessPackage : null,
+    harnessPackageMigration:
+      harnessPackageState.status === "valid" ? harnessPackageState.harnessPackageMigration : null,
     sandboxName: overrides.sandboxName ?? null,
     provider: overrides.provider ?? null,
     model: overrides.model ?? null,
@@ -973,6 +1014,7 @@ export function createSession(overrides: Partial<Session> = {}): Session {
   };
   preserveInvalidSessionToolDisclosure(overrides, session);
   preserveInvalidSessionHostMounts(overrides, session);
+  preserveInvalidSessionHarnessPackage(overrides, session);
   return session;
 }
 
@@ -1052,6 +1094,11 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     startedAt: readString(data.startedAt) ?? undefined,
     updatedAt: readString(data.updatedAt) ?? undefined,
     agent: readString(data.agent),
+    harnessPackage: data.harnessPackage as HarnessPackageIdentity | null | undefined,
+    harnessPackageMigration: data.harnessPackageMigration as
+      | HarnessPackageMigration
+      | null
+      | undefined,
     sandboxName: readString(data.sandboxName),
     provider: readString(data.provider),
     model: readString(data.model),
@@ -1163,6 +1210,7 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
   }
   preserveInvalidSessionToolDisclosure(data, normalized);
   preserveInvalidSessionHostMounts(data, normalized);
+  preserveInvalidSessionHarnessPackage(data, normalized);
 
   return normalized;
 }
@@ -1196,7 +1244,17 @@ function serializeSessionForDisk(session: Session): Record<string, unknown> {
 }
 
 export function saveSession(session: Session): Session {
+  if (hasInvalidSessionHarnessPackage(session)) {
+    throw new InvalidPersistedHarnessPackageError(
+      "Refusing to save the onboarding session: its harness package authority is invalid.",
+    );
+  }
   const normalized = normalizeSession(session) || createSession();
+  if (hasInvalidSessionHarnessPackage(normalized)) {
+    throw new InvalidPersistedHarnessPackageError(
+      "Refusing to save the onboarding session: its harness package authority is invalid.",
+    );
+  }
   normalized.updatedAt = new Date().toISOString();
   const directory = openPinnedSessionDirectory();
   const tmpFile = path.join(

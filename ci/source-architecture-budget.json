@@ -54,6 +54,7 @@
       "src/lib/onboard/machine/handlers/sandbox.ts": 21,
       "src/lib/policy/index.ts": 23,
       "src/lib/sandbox/config.ts": 22,
+      "src/lib/state/onboard-session.ts": 21,
       "src/lib/shields/index.ts": 25
     }
   },

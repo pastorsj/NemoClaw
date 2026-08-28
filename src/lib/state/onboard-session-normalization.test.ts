@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import {
   createSession,
   filterSafeUpdates,
+  hasInvalidSessionHarnessPackage,
   normalizeSession,
+  saveSession,
   summarizeForDebug,
 } from "./onboard-session";
 
@@ -21,6 +23,72 @@ function requireNormalizedSession(legacy: LegacySession) {
 }
 
 describe("onboard session normalization", () => {
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: "hermes",
+    packageVersion: "2.0.0",
+    contractVersion: 1 as const,
+    contentDigest: "b".repeat(64),
+  };
+  const harnessPackageMigration = {
+    schemaVersion: 1 as const,
+    source: "legacy-current-bundle" as const,
+    legacyAgent: "hermes",
+    migratedAt: "2026-08-28T02:00:00.000Z",
+  };
+
+  it.each([null, "openclaw", "dcode", "pi", "nemocua"])(
+    "keeps legacy package absence for agent=$agent without inference",
+    (agent) => {
+      const legacy = createSession({ agent }) as Partial<ReturnType<typeof createSession>>;
+      delete legacy.harnessPackage;
+      delete legacy.harnessPackageMigration;
+      const normalized = requireNormalizedSession(legacy as LegacySession);
+
+      expect(normalized.harnessPackage).toBeNull();
+      expect(normalized.harnessPackageMigration).toBeNull();
+      expect(hasInvalidSessionHarnessPackage(normalized)).toBe(false);
+    },
+  );
+
+  it("normalizes valid identity and matching Session-owned migration provenance", () => {
+    const normalized = requireNormalizedSession(
+      createSession({ harnessPackage, harnessPackageMigration }),
+    );
+
+    expect(normalized.harnessPackage).toEqual(harnessPackage);
+    expect(normalized.harnessPackageMigration).toEqual(harnessPackageMigration);
+    expect(hasInvalidSessionHarnessPackage(normalized)).toBe(false);
+  });
+
+  it.each([
+    {
+      harnessPackage: { id: "hermes" },
+      harnessPackageMigration: null,
+    },
+    {
+      harnessPackage: null,
+      harnessPackageMigration,
+    },
+    {
+      harnessPackage,
+      harnessPackageMigration: { ...harnessPackageMigration, legacyAgent: "openclaw" },
+    },
+    {
+      harnessPackage: { ...harnessPackage, apiKey: "secret" },
+      harnessPackageMigration: null,
+    },
+  ])("preserves an invalid-state signal for malformed present package authority", (fields) => {
+    const raw = { ...createSession(), ...fields };
+    const normalized = requireNormalizedSession(raw as unknown as LegacySession);
+
+    expect(normalized.harnessPackage).toBeNull();
+    expect(normalized.harnessPackageMigration).toBeNull();
+    expect(hasInvalidSessionHarnessPackage(normalized)).toBe(true);
+    expect(() => saveSession(raw as never)).toThrow(/harness package authority is invalid/u);
+    expect(() => saveSession(normalized)).toThrow(/harness package authority is invalid/u);
+  });
+
   it("preserves valid recovery-only cancellation state (#9833)", () => {
     const cancellationRecovery = {
       reason: "cancelled_after_sandbox_creation" as const,

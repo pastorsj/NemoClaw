@@ -276,9 +276,10 @@ describe("onboard session", () => {
     session.markStepStarted("provider_selection");
     session.updateSession((current) => {
       current.checkpoint = {
-        schemaVersion: 4,
+        schemaVersion: 5,
         profile: { kind: "selected", value: "default" },
         runtimeAuthority: { kind: "unset" },
+        harnessPackage: null,
         sessionId: current.sessionId,
         machineState: "init",
         updatedAt: new Date().toISOString(),
@@ -293,7 +294,6 @@ describe("onboard session", () => {
       };
       return current;
     });
-
     const rejected = session.markStepRejected("provider_selection");
 
     expect(rejected).toMatchObject({
