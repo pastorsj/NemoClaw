@@ -24,6 +24,11 @@ export interface LockedOnboardRuntimePreparation {
   readonly portableRuntimeContext: PortableOnboardRuntimeContext | null;
 }
 
+export interface LockedOnboardRuntimePreparationHooks {
+  /** Bind exact onboarding authority before consent or host-runtime writes. */
+  readonly beforeRuntimeEffects?: () => Promise<void> | void;
+}
+
 async function ensureNoticeAccepted(
   options: OnboardOptions,
   nonInteractive: boolean,
@@ -130,6 +135,7 @@ export async function prepare(
     readonly checkpoint?: OnboardCheckpoint | null;
     readonly metadata?: { readonly hostMounts?: OnboardOptions["hostMounts"] };
   } | null,
+  hooks: LockedOnboardRuntimePreparationHooks = {},
 ): Promise<LockedOnboardRuntimePreparation> {
   const storedSession = resume ? loadSession() : null;
   const { checkpointProfile, expectedPortableAuthority } = resolveCheckpointProfile(
@@ -143,6 +149,7 @@ export async function prepare(
   );
   let environmentScope: PortableOnboardEnvironmentScope | null = null;
   try {
+    await hooks.beforeRuntimeEffects?.();
     // Fresh runs obtain consent before bounded host preparation writes. Resumes
     // requalify recorded authority first, before any other write.
     if (!resume) await ensureNoticeAccepted(options, nonInteractive);

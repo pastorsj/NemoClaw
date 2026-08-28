@@ -53,6 +53,18 @@ const SERVING_PROFILE_PROVENANCE = {
   estimatedModelDownloadBytes: null,
 } as const;
 
+const OPENCLAW_HARNESS_BINDING = Object.freeze({
+  kind: "package" as const,
+  recordedAgent: null,
+  harnessPackage: Object.freeze({
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "0.1.0",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  }),
+});
+
 function createDeps(
   initialSession: Session | null = null,
   overrides: Partial<OnboardSessionBootstrapDeps> = {},
@@ -161,6 +173,7 @@ describe("prepareOnboardSession", () => {
         {
           resume: false,
           fresh: true,
+          freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
           recreateSandboxRequested: true,
           apfInterceptorRequested: true,
           requestedFromDockerfile: null,
@@ -186,6 +199,7 @@ describe("prepareOnboardSession", () => {
         {
           resume: false,
           fresh: true,
+          freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
           apfInterceptorRequested: true,
           checkpointProfile: "portable",
           requestedFromDockerfile: null,
@@ -206,6 +220,152 @@ describe("prepareOnboardSession", () => {
     expect(deps.saveSession).not.toHaveBeenCalled();
   });
 
+  it("rejects a fresh session without selected harness authority before clearing state", async () => {
+    const existing = createSession({ sessionId: "old-session" });
+    const { deps, getSession } = createDeps(existing);
+
+    await expect(
+      prepareOnboardSession(
+        {
+          resume: false,
+          fresh: true,
+          requestedFromDockerfile: null,
+          requestedSandboxName: null,
+          cannotPrompt: true,
+          nonInteractive: true,
+        },
+        deps,
+      ),
+    ).rejects.toThrow("requires a selected harness package");
+
+    expect(deps.clearSession).not.toHaveBeenCalled();
+    expect(deps.createSession).not.toHaveBeenCalled();
+    expect(deps.saveSession).not.toHaveBeenCalled();
+    expect(getSession()?.sessionId).toBe("old-session");
+  });
+
+  it("rejects malformed fresh package identity before clearing state", async () => {
+    const existing = createSession({ sessionId: "old-session" });
+    const { deps, getSession } = createDeps(existing);
+
+    await expect(
+      prepareOnboardSession(
+        {
+          resume: false,
+          fresh: true,
+          freshHarnessBinding: {
+            ...OPENCLAW_HARNESS_BINDING,
+            harnessPackage: {
+              ...OPENCLAW_HARNESS_BINDING.harnessPackage,
+              contentDigest: "malformed",
+            },
+          },
+          requestedFromDockerfile: null,
+          requestedSandboxName: null,
+          cannotPrompt: true,
+          nonInteractive: true,
+        },
+        deps,
+      ),
+    ).rejects.toThrow("package authority is malformed");
+
+    expect(deps.clearSession).not.toHaveBeenCalled();
+    expect(deps.createSession).not.toHaveBeenCalled();
+    expect(deps.saveSession).not.toHaveBeenCalled();
+    expect(getSession()?.sessionId).toBe("old-session");
+  });
+
+  it("rejects fabricated package authority for a qualified fresh candidate", async () => {
+    const existing = createSession({ sessionId: "old-session" });
+    const { deps, getSession } = createDeps(existing);
+
+    await expect(
+      prepareOnboardSession(
+        {
+          resume: false,
+          fresh: true,
+          freshHarnessBinding: {
+            kind: "qualified-agent",
+            recordedAgent: "pi",
+            harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
+          } as never,
+          requestedFromDockerfile: null,
+          requestedSandboxName: null,
+          cannotPrompt: true,
+          nonInteractive: true,
+        },
+        deps,
+      ),
+    ).rejects.toThrow("must remain package-free");
+
+    expect(deps.clearSession).not.toHaveBeenCalled();
+    expect(deps.createSession).not.toHaveBeenCalled();
+    expect(deps.saveSession).not.toHaveBeenCalled();
+    expect(getSession()?.sessionId).toBe("old-session");
+  });
+
+  it("rejects a non-canonical qualified fresh candidate name before clearing state", async () => {
+    const existing = createSession({ sessionId: "old-session" });
+    const { deps, getSession } = createDeps(existing);
+
+    await expect(
+      prepareOnboardSession(
+        {
+          resume: false,
+          fresh: true,
+          freshHarnessBinding: {
+            kind: "qualified-agent",
+            recordedAgent: "Pi Candidate",
+            harnessPackage: null,
+          },
+          requestedFromDockerfile: null,
+          requestedSandboxName: null,
+          cannotPrompt: true,
+          nonInteractive: true,
+        },
+        deps,
+      ),
+    ).rejects.toThrow("must use a canonical harness name");
+
+    expect(deps.clearSession).not.toHaveBeenCalled();
+    expect(deps.createSession).not.toHaveBeenCalled();
+    expect(deps.saveSession).not.toHaveBeenCalled();
+    expect(getSession()?.sessionId).toBe("old-session");
+  });
+
+  it.each(["foo", "openclaw", "hermes"])(
+    "rejects non-qualified canonical fresh harness name %s before effects",
+    async (recordedAgent) => {
+      const existing = createSession({ sessionId: "old-session" });
+      const { deps, getSession } = createDeps(existing);
+
+      await expect(
+        prepareOnboardSession(
+          {
+            resume: false,
+            fresh: true,
+            freshHarnessBinding: {
+              kind: "qualified-agent",
+              recordedAgent,
+              harnessPackage: null,
+            },
+            requestedFromDockerfile: null,
+            requestedSandboxName: null,
+            cannotPrompt: true,
+            nonInteractive: true,
+          },
+          deps,
+        ),
+      ).rejects.toThrow("is not a qualified repository harness");
+
+      expect(deps.requireHostMountRuntimeSupport).not.toHaveBeenCalled();
+      expect(deps.clearSession).not.toHaveBeenCalled();
+      expect(deps.createSession).not.toHaveBeenCalled();
+      expect(deps.saveSession).not.toHaveBeenCalled();
+      expect(getSession()?.sessionId).toBe("old-session");
+    },
+  );
+
   it("creates a fresh session and records the resolved Dockerfile", async () => {
     const existing = createSession({ sessionId: "old-session" });
     const { deps, getSession } = createDeps(existing);
@@ -214,6 +374,7 @@ describe("prepareOnboardSession", () => {
       {
         resume: false,
         fresh: true,
+        freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
         requestedFromDockerfile: "Dockerfile.custom",
         requestedSandboxName: null,
         cannotPrompt: false,
@@ -239,7 +400,53 @@ describe("prepareOnboardSession", () => {
     expect(result.session?.observabilityEnabled).toBe(true);
     expect(result.session?.observabilityRequestedExplicitly).toBe(true);
     expect(result.session?.apfInterceptorRequested).toBe(true);
+    expect(result.session).toMatchObject({
+      agent: null,
+      harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
+      harnessPackageMigration: null,
+    });
+    expect(deps.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: null,
+        harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
+        harnessPackageMigration: null,
+      }),
+    );
+    expect(deps.saveSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent: null,
+        harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
+        harnessPackageMigration: null,
+      }),
+    );
     expect(getSession()?.sessionId).not.toBe("old-session");
+  });
+
+  it("keeps a qualified candidate session package-free", async () => {
+    const { deps } = createDeps();
+
+    const result = await prepareOnboardSession(
+      {
+        resume: false,
+        fresh: false,
+        freshHarnessBinding: {
+          kind: "qualified-agent",
+          recordedAgent: "pi",
+          harnessPackage: null,
+        },
+        requestedFromDockerfile: null,
+        requestedSandboxName: null,
+        cannotPrompt: true,
+        nonInteractive: true,
+      },
+      deps,
+    );
+
+    expect(result.session).toMatchObject({
+      agent: "pi",
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
   });
 
   it("rejects unsupported fresh-session host mounts before changing session state", async () => {
@@ -257,6 +464,7 @@ describe("prepareOnboardSession", () => {
         {
           resume: false,
           fresh: true,
+          freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
           requestedFromDockerfile: null,
           requestedSandboxName: null,
           requestedHostMounts: mounts,
@@ -289,6 +497,7 @@ describe("prepareOnboardSession", () => {
       {
         resume: false,
         fresh: false,
+        freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
         requestedFromDockerfile: null,
         requestedSandboxName: null,
         cannotPrompt: true,
@@ -322,6 +531,7 @@ describe("prepareOnboardSession", () => {
       {
         resume: false,
         fresh: false,
+        freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
         requestedFromDockerfile: null,
         requestedSandboxName: "profile-test",
         cannotPrompt: true,
@@ -341,6 +551,7 @@ describe("prepareOnboardSession", () => {
       {
         resume: false,
         fresh: false,
+        freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
         requestedFromDockerfile: null,
         requestedSandboxName: "gpu-test",
         cannotPrompt: true,
@@ -364,6 +575,7 @@ describe("prepareOnboardSession", () => {
       {
         resume: false,
         fresh: false,
+        freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
         requestedFromDockerfile: null,
         requestedSandboxName: "my-assistant",
         cannotPrompt: true,
@@ -384,6 +596,7 @@ describe("prepareOnboardSession", () => {
       {
         resume: false,
         fresh: false,
+        freshHarnessBinding: OPENCLAW_HARNESS_BINDING,
         requestedFromDockerfile: null,
         requestedSandboxName: null,
         cannotPrompt: false,

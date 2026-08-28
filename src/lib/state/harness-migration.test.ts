@@ -435,6 +435,34 @@ describe("legacy harness migration", () => {
     expect(() => prepareSession(harness)).toThrow("same-owner package authorities conflict");
   });
 
+  it("rejects a changed session agent even when desired package authority appeared", () => {
+    const harness = new MigrationHarness(legacySession(null), []);
+    const prepared = prepareSession(harness);
+    harness.session = {
+      ...harness.session!,
+      agent: "hermes",
+      harnessPackage: prepared.harnessPackage,
+      harnessPackageMigration: prepared.harnessPackageMigration,
+    };
+
+    expect(() => reconcile(harness, prepared)).toThrow(
+      "onboarding session compatibility agent changed",
+    );
+  });
+
+  it("rejects a changed registry agent even when desired package authority appeared", () => {
+    const harness = new MigrationHarness(null, [legacyRegistryEntry("owner", null)]);
+    const prepared = prepareRegistry(harness, "owner");
+    harness.registry.sandboxes.owner = {
+      ...harness.registry.sandboxes.owner!,
+      agent: "hermes",
+      harnessPackage: prepared.harnessPackage,
+      harnessPackageMigration: prepared.harnessPackageMigration,
+    };
+
+    expect(() => reconcile(harness, prepared)).toThrow("registry compatibility agent changed");
+  });
+
   it.each(["pi", "nemocua", "unknown-agent"])("rejects non-standard legacy agent %s", (agent) => {
     const harness = new MigrationHarness(legacySession(agent), [
       legacyRegistryEntry("owner", agent),

@@ -8,12 +8,17 @@ import {
   CHECKPOINT_SCHEMA_VERSION,
   type OnboardCheckpoint,
 } from "../../state/onboard-checkpoint-types";
+import { ensureUsageNoticeConsent } from "../usage-notice";
 import { prepare } from "./locked-runtime";
 
 vi.mock("../session-bootstrap", async (importOriginal) => {
   const original = await importOriginal<typeof import("../session-bootstrap")>();
   return { ...original, assertLockedResumeIntentSnapshot: vi.fn() };
 });
+
+vi.mock("../usage-notice", () => ({
+  ensureUsageNoticeConsent: vi.fn(async () => true),
+}));
 
 const portableAuthority = {
   schemaVersion: 1 as const,
@@ -44,6 +49,40 @@ const portableCheckpointWithoutAuthority: OnboardCheckpoint = {
 };
 
 describe("locked onboarding runtime preparation", () => {
+  it("runs the authority hook before consent and portable host effects", async () => {
+    const events: string[] = [];
+    vi.mocked(ensureUsageNoticeConsent).mockImplementationOnce(async () => {
+      events.push("consent");
+      return true;
+    });
+    const preparePortableHost = vi.fn(() => {
+      events.push("portable-host");
+      return {
+        authority: portableAuthority,
+        socketAuthority: null,
+        containersConf: "/home/alice/.config/nemoclaw/portable/containers.conf",
+      };
+    });
+
+    const prepared = await prepare(
+      {
+        experimentalProfile: "portable",
+        preparePortableHost,
+      },
+      false,
+      true,
+      () => null,
+      {
+        beforeRuntimeEffects: () => {
+          events.push("authority");
+        },
+      },
+    );
+    prepared.environmentScope?.restore();
+
+    expect(events).toEqual(["authority", "consent", "portable-host"]);
+  });
+
   it("rejects portable resume without selected authority before host preparation (#9035)", async () => {
     const preparePortableHost = vi.fn();
 

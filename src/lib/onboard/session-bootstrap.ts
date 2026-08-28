@@ -3,8 +3,10 @@
 
 import path from "node:path";
 
+import { isCandidateAgent } from "../agent/candidate";
 import type { ServingProfileProvenance } from "../inference/serving/types";
 import { NEMOCLAW_VLLM_GPU_DEVICE_ENV, parseVllmGpuDevice } from "../inference/vllm-models";
+import { inspectHarnessPackageState } from "../harness/package-identity";
 import { PERSONAL_POLICY_TIER_NAME } from "../policy/tiers";
 import { redact, redactFull, redactSensitiveText } from "../security/redact";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
@@ -31,6 +33,10 @@ import type { PortableInferenceActivation } from "./experimental/portable-infere
 import { requireReadOnlyHostMountRuntimeSupport } from "./host-mount";
 import type { ResumeConfigConflict } from "./resume-config";
 import type { StationExpressResumeIntent } from "./station-express-resume";
+import type {
+  SelectedOnboardHarnessPackage,
+  SelectedQualifiedOnboardAgent,
+} from "./package-selection";
 import { ensureRequiredTierPolicyPresets } from "./policy-tier-suppression";
 import {
   assertLockedResumeIntentSnapshot as assertLockedResumeIntentSnapshotAtPath,
@@ -111,6 +117,7 @@ const PORTABLE_OWNED_ENV_KEYS = [
   ...PORTABLE_RUNTIME_ENV_KEYS,
   ...PORTABLE_DEFAULT_ENV_KEYS,
 ] as const;
+const QUALIFIED_HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 interface PreviousEnvironmentValue {
   readonly present: boolean;
@@ -337,7 +344,13 @@ export interface OnboardSessionBootstrapInput {
   servingProfileProvenance?: ServingProfileProvenance | null;
   checkpointProfile?: CheckpointOnboardProfile;
   portableRuntimeAuthority?: CheckpointPortableRuntimeAuthority | null;
+  /** Read-only harness selection completed under the onboarding writer lock. */
+  freshHarnessBinding?: FreshOnboardHarnessBinding;
 }
+
+export type FreshOnboardHarnessBinding =
+  | Pick<SelectedOnboardHarnessPackage, "kind" | "recordedAgent" | "harnessPackage">
+  | Pick<SelectedQualifiedOnboardAgent, "kind" | "recordedAgent" | "harnessPackage">;
 
 export interface OnboardSessionBootstrapDeps {
   loadSession(): Session | null;
@@ -615,10 +628,42 @@ async function prepareResumeSession(
   return { session, fromDockerfile };
 }
 
+function requireFreshHarnessBinding(
+  binding: FreshOnboardHarnessBinding | undefined,
+): FreshOnboardHarnessBinding {
+  if (!binding) {
+    throw new Error("Fresh onboarding requires a selected harness package");
+  }
+  if (binding.kind === "qualified-agent") {
+    if (binding.harnessPackage !== null) {
+      throw new Error("Qualified fresh harness authority must remain package-free");
+    }
+    if (!QUALIFIED_HARNESS_ID_PATTERN.test(binding.recordedAgent)) {
+      throw new Error("Qualified fresh harness authority must use a canonical harness name");
+    }
+    if (binding.recordedAgent !== "nemocua" && !isCandidateAgent(binding.recordedAgent)) {
+      throw new Error(
+        `Qualified fresh harness '${binding.recordedAgent}' is not a qualified repository harness`,
+      );
+    }
+    return binding;
+  }
+  const packageState = inspectHarnessPackageState(binding.harnessPackage, null);
+  if (packageState.status !== "valid") {
+    throw new Error("Fresh harness package authority is malformed");
+  }
+  const effectiveAgent = binding.recordedAgent ?? "openclaw";
+  if (packageState.harnessPackage.id !== effectiveAgent) {
+    throw new Error("Fresh harness package authority does not match its compatibility agent");
+  }
+  return { ...binding, harnessPackage: packageState.harnessPackage };
+}
+
 function prepareFreshSession(
   input: OnboardSessionBootstrapInput,
   deps: OnboardSessionBootstrapDeps,
 ): OnboardSessionBootstrapResult {
+  const harnessBinding = requireFreshHarnessBinding(input.freshHarnessBinding);
   if (input.apfInterceptorRequested === true && input.recreateSandboxRequested === true) {
     reportUnsupportedApfLifecycle("recreate", deps);
   }
@@ -633,6 +678,9 @@ function prepareFreshSession(
     ? deps.resolvePath(input.requestedFromDockerfile)
     : null;
   const session = deps.createSession({
+    agent: harnessBinding.recordedAgent,
+    harnessPackage: harnessBinding.harnessPackage,
+    harnessPackageMigration: null,
     mode: mode(input.nonInteractive),
     toolDisclosure: input.requestedToolDisclosure ?? DEFAULT_TOOL_DISCLOSURE,
     observabilityEnabled: input.requestedObservabilityEnabled === true,

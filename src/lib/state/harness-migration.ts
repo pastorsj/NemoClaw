@@ -331,6 +331,23 @@ function authorityMatchesDesired(
   );
 }
 
+interface PackageOwnerFields {
+  readonly agent?: string | null;
+  readonly harnessPackage?: unknown;
+  readonly harnessPackageMigration?: unknown;
+}
+
+function packageOwnerFieldsMatch(
+  current: PackageOwnerFields,
+  prepared: PackageOwnerFields,
+): boolean {
+  return (
+    current.agent === prepared.agent &&
+    isDeepStrictEqual(current.harnessPackage, prepared.harnessPackage) &&
+    isDeepStrictEqual(current.harnessPackageMigration, prepared.harnessPackageMigration)
+  );
+}
+
 function assertPreparedBundleStillMatches(
   prepared: PreparedLegacyHarnessMigration,
   deps: LegacyHarnessMigrationDependencies,
@@ -361,14 +378,20 @@ function reconcileSession(
   ) {
     throw migrationError("the prepared onboarding session owner changed");
   }
+  if (current.agent !== sessionOwner.session.agent) {
+    throw migrationError("the prepared onboarding session compatibility agent changed");
+  }
   if (authorityMatchesDesired(current.harnessPackage, current.harnessPackageMigration, prepared)) {
     return;
   }
-  if (!isDeepStrictEqual(current, sessionOwner.session)) {
-    throw migrationError("the prepared onboarding session changed before migration");
+  if (!packageOwnerFieldsMatch(current, sessionOwner.session)) {
+    throw migrationError("the prepared onboarding session package owner changed before migration");
   }
   const result = deps.compareAndSwapSession(
-    (candidate) => isDeepStrictEqual(candidate, sessionOwner.session),
+    (candidate) =>
+      candidate.sessionId === sessionOwner.session.sessionId &&
+      candidate.sandboxName === sessionOwner.sandboxName &&
+      packageOwnerFieldsMatch(candidate, sessionOwner.session),
     (candidate) => ({
       ...candidate,
       harnessPackage: cloneIdentity(prepared.harnessPackage),
@@ -411,12 +434,18 @@ function reconcileRegistry(
       throw migrationError("the prepared registry row no longer exists");
     }
     if (
+      current.name !== prepared.registryEntry.name ||
+      (current.agent ?? null) !== (prepared.registryEntry.agent ?? null)
+    ) {
+      throw migrationError("the prepared registry compatibility agent changed");
+    }
+    if (
       authorityMatchesDesired(current.harnessPackage, current.harnessPackageMigration, prepared)
     ) {
       return;
     }
-    if (!isDeepStrictEqual(current, prepared.registryEntry)) {
-      throw migrationError("the prepared registry row changed before migration");
+    if (!packageOwnerFieldsMatch(current, prepared.registryEntry)) {
+      throw migrationError("the prepared registry package owner changed before migration");
     }
     registry.sandboxes[sandboxName] = {
       ...current,

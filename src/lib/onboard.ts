@@ -57,7 +57,7 @@ const sandboxCreateOrchestration: typeof import("./onboard/sandbox-create/orches
 const managedWorkloadOnboard: typeof import("./onboard/managed-workload/onboard-orchestration") = require("./onboard/managed-workload/onboard-orchestration");
 const onboardEntryOptions: typeof import("./onboard/entry-options") = require("./onboard/entry-options");
 const onboardSessionBootstrap: typeof import("./onboard/session-bootstrap") = require("./onboard/session-bootstrap");
-const resumeRuntime: typeof import("./onboard/resume/locked-runtime") = require("./onboard/resume/locked-runtime");
+const onboardPackageBoundary: typeof import("./onboard/package/boundary") = require("./onboard/package/boundary");
 const channelState: typeof import("./onboard/channel-state") = require("./onboard/channel-state");
 const {
   ensureOllamaLoopbackSystemdOverride,
@@ -2777,25 +2777,29 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
     preserveDeferredExitSession = false,
     preserveIncompleteSession = false;
   try {
+    const entryOptions = resolveEntryOptions();
+    const { fresh, nonInteractive, cannotPrompt, resume } = entryOptions;
+    const { requestedFromDockerfile, requestedSandboxName } = entryOptions;
+    NON_INTERACTIVE = nonInteractive;
+    const validatePolicyTierBeforeRuntime =
+      isNonInteractive() && !resume && opts.experimentalProfile !== "portable";
+    const harnessPackageOperation = await onboardPackageBoundary.prepareOnboardHarnessOperation(
+      { agentFlag: opts.agent || null, canPrompt: !cannotPrompt, prompt, resume, rootDir: ROOT },
+      { assertWriterLockOwned: onboardSession.assertOnboardLockOwned, loadSession: onboardSession.loadSession },
+    );
     await portableRetirementEntry.run(async () => {
-      const entryOptions = resolveEntryOptions();
-      const { fresh, nonInteractive, cannotPrompt, resume } = entryOptions;
-      const { requestedFromDockerfile, requestedSandboxName } = entryOptions;
-      NON_INTERACTIVE = nonInteractive;
-      const validatePolicyTierBeforeRuntime =
-        isNonInteractive() && !resume && opts.experimentalProfile !== "portable";
       if (validatePolicyTierBeforeRuntime) validatePolicyTierEnvEarly();
       const baseImageResolutionContext = baseImageResolutionFlow.createBaseImageResolutionContext({
         fresh,
         initialHint: opts.baseImageResolutionHint,
         initialPreResolvedMetadata: opts.preResolvedBaseImageMetadata,
       });
-      const lockedRuntime = await resumeRuntime.prepare(
-        opts,
-        resume,
-        isNonInteractive(),
-        onboardSession.loadSession,
-      );
+      const { harnessAuthority: harnessPackageAuthority, lockedRuntime } =
+        await harnessPackageOperation.prepareBoundRuntime(
+          opts,
+          isNonInteractive(),
+          onboardSession.loadSession,
+        );
       portableEnvScope = lockedRuntime.environmentScope;
       entryDecisions.clearGatewayEnvironmentWithoutBinding(authoritativeGateway, process.env);
       preparedDcodeRuntime.applyGatewayEnv(process.env);
@@ -2817,7 +2821,6 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         GATEWAY_PORT = binding.port;
         process.env.OPENSHELL_GATEWAY = binding.name;
       });
-      onboardTrace = onboardTracing.startOnboardTrace(opts, process.env);
       let selectedMessagingChannels: string[] = [];
       let { session, fromDockerfile } =
         await onboardSessionBootstrap.prepareOnboardSessionValidated(
@@ -2837,6 +2840,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
             agentFlag: opts.agent || null,
             envAgent: process.env.NEMOCLAW_AGENT || null,
             requestedHostMounts: opts.hostMounts,
+            ...harnessPackageOperation.freshSessionInput(),
             ...stationSessionInput,
           },
           {
@@ -2856,6 +2860,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
             exitProcess: (code) => process.exit(code),
           },
         );
+      onboardTrace = onboardTracing.startOnboardTrace(opts, process.env);
       stagedLegacyValues.clear();
       migratedLegacyKeys.clear();
       stagedLegacyKeys = stageLegacyCredentialsToEnv();
@@ -2901,13 +2906,8 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
         onboardSession,
         () => completed || preserveIncompleteSession,
       );
-      const agent = await selectOnboardAgent({
-        agentFlag: opts.agent,
-        session,
-        resume,
-        canPrompt: !cannotPrompt,
-      });
-      const selectedEffectiveAgent = sandboxAgent.getEffectiveSandboxAgent(agent);
+      const { agent, effectiveAgent: selectedEffectiveAgent } =
+        await harnessPackageOperation.resolveAgents(session, selectOnboardAgent);
       const recordedSandboxName =
         session?.steps?.sandbox?.status === "complete" ? session?.sandboxName || null : null;
       const checkpointedSandboxName = onboardSessionBootstrap.getCheckpointedSandboxName(

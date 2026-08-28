@@ -3,8 +3,7 @@
 
 import { TextDecoder } from "node:util";
 import { parseDocument } from "yaml";
-import type { BuildIdentity } from "../core/version";
-import { validateBuildIdentity } from "../core/version";
+import { getBuildIdentity, type BuildIdentity, validateBuildIdentity } from "../core/version";
 import type { HarnessPackageIdentity } from "./package-types";
 
 export const HARNESS_PACKAGE_RECEIPT_MAX_BYTES = 16 * 1024;
@@ -34,6 +33,16 @@ const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 export interface BundledHarnessPackageSourceIdentity {
   readonly kind: "bundled";
   readonly nemoclawBuildIdentity: BuildIdentity;
+}
+
+/** Bind bundled package installation provenance to the exact running NemoClaw build. */
+export function getBundledHarnessPackageSourceIdentity(options: {
+  readonly rootDir: string;
+}): BundledHarnessPackageSourceIdentity {
+  return Object.freeze({
+    kind: "bundled",
+    nemoclawBuildIdentity: getBuildIdentity(options),
+  });
 }
 
 export interface HarnessPackageReceipt {
