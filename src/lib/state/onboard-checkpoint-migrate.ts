@@ -120,7 +120,7 @@ export function deriveCheckpointFromSession(
       ? { kind: "selected", value: runtimeAuthority }
       : { kind: "unset" },
     harnessPackage:
-      session.harnessPackage === null ? null : parseHarnessPackageIdentity(session.harnessPackage),
+      session.harnessPackage == null ? null : parseHarnessPackageIdentity(session.harnessPackage),
     sandboxIdentity: identityDecision(session),
     webSearch: webSearchDecision(session),
     messaging: messagingDecision(session),

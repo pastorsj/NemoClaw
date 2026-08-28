@@ -72,6 +72,15 @@ describe("deriveCheckpointFromSession", () => {
       decisionSelected({ cpu: "2", memory: "4Gi" }),
     );
   });
+
+  it("keeps omitted legacy package identity as checkpoint absence", () => {
+    const legacySession = rawJson(completedSession());
+    delete legacySession.harnessPackage;
+
+    expect(
+      deriveCheckpointFromSession(legacySession as unknown as Session).harnessPackage,
+    ).toBeNull();
+  });
 });
 
 describe("resolveCheckpointForResume", () => {
