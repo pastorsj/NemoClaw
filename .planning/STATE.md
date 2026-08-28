@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plans 02-05 through 02-17 established harness CLI, pinned definitions, selection, Session
-  binding, exact resume, route and policy authority, package-bound recreate and checkpoint state,
-  final publication, and retained recovery authority
-last_updated: "2026-08-28T14:52:27.000Z"
+status: Plans 02-05 through 02-18 established harness CLI, pinned definitions, package-bound
+  onboarding and recovery authority, and fail-closed installer reconciliation before host mutation
+last_updated: "2026-08-28T16:35:20.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 18
-  percent: 75
+  completed_plans: 19
+  percent: 79
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -23,11 +22,12 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plans 02-05 through 02-16 completed the public harness inventory/install workflow,
+Status: Plans 02-05 through 02-18 completed the public harness inventory/install workflow,
 installed-only agent compatibility list, exact registry authority, package-root definitions and
 builds, installed-package selection, writer-locked Session binding, and exact package-managed
 resume through route reservation, policy verification, sandbox creation, recreate journals,
-checkpoint replay, final publication, and recovery-only retained records. Plan 02-18 is in progress.
+checkpoint replay, final publication, recovery-only retained records, and installer reconciliation
+before backup or host mutation. Plan 02-19 is next.
 This work does not activate or support an upstream product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
@@ -101,6 +101,8 @@ tree.
   one exact package identity and revalidate it before each independently resumable mutation.
 - [x] Final registration and recovery-only retained state revalidate and preserve exact package
   authority without changing OpenClaw or qualified candidate compatibility behavior.
+- [x] Installer reconciliation migrates legacy owners, validates exact retained package authority,
+  and handles an empty package store before backup, Docker, or OpenShell changes.
 
 ## Architecture Recommendations
 
@@ -121,7 +123,7 @@ tree.
 
 ## Next Execution
 
-Complete Plan 02-18 against the accepted local-fork boundaries, then bind downstream lifecycle
+Complete Plan 02-19 against the accepted local-fork boundaries, then bind downstream lifecycle
 state in dependency order. Keep arbitrary installed host code, remote package discovery, product
 activation, and support claims outside this work. An upstream contribution still requires its own
 accepted NVIDIA/NemoClaw product decision.
