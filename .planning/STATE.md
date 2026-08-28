@@ -2,14 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plans 02-05 through 02-12 established harness CLI, pinned definitions, builds, and selection
-last_updated: "2026-08-28T05:38:00.000Z"
+status: Plans 02-05 through 02-13 established harness CLI, pinned definitions, selection, and
+  Session binding
+last_updated: "2026-08-28T06:59:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 13
-  percent: 54
+  completed_plans: 14
+  percent: 58
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -21,10 +22,10 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plans 02-05 through 02-12 completed the public harness inventory/install workflow,
+Status: Plans 02-05 through 02-13 completed the public harness inventory/install workflow,
 installed-only agent compatibility list, exact registry authority, package-root definitions and
-builds, and installed-package selection. Plan 02-13 is in progress. This work does not activate or
-support an upstream product surface.
+builds, installed-package selection, and writer-locked Session binding. Plan 02-14 is in progress.
+This work does not activate or support an upstream product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
@@ -35,7 +36,8 @@ Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `d63f7b037dbec3d34dba73ed75f09a330d36b36f`
+- Exact base: `origin/main` at `b7261ff7cc73c76a15deb3e95291c24b1624534e`
+- Local upstream merge: `3925faa63510f76687b7798978fb649bafd738ea`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
 - Pushes: none
@@ -86,6 +88,8 @@ tree.
   from the selected pinned package root.
 - [x] Onboarding selection handles zero, one, or many installed harness packages without bypassing
   candidate qualification or accepting damaged package state.
+- [x] Writer-locked onboarding proves exact package authority before portable recovery, then binds
+  one complete fresh Session or owner-scoped legacy migration before ordinary onboarding work.
 
 ## Architecture Recommendations
 
@@ -106,7 +110,7 @@ tree.
 
 ## Next Execution
 
-Complete Plan 02-13 against the accepted local-fork boundaries, then bind resume and downstream
+Complete Plan 02-14 against the accepted local-fork boundaries, then bind downstream
 lifecycle state in dependency order. Keep arbitrary installed host code, remote package discovery,
 product activation, and support claims outside this work. An upstream contribution still requires
 its own accepted NVIDIA/NemoClaw product decision.
