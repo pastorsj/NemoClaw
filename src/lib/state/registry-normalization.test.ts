@@ -12,6 +12,7 @@ import {
   normalizeBaselineExclusions,
   normalizeBaselineExclusionTransition,
   normalizeCustomPolicyEntries,
+  normalizeSandboxHarnessPackageAuthority,
   normalizeSandboxPolicyAuthority,
 } from "./registry-normalization";
 
@@ -48,6 +49,19 @@ afterEach(() => {
 });
 
 describe("sandbox registry normalization", () => {
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: "hermes",
+    packageVersion: "1.2.3",
+    contractVersion: 1 as const,
+    contentDigest: "4".repeat(64),
+  };
+  const harnessPackageMigration = {
+    schemaVersion: 1 as const,
+    source: "legacy-current-bundle" as const,
+    legacyAgent: "hermes",
+    migratedAt: "2026-08-28T04:00:00.000Z",
+  };
   const servingProfileProvenance = {
     schemaVersion: 1,
     catalogDigest: `sha256:${"1".repeat(64)}`,
@@ -180,6 +194,48 @@ describe("sandbox registry normalization", () => {
       model: "model-a",
     });
     expect(persisted.sandboxes?.alpha).not.toHaveProperty("cuaRuntimeReadiness");
+  });
+
+  it("round-trips cloned exact package authority without changing legacy fields", async () => {
+    const input = { harnessPackage, harnessPackageMigration };
+    const cloned = normalizeSandboxHarnessPackageAuthority(input);
+
+    expect(cloned).toEqual(input);
+    expect(cloned.harnessPackage).not.toBe(input.harnessPackage);
+    expect(cloned.harnessPackageMigration).not.toBe(input.harnessPackageMigration);
+
+    const registry = await loadRegistryWith({ managed: { name: "managed", ...input } });
+    expect(registry.getSandbox("managed")).toMatchObject(input);
+    registry.save(registry.load());
+    vi.resetModules();
+    const reloadedRegistry = await import("./registry");
+    expect(reloadedRegistry.getSandbox("managed")).toMatchObject(input);
+  });
+
+  it.each(["pi", "nemocua"])("keeps the %s candidate row package-absent", async (agent) => {
+    const registry = await loadRegistryWith({ candidate: { name: "candidate", agent } });
+
+    expect(registry.getSandbox("candidate")).not.toHaveProperty("harnessPackage");
+    expect(registry.getSandbox("candidate")).not.toHaveProperty("harnessPackageMigration");
+  });
+
+  it.each([
+    ["partial identity", { harnessPackage: { id: "hermes" } }],
+    ["credential-shaped identity", { harnessPackage: { ...harnessPackage, token: "secret" } }],
+    ["path-bearing identity", { harnessPackage: { ...harnessPackage, path: "/tmp/package" } }],
+    ["null identity", { harnessPackage: null }],
+    ["migration without identity", { harnessPackageMigration }],
+    [
+      "identity and migration disagreement",
+      {
+        harnessPackage: { ...harnessPackage, id: "openclaw" },
+        harnessPackageMigration,
+      },
+    ],
+  ])("fails closed on %s package authority", async (_case, packageFields) => {
+    const registry = await loadRegistryWith({ invalid: { name: "invalid", ...packageFields } });
+
+    expect(() => registry.getSandbox("invalid")).toThrow(/invalid harness package authority/u);
   });
 
   it("lists managed MCP credential reservations in a stable order", async () => {

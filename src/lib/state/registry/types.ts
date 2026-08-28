@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SandboxPolicyAuthority } from "../../adapters/openshell/policy-authority";
+import type {
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
+} from "../../harness/package-identity";
 import type { InferenceSelection } from "../../inference/selection";
 import type { ServingProfileProvenance } from "../../inference/serving/types";
 import type { WebSearchProvider } from "../../inference/web-search";
@@ -19,6 +23,8 @@ export type RecordedSandboxPolicyAuthority = Exclude<SandboxPolicyAuthority, "ow
 interface PendingSandboxPolicyVerificationBoundary {
   readonly schemaVersion: 1;
   readonly state: "verified-create";
+  /** Exact package identity at verified create; migration audit remains on the owning row. */
+  readonly harnessPackage?: HarnessPackageIdentity;
   readonly gatewayName: string;
   readonly gatewayPort: number;
   readonly sandboxName: string;
@@ -179,6 +185,10 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   /** Durable provider identity for enabled managed web search. */
   webSearchProvider?: WebSearchProvider | null;
   agent?: string | null;
+  /** Exact immutable agent-runtime package authority; absence preserves legacy and candidate rows. */
+  harnessPackage?: HarnessPackageIdentity;
+  /** Owning-row audit provenance for an explicit standard legacy migration. */
+  harnessPackageMigration?: HarnessPackageMigration;
   agentVersion?: string | null;
   /** Plugin install baseline captured before state is restored into a fresh OpenClaw image. */
   openclawImagePluginInstalls?: OpenClawImagePluginInstall[];

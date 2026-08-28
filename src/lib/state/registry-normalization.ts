@@ -3,6 +3,13 @@
 
 import { isObjectRecord } from "../core/json-types";
 import {
+  harnessPackageIdentitiesEqual,
+  parseHarnessPackageIdentity,
+  parseHarnessPackageMigration,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../harness/package-identity";
+import {
   parseNemoClawPolicyCreationReceipt,
   type NemoClawPolicyCreationReceipt,
 } from "../policy/merge";
@@ -23,6 +30,33 @@ const BASELINE_TRANSITION_ID_PATTERN =
 const BASELINE_TRANSITION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const RESERVATION_SESSION_CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
+
+export interface NormalizedSandboxHarnessPackageAuthority {
+  readonly harnessPackage?: HarnessPackageIdentity;
+  readonly harnessPackageMigration?: HarnessPackageMigration;
+}
+
+/** Clone exact package authority while preserving legacy and candidate absence. */
+export function normalizeSandboxHarnessPackageAuthority(
+  entry: Pick<SandboxEntry, "harnessPackage" | "harnessPackageMigration">,
+): NormalizedSandboxHarnessPackageAuthority {
+  if (entry.harnessPackage === undefined && entry.harnessPackageMigration === undefined) return {};
+  try {
+    const harnessPackage = parseHarnessPackageIdentity(entry.harnessPackage);
+    const harnessPackageMigration =
+      entry.harnessPackageMigration === undefined
+        ? undefined
+        : parseHarnessPackageMigration(entry.harnessPackageMigration, harnessPackage);
+    return {
+      harnessPackage,
+      ...(harnessPackageMigration ? { harnessPackageMigration } : {}),
+    };
+  } catch {
+    throw new Error(
+      "Sandbox registry contains invalid harness package authority; repair the registry before continuing",
+    );
+  }
+}
 
 /** Keep legacy absence unknown and reject every unrecognized authority value. */
 export function normalizeSandboxPolicyAuthority(
@@ -51,6 +85,7 @@ export function cloneSandboxPolicyCreationReceipt(
 
 /** Remove policy attribution that an external authority owns and normalize managed state. */
 export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxEntry {
+  const packageAuthority = normalizeSandboxHarnessPackageAuthority(entry);
   const requestedPolicyAuthority = normalizeSandboxPolicyAuthority(entry.policyAuthority);
   const parsedPolicyCreationReceipt = cloneSandboxPolicyCreationReceipt(
     entry.policyCreationReceipt,
@@ -78,6 +113,14 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
   const pendingPolicyVerification = normalizePendingSandboxPolicyVerification(
     entry.pendingPolicyVerification,
   );
+  const pendingHarnessPackage = pendingPolicyVerification?.harnessPackage;
+  const ownerHarnessPackage = packageAuthority.harnessPackage;
+  const pendingHarnessPackageMatchesOwner =
+    pendingHarnessPackage === undefined && ownerHarnessPackage === undefined
+      ? true
+      : pendingHarnessPackage !== undefined && ownerHarnessPackage !== undefined
+        ? harnessPackageIdentitiesEqual(pendingHarnessPackage, ownerHarnessPackage)
+        : false;
   if (
     pendingPolicyVerification &&
     (entry.pendingRouteReservation !== true ||
@@ -92,7 +135,8 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
       pendingPolicyVerification.gatewayPort !== entry.gatewayPort ||
       pendingPolicyVerification.lifecycleGeneration !== entry.lifecycleGeneration ||
       pendingPolicyVerification.sandboxIdentityFingerprint !==
-        entry.lifecycleLiveIdentityFingerprint)
+        entry.lifecycleLiveIdentityFingerprint ||
+      !pendingHarnessPackageMatchesOwner)
   ) {
     throw new Error(
       "Sandbox registry pending policy verification does not match its route reservation",
@@ -108,11 +152,14 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
     policyAuthority: _policyAuthority,
     policyCreationReceipt: _policyCreationReceipt,
     pendingPolicyVerification: _pendingPolicyVerification,
+    harnessPackage: _harnessPackage,
+    harnessPackageMigration: _harnessPackageMigration,
     ...rest
   } = entry;
   if (policyAuthority === "externally-managed") {
     return {
       ...rest,
+      ...packageAuthority,
       policies: [],
       policyAuthority,
       ...(pendingPolicyVerification ? { pendingPolicyVerification } : {}),
@@ -126,6 +173,7 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
   const customPolicies = normalizeCustomPolicyEntries(entry.customPolicies);
   return {
     ...rest,
+    ...packageAuthority,
     ...(entry.policies !== undefined ? { policies: entry.policies } : {}),
     ...(customPolicies ? { customPolicies } : {}),
     ...(baselineExclusions ? { baselineExclusions } : {}),
