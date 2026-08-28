@@ -26,7 +26,7 @@
       "src/lib/onboard/gateway-binding.ts": 52,
       "src/lib/runner.ts": 82,
       "src/lib/security/redact.ts": 54,
-      "src/lib/state/onboard-session.ts": 36,
+      "src/lib/state/onboard-session.ts": 37,
       "src/lib/state/registry.ts": 101,
       "src/lib/state/state-root.ts": 22,
       "src/lib/subprocess-env.ts": 24,
@@ -63,7 +63,7 @@
     "src/lib/onboard": 309,
     "src/lib/actions": 19,
     "src/lib/actions/sandbox": 183,
-    "src/lib/state": 39,
+    "src/lib/state": 40,
     "src/lib/inference": 63,
     "scripts": 43
   }
