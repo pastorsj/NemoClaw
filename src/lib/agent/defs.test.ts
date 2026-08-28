@@ -56,6 +56,18 @@ afterEach(() => {
 });
 
 describe("agent definitions", () => {
+  it("loads repository definitions through the repository package root", () => {
+    const definition = loadAgent("openclaw");
+
+    expect(definition.packageRoot).toBe(path.dirname(AGENTS_DIR));
+    expect(definition.manifestPath).toBe(path.join(AGENTS_DIR, "openclaw", "manifest.yaml"));
+    expect(Object.getOwnPropertyDescriptor(definition, "packageRoot")).toMatchObject({
+      configurable: false,
+      value: path.dirname(AGENTS_DIR),
+      writable: false,
+    });
+  });
+
   it("exposes NemoCUA only behind the exact experimental feature flag (#9649)", () => {
     expect(fs.existsSync(path.join(AGENTS_DIR, "nemocua", "manifest.yaml"))).toBe(true);
     expect(listAgents({})).not.toContain("nemocua");

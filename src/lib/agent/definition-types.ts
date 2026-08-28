@@ -153,8 +153,10 @@ export interface AgentDefinition {
   state_files?: AgentStateFile[];
   user_managed_files?: string[];
   _legacy_paths?: StringMap;
-  agentDir: string;
-  manifestPath: string;
+  readonly agentDir: string;
+  readonly manifestPath: string;
+  /** Trusted root that owns every package-derived manifest and image asset. */
+  readonly packageRoot: string;
   readonly displayName: string;
   readonly healthProbe: AgentHealthProbe | null;
   readonly forwardPort: number;

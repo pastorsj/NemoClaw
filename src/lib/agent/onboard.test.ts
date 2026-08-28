@@ -81,6 +81,7 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     legacyPaths: null,
     agentDir: "/tmp/agent",
     manifestPath: "/tmp/agent/manifest.yaml",
+    packageRoot: "/tmp/agent",
     ...overrides,
   };
 }

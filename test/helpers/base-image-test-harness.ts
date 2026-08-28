@@ -78,6 +78,7 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
     legacyPaths: null,
     agentDir: "/repo/root/agents/hermes",
     manifestPath: "/repo/root/agents/hermes/manifest.yaml",
+    packageRoot: "/repo/root",
     ...overrides,
   };
 }

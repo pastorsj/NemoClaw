@@ -56,6 +56,7 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     legacyPaths: null,
     agentDir: "/tmp/agent",
     manifestPath: "/tmp/agent/manifest.yaml",
+    packageRoot: "/tmp/agent",
     ...overrides,
   };
 }
@@ -92,14 +93,12 @@ describe("getRegisteredAgent", () => {
     expect(getRegisteredAgent({ agent: "missing-agent" })).toBeNull();
   });
 
-  it.each([
-    "../openclaw",
-    "/tmp/agent",
-    "hermes/../openclaw",
-    "hermes\\openclaw",
-  ])("fails closed for path-like persisted agent name %j", (agent) => {
-    expect(getRegisteredAgent({ agent })).toBeNull();
-  });
+  it.each(["../openclaw", "/tmp/agent", "hermes/../openclaw", "hermes\\openclaw"])(
+    "fails closed for path-like persisted agent name %j",
+    (agent) => {
+      expect(getRegisteredAgent({ agent })).toBeNull();
+    },
+  );
 });
 
 function extractGatewayProcessPattern(script: string | null): string {
