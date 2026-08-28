@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plan 02-08 added strict Session package authority and checkpoint schema v5
-last_updated: "2026-08-28T03:37:00.000Z"
+status: Plans 02-05 through 02-12 established harness CLI, pinned definitions, builds, and selection
+last_updated: "2026-08-28T05:38:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 6
-  percent: 25
+  completed_plans: 13
+  percent: 54
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -21,9 +21,10 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plan 02-08 completed strict package identity and migration-provenance normalization,
-Session persistence, checkpoint schema v5, v4 migration, and fail-closed resume comparison. Plans
-02-05 and 02-09 are next. This work does not activate or support an upstream product surface.
+Status: Plans 02-05 through 02-12 completed the public harness inventory/install workflow,
+installed-only agent compatibility list, exact registry authority, package-root definitions and
+builds, and installed-package selection. Plan 02-13 is in progress. This work does not activate or
+support an upstream product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
@@ -76,6 +77,15 @@ tree.
   reports available, healthy installed, and damaged state without fallback.
 - [x] Session state can retain exact package identity and secret-free migration provenance;
   checkpoint v5 carries exact identity and explicitly migrates active v4 state without inference.
+- [x] `harness list/install` exposes only reviewed packages, and `agents list` projects healthy
+  installed standard harnesses without candidate promotion.
+- [x] Registry, route, and policy state can preserve exact package authority without populating it.
+- [x] Repository and package-managed definitions share one containment-safe explicit-root builder;
+  sandbox resolution uses the recorded digest-addressed object without active-pointer fallback.
+- [x] Package-managed image selection, Dockerfile staging, patching, and rebuilds read their assets
+  from the selected pinned package root.
+- [x] Onboarding selection handles zero, one, or many installed harness packages without bypassing
+  candidate qualification or accepting damaged package state.
 
 ## Architecture Recommendations
 
@@ -96,9 +106,10 @@ tree.
 
 ## Next Execution
 
-Execute Plans 02-05 and 02-09 against the accepted local-fork boundaries. Keep arbitrary installed
-host code, remote package discovery, product activation, and support claims outside this work. An
-upstream contribution still requires its own accepted NVIDIA/NemoClaw product decision.
+Complete Plan 02-13 against the accepted local-fork boundaries, then bind resume and downstream
+lifecycle state in dependency order. Keep arbitrary installed host code, remote package discovery,
+product activation, and support claims outside this work. An upstream contribution still requires
+its own accepted NVIDIA/NemoClaw product decision.
 
 ## Preserved Local State
 
