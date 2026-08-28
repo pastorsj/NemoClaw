@@ -304,7 +304,7 @@ describe("prepareOnboardSession", () => {
     expect(deps.saveSession).toHaveBeenCalledWith(
       expect.objectContaining({
         checkpoint: expect.objectContaining({
-          schemaVersion: 4,
+          schemaVersion: CHECKPOINT_SCHEMA_VERSION,
           profile: { kind: "selected", value: "portable" },
           runtimeAuthority: { kind: "selected", value: authority },
         }),

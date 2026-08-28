@@ -12,6 +12,7 @@ import {
   normalizeSession,
   releaseOnboardLock,
 } from "../state/onboard-session";
+import { CHECKPOINT_SCHEMA_VERSION } from "../state/onboard-checkpoint-types";
 import { assertHermesPortableUninstallCompleteForOnboarding } from "../state/hermes-portable-uninstall/journal";
 import {
   inspectPortableOnboardSupersession,
@@ -114,7 +115,8 @@ function completedSession(bytes: Buffer, expected?: Profile) {
     !rawCheckpoint ||
     typeof rawCheckpoint !== "object" ||
     Array.isArray(rawCheckpoint) ||
-    (rawCheckpoint as Record<string, unknown>).schemaVersion !== 4 ||
+    ((rawCheckpoint as Record<string, unknown>).schemaVersion !== 4 &&
+      (rawCheckpoint as Record<string, unknown>).schemaVersion !== CHECKPOINT_SCHEMA_VERSION) ||
     (rawCheckpoint as Record<string, unknown>).sessionId !== raw.sessionId ||
     (rawCheckpoint as Record<string, unknown>).machineState !== "complete" ||
     !session ||
