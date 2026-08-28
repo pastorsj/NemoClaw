@@ -37,7 +37,7 @@ while NemoClaw safely composes exact versions without taking ownership away from
   violations, excessive size or depth, identity conflicts, digest mismatches, and unknown contracts.
   One package kind, agent ID, package version, and contract version tuple cannot bind to multiple
   content digests; changed bytes require a new adapter package version.
-- [ ] **PKG-03**: Installation copies and verifies immutable content into a digest-addressed object,
+- [x] **PKG-03**: Installation copies and verifies immutable content into a digest-addressed object,
   changes one validated active pointer atomically, and records kind, ID, version, source identity,
   content digest, and installation time in an exact receipt. The agent inventory is stored under the
   gateway-independent base NemoClaw state root and does not change with `NEMOCLAW_GATEWAY_PORT`.

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plan 02-02 established the closed package envelope and hostile filesystem boundary
-last_updated: "2026-08-28T00:56:59.326Z"
+status: Plan 02-03 established immutable harness package storage and one reviewed install transaction
+last_updated: "2026-08-28T01:56:04.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 3
-  percent: 13
+  completed_plans: 4
+  percent: 17
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -21,9 +21,9 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plan 02-02 completed the closed agent-runtime envelope, bounded data parsing, hostile-tree
-validation, deterministic digest, and verified private staging. Plan 02-03 is next. This work does
-not activate or support an upstream NemoClaw product surface.
+Status: Plan 02-03 completed strict receipts, a gateway-independent immutable package store, exact
+pinned lookup, and one reviewed data-only installation transaction. Plans 02-04 and 02-08 are next.
+This work does not activate or support an upstream NemoClaw product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
@@ -65,6 +65,8 @@ preserved branch. Current `HEAD` tracks no source under `packages/`.
 - [x] Closed agent-runtime package envelope and exact digest-bound identity implemented.
 - [x] Hostile package-tree validation, deterministic digesting, verified copying, and
   authority-bound cleanup implemented with 140 focused tests.
+- [x] Immutable objects, digest-addressed receipts, atomic active pointers, pinned reads, and one
+  data-only installation transaction implemented with 105 focused tests.
 
 ## Architecture Recommendations
 
@@ -85,9 +87,10 @@ preserved branch. Current `HEAD` tracks no source under `packages/`.
 
 ## Next Execution
 
-Execute Plan 02-03 against the accepted local-fork boundaries. Keep arbitrary installed host code,
-remote package discovery, product activation, and support claims outside this work. An upstream
-contribution still requires its own accepted NVIDIA/NemoClaw product decision.
+Integrate the latest upstream commits, then execute Plans 02-04 and 02-08 against the accepted
+local-fork boundaries. Keep arbitrary installed host code, remote package discovery, product
+activation, and support claims outside this work. An upstream contribution still requires its own
+accepted NVIDIA/NemoClaw product decision.
 
 ## Preserved Local State
 

@@ -90,11 +90,11 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    no-messaging Linux/Brev development journey. Neither development run replaces exact staging
    Launchable release evidence.
 
-**Plans:** 2/23 plans executed
+**Plans:** 3/23 plans executed
 
 - [x] `02-01` — Obtain the accepted product-scope decision.
 - [x] `02-02` — Define and validate the agent package envelope and hostile package tree.
-- [ ] `02-03` — Publish validated artifacts through an immutable store and exact receipts.
+- [x] `02-03` — Publish validated artifacts through an immutable store and exact receipts.
 - [ ] `02-04` — Build reviewed bundled artifacts and expose one package catalogue.
 - [ ] `02-05` — Add installed and available inventory plus `harness list`.
 - [ ] `02-06` — Add `harness install`, its prompt, docs, and compiled command contract.
