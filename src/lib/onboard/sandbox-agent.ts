@@ -3,7 +3,18 @@
 
 import type { AgentDefinition } from "../agent/defs";
 import { loadAgent } from "../agent/defs";
+import { isCandidateAgent } from "../agent/candidate";
+import { buildAgentDefinition } from "../agent/definition-loader";
 import { getVersion } from "../core/version";
+import {
+  inspectHarnessPackageState,
+  type HarnessPackageIdentity,
+  type HarnessPackageMigration,
+} from "../harness/package-identity";
+import {
+  resolvePinnedHarnessPackage,
+  type HarnessPackageStoreOptions,
+} from "../harness/package-store";
 import { getNameValidationGuidance, NAME_ALLOWED_FORMAT } from "../name-validation";
 import { validateName } from "../runner";
 import type { SandboxEntry } from "../state/registry";
@@ -33,6 +44,7 @@ export const RESERVED_SANDBOX_NAMES = new Set([
 ]);
 
 export const UNKNOWN_SANDBOX_AGENT_NAME = "unknown";
+const SANDBOX_AGENT_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
 export function normalizeSandboxAgentName(agentName: string | null | undefined): string {
   const trimmed = typeof agentName === "string" ? agentName.trim() : "";
@@ -138,6 +150,96 @@ export function getSandboxAgentDrift(
     existingAgentName,
     requestedAgentName,
   };
+}
+
+export interface ResolvedSandboxAgent {
+  readonly recordedAgent: string | null;
+  readonly effectiveAgentId: string;
+  readonly definition: AgentDefinition;
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly harnessPackageMigration: HarnessPackageMigration | null;
+}
+
+export interface ResolveSandboxAgentOptions extends HarnessPackageStoreOptions {
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+function sandboxAgentAuthorityError(message: string): Error {
+  return new Error(`Sandbox agent authority is invalid: ${message}`);
+}
+
+function isRepositoryQualifiedAgent(agentId: string): boolean {
+  return agentId === "nemocua" || isCandidateAgent(agentId);
+}
+
+function requireRecordedSandboxAgent(agent: unknown): string | null {
+  if (agent === null || agent === undefined) return null;
+  if (typeof agent !== "string" || !SANDBOX_AGENT_ID_PATTERN.test(agent)) {
+    throw sandboxAgentAuthorityError(
+      "the recorded agent must be null or a canonical lowercase hyphen-separated identifier",
+    );
+  }
+  return agent;
+}
+
+/** Resolve one sandbox from its durable, exact agent authority. */
+export function resolveSandboxAgent(
+  entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
+  options: ResolveSandboxAgentOptions = {},
+): ResolvedSandboxAgent {
+  const recordedAgent = requireRecordedSandboxAgent(entry.agent);
+  const effectiveAgentId = normalizeSandboxAgentName(recordedAgent);
+  const packageState = inspectHarnessPackageState(
+    entry.harnessPackage,
+    entry.harnessPackageMigration,
+  );
+
+  if (isRepositoryQualifiedAgent(effectiveAgentId)) {
+    if (packageState.status !== "absent") {
+      throw sandboxAgentAuthorityError(
+        `qualified agent '${effectiveAgentId}' must not carry harness package authority`,
+      );
+    }
+    return Object.freeze({
+      recordedAgent,
+      effectiveAgentId,
+      definition: loadAgent(effectiveAgentId, options.env ?? process.env),
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+  }
+
+  if (packageState.status === "absent") {
+    throw sandboxAgentAuthorityError(
+      `agent '${effectiveAgentId}' requires legacy package migration before use`,
+    );
+  }
+  if (packageState.status === "invalid") {
+    throw sandboxAgentAuthorityError("the recorded harness package identity is malformed");
+  }
+  if (packageState.harnessPackage.id !== effectiveAgentId) {
+    throw sandboxAgentAuthorityError("the recorded agent does not match its harness package");
+  }
+
+  const installed = resolvePinnedHarnessPackage(packageState.harnessPackage, {
+    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
+  });
+  const definition = buildAgentDefinition({
+    manifest: installed.packageManifest.manifest,
+    manifestPath: installed.packageManifest.manifestPath,
+    packageRoot: installed.packageRoot,
+  });
+  if (definition.name !== effectiveAgentId || definition.packageRoot !== installed.packageRoot) {
+    throw sandboxAgentAuthorityError("the installed definition does not match its package receipt");
+  }
+
+  return Object.freeze({
+    recordedAgent,
+    effectiveAgentId,
+    definition,
+    harnessPackage: packageState.harnessPackage,
+    harnessPackageMigration: packageState.harnessPackageMigration,
+  });
 }
 
 export interface PromptSandboxNameDeps {
