@@ -9,6 +9,11 @@ import path from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { loadAgent } from "../../../src/lib/agent/defs.ts";
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+  createSnapshotRestoreAuthorityFixture,
+} from "../../helpers/snapshot-authority.ts";
 
 const originalHome = process.env.HOME;
 const snapshotHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-snapshot-home-"));
@@ -259,6 +264,7 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
               gpuEnabled: false,
               policies: [],
               agent: "hermes",
+              harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
             },
           },
         }),
@@ -266,7 +272,10 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("hermes", { name: "hermes-state" });
+      const backup = sandboxState.backupSandboxState("hermes", {
+        ...createSnapshotBackupAuthorityFixture("hermes"),
+        name: "hermes-state",
+      });
       expect(backup.success).toBe(true);
       const backupPath = backup.manifest!.backupPath;
       expect(backup.backedUpFiles).toEqual([
@@ -285,11 +294,18 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
 
       const replacementEnv = `API_SERVER_KEY=${"b".repeat(64)}\n`;
       fs.writeFileSync(envPath, replacementEnv);
-      const restore = sandboxState.restoreSandboxState("hermes", backupPath);
+      const restore = sandboxState.restoreSandboxState(
+        "hermes",
+        backupPath,
+        createSnapshotRestoreAuthorityFixture(sandboxState, "hermes", "hermes", backupPath),
+      );
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(backup.backedUpFiles);
-      expect(ledgers.every(([relativePath, content]) =>
-          Object.is(readText(path.join(hermesHome, relativePath)), content))).toBe(true);
+      expect(
+        ledgers.every(([relativePath, content]) =>
+          Object.is(readText(path.join(hermesHome, relativePath)), content),
+        ),
+      ).toBe(true);
       expect(readText(envPath)).toBe(replacementEnv);
       const loggedCommands = readText(sshLog);
       expect(loggedCommands).toContain("src_conn.backup(dst_conn)");

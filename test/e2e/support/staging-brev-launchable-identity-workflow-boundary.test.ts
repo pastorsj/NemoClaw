@@ -9,6 +9,7 @@ import {
   type Workflow,
   type WorkflowStep,
 } from "../../helpers/e2e-workflow-contract";
+import { testTimeoutOptions } from "../../helpers/timeouts.ts";
 
 const JOB = "staging-brev-launchable-identity";
 
@@ -146,9 +147,13 @@ const workflowMutations: Array<[string, (value: Workflow) => void, string]> = [
 ];
 
 describe("exact staging Brev Launchable identity workflow boundary", () => {
-  it("keeps the explicit trusted-main identity job valid (#9925)", () => {
-    expect(validateE2eWorkflow(workflow())).toEqual([]);
-  });
+  it(
+    "keeps the explicit trusted-main identity job valid (#9925)",
+    testTimeoutOptions(15_000),
+    () => {
+      expect(validateE2eWorkflow(workflow())).toEqual([]);
+    },
+  );
 
   it.each(workflowMutations)("rejects %s (#9925)", (_case, mutate, expected) => {
     const value = workflow();

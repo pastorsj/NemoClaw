@@ -228,7 +228,10 @@ describe("rebuild policy restore fidelity", () => {
       {
         targetAgentType: "openclaw",
       },
-      { getSandbox: expect.any(Function) },
+      {
+        getSandbox: expect.any(Function),
+        captureOpenshell: expect.any(Function),
+      },
     );
     expect(applyPreset).toHaveBeenCalledOnce();
     expect(applyPreset).toHaveBeenCalledWith("alpha", "npm");

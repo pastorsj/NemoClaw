@@ -3,8 +3,20 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
+
+const fixture = vi.hoisted(() => ({
+  harnessPackage: {
+    kind: "agent-runtime" as const,
+    id: "hermes",
+    packageVersion: "1.0.0-test",
+    contractVersion: 1 as const,
+    contentDigest: "b".repeat(64),
+  },
+}));
+
 const mocks = vi.hoisted(() => ({
-  backupSandboxState: vi.fn(),
+  backupWithAuthority: vi.fn(),
   captureOpenshell: vi.fn(() => ({ status: 0, output: "alpha Ready\n" })),
   findBackup: vi.fn(),
   getBaselineExclusions: vi.fn(),
@@ -30,14 +42,28 @@ vi.mock("../../shields/timer-bound-lock", () => ({
   ),
 }));
 
+vi.mock("../../state/mcp-lifecycle-lock", () => ({
+  withSandboxMutationLock: vi.fn((_sandboxName: string, operation: () => Promise<unknown>) =>
+    operation(),
+  ),
+}));
+
 vi.mock("../../state/registry", () => ({
   getBaselineExclusions: mocks.getBaselineExclusions,
-  getSandbox: vi.fn(() => ({ name: "alpha", agent: "hermes" })),
+  getSandbox: vi.fn(() => ({
+    name: "alpha",
+    agent: "hermes",
+    harnessPackage: fixture.harnessPackage,
+  })),
 }));
 
 vi.mock("../../state/sandbox", () => ({
-  backupSandboxState: mocks.backupSandboxState,
   findBackup: mocks.findBackup,
+}));
+
+vi.mock("./snapshot/dependencies", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./snapshot/dependencies")>()),
+  backupSandboxStateWithManagedAuthority: mocks.backupWithAuthority,
 }));
 
 vi.mock("./sandbox-gateway-routing", () => ({
@@ -53,7 +79,7 @@ describe("snapshot baseline exclusion output", () => {
       timestamp: "2026-06-15T00:00:00.000Z",
       backupPath: "/tmp/backup-alpha",
     };
-    mocks.backupSandboxState.mockReturnValue({
+    mocks.backupWithAuthority.mockReturnValue({
       success: true,
       backedUpDirs: ["workspace"],
       backedUpFiles: ["openclaw.json"],
@@ -69,16 +95,20 @@ describe("snapshot baseline exclusion output", () => {
     vi.restoreAllMocks();
   });
 
-  it("reports active exclusions and support impact after a successful snapshot (#7178)", async () => {
-    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
-    const { runSandboxSnapshot } = await import("./snapshot");
+  it(
+    "reports active exclusions and support impact after a successful snapshot (#7178)",
+    testTimeoutOptions(10_000),
+    async () => {
+      const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+      const { runSandboxSnapshot } = await import("./snapshot");
 
-    await runSandboxSnapshot("alpha", { kind: "create" });
+      await runSandboxSnapshot("alpha", { kind: "create" });
 
-    const output = consoleLog.mock.calls.flat().join("\n");
-    expect(output).toContain("Active baseline exclusions: nous_research");
-    expect(output).toContain(
-      "Support impact: Excluded egress leaves dependent agent features unsupported for this sandbox.",
-    );
-  });
+      const output = consoleLog.mock.calls.flat().join("\n");
+      expect(output).toContain("Active baseline exclusions: nous_research");
+      expect(output).toContain(
+        "Support impact: Excluded egress leaves dependent agent features unsupported for this sandbox.",
+      );
+    },
+  );
 });

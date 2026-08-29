@@ -8,6 +8,7 @@ import * as sandboxState from "../state/sandbox";
 import {
   applyNonInteractiveNotReadyDecision,
   decideNonInteractiveNotReadyAction,
+  IncompleteBackupRecoveryError,
   installerRestoreOnRecreateFromEnv,
   NotReadySandboxError,
   type PreUpgradeBackupSelectInput,
@@ -15,6 +16,7 @@ import {
   selectPreUpgradeBackupForCreate,
   UnsafeCustomImagePluginBackupError,
 } from "./not-ready-recreate";
+import * as sandboxAgent from "./sandbox-agent";
 import {
   fingerprintSandboxRegistryEntry,
   type SandboxRecreateObservation,
@@ -23,6 +25,18 @@ import {
 } from "./sandbox-recreate-transaction";
 
 const BACKUP_PATH = "/home/user/.nemoclaw/rebuild-backups/my-assistant/2026-07-01T06-50-40-925Z";
+
+function validateRecoveryManifestCandidate(
+  _sandboxName: string,
+  _owner: Parameters<typeof sandboxState.validateRebuildRecoveryManifest>[1],
+  candidate: Parameters<typeof sandboxState.validateRebuildRecoveryManifest>[2],
+): ReturnType<typeof sandboxState.validateRebuildRecoveryManifest> {
+  return candidate.backupComplete === false
+    ? { ok: false, reason: "backup manifest records an incomplete capture" }
+    : candidate.version === 2 && candidate.backupComplete !== true
+      ? { ok: false, reason: "schema v2 backup manifest lacks completion evidence" }
+      : { ok: true, manifest: candidate };
+}
 
 describe("decideNonInteractiveNotReadyAction", () => {
   it("returns exit when installer restore intent is unset", () => {
@@ -67,12 +81,20 @@ describe("decideNonInteractiveNotReadyAction", () => {
 describe("selectPreUpgradeBackupForCreate", () => {
   const note = vi.fn();
   let getLatestBackupSpy: ReturnType<typeof vi.spyOn>;
+  let validateRecoveryManifestSpy: ReturnType<typeof vi.spyOn>;
+  let resolveLegacyBackupRecoveryOwnerSpy: ReturnType<typeof vi.spyOn>;
   let debugSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     note.mockReset();
     getLatestBackupSpy = vi.spyOn(sandboxState, "getLatestBackup");
+    validateRecoveryManifestSpy = vi
+      .spyOn(sandboxState, "validateRebuildRecoveryManifest")
+      .mockImplementation(validateRecoveryManifestCandidate);
+    resolveLegacyBackupRecoveryOwnerSpy = vi
+      .spyOn(sandboxAgent, "resolveLegacyBackupRecoveryOwner")
+      .mockReturnValue(null);
     debugSpy = vi.spyOn(console, "debug").mockImplementation(() => undefined);
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     delete process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE;
@@ -80,6 +102,8 @@ describe("selectPreUpgradeBackupForCreate", () => {
 
   afterEach(() => {
     getLatestBackupSpy.mockRestore();
+    validateRecoveryManifestSpy.mockRestore();
+    resolveLegacyBackupRecoveryOwnerSpy.mockRestore();
     debugSpy.mockRestore();
     warnSpy.mockRestore();
     delete process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE;
@@ -135,11 +159,18 @@ describe("selectPreUpgradeBackupForCreate", () => {
 
   it("selects the backup when the observation matches the journaled source (#7736)", () => {
     process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
-    getLatestBackupSpy.mockReturnValue({
+    const backup = {
+      version: 2,
+      backupComplete: true,
       backupPath: BACKUP_PATH,
-    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+    } as unknown as NonNullable<ReturnType<typeof sandboxState.getLatestBackup>>;
+    const rereadEntry = structuredClone(SOURCE_ENTRY);
+    getLatestBackupSpy.mockReturnValue(backup);
 
-    expect(select()).toBe(BACKUP_PATH);
+    expect(select({ readRegistryEntry: () => rereadEntry })).toBe(BACKUP_PATH);
+    expect(resolveLegacyBackupRecoveryOwnerSpy).not.toHaveBeenCalled();
+    expect(validateRecoveryManifestSpy).toHaveBeenCalledWith("my-assistant", rereadEntry, backup);
+    expect(validateRecoveryManifestSpy.mock.calls[0]?.[1]).toBe(rereadEntry);
     expect(note).toHaveBeenCalledWith(
       expect.stringMatching(/Found pre-upgrade backup for 'my-assistant'/),
     );
@@ -147,9 +178,11 @@ describe("selectPreUpgradeBackupForCreate", () => {
 
   it("selects the backup after the journal confirms deletion of a previously live source", () => {
     process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
-    getLatestBackupSpy.mockReturnValue({
+    const backup = {
+      version: 1,
       backupPath: BACKUP_PATH,
-    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+    } as unknown as NonNullable<ReturnType<typeof sandboxState.getLatestBackup>>;
+    getLatestBackupSpy.mockReturnValue(backup);
 
     expect(
       select({
@@ -159,6 +192,57 @@ describe("selectPreUpgradeBackupForCreate", () => {
         }),
       }),
     ).toBe(BACKUP_PATH);
+    expect(resolveLegacyBackupRecoveryOwnerSpy).toHaveBeenCalledWith(SOURCE_ENTRY);
+    expect(validateRecoveryManifestSpy).toHaveBeenCalledWith("my-assistant", null, backup);
+  });
+
+  it.each([1, 2] as const)("blocks an explicitly incomplete schema v%s backup", (version) => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version,
+      backupComplete: false,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+
+    expect(() => select()).toThrow(IncompleteBackupRecoveryError);
+    expect(validateRecoveryManifestSpy).toHaveBeenCalledWith(
+      "my-assistant",
+      version === 1 ? null : SOURCE_ENTRY,
+      expect.objectContaining({ version, backupComplete: false }),
+    );
+    expect(note).not.toHaveBeenCalled();
+  });
+
+  it("blocks schema v2 when the backup has no completion evidence", () => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version: 2,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+
+    expect(() => select()).toThrow(IncompleteBackupRecoveryError);
+    expect(validateRecoveryManifestSpy).toHaveBeenCalledWith(
+      "my-assistant",
+      SOURCE_ENTRY,
+      expect.objectContaining({ version: 2 }),
+    );
+    expect(note).not.toHaveBeenCalled();
+  });
+
+  it("blocks automatic recreation when the published backup payload no longer verifies", () => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version: 2,
+      backupComplete: true,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+    validateRecoveryManifestSpy.mockReturnValue({
+      ok: false,
+      reason: "backup payload changed after publication",
+    });
+
+    expect(() => select()).toThrow(/backup payload changed after publication/);
+    expect(note).not.toHaveBeenCalled();
   });
 
   it("rejects a missing source before the journal confirms deletion", () => {
@@ -306,9 +390,16 @@ describe("selectPreUpgradeBackupForCreate", () => {
       openclawImagePluginInstalls: [],
     } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
 
-    expect(() => select({ existingSandboxEntry: CUSTOM_IMAGE_ENTRY })).toThrow(
-      UnsafeCustomImagePluginBackupError,
-    );
+    expect(() =>
+      select({
+        existingSandboxEntry: CUSTOM_IMAGE_ENTRY,
+        registryEntry: CUSTOM_IMAGE_ENTRY,
+        readRegistryEntry: () => CUSTOM_IMAGE_ENTRY,
+        sourceProof: sourceProof({
+          sourceRegistryFingerprint: fingerprintSandboxRegistryEntry(CUSTOM_IMAGE_ENTRY),
+        }),
+      }),
+    ).toThrow(UnsafeCustomImagePluginBackupError);
 
     expect(note).not.toHaveBeenCalled();
   });
@@ -323,16 +414,32 @@ describe("selectPreUpgradeBackupForCreate", () => {
       openclawImagePluginInstalls: [],
     } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
 
-    expect(select({ existingSandboxEntry: CUSTOM_IMAGE_ENTRY })).toBe(BACKUP_PATH);
+    expect(
+      select({
+        existingSandboxEntry: CUSTOM_IMAGE_ENTRY,
+        registryEntry: CUSTOM_IMAGE_ENTRY,
+        readRegistryEntry: () => CUSTOM_IMAGE_ENTRY,
+        sourceProof: sourceProof({
+          sourceRegistryFingerprint: fingerprintSandboxRegistryEntry(CUSTOM_IMAGE_ENTRY),
+        }),
+      }),
+    ).toBe(BACKUP_PATH);
   });
 
   it("blocks custom OpenClaw installer recreation when no valid backup is readable (#6108)", () => {
     process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
     getLatestBackupSpy.mockReturnValue(null);
 
-    expect(() => select({ existingSandboxEntry: CUSTOM_IMAGE_ENTRY })).toThrow(
-      UnsafeCustomImagePluginBackupError,
-    );
+    expect(() =>
+      select({
+        existingSandboxEntry: CUSTOM_IMAGE_ENTRY,
+        registryEntry: CUSTOM_IMAGE_ENTRY,
+        readRegistryEntry: () => CUSTOM_IMAGE_ENTRY,
+        sourceProof: sourceProof({
+          sourceRegistryFingerprint: fingerprintSandboxRegistryEntry(CUSTOM_IMAGE_ENTRY),
+        }),
+      }),
+    ).toThrow(UnsafeCustomImagePluginBackupError);
 
     expect(note).not.toHaveBeenCalled();
   });
@@ -351,6 +458,8 @@ describe("selectPreUpgradeBackupForCreate", () => {
 describe("applyNonInteractiveNotReadyDecision", () => {
   const note = vi.fn();
   let getLatestBackupSpy: ReturnType<typeof vi.spyOn>;
+  let validateRecoveryManifestSpy: ReturnType<typeof vi.spyOn>;
+  let resolveLegacyBackupRecoveryOwnerSpy: ReturnType<typeof vi.spyOn>;
   let exitSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -358,6 +467,12 @@ describe("applyNonInteractiveNotReadyDecision", () => {
   beforeEach(() => {
     note.mockReset();
     getLatestBackupSpy = vi.spyOn(sandboxState, "getLatestBackup");
+    validateRecoveryManifestSpy = vi
+      .spyOn(sandboxState, "validateRebuildRecoveryManifest")
+      .mockImplementation(validateRecoveryManifestCandidate);
+    resolveLegacyBackupRecoveryOwnerSpy = vi
+      .spyOn(sandboxAgent, "resolveLegacyBackupRecoveryOwner")
+      .mockReturnValue(null);
     exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
       throw new Error(`process.exit called with ${code}`);
     }) as never);
@@ -368,6 +483,8 @@ describe("applyNonInteractiveNotReadyDecision", () => {
 
   afterEach(() => {
     getLatestBackupSpy.mockRestore();
+    validateRecoveryManifestSpy.mockRestore();
+    resolveLegacyBackupRecoveryOwnerSpy.mockRestore();
     exitSpy.mockRestore();
     errorSpy.mockRestore();
     warnSpy.mockRestore();
@@ -393,12 +510,83 @@ describe("applyNonInteractiveNotReadyDecision", () => {
   it("returns the pre-upgrade backup path and notes the restore when installer intent finds a backup", () => {
     process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
     getLatestBackupSpy.mockReturnValue({
+      version: 2,
+      backupComplete: true,
       backupPath: BACKUP_PATH,
     } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
     expect(applyNonInteractiveNotReadyDecision("my-assistant", note)).toBe(BACKUP_PATH);
     expect(note).toHaveBeenCalledWith(
       expect.stringMatching(/recreating and restoring pre-upgrade backup/),
     );
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("blocks an incomplete backup instead of recreating with fresh state", () => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version: 2,
+      backupComplete: false,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+
+    expect(() => applyNonInteractiveNotReadyDecision("my-assistant", note)).toThrow(
+      IncompleteBackupRecoveryError,
+    );
+    expect(validateRecoveryManifestSpy).toHaveBeenCalledWith(
+      "my-assistant",
+      null,
+      expect.objectContaining({ version: 2, backupComplete: false }),
+    );
+    expect(note).not.toHaveBeenCalled();
+  });
+
+  it("blocks legacy recovery without an owning registry row before notes or recovery validation", () => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version: 1,
+      backupComplete: true,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+
+    expect(() => applyNonInteractiveNotReadyDecision("my-assistant", note)).toThrow(
+      IncompleteBackupRecoveryError,
+    );
+
+    expect(resolveLegacyBackupRecoveryOwnerSpy).not.toHaveBeenCalled();
+    expect(validateRecoveryManifestSpy).not.toHaveBeenCalled();
+    expect(note).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it("blocks rejected legacy package migration authority before notes or recovery validation", () => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version: 1,
+      backupComplete: true,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+    const rejectedOwner: SandboxEntry = {
+      name: "my-assistant",
+      agent: null,
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "openclaw",
+        packageVersion: "1.0.0",
+        contractVersion: 1,
+        contentDigest: "a".repeat(64),
+      },
+    };
+    resolveLegacyBackupRecoveryOwnerSpy.mockImplementation(() => {
+      throw new Error("legacy backup owner is missing exact package migration provenance");
+    });
+
+    expect(() => applyNonInteractiveNotReadyDecision("my-assistant", note, rejectedOwner)).toThrow(
+      IncompleteBackupRecoveryError,
+    );
+
+    expect(resolveLegacyBackupRecoveryOwnerSpy).toHaveBeenCalledWith(rejectedOwner);
+    expect(validateRecoveryManifestSpy).not.toHaveBeenCalled();
+    expect(note).not.toHaveBeenCalled();
     expect(exitSpy).not.toHaveBeenCalled();
   });
 
@@ -417,15 +605,20 @@ describe("applyNonInteractiveNotReadyDecision", () => {
 describe("resolveNotReadyOutcome", () => {
   const note = vi.fn();
   let getLatestBackupSpy: ReturnType<typeof vi.spyOn>;
+  let validateRecoveryManifestSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     note.mockReset();
     getLatestBackupSpy = vi.spyOn(sandboxState, "getLatestBackup");
+    validateRecoveryManifestSpy = vi
+      .spyOn(sandboxState, "validateRebuildRecoveryManifest")
+      .mockImplementation(validateRecoveryManifestCandidate);
     delete process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE;
   });
 
   afterEach(() => {
     getLatestBackupSpy.mockRestore();
+    validateRecoveryManifestSpy.mockRestore();
     delete process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE;
   });
 
@@ -440,12 +633,29 @@ describe("resolveNotReadyOutcome", () => {
   it("returns a proceed outcome with the restore path when installer intent finds a backup", () => {
     process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
     getLatestBackupSpy.mockReturnValue({
+      version: 2,
+      backupComplete: true,
       backupPath: BACKUP_PATH,
     } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
     expect(resolveNotReadyOutcome("my-assistant", note)).toEqual({
       kind: "proceed",
       restoreBackupPath: BACKUP_PATH,
     });
+  });
+
+  it("returns a blocked outcome for an incomplete pre-upgrade backup", () => {
+    process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
+    getLatestBackupSpy.mockReturnValue({
+      version: 2,
+      backupComplete: false,
+      backupPath: BACKUP_PATH,
+    } as unknown as ReturnType<typeof sandboxState.getLatestBackup>);
+
+    expect(resolveNotReadyOutcome("my-assistant", note)).toMatchObject({
+      kind: "blocked",
+      hints: expect.arrayContaining([expect.stringContaining("cannot authorize automatic")]),
+    });
+    expect(note).not.toHaveBeenCalled();
   });
 
   it("blocks live not-ready custom OpenClaw recreation with a legacy backup (#6108)", () => {

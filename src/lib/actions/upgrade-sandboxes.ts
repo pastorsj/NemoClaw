@@ -26,6 +26,7 @@ import {
   captureNamedGatewaySandboxListReadOnly,
   captureSandboxListWithGatewayPreflightOrExit,
 } from "../openshell-sandbox-list";
+import { resolveLegacyBackupRecoveryOwner, resolveSandboxAgent } from "../onboard/sandbox-agent";
 import * as sandboxVersion from "../sandbox/version";
 import { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } from "../sandbox-name-contract";
 import * as registry from "../state/registry";
@@ -95,7 +96,14 @@ type RejectedBackupRecovery = {
   reason: string;
 };
 
-function prepareBackupRecovery(
+function requireCandidateRecoveryOwner(sandbox: registry.SandboxEntry): void {
+  const authority = resolveSandboxAgent(sandbox);
+  if (authority.harnessPackage !== null) {
+    throw new Error("candidate backup owner unexpectedly carries harness package authority");
+  }
+}
+
+export function prepareBackupRecovery(
   sandbox: registry.SandboxEntry,
   allowLegacyManagedImageRecovery: boolean,
 ): PreparedBackupRecovery | RejectedBackupRecovery {
@@ -105,9 +113,16 @@ function prepareBackupRecovery(
       return { sandbox, reason: "no validated pre-upgrade backup was found" };
     }
 
+    const manifestAuthority = sandboxState.inspectRebuildManifestHarnessPackage(latest);
+    if (manifestAuthority.status === "candidate") {
+      // Candidate-null is an explicit authority state, not permission to trust
+      // a persisted agent name. Re-read the protected qualification receipt and
+      // repository definition before the backup can authorize recovery.
+      requireCandidateRecoveryOwner(sandbox);
+    }
     const validation = sandboxState.validateRebuildRecoveryManifest(
       sandbox.name,
-      sandbox.agent,
+      manifestAuthority.status === "legacy" ? resolveLegacyBackupRecoveryOwner(sandbox) : sandbox,
       latest,
     );
     if (!validation.ok) {

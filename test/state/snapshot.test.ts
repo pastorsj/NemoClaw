@@ -7,13 +7,15 @@
 //   - findBackup resolves selectors (v<N>, name, exact timestamp)
 
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { managedStartupE2eProfile } from "../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import { loadAgent } from "../../src/lib/agent/defs";
 import { encodeManagedStartupProfile } from "../../src/lib/onboard/managed-startup/profile";
 import { stateDirectoryDiscoverySshSource } from "../helpers/snapshot-state-discovery-fixture";
 
@@ -47,6 +49,7 @@ if (!isSandboxStateModule(loadedSandboxState)) {
 const sandboxState = loadedSandboxState;
 const { parseRestoreArgs } = sandboxState;
 const BACKUPS_ROOT = path.join(TMP_HOME, ".nemoclaw", "rebuild-backups");
+const registeredAgentIds = new Map<string, string>();
 type BackupManifestOverrides = { [key: string]: BackupValue };
 function writeBackup(
   sandboxName: string,
@@ -114,6 +117,7 @@ afterAll(() => {
 });
 beforeEach(() => {
   fs.rmSync(BACKUPS_ROOT, { recursive: true, force: true });
+  registeredAgentIds.clear();
 });
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
@@ -131,6 +135,8 @@ function writeAgentRegistry(
   agent: string | null,
   overrides: Record<string, unknown> = {},
 ): void {
+  const effectiveAgentId = agent || "openclaw";
+  registeredAgentIds.set(sandboxName, effectiveAgentId);
   fs.mkdirSync(path.join(TMP_HOME, ".nemoclaw"), { recursive: true });
   fs.writeFileSync(
     path.join(TMP_HOME, ".nemoclaw", "sandboxes.json"),
@@ -144,11 +150,49 @@ function writeAgentRegistry(
           gpuEnabled: false,
           policies: [],
           agent,
+          harnessPackage: testHarnessPackage(effectiveAgentId),
           ...overrides,
         },
       },
     }),
   );
+}
+
+function testHarnessPackage(agentId: string) {
+  return {
+    kind: "agent-runtime" as const,
+    id: agentId,
+    packageVersion: "1.2.3",
+    contractVersion: 1 as const,
+    contentDigest: createHash("sha256").update(`snapshot-test:${agentId}`).digest("hex"),
+  };
+}
+
+function backupRegisteredSandboxState(
+  sandboxName: string,
+  options: Parameters<typeof sandboxState.backupSandboxState>[1] = {},
+) {
+  const agentId = registeredAgentIds.get(sandboxName);
+  expect(agentId, `No registered test agent for '${sandboxName}'`).toBeDefined();
+  return sandboxState.backupSandboxState(sandboxName, {
+    agentDefinition: loadAgent(agentId!),
+    harnessPackage: testHarnessPackage(agentId!),
+    ...options,
+  });
+}
+
+function restoreRegisteredSandboxState(sandboxName: string, backupPath: string) {
+  const agentId = registeredAgentIds.get(sandboxName);
+  expect(agentId, `No registered test agent for '${sandboxName}'`).toBeDefined();
+  const manifest = sandboxState.getLatestBackup(sandboxName);
+  expect(manifest, `No registered test backup for '${sandboxName}'`).toBeDefined();
+  const authority = sandboxState.captureSnapshotRestoreAuthority(backupPath, manifest!);
+  expect(authority, `Could not capture test backup authority for '${sandboxName}'`).toBeDefined();
+  return sandboxState.restoreSandboxState(sandboxName, backupPath, {
+    agentDefinition: loadAgent(agentId!),
+    authority: authority!,
+    validateBeforeMutation: () => undefined,
+  });
 }
 
 function writeOpenClawRegistry(sandboxName: string, overrides: Record<string, unknown> = {}): void {
@@ -169,27 +213,6 @@ process.exit(0);
   );
   return openshell;
 }
-describe("validateSnapshotName", () => {
-  it("accepts normal names", () => {
-    expect(sandboxState.validateSnapshotName("before-upgrade")).toBeNull();
-    expect(sandboxState.validateSnapshotName("clean_state.v2")).toBeNull();
-    expect(sandboxState.validateSnapshotName("A")).toBeNull();
-  });
-  it("rejects names matching the v<N> version pattern", () => {
-    expect(sandboxState.validateSnapshotName("v1")).toMatch(/conflicts with.*v<N>/);
-    expect(sandboxState.validateSnapshotName("V42")).toMatch(/conflicts with.*v<N>/);
-  });
-  it("rejects empty, leading-symbol, or too-long names", () => {
-    expect(sandboxState.validateSnapshotName("")).toMatch(/Invalid/);
-    expect(sandboxState.validateSnapshotName("-foo")).toMatch(/Invalid/);
-    expect(sandboxState.validateSnapshotName(".hidden")).toMatch(/Invalid/);
-    expect(sandboxState.validateSnapshotName("x".repeat(64))).toMatch(/Invalid/);
-  });
-  it("rejects names with spaces or slashes", () => {
-    expect(sandboxState.validateSnapshotName("hello world")).toMatch(/Invalid/);
-    expect(sandboxState.validateSnapshotName("foo/bar")).toMatch(/Invalid/);
-  });
-});
 describe("listBackups computes virtual versions", () => {
   it("assigns v1 to the oldest by timestamp and vN to the newest", () => {
     // Written out of chronological order to verify sort-by-timestamp.
@@ -400,191 +423,65 @@ describe("listBackups computes virtual versions", () => {
   });
 });
 
-describe("snapshot restore content authority", () => {
-  it("binds the selected manifest and payload bytes to one digest", () => {
-    const manifest = writeBackup("alpha", "2026-04-21T14-00-00-000Z", {
-      backedUpDirs: ["workspace"],
-      stateDirs: ["workspace"],
-    });
-    const backupPath = String(manifest.backupPath);
-    fs.mkdirSync(path.join(backupPath, "workspace"));
-    fs.writeFileSync(path.join(backupPath, "workspace", "state.txt"), "before\n");
-    const selected = sandboxState.getLatestBackup("alpha");
-    expect(selected).not.toBeNull();
-
-    const authority = sandboxState.captureSnapshotRestoreAuthority(backupPath, selected!);
-    expect(authority).toMatchObject({
-      schemaVersion: 1,
-      backupPath,
-      contentSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
-    });
-
-    fs.writeFileSync(path.join(backupPath, "workspace", "state.txt"), "after\n");
-    expect(sandboxState.captureSnapshotRestoreAuthority(backupPath)?.contentSha256).not.toBe(
-      authority?.contentSha256,
-    );
-  });
-});
-
-describe("findBackup", () => {
-  it("matches v<N> against the computed version", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z"); // v1 (oldest)
-    writeBackup("test-sandbox", "2026-04-21T14-05-00-000Z"); // v2 (newest)
-    const r = sandboxState.findBackup("test-sandbox", "v2");
-    expect(r.match?.timestamp).toBe("2026-04-21T14-05-00-000Z");
-    expect(r.match?.snapshotVersion).toBe(2);
-  });
-
-  it("is case-insensitive on the v prefix", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z");
-    writeBackup("test-sandbox", "2026-04-21T14-05-00-000Z");
-    writeBackup("test-sandbox", "2026-04-21T14-10-00-000Z");
-    expect(sandboxState.findBackup("test-sandbox", "V3").match?.timestamp).toBe(
-      "2026-04-21T14-10-00-000Z",
-    );
-  });
-
-  it("returns null for a non-existent version", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z");
-    expect(sandboxState.findBackup("test-sandbox", "v99").match).toBeNull();
-  });
-
-  it("matches by exact user-assigned name", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z", { name: "before-upgrade" });
-    expect(sandboxState.findBackup("test-sandbox", "before-upgrade").match?.name).toBe(
-      "before-upgrade",
-    );
-  });
-
-  it("matches exact timestamp", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z");
-    const r = sandboxState.findBackup("test-sandbox", "2026-04-21T14-00-00-000Z");
-    expect(r.match?.timestamp).toBe("2026-04-21T14-00-00-000Z");
-  });
-
-  it("does NOT match on timestamp prefix (exact-only)", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z");
-    expect(sandboxState.findBackup("test-sandbox", "2026-04-21").match).toBeNull();
-  });
-
-  it("returns no match for an unknown selector", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z");
-    expect(sandboxState.findBackup("test-sandbox", "nonexistent").match).toBeNull();
-  });
-
-  it("returns no match when the sandbox has no snapshots", () => {
-    expect(sandboxState.findBackup("unknown-sandbox", "v1").match).toBeNull();
-  });
-});
-
-// Argv parser for `snapshot restore [selector] [--to <dst>]`. Added alongside
-// the cross-sandbox restore flag: covers positional selectors, --to extraction,
-// ordering permutations, and error cases for a missing or flag-shaped value.
-describe("parseRestoreArgs", () => {
-  it("defaults to self-restore when --to is absent", () => {
-    expect(parseRestoreArgs("src", ["restore"])).toEqual({
-      ok: true,
-      targetSandbox: "src",
-      selector: null,
-    });
-  });
-
-  it("carries a positional selector through without --to", () => {
-    expect(parseRestoreArgs("src", ["restore", "v3"])).toEqual({
-      ok: true,
-      targetSandbox: "src",
-      selector: "v3",
-    });
-  });
-
-  it("accepts a user-assigned snapshot name as selector", () => {
-    expect(parseRestoreArgs("src", ["restore", "before-upgrade"])).toEqual({
-      ok: true,
-      targetSandbox: "src",
-      selector: "before-upgrade",
-    });
-  });
-
-  it("extracts --to and redirects the restore target", () => {
-    expect(parseRestoreArgs("src", ["restore", "--to", "dst"])).toEqual({
-      ok: true,
-      targetSandbox: "dst",
-      selector: null,
-    });
-  });
-
-  it("combines selector + --to with selector first", () => {
-    expect(parseRestoreArgs("src", ["restore", "v3", "--to", "dst"])).toEqual({
-      ok: true,
-      targetSandbox: "dst",
-      selector: "v3",
-    });
-  });
-
-  it("combines selector + --to with --to first", () => {
-    expect(parseRestoreArgs("src", ["restore", "--to", "dst", "v3"])).toEqual({
-      ok: true,
-      targetSandbox: "dst",
-      selector: "v3",
-    });
-  });
-
-  it("preserves timestamp-shaped selectors alongside --to", () => {
-    expect(parseRestoreArgs("src", ["restore", "2026-04-21T14-00-00-000Z", "--to", "dst"])).toEqual(
-      {
-        ok: true,
-        targetSandbox: "dst",
-        selector: "2026-04-21T14-00-00-000Z",
-      },
-    );
-  });
-
-  it("rejects --to at end-of-args with no value", () => {
-    const result = parseRestoreArgs("src", ["restore", "--to"]);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("Expected parseRestoreArgs() to reject a trailing --to flag");
-    }
-    expect(result.error).toMatch(/--to requires a target sandbox name/);
-  });
-
-  it("rejects --to when followed immediately by another flag", () => {
-    // Without this guard, `--to --other` would swallow the flag as the dst
-    // name and confuse validateName with an error about a weird name.
-    const result = parseRestoreArgs("src", ["restore", "--to", "--other"]);
-    expect(result.ok).toBe(false);
-    if (result.ok) {
-      throw new Error("Expected parseRestoreArgs() to reject --to without a target name");
-    }
-    expect(result.error).toMatch(/--to requires a target sandbox name/);
-  });
-
-  it("returns self-restore when target equals source explicitly", () => {
-    expect(parseRestoreArgs("src", ["restore", "--to", "src"])).toEqual({
-      ok: true,
-      targetSandbox: "src",
-      selector: null,
-    });
-  });
-
-  it("uses only the first positional as selector; ignores trailing positionals", () => {
-    // Trailing positionals are silently accepted today — pin that behavior so
-    // future changes notice if it shifts.
-    expect(parseRestoreArgs("src", ["restore", "v1", "v2"])).toEqual({
-      ok: true,
-      targetSandbox: "src",
-      selector: "v1",
-    });
-  });
-});
-
 describe("sandbox directory backup semantics", () => {
+  it("refuses to downgrade a registered standard package backup to schema v1", () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contractVersion: 1,
+      contentDigest: "a".repeat(64),
+    };
+    writeOpenClawRegistry("alpha", { harnessPackage });
+
+    const backup = sandboxState.backupSandboxState("alpha");
+
+    expect(backup).toMatchObject({
+      success: false,
+      error:
+        "registered harness package snapshot requires its pinned agent definition and package identity",
+    });
+    expect(backup.manifest).toBeUndefined();
+    expect(fs.existsSync(path.join(BACKUPS_ROOT, "alpha"))).toBe(false);
+  });
+
+  it("refuses to synthesize a schema-v1 backup for a registered standard sandbox", () => {
+    writeOpenClawRegistry("alpha", { harnessPackage: undefined });
+
+    const backup = sandboxState.backupSandboxState("alpha");
+
+    expect(backup).toMatchObject({
+      success: false,
+      error:
+        "registered harness package snapshot requires its pinned agent definition and package identity",
+    });
+    expect(backup.manifest).toBeUndefined();
+    expect(fs.existsSync(path.join(BACKUPS_ROOT, "alpha"))).toBe(false);
+  });
+
+  it("refuses to synthesize a schema-v1 backup from malformed package authority", () => {
+    writeOpenClawRegistry("alpha", {
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "openclaw",
+        packageVersion: "1.2.3",
+        contractVersion: 1,
+        contentDigest: "invalid",
+      },
+    });
+
+    expect(() => sandboxState.backupSandboxState("alpha")).toThrow(
+      "Sandbox registry contains invalid harness package authority",
+    );
+    expect(fs.existsSync(path.join(BACKUPS_ROOT, "alpha"))).toBe(false);
+  });
+
   it("rejects a custom OpenClaw backup with missing image-plugin provenance (#6108)", () => {
     writeOpenClawRegistry("custom-openclaw", {
       fromDockerfile: "/tmp/Dockerfile.custom",
     });
 
-    const backup = sandboxState.backupSandboxState("custom-openclaw");
+    const backup = backupRegisteredSandboxState("custom-openclaw");
 
     expect(backup.success).toBe(false);
     expect(backup.manifest).toBeUndefined();
@@ -639,10 +536,12 @@ describe("sandbox directory backup semantics", () => {
       process.env.TMPDIR = stagingRoot;
       process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(true);
       expect(backup.failedDirs).toEqual([]);
       expect(backup.backedUpDirs).toEqual(existingDirs);
+      expect(backup.manifest?.backupComplete).toBe(true);
+      expect(backup.manifest?.backupContentSha256).toMatch(/^[0-9a-f]{64}$/u);
       expect(backup.manifest?.backedUpDirs).toEqual(existingDirs);
       expect(backup.manifest?.stateDirs.at(-1)).toBe("workspace-research");
       expect(backup.manifest?.reconcileOpenClawImagePluginProvenance).toBe(true);
@@ -656,7 +555,7 @@ describe("sandbox directory backup semantics", () => {
       expect(discoveryCommand).toContain("'/sandbox/.openclaw/workspace-'*/");
       expect(fs.readdirSync(stagingRoot)).toEqual([]);
 
-      const rejected = sandboxState.backupSandboxState("alpha", {
+      const rejected = backupRegisteredSandboxState("alpha", {
         validateBeforePublish: () => {
           throw new Error("runtime generation changed");
         },
@@ -667,8 +566,28 @@ describe("sandbox directory backup semantics", () => {
           "Snapshot authority changed during backup: runtime generation changed",
         ),
       });
+      let publicationChecks = 0;
+      const publicationOutcomes = [
+        () => undefined,
+        () => {
+          throw new Error("package changed during digest capture");
+        },
+      ];
+      const rejectedAfterDigest = backupRegisteredSandboxState("alpha", {
+        validateBeforePublish: () => {
+          publicationChecks += 1;
+          publicationOutcomes[publicationChecks - 1]?.();
+        },
+      });
+      expect(rejectedAfterDigest).toMatchObject({
+        success: false,
+        error: expect.stringContaining(
+          "Snapshot authority changed during backup: package changed during digest capture",
+        ),
+      });
+      expect(publicationChecks).toBe(2);
       fs.writeFileSync(unsafeDiscoveryMarker, "hostile newline discovery\n");
-      const unsafeDiscovery = sandboxState.backupSandboxState("alpha");
+      const unsafeDiscovery = backupRegisteredSandboxState("alpha");
       expect(unsafeDiscovery).toMatchObject({
         success: false,
         error: "State directory discovery returned undeclared or unsafe entries",
@@ -724,7 +643,7 @@ process.exit(0);
         return originalOpenSync(filePath, flags, mode);
       }) as typeof fs.openSync;
       syncBuiltinESMExports();
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(false);
       expect(backup.failedDirs).toEqual(["workspace"]);
       expect(backup.error).toMatch(/Failed to create backup archive file.*ENOSPC/);
@@ -806,7 +725,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(false);
       expect(backup.failedDirs).toEqual(["agents", "workspace"]);
       expect(backup.failedDirReasons).toEqual({
@@ -814,10 +733,11 @@ process.exit(0);
         workspace: "tar read error",
       });
       expect(backup.backedUpDirs).toEqual(["extensions"]);
+      expect(backup.manifest?.backupComplete).toBe(false);
       expect(backup.manifest?.backedUpDirs).toEqual(["extensions"]);
       expect(fs.existsSync(path.join(backup.manifest!.backupPath, "agents"))).toBe(true);
 
-      const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+      const restore = restoreRegisteredSandboxState("alpha", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(["extensions"]);
 
@@ -893,7 +813,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(true);
       expect(backup.backedUpDirs).toEqual(existingDirs);
       expect(backup.error).toBeUndefined();
@@ -957,7 +877,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(true);
       expect(backup.error).toBeUndefined();
     } finally {
@@ -1008,7 +928,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(false);
       expect(backup.error).toMatch(/node_modules\/\.bin\/leak/);
       expect(backup.error).toMatch(/openclaw\.json/);
@@ -1061,7 +981,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(false);
       expect(backup.error).toMatch(/workspace\/leak/);
       expect(backup.error).not.toMatch(/openclaw-weixin/);
@@ -1076,30 +996,29 @@ process.exit(0);
     }
   });
 
-  it.each([
-    "weather",
-    "slack",
-  ])("rejects a generic %s OpenClaw peer link with a tampered target", (extensionName) => {
-    // The generic peer path is valid, but its target must remain the exact
-    // global OpenClaw install rather than an arbitrary absolute path.
-    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-target-tampered-"));
-    const oldPath = process.env.PATH;
-    const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
-    try {
-      const binDir = path.join(fixture, "bin");
-      const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
-      const existingDirs = ["extensions"];
-      fs.mkdirSync(binDir, { recursive: true });
-      for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
+  it.each(["weather", "slack"])(
+    "rejects a generic %s OpenClaw peer link with a tampered target",
+    (extensionName) => {
+      // The generic peer path is valid, but its target must remain the exact
+      // global OpenClaw install rather than an arbitrary absolute path.
+      const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-audit-target-tampered-"));
+      const oldPath = process.env.PATH;
+      const oldOpenshell = process.env.NEMOCLAW_OPENSHELL_BIN;
+      try {
+        const binDir = path.join(fixture, "bin");
+        const openclawDir = path.join(fixture, "sandbox-root", ".openclaw");
+        const existingDirs = ["extensions"];
+        fs.mkdirSync(binDir, { recursive: true });
+        for (const d of existingDirs) fs.mkdirSync(path.join(openclawDir, d), { recursive: true });
 
-      const auditOutput = encodePreBackupAuditRows([
-        `l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`,
-      ]);
+        const auditOutput = encodePreBackupAuditRows([
+          `l\t/sandbox/.openclaw/extensions/${extensionName}/node_modules/openclaw\t/etc/passwd`,
+        ]);
 
-      const openshell = writeFakeOpenshell(binDir);
-      writeExecutable(
-        path.join(binDir, "ssh"),
-        `#!/usr/bin/env node
+        const openshell = writeFakeOpenshell(binDir);
+        writeExecutable(
+          path.join(binDir, "ssh"),
+          `#!/usr/bin/env node
 const cmd = process.argv[process.argv.length - 1] || "";
 const existingDirs = ${JSON.stringify(existingDirs)};
 if (cmd.includes("[ -d ")) {
@@ -1112,26 +1031,27 @@ if (cmd.includes("find ")) {
 }
 process.exit(0);
 `,
-      );
+        );
 
-      writeOpenClawRegistry("alpha");
-      process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
-      process.env.PATH = `${binDir}:${oldPath || ""}`;
+        writeOpenClawRegistry("alpha");
+        process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
+        process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
-      expect(backup.success).toBe(false);
-      expect(backup.error).toContain(`extensions/${extensionName}`);
-      expect(backup.error).toMatch(/\/etc\/passwd/);
-    } finally {
-      if (oldOpenshell === undefined) {
-        delete process.env.NEMOCLAW_OPENSHELL_BIN;
-      } else {
-        process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
+        const backup = backupRegisteredSandboxState("alpha");
+        expect(backup.success).toBe(false);
+        expect(backup.error).toContain(`extensions/${extensionName}`);
+        expect(backup.error).toMatch(/\/etc\/passwd/);
+      } finally {
+        if (oldOpenshell === undefined) {
+          delete process.env.NEMOCLAW_OPENSHELL_BIN;
+        } else {
+          process.env.NEMOCLAW_OPENSHELL_BIN = oldOpenshell;
+        }
+        process.env.PATH = oldPath;
+        fs.rmSync(fixture, { recursive: true, force: true });
       }
-      process.env.PATH = oldPath;
-      fs.rmSync(fixture, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it("marks non-attributed directories failed when they are missing from partial extraction", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-missing-partial-"));
@@ -1178,7 +1098,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(false);
       expect(backup.backedUpDirs).toEqual(["extensions"]);
       expect(backup.failedDirs).toEqual(["agents", "workspace"]);
@@ -1256,7 +1176,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(true);
       expect(backup.error).toBeUndefined();
       expect(backup.backedUpDirs).toEqual(existingDirs);
@@ -1320,7 +1240,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = backupRegisteredSandboxState("alpha");
       expect(backup.success).toBe(false);
       expect(backup.error).toMatch(/workspace\/leak/);
     } finally {
@@ -1436,7 +1356,7 @@ process.exit(0);
       process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
       process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("deepagents", { name: "deepagents-state" });
+      const backup = backupRegisteredSandboxState("deepagents", { name: "deepagents-state" });
       expect(backup.success).toBe(true);
       expect(backup.backedUpDirs).toEqual([".state", "skills", "agent/skills"]);
       expect(backup.backedUpFiles).toEqual(["config.toml"]);
@@ -1470,7 +1390,7 @@ process.exit(0);
       expect(loggedCommands).not.toContain(".mcp.json");
       expect(loggedCommands).not.toContain(".nemoclaw-mcp.json");
       // #5753: restore must include agent/skills after backup and recreation.
-      const restore = sandboxState.restoreSandboxState("deepagents", backup.manifest!.backupPath);
+      const restore = restoreRegisteredSandboxState("deepagents", backup.manifest!.backupPath);
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toEqual(
         expect.arrayContaining([".state", "skills", "agent/skills"]),

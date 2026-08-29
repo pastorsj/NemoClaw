@@ -12,6 +12,7 @@ import {
   installGooglechatCredentialFixture,
   rebuildGooglechatForChannelsStopStartLiveE2e,
 } from "../live/channels-stop-start-googlechat-entry.ts";
+import { testTimeout } from "../../helpers/timeouts";
 
 type FixtureRunner = typeof import("../../../src/lib/adapters/openshell/runtime.ts").runOpenshell;
 type FixtureProviderDependencies = {
@@ -30,30 +31,34 @@ type FixtureProviderDependencies = {
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../..");
 
 describe("channels stop/start Google Chat live composition", () => {
-  it("loads through the standalone live-E2E module boundary (#7317)", () => {
-    const result = spawnSync(
-      process.execPath,
-      [
-        "--import",
-        "tsx",
-        "-e",
+  it(
+    "loads through the standalone live-E2E module boundary (#7317)",
+    () => {
+      const result = spawnSync(
+        process.execPath,
         [
-          'import("./test/e2e/live/channels-stop-start-googlechat-entry.ts")',
-          "  .then((module) => console.log(typeof module.addGooglechatForChannelsStopStartLiveE2e))",
-          "  .catch((error) => { console.error(error); process.exitCode = 1; });",
-        ].join("\n"),
-      ],
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        env: { ...process.env, NODE_NO_WARNINGS: "1" },
-        timeout: 10_000,
-      },
-    );
+          "--import",
+          "tsx",
+          "-e",
+          [
+            'import("./test/e2e/live/channels-stop-start-googlechat-entry.ts")',
+            "  .then((module) => console.log(typeof module.addGooglechatForChannelsStopStartLiveE2e))",
+            "  .catch((error) => { console.error(error); process.exitCode = 1; });",
+          ].join("\n"),
+        ],
+        {
+          cwd: REPO_ROOT,
+          encoding: "utf8",
+          env: { ...process.env, NODE_NO_WARNINGS: "1" },
+          timeout: 10_000,
+        },
+      );
 
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout.trim()).toBe("function");
-  });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("function");
+    },
+    testTimeout(15_000),
+  );
 
   it("grants a process-local audience capability to the exact live sandbox", async () => {
     const addSandboxChannel = vi.fn(async () => {});

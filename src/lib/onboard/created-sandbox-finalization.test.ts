@@ -6,35 +6,66 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
+import { restoreEnv } from "../../../test/helpers/env-test-helpers";
+import type { AgentDefinition } from "../agent/defs";
 import type { SandboxEntry } from "../state/registry";
 import type { QualifiedSandboxInferenceRouteReservation } from "../state/registry/route-reservation";
-import * as sandboxState from "../state/sandbox";
-import {
+import type {
+  RebuildManifest,
+  RecreatedSandboxRestoreOptions,
+  RestoreResult,
+  SnapshotRestoreAuthority,
+} from "../state/sandbox";
+import type { HermesPortableConfiguredReceipt } from "./experimental/hermes-portable-receipt";
+import type { SandboxGpuCreateFlowResult } from "./sandbox-gpu-create-flow";
+import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
+import type { CreatedSandboxRegistrationInput } from "./sandbox-registration";
+
+// sandbox-state binds its backup root at module load. Load the finalization
+// path only after HOME points at this file's isolated state root so the fixture
+// can exercise the real snapshot-content authority check without touching user
+// state.
+const ORIGINAL_HOME = process.env.HOME;
+const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-created-finalize-home-"));
+process.env.HOME = TEST_HOME;
+const { loadAgent } = await import("../agent/defs");
+const sandboxState = await import("../state/sandbox");
+const {
   completeOrdinaryOnboardSandboxCreation,
   createCreatedSandboxCompletionActions,
   createOnboardCreatedSandboxCompletion,
   createOnboardCreatedSandboxRegistration,
   finalizeCreatedSandbox,
-} from "./created-sandbox-finalization";
-import { getDcodeSelectionDrift } from "./dcode-selection-drift";
-import type { HermesPortableConfiguredReceipt } from "./experimental/hermes-portable-receipt";
-import { pendingSandboxPolicyVerificationForBoundary } from "./sandbox-create/policy-creation-receipt";
-import type { SandboxGpuCreateFlowResult } from "./sandbox-gpu-create-flow";
-import type { SandboxGpuConfig } from "./sandbox-gpu-mode";
-import type { CreatedSandboxRegistrationInput } from "./sandbox-registration";
+} = await import("./created-sandbox-finalization");
+const { getDcodeSelectionDrift } = await import("./dcode-selection-drift");
+const { pendingSandboxPolicyVerificationForBoundary } =
+  await import("./sandbox-create/policy-creation-receipt");
 
 const fixtures: string[] = [];
+const TEST_BACKUPS_ROOT = path.join(TEST_HOME, ".nemoclaw", "rebuild-backups");
 const TEST_PACKAGE_AUTHORITY = {
   harnessPackage: null,
   harnessPackageMigration: null,
 } as const;
+const DCODE_HARNESS_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "langchain-deepagents-code",
+  packageVersion: "0.1.0",
+  contractVersion: 1 as const,
+  contentDigest: "d".repeat(64),
+};
 
 afterEach(() => {
   delete process.env.NEMOCLAW_OPENSHELL_BIN;
   for (const fixture of fixtures.splice(0)) fs.rmSync(fixture, { recursive: true, force: true });
   vi.restoreAllMocks();
+});
+
+afterAll(() => {
+  restoreEnv("HOME", ORIGINAL_HOME);
+  fs.rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
 describe("created sandbox registration authority", () => {
@@ -118,14 +149,15 @@ function makeRestoreFixture(): {
   oldPath: string;
 } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-finalize-"));
-  fixtures.push(root);
   const bin = path.join(root, "bin");
-  const backupPath = path.join(root, "backup");
+  const sandboxBackupRoot = path.join(TEST_BACKUPS_ROOT, "dcode");
+  fs.mkdirSync(sandboxBackupRoot, { recursive: true });
+  const backupPath = fs.mkdtempSync(path.join(sandboxBackupRoot, "2026-07-06-"));
+  fixtures.push(root, backupPath);
   const liveDir = path.join(root, "live", ".deepagents");
   const currentPath = path.join(liveDir, "config.toml");
   const oldPath = process.env.PATH ?? "";
   fs.mkdirSync(bin, { recursive: true });
-  fs.mkdirSync(backupPath);
   fs.mkdirSync(liveDir, { recursive: true });
 
   fs.writeFileSync(
@@ -274,6 +306,23 @@ function identityFromConfig(config: string): string {
   ].join("\n");
 }
 
+function captureFixtureRestoreAuthority(
+  backupPath: string,
+  expectedManifest?: RebuildManifest,
+): SnapshotRestoreAuthority {
+  const authority = sandboxState.captureSnapshotRestoreAuthority(backupPath, expectedManifest);
+  expect(authority).not.toBeNull();
+  return authority!;
+}
+
+function restoreFixtureState(
+  sandboxName: string,
+  backupPath: string,
+  options: RecreatedSandboxRestoreOptions,
+): RestoreResult {
+  return sandboxState.restoreRecreatedSandboxState(sandboxName, backupPath, options);
+}
+
 describe("created DCode sandbox finalization", () => {
   it("merges stale backup preferences before live validation and registry publication (#6311)", () => {
     const fixture = makeRestoreFixture();
@@ -286,6 +335,7 @@ describe("created DCode sandbox finalization", () => {
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
           targetAgentType: "langchain-deepagents-code",
+          agentDefinition: loadAgent("langchain-deepagents-code"),
           validateManagedDcode: true,
           provider: "nvidia-prod",
           model: "new-model",
@@ -300,8 +350,11 @@ describe("created DCode sandbox finalization", () => {
           restoreRecreatedSandboxState: (name, backup, options) => {
             order.push("restore");
             expect(options.allowCustomImageWholeStateFileRestore).toBeUndefined();
-            return sandboxState.restoreRecreatedSandboxState(name, backup, options);
+            return restoreFixtureState(name, backup, options);
           },
+          captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
+          revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
+          revalidatePolicyAuthority: vi.fn(),
           getDcodeSelectionDrift: (name, provider, model, api) => {
             order.push("validate");
             return getDcodeSelectionDrift(name, provider, model, api, {
@@ -328,6 +381,57 @@ describe("created DCode sandbox finalization", () => {
       expect(registeredConfigs[0]).not.toContain("[agents]");
       expect(registeredConfigs[0]).toContain("[ui]\nshow_scrollbar = true");
       expect(registeredConfigs[0]).not.toContain('theme = "dark"');
+    } finally {
+      process.env.PATH = fixture.oldPath;
+    }
+  });
+
+  it("refuses registry publication when selected backup content changes before restore (#6311)", () => {
+    const fixture = makeRestoreFixture();
+    const register = vi.fn();
+    const error = vi.fn();
+    const getDcodeSelectionDrift = vi.fn();
+    const liveConfigBeforeRestore = fs.readFileSync(fixture.currentPath, "utf8");
+    try {
+      expect(() =>
+        finalizeCreatedSandbox(
+          {
+            sandboxName: "dcode",
+            restoreBackupPath: fixture.backupPath,
+            preUpgradeBackup: false,
+            targetAgentType: "langchain-deepagents-code",
+            agentDefinition: loadAgent("langchain-deepagents-code"),
+            validateManagedDcode: true,
+            provider: "nvidia-prod",
+            model: "new-model",
+            preferredInferenceApi: null,
+          },
+          {
+            discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+            restoreRecreatedSandboxState: (name, backup, options) => {
+              fs.appendFileSync(path.join(backup, "config.toml"), "\n# changed after selection\n");
+              return restoreFixtureState(name, backup, options);
+            },
+            captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
+            revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
+            revalidatePolicyAuthority: vi.fn(),
+            getDcodeSelectionDrift,
+            register,
+            note: vi.fn(),
+            error,
+            exitProcess: (code): never => {
+              throw new Error(`exit ${code}`);
+            },
+          },
+        ),
+      ).toThrow("exit 1");
+
+      expect(register).not.toHaveBeenCalled();
+      expect(getDcodeSelectionDrift).not.toHaveBeenCalled();
+      expect(fs.readFileSync(fixture.currentPath, "utf8")).toBe(liveConfigBeforeRestore);
+      expect(error.mock.calls.flat().join("\n")).toContain(
+        "Could not stage selected snapshot safely: selected snapshot content changed while it was staged",
+      );
     } finally {
       process.env.PATH = fixture.oldPath;
     }
@@ -453,6 +557,10 @@ describe("created DCode sandbox finalization", () => {
       null,
       null,
       null,
+      {
+        name: "langchain-deepagents-code",
+        packageRoot: "/state/harnesses/objects/deepagents-code",
+      } as AgentDefinition,
       null,
       { customOpenClawImage: false, isManagedDcodeAgent: true },
       {
@@ -644,6 +752,7 @@ describe("created DCode sandbox finalization", () => {
             restoreBackupPath: fixture.backupPath,
             preUpgradeBackup: false,
             targetAgentType: "langchain-deepagents-code",
+            agentDefinition: loadAgent("langchain-deepagents-code"),
             validateManagedDcode: true,
             provider: "nvidia-prod",
             model: "new-model",
@@ -652,7 +761,7 @@ describe("created DCode sandbox finalization", () => {
           {
             discoverFreshOpenClawImagePluginInstalls: vi.fn(),
             restoreRecreatedSandboxState: (name, backup, options) => {
-              const restored = sandboxState.restoreRecreatedSandboxState(name, backup, options);
+              const restored = restoreFixtureState(name, backup, options);
               return {
                 ...restored,
                 success: false,
@@ -661,6 +770,9 @@ describe("created DCode sandbox finalization", () => {
                 error: "copy failed",
               };
             },
+            captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
+            revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
+            revalidatePolicyAuthority: vi.fn(),
             getDcodeSelectionDrift,
             register,
             note: vi.fn(),
@@ -708,6 +820,7 @@ describe("created DCode sandbox finalization", () => {
           restoreBackupPath: fixture.backupPath,
           preUpgradeBackup: false,
           targetAgentType: "langchain-deepagents-code",
+          agentDefinition: loadAgent("langchain-deepagents-code"),
           customImage: true,
           validateManagedDcode: false,
           provider: "custom-provider",
@@ -718,8 +831,11 @@ describe("created DCode sandbox finalization", () => {
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
           restoreRecreatedSandboxState: (name, backup, options) => {
             expect(options.allowCustomImageWholeStateFileRestore).toBe(true);
-            return sandboxState.restoreRecreatedSandboxState(name, backup, options);
+            return restoreFixtureState(name, backup, options);
           },
+          captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
+          revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
+          revalidatePolicyAuthority: vi.fn(),
           getDcodeSelectionDrift: vi.fn(),
           register: () => {
             registeredConfigs.push(fs.readFileSync(fixture.currentPath, "utf8"));
@@ -744,6 +860,13 @@ describe("created DCode sandbox finalization", () => {
 });
 
 describe("created OpenClaw sandbox finalization", () => {
+  const openClawHarnessPackage = {
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "1.2.3",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  };
   const pluginInstalls = [
     {
       id: "weather",
@@ -751,6 +874,23 @@ describe("created OpenClaw sandbox finalization", () => {
       loadPaths: [],
     },
   ];
+
+  function openClawV2Manifest(overrides: Partial<RebuildManifest> = {}): RebuildManifest {
+    return {
+      version: 2,
+      sandboxName: "openclaw",
+      timestamp: "2026-08-28T00:00:00.000Z",
+      agentType: "openclaw",
+      agentVersion: "1.2.3",
+      expectedVersion: "1.2.3",
+      harnessPackage: openClawHarnessPackage,
+      stateDirs: ["extensions"],
+      dir: "/sandbox/.openclaw",
+      backupPath: "/tmp/openclaw-backup",
+      blueprintDigest: null,
+      ...overrides,
+    };
+  }
 
   it("skips image-plugin discovery for a managed OpenClaw image", () => {
     const discoverFreshOpenClawImagePluginInstalls = vi.fn();
@@ -824,61 +964,54 @@ describe("created OpenClaw sandbox finalization", () => {
     expect(register).toHaveBeenCalledWith(pluginInstalls);
   });
 
-  it("preserves the fresh image plugin baseline across recreation before registration", () => {
-    const order: string[] = [];
-    const register = vi.fn(() => {
-      order.push("register");
-    });
-    const restoreRecreatedSandboxState = vi.fn(() => {
-      order.push("restore");
-      return {
-        success: true,
-        restoredDirs: ["extensions"],
-        failedDirs: [],
-        restoredFiles: ["openclaw.json"],
-        failedFiles: [],
-      };
-    });
+  it("fails closed when snapshot content changes during recreate preflight", () => {
+    const restoreRecreatedSandboxState = vi.fn();
+    const register = vi.fn();
+    const error = vi.fn();
+    const captureSnapshotRestoreAuthority = vi.fn(() => null);
 
-    finalizeCreatedSandbox(
-      {
-        sandboxName: "openclaw",
-        restoreBackupPath: "/tmp/openclaw-backup",
-        preUpgradeBackup: false,
-        targetAgentType: "openclaw",
-        discoverOpenClawImagePluginInstalls: true,
-        validateManagedDcode: false,
-        provider: "compatible-endpoint",
-        model: "demo",
-        preferredInferenceApi: "openai-completions",
-      },
-      {
-        discoverFreshOpenClawImagePluginInstalls: () => {
-          order.push("discover");
-          return { ok: true, extensionDirs: ["weather"], pluginInstalls };
+    expect(() =>
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "openclaw",
+          restoreBackupPath: "/tmp/openclaw-backup",
+          preUpgradeBackup: false,
+          targetAgentType: "openclaw",
+          agentDefinition: { name: "openclaw" } as never,
+          validateManagedDcode: false,
+          provider: "compatible-endpoint",
+          model: "demo",
+          preferredInferenceApi: "openai-completions",
         },
-        restoreRecreatedSandboxState,
-        getDcodeSelectionDrift: vi.fn(),
-        register,
-        note: vi.fn(),
-        error: vi.fn(),
-        exitProcess: (code): never => {
-          throw new Error(`exit ${code}`);
+        {
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          restoreRecreatedSandboxState,
+          readSandboxStateBackupManifest: () => openClawV2Manifest(),
+          captureSnapshotRestoreAuthority,
+          revalidateHarnessPackageAuthority: () => openClawHarnessPackage,
+          getDcodeSelectionDrift: vi.fn(),
+          register,
+          note: vi.fn(),
+          error,
+          exitProcess: (code): never => {
+            throw new Error(`exit ${code}`);
+          },
         },
-      },
+      ),
+    ).toThrow("exit 1");
+
+    expect(captureSnapshotRestoreAuthority).toHaveBeenCalledOnce();
+    expect(restoreRecreatedSandboxState).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(
+      "  Restore reason: Selected snapshot content changed during restore preflight",
     );
-
-    expect(order).toEqual(["discover", "restore", "register"]);
-    expect(restoreRecreatedSandboxState).toHaveBeenCalledWith("openclaw", "/tmp/openclaw-backup", {
-      targetAgentType: "openclaw",
-      freshOpenClawImagePluginInstalls: pluginInstalls,
-    });
-    expect(register).toHaveBeenCalledWith(pluginInstalls);
   });
 
   it("defers managed restore before unregistered target authority can be bound", () => {
     const register = vi.fn();
     const error = vi.fn();
+    const captureSnapshotRestoreAuthority = vi.fn();
 
     expect(() =>
       finalizeCreatedSandbox(
@@ -894,14 +1027,23 @@ describe("created OpenClaw sandbox finalization", () => {
         },
         {
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
-          restoreRecreatedSandboxState: () => ({
-            success: false,
-            restoredDirs: [],
-            failedDirs: ["manifest"],
-            restoredFiles: [],
-            failedFiles: [],
-            error: sandboxState.MANAGED_SNAPSHOT_RESTORE_AUTHORITY_ERROR,
-          }),
+          readSandboxStateBackupManifest: () =>
+            openClawV2Manifest({
+              workload: { kind: "managed-image" } as never,
+            }),
+          captureSnapshotRestoreAuthority,
+          restoreRecreatedSandboxState: (_name, _backup, options) => {
+            expect(options.authority).toBeUndefined();
+            expect(options.validateBeforeMutation).toBeUndefined();
+            return {
+              success: false,
+              restoredDirs: [],
+              failedDirs: ["manifest"],
+              restoredFiles: [],
+              failedFiles: [],
+              error: sandboxState.MANAGED_SNAPSHOT_RESTORE_AUTHORITY_ERROR,
+            };
+          },
           getDcodeSelectionDrift: vi.fn(),
           register,
           note: vi.fn(),
@@ -914,6 +1056,7 @@ describe("created OpenClaw sandbox finalization", () => {
     ).toThrow("exit 1");
 
     expect(register).not.toHaveBeenCalled();
+    expect(captureSnapshotRestoreAuthority).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(expect.stringContaining("restore is deferred"));
     expect(error).toHaveBeenCalledWith(
       "  State was not restored and registry metadata was not updated.",

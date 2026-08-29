@@ -5,6 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as f from "./snapshot-restore-test-fixture";
 
+const DCODE_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "langchain-deepagents-code",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "c".repeat(64),
+};
+const DCODE_SNAPSHOT = {
+  ...f.latestBackupFixture,
+  version: 2,
+  backupComplete: true,
+  agentType: DCODE_PACKAGE.id,
+  harnessPackage: DCODE_PACKAGE,
+};
+
 beforeEach(f.resetSnapshotRestoreMocks);
 afterEach(f.cleanupSnapshotRestoreMocks);
 describe("runSandboxSnapshot restore: observability policy reconciliation", () => {
@@ -23,10 +38,11 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     f.getSandboxMock.mockReturnValue({
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       policyTier: "balanced",
     } as never);
     f.getLatestBackupMock.mockReturnValue({
-      ...f.latestBackupFixture,
+      ...DCODE_SNAPSHOT,
       policyPresets: [customPolicy.name],
       customPolicies: [customPolicy],
     });
@@ -41,7 +57,11 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
       "alpha",
       customPolicy.name,
       customPolicy.content,
-      { custom: { sourcePath: customPolicy.sourcePath }, nonFatal: true },
+      {
+        custom: { sourcePath: customPolicy.sourcePath },
+        nonFatal: true,
+        skipRegistryUpdate: true,
+      },
     );
     expect(consoleWarn.mock.calls.flat().join("\n")).toContain("private-api (apply failed)");
   });
@@ -50,17 +70,14 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     let registryEntry = {
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       observabilityEnabled: false,
       policyTier: "balanced",
       policies: ["github", "observability-otlp-local"],
     };
     f.getSandboxMock.mockImplementation(() => registryEntry as never);
-    f.updateSandboxMock.mockImplementation((_sandboxName, update) => {
-      registryEntry = { ...registryEntry, ...(update as Partial<typeof registryEntry>) };
-    });
     f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
+      ...DCODE_SNAPSHOT,
       policyPresets: [],
     });
     f.getAppliedPresetsMock.mockReturnValue(["github", "observability-otlp-local"]);
@@ -68,10 +85,6 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     f.removePresetMock
       .mockImplementationOnce((_sandboxName, presetName) => {
         expect(presetName).toBe("github");
-        registryEntry = {
-          ...registryEntry,
-          policies: registryEntry.policies.filter((name) => name !== "github"),
-        };
         return true;
       })
       .mockReturnValue(true);
@@ -84,9 +97,10 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
       "github",
       "observability-otlp-local",
     ]);
-    expect(f.updateSandboxMock).toHaveBeenLastCalledWith("alpha", {
-      policies: ["observability-otlp-local"],
-    });
+    expect(f.updateSandboxIfCurrentMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ name: "alpha" }),
+      { policies: ["observability-otlp-local"] },
+    );
     expect(registryEntry.policies).toEqual(["observability-otlp-local"]);
   });
 
@@ -105,34 +119,35 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
       policies: ["npm", "observability-otlp-local"],
       expectedPolicies: ["npm"],
     },
-  ])("repairs stale OTLP registry state: $label", async ({
-    observabilityEnabled,
-    liveState,
-    policies: recordedPolicies,
-    expectedPolicies,
-  }) => {
-    f.getSandboxMock.mockReturnValue({
-      name: "alpha",
-      agent: "langchain-deepagents-code",
-      observabilityEnabled,
-      policyTier: "balanced",
-      policies: recordedPolicies,
-    } as never);
-    f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
-      policyPresets: ["npm"],
-    });
-    f.getAppliedPresetsMock.mockReturnValue(recordedPolicies);
-    f.getPresetContentGatewayStateMock.mockReturnValue(liveState);
-    const { runSandboxSnapshot } = await import("./snapshot");
+  ])(
+    "repairs stale OTLP registry state: $label",
+    async ({ observabilityEnabled, liveState, policies: recordedPolicies, expectedPolicies }) => {
+      f.getSandboxMock.mockReturnValue({
+        name: "alpha",
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
+        observabilityEnabled,
+        policyTier: "balanced",
+        policies: recordedPolicies,
+      } as never);
+      f.getLatestBackupMock.mockReturnValue({
+        ...DCODE_SNAPSHOT,
+        policyPresets: ["npm"],
+      });
+      f.getAppliedPresetsMock.mockReturnValue(recordedPolicies);
+      f.getPresetContentGatewayStateMock.mockReturnValue(liveState);
+      const { runSandboxSnapshot } = await import("./snapshot");
 
-    await runSandboxSnapshot("alpha", { kind: "restore" });
+      await runSandboxSnapshot("alpha", { kind: "restore" });
 
-    expect(f.updateSandboxMock).toHaveBeenCalledWith("alpha", { policies: expectedPolicies });
-    expect(f.applyPresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
-    expect(f.removePresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
-  });
+      expect(f.updateSandboxIfCurrentMock).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "alpha" }),
+        { policies: expectedPolicies },
+      );
+      expect(f.applyPresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
+      expect(f.removePresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
+    },
+  );
 
   it("does not let a same-name, different-key custom replay suppress stale built-in OTLP cleanup", async () => {
     const customPolicy = {
@@ -143,12 +158,12 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     f.getSandboxMock.mockReturnValue({
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       observabilityEnabled: false,
       policyTier: "balanced",
     } as never);
     f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
+      ...DCODE_SNAPSHOT,
       policyPresets: [customPolicy.name],
       customPolicies: [customPolicy],
     });
@@ -163,14 +178,19 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
       "alpha",
       customPolicy.name,
       customPolicy.content,
-      { custom: { sourcePath: customPolicy.sourcePath }, nonFatal: true },
+      {
+        custom: { sourcePath: customPolicy.sourcePath },
+        nonFatal: true,
+        skipRegistryUpdate: true,
+      },
     );
     expect(f.removePresetMock).toHaveBeenCalledTimes(1);
     expect(f.removePresetMock).toHaveBeenCalledWith("alpha", "observability-otlp-local", {
       nonFatal: true,
+      skipRegistryUpdate: true,
     });
     expect(f.applyPresetMock).not.toHaveBeenCalledWith("alpha", customPolicy.name);
-    expect(f.updateSandboxMock).not.toHaveBeenCalled();
+    expect(f.updateSandboxIfCurrentMock).toHaveBeenCalledTimes(1);
   });
 
   it("lets successfully replayed corp-otel content own its exact live OTLP key", async () => {
@@ -183,13 +203,13 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     f.getSandboxMock.mockReturnValue({
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       observabilityEnabled: false,
       policyTier: "balanced",
       policies: ["npm", "observability-otlp-local"],
     } as never);
     f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
+      ...DCODE_SNAPSHOT,
       policyPresets: ["npm", "observability-otlp-local"],
       customPolicies: [customPolicy],
     });
@@ -205,12 +225,19 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
       "alpha",
       customPolicy.name,
       customPolicy.content,
-      { custom: { sourcePath: customPolicy.sourcePath }, nonFatal: true },
+      {
+        custom: { sourcePath: customPolicy.sourcePath },
+        nonFatal: true,
+        skipRegistryUpdate: true,
+      },
     );
     expect(f.applyPresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
     expect(f.removePresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
     expect(f.removePresetMock).not.toHaveBeenCalledWith("alpha", customPolicy.name);
-    expect(f.updateSandboxMock).toHaveBeenCalledWith("alpha", { policies: ["npm"] });
+    expect(f.updateSandboxIfCurrentMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "alpha" }),
+      { policies: ["npm"] },
+    );
     expect(f.getPresetContentGatewayStateMock).toHaveBeenCalledTimes(1);
     expect(f.getPresetContentGatewayStateMock.mock.calls[0]?.[1]).toBe(customPolicy.content);
     expect(f.getPresetContentGatewayStateMock.mock.calls[0]?.[2]).toBe("observability-otlp-local");
@@ -226,13 +253,13 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     f.getSandboxMock.mockReturnValue({
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       observabilityEnabled: false,
       policyTier: "balanced",
       policies: ["npm", "observability-otlp-local"],
     } as never);
     f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
+      ...DCODE_SNAPSHOT,
       policyPresets: ["npm", "observability-otlp-local"],
       customPolicies: [customPolicy],
     });
@@ -247,6 +274,7 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     expect(consoleWarn.mock.calls.flat().join("\n")).toContain("corp-otel (apply failed)");
     expect(f.removePresetMock).toHaveBeenCalledWith("alpha", "observability-otlp-local", {
       nonFatal: true,
+      skipRegistryUpdate: true,
     });
     expect(f.getPresetContentGatewayStateMock).toHaveBeenCalledTimes(2);
     expect(f.getPresetContentGatewayStateMock).toHaveBeenCalledWith(
@@ -264,11 +292,12 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     f.getSandboxMock.mockReturnValue({
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       observabilityEnabled: true,
       policyTier: "balanced",
     } as never);
     f.getLatestBackupMock.mockReturnValue({
-      ...f.latestBackupFixture,
+      ...DCODE_SNAPSHOT,
       policyPresets: [],
       customPolicies: [],
     });
@@ -282,50 +311,51 @@ describe("runSandboxSnapshot restore: observability policy reconciliation", () =
     await runSandboxSnapshot("alpha", { kind: "restore" });
     expect(f.removePresetMock).toHaveBeenCalledWith("alpha", currentCustomPolicy.name, {
       nonFatal: true,
+      skipRegistryUpdate: true,
     });
     expect(f.applyPresetMock).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
     expect(consoleWarn.mock.calls.flat().join("\n")).toContain(
       "leaving live policy presets unchanged",
     );
   });
-  it.each([
-    "drift",
-    null,
-  ] as const)("does not remove built-in OTLP when its exact live content state is %s", async (gatewayState) => {
-    f.getSandboxMock.mockReturnValue({
-      name: "alpha",
-      agent: "langchain-deepagents-code",
-      observabilityEnabled: false,
-      policyTier: "balanced",
-    } as never);
-    f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
-      policyPresets: ["observability-otlp-local"],
-    });
-    f.getAppliedPresetsMock.mockReturnValue(["observability-otlp-local"]);
-    f.getPresetContentGatewayStateMock.mockReturnValue(gatewayState);
-    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const { runSandboxSnapshot } = await import("./snapshot");
+  it.each(["drift", null] as const)(
+    "does not remove built-in OTLP when its exact live content state is %s",
+    async (gatewayState) => {
+      f.getSandboxMock.mockReturnValue({
+        name: "alpha",
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
+        observabilityEnabled: false,
+        policyTier: "balanced",
+      } as never);
+      f.getLatestBackupMock.mockReturnValue({
+        ...DCODE_SNAPSHOT,
+        policyPresets: ["observability-otlp-local"],
+      });
+      f.getAppliedPresetsMock.mockReturnValue(["observability-otlp-local"]);
+      f.getPresetContentGatewayStateMock.mockReturnValue(gatewayState);
+      const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { runSandboxSnapshot } = await import("./snapshot");
 
-    await runSandboxSnapshot("alpha", { kind: "restore" });
+      await runSandboxSnapshot("alpha", { kind: "restore" });
 
-    expect(f.removePresetMock).not.toHaveBeenCalled();
-    expect(consoleWarn.mock.calls.flat().join("\n")).toContain(
-      "leaving its live policy content unchanged",
-    );
-  });
+      expect(f.removePresetMock).not.toHaveBeenCalled();
+      expect(consoleWarn.mock.calls.flat().join("\n")).toContain(
+        "leaving its live policy content unchanged",
+      );
+    },
+  );
 
   it("normalizes a legacy restricted tier before deciding built-in OTLP egress", async () => {
     f.getSandboxMock.mockReturnValue({
       name: "alpha",
       agent: "langchain-deepagents-code",
+      harnessPackage: DCODE_PACKAGE,
       observabilityEnabled: true,
       policyTier: " Restricted ",
     } as never);
     f.getLatestBackupMock.mockReturnValue({
-      timestamp: "2026-06-15T00:00:00.000Z",
-      backupPath: "/tmp/backup-alpha",
+      ...DCODE_SNAPSHOT,
       policyPresets: [],
     });
     const { runSandboxSnapshot } = await import("./snapshot");

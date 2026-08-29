@@ -59,6 +59,13 @@ export const AGENTS_DIR = path.join(ROOT, "agents");
 
 const _cache = new Map<string, AgentDefinition>();
 
+function freezeAgentDefinitionTree<T>(value: T, seen = new WeakSet<object>()): T {
+  if (typeof value !== "object" || value === null || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) freezeAgentDefinitionTree(child, seen);
+  return Object.freeze(value);
+}
+
 export { agentAliasSummary } from "./aliases";
 export { requireCandidateQualificationEnabled } from "./candidate";
 
@@ -115,7 +122,33 @@ export function requireAgentPolicyAdditionsPath(
 }
 
 /**
- * Load and parse an agent manifest.
+ * Load and parse an agent manifest without consulting the process cache.
+ * Destructive repository-agent authority checks use this path so each fence
+ * observes current manifest bytes and owns a detached immutable definition.
+ */
+export function loadAgentFresh(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): AgentDefinition {
+  if (name === "nemocua") requireCuaEnabled(env);
+  requireCandidateAgentSelectable(name, env);
+  const manifestPath = path.join(AGENTS_DIR, name, "manifest.yaml");
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(`Agent '${name}' not found: ${manifestPath}`);
+  }
+  return freezeAgentDefinitionTree(
+    structuredClone(
+      buildAgentDefinition({
+        manifest: loadManifestRecord(manifestPath),
+        manifestPath,
+        packageRoot: ROOT,
+      }),
+    ),
+  );
+}
+
+/**
+ * Load and parse an agent manifest through the ordinary process cache.
  */
 export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): AgentDefinition {
   if (name === "nemocua") requireCuaEnabled(env);
@@ -124,16 +157,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
   const cacheKey = `${ROOT}\0${manifestPath}`;
   const cached = _cache.get(cacheKey);
   if (cached) return cached;
-
-  if (!fs.existsSync(manifestPath)) {
-    throw new Error(`Agent '${name}' not found: ${manifestPath}`);
-  }
-
-  const agent = buildAgentDefinition({
-    manifest: loadManifestRecord(manifestPath),
-    manifestPath,
-    packageRoot: ROOT,
-  });
+  const agent = loadAgentFresh(name, env);
   _cache.set(cacheKey, agent);
   return agent;
 }

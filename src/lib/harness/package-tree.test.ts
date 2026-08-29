@@ -478,6 +478,32 @@ describe("harness package tree", () => {
     expect(() => validateHarnessPackageTree(fixture.sourceRoot)).toThrow(/ancestor.*owner/);
   });
 
+  it("allows unrelated sibling changes under a source ancestor", () => {
+    const fixture = createTree({ runtime: { contents: "reviewed" } });
+    const validated = validateHarnessPackageTree(fixture.sourceRoot);
+
+    fs.mkdirSync(path.join(fixture.fixtureRoot, "unrelated"), { mode: 0o700 });
+
+    const copied = copyVerifiedPackageTree(validated, {
+      stagingParent: fixture.stagingParent,
+    });
+    expect(fs.readFileSync(path.join(copied.packageRoot, "runtime"), "utf8")).toBe("reviewed");
+  });
+
+  it("rejects source-ancestor replacement before copy", () => {
+    const fixture = createTree({ runtime: { contents: "reviewed" } });
+    const validated = validateHarnessPackageTree(fixture.sourceRoot);
+    const movedRoot = `${fixture.fixtureRoot}.original`;
+    fixtureRoots.add(movedRoot);
+    fs.renameSync(fixture.fixtureRoot, movedRoot);
+    fs.mkdirSync(fixture.fixtureRoot, { mode: 0o700 });
+    fs.mkdirSync(fixture.stagingParent, { mode: 0o700 });
+
+    expect(() =>
+      copyVerifiedPackageTree(validated, { stagingParent: fixture.stagingParent }),
+    ).toThrow(/changed/);
+  });
+
   it.each([
     ["entry count", { maxEntries: 0 }, { one: { contents: "1" } }, /entry count/],
     ["depth", { maxDepth: 1 }, { "one/two": { contents: "2" } }, /depth/],

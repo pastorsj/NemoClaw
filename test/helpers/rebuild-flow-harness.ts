@@ -7,10 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
 import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
-import {
-  createHarnessPackageFixture,
-  type HarnessPackageFixture,
-} from "./harness-packages";
+import { createHarnessPackageFixture, type HarnessPackageFixture } from "./harness-packages";
 import { type RebuildSandbox, snapshotEnv } from "./rebuild-flow-test-support";
 
 export * from "./rebuild-flow-test-support";
@@ -69,6 +66,7 @@ export const registry = requireDist("../../state/registry.js");
 export const registryPersistence = requireDist("../../state/registry/persistence.js");
 export const resolve = requireDist("../../adapters/openshell/resolve.js");
 export const sandboxList = requireDist("../../openshell-sandbox-list.js");
+export const sandboxAgent = requireDist("../../onboard/sandbox-agent.js");
 export const sandboxSession = requireDist("../../state/sandbox-session.js");
 export const sandboxState = requireDist("../../state/sandbox.js");
 export const sandboxVersion = requireDist("../../sandbox/version.js");
@@ -91,10 +89,7 @@ export function sourceSandboxGateway(argv: string[], verb: string): string | nul
 
 const harnessTempDirs: string[] = [];
 const harnessCleanupCallbacks: Array<() => void> = [];
-const REBUILD_HOME_PARENT = path.join(
-  process.cwd(),
-  "node_modules/.cache/nemoclaw-rebuild-homes",
-);
+const REBUILD_HOME_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-rebuild-homes");
 const harnessPackageFixtures = new Map<
   string,
   {
@@ -109,11 +104,7 @@ export function createHarnessTempDir(prefix: string): string {
   return dir;
 }
 
-const STANDARD_REBUILD_HARNESS_IDS = new Set([
-  "openclaw",
-  "hermes",
-  "langchain-deepagents-code",
-]);
+const STANDARD_REBUILD_HARNESS_IDS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);
 
 /** Install exact standard-harness authority under an isolated rebuild-test home. */
 export function installRebuildHarnessPackage(agentName: string): HarnessPackageIdentity | null {

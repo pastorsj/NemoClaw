@@ -3,6 +3,7 @@
 
 import type { SandboxEntry } from "../state/registry";
 import * as sandboxState from "../state/sandbox";
+import * as sandboxAgent from "./sandbox-agent";
 import {
   assertSandboxRecreateSourceProof,
   type SandboxRecreateObservation,
@@ -77,26 +78,78 @@ export class UnsafeCustomImagePluginBackupError extends Error {
   }
 }
 
-function assertNotReadyBackupPluginProvenance(
+export class IncompleteBackupRecoveryError extends Error {
+  readonly hints: readonly string[];
+
+  constructor(sandboxName: string, backupPath: string, reason?: string) {
+    super(
+      `Pre-upgrade backup for '${sandboxName}' cannot authorize automatic recovery${reason ? `: ${reason}` : "."}`,
+    );
+    this.name = "IncompleteBackupRecoveryError";
+    this.hints = [
+      `  The pre-upgrade backup for '${sandboxName}' cannot authorize automatic recreation because its capture is incomplete, lacks publication evidence, or changed after publication.`,
+      "  Automatic recreation is blocked before delete. The sandbox and backup are untouched.",
+      `  Inspect or restore the snapshot manually from: ${backupPath}`,
+      "  Select a complete snapshot or take a new complete backup before retrying automatic recreation.",
+    ];
+  }
+}
+
+function assertNotReadyBackupRecoveryEligibility(
   sandboxName: string,
   backup: sandboxState.SnapshotEntry | null,
   entry: SandboxEntry | null,
   requireOpenClawImagePluginProvenance: boolean,
-): void {
+): sandboxState.RebuildManifest | null {
   const customOpenClaw =
     requireOpenClawImagePluginProvenance ||
     (Boolean(entry?.fromDockerfile) && (!entry?.agent || entry.agent === "openclaw"));
   if (!backup) {
     if (customOpenClaw) throw new UnsafeCustomImagePluginBackupError(sandboxName, null);
-    return;
+    return null;
   }
-  const markedCustomImageBackup = backup.reconcileOpenClawImagePluginProvenance === true;
+  let recoveryOwner:
+    | string
+    | null
+    | Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">;
+  if (backup.version === 1) {
+    if (!entry) {
+      throw new IncompleteBackupRecoveryError(
+        sandboxName,
+        backup.backupPath,
+        "legacy backup recovery requires its owning sandbox registry entry",
+      );
+    }
+    try {
+      recoveryOwner = sandboxAgent.resolveLegacyBackupRecoveryOwner(entry);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new IncompleteBackupRecoveryError(sandboxName, backup.backupPath, detail);
+    }
+  } else {
+    recoveryOwner = entry;
+  }
+  const recoveryValidation = sandboxState.validateRebuildRecoveryManifest(
+    sandboxName,
+    recoveryOwner,
+    backup,
+  );
+  if (!recoveryValidation.ok) {
+    throw new IncompleteBackupRecoveryError(
+      sandboxName,
+      backup.backupPath,
+      recoveryValidation.reason,
+    );
+  }
+  const validatedBackup = recoveryValidation.manifest;
+  const markedCustomImageBackup = validatedBackup.reconcileOpenClawImagePluginProvenance === true;
   if (
     (customOpenClaw || markedCustomImageBackup) &&
-    !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(backup)
+    !sandboxState.hasAuthoritativeOpenClawImagePluginProvenance(validatedBackup)
   ) {
-    throw new UnsafeCustomImagePluginBackupError(sandboxName, backup.backupPath);
+    throw new UnsafeCustomImagePluginBackupError(sandboxName, validatedBackup.backupPath);
   }
+  return validatedBackup;
 }
 
 export function installerRestoreOnRecreateFromEnv(env: NodeJS.ProcessEnv): boolean {
@@ -141,17 +194,17 @@ export function selectPreUpgradeBackupForCreate(input: PreUpgradeBackupSelectInp
     observation,
   });
   const latest = sandboxState.getLatestBackup(input.sandboxName);
-  assertNotReadyBackupPluginProvenance(
+  const selectedBackup = assertNotReadyBackupRecoveryEligibility(
     input.sandboxName,
     latest,
-    input.existingSandboxEntry ?? null,
+    registryEntry,
     input.requireOpenClawImagePluginProvenance === true,
   );
-  if (latest?.backupPath) {
+  if (selectedBackup) {
     input.note(
       `  Found pre-upgrade backup for '${input.sandboxName}'; it will be restored after recreation.`,
     );
-    return latest.backupPath;
+    return selectedBackup.backupPath;
   }
   // A guaranteed pre-upgrade backup is out of scope: the backup may have been
   // manually deleted, the disk may be full, or a prior upgrade attempt may have
@@ -173,8 +226,9 @@ export function applyNonInteractiveNotReadyDecision(
 ): string | null {
   const installerRestoreOnRecreate = installerRestoreOnRecreateFromEnv(process.env);
   const latest = installerRestoreOnRecreate ? sandboxState.getLatestBackup(sandboxName) : null;
+  let selectedBackup: sandboxState.RebuildManifest | null = null;
   if (installerRestoreOnRecreate) {
-    assertNotReadyBackupPluginProvenance(
+    selectedBackup = assertNotReadyBackupRecoveryEligibility(
       sandboxName,
       latest,
       existingSandboxEntry,
@@ -184,7 +238,7 @@ export function applyNonInteractiveNotReadyDecision(
   const decision = decideNonInteractiveNotReadyAction({
     sandboxName,
     installerRestoreOnRecreate,
-    latestBackupPath: latest?.backupPath ?? null,
+    latestBackupPath: selectedBackup?.backupPath ?? null,
   });
   if (decision.kind === "exit") {
     throw new NotReadySandboxError(sandboxName);
@@ -227,7 +281,8 @@ export function resolveNotReadyOutcome(
   } catch (error) {
     if (
       !(error instanceof NotReadySandboxError) &&
-      !(error instanceof UnsafeCustomImagePluginBackupError)
+      !(error instanceof UnsafeCustomImagePluginBackupError) &&
+      !(error instanceof IncompleteBackupRecoveryError)
     )
       throw error;
     return { kind: "blocked", hints: error.hints };

@@ -8,6 +8,11 @@ import { pathToFileURL } from "node:url";
 
 import { afterAll, expect, it } from "vitest";
 
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+} from "../../helpers/snapshot-authority.ts";
+
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-home-snapshot-"));
 process.env.HOME = TMP_HOME;
@@ -84,6 +89,7 @@ process.exit(result.status === null ? 1 : result.status);
             gpuEnabled: false,
             policies: [],
             agent: "hermes",
+            harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
           },
         },
       }),
@@ -91,7 +97,10 @@ process.exit(result.status === null ? 1 : result.status);
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-    const backup = sandboxState.backupSandboxState("hermes", { name: "home-channel" });
+    const backup = sandboxState.backupSandboxState("hermes", {
+      ...createSnapshotBackupAuthorityFixture("hermes"),
+      name: "home-channel",
+    });
 
     expect(backup.success).toBe(true);
     expect(backup.manifest?.preservedEnv).toEqual([

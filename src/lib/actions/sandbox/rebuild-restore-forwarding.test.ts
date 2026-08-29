@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("rebuild restore target forwarding", () => {
-  it("forwards the recreated target identity and explicit custom-image capability", () => {
+  it("forwards the recreated target, custom-image capability, and live identity reader", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const restoreRecreatedSandboxState = vi
       .spyOn(snapshotRestore, "restoreRecreatedSandboxStateWithManagedAuthority")
@@ -41,7 +41,10 @@ describe("rebuild restore target forwarding", () => {
         targetAgentType: "langchain-deepagents-code",
         allowCustomImageWholeStateFileRestore: true,
       },
-      { getSandbox: expect.any(Function) },
+      {
+        getSandbox: expect.any(Function),
+        captureOpenshell: expect.any(Function),
+      },
     );
   });
 });

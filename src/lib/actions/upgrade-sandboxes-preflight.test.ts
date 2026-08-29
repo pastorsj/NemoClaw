@@ -10,10 +10,12 @@ const mocks = vi.hoisted(() => ({
   captureSandboxListWithGatewayPreflightOrExit: vi.fn(),
   checkAgentVersion: vi.fn(),
   classifyUpgradeableSandboxes: vi.fn(),
+  getCredential: vi.fn(() => null),
   getLatestBackup: vi.fn(),
   getVersion: vi.fn(),
   listSandboxes: vi.fn(),
   prompt: vi.fn(),
+  saveCredential: vi.fn(),
   shouldSkipUpgradeConfirmation: vi.fn(),
   splitRebuildableSandboxes: vi.fn(),
 }));
@@ -21,7 +23,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../cli/branding", () => ({ CLI_NAME: "nemoclaw" }));
 vi.mock("../cli/terminal-style", () => ({ B: "", D: "", G: "", R: "", YW: "" }));
 vi.mock("../core/version", () => ({ getVersion: mocks.getVersion }));
-vi.mock("../credentials/store", () => ({ prompt: mocks.prompt }));
+vi.mock("../credentials/store", () => ({
+  getCredential: mocks.getCredential,
+  prompt: mocks.prompt,
+  saveCredential: mocks.saveCredential,
+}));
 vi.mock("../domain/lifecycle/options", () => ({
   normalizeUpgradeSandboxesOptions: (options: unknown) => options,
 }));

@@ -10,7 +10,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as agentDefs from "../agent/defs";
 import { ROOT } from "../runner";
 import * as registry from "../state/registry";
-import { resolveSandboxBaselinePolicy } from "./index";
+import {
+  resolveAgentBaselinePolicy,
+  resolveAgentDefinitionBaselinePolicy,
+  resolveSandboxBaselinePolicy,
+} from "./index";
 
 const tempDirs: string[] = [];
 
@@ -102,4 +106,38 @@ network_policies:
       );
     },
   );
+});
+
+describe("agent definition baseline policy resolution", () => {
+  it("uses a pinned OpenClaw package policy instead of the repository definition", () => {
+    const reviewedPolicy = fs.readFileSync(
+      path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+      "utf-8",
+    );
+    const pinnedPolicyPath = writePolicy(reviewedPolicy);
+    const repositoryPolicyPath = writePolicy("version: [unterminated");
+    const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
+      name: "openclaw",
+      policyAdditionsPath: repositoryPolicyPath,
+    } as never);
+
+    expect(
+      resolveAgentDefinitionBaselinePolicy({
+        name: "openclaw",
+        policyAdditionsPath: pinnedPolicyPath,
+      }),
+    ).toMatchObject({ agent: "openclaw", policyPath: pinnedPolicyPath, content: reviewedPolicy });
+    expect(loadAgentSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the name-based OpenClaw resolver on the reviewed repository policy", () => {
+    const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
+      throw new Error("loadAgent must not run");
+    });
+
+    expect(resolveAgentBaselinePolicy("openclaw")?.policyPath).toBe(
+      path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
+    );
+    expect(loadAgentSpy).not.toHaveBeenCalled();
+  });
 });

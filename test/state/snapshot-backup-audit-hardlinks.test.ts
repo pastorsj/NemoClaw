@@ -20,6 +20,10 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+} from "../helpers/snapshot-authority";
 
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-backup-audit-hardlinks-"));
@@ -61,6 +65,7 @@ function writeRegistry(sandboxName: string): void {
           gpuEnabled: false,
           policies: [],
           agent: null,
+          harnessPackage: createSnapshotHarnessPackageFixture("openclaw"),
         },
       },
     }),
@@ -145,7 +150,10 @@ process.exit(0);
     writeRegistry("alpha");
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}:${oldPath || ""}`;
-    return sandboxState.backupSandboxState("alpha");
+    return sandboxState.backupSandboxState(
+      "alpha",
+      createSnapshotBackupAuthorityFixture("openclaw"),
+    );
   } finally {
     restoreEnv("NEMOCLAW_OPENSHELL_BIN", oldOpenshell);
     restoreEnv("PATH", oldPath);
@@ -231,7 +239,7 @@ describe("pre-backup audit record framing", () => {
     expect(backup.success).toBe(false);
   });
 
-  it("keeps accepting a hard-link entry with an empty link target", () => {
+  hardDereferenceTest("keeps accepting a hard-link entry with an empty link target", () => {
     const backup = backupWithAuditOutput(
       encodePreBackupAuditEntries([
         ["f", "/sandbox/.openclaw/workspace/lazy-packages/edge_tts/__init__.py", ""],

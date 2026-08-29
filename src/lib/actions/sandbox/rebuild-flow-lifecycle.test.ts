@@ -10,6 +10,7 @@ import {
   portableAgentLifecycle,
   snapshotEnv,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { makePreparedRecoveryManifest } from "./rebuild-flow-test-fixtures";
 
 describe("rebuildSandbox flow: lifecycle", () => {
@@ -136,7 +137,12 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       "/tmp/nemoclaw-rebuild-backup",
-      { targetAgentType: "openclaw" },
+      expect.objectContaining({
+        targetAgentType: "openclaw",
+        agentDefinition: expect.objectContaining({ name: "openclaw" }),
+        authority: expect.objectContaining({ schemaVersion: 1 }),
+        validateBeforeMutation: expect.any(Function),
+      }),
     );
     expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
@@ -317,18 +323,28 @@ network_policies:
       harness.rebuildSandbox("alpha", ["--yes", "--verbose"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    // Open the journal against the live source, wait for absence, then prove
-    // absence once more before the journal records the deleted phase (#7734).
+    // Open the journal against the live source, wait for absence, prove
+    // absence once more before recording deletion, then verify the replacement
+    // identity at the state-restore mutation edge (#7734).
     expect(events).toEqual(["stale-live", "absent", "absent", "onboard"]);
     expect(
       harness.captureOpenshellSpy.mock.calls.filter(
         ([args]) => Array.isArray(args) && args.join(" ") === "sandbox get -g nemoclaw alpha",
       ),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it("accepts the agent version cached by the confirmation probe before lock acquisition", async () => {
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    expect(harnessPackage).not.toBeNull();
+    const recoveryManifest = {
+      ...makePreparedRecoveryManifest(),
+      version: 2 as const,
+      harnessPackage,
+    };
     const harness = createRebuildFlowHarness({
+      harnessPackage,
+      preDeleteLatestManifest: recoveryManifest,
       sandboxEntry: { agentVersion: null },
       entryUpdatesAfterVersionCheck: { agentVersion: "0.2.0" },
       versionCheck: {
@@ -343,7 +359,7 @@ network_policies:
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
-        recoveryManifest: makePreparedRecoveryManifest(),
+        recoveryManifest,
       }),
     ).resolves.toBeUndefined();
 

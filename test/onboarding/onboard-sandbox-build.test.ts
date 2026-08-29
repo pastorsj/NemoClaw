@@ -327,6 +327,7 @@ runner.runCapture = (command) => {
   return "";
 };
 const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  agentName: "hermes",
   sandboxName: "hermes-sandbox",
   provider: "nvidia-prod",
   model: "gpt-5.4",
@@ -813,7 +814,7 @@ const { createSandbox } = require(${onboardPath});
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   const sandboxName = await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
-    [null, "gpt-5.4", "nvidia-prod", null, null, null, null, null, null, null, null, null, []],
+    [null, "gpt-5.4", "nvidia-prod", null, null, null, null, null, null, 19000, null, null, []],
     createFixture,
   ));
   console.log(JSON.stringify({ sandboxName, commands }));

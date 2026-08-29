@@ -685,6 +685,11 @@ startGateway(null).catch((error) => {
 	const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
 	const registry = require(${registryPath});
 	const fixtureMocks = require(${onboardScriptMocksPath});
+	const harnessFixture = fixtureMocks.installHarnessRouteFixture({
+	  sandboxName: "my-assistant",
+	  provider: "nvidia-prod",
+	  model: "gpt-5.4",
+	});
 	const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
@@ -704,6 +709,7 @@ runner.runCapture = (command) => {
 	registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
 	  name: "my-assistant",
 	  toolDisclosure: "progressive",
+	  ...harnessFixture.registryAuthority,
 	});
 
 childProcess.spawn = (...args) => {
@@ -722,7 +728,12 @@ const { createSandbox } = require(${onboardPath});
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   process.env.CHAT_UI_URL = "https://chat.example.com";
-  const sandboxName = await createSandbox(null, "gpt-5.4", "nvidia-prod", null, "my-assistant");
+  const sandboxName = await createSandbox(
+    ...fixtureMocks.buildHarnessRouteArguments(
+      [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
+      harnessFixture,
+    ),
+  );
   console.log(JSON.stringify({ sandboxName, commands }));
 })().catch((error) => {
   console.error(error);

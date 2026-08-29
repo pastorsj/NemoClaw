@@ -4,6 +4,18 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { dockerSpawnSync } from "../../../adapters/docker/exec";
+import type { AgentDefinition } from "../../../agent/defs";
+import { cloneAndDeepFreeze } from "../../../core/immutable";
+import {
+  harnessPackageIdentitiesEqual,
+  inspectHarnessPackageState,
+  type HarnessPackageIdentity,
+} from "../../../harness/package-identity";
+import {
+  resolvePinnedHarnessPackage,
+  type InstalledHarnessPackage,
+} from "../../../harness/package-store";
+import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../../onboard/sandbox-agent";
 import type { RuntimeProviderBundle } from "../../../onboard/runtime-provider/contract";
 import { CURRENT_RUNTIME_PROVIDER_BUNDLES } from "../../../onboard/runtime-provider/current";
 import {
@@ -25,6 +37,8 @@ type SnapshotBackupAuthority = Pick<
   sandboxState.BackupOptions,
   | "runtimeSnapshot"
   | "workload"
+  | "agentDefinition"
+  | "harnessPackage"
   | "hostLocalInferenceReceipt"
   | "hostLocalInferenceProvenance"
   | "validateBeforePublish"
@@ -32,12 +46,28 @@ type SnapshotBackupAuthority = Pick<
 
 interface SnapshotBackupAuthorityDependencies {
   readonly getSandbox: (sandboxName: string) => SandboxEntry | null;
+  readonly resolveAgent: (entry: SandboxEntry) => ResolvedSandboxAgent;
+  readonly resolvePinnedPackage: (identity: HarnessPackageIdentity) => InstalledHarnessPackage;
   readonly requireProvider: (sandbox: SandboxEntry) => RuntimeProviderBundle;
   readonly captureRuntime: typeof captureSandboxRuntimeSnapshot;
   readonly prepareHostLocalInference: typeof prepareSandboxHostLocalInferenceAuthority;
   readonly confirmHostLocalInference: typeof confirmHostLocalInferenceAuthority;
   readonly backup: typeof sandboxState.backupSandboxState;
   readonly captureOpenClawStateFile: typeof captureOpenClawStateFile;
+}
+
+interface CapturedManagedAuthority {
+  readonly runtimeSnapshot: NonNullable<sandboxState.BackupOptions["runtimeSnapshot"]>;
+  readonly workload: NonNullable<sandboxState.BackupOptions["workload"]>;
+  readonly validateCurrent: (current: SandboxEntry) => void;
+}
+
+interface CapturedHostLocalInferenceAuthority {
+  readonly hostLocalInferenceReceipt: string;
+  readonly hostLocalInferenceProvenance?: NonNullable<
+    sandboxState.BackupOptions["hostLocalInferenceProvenance"]
+  >;
+  readonly validateCurrent: (current: SandboxEntry) => void;
 }
 
 const MAX_OPENCLAW_CONFIG_BYTES = 16 * 1024 * 1024;
@@ -226,6 +256,8 @@ export function captureOpenClawStateFile(
 }
 
 const defaultDependencies: Omit<SnapshotBackupAuthorityDependencies, "getSandbox"> = {
+  resolveAgent: (entry) => resolveSandboxAgent(entry),
+  resolvePinnedPackage: (identity) => resolvePinnedHarnessPackage(identity),
   requireProvider: (sandbox) =>
     requireRuntimeProviderBundleForSandbox(sandbox, CURRENT_RUNTIME_PROVIDER_BUNDLES),
   captureRuntime: captureSandboxRuntimeSnapshot,
@@ -245,8 +277,134 @@ function failure(error: unknown): sandboxState.BackupResult {
     failedDirs: [],
     backedUpFiles: [],
     failedFiles: [],
-    error: `Cannot capture provider snapshot authority: ${detail}.`,
+    error: `Cannot capture snapshot authority: ${detail}.`,
   };
+}
+
+export interface SnapshotBackupAgentAuthority {
+  readonly agentDefinition: AgentDefinition;
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly registryEntry: SandboxEntry;
+}
+
+type ResolveSnapshotBackupAgentDependencies = Pick<
+  SnapshotBackupAuthorityDependencies,
+  "getSandbox" | "resolveAgent"
+>;
+
+/** Materialize derived definition getters into immutable data for exact later comparison. */
+function captureAgentDefinitionSnapshot(definition: AgentDefinition): AgentDefinition {
+  try {
+    return cloneAndDeepFreeze(structuredClone(definition));
+  } catch (error) {
+    throw new Error(
+      `cannot capture agent definition: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+function captureAuthorityValue<T>(label: string, value: T): T {
+  try {
+    return cloneAndDeepFreeze(value);
+  } catch (error) {
+    throw new Error(
+      `cannot capture ${label}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+/** Resolve one definition before maintenance can start a container or open Shields. */
+export function resolveSnapshotBackupAgentAuthority(
+  sandboxName: string,
+  overrides: Pick<SnapshotBackupAuthorityDependencies, "getSandbox"> &
+    Partial<Pick<SnapshotBackupAuthorityDependencies, "resolveAgent">>,
+): SnapshotBackupAgentAuthority {
+  const dependencies: ResolveSnapshotBackupAgentDependencies = {
+    getSandbox: overrides.getSandbox,
+    resolveAgent: overrides.resolveAgent ?? defaultDependencies.resolveAgent,
+  };
+  const entry = dependencies.getSandbox(sandboxName);
+  if (!entry) throw new Error(`sandbox '${sandboxName}' is no longer registered`);
+  const resolved = dependencies.resolveAgent(entry);
+  return Object.freeze({
+    agentDefinition: captureAgentDefinitionSnapshot(resolved.definition),
+    harnessPackage:
+      resolved.harnessPackage === null
+        ? null
+        : captureAuthorityValue("harness package identity", resolved.harnessPackage),
+    registryEntry: captureAuthorityValue("sandbox registry entry", entry),
+  });
+}
+
+/** Confirm pinned package authority after the sandbox mutation lock is held. */
+export function confirmSnapshotBackupAgentAuthority(
+  sandboxName: string,
+  authority: SnapshotBackupAgentAuthority,
+  overrides: Pick<SnapshotBackupAuthorityDependencies, "getSandbox"> &
+    Partial<Omit<SnapshotBackupAuthorityDependencies, "getSandbox">>,
+): void {
+  const dependencies = { ...defaultDependencies, ...overrides };
+  const entry = dependencies.getSandbox(sandboxName);
+  if (!entry) throw new Error(`sandbox '${sandboxName}' is no longer registered`);
+  assertSnapshotBackupAgentAuthority(entry, authority, dependencies);
+  assertSnapshotBackupRegistryAuthority(entry, authority);
+}
+
+function assertSnapshotBackupRegistryAuthority(
+  entry: SandboxEntry,
+  authority: SnapshotBackupAgentAuthority,
+): void {
+  if (!isDeepStrictEqual(entry, authority.registryEntry)) {
+    throw new Error(`sandbox '${entry.name}' registry authority changed during backup`);
+  }
+}
+
+function assertSnapshotBackupAgentAuthority(
+  entry: SandboxEntry,
+  authority: SnapshotBackupAgentAuthority,
+  dependencies: SnapshotBackupAuthorityDependencies,
+): void {
+  const effectiveAgent = entry.agent || "openclaw";
+  if (authority.agentDefinition.name !== effectiveAgent) {
+    throw new Error(`sandbox authority changed during backup: '${entry.name}' changed agent`);
+  }
+
+  if (authority.harnessPackage === null) {
+    const resolved = dependencies.resolveAgent(entry);
+    if (
+      resolved.harnessPackage !== null ||
+      !isDeepStrictEqual(
+        captureAgentDefinitionSnapshot(resolved.definition),
+        authority.agentDefinition,
+      )
+    ) {
+      throw new Error(`sandbox '${entry.name}' candidate agent authority changed during backup`);
+    }
+    return;
+  }
+
+  const recorded = inspectHarnessPackageState(entry.harnessPackage, entry.harnessPackageMigration);
+  if (
+    recorded.status !== "valid" ||
+    !harnessPackageIdentitiesEqual(recorded.harnessPackage, authority.harnessPackage)
+  ) {
+    throw new Error(`sandbox '${entry.name}' harness package changed during backup`);
+  }
+  const installed = dependencies.resolvePinnedPackage(authority.harnessPackage);
+  const resolved = dependencies.resolveAgent(entry);
+  const currentDefinition = captureAgentDefinitionSnapshot(resolved.definition);
+  if (
+    !harnessPackageIdentitiesEqual(installed.identity, authority.harnessPackage) ||
+    resolved.harnessPackage === null ||
+    !harnessPackageIdentitiesEqual(resolved.harnessPackage, authority.harnessPackage) ||
+    !isDeepStrictEqual(currentDefinition, authority.agentDefinition) ||
+    installed.packageRoot !== authority.agentDefinition.packageRoot ||
+    installed.packageManifest.manifestPath !== authority.agentDefinition.manifestPath
+  ) {
+    throw new Error(`sandbox '${entry.name}' pinned harness package changed during backup`);
+  }
 }
 
 function backupStateOnly(
@@ -272,7 +430,7 @@ function readAuthority(entry: SandboxEntry) {
 function captureManagedAuthority(
   entry: SandboxEntry,
   dependencies: SnapshotBackupAuthorityDependencies,
-): SnapshotBackupAuthority | null {
+): CapturedManagedAuthority | null {
   const authority = readAuthority(entry);
   if (!authority) return null;
   const provider = dependencies.requireProvider(entry);
@@ -287,11 +445,7 @@ function captureManagedAuthority(
   return {
     runtimeSnapshot,
     workload,
-    validateBeforePublish: () => {
-      const current = dependencies.getSandbox(entry.name);
-      if (!current) {
-        throw new Error(`sandbox '${entry.name}' is no longer registered`);
-      }
+    validateCurrent: (current) => {
       const currentAuthority = readAuthority(current);
       if (!currentAuthority || !isDeepStrictEqual(currentAuthority.receipt, workload)) {
         throw new Error(`sandbox '${entry.name}' managed workload changed during backup`);
@@ -314,10 +468,7 @@ function captureManagedAuthority(
 function captureHostLocalInferenceAuthority(
   entry: SandboxEntry,
   dependencies: SnapshotBackupAuthorityDependencies,
-): Pick<
-  sandboxState.BackupOptions,
-  "hostLocalInferenceReceipt" | "hostLocalInferenceProvenance" | "validateBeforePublish"
-> | null {
+): CapturedHostLocalInferenceAuthority | null {
   const receipt = entry.hostLocalInferenceReceipt;
   if (typeof receipt !== "string") return null;
   const provider = dependencies.requireProvider(entry);
@@ -333,9 +484,7 @@ function captureHostLocalInferenceAuthority(
     ...(entry.hostLocalInferenceProvenance
       ? { hostLocalInferenceProvenance: entry.hostLocalInferenceProvenance }
       : {}),
-    validateBeforePublish: () => {
-      const current = dependencies.getSandbox(entry.name);
-      if (!current) throw new Error(`sandbox '${entry.name}' is no longer registered`);
+    validateCurrent: (current) => {
       if (current.hostLocalInferenceReceipt !== receipt) {
         throw new Error(`sandbox '${entry.name}' host-local inference changed during backup`);
       }
@@ -357,12 +506,16 @@ function captureHostLocalInferenceAuthority(
 
 function captureSnapshotAuthority(
   entry: SandboxEntry,
+  agentAuthority: SnapshotBackupAgentAuthority,
   dependencies: SnapshotBackupAuthorityDependencies,
-): SnapshotBackupAuthority | null {
+): SnapshotBackupAuthority {
+  assertSnapshotBackupAgentAuthority(entry, agentAuthority, dependencies);
+  assertSnapshotBackupRegistryAuthority(entry, agentAuthority);
   const managed = captureManagedAuthority(entry, dependencies);
   const hostLocal = captureHostLocalInferenceAuthority(entry, dependencies);
-  if (!managed && !hostLocal) return null;
   return {
+    agentDefinition: agentAuthority.agentDefinition,
+    harnessPackage: agentAuthority.harnessPackage,
     ...(managed?.runtimeSnapshot === undefined ? {} : { runtimeSnapshot: managed.runtimeSnapshot }),
     ...(managed?.workload === undefined ? {} : { workload: managed.workload }),
     ...(hostLocal?.hostLocalInferenceReceipt === undefined
@@ -372,8 +525,12 @@ function captureSnapshotAuthority(
       ? {}
       : { hostLocalInferenceProvenance: hostLocal.hostLocalInferenceProvenance }),
     validateBeforePublish: () => {
-      managed?.validateBeforePublish?.();
-      hostLocal?.validateBeforePublish?.();
+      const current = dependencies.getSandbox(entry.name);
+      if (!current) throw new Error(`sandbox '${entry.name}' is no longer registered`);
+      assertSnapshotBackupAgentAuthority(current, agentAuthority, dependencies);
+      managed?.validateCurrent(current);
+      hostLocal?.validateCurrent(current);
+      assertSnapshotBackupRegistryAuthority(current, agentAuthority);
     },
   };
 }
@@ -386,30 +543,72 @@ function captureSnapshotAuthority(
  */
 export function backupSandboxStateWithManagedAuthority(
   sandboxName: string,
-  options: Pick<sandboxState.BackupOptions, "name"> = {},
+  options: Pick<sandboxState.BackupOptions, "name" | "agentDefinition" | "harnessPackage"> &
+    Partial<Pick<SnapshotBackupAgentAuthority, "registryEntry">> = {},
   overrides: Pick<SnapshotBackupAuthorityDependencies, "getSandbox"> &
     Partial<Omit<SnapshotBackupAuthorityDependencies, "getSandbox">>,
 ): sandboxState.BackupResult {
   const dependencies = { ...defaultDependencies, ...overrides };
+  const hasDefinition = options.agentDefinition !== undefined;
+  const hasHarnessPackage = Object.prototype.hasOwnProperty.call(options, "harnessPackage");
+  if (hasDefinition !== hasHarnessPackage) {
+    return failure(
+      new Error("snapshot agent definition and harness package must be supplied together"),
+    );
+  }
   const entry = dependencies.getSandbox(sandboxName);
-  if (!entry) return backupStateOnly(dependencies, sandboxName, options);
+  if (!entry) {
+    if (hasDefinition) {
+      return failure(new Error(`sandbox '${sandboxName}' is no longer registered`));
+    }
+    return backupStateOnly(dependencies, sandboxName, { name: options.name });
+  }
+
+  let agentAuthority: SnapshotBackupAgentAuthority;
+  try {
+    agentAuthority = hasDefinition
+      ? {
+          agentDefinition: captureAgentDefinitionSnapshot(
+            options.agentDefinition as AgentDefinition,
+          ),
+          harnessPackage: options.harnessPackage ?? null,
+          registryEntry: captureAuthorityValue(
+            "sandbox registry entry",
+            options.registryEntry ?? entry,
+          ),
+        }
+      : (() => {
+          const resolved = dependencies.resolveAgent(entry);
+          return {
+            agentDefinition: captureAgentDefinitionSnapshot(resolved.definition),
+            harnessPackage: resolved.harnessPackage,
+            registryEntry: captureAuthorityValue("sandbox registry entry", entry),
+          };
+        })();
+  } catch (error) {
+    return failure(error);
+  }
 
   const stateFileOptions: Pick<sandboxState.BackupOptions, "captureStateFile"> =
-    !entry.agent || entry.agent === "openclaw"
+    agentAuthority.agentDefinition.name === "openclaw"
       ? {
           captureStateFile: (request) =>
             dependencies.captureOpenClawStateFile(sandboxName, request),
         }
       : {};
-  const backupOptions = { ...options, ...stateFileOptions };
+  const { registryEntry: _registryEntry, ...publicOptions } = options;
+  const backupOptions = {
+    ...publicOptions,
+    agentDefinition: agentAuthority.agentDefinition,
+    harnessPackage: agentAuthority.harnessPackage,
+    ...stateFileOptions,
+  };
 
-  let authority: SnapshotBackupAuthority | null;
+  let authority: SnapshotBackupAuthority;
   try {
-    authority = captureSnapshotAuthority(entry, dependencies);
+    authority = captureSnapshotAuthority(entry, agentAuthority, dependencies);
   } catch (error) {
     return failure(error);
   }
-  return authority
-    ? dependencies.backup(sandboxName, { ...backupOptions, ...authority })
-    : backupStateOnly(dependencies, sandboxName, backupOptions);
+  return dependencies.backup(sandboxName, { ...backupOptions, ...authority });
 }

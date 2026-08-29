@@ -391,6 +391,7 @@ const { createSandbox } = require(${onboardPath});
       const script = String.raw`
 const fs = require("node:fs");
 const runner = require(${runnerPath});
+const fixtureMocks = require(${onboardScriptMocksPath});
 const registry = require(${registryPath});
 const outcomePath = ${JSON.stringify(outcomePath)};
 const customDockerfile = ${JSON.stringify(customDockerfile)};
@@ -638,6 +639,7 @@ const { createSandbox } = require(${onboardPath});
 
     const script = String.raw`
 const runner = require(${runnerPath});
+const fixtureMocks = require(${onboardScriptMocksPath});
 const registry = require(${registryPath});
 const preflight = require(${preflightPath});
 const credentials = require(${credentialsPath});
@@ -650,12 +652,20 @@ registry.setDefault = () => true;
 registry.removeSandbox = () => true;
 preflight.checkPortAvailable = async () => ({ ok: true });
 credentials.prompt = async () => "";
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  sandboxName: "my-assistant",
+  provider: "openai-api",
+  model: "gpt-5.4",
+});
 
 const { createSandbox } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
-  await createSandbox(null, "gpt-5.4", "openai-api", null, "my-assistant", null, null, ${customDockerfilePath});
+  await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
+    [null, "gpt-5.4", "openai-api", null, "my-assistant", null, null, ${customDockerfilePath}],
+    createFixture,
+  ));
 })().catch((error) => {
   console.error(error);
   process.exit(1);
@@ -714,6 +724,7 @@ const { createSandbox } = require(${onboardPath});
 const fs = require("node:fs");
 const path = require("node:path");
 const runner = require(${runnerPath});
+const fixtureMocks = require(${onboardScriptMocksPath});
 const registry = require(${registryPath});
 const preflight = require(${preflightPath});
 const credentials = require(${credentialsPath});
@@ -744,13 +755,21 @@ registry.setDefault = () => true;
 registry.removeSandbox = () => true;
 preflight.checkPortAvailable = async () => ({ ok: true });
 credentials.prompt = async () => "";
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  sandboxName: "my-assistant",
+  provider: "openai-api",
+  model: "gpt-5.4",
+});
 
 const { createSandbox } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   try {
-    await createSandbox(null, "gpt-5.4", "openai-api", null, "my-assistant", null, null, ${customDockerfilePath});
+    await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
+      [null, "gpt-5.4", "openai-api", null, "my-assistant", null, null, ${customDockerfilePath}],
+      createFixture,
+    ));
   } catch (error) {
     console.log(JSON.stringify({
       removed: Boolean(createdBuildContext) && !fs.existsSync(createdBuildContext),

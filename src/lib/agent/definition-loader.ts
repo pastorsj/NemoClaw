@@ -414,7 +414,16 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     },
 
     get policyAdditionsPath(): string | null {
-      return readOptionalOrdinaryAsset(packageRoot, policyAdditionsTarget, "Agent baseline policy");
+      const packagePolicy = readOptionalOrdinaryAsset(
+        packageRoot,
+        policyAdditionsTarget,
+        "Agent baseline policy",
+      );
+      if (packagePolicy) return packagePolicy;
+      const legacyPolicy = resolveLegacyPaths(packageRoot, legacyPathConfig)?.policy;
+      return legacyPolicy
+        ? readOptionalOrdinaryAsset(packageRoot, legacyPolicy, "Agent legacy baseline policy")
+        : null;
     },
 
     get policyPermissivePath(): string | null {

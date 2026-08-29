@@ -1326,6 +1326,7 @@ maybe_offer_express_install() {
 ensure_station_express_host() { printf 'LOCAL_HELPER_CALLED\n'; }
 ensure_docker() { printf 'DOCKER_CALLED\n'; }
 ensure_openshell_build_deps() { printf 'BUILD_DEPS_CALLED\n'; }
+maybe_offer_express_install
 prepare_installer_host
 `,
     );

@@ -13,6 +13,7 @@ import {
   cleanupShieldsDestroyArtifacts,
   removeSandboxImage,
   removeSandboxRegistryEntry,
+  removeSandboxRegistryEntryIfCurrentOutcome,
   removeSandboxRegistryEntryOutcome,
   removeSandboxRegistryEntryWithReceipt,
   removeShieldsState,
@@ -43,6 +44,116 @@ describe("image cleanup: sandbox destroy removes Docker image (#2086)", () => {
 
     expect(removed).toBe(true);
     expect(calls).toEqual(["image:alpha", "registry:alpha"]);
+  });
+
+  it("does not remove an image when the exact registry row was replaced after preflight", () => {
+    const expected = {
+      name: "alpha",
+      agent: "openclaw",
+      imageTag: "local/alpha:selected",
+    };
+    const replacement = {
+      ...expected,
+      imageTag: "local/alpha:replacement",
+      lifecycleGeneration: "replacement-generation",
+    };
+    const removeImage = vi.fn();
+    const removeSandboxIfCurrentDuringCleanup = vi.fn(() => ({ status: "changed" as const }));
+
+    const outcome = removeSandboxRegistryEntryIfCurrentOutcome(expected, {
+      removeImage,
+      removeSandboxIfCurrentDuringCleanup,
+    });
+
+    expect(outcome).toEqual({
+      status: "blocked",
+      reason: "registry-changed",
+      removed: false,
+    });
+    expect(removeSandboxIfCurrentDuringCleanup).toHaveBeenCalledWith(
+      expected,
+      expect.any(Function),
+    );
+    expect(removeImage).not.toHaveBeenCalled();
+    expect(replacement).toMatchObject({
+      imageTag: "local/alpha:replacement",
+      lifecycleGeneration: "replacement-generation",
+    });
+  });
+
+  it("accepts an absent row after the exact registry removal compare-and-set fails", () => {
+    const expected = {
+      name: "alpha",
+      agent: "openclaw",
+      imageTag: "local/alpha:selected",
+    };
+    const removeImage = vi.fn();
+
+    const outcome = removeSandboxRegistryEntryIfCurrentOutcome(expected, {
+      removeImage,
+      removeSandboxIfCurrentDuringCleanup: () => ({ status: "absent" }),
+    });
+
+    expect(outcome).toEqual({ status: "not-found", removed: false });
+    expect(removeImage).not.toHaveBeenCalled();
+  });
+
+  it("keeps exact-row removal and captured image cleanup in one ordered transaction", () => {
+    const expected = {
+      name: "alpha",
+      agent: "openclaw",
+      imageTag: "local/alpha:selected",
+    };
+    const calls: string[] = [];
+    const removeImage = vi.fn((_name, selected) => {
+      calls.push(`image:${String(selected.imageTag)}`);
+      return {
+        status: "removed" as const,
+        engineDisplayName: "Docker",
+        reference: String(selected.imageTag),
+      };
+    });
+    const removeSandboxIfCurrentDuringCleanup = vi.fn((selected, cleanup) => {
+      calls.push("registry:removed");
+      const decision = cleanup(selected);
+      calls.push(decision.rollback ? "registry:rollback" : "registry:commit");
+      return { status: "selected" as const, result: decision.result };
+    });
+
+    const outcome = removeSandboxRegistryEntryIfCurrentOutcome(expected, {
+      removeImage,
+      removeSandboxIfCurrentDuringCleanup,
+    });
+
+    expect(outcome).toEqual({ status: "complete", removed: true });
+    expect(calls).toEqual(["registry:removed", "image:local/alpha:selected", "registry:commit"]);
+    expect(removeImage).toHaveBeenCalledWith("alpha", expected);
+  });
+
+  it("requests exact-row rollback when captured image authority is unproven", () => {
+    const expected = {
+      name: "alpha",
+      agent: "openclaw",
+      imageTag: "local/alpha:selected",
+    };
+    const decisions: boolean[] = [];
+    const removeSandboxIfCurrentDuringCleanup = vi.fn((selected, cleanup) => {
+      const decision = cleanup(selected);
+      decisions.push(decision.rollback);
+      return { status: "selected" as const, result: decision.result };
+    });
+
+    const outcome = removeSandboxRegistryEntryIfCurrentOutcome(expected, {
+      removeImage: () => ({ status: "skipped", reason: "authority-unproven" }),
+      removeSandboxIfCurrentDuringCleanup,
+    });
+
+    expect(outcome).toEqual({
+      status: "blocked",
+      reason: "authority-unproven",
+      removed: false,
+    });
+    expect(decisions).toEqual([true]);
   });
 
   it("removeSandboxImage calls docker rmi for recorded image tags", () => {

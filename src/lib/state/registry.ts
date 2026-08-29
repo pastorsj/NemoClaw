@@ -58,6 +58,7 @@ import {
   normalizeSandboxHarnessPackageAuthority,
   normalizeSandboxPolicyAttribution,
   normalizeSandboxPolicyAuthority,
+  normalizeSnapshotSourceRegistryFingerprint,
   retainedDefaultSandbox,
 } from "./registry-normalization";
 import * as reversibleRemoval from "./registry-reversible-removal";
@@ -369,6 +370,8 @@ export function registerSandbox(
   options: {
     pending?: boolean;
     reservationSessionId?: string;
+    /** Publish only while the complete row observed by the caller is current. */
+    expectedCurrent?: SandboxEntry | null;
     finalPackageAuthority?: HarnessPackageAuthority;
     verifiedCreate?: {
       readonly reservation: QualifiedPendingSandboxCreateReservation;
@@ -379,6 +382,14 @@ export function registerSandbox(
   return withLock(() => {
     const data = load();
     const recordedEntry = data.sandboxes[entry.name];
+    if (
+      Object.prototype.hasOwnProperty.call(options, "expectedCurrent") &&
+      !isDeepStrictEqual(recordedEntry ?? null, options.expectedCurrent ?? null)
+    ) {
+      throw new Error(
+        `Cannot register sandbox '${entry.name}' after its expected registry row changed`,
+      );
+    }
     if (entry.pendingPolicyVerification !== undefined) {
       throw new PolicyAuthorityRefusalError(
         "Cannot publish a caller-supplied pending policy verification",
@@ -653,6 +664,9 @@ export function registerSandbox(
       ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
       lifecycleGeneration: entry.lifecycleGeneration,
       lifecycleLiveIdentityFingerprint: entry.lifecycleLiveIdentityFingerprint,
+      snapshotSourceRegistryFingerprint: normalizeSnapshotSourceRegistryFingerprint(
+        entry.snapshotSourceRegistryFingerprint,
+      ),
       messaging: cloneSandboxMessagingState(entry.messaging),
       mcp: normalizeSandboxMcpState(entry.mcp),
       hermesToolGateways:
@@ -679,13 +693,17 @@ export function registerSandbox(
         "Cannot publish a sandbox registration that drops final harness package authority",
       );
     }
-    data.sandboxes[entry.name] = registered;
+    // Return the same plain-JSON shape that a subsequent registry read sees;
+    // callers using exact publication authority must not compare against
+    // transient own-properties whose values serialize as undefined.
+    const persistedRegistered = JSON.parse(JSON.stringify(registered)) as SandboxEntry;
+    data.sandboxes[entry.name] = persistedRegistered;
     save(
       options.pending === true
         ? data
         : reversibleRemoval.claimInitialDefaultInRegistry(data, entry.name),
     );
-    return structuredClone(registered);
+    return structuredClone(persistedRegistered);
   });
 }
 
@@ -992,38 +1010,67 @@ function assertPolicyCreationReceiptUnchanged(
   );
 }
 
+function updatedSandboxEntry(
+  name: string,
+  current: SandboxEntry,
+  updates: Partial<SandboxEntry>,
+): SandboxEntry | false {
+  if (Object.prototype.hasOwnProperty.call(updates, "pendingPolicyVerification")) {
+    throw new PolicyAuthorityRefusalError(
+      `Refusing to change sandbox '${name}' verified create checkpoint outside its transaction.`,
+    );
+  }
+  if (current.pendingPolicyVerification) {
+    throw new PolicyAuthorityRefusalError(
+      `Refusing to update sandbox '${name}' while its verified create checkpoint is incomplete.`,
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name !== name) {
+    return false;
+  }
+  if (changesHostLocalInferenceLifecycleAuthority(current, updates)) return false;
+  if (
+    updates.policyAuthority === "nemoclaw-managed" &&
+    current.policyAuthority !== "nemoclaw-managed"
+  ) {
+    throw new PolicyAuthorityRefusalError(
+      `Refusing to assign NemoClaw policy ownership to sandbox '${current.name}' outside completed sandbox registration.`,
+    );
+  }
+  assertRecordedPolicyAuthorityUnchanged(current, updates);
+  assertPolicyCreationReceiptUnchanged(current, updates);
+  return normalizeSandboxPolicyAttribution({ ...current, ...updates });
+}
+
 export function updateSandbox(name: string, updates: Partial<SandboxEntry>): boolean {
   return withLock(() => {
     const data = load();
     const current = data.sandboxes[name];
     if (!current) return false;
-    if (Object.prototype.hasOwnProperty.call(updates, "pendingPolicyVerification")) {
-      throw new PolicyAuthorityRefusalError(
-        `Refusing to change sandbox '${name}' verified create checkpoint outside its transaction.`,
-      );
-    }
-    if (current.pendingPolicyVerification) {
-      throw new PolicyAuthorityRefusalError(
-        `Refusing to update sandbox '${name}' while its verified create checkpoint is incomplete.`,
-      );
-    }
-    if (Object.prototype.hasOwnProperty.call(updates, "name") && updates.name !== name) {
-      return false;
-    }
-    if (changesHostLocalInferenceLifecycleAuthority(current, updates)) return false;
-    if (
-      updates.policyAuthority === "nemoclaw-managed" &&
-      current.policyAuthority !== "nemoclaw-managed"
-    ) {
-      throw new PolicyAuthorityRefusalError(
-        `Refusing to assign NemoClaw policy ownership to sandbox '${current.name}' outside completed sandbox registration.`,
-      );
-    }
-    assertRecordedPolicyAuthorityUnchanged(current, updates);
-    assertPolicyCreationReceiptUnchanged(current, updates);
-    data.sandboxes[name] = normalizeSandboxPolicyAttribution({ ...current, ...updates });
+    const next = updatedSandboxEntry(name, current, updates);
+    if (!next) return false;
+    data.sandboxes[name] = next;
     save(data);
     return true;
+  });
+}
+
+/** Update a sandbox only while the caller's complete captured row remains current. */
+export function updateSandboxIfCurrent(
+  expected: SandboxEntry,
+  updates: Partial<SandboxEntry>,
+): SandboxEntry | false {
+  const expectedSnapshot = structuredClone(expected);
+  const updatesSnapshot = structuredClone(updates);
+  return withLock(() => {
+    const data = load();
+    const current = data.sandboxes[expectedSnapshot.name];
+    if (!current || !isDeepStrictEqual(current, expectedSnapshot)) return false;
+    const next = updatedSandboxEntry(expectedSnapshot.name, current, updatesSnapshot);
+    if (!next) return false;
+    data.sandboxes[expectedSnapshot.name] = next;
+    save(data);
+    return structuredClone(next);
   });
 }
 
@@ -1076,6 +1123,77 @@ export function removeSandboxRouteReservationIfCurrent(expected: SandboxEntry): 
     save(result.registry);
     return true;
   });
+}
+
+/** Atomically capture and remove only the complete row selected by this operation. */
+export function removeSandboxIfCurrentWithReceipt(
+  expected: SandboxEntry,
+): SandboxRemovalReceipt | null {
+  const expectedSnapshot = structuredClone(expected);
+  return withLock(() => {
+    const data = load();
+    if (!isDeepStrictEqual(data.sandboxes[expectedSnapshot.name], expectedSnapshot)) return null;
+    const result = reversibleRemoval.removeSandboxFromRegistry(data, expectedSnapshot.name);
+    if (!result.receipt) return null;
+    save(result.registry);
+    return result.receipt;
+  });
+}
+
+/**
+ * Remove one exact row and keep the registry mutation lock until its captured
+ * workload cleanup has either committed or rolled the row back.
+ *
+ * The cleanup callback must not call registry mutation APIs. Keeping the lock
+ * across this synchronous boundary prevents a same-name replacement from
+ * claiming the removed row's mutable workload reference before cleanup uses
+ * the captured authority.
+ */
+export function removeSandboxIfCurrentDuringCleanup<T>(
+  expected: SandboxEntry,
+  cleanup: (selected: SandboxEntry) => {
+    readonly result: T;
+    readonly rollback: boolean;
+  },
+):
+  | { readonly status: "selected"; readonly result: T }
+  | { readonly status: "absent" }
+  | { readonly status: "changed" } {
+  const expectedSnapshot = structuredClone(expected);
+  return withLock(() => {
+    const data = load();
+    const current = data.sandboxes[expectedSnapshot.name];
+    if (!current) return { status: "absent" };
+    if (!isDeepStrictEqual(current, expectedSnapshot)) return { status: "changed" };
+    const removal = reversibleRemoval.removeSandboxFromRegistry(data, expectedSnapshot.name);
+    if (!removal.receipt) {
+      throw new Error(`Exact registry row '${expectedSnapshot.name}' could not be removed`);
+    }
+    save(removal.registry);
+
+    const restoreRemovedRow = (): void => {
+      const restored = reversibleRemoval.restoreSandboxIfMissingInRegistry(
+        load(),
+        removal.receipt!,
+      );
+      if (restored.restored) save(restored.registry);
+    };
+
+    let cleanupResult: ReturnType<typeof cleanup>;
+    try {
+      cleanupResult = cleanup(structuredClone(expectedSnapshot));
+    } catch (error) {
+      restoreRemovedRow();
+      throw error;
+    }
+    if (cleanupResult.rollback) restoreRemovedRow();
+    return { status: "selected", result: cleanupResult.result };
+  });
+}
+
+/** Remove only the complete registry row captured by the current operation. */
+export function removeSandboxIfCurrent(expected: SandboxEntry): boolean {
+  return removeSandboxIfCurrentWithReceipt(expected) !== null;
 }
 
 /** Publish only the owning route transaction and retain its receipt for exact retries. */
@@ -1168,6 +1286,28 @@ export function finalizePendingSandboxRegistration(name: string): boolean {
     }
     data.sandboxes[name] = { ...current, pendingRouteReservation: undefined };
     save(reversibleRemoval.claimInitialDefaultInRegistry(data, name));
+    return true;
+  });
+}
+
+/** Publish only the exact pending registration created by the current operation. */
+export function finalizePendingSandboxRegistrationIfCurrent(expected: SandboxEntry): boolean {
+  const expectedSnapshot = structuredClone(expected);
+  if (
+    expectedSnapshot.pendingRouteReservation !== true ||
+    expectedSnapshot.reservationSessionId !== undefined ||
+    expectedSnapshot.pendingPolicyVerification !== undefined
+  ) {
+    return false;
+  }
+  return withLock(() => {
+    const data = load();
+    if (!isDeepStrictEqual(data.sandboxes[expectedSnapshot.name], expectedSnapshot)) return false;
+    data.sandboxes[expectedSnapshot.name] = {
+      ...expectedSnapshot,
+      pendingRouteReservation: undefined,
+    };
+    save(reversibleRemoval.claimInitialDefaultInRegistry(data, expectedSnapshot.name));
     return true;
   });
 }

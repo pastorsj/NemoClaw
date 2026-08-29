@@ -4,6 +4,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createInMemoryRuntimeProviderBundle } from "../../../../../test/helpers/runtime-provider-bundle";
+import { loadAgent, type AgentDefinition } from "../../../agent/defs";
+import type { HarnessPackageIdentity } from "../../../harness/package-identity";
+import { fingerprintSandboxLiveIdentity } from "../../../onboard/sandbox-recreate-transaction";
 import { createSandboxHostLocalInferenceProvenance } from "../../../state/registry/host-local-inference";
 import {
   type HostLocalInferenceOperation,
@@ -25,6 +28,44 @@ type Service = "ollama" | "nim" | "vllm";
 const AUTHORITY_ID = `mxc-endpoint:${"a".repeat(64)}`;
 const BINDING_SHA256 = "d".repeat(64);
 const MODEL = "qwen3.5-9b";
+const LIVE_SANDBOX_OUTPUT = "Name: alpha\nId: sandbox-alpha\nPhase: Ready\n";
+const LIVE_SANDBOX_FINGERPRINT = fingerprintSandboxLiveIdentity(LIVE_SANDBOX_OUTPUT)!;
+
+function captureMatchingLiveSandbox() {
+  return {
+    status: 0,
+    output: LIVE_SANDBOX_OUTPUT,
+    stdout: LIVE_SANDBOX_OUTPUT,
+    stderr: "",
+  };
+}
+
+function packageIdentity(agent: Agent): HarnessPackageIdentity {
+  return {
+    kind: "agent-runtime",
+    id: agent,
+    packageVersion: "1.2.3",
+    contractVersion: 1,
+    contentDigest: "d".repeat(64),
+  };
+}
+
+function packageRoot(agent: Agent): string {
+  return `/state/harnesses/objects/${packageIdentity(agent).contentDigest}`;
+}
+
+function pinnedAgentDefinition(agent: Agent): AgentDefinition {
+  return Object.freeze({ ...loadAgent(agent), packageRoot: packageRoot(agent) });
+}
+
+function packageDependencies(agent: Agent) {
+  const identity = packageIdentity(agent);
+  return {
+    captureOpenshell: vi.fn(captureMatchingLiveSandbox),
+    resolvePinnedPackage: vi.fn(() => ({ identity, packageRoot: packageRoot(agent) })),
+    resolveAgentDefinition: vi.fn(() => pinnedAgentDefinition(agent)),
+  };
+}
 
 function receipt(service: Service, port = 8000): HostLocalInferenceReceipt {
   return {
@@ -117,7 +158,7 @@ function llamaCppReceipt(): string {
 
 function manifest(agent: Agent, service: Service, port = 8000): RebuildManifest {
   return {
-    version: 1,
+    version: 2,
     sandboxName: "alpha",
     timestamp: "2026-08-02T00-00-00-000Z",
     agentType: agent,
@@ -128,6 +169,7 @@ function manifest(agent: Agent, service: Service, port = 8000): RebuildManifest 
     backupPath: "/tmp/alpha",
     blueprintDigest: null,
     hostLocalInferenceReceipt: serializeHostLocalInferenceReceipt(receipt(service, port)),
+    harnessPackage: packageIdentity(agent),
   };
 }
 
@@ -141,12 +183,14 @@ function sandbox(
   return {
     name: "alpha",
     agent,
+    harnessPackage: packageIdentity(agent),
     openshellDriver: "mxc",
     provider: service === "ollama" ? "ollama-local" : "vllm-local",
     model: value.inference?.model ?? MODEL,
     endpointUrl: "https://inference.local/v1",
     gatewayName: "nemoclaw",
     lifecycleGeneration: "alpha-generation-1",
+    lifecycleLiveIdentityFingerprint: LIVE_SANDBOX_FINGERPRINT,
     hostLocalInferenceReceipt: serializeHostLocalInferenceReceipt(value),
     ...overrides,
   };
@@ -235,6 +279,7 @@ describe("host-local inference snapshot restore authority", () => {
   ] as const)("re-proves exact %s %s authority before, at, and after restore", (agent, service) => {
     const target = sandbox(agent, service);
     const runtimeProvider = provider();
+    const packageAuthority = packageDependencies(agent);
     const restore = vi.fn((_name, _path, options: RecreatedSandboxRestoreOptions) =>
       successfulRestore(options),
     );
@@ -242,8 +287,9 @@ describe("host-local inference snapshot restore authority", () => {
     const result = restoreRecreatedSandboxStateWithManagedAuthority(
       "alpha",
       manifest(agent, service),
-      { targetAgentType: agent },
+      { targetAgentType: agent, agentDefinition: pinnedAgentDefinition(agent) },
       {
+        ...packageAuthority,
         getSandbox: () => target,
         requireProvider: () => runtimeProvider.bundle,
         captureContentAuthority: () => ({
@@ -269,12 +315,14 @@ describe("host-local inference snapshot restore authority", () => {
 
   it("fails before mutation when the target route differs from the manifest", () => {
     const runtimeProvider = provider();
+    const packageAuthority = packageDependencies("hermes");
     const restore = vi.fn();
     const result = restoreRecreatedSandboxStateWithManagedAuthority(
       "alpha",
       manifest("hermes", "vllm"),
-      { targetAgentType: "hermes" },
+      { targetAgentType: "hermes", agentDefinition: pinnedAgentDefinition("hermes") },
       {
+        ...packageAuthority,
         getSandbox: () => sandbox("hermes", "vllm", 8001),
         requireProvider: () => runtimeProvider.bundle,
         captureContentAuthority: vi.fn(),
@@ -291,6 +339,7 @@ describe("host-local inference snapshot restore authority", () => {
 
   it("rejects a dedicated llama.cpp receipt instead of skipping provider confirmation", () => {
     const runtimeProvider = provider();
+    const packageAuthority = packageDependencies("openclaw");
     const serialized = llamaCppReceipt();
     const target = {
       ...sandbox("openclaw", "vllm"),
@@ -303,8 +352,12 @@ describe("host-local inference snapshot restore authority", () => {
     const result = restoreRecreatedSandboxStateWithManagedAuthority(
       "alpha",
       { ...manifest("openclaw", "vllm"), hostLocalInferenceReceipt: serialized },
-      { targetAgentType: "openclaw" },
       {
+        targetAgentType: "openclaw",
+        agentDefinition: pinnedAgentDefinition("openclaw"),
+      },
+      {
+        ...packageAuthority,
         getSandbox: () => target,
         requireProvider: () => runtimeProvider.bundle,
         captureContentAuthority,
@@ -340,6 +393,7 @@ describe("host-local inference snapshot restore authority", () => {
       };
       const prepareHostLocalInference = vi.fn(() => prepared);
       const confirmHostLocalInference = vi.fn();
+      const packageAuthority = packageDependencies(agent);
       const restore = vi.fn((_name, _path, options: RecreatedSandboxRestoreOptions) =>
         successfulRestore(options),
       );
@@ -351,8 +405,9 @@ describe("host-local inference snapshot restore authority", () => {
           hostLocalInferenceReceipt: serialized,
           hostLocalInferenceProvenance: provenance,
         },
-        { targetAgentType: agent },
+        { targetAgentType: agent, agentDefinition: pinnedAgentDefinition(agent) },
         {
+          ...packageAuthority,
           getSandbox: () => target,
           requireProvider: () => provider().bundle,
           prepareHostLocalInference: prepareHostLocalInference as never,
@@ -374,6 +429,7 @@ describe("host-local inference snapshot restore authority", () => {
 
   it("rejects a manifest that omits explicit llama.cpp provenance", () => {
     const serialized = llamaCppReceipt();
+    const packageAuthority = packageDependencies("openclaw");
     const target: SandboxEntry = {
       ...sandbox("openclaw", "vllm"),
       provider: "llama-cpp-local",
@@ -388,8 +444,12 @@ describe("host-local inference snapshot restore authority", () => {
     const result = restoreRecreatedSandboxStateWithManagedAuthority(
       "alpha",
       { ...manifest("openclaw", "vllm"), hostLocalInferenceReceipt: serialized },
-      { targetAgentType: "openclaw" },
       {
+        targetAgentType: "openclaw",
+        agentDefinition: pinnedAgentDefinition("openclaw"),
+      },
+      {
+        ...packageAuthority,
         getSandbox: () => target,
         requireProvider: () => provider().bundle,
         prepareHostLocalInference: prepareHostLocalInference as never,
@@ -406,8 +466,75 @@ describe("host-local inference snapshot restore authority", () => {
     expect(restore).not.toHaveBeenCalled();
   });
 
+  it("does not apply host-local inference restore after a same-name sandbox replacement", () => {
+    const target = sandbox("openclaw", "ollama");
+    const runtimeProvider = provider();
+    const packageAuthority = packageDependencies("openclaw");
+    const prepared = {
+      providerId: "mxc",
+      sandboxName: "alpha",
+      serializedReceipt: target.hostLocalInferenceReceipt,
+    };
+    const prepareHostLocalInference = vi.fn(() => prepared);
+    let hostLocalMutations = 0;
+    const confirmHostLocalInference = vi.fn(
+      (
+        _provider: unknown,
+        _sandbox: unknown,
+        _prepared: unknown,
+        options: { readonly validateBeforeMutation?: () => void } = {},
+      ) => {
+        options.validateBeforeMutation?.();
+        hostLocalMutations += 1;
+      },
+    );
+    const replacementOutput = "Name: alpha\nId: sandbox-replacement\nPhase: Ready\n";
+    const captureOpenshell = vi
+      .fn()
+      .mockImplementationOnce(captureMatchingLiveSandbox)
+      .mockImplementationOnce(captureMatchingLiveSandbox)
+      .mockReturnValue({
+        status: 0,
+        output: replacementOutput,
+        stdout: replacementOutput,
+        stderr: "",
+      });
+
+    const result = restoreRecreatedSandboxStateWithManagedAuthority(
+      "alpha",
+      manifest("openclaw", "ollama"),
+      {
+        targetAgentType: "openclaw",
+        agentDefinition: pinnedAgentDefinition("openclaw"),
+      },
+      {
+        ...packageAuthority,
+        captureOpenshell,
+        getSandbox: () => target,
+        requireProvider: () => runtimeProvider.bundle,
+        prepareHostLocalInference: prepareHostLocalInference as never,
+        confirmHostLocalInference: confirmHostLocalInference as never,
+        captureContentAuthority: () => ({
+          schemaVersion: 1,
+          backupPath: "/tmp/alpha",
+          contentSha256: "f".repeat(64),
+        }),
+        restore: (_name, _path, options) => successfulRestore(options),
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("live identity changed before restore"),
+    });
+    expect(captureOpenshell).toHaveBeenCalledTimes(3);
+    expect(confirmHostLocalInference).toHaveBeenCalledTimes(2);
+    expect(hostLocalMutations).toBe(1);
+  });
+
   it("fails closed when sandbox authority changes at the filesystem mutation fence", () => {
     const runtimeProvider = provider();
+    const packageAuthority = packageDependencies("openclaw");
     const initial = sandbox("openclaw", "ollama");
     const changed = sandbox("openclaw", "ollama", 8000, {
       lifecycleGeneration: "alpha-generation-2",
@@ -415,13 +542,18 @@ describe("host-local inference snapshot restore authority", () => {
     const getSandbox = vi
       .fn<() => SandboxEntry | null>()
       .mockReturnValueOnce(initial)
-      .mockReturnValueOnce(changed);
+      .mockReturnValueOnce(initial)
+      .mockReturnValue(changed);
 
     const result = restoreRecreatedSandboxStateWithManagedAuthority(
       "alpha",
       manifest("openclaw", "ollama"),
-      { targetAgentType: "openclaw" },
       {
+        targetAgentType: "openclaw",
+        agentDefinition: pinnedAgentDefinition("openclaw"),
+      },
+      {
+        ...packageAuthority,
         getSandbox,
         requireProvider: () => runtimeProvider.bundle,
         captureContentAuthority: () => ({
@@ -435,7 +567,7 @@ describe("host-local inference snapshot restore authority", () => {
 
     expect(result).toMatchObject({
       success: false,
-      error: expect.stringContaining("sandbox authority changed"),
+      error: expect.stringContaining("target 'alpha' changed before restore"),
     });
   });
 });

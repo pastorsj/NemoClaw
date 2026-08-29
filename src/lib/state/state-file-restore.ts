@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 
 import type { StateFileRestoreOwnership } from "../agent/defs.js";
 import { shellQuote } from "../runner.js";
@@ -141,17 +139,13 @@ export function restoreStateFile(
   sshArgs: readonly string[],
   dir: string,
   spec: StateFileRestoreSpec,
-  backupPath: string,
+  backupContents: Buffer,
   ownership: StateFileRestoreOwnership | undefined,
   allowCustomImageWholeStateFileRestore: boolean,
   log: (message: string) => void,
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
 ): boolean {
-  const localPath = path.join(backupPath, spec.path);
-  if (!existsSync(localPath)) return true;
-
-  const backupContents = readFileSync(localPath);
   log(`Restoring state file ${spec.path} (${spec.strategy})`);
 
   let command: string;

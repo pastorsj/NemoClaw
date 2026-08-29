@@ -15,6 +15,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import {
+  createHarnessPackageFixture,
+  type HarnessPackageFixtureId,
+} from "../helpers/harness-packages";
 import { execTimeout, testTimeoutOptions } from "../helpers/timeouts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "../..");
@@ -37,7 +41,7 @@ afterEach(() => {
 });
 
 function createFixture(opts: {
-  agent?: string | null;
+  agent?: HarnessPackageFixtureId | null;
   provider?: string;
   credentialEnv?: string;
   providerRegistered?: boolean;
@@ -51,10 +55,22 @@ function createFixture(opts: {
     inferenceProbeHttpStatus = null,
   } = opts;
   const sandboxName = "my-assistant";
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-2273-"));
+  const tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-2273-")));
   tmpFixtures.push(tmpDir);
   const nemoclawDir = path.join(tmpDir, ".nemoclaw");
   fs.mkdirSync(nemoclawDir, { recursive: true, mode: 0o700 });
+  const agentName = agent ?? "openclaw";
+  const packageFixture = createHarnessPackageFixture({
+    fixtureParent: path.join(tmpDir, "harness-package-fixtures"),
+    storeRoot: path.join(nemoclawDir, "harnesses"),
+  });
+  const packageRoot = packageFixture.packageRoots.get(agentName);
+  expect(packageRoot, `Missing harness package fixture for '${agentName}'`).toBeDefined();
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "agents", agentName, "manifest.yaml"),
+    path.join(packageRoot!, "agents", agentName, "manifest.yaml"),
+  );
+  const installedHarness = packageFixture.install(agentName);
 
   const gatewayReadyMarker = path.join(tmpDir, "gateway-ready");
   const gatewayProcess = spawn(
@@ -104,6 +120,7 @@ wait();`,
           fromDockerfile: null,
           policies: [],
           agent,
+          harnessPackage: installedHarness.identity,
           ...(agent === "langchain-deepagents-code"
             ? {
                 credentialEnv,
@@ -131,7 +148,8 @@ wait();`,
       lastStepStarted: null,
       lastCompletedStep: "policies",
       failure: null,
-      agent: null,
+      agent,
+      harnessPackage: installedHarness.identity,
       sandboxName,
       provider,
       model: "meta/llama-3.3-70b-instruct",

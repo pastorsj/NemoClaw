@@ -63,7 +63,15 @@ describe("rebuildSandbox DCode recovered provider", () => {
     try {
       const harness = createRebuildFlowHarness({
         agentName: "langchain-deepagents-code",
-        sandboxEntry: makeDcodeSandboxEntry(),
+        sandboxEntry: {
+          ...makeDcodeSandboxEntry(),
+          harnessPackageMigration: {
+            schemaVersion: 1,
+            source: "legacy-current-bundle",
+            legacyAgent: "langchain-deepagents-code",
+            migratedAt: "2026-08-28T05:00:00.000Z",
+          },
+        },
         sandboxInventory: {
           sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
         },

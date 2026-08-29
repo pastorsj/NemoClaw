@@ -4,6 +4,8 @@
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
+import type { AgentDefinition } from "../agent/defs";
+import type { HarnessPackageIdentity } from "../harness/package-types";
 import type {
   OpenClawImagePluginInstall,
   OpenClawManagedExtensionDiscoveryResult,
@@ -51,6 +53,7 @@ export type CreatedSandboxFinalizationOptions = {
   restoreBackupPath: string | null;
   preUpgradeBackup: boolean;
   targetAgentType: string;
+  agentDefinition?: AgentDefinition;
   customImage?: boolean;
   discoverOpenClawImagePluginInstalls?: boolean;
   validateManagedDcode: boolean;
@@ -62,6 +65,14 @@ export type CreatedSandboxFinalizationOptions = {
 
 export type CreatedSandboxFinalizationDeps = {
   revalidatePolicyAuthority?(operation: string): void;
+  revalidateHarnessPackageAuthority?(operation: string): HarnessPackageIdentity | null;
+  readSandboxStateBackupManifest?(
+    backupPath: string,
+  ): Readonly<sandboxState.RebuildManifest> | null;
+  captureSnapshotRestoreAuthority?(
+    backupPath: string,
+    expectedManifest?: sandboxState.RebuildManifest,
+  ): sandboxState.SnapshotRestoreAuthority | null;
   discoverFreshOpenClawImagePluginInstalls(
     sandboxName: string,
   ): OpenClawManagedExtensionDiscoveryResult;
@@ -84,6 +95,68 @@ export type CreatedSandboxFinalizationDeps = {
   error(message: string): void;
   exitProcess(code: number): never;
 };
+
+type RecreateRestoreAuthority = Pick<
+  RecreatedSandboxRestoreOptions,
+  "authority" | "validateBeforeMutation"
+>;
+
+/** Bind an ordinary recreate restore to the selected bytes and live package session. */
+function prepareRecreateRestoreAuthority(
+  sandboxName: string,
+  backupPath: string,
+  deps: CreatedSandboxFinalizationDeps,
+): RecreateRestoreAuthority | null | undefined {
+  const manifest = (
+    deps.readSandboxStateBackupManifest ?? sandboxState.readSandboxStateBackupManifest
+  )(backupPath);
+  if (!manifest) return undefined;
+
+  const manifestPackage = sandboxState.inspectRebuildManifestHarnessPackage(manifest);
+  if (manifestPackage.status === "invalid") {
+    return undefined;
+  }
+  // Provider-backed restores need runtime authority that does not exist until
+  // the target is registered. Leave them to the state layer's explicit
+  // managed/host-local deferral instead of granting ordinary restore authority.
+  if (
+    manifest.workload?.kind === "managed-image" ||
+    typeof manifest.hostLocalInferenceReceipt === "string"
+  ) {
+    return undefined;
+  }
+
+  const authority = (
+    deps.captureSnapshotRestoreAuthority ?? sandboxState.captureSnapshotRestoreAuthority
+  )(backupPath, manifest);
+  if (!authority) return null;
+
+  const revalidate = deps.revalidateHarnessPackageAuthority;
+  const revalidateCreatedSandbox = deps.revalidatePolicyAuthority;
+  const expectedHarnessPackage =
+    manifestPackage.status === "legacy"
+      ? revalidate?.(`prepare legacy restore for sandbox '${sandboxName}'`)
+      : manifestPackage.harnessPackage;
+  return {
+    authority,
+    validateBeforeMutation: () => {
+      if (!revalidate || !revalidateCreatedSandbox) {
+        throw new Error(
+          `Cannot restore sandbox '${sandboxName}': created-sandbox or harness package revalidation is missing.`,
+        );
+      }
+      const operation = `restore files for sandbox '${sandboxName}'`;
+      revalidateCreatedSandbox(operation);
+      const currentHarnessPackage = revalidate(operation);
+      if (!isDeepStrictEqual(currentHarnessPackage, expectedHarnessPackage)) {
+        throw new Error(
+          `Cannot restore sandbox '${sandboxName}': snapshot harness package authority changed.`,
+        );
+      }
+      revalidateCreatedSandbox(operation);
+    },
+  };
+}
 
 type WorkloadResolutionInput = Parameters<
   typeof managedWorkloadOnboard.resolveOnboardSandboxWorkloadReceipt
@@ -528,10 +601,7 @@ function assertVerifiedCreateMatchesPolicyBoundary(
   if (
     !isDeepStrictEqual(
       verifiedCreate.checkpoint,
-      pendingSandboxPolicyVerificationForBoundary(
-        boundary,
-        verifiedCreate.reservation.authority,
-      ),
+      pendingSandboxPolicyVerificationForBoundary(boundary, verifiedCreate.reservation.authority),
     )
   ) {
     throw new Error("Verified sandbox create checkpoint does not match final policy authority.");
@@ -622,6 +692,7 @@ export function createOnboardCreatedSandboxCompletion(
   restoreBackupPath: string | null,
   pendingStateRestoreBackupPath: string | null,
   agent: RegistrationSeed["agent"],
+  effectiveAgent: AgentDefinition,
   fromDockerfile: string | null,
   agentFlags: OnboardAgentFlags,
   inference: OnboardInferenceSelection,
@@ -650,6 +721,7 @@ export function createOnboardCreatedSandboxCompletion(
   workloadRuntime: WorkloadResolutionInput["runtime"],
   workload: WorkloadResolutionInput["workload"],
   note: (message: string) => void,
+  revalidateHarnessPackageAuthority: (operation: string) => HarnessPackageIdentity | null,
 ): CreatedSandboxCompletionActions {
   const { provider, model, preferredInferenceApi, endpointUrl } = inference;
   const { createIntent, resolvedCreateIntent } = createContext;
@@ -659,7 +731,8 @@ export function createOnboardCreatedSandboxCompletion(
         sandboxName,
         restoreBackupPath,
         preUpgradeBackup: pendingStateRestoreBackupPath !== null,
-        targetAgentType: agent?.name ?? "openclaw",
+        targetAgentType: effectiveAgent.name,
+        agentDefinition: effectiveAgent,
         customImage: Boolean(fromDockerfile),
         discoverOpenClawImagePluginInstalls: agentFlags.customOpenClawImage,
         validateManagedDcode: agentFlags.isManagedDcodeAgent,
@@ -741,7 +814,7 @@ export function createOnboardCreatedSandboxCompletion(
         openClawPluginRestore.discoverFreshOpenClawImagePluginInstalls(
           name,
           sandboxState,
-          agent?.configPaths.dir,
+          effectiveAgent.configPaths.dir,
         ),
       restoreRecreatedSandboxState: sandboxState.restoreRecreatedSandboxState,
       getDcodeSelectionDrift: createDcodeSelectionDriftReader(
@@ -752,6 +825,7 @@ export function createOnboardCreatedSandboxCompletion(
       error: console.error,
       exitProcess: (code) => process.exit(code),
       revalidatePolicyAuthority: preparedPolicy.revalidatePolicyAuthority,
+      revalidateHarnessPackageAuthority,
     },
   );
 }
@@ -790,15 +864,34 @@ export function finalizeCreatedSandbox(
         : "  Restoring workspace state from pre-recreate backup...",
     );
     deps.revalidatePolicyAuthority?.(`restoring files for sandbox '${options.sandboxName}'`);
+    const recreateRestoreAuthority = prepareRecreateRestoreAuthority(
+      options.sandboxName,
+      options.restoreBackupPath,
+      deps,
+    );
+    if (recreateRestoreAuthority === null) {
+      deps.error(
+        `  Warning: workspace state restore was incomplete for sandbox '${options.sandboxName}'.`,
+      );
+      deps.error("  Restore reason: Selected snapshot content changed during restore preflight");
+      deps.error(
+        "  Workspace state restoration did not complete. Registry metadata was not updated.",
+      );
+      reportUnregisteredSandboxRecovery();
+      deps.error(`  Keep the snapshot for manual recovery: ${options.restoreBackupPath}`);
+      return deps.exitProcess(1);
+    }
     const restore = deps.restoreRecreatedSandboxState(
       options.sandboxName,
       options.restoreBackupPath,
       {
         targetAgentType: options.targetAgentType,
+        ...(options.agentDefinition ? { agentDefinition: options.agentDefinition } : {}),
         ...(options.customImage ? { allowCustomImageWholeStateFileRestore: true } : {}),
         ...(freshOpenClawImagePluginInstalls !== undefined
           ? { freshOpenClawImagePluginInstalls }
           : {}),
+        ...(recreateRestoreAuthority ?? {}),
       },
     );
     deps.revalidatePolicyAuthority?.(

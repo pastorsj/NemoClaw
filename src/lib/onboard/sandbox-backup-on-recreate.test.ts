@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
-import type { BackupResult } from "../state/sandbox";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type BackupResult } from "../state/sandbox";
+import * as sandboxState from "../state/sandbox";
 import {
   backupSandboxBeforeRecreate,
   shouldSkipPreRecreateBackup,
@@ -23,6 +24,10 @@ function makeBackup(overrides: Partial<BackupResult> = {}): BackupResult {
   };
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("backupSandboxBeforeRecreate", () => {
   it("returns ok with backup result on success", () => {
     const backup = makeBackup();
@@ -39,6 +44,62 @@ describe("backupSandboxBeforeRecreate", () => {
     expect(result.failureKind).toBe("none");
     expect(backupImpl).toHaveBeenCalledWith("my-assistant");
     expect(log).toHaveBeenCalledWith(expect.stringContaining("State backed up"));
+  });
+
+  it("passes source package authority to the default state backup", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "0.13.0",
+      contractVersion: 1 as const,
+      contentDigest: "b".repeat(64),
+    };
+    const sandboxEntry = {
+      name: "hermes",
+      agent: "hermes",
+      harnessPackage,
+    };
+    const agentDefinition = {
+      name: "hermes",
+      packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+    };
+    const backup = makeBackup();
+    const validateBeforePublish = vi.fn();
+    const sourceBackupAuthority = {
+      agentDefinition: agentDefinition as never,
+      harnessPackage,
+      validateBeforePublish,
+    };
+    const backupSandboxState = vi.spyOn(sandboxState, "backupSandboxState").mockReturnValue(backup);
+
+    const result = backupSandboxBeforeRecreate({
+      sandboxName: "hermes",
+      sandboxEntry,
+      sourceBackupAuthority,
+      log: vi.fn(),
+      errorLog: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ ok: true, backup, failureKind: "none" });
+    expect(backupSandboxState).toHaveBeenCalledWith("hermes", sourceBackupAuthority);
+  });
+
+  it("rejects a default backup that has no registered agent package authority", () => {
+    const backupSandboxState = vi.spyOn(sandboxState, "backupSandboxState");
+    const errorLog = vi.fn();
+
+    const result = backupSandboxBeforeRecreate({
+      sandboxName: "orphan",
+      sandboxEntry: null,
+      log: vi.fn(),
+      errorLog,
+    });
+
+    expect(result).toMatchObject({ ok: false, failureKind: "threw" });
+    expect(backupSandboxState).not.toHaveBeenCalled();
+    expect(errorLog).toHaveBeenCalledWith(
+      expect.stringContaining("has no registered agent package authority"),
+    );
   });
 
   it("rejects an unmarked custom OpenClaw backup before recreate deletion (#6108)", () => {

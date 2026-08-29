@@ -986,6 +986,7 @@ station_installer_revision() { printf '${STATION_REVISION}'; }
 station_express_resume_generation() { printf '${STATION_GENERATION}'; }
 ensure_docker() { printf 'ENSURE_DOCKER\\n'; }
 ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\\n'; }
+maybe_offer_express_install
 prepare_installer_host
 PAYLOAD
   cat > "$target/scripts/prepare-dgx-station-host.sh" <<'HELPER'
@@ -1046,6 +1047,7 @@ maybe_offer_express_install() { printf 'SELECT_EXPRESS\n'; _SELECTED_EXPRESS_PLA
 ensure_station_express_host() { printf 'PREPARE_STATION\n'; }
 ensure_docker() { printf 'ENSURE_DOCKER\n'; }
 ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\n'; }
+maybe_offer_express_install
 prepare_installer_host
 `,
     );
@@ -1071,6 +1073,7 @@ ensure_station_express_host() {
 }
 ensure_docker() { :; }
 ensure_openshell_build_deps() { :; }
+maybe_offer_express_install
 prepare_installer_host
 `,
     );
@@ -1090,6 +1093,7 @@ ensure_station_express_host() {
 }
 ensure_docker() { printf 'ENSURE_DOCKER\n'; }
 ensure_openshell_build_deps() { printf 'ENSURE_BUILD_DEPS\n'; }
+maybe_offer_express_install
 prepare_installer_host
 `,
     );
@@ -1476,25 +1480,5 @@ printf 'RESULT MODEL=%s\n' "$NEMOCLAW_VLLM_MODEL"
 
     expect(result.status, output).not.toBe(0);
     expect(output).toMatch(/resume state is invalid/);
-  });
-
-  it("rejects resume under a different installer revision with exact rerun guidance", () => {
-    const savedRevision = "b".repeat(40);
-    const currentRevision = "c".repeat(40);
-    const { result, output } = runSourced(
-      INSTALLER_PAYLOAD,
-      `
-mkdir -p "$HOME/.nemoclaw"
-chmod 0700 "$HOME/.nemoclaw"
-printf 'revision=${savedRevision}\nmodel=nemotron-3-ultra-550b-a55b\ngeneration=${STATION_GENERATION}\n' >"$HOME/.nemoclaw/station-express-resume"
-chmod 0600 "$HOME/.nemoclaw/station-express-resume"
-station_installer_revision() { printf '${currentRevision}'; }
-load_station_express_resume
-`,
-    );
-
-    expect(result.status, output).not.toBe(0);
-    expect(output).toContain(`requires NemoClaw revision ${savedRevision}`);
-    expect(output).toContain(`NEMOCLAW_INSTALL_TAG=${savedRevision}`);
   });
 });

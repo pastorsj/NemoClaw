@@ -31,6 +31,9 @@ vi.mock("../../../src/lib/onboard/policy-context-seed", () => ({
 }));
 
 const repoRoot = path.join(import.meta.dirname, "../../..");
+const onboardScriptMocksPath = JSON.stringify(
+  path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+);
 
 function runAdapterScript(
   scriptBody: string,
@@ -217,6 +220,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 process.env.NEMOCLAW_NON_INTERACTIVE = "preserve-direct";
 process.env.NEMOCLAW_POLICY_TIER = "invalid_tier";
+require(${onboardScriptMocksPath}).installOnboardProcessHarnessPackage();
 const { onboard } = require(${onboardPath});
 const exitMarker = "__NEMOCLAW_TEST_PROCESS_EXIT__";
 let exitObservation = null;
@@ -282,6 +286,7 @@ process.exit = originalExit;
     const script = String.raw`
 process.env.NEMOCLAW_POLICY_TIER = "invalid_tier";
 delete process.env.NEMOCLAW_NON_INTERACTIVE;
+require(${onboardScriptMocksPath}).installOnboardProcessHarnessPackage();
 const { onboard } = require(${onboardPath});
 const exitMarker = "__NEMOCLAW_TEST_PROCESS_EXIT__";
 process.exit = (code = 0) => {

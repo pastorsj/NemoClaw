@@ -1,34 +1,84 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const isolatedRecoveryState = vi.hoisted(() => ({
+  candidateDigests: [] as string[],
+  root: `${process.cwd()}/node_modules/.cache/nemoclaw-upgrade-recovery-${String(process.pid)}`,
+}));
+
+vi.mock("../state/state-root", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../state/state-root")>();
+  return {
+    ...actual,
+    getNemoclawBaseStateRoot: () => isolatedRecoveryState.root,
+    nemoclawStateRoot: () => isolatedRecoveryState.root,
+  };
+});
+
+vi.mock("../agent/candidate-authority", () => ({
+  CANDIDATE_QUALIFICATION_RECEIPT_DIGESTS: {
+    pi: isolatedRecoveryState.candidateDigests,
+  },
+  acceptedCandidateReceiptDigests: () => isolatedRecoveryState.candidateDigests,
+}));
+
 import { parseCliOpenShellSandboxInventory } from "../adapters/openshell/sandbox-observer-cli";
+import {
+  type CandidateQualificationFixture,
+  candidateQualificationEnvironment,
+} from "../agent/candidate-test-fixture";
+import * as agentDefinitions from "../agent/defs";
 import * as coreVersion from "../core/version";
 import * as sandboxList from "../openshell-sandbox-list";
 import * as sandboxVersion from "../sandbox/version";
+import type { HarnessPackageIdentity, HarnessPackageMigration } from "../harness/package-identity";
 import * as registry from "../state/registry";
 import * as sandboxState from "../state/sandbox";
-import { upgradeSandboxes, upgradeSandboxesDependencies } from "./upgrade-sandboxes";
+import { hashSnapshotBackupContent } from "../state/snapshot/content-digest";
+import { createHarnessPackageFixture } from "../../../test/helpers/harness-packages";
+import {
+  prepareBackupRecovery,
+  upgradeSandboxes,
+  upgradeSandboxesDependencies,
+} from "./upgrade-sandboxes";
 
 type UpgradeSandboxes = typeof upgradeSandboxes;
 
 type ManifestAgentType = "openclaw" | "hermes";
+
+const candidateQualificationFixtures: CandidateQualificationFixture[] = [];
+const packageFixtures: ReturnType<typeof createHarnessPackageFixture>[] = [];
 
 const MANIFEST_DIR_BY_AGENT: Record<ManifestAgentType, string> = {
   openclaw: "/sandbox/.openclaw",
   hermes: "/sandbox/.hermes",
 };
 
+function harnessPackage(agentType: string, digest = "a".repeat(64)) {
+  return {
+    kind: "agent-runtime" as const,
+    id: agentType,
+    packageVersion: "1.0.0",
+    contractVersion: 1 as const,
+    contentDigest: digest,
+  };
+}
+
 function makeManifest(sandboxName: string, agentType: ManifestAgentType = "openclaw") {
   const timestamp = `2026-07-01T06-50-4${sandboxName.length}-044Z`;
   return {
-    version: 1,
+    version: 2,
     sandboxName,
     timestamp,
     agentType,
     agentVersion: "2026.5.27",
     expectedVersion: "2026.5.27",
+    harnessPackage: harnessPackage(agentType),
     stateDirs: ["workspace"],
     backedUpDirs: ["workspace"],
     stateFiles: [],
@@ -39,6 +89,81 @@ function makeManifest(sandboxName: string, agentType: ManifestAgentType = "openc
     customPolicies: [],
     snapshotVersion: 1,
   };
+}
+
+function writeRecoveryManifest(input: {
+  sandboxName: string;
+  agentType: string;
+  version: 1 | 2;
+  harnessPackage?: HarnessPackageIdentity | null;
+  backupComplete?: boolean;
+  payloadFiles?: Readonly<Record<string, string>>;
+}): sandboxState.RebuildManifest {
+  const timestamp = "2026-08-29T12-00-00-000Z";
+  const backupPath = path.join(
+    isolatedRecoveryState.root,
+    "rebuild-backups",
+    input.sandboxName,
+    timestamp,
+  );
+  fs.mkdirSync(backupPath, { recursive: true, mode: 0o700 });
+  for (const [relativePath, contents] of Object.entries(input.payloadFiles ?? {})) {
+    const payloadPath = path.join(backupPath, relativePath);
+    fs.mkdirSync(path.dirname(payloadPath), { recursive: true });
+    fs.writeFileSync(payloadPath, contents);
+  }
+  const manifest: sandboxState.RebuildManifest = {
+    version: input.version,
+    sandboxName: input.sandboxName,
+    timestamp,
+    agentType: input.agentType,
+    agentVersion: "2026.5.27",
+    expectedVersion: "2026.5.27",
+    stateDirs: [],
+    backedUpDirs: [],
+    stateFiles: [],
+    dir: `/sandbox/.${input.agentType}`,
+    backupPath,
+    blueprintDigest: null,
+    policyPresets: [],
+    customPolicies: [],
+    ...(input.version === 2
+      ? {
+          harnessPackage: input.harnessPackage ?? null,
+          backupComplete: input.backupComplete ?? true,
+          backupContentSha256: hashSnapshotBackupContent(backupPath),
+        }
+      : input.backupComplete === undefined
+        ? {}
+        : { backupComplete: input.backupComplete }),
+  };
+  sandboxState.__test.writeManifest(backupPath, manifest);
+  return manifest;
+}
+
+function recoveryOwner(input: {
+  sandboxName: string;
+  agent: string | null;
+  harnessPackage: HarnessPackageIdentity | null;
+  harnessPackageMigration: HarnessPackageMigration | null;
+}): registry.SandboxEntry {
+  return {
+    name: input.sandboxName,
+    agent: input.agent,
+    harnessPackage: input.harnessPackage,
+    harnessPackageMigration: input.harnessPackageMigration,
+    agentVersion: "2026.5.27",
+    nemoclawVersion: "0.0.113",
+    fromDockerfile: null,
+  } as registry.SandboxEntry;
+}
+
+function installRecoveryPackage(id: "openclaw" | "hermes" = "openclaw") {
+  const fixture = createHarnessPackageFixture({
+    storeRoot: path.join(isolatedRecoveryState.root, "harnesses"),
+  });
+  packageFixtures.push(fixture);
+  return fixture.install(id);
 }
 
 function sandboxInventory(output: string) {
@@ -63,6 +188,7 @@ function createRecoveryHarness(
           nemoclawVersion: string | null;
           fromDockerfile: string | null;
           pendingRouteReservation: true;
+          harnessPackage: ReturnType<typeof harnessPackage>;
         }>
       >
     >;
@@ -78,6 +204,7 @@ function createRecoveryHarness(
   checkAgentVersionSpy: ReturnType<typeof vi.spyOn>;
   liveListSpy: ReturnType<typeof vi.spyOn>;
   readOnlyListSpy: ReturnType<typeof vi.spyOn>;
+  recoveryValidationSpy: ReturnType<typeof vi.spyOn>;
 } {
   vi.stubEnv("NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE", "1");
   vi.stubEnv(
@@ -112,6 +239,7 @@ function createRecoveryHarness(
     sandboxes: names.map((name) => ({
       name,
       agent: null,
+      harnessPackage: harnessPackage(options.registryOverrides?.[name]?.agent || "openclaw"),
       agentVersion: "2026.5.27",
       gatewayName: options.gatewayNames?.[name],
       gatewayPort: options.gatewayPort,
@@ -139,12 +267,12 @@ function createRecoveryHarness(
         ? makeManifest(sandboxName, options.manifestAgentTypes?.[sandboxName])
         : options.latestBackup;
     });
-  vi.spyOn(sandboxState, "validateRebuildRecoveryManifest").mockImplementation(
-    (...args: unknown[]) => ({
+  const recoveryValidationSpy = vi
+    .spyOn(sandboxState, "validateRebuildRecoveryManifest")
+    .mockImplementation((...args: unknown[]) => ({
       ok: true as const,
       manifest: args[2] as ReturnType<typeof makeManifest>,
-    }),
-  );
+    }));
   const managedEvidenceSpy = options.useRealManagedEvidence
     ? vi.spyOn(sandboxState, "hasPositiveManagedImageEvidence")
     : vi.spyOn(sandboxState, "hasPositiveManagedImageEvidence").mockReturnValue(true);
@@ -160,12 +288,257 @@ function createRecoveryHarness(
     checkAgentVersionSpy,
     liveListSpy,
     readOnlyListSpy,
+    recoveryValidationSpy,
   };
 }
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  isolatedRecoveryState.candidateDigests.splice(0);
+  while (candidateQualificationFixtures.length > 0) {
+    candidateQualificationFixtures.pop()?.cleanup();
+  }
+  while (packageFixtures.length > 0) packageFixtures.pop()?.cleanup();
+  fs.rmSync(isolatedRecoveryState.root, { recursive: true, force: true });
+});
+
+describe("upgrade backup recovery authority", () => {
+  it("accepts an on-disk v1 backup only for its exact migrated package owner", () => {
+    const installed = installRecoveryPackage();
+    const migration: HarnessPackageMigration = {
+      schemaVersion: 1,
+      source: "legacy-current-bundle",
+      legacyAgent: null,
+      migratedAt: "2026-08-29T11:00:00.000Z",
+    };
+    writeRecoveryManifest({
+      sandboxName: "legacy-openclaw",
+      agentType: "openclaw",
+      version: 1,
+    });
+
+    const accepted = prepareBackupRecovery(
+      recoveryOwner({
+        sandboxName: "legacy-openclaw",
+        agent: null,
+        harnessPackage: installed.identity,
+        harnessPackageMigration: migration,
+      }),
+      false,
+    );
+
+    expect(accepted).toMatchObject({
+      manifest: { version: 1, sandboxName: "legacy-openclaw" },
+    });
+
+    const missingAudit = prepareBackupRecovery(
+      recoveryOwner({
+        sandboxName: "legacy-openclaw",
+        agent: null,
+        harnessPackage: installed.identity,
+        harnessPackageMigration: null,
+      }),
+      false,
+    );
+    expect(missingAudit).toMatchObject({
+      reason: expect.stringContaining("missing exact legacy-current-bundle migration provenance"),
+    });
+
+    const wrongSentinel = prepareBackupRecovery(
+      recoveryOwner({
+        sandboxName: "legacy-openclaw",
+        agent: null,
+        harnessPackage: installed.identity,
+        harnessPackageMigration: { ...migration, legacyAgent: "openclaw" },
+      }),
+      false,
+    );
+    expect(wrongSentinel).toMatchObject({
+      reason: expect.stringContaining("missing exact legacy-current-bundle migration provenance"),
+    });
+
+    const missingObject = prepareBackupRecovery(
+      recoveryOwner({
+        sandboxName: "legacy-openclaw",
+        agent: null,
+        harnessPackage: { ...installed.identity, contentDigest: "f".repeat(64) },
+        harnessPackageMigration: migration,
+      }),
+      false,
+    );
+    expect(missingObject).toMatchObject({
+      reason: expect.stringContaining("backup recovery assessment failed"),
+    });
+  });
+
+  it("reruns candidate qualification before accepting an on-disk v1 backup", () => {
+    writeRecoveryManifest({ sandboxName: "legacy-pi", agentType: "pi", version: 1 });
+    const qualification = candidateQualificationEnvironment();
+    candidateQualificationFixtures.push(qualification);
+    isolatedRecoveryState.candidateDigests.push(qualification.receiptDigest);
+    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", qualification.env.NEMOCLAW_CANDIDATE_AGENTS!);
+    vi.stubEnv(
+      "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
+      qualification.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT!,
+    );
+    const owner = recoveryOwner({
+      sandboxName: "legacy-pi",
+      agent: "pi",
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+
+    expect(prepareBackupRecovery(owner, false)).toMatchObject({
+      manifest: { version: 1, sandboxName: "legacy-pi", agentType: "pi" },
+    });
+
+    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", "");
+    vi.stubEnv("NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT", "");
+    expect(prepareBackupRecovery(owner, false)).toMatchObject({
+      reason: expect.stringContaining("backup recovery assessment failed"),
+    });
+  });
+
+  it("reruns candidate qualification before accepting an on-disk v2 backup", () => {
+    writeRecoveryManifest({
+      sandboxName: "current-pi",
+      agentType: "pi",
+      version: 2,
+      harnessPackage: null,
+    });
+    const qualification = candidateQualificationEnvironment();
+    candidateQualificationFixtures.push(qualification);
+    isolatedRecoveryState.candidateDigests.push(qualification.receiptDigest);
+    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", qualification.env.NEMOCLAW_CANDIDATE_AGENTS!);
+    vi.stubEnv(
+      "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
+      qualification.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT!,
+    );
+    const owner = recoveryOwner({
+      sandboxName: "current-pi",
+      agent: "pi",
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+
+    expect(prepareBackupRecovery(owner, false)).toMatchObject({
+      manifest: { version: 2, sandboxName: "current-pi", agentType: "pi" },
+    });
+
+    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", "");
+    vi.stubEnv("NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT", "");
+    expect(prepareBackupRecovery(owner, false)).toMatchObject({
+      reason: expect.stringContaining("backup recovery assessment failed"),
+    });
+  });
+
+  it("re-reads the candidate definition instead of trusting its cached manifest", () => {
+    writeRecoveryManifest({
+      sandboxName: "fresh-pi",
+      agentType: "pi",
+      version: 2,
+      harnessPackage: null,
+    });
+    const qualification = candidateQualificationEnvironment();
+    candidateQualificationFixtures.push(qualification);
+    isolatedRecoveryState.candidateDigests.push(qualification.receiptDigest);
+    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", qualification.env.NEMOCLAW_CANDIDATE_AGENTS!);
+    vi.stubEnv(
+      "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
+      qualification.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT!,
+    );
+    const owner = recoveryOwner({
+      sandboxName: "fresh-pi",
+      agent: "pi",
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+    agentDefinitions.loadAgent("pi");
+    const freshDefinition = vi
+      .spyOn(agentDefinitions, "loadAgentFresh")
+      .mockImplementationOnce(() => {
+        throw new Error("candidate manifest changed after cache warmup");
+      });
+
+    expect(prepareBackupRecovery(owner, false)).toMatchObject({
+      reason: expect.stringContaining("candidate manifest changed after cache warmup"),
+    });
+    expect(freshDefinition).toHaveBeenCalledOnce();
+  });
+
+  it("keeps schema v2 recovery on full-row manifest validation", () => {
+    const installed = installRecoveryPackage();
+    const exactOwner = recoveryOwner({
+      sandboxName: "current-openclaw",
+      agent: null,
+      harnessPackage: installed.identity,
+      harnessPackageMigration: null,
+    });
+    writeRecoveryManifest({
+      sandboxName: exactOwner.name,
+      agentType: "openclaw",
+      version: 2,
+      harnessPackage: installed.identity,
+    });
+    expect(prepareBackupRecovery(exactOwner, false)).toMatchObject({
+      manifest: { version: 2, harnessPackage: installed.identity, backupComplete: true },
+    });
+
+    const incompleteOwner = recoveryOwner({
+      sandboxName: "incomplete-openclaw",
+      agent: null,
+      harnessPackage: installed.identity,
+      harnessPackageMigration: null,
+    });
+    writeRecoveryManifest({
+      sandboxName: incompleteOwner.name,
+      agentType: "openclaw",
+      version: 2,
+      harnessPackage: installed.identity,
+      backupComplete: false,
+    });
+    expect(prepareBackupRecovery(incompleteOwner, false)).toMatchObject({
+      reason: "backup manifest records an incomplete capture",
+    });
+
+    const changedPayloadOwner = recoveryOwner({
+      sandboxName: "changed-payload-openclaw",
+      agent: null,
+      harnessPackage: installed.identity,
+      harnessPackageMigration: null,
+    });
+    const changedPayloadManifest = writeRecoveryManifest({
+      sandboxName: changedPayloadOwner.name,
+      agentType: "openclaw",
+      version: 2,
+      harnessPackage: installed.identity,
+      payloadFiles: { "workspace/note.txt": "published\n" },
+    });
+    fs.writeFileSync(
+      path.join(changedPayloadManifest.backupPath, "workspace", "note.txt"),
+      "changed\n",
+    );
+    expect(prepareBackupRecovery(changedPayloadOwner, false)).toMatchObject({
+      reason: "backup payload changed after publication",
+    });
+
+    const mismatchedOwner = recoveryOwner({
+      sandboxName: "mismatched-openclaw",
+      agent: null,
+      harnessPackage: installed.identity,
+      harnessPackageMigration: null,
+    });
+    writeRecoveryManifest({
+      sandboxName: mismatchedOwner.name,
+      agentType: "openclaw",
+      version: 2,
+      harnessPackage: { ...installed.identity, contentDigest: "e".repeat(64) },
+    });
+    expect(prepareBackupRecovery(mismatchedOwner, false)).toMatchObject({
+      reason: "backup harness package does not match the owning sandbox",
+    });
+  });
 });
 
 describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
@@ -219,6 +592,25 @@ describe("upgrade-sandboxes prepared backup recovery (#6114)", () => {
       });
     },
   );
+
+  it("validates recovery against the sandbox's full package authority", async () => {
+    const identity = harnessPackage("openclaw", "b".repeat(64));
+    const harness = createRecoveryHarness(["alpha"], {
+      registryOverrides: { alpha: { harnessPackage: identity } },
+      latestBackup: {
+        ...makeManifest("alpha"),
+        harnessPackage: identity,
+      },
+    });
+
+    await expect(harness.upgradeSandboxes({ auto: true })).resolves.toBeUndefined();
+
+    expect(harness.recoveryValidationSpy).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ name: "alpha", harnessPackage: identity }),
+      expect.objectContaining({ harnessPackage: identity }),
+    );
+  });
 
   it.each([
     {

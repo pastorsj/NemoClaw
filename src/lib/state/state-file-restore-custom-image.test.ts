@@ -50,13 +50,13 @@ afterEach(() => {
 
 describe("custom-image state-file restore capability (#6334)", () => {
   it("restores the complete backup without invoking the managed key allowlist", () => {
-    const { backupPath, backupContents } = createBackupFixture();
+    const { backupContents } = createBackupFixture();
 
     const restored = restoreStateFile(
       ["-F", "/tmp/ssh-config", "openshell-alpha"],
       "/sandbox/.deepagents",
       { path: "config.toml", strategy: "copy" },
-      backupPath,
+      backupContents,
       ownership,
       true,
       vi.fn(),
@@ -73,13 +73,13 @@ describe("custom-image state-file restore capability (#6334)", () => {
   });
 
   it("requires the capability before bypassing the managed key allowlist", () => {
-    const { backupPath, backupContents } = createBackupFixture();
+    const { backupContents } = createBackupFixture();
 
     const restored = restoreStateFile(
       ["-F", "/tmp/ssh-config", "openshell-alpha"],
       "/sandbox/.deepagents",
       { path: "config.toml", strategy: "copy" },
-      backupPath,
+      backupContents,
       ownership,
       false,
       vi.fn(),

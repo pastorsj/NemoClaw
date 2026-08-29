@@ -202,9 +202,9 @@ export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): Rebuild
         targetAgentType,
         ...(targetImageIsCustom ? { allowCustomImageWholeStateFileRestore: true } : {}),
       },
-      {
-        getSandbox: (name) => loadRegistry().sandboxes[name] ?? null,
-      },
+      snapshotRestore.createManagedRestoreAuthorityDependencies(
+        (name) => loadRegistry().sandboxes[name] ?? null,
+      ),
     );
     log(
       `Restore result: success=${restore.success}, restored=${restore.restoredDirs.join(",")}; files=${restore.restoredFiles.join(",")}, failed=${restore.failedDirs.join(",")}; failedFiles=${restore.failedFiles.join(",")}${restore.error ? `; error=${restore.error}` : ""}`,

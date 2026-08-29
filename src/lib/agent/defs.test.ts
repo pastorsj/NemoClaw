@@ -24,6 +24,7 @@ import {
   getAgentChoices,
   listAgents,
   loadAgent,
+  loadAgentFresh,
   requireAgentPolicyAdditionsPath,
   resolveAgentName,
   resolveAgentNameAlias,
@@ -126,6 +127,46 @@ describe("agent definitions", () => {
     expect(loadAgent("pi", fixture.env).name).toBe("pi");
   });
 
+  it("rereads a candidate manifest into detached immutable definitions", () => {
+    const fixture = candidateQualificationEnvironment();
+    qualificationFixtures.push(fixture);
+    authority.digests.push(fixture.receiptDigest);
+
+    const manifestPath = path.join(AGENTS_DIR, "pi", "manifest.yaml");
+    const originalManifest = fs.readFileSync(manifestPath, "utf8");
+    const updatedManifest = originalManifest.replace(
+      'display_name: "Pi"',
+      'display_name: "Pi Reloaded"',
+    );
+    expect(updatedManifest).not.toBe(originalManifest);
+
+    const readFileSync = fs.readFileSync;
+    let manifestReads = 0;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((
+      target: fs.PathOrFileDescriptor,
+      options?: unknown,
+    ) => {
+      return target === manifestPath && options === "utf8"
+        ? (manifestReads += 1) === 1
+          ? originalManifest
+          : updatedManifest
+        : Reflect.apply(readFileSync, fs, [target, options]);
+    }) as typeof fs.readFileSync);
+
+    const first = loadAgentFresh("pi", fixture.env);
+    const second = loadAgentFresh("pi", fixture.env);
+
+    expect(first).not.toBe(second);
+    expect(first.displayName).toBe("Pi");
+    expect(second.displayName).toBe("Pi Reloaded");
+    expect(first.displayName).toBe("Pi");
+    expect(Object.isFrozen(second)).toBe(true);
+    expect(Object.isFrozen(second.runtime)).toBe(true);
+    expect(() => {
+      (second.runtime as { interactive_command: string }).interactive_command = "changed";
+    }).toThrow(TypeError);
+  });
+
   it("withholds Pi from a receipt the repository has not published (#7927)", () => {
     const fixture = candidateQualificationEnvironment();
     qualificationFixtures.push(fixture);
@@ -206,7 +247,7 @@ describe("agent definitions", () => {
     fs.rmSync(policyPath, { recursive: true });
     fs.writeFileSync(policyPath, "version: 1\nnetwork_policies: {}\n");
 
-    expect(requireAgentPolicyAdditionsPath(agent)).toBe(policyPath);
+    expect(requireAgentPolicyAdditionsPath(loadAgentFresh(agentName))).toBe(policyPath);
   });
 
   it("falls back to openclaw when session references an unknown agent", () => {

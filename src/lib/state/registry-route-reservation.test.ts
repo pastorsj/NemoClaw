@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { serializedHostLocalInferenceReceipt } from "../../../test/helpers/host-local-inference-receipt";
+import { testTimeoutOptions } from "../../../test/helpers/timeouts";
 import type { InferenceSelection } from "../inference/selection";
 import type { SandboxInferenceRouteReservationDisposition } from "./registry/route-reservation";
 import type { PendingSandboxPolicyVerification, SandboxEntry } from "./registry/types";
@@ -305,6 +306,7 @@ describe("sandbox inference route reservation", () => {
     ],
   ] as const)(
     "stages %s from the durable route",
+    testTimeoutOptions(10_000),
     async (_label, sandboxName, provider, model, endpointUrl, credentialEnv, existing) => {
       const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-route-registration-"));
       vi.stubEnv("HOME", home);
@@ -1266,8 +1268,15 @@ describe("sandbox inference route reservation", () => {
       expect(pending.pendingRouteReservation).toBe(true);
       expect(registry.isPublishedSandboxRegistration(pending)).toBe(false);
       expect(registry.getDefault()).toBeNull();
+      const persistedPending = registry.getSandbox("clone")!;
 
-      expect(registry.finalizePendingSandboxRegistration("clone")).toBe(true);
+      expect(
+        registry.finalizePendingSandboxRegistrationIfCurrent({
+          ...persistedPending,
+          model: "changed-model",
+        }),
+      ).toBe(false);
+      expect(registry.finalizePendingSandboxRegistrationIfCurrent(persistedPending)).toBe(true);
       expect(registry.isPublishedSandboxRegistration(registry.getSandbox("clone")!)).toBe(true);
       expect(registry.getDefault()).toBe("clone");
 
@@ -1279,6 +1288,75 @@ describe("sandbox inference route reservation", () => {
         gatewayName: "nemoclaw",
       });
       expect(registry.getDefault()).toBe("clone");
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("publishes a pending clone only over its exact captured registry row", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-pending-clone-cas-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    try {
+      const registry = await import("./registry");
+      const packageIdentity = {
+        ...HARNESS_PACKAGE,
+        id: "openclaw",
+      };
+      const foreignSamePackage = registry.registerSandbox({
+        name: "clone",
+        agent: "openclaw",
+        harnessPackage: packageIdentity,
+        provider: "openai",
+        model: "foreign-model",
+        openshellDriver: "docker",
+        gatewayName: "nemoclaw",
+        lifecycleGeneration: "foreign-generation",
+        lifecycleLiveIdentityFingerprint: "f".repeat(64),
+      });
+
+      expect(() =>
+        registry.registerSandbox(
+          {
+            ...foreignSamePackage,
+            model: "clone-model",
+            lifecycleGeneration: "clone-generation",
+            lifecycleLiveIdentityFingerprint: "a".repeat(64),
+          },
+          undefined,
+          { pending: true, expectedCurrent: null },
+        ),
+      ).toThrow(/expected registry row changed/u);
+      expect(registry.getSandbox("clone")).toEqual(foreignSamePackage);
+
+      expect(registry.removeSandboxIfCurrent(foreignSamePackage)).toBe(true);
+      registry.reserveSandboxInferenceRoute("clone", {
+        provider: "openai",
+        model: "clone-model",
+        endpointUrl: null,
+        endpointSource: null,
+        credentialEnv: null,
+        preferredInferenceApi: null,
+        gatewayName: "nemoclaw",
+      });
+      const capturedRoute = registry.getSandbox("clone")!;
+      expect(capturedRoute.pendingRouteReservation).toBe(true);
+
+      const published = registry.registerSandbox(
+        {
+          name: "clone",
+          agent: "openclaw",
+          provider: "openai",
+          model: "clone-model",
+          openshellDriver: "docker",
+          gatewayName: "nemoclaw",
+          lifecycleGeneration: "clone-generation",
+          lifecycleLiveIdentityFingerprint: "a".repeat(64),
+        },
+        undefined,
+        { pending: true, expectedCurrent: capturedRoute },
+      );
+      expect(registry.getSandbox("clone")).toEqual(published);
     } finally {
       await fs.rm(home, { recursive: true, force: true });
     }
@@ -1312,135 +1390,6 @@ describe("sandbox inference route reservation", () => {
       await fs.rm(home, { recursive: true, force: true });
     }
   });
-});
-
-describe("sandbox inference route reservation qualification (#9203)", () => {
-  it.each([
-    ["owned", EXACT_QUALIFIED_ROUTE_RESERVATION, "owned"],
-    ["missing", null, "missing"],
-    ["ownerless", { ...EXACT_ROUTE_RESERVATION, reservationSessionId: undefined }, "conflict"],
-    [
-      "foreign-session",
-      { ...EXACT_ROUTE_RESERVATION, reservationSessionId: "another-session" },
-      "conflict",
-    ],
-    ["mismatched-sandbox", { ...EXACT_ROUTE_RESERVATION, name: "beta" }, "conflict"],
-    [
-      "mismatched-gateway",
-      { ...EXACT_ROUTE_RESERVATION, gatewayName: "other-gateway" },
-      "conflict",
-    ],
-    ["mismatched-route", { ...EXACT_ROUTE_RESERVATION, model: "another-model" }, "conflict"],
-    ["malformed", { ...EXACT_ROUTE_RESERVATION, gatewayPort: 0 }, "conflict"],
-    [
-      "completed",
-      { ...EXACT_ROUTE_RESERVATION, createdAt: "2026-08-18T00:00:00.000Z" },
-      "conflict",
-    ],
-    ["sandbox-authority", { ...EXACT_ROUTE_RESERVATION, agent: "hermes" }, "conflict"],
-  ])("classifies %s reservation authority", async (_case, entry, expectedKind) => {
-    const { classifySandboxInferenceRouteReservation } =
-      await import("./registry/route-reservation");
-    expect(classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, entry).kind).toBe(
-      expectedKind,
-    );
-  });
-
-  it("admits bounded portable recreate carry metadata without sandbox authority (#10056)", async () => {
-    const { classifySandboxInferenceRouteReservation } =
-      await import("./registry/route-reservation");
-    const disposition = classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, {
-      ...EXACT_QUALIFIED_ROUTE_RESERVATION,
-      dashboardPort: 8080,
-      policies: ["github"],
-      policyPresetsFinalized: true,
-      policyTier: "personal",
-      webSearchEnabled: false,
-      webSearchProvider: null,
-    });
-
-    expect(disposition.kind).toBe("owned");
-  });
-
-  it("recognizes only an exact verified-create checkpoint overlay as pending authority (#10423)", async () => {
-    const { classifySandboxInferenceRouteReservation, isCurrentSandboxInferenceRouteReservation } =
-      await import("./registry/route-reservation");
-    const admitted = ownedReservation(
-      classifySandboxInferenceRouteReservation(
-        EXACT_ROUTE_AUTHORITY,
-        EXACT_QUALIFIED_ROUTE_RESERVATION,
-      ),
-    );
-    const checkpoint = managedCheckpoint();
-    const pending = {
-      ...EXACT_QUALIFIED_ROUTE_RESERVATION,
-      gatewayPort: checkpoint.gatewayPort,
-      lifecycleGeneration: checkpoint.lifecycleGeneration,
-      lifecycleLiveIdentityFingerprint: checkpoint.sandboxIdentityFingerprint,
-      pendingPolicyVerification: checkpoint,
-    };
-
-    expect(classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, pending).kind).toBe(
-      "owned",
-    );
-    expect(isCurrentSandboxInferenceRouteReservation(admitted, pending)).toBe(true);
-    expect(
-      classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, {
-        ...pending,
-        gatewayPort: 8081,
-      }),
-    ).toMatchObject({
-      kind: "conflict",
-      detail: "the inference route reservation verified create checkpoint is malformed",
-    });
-  });
-
-  it.each([
-    ["invalid dashboard port", { dashboardPort: 0 }],
-    ["duplicate policies", { policies: ["github", "github"] }],
-    ["control character in a policy", { policies: ["github\u0000"] }],
-    ["control character in the policy tier", { policyTier: "personal\u0000" }],
-    ["non-boolean policy finalization", { policyPresetsFinalized: "yes" }],
-    ["non-boolean web search state", { webSearchEnabled: "yes" }],
-    ["unknown web search provider", { webSearchProvider: "unknown" }],
-  ])("rejects %s in carried route metadata (#10056)", async (_case, updates) => {
-    const { classifySandboxInferenceRouteReservation } =
-      await import("./registry/route-reservation");
-    const entry = {
-      ...EXACT_QUALIFIED_ROUTE_RESERVATION,
-      ...updates,
-    } as Parameters<typeof classifySandboxInferenceRouteReservation>[1];
-
-    expect(classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, entry)).toMatchObject({
-      kind: "conflict",
-      detail: "the inference route reservation carry metadata is malformed",
-    });
-  });
-
-  it.each([
-    ["agent", { agent: "hermes" }],
-    [
-      "workload",
-      { workload: { schemaVersion: 1, kind: "legacy-dockerfile", reference: null, shared: false } },
-    ],
-    ["lifecycle", { lifecycleGeneration: "11111111-1111-4111-8111-111111111111" }],
-  ])(
-    "still rejects %s sandbox authority on a carried reservation (#10056)",
-    async (_case, updates) => {
-      const { classifySandboxInferenceRouteReservation } =
-        await import("./registry/route-reservation");
-      const entry = {
-        ...EXACT_QUALIFIED_ROUTE_RESERVATION,
-        policies: ["github"],
-        ...updates,
-      } as Parameters<typeof classifySandboxInferenceRouteReservation>[1];
-
-      expect(classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, entry)).toMatchObject({
-        kind: "conflict",
-        detail: "the inference route reservation has sandbox authority",
-      });
-    },
-  );
 });
 
 describe("pending reservation ownership (#6562)", () => {

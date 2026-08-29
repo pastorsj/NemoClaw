@@ -8,13 +8,20 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, expect, it } from "vitest";
 
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+  createSnapshotRestoreAuthorityFixture,
+} from "../../helpers/snapshot-authority.ts";
+
 // sandbox-state captures HOME when the module loads, so isolate its registry
 // and rebuild backups before importing it.
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-kanban-snapshot-"));
 process.env.HOME = TMP_HOME;
 const sandboxState = await import(
-  pathToFileURL(path.join(import.meta.dirname, "../../..", "src", "lib", "state", "sandbox.ts")).href
+  pathToFileURL(path.join(import.meta.dirname, "../../..", "src", "lib", "state", "sandbox.ts"))
+    .href
 );
 
 afterAll(() => {
@@ -40,6 +47,7 @@ function writeHermesRegistry(): void {
           gpuEnabled: false,
           policies: [],
           agent: "hermes",
+          harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
         },
       },
     }),
@@ -50,6 +58,7 @@ function exerciseFailedKanbanBackup(options: { mode: "execute" | "empty-success"
   success: boolean;
   backedUpFiles: string[];
   failedFiles: string[];
+  backupComplete: boolean | undefined;
   localKanbanBackupExists: boolean;
   remoteKanbanStatus: number | null;
 } {
@@ -102,11 +111,15 @@ process.exit(result.status === null ? 1 : result.status);
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-    const backup = sandboxState.backupSandboxState("hermes", { name: options.name });
+    const backup = sandboxState.backupSandboxState("hermes", {
+      ...createSnapshotBackupAuthorityFixture("hermes"),
+      name: options.name,
+    });
     return {
       success: backup.success,
       backedUpFiles: backup.backedUpFiles,
       failedFiles: backup.failedFiles,
+      backupComplete: backup.manifest?.backupComplete,
       localKanbanBackupExists:
         backup.manifest !== undefined &&
         fs.existsSync(path.join(backup.manifest.backupPath, "kanban.db")),
@@ -129,6 +142,7 @@ it("fails closed when the remote Hermes SQLite backup command fails (#7144)", ()
   expect(result.success).toBe(false);
   expect(result.backedUpFiles).toEqual([]);
   expect(result.failedFiles).toEqual(["kanban.db"]);
+  expect(result.backupComplete).toBe(false);
   expect(result.localKanbanBackupExists).toBe(false);
   expect(result.remoteKanbanStatus).toBe(1);
 });
@@ -139,6 +153,7 @@ it("rejects an empty Hermes SQLite backup payload (#7144)", () => {
   expect(result.success).toBe(false);
   expect(result.backedUpFiles).toEqual([]);
   expect(result.failedFiles).toEqual(["kanban.db"]);
+  expect(result.backupComplete).toBe(false);
   expect(result.localKanbanBackupExists).toBe(false);
 });
 
@@ -248,7 +263,10 @@ process.exit(0);
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-    const backup = sandboxState.backupSandboxState("hermes", { name: "kanban-state" });
+    const backup = sandboxState.backupSandboxState("hermes", {
+      ...createSnapshotBackupAuthorityFixture("hermes"),
+      name: "kanban-state",
+    });
     expect(backup.success).toBe(true);
     expect(backup.backedUpFiles).toEqual(["kanban.db"]);
     expect(backup.failedFiles).toEqual([]);
@@ -271,7 +289,16 @@ process.exit(0);
     fs.writeFileSync(externalDirFile, "fresh external dir workspace\n");
     fs.writeFileSync(externalWorktreeFile, "fresh external worktree\n");
 
-    const restore = sandboxState.restoreSandboxState("hermes", backup.manifest!.backupPath);
+    const restore = sandboxState.restoreSandboxState(
+      "hermes",
+      backup.manifest!.backupPath,
+      createSnapshotRestoreAuthorityFixture(
+        sandboxState,
+        "hermes",
+        "hermes",
+        backup.manifest!.backupPath,
+      ),
+    );
     expect(restore.success).toBe(true);
     expect(restore.restoredFiles).toEqual(["kanban.db"]);
     expect(restore.restoredDirs).toEqual([]);

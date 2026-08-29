@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { testTimeoutOptions } from "../../helpers/timeouts.ts";
 import {
   credentialFreeTestCoverage,
   discoverCredentialFreeTests,
@@ -85,40 +86,46 @@ function expectExplicitCatalogueCoverage(): void {
 }
 
 describe("E2E workflow plan", () => {
-  it("defaults to every release-required target and tagged credential-free test", () => {
-    const plan = buildE2eWorkflowPlan();
+  it(
+    "defaults to every release-required target and tagged credential-free test",
+    testTimeoutOptions(15_000),
+    () => {
+      const plan = buildE2eWorkflowPlan();
 
-    expect(plan.matrix).toEqual(buildLiveTargetMatrix());
-    expect(plan.testMatrix).toEqual(discoverCredentialFreeTests());
-    expect(Object.values(plan.catalogueMatrices).flat()).toHaveLength(E2E_TARGET_CATALOGUE.length);
-    expect(
-      plan.coverageMatrix.reduce<Record<string, number>>((counts, row) => {
-        counts[row.source] = (counts[row.source] ?? 0) + 1;
-        return counts;
-      }, {}),
-    ).toEqual({
-      catalogue: E2E_TARGET_CATALOGUE.length,
-      "typed-registry": 5,
-      "shared-e2e": 2,
-      "retained-workflow": 19,
-      staging: 1,
-    });
-    expect(plan.coverageMatrix.filter((row) => row.unresolvedReason !== "")).toEqual([
-      expect.objectContaining({
-        id: "spark-install",
-        agentRuntime: "unresolved",
-      }),
-    ]);
-    expect(plan.hermesSelected).toBe(true);
-    expect(plan.explicitOnlyJobs).toEqual([
-      "staging-brev-launchable-identity",
-      "llama-cpp-dgx-spark-qualification",
-    ]);
-    expect(releaseRequiredWorkflowJobs()).toContain("live");
-    expect(releaseRequiredWorkflowJobs()).toContain("staging-brev-launchable");
-    expect(releaseRequiredWorkflowJobs()).not.toContain("staging-brev-launchable-identity");
-    expect(releaseRequiredWorkflowJobs()).not.toContain("llama-cpp-dgx-spark-qualification");
-  });
+      expect(plan.matrix).toEqual(buildLiveTargetMatrix());
+      expect(plan.testMatrix).toEqual(discoverCredentialFreeTests());
+      expect(Object.values(plan.catalogueMatrices).flat()).toHaveLength(
+        E2E_TARGET_CATALOGUE.length,
+      );
+      expect(
+        plan.coverageMatrix.reduce<Record<string, number>>((counts, row) => {
+          counts[row.source] = (counts[row.source] ?? 0) + 1;
+          return counts;
+        }, {}),
+      ).toEqual({
+        catalogue: E2E_TARGET_CATALOGUE.length,
+        "typed-registry": 5,
+        "shared-e2e": 2,
+        "retained-workflow": 19,
+        staging: 1,
+      });
+      expect(plan.coverageMatrix.filter((row) => row.unresolvedReason !== "")).toEqual([
+        expect.objectContaining({
+          id: "spark-install",
+          agentRuntime: "unresolved",
+        }),
+      ]);
+      expect(plan.hermesSelected).toBe(true);
+      expect(plan.explicitOnlyJobs).toEqual([
+        "staging-brev-launchable-identity",
+        "llama-cpp-dgx-spark-qualification",
+      ]);
+      expect(releaseRequiredWorkflowJobs()).toContain("live");
+      expect(releaseRequiredWorkflowJobs()).toContain("staging-brev-launchable");
+      expect(releaseRequiredWorkflowJobs()).not.toContain("staging-brev-launchable-identity");
+      expect(releaseRequiredWorkflowJobs()).not.toContain("llama-cpp-dgx-spark-qualification");
+    },
+  );
 
   it("omits only targets whose optional credential is unavailable", () => {
     const plan = withoutUnavailableOptionalCredentialTargets(buildE2eWorkflowPlan(), new Set());

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { vi } from "vitest";
@@ -269,6 +270,10 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     ...customOpenClawPluginProvenance,
     ...(overrides.sandboxEntry ?? {}),
   };
+  const recreatedSandboxId = "sbx-alpha-recreated";
+  const recreatedSandboxOutput = `Name: alpha\nId: ${recreatedSandboxId}\nPhase: Ready\n`;
+  const recreatedSandboxFingerprint = createHash("sha256").update(recreatedSandboxId).digest("hex");
+  let recreatedSandboxRegistered = false;
   const readCurrentSandboxEntry = () => structuredClone(currentSandboxEntry);
   vi.spyOn(registry, "getSandbox").mockImplementation(readCurrentSandboxEntry);
   const initialDefaultSandbox = overrides.defaultSandbox ?? null;
@@ -306,7 +311,8 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     const defaultSelectionRevision = isPreDeleteRead
       ? preDeleteDefaultSelectionRevision
       : initialDefaultSelectionRevision;
-    const selectedEntry = isPreDeleteRead ? preDeleteSandboxEntry : currentSandboxEntry;
+    const selectedEntry =
+      isPreDeleteRead && !recreatedSandboxRegistered ? preDeleteSandboxEntry : currentSandboxEntry;
     return {
       sandboxes: {
         alpha: structuredClone(selectedEntry),
@@ -423,8 +429,26 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     });
   const backupSandboxStateSpy = vi
     .spyOn(sandboxState, "backupSandboxState")
-    .mockImplementation(() => {
+    .mockImplementation((...args: unknown[]) => {
       overrides.beforeBackup?.();
+      const options = (args[1] ?? {}) as {
+        agentDefinition?: {
+          name: string;
+          expectedVersion?: string | null;
+          configPaths?: { dir?: string };
+          backupStateDirs?: readonly string[];
+          stateFiles?: readonly unknown[];
+        };
+        harnessPackage?: unknown;
+        validateBeforePublish?: () => void;
+      };
+      options.validateBeforePublish?.();
+      const agentName =
+        options.agentDefinition?.name ??
+        (typeof overrides.sandboxEntry?.agent === "string"
+          ? overrides.sandboxEntry.agent
+          : "openclaw");
+      const stateDirs = [...(options.agentDefinition?.backupStateDirs ?? ["workspace"])];
       return {
         success: true,
         backedUpDirs: ["workspace"],
@@ -432,14 +456,21 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
         failedDirs: [],
         failedFiles: [],
         manifest: {
-          agentType:
-            typeof overrides.sandboxEntry?.agent === "string"
-              ? overrides.sandboxEntry.agent
-              : "openclaw",
-          dir: "/sandbox/.openclaw",
+          version: options.agentDefinition ? 2 : 1,
+          sandboxName: "alpha",
+          agentType: agentName,
+          agentVersion: "0.1.0",
+          expectedVersion: options.agentDefinition?.expectedVersion ?? null,
+          ...(options.agentDefinition ? { harnessPackage: options.harnessPackage ?? null } : {}),
+          stateDirs,
+          backedUpDirs: ["workspace"],
+          stateFiles: [...(options.agentDefinition?.stateFiles ?? [])],
+          dir: options.agentDefinition?.configPaths?.dir ?? "/sandbox/.openclaw",
           backupPath: "/tmp/nemoclaw-rebuild-backup",
           timestamp: "2026-06-01T00:00:00.000Z",
+          blueprintDigest: null,
           policyPresets: overrides.backupPolicyPresets ?? ["npm", "bad", "throw"],
+          customPolicies: [],
           ...(overrides.backupPreservedEnv
             ? { preservedEnv: structuredClone(overrides.backupPreservedEnv) }
             : {}),
@@ -469,18 +500,29 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   vi.spyOn(sandboxState, "hasPositiveManagedImageEvidence").mockReturnValue(
     overrides.managedImageEvidence ?? true,
   );
+  vi.spyOn(sandboxState, "captureSnapshotRestoreAuthority").mockImplementation(
+    (...args: unknown[]) => ({
+      schemaVersion: 1 as const,
+      backupPath: path.resolve(String(args[0])),
+      contentSha256: "a".repeat(64),
+    }),
+  );
   const restoreSandboxStateSpy = vi
     .spyOn(sandboxState, "restoreRecreatedSandboxState")
-    .mockImplementation(
-      overrides.restoreSandboxState ??
+    .mockImplementation((...args: unknown[]) => {
+      const options = args[2] as { validateBeforeMutation?: () => void };
+      options.validateBeforeMutation?.();
+      return (
+        overrides.restoreSandboxState ??
         (() => ({
           success: true,
           restoredDirs: ["workspace"],
           restoredFiles: ["user.md"],
           failedDirs: [],
           failedFiles: [],
-        })),
-    );
+        }))
+      )();
+    });
   const deletedSourceGateways = new Set<string>();
   const runOpenshellSpy = vi
     .spyOn(openshellRuntime, "runOpenshell")
@@ -510,10 +552,18 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .spyOn(openshellRuntime, "captureOpenshell")
     .mockImplementation((args: unknown, options?: unknown) => {
       const argv = Array.isArray(args) ? args.map(String) : [];
+      const probedGateway = sourceSandboxGateway(argv, "get");
+      if (probedGateway && recreatedSandboxRegistered) {
+        return {
+          status: 0,
+          output: recreatedSandboxOutput,
+          stdout: recreatedSandboxOutput,
+          stderr: "",
+        };
+      }
       if (overrides.captureOpenshell) {
         return overrides.captureOpenshell(argv, options as Record<string, unknown> | undefined);
       }
-      const probedGateway = sourceSandboxGateway(argv, "get");
       const liveSource = "Name: alpha\nId: sbx-alpha-source\nPhase: Ready\n";
       return probedGateway && !deletedSourceGateways.has(probedGateway)
         ? { status: 0, output: liveSource, stdout: liveSource, stderr: "" }
@@ -556,6 +606,11 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .mockImplementation(async (...args: unknown[]) => {
       const options = args[0] as RebuildRecreateOnboardOpts;
       await overrides.onboard?.(session, options);
+      recreatedSandboxRegistered = true;
+      Object.assign(currentSandboxEntry, {
+        lifecycleGeneration: "11111111-1111-4111-8111-111111111111",
+        lifecycleLiveIdentityFingerprint: recreatedSandboxFingerprint,
+      });
     });
   vi.spyOn(rebuildOnboardDependencies, "preflightAuthoritativeRebuildTarget").mockImplementation(
     async (options: unknown) => {

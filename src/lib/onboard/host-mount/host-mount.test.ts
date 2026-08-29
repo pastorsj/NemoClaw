@@ -25,7 +25,13 @@ function workspaceTempDir(): string {
 }
 
 afterEach(() => {
-  for (const target of created.splice(0)) fs.rmSync(target, { recursive: true, force: true });
+  for (const target of created.splice(0)) {
+    try {
+      fs.unlinkSync(target);
+    } catch {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  }
 });
 
 describe("read-only host mount validation", () => {

@@ -31,14 +31,63 @@ import {
   type ShippedManagedImageAgent,
 } from "../../../onboard/managed-image/contract";
 import { encodeManagedStartupProfile } from "../../../onboard/managed-startup/profile";
+import type { ResolvedSandboxAgent } from "../../../onboard/sandbox-agent";
 import type { RuntimeProviderBundle } from "../../../onboard/runtime-provider/contract";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../../../state/registry/types";
 import { createSandboxHostLocalInferenceProvenance } from "../../../state/registry/host-local-inference";
 import type { BackupOptions, BackupResult } from "../../../state/sandbox";
 import {
-  backupSandboxStateWithManagedAuthority,
+  backupSandboxStateWithManagedAuthority as backupSandboxStateWithManagedAuthorityImpl,
   captureOpenClawStateFile,
+  confirmSnapshotBackupAgentAuthority,
+  resolveSnapshotBackupAgentAuthority,
 } from "./backup-authority";
+
+function harnessPackage(agent: string, digest = "a".repeat(64)) {
+  return {
+    kind: "agent-runtime" as const,
+    id: agent,
+    packageVersion: "1.0.0",
+    contractVersion: 1 as const,
+    contentDigest: digest,
+  };
+}
+
+function resolvedAgent(entry: SandboxEntry): ResolvedSandboxAgent {
+  const agent = entry.agent || "openclaw";
+  const identity = entry.harnessPackage ?? harnessPackage(agent);
+  const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+  return {
+    recordedAgent: entry.agent ?? null,
+    effectiveAgentId: agent,
+    definition: {
+      name: agent,
+      packageRoot,
+      manifestPath: `${packageRoot}/manifest.yaml`,
+    },
+    harnessPackage: identity,
+    harnessPackageMigration: null,
+  } as unknown as ResolvedSandboxAgent;
+}
+
+function backupSandboxStateWithManagedAuthority(
+  sandboxName: string,
+  options: BackupOptions,
+  overrides: Parameters<typeof backupSandboxStateWithManagedAuthorityImpl>[2],
+) {
+  return backupSandboxStateWithManagedAuthorityImpl(sandboxName, options, {
+    resolveAgent: (entry) => resolvedAgent(entry),
+    resolvePinnedPackage: (identity) => {
+      const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+      return {
+        identity,
+        packageRoot,
+        packageManifest: { manifestPath: `${packageRoot}/manifest.yaml` },
+      } as never;
+    },
+    ...overrides,
+  });
+}
 
 function workload(
   agent: ShippedManagedImageAgent,
@@ -71,6 +120,7 @@ function sandbox(
   return {
     name: "alpha",
     agent,
+    harnessPackage: harnessPackage(agent),
     openshellDriver: "mxc",
     imageTag: receipt.kind === "managed-image" ? receipt.reference : null,
     fromDockerfile: null,
@@ -127,12 +177,13 @@ function successfulBackup(options: BackupOptions): BackupResult {
   return {
     success: true,
     manifest: {
-      version: 1,
+      version: 2,
       sandboxName: "alpha",
       timestamp: "2026-07-31T00-00-00-000Z",
       agentType: "openclaw",
       agentVersion: null,
       expectedVersion: null,
+      harnessPackage: harnessPackage("openclaw"),
       stateDirs: [],
       dir: "/sandbox",
       backupPath: "/tmp/alpha",
@@ -152,6 +203,7 @@ function hostLocalSandbox(
   return {
     name: "alpha",
     agent,
+    harnessPackage: harnessPackage(agent),
     openshellDriver: "mxc",
     provider: "vllm-local",
     model: "model-a",
@@ -168,6 +220,7 @@ function explicitLlamaSandbox(agent: "openclaw" | "hermes" | "langchain-deepagen
   return {
     name: "alpha",
     agent,
+    harnessPackage: harnessPackage(agent),
     openshellDriver: "mxc",
     provider: "llama-cpp-local",
     model: "llama-cpp-model",
@@ -189,6 +242,100 @@ describe("managed snapshot backup authority", () => {
     privilegedCaptureMocks.dockerSpawnSync.mockReset();
     privilegedCaptureMocks.privilegedSandboxExecArgv.mockClear();
     privilegedCaptureMocks.withPrivilegedSandboxExecutionLease.mockClear();
+  });
+
+  it("resolves one exact package definition for maintenance preflight", () => {
+    const entry = { ...sandbox("openclaw"), policies: ["github"] } satisfies SandboxEntry;
+    const baseResolved = resolvedAgent(entry);
+    const stateFiles = [{ path: "state.db", strategy: "sqlite_backup" as const }];
+    const definition = {
+      ...baseResolved.definition,
+      get stateFiles() {
+        return stateFiles;
+      },
+    };
+    const resolved = { ...baseResolved, definition };
+    const getSandbox = vi.fn(() => entry);
+    const resolveAgent = vi.fn(() => resolved);
+
+    const authority = resolveSnapshotBackupAgentAuthority(entry.name, { getSandbox, resolveAgent });
+    expect(authority).toEqual({
+      agentDefinition: resolved.definition,
+      harnessPackage: entry.harnessPackage,
+      registryEntry: entry,
+    });
+    entry.policies.push("brave");
+    stateFiles[0]!.path = "changed.db";
+    expect(authority.registryEntry.policies).toEqual(["github"]);
+    expect(authority.agentDefinition.stateFiles[0]?.path).toBe("state.db");
+    expect(Object.isFrozen(authority)).toBe(true);
+    expect(Object.isFrozen(authority.registryEntry)).toBe(true);
+    expect(Object.isFrozen(authority.registryEntry.policies)).toBe(true);
+    expect(Object.isFrozen(authority.agentDefinition)).toBe(true);
+    expect(Object.isFrozen(authority.agentDefinition.stateFiles)).toBe(true);
+    expect(getSandbox).toHaveBeenCalledOnce();
+    expect(resolveAgent).toHaveBeenCalledWith(entry);
+  });
+
+  it("rejects registry package drift at the maintenance mutation boundary", () => {
+    const initial = sandbox("openclaw");
+    const changed = {
+      ...initial,
+      harnessPackage: harnessPackage("openclaw", "b".repeat(64)),
+    } satisfies SandboxEntry;
+    const resolved = resolvedAgent(initial);
+
+    expect(() =>
+      confirmSnapshotBackupAgentAuthority(
+        initial.name,
+        {
+          agentDefinition: resolved.definition,
+          harnessPackage: resolved.harnessPackage,
+          registryEntry: initial,
+        },
+        {
+          getSandbox: () => changed,
+          resolveAgent: () => resolvedAgent(changed),
+          resolvePinnedPackage: (identity) => {
+            const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+            return {
+              identity,
+              packageRoot,
+              packageManifest: { manifestPath: `${packageRoot}/manifest.yaml` },
+            } as never;
+          },
+        },
+      ),
+    ).toThrow("harness package changed during backup");
+  });
+
+  it("rejects non-package registry drift at the maintenance mutation boundary", () => {
+    const initial = { ...sandbox("openclaw"), policies: ["github"] } satisfies SandboxEntry;
+    const changed = { ...initial, policies: ["github", "brave"] } satisfies SandboxEntry;
+    const resolved = resolvedAgent(initial);
+
+    expect(() =>
+      confirmSnapshotBackupAgentAuthority(
+        initial.name,
+        {
+          agentDefinition: resolved.definition,
+          harnessPackage: resolved.harnessPackage,
+          registryEntry: initial,
+        },
+        {
+          getSandbox: () => changed,
+          resolveAgent: () => resolvedAgent(changed),
+          resolvePinnedPackage: (identity) => {
+            const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+            return {
+              identity,
+              packageRoot,
+              packageManifest: { manifestPath: `${packageRoot}/manifest.yaml` },
+            } as never;
+          },
+        },
+      ),
+    ).toThrow("registry authority changed during backup");
   });
 
   it("captures the exact OpenClaw configuration with bounded privileged execution", () => {
@@ -284,10 +431,7 @@ describe("managed snapshot backup authority", () => {
     });
 
     expect(result).toMatchObject({ outcome: "failed" });
-    const failedResult = result as Extract<
-      NonNullable<typeof result>,
-      { outcome: "failed" }
-    >;
+    const failedResult = result as Extract<NonNullable<typeof result>, { outcome: "failed" }>;
     const error = failedResult.error ?? "";
     expect(error).toContain("permission denied apiKey=<REDACTED>");
     expect(error).not.toContain("secret-value");
@@ -350,33 +494,35 @@ describe("managed snapshot backup authority", () => {
   it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
     "captures and republishes exact %s provider authority",
     (agent) => {
-    const entry = sandbox(agent);
-    const getSandbox = vi.fn(() => entry);
-    const requireProvider = vi.fn(() => provider());
-    const captureRuntime = vi.fn(() => runtime());
+      const entry = sandbox(agent);
+      const getSandbox = vi.fn(() => entry);
+      const requireProvider = vi.fn(() => provider());
+      const captureRuntime = vi.fn(() => runtime());
       const backup = vi.fn((_name: string, options: BackupOptions = {}) =>
         successfulBackup(options),
       );
 
-    const result = backupSandboxStateWithManagedAuthority(
-      "alpha",
-      { name: "stable" },
-      { getSandbox, requireProvider, captureRuntime, backup },
-    );
+      const result = backupSandboxStateWithManagedAuthority(
+        "alpha",
+        { name: "stable" },
+        { getSandbox, requireProvider, captureRuntime, backup },
+      );
 
-    expect(result.success).toBe(true);
-    expect(backup).toHaveBeenCalledWith(
-      "alpha",
-      expect.objectContaining({
-        name: "stable",
-        workload: entry.workload,
-        runtimeSnapshot: runtime(),
-        validateBeforePublish: expect.any(Function),
-      }),
-    );
-    expect(getSandbox).toHaveBeenCalledTimes(2);
-    expect(requireProvider).toHaveBeenCalledTimes(2);
-    expect(captureRuntime).toHaveBeenCalledTimes(2);
+      expect(result.success).toBe(true);
+      expect(backup).toHaveBeenCalledWith(
+        "alpha",
+        expect.objectContaining({
+          name: "stable",
+          agentDefinition: expect.objectContaining({ name: agent }),
+          harnessPackage: entry.harnessPackage,
+          workload: entry.workload,
+          runtimeSnapshot: runtime(),
+          validateBeforePublish: expect.any(Function),
+        }),
+      );
+      expect(getSandbox).toHaveBeenCalledTimes(2);
+      expect(requireProvider).toHaveBeenCalledTimes(2);
+      expect(captureRuntime).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -445,10 +591,51 @@ describe("managed snapshot backup authority", () => {
     expect(backup).not.toHaveBeenCalled();
   });
 
+  it("rejects explicit package authority when the registry row disappears", () => {
+    const entry = sandbox("openclaw");
+    const resolved = resolvedAgent(entry);
+    const backup = vi.fn();
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      entry.name,
+      {
+        agentDefinition: resolved.definition,
+        harnessPackage: resolved.harnessPackage,
+      },
+      {
+        getSandbox: () => null,
+        backup,
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("is no longer registered"),
+    });
+    expect(backup).not.toHaveBeenCalled();
+  });
+
+  it("keeps the state-only fallback for an unregistered legacy call", () => {
+    const backup = vi.fn(() => successfulBackup({}));
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      "alpha",
+      { name: "legacy" },
+      {
+        getSandbox: () => null,
+        backup,
+      },
+    );
+
+    expect(result.success).toBe(true);
+    expect(backup).toHaveBeenCalledWith("alpha", { name: "legacy" });
+  });
+
   it("keeps explicit Dockerfile backups on the legacy state-only path", () => {
     const entry = {
       name: "alpha",
       agent: "openclaw",
+      harnessPackage: harnessPackage("openclaw"),
       openshellDriver: "mxc",
       fromDockerfile: "/tmp/Dockerfile",
     } satisfies SandboxEntry;
@@ -476,51 +663,173 @@ describe("managed snapshot backup authority", () => {
     expect(captureRuntime).not.toHaveBeenCalled();
   });
 
-  it.each([
-    "openclaw",
-    "hermes",
-    "langchain-deepagents-code",
-  ] as const)("captures and confirms exact %s host-local inference authority", (agent) => {
-    const entry = hostLocalSandbox(agent);
-    const prepared = {
-      providerId: "mxc",
-      sandboxName: "alpha",
-      serializedReceipt: entry.hostLocalInferenceReceipt,
-      sandboxAuthority: { model: entry.model },
+  it("preserves explicit null authority for a qualified repository agent", () => {
+    const entry = { name: "alpha", agent: "pi" } satisfies SandboxEntry;
+    const definition = {
+      name: "pi",
+      packageRoot: "/repository",
+      manifestPath: "/repository/agents/pi/manifest.yaml",
     };
-    const prepareHostLocalInference = vi.fn(() => prepared);
-    const confirmHostLocalInference = vi.fn();
+    const resolveAgent = vi.fn(() => ({
+      recordedAgent: "pi",
+      effectiveAgentId: "pi",
+      definition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    })) as never;
+    const resolvePinnedPackage = vi.fn();
     const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
 
     const result = backupSandboxStateWithManagedAuthority(
-      "alpha",
-      { name: "host-local" },
+      entry.name,
+      {},
       {
         getSandbox: () => entry,
-        requireProvider: () => provider(),
-        captureRuntime: vi.fn() as never,
-        prepareHostLocalInference: prepareHostLocalInference as never,
-        confirmHostLocalInference: confirmHostLocalInference as never,
+        resolveAgent,
+        resolvePinnedPackage,
         backup,
       },
     );
 
     expect(result.success).toBe(true);
     expect(backup).toHaveBeenCalledWith(
-      "alpha",
-      expect.objectContaining({
-        name: "host-local",
-        hostLocalInferenceReceipt: entry.hostLocalInferenceReceipt,
-        validateBeforePublish: expect.any(Function),
-      }),
+      entry.name,
+      expect.objectContaining({ agentDefinition: definition, harnessPackage: null }),
     );
-    expect(prepareHostLocalInference).toHaveBeenCalledWith(expect.anything(), entry);
-    expect(confirmHostLocalInference).toHaveBeenCalledWith(
-      expect.anything(),
-      entry,
-      prepared,
-    );
+    expect(resolvePinnedPackage).not.toHaveBeenCalled();
   });
+
+  it("rejects same-root candidate definition drift before manifest publication", () => {
+    const entry = { name: "alpha", agent: "pi" } satisfies SandboxEntry;
+    const selectedDefinition = {
+      name: "pi",
+      packageRoot: "/repository",
+      manifestPath: "/repository/agents/pi/manifest.yaml",
+      stateFiles: [{ path: "state.db", strategy: "sqlite_backup" as const }],
+    } as never;
+    const changedDefinition = {
+      name: "pi",
+      packageRoot: "/repository",
+      manifestPath: "/repository/agents/pi/manifest.yaml",
+      stateFiles: [{ path: "different.db", strategy: "sqlite_backup" as const }],
+    } as never;
+    const selectedAgent = {
+      recordedAgent: "pi",
+      effectiveAgentId: "pi",
+      definition: selectedDefinition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    };
+    const resolveAgent = vi
+      .fn()
+      .mockReturnValueOnce(selectedAgent)
+      .mockReturnValue({ ...selectedAgent, definition: changedDefinition });
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      entry.name,
+      { agentDefinition: selectedDefinition, harnessPackage: null },
+      {
+        getSandbox: () => entry,
+        resolveAgent: resolveAgent as never,
+        backup,
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("candidate agent authority changed during backup"),
+    });
+    expect(resolveAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects same-root package definition drift before manifest publication", () => {
+    const identity = harnessPackage("openclaw");
+    const entry = {
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: identity,
+    } satisfies SandboxEntry;
+    const selectedAgent = resolvedAgent(entry);
+    const changedAgent = {
+      ...selectedAgent,
+      definition: {
+        ...selectedAgent.definition,
+        stateFiles: [{ path: "different.json", strategy: "copy" as const }],
+      },
+    };
+    const resolveAgent = vi.fn().mockReturnValueOnce(selectedAgent).mockReturnValue(changedAgent);
+    const resolvePinnedPackage = vi.fn((identity) => ({
+      identity,
+      packageRoot: selectedAgent.definition.packageRoot,
+      packageManifest: { manifestPath: selectedAgent.definition.manifestPath },
+    }));
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      entry.name,
+      {
+        agentDefinition: selectedAgent.definition,
+        harnessPackage: selectedAgent.harnessPackage,
+      },
+      {
+        getSandbox: () => entry,
+        resolveAgent: resolveAgent as never,
+        resolvePinnedPackage: resolvePinnedPackage as never,
+        backup,
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("pinned harness package changed during backup"),
+    });
+    expect(resolveAgent).toHaveBeenCalledTimes(2);
+    expect(resolvePinnedPackage).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
+    "captures and confirms exact %s host-local inference authority",
+    (agent) => {
+      const entry = hostLocalSandbox(agent);
+      const prepared = {
+        providerId: "mxc",
+        sandboxName: "alpha",
+        serializedReceipt: entry.hostLocalInferenceReceipt,
+        sandboxAuthority: { model: entry.model },
+      };
+      const prepareHostLocalInference = vi.fn(() => prepared);
+      const confirmHostLocalInference = vi.fn();
+      const backup = vi.fn((_name: string, options: BackupOptions = {}) =>
+        successfulBackup(options),
+      );
+
+      const result = backupSandboxStateWithManagedAuthority(
+        "alpha",
+        { name: "host-local" },
+        {
+          getSandbox: () => entry,
+          requireProvider: () => provider(),
+          captureRuntime: vi.fn() as never,
+          prepareHostLocalInference: prepareHostLocalInference as never,
+          confirmHostLocalInference: confirmHostLocalInference as never,
+          backup,
+        },
+      );
+
+      expect(result.success).toBe(true);
+      expect(backup).toHaveBeenCalledWith(
+        "alpha",
+        expect.objectContaining({
+          name: "host-local",
+          hostLocalInferenceReceipt: entry.hostLocalInferenceReceipt,
+          validateBeforePublish: expect.any(Function),
+        }),
+      );
+      expect(prepareHostLocalInference).toHaveBeenCalledWith(expect.anything(), entry);
+      expect(confirmHostLocalInference).toHaveBeenCalledWith(expect.anything(), entry, prepared);
+    },
+  );
 
   it.each([
     ["agent", { agent: "hermes" }],
@@ -550,7 +859,7 @@ describe("managed snapshot backup authority", () => {
         "lifecycleGeneration",
       ] as const;
       expect(fields.some((field) => candidate[field] !== initial[field])).toBe(true);
-        throw new Error("sandbox authority changed after lifecycle preparation");
+      throw new Error("sandbox authority changed after lifecycle preparation");
     });
     const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
 
@@ -595,6 +904,105 @@ describe("managed snapshot backup authority", () => {
     expect(backup).not.toHaveBeenCalled();
   });
 
+  it("rejects missing pinned package bytes before filesystem capture", () => {
+    const entry = sandbox("openclaw");
+    const backup = vi.fn();
+
+    const result = backupSandboxStateWithManagedAuthority(
+      entry.name,
+      {},
+      {
+        getSandbox: () => entry,
+        resolveAgent: () => resolvedAgent(entry),
+        resolvePinnedPackage: () => {
+          throw new Error("retained object is missing");
+        },
+        backup,
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("retained object is missing"),
+    });
+    expect(backup).not.toHaveBeenCalled();
+  });
+
+  it("rejects complete registry drift before manifest publication", () => {
+    const initial = sandbox("openclaw");
+    const changed = {
+      ...initial,
+      policies: ["github"],
+    } satisfies SandboxEntry;
+    const getSandbox = vi
+      .fn<() => SandboxEntry | null>()
+      .mockReturnValueOnce(initial)
+      .mockReturnValue(changed);
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+
+    const result = backupSandboxStateWithManagedAuthority(
+      initial.name,
+      {},
+      {
+        getSandbox,
+        resolveAgent: () => resolvedAgent(initial),
+        resolvePinnedPackage: (identity) => {
+          const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+          return {
+            identity,
+            packageRoot,
+            packageManifest: { manifestPath: `${packageRoot}/manifest.yaml` },
+          } as never;
+        },
+        requireProvider: () => provider(),
+        captureRuntime: () => runtime(),
+        backup,
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("registry authority changed during backup"),
+    });
+  });
+
+  it("revalidates pinned package bytes before manifest publication", () => {
+    const entry = sandbox("openclaw");
+    const resolved = resolvedAgent(entry);
+    const resolvePinnedPackage = vi
+      .fn()
+      .mockReturnValueOnce({
+        identity: entry.harnessPackage,
+        packageRoot: resolved.definition.packageRoot,
+        packageManifest: { manifestPath: resolved.definition.manifestPath },
+      })
+      .mockReturnValue({
+        identity: entry.harnessPackage,
+        packageRoot: "/packages/replaced",
+        packageManifest: { manifestPath: "/packages/replaced/manifest.yaml" },
+      });
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+
+    const result = backupSandboxStateWithManagedAuthority(
+      entry.name,
+      {},
+      {
+        getSandbox: () => entry,
+        resolveAgent: () => resolved,
+        resolvePinnedPackage,
+        requireProvider: () => provider(),
+        captureRuntime: () => runtime(),
+        backup,
+      },
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("pinned harness package changed during backup"),
+    });
+    expect(resolvePinnedPackage).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     {
       label: "workload",
@@ -608,39 +1016,40 @@ describe("managed snapshot backup authority", () => {
       secondRuntime: runtime("session-2"),
       error: "runtime changed during backup",
     },
-  ])("rejects $label drift before manifest publication", ({
-    secondEntry,
-    secondRuntime,
-    error,
-  }) => {
-    const initialEntry = sandbox("openclaw");
-    const getSandbox = vi
-      .fn<() => SandboxEntry | null>()
-      .mockReturnValueOnce(initialEntry)
-      .mockReturnValueOnce(secondEntry);
-    const captureRuntime = vi
-      .fn<() => ReturnType<typeof runtime>>()
-      .mockReturnValueOnce(runtime())
-      .mockReturnValueOnce(secondRuntime);
-    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+  ])(
+    "rejects $label drift before manifest publication",
+    ({ secondEntry, secondRuntime, error }) => {
+      const initialEntry = sandbox("openclaw");
+      const getSandbox = vi
+        .fn<() => SandboxEntry | null>()
+        .mockReturnValueOnce(initialEntry)
+        .mockReturnValueOnce(secondEntry);
+      const captureRuntime = vi
+        .fn<() => ReturnType<typeof runtime>>()
+        .mockReturnValueOnce(runtime())
+        .mockReturnValueOnce(secondRuntime);
+      const backup = vi.fn((_name: string, options: BackupOptions = {}) =>
+        successfulBackup(options),
+      );
 
-    const result = backupSandboxStateWithManagedAuthority(
-      "alpha",
-      {},
-      {
-        getSandbox,
-        requireProvider: () => provider(),
-        captureRuntime: captureRuntime as (
-          bundle: RuntimeProviderBundle,
-          entry: SandboxEntry,
-        ) => ReturnType<typeof runtime>,
-        backup,
-      },
-    );
+      const result = backupSandboxStateWithManagedAuthority(
+        "alpha",
+        {},
+        {
+          getSandbox,
+          requireProvider: () => provider(),
+          captureRuntime: captureRuntime as (
+            bundle: RuntimeProviderBundle,
+            entry: SandboxEntry,
+          ) => ReturnType<typeof runtime>,
+          backup,
+        },
+      );
 
-    expect(result).toMatchObject({
-      success: false,
-      error: expect.stringContaining(error),
-    });
-  });
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining(error),
+      });
+    },
+  );
 });

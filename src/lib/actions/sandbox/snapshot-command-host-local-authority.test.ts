@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostLocalInferenceReceipt } from "../../../../test/helpers/host-local-inference-receipt";
@@ -14,6 +15,14 @@ import type { SandboxEntry } from "../../state/registry/types";
 import type { RebuildManifest, RestoreResult, SnapshotRestoreOptions } from "../../state/sandbox";
 import { runSandboxSnapshot } from "./snapshot";
 
+const HARNESS_PACKAGE = vi.hoisted(() => ({
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.0.0-test",
+  contractVersion: 1 as const,
+  contentDigest: "b".repeat(64),
+}));
+
 const harness = vi.hoisted(() => {
   let registryEntry: unknown = null;
   const events: string[] = [];
@@ -25,6 +34,9 @@ const harness = vi.hoisted(() => {
     },
     getLatestBackup: vi.fn(),
     captureSnapshotRestoreAuthority: vi.fn(),
+    preparedSnapshotCleanup: vi.fn(),
+    preparedSnapshotValidate: vi.fn(),
+    prepareSnapshotRestoreContent: vi.fn(),
     restoreSandboxState: vi.fn(),
     preserveForRebuild: vi.fn((receipt: unknown) => {
       events.push("reprove");
@@ -74,9 +86,36 @@ const provider = createInMemoryRuntimeProviderBundle({
 });
 
 vi.mock("../../adapters/openshell/runtime", () => ({
-  captureOpenshell: vi.fn(() => ({ status: 0, output: "alpha Ready\n" })),
+  captureOpenshell: vi.fn((args: string[]) => ({
+    status: 0,
+    output:
+      args[0] === "sandbox" && args[1] === "get"
+        ? "Name: alpha\nId: alpha-live-id\nPhase: Ready\n"
+        : "alpha Ready\n",
+  })),
   getOpenshellBinary: vi.fn(() => "openshell"),
   runOpenshell: vi.fn(() => ({ status: 0, output: "" })),
+}));
+
+vi.mock("../../agent/definition-loader", () => ({
+  buildAgentDefinition: vi.fn(({ packageRoot }) => ({
+    name: "openclaw",
+    packageRoot,
+  })),
+}));
+
+vi.mock("../../harness/package-store", () => ({
+  resolvePinnedHarnessPackage: vi.fn(() => {
+    const packageRoot = `/state/harnesses/objects/${HARNESS_PACKAGE.contentDigest}`;
+    return {
+      identity: HARNESS_PACKAGE,
+      packageRoot,
+      packageManifest: {
+        manifest: { name: "openclaw" },
+        manifestPath: `${packageRoot}/manifest.yaml`,
+      },
+    };
+  }),
 }));
 
 vi.mock("../../policy", () => ({
@@ -118,8 +157,10 @@ vi.mock("../../state/registry", () => ({
   updateSandbox: vi.fn(),
 }));
 
-vi.mock("../../state/sandbox", () => ({
+vi.mock("../../state/sandbox", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/sandbox")>()),
   captureSnapshotRestoreAuthority: harness.captureSnapshotRestoreAuthority,
+  prepareSnapshotRestoreContent: harness.prepareSnapshotRestoreContent,
   findBackup: vi.fn(() => ({ match: null })),
   getLatestBackup: harness.getLatestBackup,
   listBackups: vi.fn(() => []),
@@ -148,12 +189,15 @@ function receiptAtPort(port: number): string {
 
 function manifest(receipt: string): RebuildManifest {
   return {
-    version: 1,
+    version: 2,
+    backupComplete: true,
+    backupContentSha256: "d".repeat(64),
     sandboxName: "alpha",
     timestamp: "2026-08-02T00-00-00-000Z",
     agentType: "openclaw",
     agentVersion: null,
     expectedVersion: null,
+    harnessPackage: HARNESS_PACKAGE,
     stateDirs: [],
     dir: "/sandbox",
     backupPath: "/tmp/backup-alpha",
@@ -166,6 +210,7 @@ function sandbox(receipt: string): SandboxEntry {
   return {
     name: "alpha",
     agent: "openclaw",
+    harnessPackage: HARNESS_PACKAGE,
     openshellDriver: "docker",
     provider: "vllm-local",
     model: "model-a",
@@ -173,7 +218,7 @@ function sandbox(receipt: string): SandboxEntry {
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
     lifecycleGeneration: "11111111-1111-4111-8111-111111111111",
-    lifecycleLiveIdentityFingerprint: "f".repeat(64),
+    lifecycleLiveIdentityFingerprint: createHash("sha256").update("alpha-live-id").digest("hex"),
     hostLocalInferenceReceipt: receipt,
   };
 }
@@ -198,6 +243,19 @@ function successfulRestore(
 describe("snapshot command host-local inference authority", () => {
   beforeEach(() => {
     harness.events.length = 0;
+    harness.prepareSnapshotRestoreContent.mockImplementation(() => {
+      const authority = harness.captureSnapshotRestoreAuthority();
+      return authority
+        ? {
+            schemaVersion: 1,
+            selectedBackupPath: authority.backupPath,
+            stagedBackupPath: `${authority.backupPath}.prepared`,
+            authority,
+            validate: harness.preparedSnapshotValidate,
+            cleanup: harness.preparedSnapshotCleanup,
+          }
+        : null;
+    });
   });
 
   it("re-proves authority before restore, at the mutation fence, and after success", async () => {

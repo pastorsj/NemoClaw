@@ -25,7 +25,7 @@ import {
   type SandboxPolicyAuthorityInspection,
 } from "../adapters/openshell/policy-authority";
 import * as openshellResolveModule from "../adapters/openshell/resolve";
-import { loadAgent, requireAgentPolicyAdditionsPath } from "../agent/defs";
+import { type AgentDefinition, loadAgent, requireAgentPolicyAdditionsPath } from "../agent/defs";
 import { CLI_NAME } from "../cli/branding";
 import {
   getMessagingPolicyKeyAliases,
@@ -2112,9 +2112,9 @@ function removePreset(
       const teamsActive =
         presetName === "teams"
           ? false
-          : getCredentialBoundMessagingChannelsFromEntry(
-              registry.getSandbox(sandboxName),
-            ).includes("teams");
+          : getCredentialBoundMessagingChannelsFromEntry(registry.getSandbox(sandboxName)).includes(
+              "teams",
+            );
       updated = reconcileTeamsOutlookLoginCredentialBinding(updated, sandboxName, teamsActive);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2196,24 +2196,36 @@ function readCurrentSandboxPolicy(sandboxName: string, gatewayName?: string): st
   return parseCurrentPolicyOrEmpty(rawPolicy) || null;
 }
 
-/** Resolve and validate one agent's reviewed baseline policy source. */
-function resolveAgentBaselinePolicy(
-  agentName: string | null | undefined,
+/** Resolve and validate the reviewed baseline from an already resolved agent definition. */
+function resolveAgentDefinitionBaselinePolicy(
+  agent: Pick<AgentDefinition, "name" | "policyAdditionsPath">,
 ): { agent: string; policyPath: string; content: string } | null {
-  const resolvedAgent = agentName || "openclaw";
-  const usesOpenClawBaseline = !agentName || agentName === "openclaw";
-  const policyPath = usesOpenClawBaseline
-    ? path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml")
-    : requireAgentPolicyAdditionsPath(loadAgent(resolvedAgent));
+  const policyPath = requireAgentPolicyAdditionsPath(agent);
   let content: string;
   try {
     content = fs.readFileSync(policyPath, "utf-8");
   } catch {
-    if (!usesOpenClawBaseline) {
-      throw new Error(
-        `Agent '${resolvedAgent}' baseline policy became unreadable. Refusing to substitute the OpenClaw baseline.`,
-      );
-    }
+    throw new Error(
+      `Agent '${agent.name}' baseline policy became unreadable. Refusing to substitute the OpenClaw baseline.`,
+    );
+  }
+  parseAndValidateSandboxPolicy(content);
+  return { agent: agent.name, policyPath, content };
+}
+
+/** Resolve and validate one agent's reviewed baseline policy source by name. */
+function resolveAgentBaselinePolicy(
+  agentName: string | null | undefined,
+): { agent: string; policyPath: string; content: string } | null {
+  const resolvedAgent = agentName || "openclaw";
+  if (resolvedAgent !== "openclaw") {
+    return resolveAgentDefinitionBaselinePolicy(loadAgent(resolvedAgent));
+  }
+  const policyPath = path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml");
+  let content: string;
+  try {
+    content = fs.readFileSync(policyPath, "utf-8");
+  } catch {
     return null;
   }
   parseAndValidateSandboxPolicy(content);
@@ -3911,6 +3923,7 @@ export {
   renderPresetScope,
   replayTrustedPrivatePolicyPinCapability,
   resolveAgentBaselinePolicy,
+  resolveAgentDefinitionBaselinePolicy,
   resolvePermissivePolicyPath,
   resolveSandboxBaselinePolicy,
   restoreBaselineEntry,

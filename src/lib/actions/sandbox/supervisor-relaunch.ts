@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import { dockerCapture } from "../../adapters/docker";
-import * as agentRuntime from "../../agent/runtime";
 import { shouldManageDashboardForAgent } from "../../onboard/dashboard-runtime";
+import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   type DockerContainerInspect,
   parseDockerInspectJson,
@@ -21,6 +23,11 @@ import { redact, redactFull } from "../../security/redact";
 import * as registry from "../../state/registry";
 import * as sandboxState from "../../state/sandbox";
 import { resolveSandboxDashboardPort } from "./forward-recovery";
+import { backupSandboxStateWithManagedAuthority } from "./snapshot/backup-authority";
+import {
+  createManagedRestoreAuthorityDependencies,
+  restoreRecreatedSandboxStateWithManagedAuthority,
+} from "./snapshot/restore-authority";
 
 /**
  * Compatibility boundary for OpenShell 0.0.71's Docker driver: legacy
@@ -46,15 +53,17 @@ export type ManagedSupervisorRelaunch = {
 
 export type ManagedSupervisorRelaunchDeps = {
   getSandbox?: typeof registry.getSandbox;
-  getSessionAgent?: typeof agentRuntime.getSessionAgent;
   resolveDashboardPort?: typeof resolveSandboxDashboardPort;
   resolveContainer?: typeof resolveDirectSandboxContainer;
   inspectContainer?: (containerId: string) => DockerContainerInspect;
   confirmMissingSupervisor?: (containerId: string) => boolean;
   restartRestoredManagedGateway?: (containerId: string) => boolean;
+  resolveSandboxAgent?: typeof resolveSandboxAgent;
   backupState?: typeof sandboxState.backupSandboxState;
+  backupStateWithManagedAuthority?: typeof backupSandboxStateWithManagedAuthority;
   sleep?: (seconds: number) => void;
   restoreState?: typeof sandboxState.restoreSandboxState;
+  restoreStateWithManagedAuthority?: typeof restoreRecreatedSandboxStateWithManagedAuthority;
   removeBackup?: typeof sandboxState.removeSandboxStateBackup;
   recreate?: typeof recreateOpenShellDockerSandboxWithStartupCommand;
   finalize?: typeof finalizeDockerGpuPatchBackup;
@@ -84,14 +93,11 @@ function hasLegacyKeepaliveStartup(inspect: DockerContainerInspect): boolean {
 function reconstructSupervisorLaunchCommand(
   sandboxName: string,
   entry: NonNullable<ReturnType<typeof registry.getSandbox>>,
+  selectedAgent: ResolvedSandboxAgent,
   deps: ManagedSupervisorRelaunchDeps,
 ): string[] | null {
-  const getSessionAgent = deps.getSessionAgent ?? agentRuntime.getSessionAgent;
-  const agent = getSessionAgent(sandboxName) ?? null;
-  const persistedAgent = entry.agent ?? "openclaw";
-  if (!["openclaw", "hermes"].includes(persistedAgent)) return null;
-  if (persistedAgent === "hermes" && agent?.name !== "hermes") return null;
-  if (agent && agent.name !== "openclaw" && agent.name !== "hermes") return null;
+  const agent = selectedAgent.definition;
+  if (!["openclaw", "hermes"].includes(selectedAgent.effectiveAgentId)) return null;
 
   const manageDashboard = shouldManageDashboardForAgent(agent);
   const resolveDashboardPort = deps.resolveDashboardPort ?? resolveSandboxDashboardPort;
@@ -139,20 +145,28 @@ export function relaunchManagedSupervisorSession(
   if (!entry) return null;
   const driver = entry.openshellDriver?.trim().toLowerCase() ?? null;
   if (driver !== null && driver !== "docker" && driver !== "vm") return null;
-  const startupCommand = reconstructSupervisorLaunchCommand(sandboxName, entry, deps);
-  if (startupCommand === null) return null;
 
   const resolveContainer = deps.resolveContainer ?? resolveDirectSandboxContainer;
+  const resolveAgent = deps.resolveSandboxAgent ?? resolveSandboxAgent;
   const inspect = deps.inspectContainer ?? inspectContainer;
   const confirmMissingSupervisor = deps.confirmMissingSupervisor;
   const restartRestoredManagedGateway = deps.restartRestoredManagedGateway;
-  const backupState = deps.backupState ?? sandboxState.backupSandboxState;
-  const restoreState = deps.restoreState ?? sandboxState.restoreSandboxState;
   const removeBackup = deps.removeBackup ?? sandboxState.removeSandboxStateBackup;
   const recreate = deps.recreate ?? recreateOpenShellDockerSandboxWithStartupCommand;
   const finalize = deps.finalize ?? finalizeDockerGpuPatchBackup;
   let pendingStateBackupPath: string | null = null;
   try {
+    // One durable package definition owns launch reconstruction, backup, and
+    // restore. Session state is intentionally not an authority for a
+    // destructive container recreation.
+    const selectedAgent = resolveAgent(entry);
+    const startupCommand = reconstructSupervisorLaunchCommand(
+      sandboxName,
+      entry,
+      selectedAgent,
+      deps,
+    );
+    if (startupCommand === null) return null;
     const containerId = resolveContainer(sandboxName, driver);
     const sleep =
       deps.sleep ??
@@ -164,6 +178,17 @@ export function relaunchManagedSupervisorSession(
       });
     if (!hasLegacyKeepaliveStartup(inspect(containerId))) return null;
     if (!confirmMissingSupervisor?.(containerId)) return null;
+    const backupState =
+      deps.backupState ??
+      ((name: string) =>
+        (deps.backupStateWithManagedAuthority ?? backupSandboxStateWithManagedAuthority)(
+          name,
+          {
+            agentDefinition: selectedAgent.definition,
+            harnessPackage: selectedAgent.harnessPackage,
+          },
+          { getSandbox },
+        ));
     let backup = backupState(sandboxName);
     // Docker can restore the OpenShell exec relay before its SSH transport.
     // Retry only that typed transport lag; integrity and audit failures remain terminal.
@@ -207,6 +232,15 @@ export function relaunchManagedSupervisorSession(
     pendingStateBackupPath = backupManifest.backupPath;
     if (!quiet) {
       console.log("  Recreating the sandbox container with its managed startup command...");
+    }
+    const currentEntry = getSandbox(sandboxName);
+    if (!currentEntry) throw new Error(`sandbox '${sandboxName}' is no longer registered`);
+    const currentAgent = resolveAgent(currentEntry);
+    if (
+      !isDeepStrictEqual(currentEntry, entry) ||
+      !isDeepStrictEqual(currentAgent, selectedAgent)
+    ) {
+      throw new Error(`sandbox '${sandboxName}' agent package authority changed before recreation`);
     }
     const result = recreate({
       sandboxName,
@@ -267,7 +301,20 @@ export function relaunchManagedSupervisorSession(
         }
         let stateRestored = false;
         try {
-          stateRestored = restoreState(sandboxName, backupManifest.backupPath).success;
+          stateRestored = deps.restoreState
+            ? deps.restoreState(sandboxName, backupManifest.backupPath).success
+            : (
+                deps.restoreStateWithManagedAuthority ??
+                restoreRecreatedSandboxStateWithManagedAuthority
+              )(
+                sandboxName,
+                backupManifest,
+                {
+                  targetAgentType: selectedAgent.effectiveAgentId,
+                  agentDefinition: selectedAgent.definition,
+                },
+                createManagedRestoreAuthorityDependencies(getSandbox),
+              ).success;
         } catch {
           stateRestored = false;
         }

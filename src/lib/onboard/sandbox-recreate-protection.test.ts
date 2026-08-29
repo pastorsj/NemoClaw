@@ -26,11 +26,17 @@ describe("createSandboxRecreateProtection", () => {
       backup: null,
       failureKind: "none" as const,
     };
+    const sourceBackupAuthority = {
+      agentDefinition: { name: "openclaw" },
+      harnessPackage: null,
+      validateBeforePublish: vi.fn(),
+    } as never;
     const backupSandboxBeforeRecreate = vi.fn(() => backupResult);
     const protection = createSandboxRecreateProtection(
       {
         sandboxName: "my-assistant",
         sandboxEntry,
+        sourceBackupAuthority,
         customOpenClawImage: true,
         note,
       },
@@ -91,6 +97,7 @@ describe("createSandboxRecreateProtection", () => {
     expect(backupSandboxBeforeRecreate).toHaveBeenCalledWith({
       sandboxName: "my-assistant",
       sandboxEntry,
+      sourceBackupAuthority,
       requireOpenClawImagePluginProvenance: true,
     });
   });
@@ -116,6 +123,7 @@ describe("createSandboxRecreateProtection", () => {
         {
           sandboxName: "my-assistant",
           sandboxEntry: { name: "my-assistant" },
+          sourceBackupAuthority: null,
           customOpenClawImage: false,
           note: vi.fn(),
         },

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { writeExecutable } from "../helpers/installer-sourced-env";
-import { writeNpmStub } from "../helpers/installer-run-fixture";
+import { writeNpmStub, writeSourceCheckoutNpmStub } from "../helpers/installer-run-fixture";
 
 const INSTALLER = path.join(import.meta.dirname, "../..", "install.sh");
 
@@ -63,14 +63,17 @@ function throwError(error: unknown): never {
 function runWithoutStrings(env: Record<string, string> = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-no-strings-"));
   const fakeBin = path.join(tmp, "bin");
+  const npmPrefix = path.join(tmp, "prefix");
   fs.mkdirSync(fakeBin);
+  fs.mkdirSync(path.join(npmPrefix, "bin"), { recursive: true });
   writeNodeStub(fakeBin);
   writeDockerOkStub(fakeBin);
-  env.NEMOCLAW_DEFER_OPENSHELL_INSTALL === "1" &&
-    (() => {
-      writeNpmStub(fakeBin, { installSnippet: 'echo "npm stub stop" >&2; exit 91' });
-      env.NPM_PREFIX = path.join(tmp, "prefix");
-    })();
+  const writeInstallerNpmStub =
+    env.NEMOCLAW_DEFER_OPENSHELL_INSTALL === "1"
+      ? () => writeNpmStub(fakeBin, { installSnippet: 'echo "npm stub stop" >&2; exit 91' })
+      : () => writeSourceCheckoutNpmStub(fakeBin);
+  writeInstallerNpmStub();
+  env.NPM_PREFIX = npmPrefix;
   return spawnSync("bash", [INSTALLER], {
     cwd: path.join(import.meta.dirname, "../.."),
     encoding: "utf-8",

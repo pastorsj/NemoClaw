@@ -78,6 +78,14 @@ type RemoveSandboxRegistryEntryDeps = {
   removeSandbox?: typeof registry.removeSandbox;
 };
 
+type RemoveSandboxRegistryEntryIfCurrentDeps = {
+  removeImage?: (
+    sandboxName: string,
+    expected: registry.SandboxEntry,
+  ) => RuntimeProviderWorkloadCleanupResult | void;
+  removeSandboxIfCurrentDuringCleanup?: typeof registry.removeSandboxIfCurrentDuringCleanup;
+};
+
 type RemoveSandboxRegistryEntryWithReceiptDeps = {
   removeImage?: (sandboxName: string) => RuntimeProviderWorkloadCleanupResult | void;
   removeSandboxWithReceipt?: typeof registry.removeSandboxWithReceipt;
@@ -94,7 +102,7 @@ export type RemoveSandboxRegistryEntryOutcome =
     }
   | {
       readonly status: "blocked";
-      readonly reason: "authority-unproven";
+      readonly reason: "authority-unproven" | "registry-changed";
       readonly removed: false;
     };
 
@@ -388,6 +396,43 @@ export function removeSandboxRegistryEntryOutcome(
   return removeSandbox(sandboxName)
     ? { status: "complete", removed: true }
     : { status: "not-found", removed: false };
+}
+
+/**
+ * Retire an operation-owned row before cleaning up its operation-owned image.
+ * The exact registry CAS is the authority boundary: if another writer replaced
+ * the row after preflight, no image cleanup runs. The registry mutation lock
+ * remains held across cleanup so a same-name replacement cannot claim the
+ * captured mutable image between the CAS and image removal.
+ */
+export function removeSandboxRegistryEntryIfCurrentOutcome(
+  expected: registry.SandboxEntry,
+  deps: RemoveSandboxRegistryEntryIfCurrentDeps = {},
+): RemoveSandboxRegistryEntryOutcome {
+  const expectedSnapshot = structuredClone(expected);
+  const removeSandboxIfCurrentDuringCleanup =
+    deps.removeSandboxIfCurrentDuringCleanup ?? registry.removeSandboxIfCurrentDuringCleanup;
+  const removeImage =
+    deps.removeImage ??
+    ((sandboxName: string, sandbox: registry.SandboxEntry) =>
+      removeSandboxImage(sandboxName, { getSandbox: () => sandbox }));
+  const transaction = removeSandboxIfCurrentDuringCleanup(expectedSnapshot, (selected) => {
+    const imageResult = removeImage(selected.name, selected);
+    return {
+      result: imageResult,
+      rollback: imageResult?.status === "skipped" && imageResult.reason === "authority-unproven",
+    };
+  });
+  if (transaction.status === "absent") return { status: "not-found", removed: false };
+  if (transaction.status === "changed") {
+    return { status: "blocked", reason: "registry-changed", removed: false };
+  }
+
+  const imageResult = transaction.result;
+  if (imageResult?.status === "skipped" && imageResult.reason === "authority-unproven") {
+    return { status: "blocked", reason: "authority-unproven", removed: false };
+  }
+  return { status: "complete", removed: true };
 }
 
 export function removeSandboxRegistryEntry(

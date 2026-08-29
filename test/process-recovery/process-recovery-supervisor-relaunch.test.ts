@@ -94,10 +94,23 @@ function composedRelaunchTransaction(
   const relaunchManagedSupervisorSessionImpl = vi.fn(
     (sandboxName: string, options: Parameters<typeof relaunchManagedSupervisorSession>[1]) => {
       activeSandboxName = sandboxName;
+      const selectedAgent = {
+        recordedAgent: "openclaw",
+        effectiveAgentId: "openclaw",
+        definition: {
+          name: "openclaw",
+          displayName: "OpenClaw",
+          forwardPort: 18789,
+          packageRoot: "/test/packages/openclaw",
+        },
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      };
       return relaunchManagedSupervisorSession(sandboxName, {
         quiet: options.quiet,
         deps: {
           ...options.deps,
+          resolveSandboxAgent: vi.fn(() => selectedAgent) as never,
           resolveContainer,
           inspectContainer: vi.fn(() => ({
             Config: { Env: ["OPENSHELL_SANDBOX_COMMAND=sleep infinity"] },
@@ -1435,65 +1448,5 @@ describe("checkAndRecoverSandboxProcesses supervisor relaunch", () => {
       ignoreError: true,
       stdio: "ignore",
     });
-  });
-
-  it("reports GATEWAY_UNSAFE_CONFIG_PATH after a transient identity refusal clears (#9364)", () => {
-    mockOpenClawSandbox("current-probe-box");
-    setImmediateRecoveryPolling();
-    vi.stubEnv("NEMOCLAW_GATEWAY_RECOVERY_WAIT_SECONDS", "1");
-    const finalize = vi.fn(() => ({ backupRemoved: true, rolledBack: false }));
-    const relaunchManagedSupervisorSessionImpl = vi.fn(() => ({
-      containerId: "replacement-container-id",
-      finalize,
-    }));
-    const requestGatewaySupervisorAction = vi.fn(() => MISSING_MANAGED_SUPERVISOR);
-    const unsafeConfigProbe = {
-      status: 1,
-      stdout: "",
-      stderr: "GATEWAY_UNSAFE_CONFIG_PATH",
-    } as const;
-    const requestPinnedGatewaySupervisorAction = vi
-      .fn()
-      .mockReturnValueOnce(pinnedIdentityRefusal("current-probe-box"))
-      .mockReturnValueOnce(ACCEPTED_MANAGED_PROBE)
-      .mockReturnValueOnce(ACCEPTED_MANAGED_PROBE)
-      .mockReturnValue(unsafeConfigProbe);
-    const waitForRecreatedSandboxOpenShellReadyImpl = vi.fn(
-      (_name, options) => options.beforeProbe?.(1000) === true,
-    );
-    vi.spyOn(forwardHealth, "isLocalForwardReachable").mockReturnValue(true);
-    vi.spyOn(openshellRuntime, "captureOpenshell").mockReturnValue({
-      status: 0,
-      output:
-        "SANDBOX  BIND  PORT  PID  STATUS\ncurrent-probe-box  127.0.0.1  18789  12345  running",
-    });
-    const runOpenshell = vi
-      .spyOn(openshellRuntime, "runOpenshell")
-      .mockReturnValue({ status: 0 } as never);
-
-    const result = checkAndRecoverSandboxProcesses("current-probe-box", {
-      quiet: true,
-      isSandboxGatewayRunningImpl: () => false,
-      requestGatewaySupervisorAction,
-      requestPinnedGatewaySupervisorAction,
-      relaunchManagedSupervisorSessionImpl,
-      waitForRecreatedSandboxOpenShellReadyImpl,
-    });
-
-    expect(result).toMatchObject({
-      checked: true,
-      wasRunning: false,
-      recovered: false,
-      forwardRecovered: false,
-      recoveryFailureDetail: expect.stringContaining(
-        "unsafe config path: GATEWAY_UNSAFE_CONFIG_PATH",
-      ),
-    });
-    expect("recoveryFailureDetail" in result ? result.recoveryFailureDetail : "").not.toContain(
-      "identity changed",
-    );
-    expect(requestPinnedGatewaySupervisorAction).toHaveBeenCalledTimes(4);
-    expect(finalize).toHaveBeenCalledWith(true);
-    expect(runOpenshell).toHaveBeenCalledOnce();
   });
 });

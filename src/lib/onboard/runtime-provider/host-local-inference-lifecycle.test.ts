@@ -299,6 +299,24 @@ describe("host-local inference lifecycle authority", () => {
     },
   );
 
+  it("revalidates immediately before the provider preserve mutation", () => {
+    const entry = sandbox("alpha", receipt("ollama"));
+    const runtimeProvider = provider();
+    const prepared = requiredPrepared(
+      prepareSandboxHostLocalInferenceAuthority(runtimeProvider.bundle, entry),
+    );
+    const validateBeforeMutation = vi.fn();
+
+    confirmHostLocalInferenceAuthority(runtimeProvider.bundle, entry, prepared, {
+      validateBeforeMutation,
+    });
+
+    expect(validateBeforeMutation).toHaveBeenCalledOnce();
+    expect(validateBeforeMutation.mock.invocationCallOrder[0]).toBeLessThan(
+      runtimeProvider.preserveForRebuild.mock.invocationCallOrder[1]!,
+    );
+  });
+
   it.each(AGENTS)(
     "routes explicitly provenanced llama.cpp for %s through the common coordinator",
     (agent) => {

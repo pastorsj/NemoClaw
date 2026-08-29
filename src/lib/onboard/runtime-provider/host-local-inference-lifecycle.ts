@@ -84,6 +84,8 @@ export type HostLocalInferenceRetirementResult =
 export interface HostLocalInferenceLifecycleOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
+  /** Re-prove the sandbox immediately before a provider lifecycle mutation. */
+  readonly validateBeforeMutation?: () => void;
   readonly createLlamaCppAdapter?: (
     options: ManagedLlamaCppLifecycleAdapterOptions,
   ) => ManagedLlamaCppLifecycleAdapter;
@@ -414,6 +416,7 @@ export function confirmHostLocalInferenceAuthority(
   const receipt = parseManagedReceipt(prepared.serializedReceipt, sandbox);
   if (!receipt) fail("prepared receipt no longer has a managed lifecycle");
   const { runtime } = requireRuntime(provider, receipt, sandbox, options);
+  options.validateBeforeMutation?.();
   requireExactReceipt(
     prepared.serializedReceipt,
     runtime.preserveForRebuild(receipt),

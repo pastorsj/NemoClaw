@@ -1,162 +1,111 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { HarnessPackageIdentity } from "../harness/package-identity";
-import { createSession } from "../state/onboard-session";
-import type { CheckpointSandboxRecreateTransactionV2 } from "../state/onboard-checkpoint-types";
-import type { SandboxEntry } from "../state/registry/types";
-import {
-  advanceSandboxRecreateTransaction,
-  beginSandboxRecreateTransaction,
-  createSandboxRecreateRuntime,
-  fingerprintSandboxRecreateValue,
-  matchingSandboxRecreateTransaction,
-  planSandboxRecreateRecovery,
-  sandboxRecreateSourceProof,
-  type SandboxRecreateObservation,
-} from "./sandbox-recreate-transaction";
+import type { RebuildManifest, RestoreResult } from "../state/sandbox";
+import { finalizeCreatedSandbox } from "./created-sandbox-finalization";
 
-const PACKAGE: HarnessPackageIdentity = {
-  kind: "agent-runtime",
-  id: "openclaw",
-  packageVersion: "1.2.3",
-  contractVersion: 1,
+const legacyManifest: RebuildManifest = {
+  version: 1,
+  sandboxName: "dcode",
+  timestamp: "2026-08-28T00:00:00.000Z",
+  agentType: "langchain-deepagents-code",
+  agentVersion: "0.1.0",
+  expectedVersion: "0.1.0",
+  stateDirs: [],
+  dir: "/sandbox/.deepagents",
+  backupPath: "/tmp/dcode-backup",
+  blueprintDigest: null,
+};
+
+const packageIdentity = {
+  kind: "agent-runtime" as const,
+  id: "langchain-deepagents-code",
+  packageVersion: "0.1.0",
+  contractVersion: 1 as const,
   contentDigest: "a".repeat(64),
 };
-const SOURCE_ID = fingerprintSandboxRecreateValue("source");
-const INTENT = fingerprintSandboxRecreateValue("intent");
-const ENTRY: SandboxEntry = {
-  name: "alpha",
-  agent: "openclaw",
-  harnessPackage: PACKAGE,
-  gatewayName: "nemoclaw",
-  gatewayPort: 8080,
-};
 
-function packageJournal() {
-  const session = createSession({
-    agent: "openclaw",
-    sandboxName: "alpha",
-    harnessPackage: PACKAGE,
-  });
-  const transaction = beginSandboxRecreateTransaction(session, {
-    sandboxName: "alpha",
-    gatewayName: "nemoclaw",
-    gatewayPort: 8080,
-    sourceEntry: ENTRY,
-    observation: { state: "ready", liveIdentityFingerprint: SOURCE_ID },
-    targetIntentFingerprint: INTENT,
-    id: "11111111-1111-4111-8111-111111111111",
-    targetGeneration: "22222222-2222-4222-8222-222222222222",
-    now: "2026-08-28T05:00:00.000Z",
-  });
-  return { session, transaction };
-}
-
-describe("sandbox recreate package authority", () => {
-  it("copies the owning Session identity into the v2 transaction and source proof", () => {
-    const { transaction } = packageJournal();
-
-    expect(transaction).toMatchObject({ version: 2, harnessPackage: PACKAGE });
-    expect(sandboxRecreateSourceProof(transaction).harnessPackage).toEqual(PACKAGE);
-  });
-
-  it("rejects Session drift before advancing the next recreate mutation", () => {
-    const { session, transaction } = packageJournal();
-    session.harnessPackage = { ...PACKAGE, contentDigest: "b".repeat(64) };
-
-    expect(() => advanceSandboxRecreateTransaction(session, transaction.id, "deleting")).toThrow(
-      "checkpoint package authority does not match its Session",
-    );
-    expect(session.checkpoint?.sandboxRecreate?.phase).toBe("planned");
-  });
-
-  it("rejects registry identity drift during recovery", () => {
-    const { transaction } = packageJournal();
-    expect(
-      planSandboxRecreateRecovery(
-        transaction,
-        { state: "ready", liveIdentityFingerprint: SOURCE_ID },
-        { ...ENTRY, harnessPackage: { ...PACKAGE, contentDigest: "c".repeat(64) } },
-      ),
-    ).toEqual({
-      action: "reject",
-      reason: "the registry row package authority does not match the recreate transaction",
+describe("ordinary recreate restore authority", () => {
+  it("rejects legacy snapshot restore when its reconciled package changes", () => {
+    const changedPackage = { ...packageIdentity, contentDigest: "b".repeat(64) };
+    const revalidateHarnessPackageAuthority = vi
+      .fn()
+      .mockReturnValueOnce(packageIdentity)
+      .mockReturnValue(changedPackage);
+    const revalidatePolicyAuthority = vi.fn();
+    const register = vi.fn();
+    const error = vi.fn();
+    const restoreRecreatedSandboxState = vi.fn((_name, _backup, options): RestoreResult => {
+      try {
+        options.validateBeforeMutation?.();
+        return {
+          success: true,
+          restoredDirs: [],
+          failedDirs: [],
+          restoredFiles: [],
+          failedFiles: [],
+        };
+      } catch (cause) {
+        return {
+          success: false,
+          restoredDirs: [],
+          failedDirs: ["manifest"],
+          restoredFiles: [],
+          failedFiles: [],
+          error: String(cause),
+        };
+      }
     });
-  });
 
-  it("requires the exact package-bound handler handoff", () => {
-    const { session, transaction } = packageJournal();
     expect(() =>
-      matchingSandboxRecreateTransaction(session, {
-        sandboxName: "alpha",
-        gatewayName: "nemoclaw",
-        transactionId: transaction.id,
-        targetGeneration: transaction.targetGeneration,
-        targetIntentFingerprint: transaction.targetIntentFingerprint,
-        version: 2,
-        harnessPackage: { ...PACKAGE, contentDigest: "d".repeat(64) },
-      }),
-    ).toThrow("does not match the requested replacement");
-  });
+      finalizeCreatedSandbox(
+        {
+          sandboxName: "dcode",
+          restoreBackupPath: legacyManifest.backupPath,
+          preUpgradeBackup: false,
+          targetAgentType: legacyManifest.agentType,
+          agentDefinition: { name: legacyManifest.agentType } as never,
+          validateManagedDcode: false,
+          provider: "nvidia-prod",
+          model: "test-model",
+          preferredInferenceApi: null,
+        },
+        {
+          readSandboxStateBackupManifest: () => legacyManifest,
+          captureSnapshotRestoreAuthority: () => ({
+            schemaVersion: 1,
+            backupPath: legacyManifest.backupPath,
+            contentSha256: "c".repeat(64),
+          }),
+          revalidatePolicyAuthority,
+          revalidateHarnessPackageAuthority,
+          discoverFreshOpenClawImagePluginInstalls: vi.fn(),
+          restoreRecreatedSandboxState,
+          getDcodeSelectionDrift: vi.fn(),
+          register,
+          note: vi.fn(),
+          error,
+          exitProcess: (code): never => {
+            throw new Error(`exit ${String(code)}`);
+          },
+        },
+      ),
+    ).toThrow("exit 1");
 
-  it("refuses ordinary mutation of a v1 journal before explicit migration", () => {
-    const { session, transaction } = packageJournal();
-    expect(transaction.version).toBe(2);
-    const { harnessPackage: _harnessPackage, ...legacy } =
-      transaction as CheckpointSandboxRecreateTransactionV2;
-    session.checkpoint = {
-      ...session.checkpoint!,
-      sandboxRecreate: { ...legacy, version: 1 },
-    };
-
-    expect(() => advanceSandboxRecreateTransaction(session, transaction.id, "deleting")).toThrow(
-      "requires package authority migration",
+    expect(revalidateHarnessPackageAuthority).toHaveBeenNthCalledWith(
+      1,
+      "prepare legacy restore for sandbox 'dcode'",
     );
-  });
-
-  it("rechecks registry authority at delete and post-delete boundaries", () => {
-    const { session, transaction } = packageJournal();
-    let entry: SandboxEntry | null = ENTRY;
-    let observation: SandboxRecreateObservation = {
-      state: "ready",
-      liveIdentityFingerprint: SOURCE_ID,
-    };
-    const runtime = createSandboxRecreateRuntime(
-      {
-        loadSession: () => session,
-        updateSession: (mutate) => mutate(session) ?? session,
-      },
-      {
-        version: 2,
-        id: transaction.id,
-        targetGeneration: transaction.targetGeneration,
-        targetIntentFingerprint: transaction.targetIntentFingerprint,
-        harnessPackage: PACKAGE,
-      },
-      "alpha",
-      "nemoclaw",
-      ENTRY,
-      () => observation,
-      () => undefined,
-      () => entry,
+    expect(revalidateHarnessPackageAuthority).toHaveBeenNthCalledWith(
+      2,
+      "restore files for sandbox 'dcode'",
     );
-
-    entry = { ...ENTRY, harnessPackage: { ...PACKAGE, contentDigest: "e".repeat(64) } };
-    expect(() => runtime.beginDelete()).toThrow("registry package authority changed");
-    expect(session.checkpoint?.sandboxRecreate?.phase).toBe("planned");
-
-    entry = ENTRY;
-    expect(runtime.beginDelete()).toBe("source");
-    observation = { state: "missing", liveIdentityFingerprint: null };
-    entry = { ...ENTRY, harnessPackage: { ...PACKAGE, contentDigest: "f".repeat(64) } };
-    expect(() => runtime.confirmDeleted()).toThrow("registry package authority changed");
-    expect(session.checkpoint?.sandboxRecreate?.phase).toBe("deleting");
-
-    entry = null;
-    expect(() => runtime.confirmDeleted()).not.toThrow();
-    expect(session.checkpoint?.sandboxRecreate?.phase).toBe("deleted");
+    expect(revalidatePolicyAuthority).toHaveBeenCalledWith("restore files for sandbox 'dcode'");
+    expect(register).not.toHaveBeenCalled();
+    expect(error.mock.calls.flat().join("\n")).toContain(
+      "snapshot harness package authority changed",
+    );
   });
 });

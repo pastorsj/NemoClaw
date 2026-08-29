@@ -604,10 +604,10 @@ describe("E2E recommendation normalizer", () => {
           reason: "model invented a target",
         },
         {
-          id: "ubuntu-repo-cloud-hermes",
+          id: "ubuntu-repo-cloud-hermes-slack",
           workflow: E2E_WORKFLOW,
           selectorType: "target",
-          reason: "registry target not wired for live Vitest fixtures",
+          reason: "credentialed registry target not wired for live Vitest fixtures",
         },
         {
           id: "e2e-all",

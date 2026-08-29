@@ -56,14 +56,10 @@ if entrypoint == "accepted-station-main":
 source "$INSTALLER_UNDER_TEST" >/dev/null
 detect_express_platform() { printf "$EXPRESS_PLATFORM"; }
 print_banner() { :; }
-ensure_docker() { :; }
-ensure_openshell_build_deps() { :; }
-# Stop immediately after the real Station express prompt configures its recipe,
-# before setup-jetson.sh or any installation side effect can run.
 classify_dgx_station_release() { printf "%s" "\${EXPRESS_RELEASE_STATE:-generic-ubuntu}"; }
-station_installer_revision() { printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'; }
-station_express_resume_generation() { printf '0123456789abcdef0123456789abcdef'; }
-bash() {
+# This fixture owns prompt behavior. Stop at the post-selection install boundary
+# so the real Node, CLI, and host phases cannot mutate the test host.
+install_nemoclaw_before_onboarding() {
   printf "RESULT NON_INTERACTIVE=%s SUDO_MODE=%s PROVIDER=%s MODEL=%s VLLM_MODEL=%s POLICY=%s YES=%s SANDBOX=%s STATION_EXPRESS=%s PROFILE_GATE=%s PROFILE_RUNTIME=%s SPARK_SELECTION=%s\\n" \
     "\${NON_INTERACTIVE:-}" "\${NEMOCLAW_NON_INTERACTIVE_SUDO_MODE:-}" "\${NEMOCLAW_PROVIDER:-}" "\${NEMOCLAW_MODEL:-}" \
     "\${NEMOCLAW_VLLM_MODEL:-}" "\${NEMOCLAW_POLICY_MODE:-}" "\${NEMOCLAW_YES:-}" "\${NEMOCLAW_SANDBOX_NAME:-}" \

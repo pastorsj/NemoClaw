@@ -83,6 +83,15 @@ export function cloneSandboxPolicyCreationReceipt(
   }
 }
 
+/** Keep only one canonical digest for pending snapshot-clone source authority. */
+export function normalizeSnapshotSourceRegistryFingerprint(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string" && SHA256_DIGEST_PATTERN.test(value)) return value;
+  throw new Error(
+    "Sandbox registry contains an invalid snapshot source fingerprint; repair the registry before continuing",
+  );
+}
+
 /** Remove policy attribution that an external authority owns and normalize managed state. */
 export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxEntry {
   const packageAuthority = normalizeSandboxHarnessPackageAuthority(entry);
@@ -112,6 +121,9 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
   const policyCreationReceipt = hasManagedReceipt ? parsedPolicyCreationReceipt : undefined;
   const pendingPolicyVerification = normalizePendingSandboxPolicyVerification(
     entry.pendingPolicyVerification,
+  );
+  const snapshotSourceRegistryFingerprint = normalizeSnapshotSourceRegistryFingerprint(
+    entry.snapshotSourceRegistryFingerprint,
   );
   const pendingHarnessPackage = pendingPolicyVerification?.harnessPackage;
   const ownerHarnessPackage = packageAuthority.harnessPackage;
@@ -154,6 +166,7 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
     pendingPolicyVerification: _pendingPolicyVerification,
     harnessPackage: _harnessPackage,
     harnessPackageMigration: _harnessPackageMigration,
+    snapshotSourceRegistryFingerprint: _snapshotSourceRegistryFingerprint,
     ...rest
   } = entry;
   if (policyAuthority === "externally-managed") {
@@ -163,6 +176,7 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
       policies: [],
       policyAuthority,
       ...(pendingPolicyVerification ? { pendingPolicyVerification } : {}),
+      ...(snapshotSourceRegistryFingerprint ? { snapshotSourceRegistryFingerprint } : {}),
     };
   }
 
@@ -185,6 +199,7 @@ export function normalizeSandboxPolicyAttribution(entry: SandboxEntry): SandboxE
     ...(policyAuthority !== undefined ? { policyAuthority } : {}),
     ...(policyCreationReceipt ? { policyCreationReceipt } : {}),
     ...(pendingPolicyVerification ? { pendingPolicyVerification } : {}),
+    ...(snapshotSourceRegistryFingerprint ? { snapshotSourceRegistryFingerprint } : {}),
   };
 }
 

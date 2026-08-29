@@ -4,6 +4,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { RD as _RD, R } from "../../cli/terminal-style";
+import { resolveLegacyBackupRecoveryOwner } from "../../onboard/sandbox-agent";
 import type { SandboxRegistry } from "../../state/registry";
 import { load as loadRegistry } from "../../state/registry/persistence";
 import * as sandboxState from "../../state/sandbox";
@@ -47,6 +48,35 @@ function isPreparedRecoveryImageAllowed(
   );
 }
 
+function rebuildRecoveryManifestOwner(
+  sandboxEntry: RebuildSandboxEntry,
+  candidate: sandboxState.RebuildManifest,
+): RebuildSandboxEntry | string | null {
+  return sandboxState.inspectRebuildManifestHarnessPackage(candidate).status === "legacy"
+    ? resolveLegacyBackupRecoveryOwner(sandboxEntry)
+    : sandboxEntry;
+}
+
+function validatePreparedRecoveryCandidate(
+  sandboxName: string,
+  sandboxEntry: RebuildSandboxEntry,
+  candidate: sandboxState.RebuildManifest,
+): sandboxState.RebuildRecoveryManifestValidation {
+  try {
+    return sandboxState.validateRebuildRecoveryManifest(
+      sandboxName,
+      rebuildRecoveryManifestOwner(sandboxEntry, candidate),
+      candidate,
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `legacy backup owner could not be resolved: ${detail}`,
+    };
+  }
+}
+
 export function validatePreparedRecoveryManifest(
   sandboxName: string,
   sandboxEntry: RebuildSandboxEntry,
@@ -55,11 +85,7 @@ export function validatePreparedRecoveryManifest(
   bail: RebuildBail,
 ): sandboxState.RebuildManifest | null {
   if (!candidate) return null;
-  const validation = sandboxState.validateRebuildRecoveryManifest(
-    sandboxName,
-    sandboxEntry.agent,
-    candidate,
-  );
+  const validation = validatePreparedRecoveryCandidate(sandboxName, sandboxEntry, candidate);
   if (!validation.ok) {
     console.error("");
     console.error(`  ${_RD}Recovery preflight failed:${R} ${validation.reason}.`);
@@ -141,11 +167,7 @@ export function revalidatePreparedRecoveryBeforeDelete(
     );
   }
 
-  const validation = sandboxState.validateRebuildRecoveryManifest(
-    sandboxName,
-    currentEntry.agent,
-    latestManifest,
-  );
+  const validation = validatePreparedRecoveryCandidate(sandboxName, currentEntry, latestManifest);
   if (!validation.ok) {
     return failPreparedRecoveryPreDelete(
       validation.reason,

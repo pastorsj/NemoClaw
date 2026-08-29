@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
-import { loadAgent } from "../agent/defs";
+import { loadAgent, loadAgentFresh } from "../agent/defs";
 import { isCandidateAgent } from "../agent/candidate";
 import { buildAgentDefinition } from "../agent/definition-loader";
 import { getVersion } from "../core/version";
@@ -203,7 +203,7 @@ export function resolveSandboxAgent(
     return Object.freeze({
       recordedAgent,
       effectiveAgentId,
-      definition: loadAgent(effectiveAgentId, options.env ?? process.env),
+      definition: loadAgentFresh(effectiveAgentId, options.env ?? process.env),
       harnessPackage: null,
       harnessPackageMigration: null,
     });
@@ -240,6 +240,30 @@ export function resolveSandboxAgent(
     harnessPackage: packageState.harnessPackage,
     harnessPackageMigration: packageState.harnessPackageMigration,
   });
+}
+
+/**
+ * Resolve the durable owner that may authorize one legacy backup manifest.
+ *
+ * Legacy manifests predate package identity, so callers must first prove that
+ * the current registry row still resolves to its qualified repository agent or
+ * to the exact installed package recorded by its migration receipt.
+ */
+export function resolveLegacyBackupRecoveryOwner(
+  entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
+  options: ResolveSandboxAgentOptions = {},
+): string | null {
+  const authority = resolveSandboxAgent(entry, options);
+  if (authority.harnessPackage === null) return authority.recordedAgent;
+  if (
+    authority.harnessPackageMigration === null ||
+    authority.harnessPackageMigration.legacyAgent !== authority.recordedAgent
+  ) {
+    throw sandboxAgentAuthorityError(
+      "legacy backup owner is missing exact legacy-current-bundle migration provenance",
+    );
+  }
+  return authority.recordedAgent;
 }
 
 export interface PromptSandboxNameDeps {

@@ -7,6 +7,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+  createSnapshotRestoreAuthorityFixture,
+} from "../../helpers/snapshot-authority.ts";
+
 // sandbox-state computes its backup root from HOME at module load time.
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-snapshot-home-"));
@@ -114,6 +120,7 @@ function writeOpenClawRegistry(sandboxName: string): void {
           gpuEnabled: false,
           policies: [],
           agent: null,
+          harnessPackage: createSnapshotHarnessPackageFixture("openclaw"),
         },
       },
     }),
@@ -141,7 +148,10 @@ describe("OpenClaw durable config file (#5027)", () => {
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
       const captureStateFile = vi.fn(() => ({ outcome: "backed_up" as const, data: original }));
-      const backup = sandboxState.backupSandboxState("alpha", { captureStateFile });
+      const backup = sandboxState.backupSandboxState("alpha", {
+        ...createSnapshotBackupAuthorityFixture("openclaw"),
+        captureStateFile,
+      });
 
       expect(backup.success).toBe(true);
       expect(backup.backedUpFiles).toEqual(["openclaw.json"]);
@@ -217,7 +227,10 @@ describe("OpenClaw durable config file (#5027)", () => {
       process.env.NEMOCLAW_OPENSHELL_BIN = path.join(binDir, "openshell");
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = sandboxState.backupSandboxState(
+        "alpha",
+        createSnapshotBackupAuthorityFixture("openclaw"),
+      );
       expect(backup.success).toBe(true);
       expect(backup.backedUpFiles).toEqual(["openclaw.json"]);
       expect(backup.manifest?.stateFiles).toEqual([{ path: "openclaw.json", strategy: "copy" }]);
@@ -260,7 +273,16 @@ describe("OpenClaw durable config file (#5027)", () => {
           2,
         ),
       );
-      const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+      const restore = sandboxState.restoreSandboxState(
+        "alpha",
+        backup.manifest!.backupPath,
+        createSnapshotRestoreAuthorityFixture(
+          sandboxState,
+          "alpha",
+          "openclaw",
+          backup.manifest!.backupPath,
+        ),
+      );
       expect(restore.success).toBe(true);
       expect(restore.restoredFiles).toEqual(["openclaw.json"]);
 
@@ -348,7 +370,10 @@ describe("OpenClaw durable config file (#5027)", () => {
       process.env.NEMOCLAW_OPENSHELL_BIN = path.join(binDir, "openshell");
       process.env.PATH = `${binDir}:${oldPath || ""}`;
 
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = sandboxState.backupSandboxState(
+        "alpha",
+        createSnapshotBackupAuthorityFixture("openclaw"),
+      );
       expect(backup.success).toBe(true);
 
       // Local backup keeps non-secret tuning + mcp.servers; secrets are stripped.
@@ -395,7 +420,16 @@ describe("OpenClaw durable config file (#5027)", () => {
         ),
       );
 
-      const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+      const restore = sandboxState.restoreSandboxState(
+        "alpha",
+        backup.manifest!.backupPath,
+        createSnapshotRestoreAuthorityFixture(
+          sandboxState,
+          "alpha",
+          "openclaw",
+          backup.manifest!.backupPath,
+        ),
+      );
       expect(restore.success).toBe(true);
 
       const after = JSON.parse(fs.readFileSync(path.join(openclawDir, "openclaw.json"), "utf-8"));

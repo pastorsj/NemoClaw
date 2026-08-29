@@ -5,6 +5,7 @@ import type { SandboxEntry } from "../state/registry";
 import * as notReadyRecreate from "./not-ready-recreate";
 import {
   backupSandboxBeforeRecreate,
+  type PreRecreateBackupAuthority,
   type PreRecreateBackupResult,
 } from "./sandbox-backup-on-recreate";
 import type {
@@ -41,6 +42,7 @@ export interface JournalBoundPreUpgradeBackupResult<Runtime> {
 export interface SandboxRecreateProtectionOptions {
   sandboxName: string;
   sandboxEntry: SandboxEntry | null;
+  sourceBackupAuthority: PreRecreateBackupAuthority | null;
   customOpenClawImage: boolean;
   note(message: string): void;
 }
@@ -62,7 +64,7 @@ export function createSandboxRecreateProtection(
   options: SandboxRecreateProtectionOptions,
   deps: SandboxRecreateProtectionDeps = defaultDeps,
 ) {
-  const { sandboxName, sandboxEntry, customOpenClawImage, note } = options;
+  const { sandboxName, sandboxEntry, sourceBackupAuthority, customOpenClawImage, note } = options;
 
   const selectPreUpgradeBackup = (binding: PreUpgradeBackupBinding): string | null =>
     deps.selectPreUpgradeBackupForCreate({
@@ -110,6 +112,7 @@ export function createSandboxRecreateProtection(
       return deps.backupSandboxBeforeRecreate({
         sandboxName,
         sandboxEntry,
+        sourceBackupAuthority,
         requireOpenClawImagePluginProvenance: customOpenClawImage,
       });
     },

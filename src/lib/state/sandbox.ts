@@ -16,7 +16,9 @@ import {
   constants,
   existsSync,
   fstatSync,
+  futimesSync,
   lstatSync,
+  lutimesSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -24,9 +26,11 @@ import {
   readFileSync,
   readlinkSync,
   readSync,
-  renameSync,
   rmSync,
   statSync,
+  symlinkSync,
+  utimesSync,
+  writeSync,
   writeFileSync,
 } from "node:fs";
 import os from "node:os";
@@ -40,9 +44,8 @@ import {
 } from "../adapters/openshell/client.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
-import type { AgentStateFile } from "../agent/defs.js";
+import type { AgentDefinition, AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
-import { isObjectRecord, type UnknownRecord } from "../core/json-types.js";
 import { GATEWAY_PORT } from "../core/ports.js";
 import {
   BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION,
@@ -61,7 +64,6 @@ import {
 } from "./openclaw-managed-extensions.js";
 import {
   discoverFreshOpenClawImagePluginInstalls,
-  hasCompleteOpenClawImagePluginProvenance,
   type OpenClawImagePluginInstall,
   parseOpenClawImagePluginInstalls,
   planOpenClawPluginRestore,
@@ -71,20 +73,32 @@ import {
   HERMES_PRESERVED_ENV_INVENTORY,
   type PreservedEnvFile,
   type PreservedEnvInventory,
-  validatePreservedEnvFiles,
 } from "./preserved-env/index.js";
-import {
-  cloneSandboxRuntimeSnapshot,
-  type SandboxRuntimeSnapshot,
-} from "./registry/runtime-snapshot.js";
+import type { SandboxRuntimeSnapshot } from "./registry/runtime-snapshot.js";
 import type {
   SandboxEntry,
   SandboxHostLocalInferenceProvenance,
   SandboxWorkloadReceipt,
 } from "./registry/types.js";
-import { cloneSandboxWorkloadReceipt } from "./registry/workload.js";
 import type { CustomPolicyEntry } from "./registry.js";
 import * as registry from "./registry.js";
+import { hashSnapshotBackupContent, hashSnapshotTree } from "./snapshot/content-digest.js";
+import {
+  hasInvalidMarkedOpenClawPluginProvenance,
+  normalizeBackupAgentAuthority,
+  normalizeSnapshotBackupAuthority,
+  normalizeStateFilePath,
+  normalizeStateFileSpecsPreservingDuplicates,
+  readManifest,
+  snapshotManifestAuthority,
+  validateSnapshotBackupContent,
+  validateRebuildRecoveryManifestAtRoot,
+  writeManifest,
+  type RebuildManifest,
+  type RebuildRecoveryManifestValidation,
+  type SnapshotEntry,
+  type StateFileSpec,
+} from "./snapshot/manifest.js";
 import { isSshTransportFailure } from "./ssh-transport.js";
 import { restoreStateFile } from "./state-file-restore.js";
 import { nemoclawStateRoot } from "./state-root.js";
@@ -92,82 +106,62 @@ import { runTarListing, type TarArchiveSource } from "./tar-listing.js";
 
 const HOME_DIR = path.resolve(process.env.HOME || os.homedir());
 const REBUILD_BACKUPS_DIR = path.join(nemoclawStateRoot(HOME_DIR, GATEWAY_PORT), "rebuild-backups");
-
-const MANIFEST_VERSION = 1;
 export const OPENCLAW_IMAGE_PLUGIN_PROVENANCE_RESTORE_ERROR =
   "custom-image OpenClaw plugin provenance is missing or invalid";
 export const MANAGED_SNAPSHOT_RESTORE_AUTHORITY_ERROR =
   "managed snapshot restore requires exact content and runtime authority";
 export const HOST_LOCAL_INFERENCE_SNAPSHOT_RESTORE_AUTHORITY_ERROR =
   "host-local inference snapshot restore requires exact content and runtime authority";
+export const SCHEMA_V2_SNAPSHOT_RESTORE_AUTHORITY_ERROR =
+  "schema v2 snapshot restore requires its pinned agent definition, exact content authority, and mutation fence";
 
-function parseJson<T>(text: string): T {
-  return JSON.parse(text);
+export {
+  hasAuthoritativeOpenClawImagePluginProvenance,
+  inspectRebuildManifestHarnessPackage,
+  readSandboxStateBackupManifest,
+  validateSnapshotBackupContent,
+} from "./snapshot/manifest.js";
+export type {
+  InstanceBackup,
+  RebuildManifest,
+  RebuildManifestHarnessPackageInspection,
+  RebuildRecoveryManifestValidation,
+  SnapshotEntry,
+  StateFileSpec,
+  StateFileStrategy,
+} from "./snapshot/manifest.js";
+
+/** Validate a recovery candidate against NemoClaw's configured backup root. */
+export function validateRebuildRecoveryManifest(
+  sandboxName: string,
+  owner:
+    | string
+    | null
+    | undefined
+    | Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
+  candidate: RebuildManifest,
+): RebuildRecoveryManifestValidation {
+  try {
+    // Lexical containment is not enough when an ancestor below NemoClaw's
+    // state root can redirect the candidate into another tree.
+    rejectSymlinksOnPath(path.join(REBUILD_BACKUPS_DIR, sandboxName, candidate.timestamp));
+  } catch {
+    return {
+      ok: false,
+      reason: "backup path or one of its NemoClaw state ancestors is a symbolic link",
+    };
+  }
+  return validateRebuildRecoveryManifestAtRoot(REBUILD_BACKUPS_DIR, sandboxName, owner, candidate);
 }
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export interface RebuildManifest {
-  version: number;
-  sandboxName: string;
-  timestamp: string;
-  agentType: string;
-  agentVersion: string | null;
-  expectedVersion: string | null;
-  /** Fresh-image plugin baseline captured before user state was restored. */
-  openclawImagePluginInstalls?: OpenClawImagePluginInstall[];
-  /** The plugin baseline is authoritative and must be reconciled during recreation. */
-  reconcileOpenClawImagePluginProvenance?: boolean;
-  stateDirs: string[];
-  /** Directories verified as safe to restore. Absent on older manifests. */
-  backedUpDirs?: string[];
-  /** Declared directories that could not be backed up. Absent on older manifests. */
-  failedBackupDirs?: string[];
-  stateFiles?: StateFileSpec[];
-  /** Single config/state directory */
-  dir: string;
-  /** @deprecated Old field name for `dir` — retained for backward compat with pre-consolidation backups. */
-  writableDir?: string;
-  backupPath: string;
-  blueprintDigest: string | null;
-  policyPresets?: string[];
-  /**
-   * Custom policy presets applied via `--from-file`/`--from-dir`, captured with
-   * full content so they can be re-applied on restore without the source file.
-   * Like `policyPresets`, these live in the gateway policy engine and are
-   * otherwise lost on destroy/recreate. Always present on snapshots created since
-   * this field was added (possibly an empty array, so restore can reconcile a
-   * zero-custom snapshot); absent only on legacy manifests.
-   */
-  customPolicies?: CustomPolicyEntry[];
-  /** Allowlisted non-secret environment assignments captured for image recreation. */
-  preservedEnv?: PreservedEnvFile[];
-  /**
-   * Provider-neutral runtime and acceleration state captured before the
-   * filesystem copy. Required when `workload` is a managed-image receipt.
-   */
-  runtimeSnapshot?: SandboxRuntimeSnapshot;
-  /**
-   * Exact immutable managed workload/profile authority associated with this
-   * snapshot. Older and explicit Dockerfile snapshots omit this field.
-   */
-  workload?: SandboxWorkloadReceipt;
-  /** Exact provider-neutral authority for out-of-sandbox inference. */
-  hostLocalInferenceReceipt?: string;
-  /** Explicit hidden-lifecycle provenance paired with the exact receipt. */
-  hostLocalInferenceProvenance?: SandboxHostLocalInferenceProvenance;
-  instances?: InstanceBackup[];
-  // Optional user-provided label for `snapshot restore <name>`.
-  name?: string;
-}
-
-// Manifest enriched with a virtual version number computed at list time.
-// Versions are position-based (v1 = oldest by timestamp) and NOT persisted,
-// so they can shift if snapshots are deleted.
-export type SnapshotEntry = RebuildManifest & { snapshotVersion: number };
-
 export interface BackupOptions {
   name?: string | null;
+  /** Definition resolved from the sandbox's durable package authority before backup mutation. */
+  agentDefinition?: AgentDefinition;
+  /** Exact package paired with agentDefinition; null is explicit candidate authority. */
+  harnessPackage?: Exclude<RebuildManifest["harnessPackage"], undefined>;
   runtimeSnapshot?: SandboxRuntimeSnapshot;
   workload?: SandboxWorkloadReceipt;
   hostLocalInferenceReceipt?: string;
@@ -184,21 +178,6 @@ export interface BackupOptions {
    * identity, and stable-read constraints before returning bytes.
    */
   captureStateFile?: StateFileCapture;
-}
-
-export interface InstanceBackup {
-  instanceId: string;
-  agentType: string;
-  dataDir: string;
-  stateDirs: string[];
-  backedUpDirs: string[];
-}
-
-export type StateFileStrategy = "copy" | "sqlite_backup";
-
-export interface StateFileSpec {
-  path: string;
-  strategy: StateFileStrategy;
 }
 
 export interface StateFileCaptureRequest {
@@ -254,13 +233,31 @@ export interface SnapshotRestoreAuthority {
   readonly contentSha256: string;
 }
 
+/** Private snapshot copy prepared before an operation can delete or create a sandbox. */
+export interface PreparedSnapshotRestoreContent {
+  readonly schemaVersion: 1;
+  readonly selectedBackupPath: string;
+  readonly stagedBackupPath: string;
+  readonly authority: SnapshotRestoreAuthority;
+  validate(): void;
+  cleanup(): void;
+}
+
 export interface SnapshotRestoreOptions {
+  /**
+   * Exact agent definition selected from the sandbox's pinned harness package.
+   * Managed restore callers provide this so the state layer never falls back
+   * to the agent manifest in the current NemoClaw checkout.
+   */
+  readonly agentDefinition?: AgentDefinition;
   /**
    * Content identity captured from the selected manifest and every backup
    * payload. The state layer revalidates it after local staging and before
    * the first remote filesystem mutation.
    */
   readonly authority?: SnapshotRestoreAuthority;
+  /** Operation-owned content prepared before an earlier destructive boundary. */
+  readonly preparedContent?: PreparedSnapshotRestoreContent;
   /** Internal provider fence invoked at the same last-safe mutation edge. */
   readonly validateBeforeMutation?: () => void;
 }
@@ -276,10 +273,12 @@ export interface RecreatedSandboxRestoreOptions extends SnapshotRestoreOptions {
 
 interface InternalRestoreOptions {
   targetAgentType: string;
+  agentDefinition?: AgentDefinition;
   allowCustomImageWholeStateFileRestore?: true;
   discoverFreshOpenClawImagePluginInstalls?: true;
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
   authority?: SnapshotRestoreAuthority;
+  preparedContent?: PreparedSnapshotRestoreContent;
   validateBeforeMutation?: () => void;
 }
 
@@ -294,39 +293,6 @@ export interface SafeExtractResult {
   error?: string;
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}
-
-function isStateFileSpec(value: unknown): value is StateFileSpec {
-  return (
-    isObjectRecord(value) &&
-    typeof value.path === "string" &&
-    (value.strategy === "copy" || value.strategy === "sqlite_backup") &&
-    normalizeStateFileSpec({ path: value.path, strategy: value.strategy }) !== null
-  );
-}
-
-function isInstanceBackup(value: unknown): value is InstanceBackup {
-  if (!isObjectRecord(value) || !isStateDirArray(value.stateDirs)) return false;
-  return (
-    typeof value.instanceId === "string" &&
-    typeof value.agentType === "string" &&
-    typeof value.dataDir === "string" &&
-    isBackedUpDirArray(value.backedUpDirs, value.stateDirs)
-  );
-}
-
-function isCustomPolicyEntryArray(value: unknown): value is CustomPolicyEntry[] {
-  if (!Array.isArray(value)) return false;
-  if (value.length === 0) return true;
-  try {
-    return registry.normalizeCustomPolicyEntries(value) !== undefined;
-  } catch {
-    return false;
-  }
-}
-
 function cloneOpenClawImagePluginInstalls(
   installs: readonly OpenClawImagePluginInstall[],
 ): OpenClawImagePluginInstall[] {
@@ -334,92 +300,6 @@ function cloneOpenClawImagePluginInstalls(
     ...install,
     ...(install.loadPaths !== undefined ? { loadPaths: [...install.loadPaths] } : {}),
   }));
-}
-
-export function hasAuthoritativeOpenClawImagePluginProvenance(value: {
-  agentType?: unknown;
-  dir?: unknown;
-  writableDir?: unknown;
-  openclawImagePluginInstalls?: unknown;
-  reconcileOpenClawImagePluginProvenance?: unknown;
-}): boolean {
-  const dir = typeof value.dir === "string" ? value.dir : value.writableDir;
-  return (
-    value.agentType === "openclaw" &&
-    typeof dir === "string" &&
-    value.reconcileOpenClawImagePluginProvenance === true &&
-    hasCompleteOpenClawImagePluginProvenance(value.openclawImagePluginInstalls, dir)
-  );
-}
-
-function isRebuildManifest(value: unknown): value is RebuildManifest {
-  if (!isObjectRecord(value) || !isStateDirArray(value.stateDirs)) return false;
-  const dir = typeof value.dir === "string" ? value.dir : value.writableDir;
-  const runtimeSnapshot =
-    value.runtimeSnapshot === undefined
-      ? undefined
-      : cloneSandboxRuntimeSnapshot(value.runtimeSnapshot);
-  const workload =
-    value.workload === undefined ? undefined : cloneSandboxWorkloadReceipt(value.workload as never);
-  const hostLocalInferenceReceipt = registry.cloneSandboxHostLocalInferenceReceipt(
-    value.hostLocalInferenceReceipt as string | null | undefined,
-  );
-  const hostLocalInferenceProvenance = registry.cloneSandboxHostLocalInferenceProvenance(
-    value.hostLocalInferenceProvenance,
-  );
-  const validHostLocalInferenceProvenance = (() => {
-    if (value.hostLocalInferenceProvenance === undefined) return true;
-    if (!hostLocalInferenceProvenance || typeof hostLocalInferenceReceipt !== "string")
-      return false;
-    try {
-      registry.requireSandboxHostLocalInferenceProvenance(
-        hostLocalInferenceProvenance,
-        hostLocalInferenceReceipt,
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-  return (
-    typeof value.version === "number" &&
-    typeof value.sandboxName === "string" &&
-    typeof value.timestamp === "string" &&
-    typeof value.agentType === "string" &&
-    (value.agentVersion === null || typeof value.agentVersion === "string") &&
-    (value.expectedVersion === null || typeof value.expectedVersion === "string") &&
-    (value.backedUpDirs === undefined || isBackedUpDirArray(value.backedUpDirs, value.stateDirs)) &&
-    (value.failedBackupDirs === undefined ||
-      isBackedUpDirArray(value.failedBackupDirs, value.stateDirs)) &&
-    typeof dir === "string" &&
-    (value.openclawImagePluginInstalls === undefined ||
-      parseOpenClawImagePluginInstalls(value.openclawImagePluginInstalls, dir).ok) &&
-    (value.reconcileOpenClawImagePluginProvenance === undefined ||
-      typeof value.reconcileOpenClawImagePluginProvenance === "boolean") &&
-    (value.reconcileOpenClawImagePluginProvenance !== true ||
-      hasAuthoritativeOpenClawImagePluginProvenance(value)) &&
-    typeof value.backupPath === "string" &&
-    (value.stateFiles === undefined ||
-      (Array.isArray(value.stateFiles) && value.stateFiles.every(isStateFileSpec))) &&
-    (value.blueprintDigest === undefined ||
-      value.blueprintDigest === null ||
-      typeof value.blueprintDigest === "string") &&
-    (value.policyPresets === undefined || isStringArray(value.policyPresets)) &&
-    (value.customPolicies === undefined || isCustomPolicyEntryArray(value.customPolicies)) &&
-    (value.preservedEnv === undefined ||
-      (value.agentType === "hermes" &&
-        validatePreservedEnvFiles(value.preservedEnv, HERMES_PRESERVED_ENV_INVENTORY))) &&
-    (value.runtimeSnapshot === undefined || runtimeSnapshot !== undefined) &&
-    (value.workload === undefined || workload !== undefined) &&
-    (value.hostLocalInferenceReceipt === undefined ||
-      (typeof hostLocalInferenceReceipt === "string" && hostLocalInferenceReceipt.length > 0)) &&
-    validHostLocalInferenceProvenance &&
-    (workload?.kind !== "managed-image" || runtimeSnapshot !== undefined) &&
-    (value.instances === undefined ||
-      (Array.isArray(value.instances) &&
-        value.instances.every((entry) => isInstanceBackup(entry)))) &&
-    (value.name === undefined || typeof value.name === "string")
-  );
 }
 
 // ── Safe tar extraction ──────────────────────────────────────────
@@ -864,24 +744,6 @@ export function validateSnapshotName(name: string): string | null {
   return null;
 }
 
-function normalizeStateFilePath(filePath: string): string | null {
-  if (!filePath || filePath.includes("\0") || path.isAbsolute(filePath)) return null;
-  const normalized = path.posix.normalize(filePath.replace(/\\/g, "/"));
-  if (normalized === "." || normalized.startsWith("../") || normalized === "..") return null;
-  return normalized;
-}
-
-function isSafeStateDirPath(dirPath: string): boolean {
-  if (!dirPath || dirPath.includes("\0") || path.isAbsolute(dirPath)) return false;
-  const normalized = path.posix.normalize(dirPath.replace(/\\/g, "/"));
-  return (
-    normalized === dirPath &&
-    normalized !== "." &&
-    normalized !== ".." &&
-    !normalized.startsWith("../")
-  );
-}
-
 function isAllowedDiscoveredStateDir(
   candidate: string,
   exactDirectories: readonly string[],
@@ -921,18 +783,6 @@ function describeStateDirDiscoveryFailure(
   return null;
 }
 
-function isStateDirArray(value: unknown): value is string[] {
-  return isStringArray(value) && value.every(isSafeStateDirPath);
-}
-
-function isBackedUpDirArray(value: unknown, stateDirs: string[]): value is string[] {
-  const stateDirSet = new Set(stateDirs);
-  return (
-    isStringArray(value) &&
-    value.every((dirName) => isSafeStateDirPath(dirName) && stateDirSet.has(dirName))
-  );
-}
-
 function existingBackupDirs(backupPath: string, dirNames: string[]): string[] {
   const existing: string[] = [];
   for (const dirName of dirNames) {
@@ -945,22 +795,6 @@ function existingBackupDirs(backupPath: string, dirNames: string[]): string[] {
     }
   }
   return existing;
-}
-
-function normalizeStateFileSpec(spec: AgentStateFile | StateFileSpec): StateFileSpec | null {
-  const normalized = normalizeStateFilePath(spec.path);
-  if (!normalized) return null;
-  if (spec.strategy !== "copy" && spec.strategy !== "sqlite_backup") return null;
-  return { path: normalized, strategy: spec.strategy };
-}
-
-function normalizeStateFileSpecsPreservingDuplicates(
-  specs: readonly (AgentStateFile | StateFileSpec)[],
-): StateFileSpec[] {
-  return specs.flatMap((spec) => {
-    const normalized = normalizeStateFileSpec(spec);
-    return normalized ? [normalized] : [];
-  });
 }
 
 function normalizeStateFileSpecs(
@@ -1195,61 +1029,6 @@ export { buildStateFileRestoreCommand } from "./state-file-restore.js";
 // module. Prefer importing directly from ./ssh-transport in new code.
 export { isSshTransportFailure };
 
-function normalizeSnapshotBackupAuthority(options: BackupOptions): {
-  readonly runtimeSnapshot?: SandboxRuntimeSnapshot;
-  readonly workload?: SandboxWorkloadReceipt;
-  readonly hostLocalInferenceReceipt?: string;
-  readonly hostLocalInferenceProvenance?: SandboxHostLocalInferenceProvenance;
-  readonly error?: string;
-} {
-  const runtimeSnapshot =
-    options.runtimeSnapshot === undefined
-      ? undefined
-      : cloneSandboxRuntimeSnapshot(options.runtimeSnapshot);
-  const workload =
-    options.workload === undefined ? undefined : cloneSandboxWorkloadReceipt(options.workload);
-  const hostLocalInferenceReceipt = registry.cloneSandboxHostLocalInferenceReceipt(
-    options.hostLocalInferenceReceipt,
-  );
-  const hostLocalInferenceProvenance = registry.cloneSandboxHostLocalInferenceProvenance(
-    options.hostLocalInferenceProvenance,
-  );
-  if (options.runtimeSnapshot !== undefined && runtimeSnapshot === undefined) {
-    return { error: "snapshot runtime state is invalid or cannot be represented" };
-  }
-  if (options.workload !== undefined && workload === undefined) {
-    return { error: "snapshot workload authority is invalid" };
-  }
-  if (
-    options.hostLocalInferenceReceipt !== undefined &&
-    typeof hostLocalInferenceReceipt !== "string"
-  ) {
-    return { error: "snapshot host-local inference authority is invalid" };
-  }
-  if (options.hostLocalInferenceProvenance !== undefined) {
-    if (!hostLocalInferenceProvenance || typeof hostLocalInferenceReceipt !== "string") {
-      return { error: "snapshot host-local inference provenance is invalid" };
-    }
-    try {
-      registry.requireSandboxHostLocalInferenceProvenance(
-        hostLocalInferenceProvenance,
-        hostLocalInferenceReceipt,
-      );
-    } catch {
-      return { error: "snapshot host-local inference provenance is invalid" };
-    }
-  }
-  if (workload?.kind === "managed-image" && runtimeSnapshot === undefined) {
-    return { error: "managed snapshot is missing provider runtime state" };
-  }
-  return {
-    ...(runtimeSnapshot === undefined ? {} : { runtimeSnapshot }),
-    ...(workload === undefined ? {} : { workload }),
-    ...(typeof hostLocalInferenceReceipt === "string" ? { hostLocalInferenceReceipt } : {}),
-    ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
-  };
-}
-
 function validateSnapshotPublication(
   backupPath: string,
   validateBeforePublish: BackupOptions["validateBeforePublish"],
@@ -1268,6 +1047,30 @@ function validateSnapshotPublication(
         cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
       return (
         `Snapshot authority changed during backup: ${detail}. ` +
+        `The unpublished backup at '${backupPath}' could not be removed: ${cleanupDetail}`
+      );
+    }
+  }
+}
+
+function recordBackupContentIntegrity(
+  backupPath: string,
+  manifest: RebuildManifest,
+): string | null {
+  if (manifest.version !== 2) return null;
+  try {
+    manifest.backupContentSha256 = hashSnapshotBackupContent(backupPath);
+    return null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    try {
+      rmSync(backupPath, { recursive: true, force: true });
+      return `Snapshot content integrity publication failed: ${detail}`;
+    } catch (cleanupError) {
+      const cleanupDetail =
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      return (
+        `Snapshot content integrity publication failed: ${detail}. ` +
         `The unpublished backup at '${backupPath}' could not be removed: ${cleanupDetail}`
       );
     }
@@ -1337,8 +1140,18 @@ function classifyPreBackupAuditEntry(
 
 export function backupSandboxState(sandboxName: string, options: BackupOptions = {}): BackupResult {
   const sb = registry.getSandbox(sandboxName);
-  const agentName = sb?.agent || "openclaw";
-  const agent = loadAgent(agentName);
+  const agentAuthority = normalizeBackupAgentAuthority(sb, options, loadAgent);
+  if (!agentAuthority.ok) {
+    return {
+      success: false,
+      backedUpDirs: [],
+      failedDirs: [],
+      backedUpFiles: [],
+      failedFiles: [],
+      error: agentAuthority.error,
+    };
+  }
+  const { agent, agentName } = agentAuthority;
   const dir = agent.configPaths.dir;
   const stateDirs = agent.backupStateDirs;
   const stateDirPrefixes = agent.backupStateDirPrefixes;
@@ -1440,12 +1253,15 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
   _log(`customPolicies from registry: [${customPolicies.map((c) => c.name).join(",")}]`);
 
   const manifest: RebuildManifest = {
-    version: MANIFEST_VERSION,
+    version: agentAuthority.manifestVersion,
     sandboxName,
     timestamp,
     agentType: agentName,
     agentVersion: sb?.agentVersion || null,
     expectedVersion: agent.expectedVersion,
+    ...(agentAuthority.manifestVersion === 2
+      ? { harnessPackage: agentAuthority.harnessPackage ?? null }
+      : {}),
     ...(openClawMetadata.pluginInstalls !== undefined
       ? { openclawImagePluginInstalls: openClawMetadata.pluginInstalls }
       : {}),
@@ -1454,6 +1270,7 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
       : {}),
     stateDirs,
     failedBackupDirs: [],
+    backupComplete: false,
     stateFiles,
     dir,
     backupPath,
@@ -1483,6 +1300,32 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
         backedUpFiles: [],
         failedFiles: [],
         error: publicationError,
+      };
+    }
+    manifest.backupComplete = true;
+    const integrityError = recordBackupContentIntegrity(backupPath, manifest);
+    if (integrityError) {
+      return {
+        success: false,
+        backedUpDirs: [],
+        failedDirs: [],
+        backedUpFiles: [],
+        failedFiles: [],
+        error: integrityError,
+      };
+    }
+    const finalPublicationError = validateSnapshotPublication(
+      backupPath,
+      options.validateBeforePublish,
+    );
+    if (finalPublicationError) {
+      return {
+        success: false,
+        backedUpDirs: [],
+        failedDirs: [],
+        backedUpFiles: [],
+        failedFiles: [],
+        error: finalPublicationError,
       };
     }
     writeManifest(backupPath, manifest);
@@ -1868,6 +1711,8 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
   manifest.failedBackupDirs = failedDirs.filter((failedDir) =>
     manifest.stateDirs.includes(failedDir),
   );
+  const backupComplete = failedDirs.length === 0 && failedFiles.length === 0;
+  manifest.backupComplete = backupComplete;
 
   const publicationError = validateSnapshotPublication(backupPath, options.validateBeforePublish);
   if (publicationError) {
@@ -1880,11 +1725,36 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
       error: publicationError,
     };
   }
+  const integrityError = recordBackupContentIntegrity(backupPath, manifest);
+  if (integrityError) {
+    return {
+      success: false,
+      backedUpDirs: [],
+      failedDirs: [],
+      backedUpFiles: [],
+      failedFiles: [],
+      error: integrityError,
+    };
+  }
+  const finalPublicationError = validateSnapshotPublication(
+    backupPath,
+    options.validateBeforePublish,
+  );
+  if (finalPublicationError) {
+    return {
+      success: false,
+      backedUpDirs: [],
+      failedDirs: [],
+      backedUpFiles: [],
+      failedFiles: [],
+      error: finalPublicationError,
+    };
+  }
   writeManifest(backupPath, manifest);
   manifest.backupPath = backupPath;
 
   return {
-    success: failedDirs.length === 0 && failedFiles.length === 0,
+    success: backupComplete,
     unreachable,
     manifest,
     backedUpDirs,
@@ -1897,83 +1767,285 @@ export function backupSandboxState(sandboxName: string, options: BackupOptions =
 
 // ── Restore ────────────────────────────────────────────────────────
 
-function snapshotManifestAuthority(manifest: RebuildManifest): RebuildManifest {
-  const normalized = {
-    ...manifest,
-    backupPath: path.resolve(manifest.backupPath),
-  } as RebuildManifest & { snapshotVersion?: unknown };
-  // snapshotVersion is a list-time cursor, not persisted restore authority.
-  // Every other normalized manifest field can affect restore behavior and
-  // therefore remains bound to the operator's selected snapshot.
-  delete normalized.snapshotVersion;
-  return normalized;
+type SnapshotFileStat = NonNullable<ReturnType<typeof lstatSync>>;
+
+function sameSnapshotFileStat(left: SnapshotFileStat, right: SnapshotFileStat): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.size === right.size &&
+    left.mtimeMs === right.mtimeMs &&
+    left.ctimeMs === right.ctimeMs
+  );
 }
 
-function hashSnapshotTree(backupPath: string): string {
-  if (typeof constants.O_NOFOLLOW !== "number") {
-    throw new Error("snapshot hashing requires O_NOFOLLOW support");
+function snapshotPermissionMode(stat: SnapshotFileStat): number {
+  // Staging intentionally preserves only portable owner/group/other rwx bits.
+  // Bind the digest to the same mode bits that the restore tar can apply.
+  return Number(stat.mode) & 0o777;
+}
+
+function snapshotRestorableTime(stat: SnapshotFileStat): number {
+  return Math.trunc(Number(stat.mtimeMs) / 1000);
+}
+
+function snapshotDirectoryOpenFlags(): number {
+  if (typeof constants.O_NOFOLLOW !== "number" || typeof constants.O_DIRECTORY !== "number") {
+    throw new Error("snapshot staging requires O_NOFOLLOW and O_DIRECTORY support");
   }
-  const openFlags =
+  return constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY;
+}
+
+function copyStableSnapshotFile(sourcePath: string, destinationPath: string, relativePath: string) {
+  const sourceFlags =
     constants.O_RDONLY |
     constants.O_NOFOLLOW |
     (typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0);
-  const hash = createHash("sha256");
-  const visit = (directory: string, relativeDirectory: string): void => {
-    const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+  const sourceDescriptor = openSync(sourcePath, sourceFlags);
+  let destinationDescriptor: number | null = null;
+  try {
+    const before = fstatSync(sourceDescriptor);
+    const namedBefore = lstatSync(sourcePath);
+    if (
+      !before.isFile() ||
+      namedBefore.isSymbolicLink() ||
+      !sameSnapshotFileStat(before, namedBefore)
+    ) {
+      throw new Error(`snapshot entry '${relativePath}' changed before it was staged`);
+    }
+    destinationDescriptor = openSync(
+      destinationPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      snapshotPermissionMode(before),
+    );
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    for (;;) {
+      const bytesRead = readSync(sourceDescriptor, buffer, 0, buffer.byteLength, null);
+      if (bytesRead === 0) break;
+      let written = 0;
+      while (written < bytesRead) {
+        written += writeSync(destinationDescriptor, buffer, written, bytesRead - written, null);
+      }
+    }
+    const after = fstatSync(sourceDescriptor);
+    const namedAfter = lstatSync(sourcePath);
+    if (!sameSnapshotFileStat(before, after) || !sameSnapshotFileStat(before, namedAfter)) {
+      throw new Error(`snapshot entry '${relativePath}' changed while it was staged`);
+    }
+    futimesSync(
+      destinationDescriptor,
+      snapshotRestorableTime(before),
+      snapshotRestorableTime(before),
+    );
+  } finally {
+    if (destinationDescriptor !== null) closeSync(destinationDescriptor);
+    closeSync(sourceDescriptor);
+  }
+}
+
+function copyStableSnapshotDirectory(
+  sourceDirectory: string,
+  destinationDirectory: string,
+  relativeDirectory = "",
+): void {
+  const directoryDescriptor = openSync(sourceDirectory, snapshotDirectoryOpenFlags());
+  try {
+    const openedDirectory = fstatSync(directoryDescriptor);
+    const namedDirectory = lstatSync(sourceDirectory);
+    if (
+      !openedDirectory.isDirectory() ||
+      namedDirectory.isSymbolicLink() ||
+      !sameSnapshotFileStat(openedDirectory, namedDirectory)
+    ) {
+      throw new Error(
+        `snapshot directory '${relativeDirectory || "."}' changed before it was staged`,
+      );
+    }
+    const entries = readdirSync(sourceDirectory, { withFileTypes: true }).sort((left, right) =>
       left.name === right.name ? 0 : left.name < right.name ? -1 : 1,
     );
     for (const entry of entries) {
-      const fullPath = path.join(directory, entry.name);
+      const sourcePath = path.join(sourceDirectory, entry.name);
+      const destinationPath = path.join(destinationDirectory, entry.name);
       const relativePath = path.posix.join(
         relativeDirectory.split(path.sep).join(path.posix.sep),
         entry.name,
       );
-      if (entry.isDirectory()) {
-        hash.update(JSON.stringify(["directory", relativePath]), "utf8");
-        visit(fullPath, relativePath);
+      const namedBefore = lstatSync(sourcePath);
+      if (namedBefore.isDirectory()) {
+        mkdirSync(destinationPath, { mode: 0o700 });
+        copyStableSnapshotDirectory(sourcePath, destinationPath, relativePath);
+        chmodSync(destinationPath, snapshotPermissionMode(namedBefore));
+        utimesSync(
+          destinationPath,
+          snapshotRestorableTime(namedBefore),
+          snapshotRestorableTime(namedBefore),
+        );
         continue;
       }
-      if (entry.isSymbolicLink()) {
-        hash.update(JSON.stringify(["symlink", relativePath, readlinkSync(fullPath)]), "utf8");
+      if (namedBefore.isSymbolicLink()) {
+        const target = readlinkSync(sourcePath);
+        const namedAfter = lstatSync(sourcePath);
+        if (!sameSnapshotFileStat(namedBefore, namedAfter) || readlinkSync(sourcePath) !== target) {
+          throw new Error(`snapshot symlink '${relativePath}' changed while it was staged`);
+        }
+        symlinkSync(target, destinationPath);
+        lutimesSync(
+          destinationPath,
+          snapshotRestorableTime(namedBefore),
+          snapshotRestorableTime(namedBefore),
+        );
         continue;
       }
-      if (!entry.isFile()) {
+      if (!namedBefore.isFile()) {
         throw new Error(`snapshot contains unsupported entry '${relativePath}'`);
       }
-      const descriptor = openSync(fullPath, openFlags);
-      try {
-        const opened = fstatSync(descriptor);
-        if (!opened.isFile()) {
-          throw new Error(`snapshot entry '${relativePath}' changed while it was opened`);
-        }
-        hash.update(JSON.stringify(["file", relativePath, opened.size]), "utf8");
-        const buffer = Buffer.allocUnsafe(64 * 1024);
-        for (;;) {
-          const bytesRead = readSync(descriptor, buffer, 0, buffer.byteLength, null);
-          if (bytesRead === 0) break;
-          hash.update(buffer.subarray(0, bytesRead));
-        }
-        const after = fstatSync(descriptor);
-        const pathAfter = lstatSync(fullPath);
-        if (
-          after.size !== opened.size ||
-          after.mtimeMs !== opened.mtimeMs ||
-          pathAfter.isSymbolicLink() ||
-          !pathAfter.isFile() ||
-          pathAfter.dev !== opened.dev ||
-          pathAfter.ino !== opened.ino ||
-          pathAfter.size !== opened.size ||
-          pathAfter.mtimeMs !== opened.mtimeMs
-        ) {
-          throw new Error(`snapshot entry '${relativePath}' changed while it was read`);
-        }
-      } finally {
-        closeSync(descriptor);
+      copyStableSnapshotFile(sourcePath, destinationPath, relativePath);
+      chmodSync(destinationPath, snapshotPermissionMode(namedBefore));
+    }
+    const afterDirectory = fstatSync(directoryDescriptor);
+    const namedAfterDirectory = lstatSync(sourceDirectory);
+    if (
+      !sameSnapshotFileStat(openedDirectory, afterDirectory) ||
+      !sameSnapshotFileStat(openedDirectory, namedAfterDirectory)
+    ) {
+      throw new Error(
+        `snapshot directory '${relativeDirectory || "."}' changed while it was staged`,
+      );
+    }
+  } finally {
+    closeSync(directoryDescriptor);
+  }
+}
+
+interface StagedSnapshotRestoreTree {
+  readonly backupPath: string;
+  readonly contentSha256: string;
+  cleanup(): void;
+}
+
+function removePrivateSnapshotStagingTree(stagingPath: string): void {
+  const makeDirectoriesWritable = (directory: string): void => {
+    let stat: SnapshotFileStat;
+    try {
+      stat = lstatSync(directory);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    chmodSync(directory, 0o700);
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        makeDirectoriesWritable(path.join(directory, entry.name));
       }
     }
   };
-  visit(backupPath, "");
-  return hash.digest("hex");
+  try {
+    makeDirectoriesWritable(stagingPath);
+  } finally {
+    rmSync(stagingPath, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Copy the selected tree into a private, operation-owned tree. Comparing the
+ * complete copy with the selected digest
+ * prevents a rename-and-return attack from feeding restore bytes from another
+ * directory while the original path still passes the final authority check.
+ */
+function stageSnapshotRestoreTree(
+  backupPath: string,
+  authority: SnapshotRestoreAuthority,
+): StagedSnapshotRestoreTree {
+  const root = path.resolve(REBUILD_BACKUPS_DIR);
+  const candidate = path.resolve(backupPath);
+  if (candidate === root || !isWithinRoot(candidate, root) || candidate !== authority.backupPath) {
+    throw new Error("selected snapshot path differs from its captured authority");
+  }
+  rejectSymlinksOnPath(candidate);
+
+  let stagingPath: string | null = null;
+  try {
+    stagingPath = mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-restore-"));
+    chmodSync(stagingPath, 0o700);
+    copyStableSnapshotDirectory(candidate, stagingPath);
+    const contentSha256 = hashSnapshotTree(stagingPath);
+    if (contentSha256 !== authority.contentSha256) {
+      throw new Error("selected snapshot content changed while it was staged");
+    }
+
+    const ownedPath = stagingPath;
+    stagingPath = null;
+    return {
+      backupPath: ownedPath,
+      contentSha256,
+      cleanup: () => removePrivateSnapshotStagingTree(ownedPath),
+    };
+  } finally {
+    if (stagingPath !== null) removePrivateSnapshotStagingTree(stagingPath);
+  }
+}
+
+function snapshotFileAncestors(backupPath: string, relativePath: string): SnapshotFileStat[] {
+  const parts = relativePath.split("/");
+  const ancestors: SnapshotFileStat[] = [];
+  let current = backupPath;
+  for (const part of parts.slice(0, -1)) {
+    current = path.join(current, part);
+    const stat = lstatSync(current);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error(`backup state file '${relativePath}' has an unsafe parent path`);
+    }
+    ancestors.push(stat);
+  }
+  return ancestors;
+}
+
+function readStableSnapshotStateFile(backupPath: string, relativePath: string): Buffer {
+  if (typeof constants.O_NOFOLLOW !== "number") {
+    throw new Error("snapshot state-file restore requires O_NOFOLLOW support");
+  }
+  const fullPath = path.join(backupPath, relativePath);
+  const beforeAncestors = snapshotFileAncestors(backupPath, relativePath);
+  const flags =
+    constants.O_RDONLY |
+    constants.O_NOFOLLOW |
+    (typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0);
+  const descriptor = openSync(fullPath, flags);
+  try {
+    const before = fstatSync(descriptor);
+    const namedBefore = lstatSync(fullPath);
+    if (
+      !before.isFile() ||
+      namedBefore.isSymbolicLink() ||
+      !namedBefore.isFile() ||
+      before.nlink !== 1 ||
+      !sameSnapshotFileStat(before, namedBefore)
+    ) {
+      throw new Error(`backup state file '${relativePath}' is not one stable regular file`);
+    }
+    const contents = readFileSync(descriptor);
+    const after = fstatSync(descriptor);
+    const namedAfter = lstatSync(fullPath);
+    const afterAncestors = snapshotFileAncestors(backupPath, relativePath);
+    if (
+      contents.byteLength !== after.size ||
+      !sameSnapshotFileStat(before, after) ||
+      !sameSnapshotFileStat(before, namedAfter) ||
+      beforeAncestors.length !== afterAncestors.length ||
+      beforeAncestors.some((ancestor, index) =>
+        sameSnapshotFileStat(ancestor, afterAncestors[index]!) ? false : true,
+      )
+    ) {
+      throw new Error(`backup state file '${relativePath}' changed while it was staged`);
+    }
+    return contents;
+  } finally {
+    closeSync(descriptor);
+  }
 }
 
 /**
@@ -1985,11 +2057,22 @@ export function captureSnapshotRestoreAuthority(
   backupPath: string,
   expectedManifest?: RebuildManifest,
 ): SnapshotRestoreAuthority | null {
+  let descriptor: number | null = null;
   try {
     const root = path.resolve(REBUILD_BACKUPS_DIR);
     const candidate = path.resolve(backupPath);
     if (candidate === root || !isWithinRoot(candidate, root)) return null;
     rejectSymlinksOnPath(candidate);
+    descriptor = openSync(candidate, snapshotDirectoryOpenFlags());
+    const openedRoot = fstatSync(descriptor);
+    const namedRoot = lstatSync(candidate);
+    if (
+      !openedRoot.isDirectory() ||
+      namedRoot.isSymbolicLink() ||
+      !sameSnapshotFileStat(openedRoot, namedRoot)
+    ) {
+      return null;
+    }
     if (!lstatSync(path.join(candidate, "rebuild-manifest.json")).isFile()) return null;
     const manifest = readManifest(candidate);
     if (!manifest || path.resolve(manifest.backupPath) !== candidate) return null;
@@ -2002,28 +2085,103 @@ export function captureSnapshotRestoreAuthority(
     ) {
       return null;
     }
+    if (!validateSnapshotBackupContent(manifest, { requireV2Evidence: false }).ok) return null;
+    const contentSha256 = hashSnapshotTree(candidate);
+    const afterRoot = fstatSync(descriptor);
+    const namedAfterRoot = lstatSync(candidate);
+    if (
+      !sameSnapshotFileStat(openedRoot, afterRoot) ||
+      !sameSnapshotFileStat(openedRoot, namedAfterRoot)
+    ) {
+      return null;
+    }
     return {
       schemaVersion: 1,
       backupPath: candidate,
-      contentSha256: hashSnapshotTree(candidate),
+      contentSha256,
     };
   } catch {
     return null;
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
   }
 }
 
-function validateSnapshotRestoreMutation(
+/** Capture and privately stage the exact snapshot bytes before any destructive action. */
+export function prepareSnapshotRestoreContent(
   backupPath: string,
-  options: Pick<InternalRestoreOptions, "authority" | "validateBeforeMutation">,
+  expectedManifest?: RebuildManifest,
+): PreparedSnapshotRestoreContent | null {
+  const authority = captureSnapshotRestoreAuthority(backupPath, expectedManifest);
+  if (!authority) return null;
+  let staged: StagedSnapshotRestoreTree;
+  try {
+    staged = stageSnapshotRestoreTree(backupPath, authority);
+  } catch {
+    return null;
+  }
+  let cleaned = false;
+  const validate = (): void => {
+    if (cleaned) throw new Error("operation-owned snapshot content has already been removed");
+    if (authority.backupPath !== path.resolve(backupPath)) {
+      throw new Error("operation-owned snapshot content no longer matches its selected path");
+    }
+    let currentContentSha256: string;
+    try {
+      currentContentSha256 = hashSnapshotTree(staged.backupPath);
+    } catch {
+      throw new Error("operation-owned snapshot content could not be verified safely");
+    }
+    if (currentContentSha256 !== authority.contentSha256) {
+      throw new Error("operation-owned snapshot content changed before lifecycle mutation");
+    }
+  };
+  return {
+    schemaVersion: 1,
+    selectedBackupPath: authority.backupPath,
+    stagedBackupPath: staged.backupPath,
+    authority,
+    validate,
+    cleanup: () => {
+      if (cleaned) return;
+      staged.cleanup();
+      cleaned = true;
+    },
+  };
+}
+
+function validateSnapshotRestoreMutation(
+  selectedBackupPath: string,
+  stagedBackupPath: string,
+  options: Pick<InternalRestoreOptions, "authority" | "preparedContent" | "validateBeforeMutation">,
 ): string | null {
   if (options.authority) {
-    const current = captureSnapshotRestoreAuthority(backupPath);
-    if (
-      !current ||
-      current.backupPath !== options.authority.backupPath ||
-      current.contentSha256 !== options.authority.contentSha256
-    ) {
-      return "Selected snapshot content changed before filesystem mutation";
+    let stagedContentSha256: string;
+    try {
+      stagedContentSha256 = hashSnapshotTree(stagedBackupPath);
+    } catch {
+      return "Operation-owned snapshot content changed before filesystem mutation";
+    }
+    if (stagedContentSha256 !== options.authority.contentSha256) {
+      return "Operation-owned snapshot content changed before filesystem mutation";
+    }
+    if (options.preparedContent) {
+      if (
+        options.preparedContent.selectedBackupPath !== selectedBackupPath ||
+        options.preparedContent.stagedBackupPath !== stagedBackupPath ||
+        !isDeepStrictEqual(options.preparedContent.authority, options.authority)
+      ) {
+        return "Operation-owned snapshot content does not match its prepared authority";
+      }
+    } else {
+      const current = captureSnapshotRestoreAuthority(selectedBackupPath);
+      if (
+        !current ||
+        current.backupPath !== options.authority.backupPath ||
+        current.contentSha256 !== options.authority.contentSha256
+      ) {
+        return "Selected snapshot content changed before filesystem mutation";
+      }
     }
   }
   try {
@@ -2056,8 +2214,10 @@ export function restoreSandboxState(
   }
   return restoreSandboxStateInternal(sandboxName, backupPath, {
     targetAgentType: String(target.agent || "openclaw"),
+    ...(options.agentDefinition ? { agentDefinition: options.agentDefinition } : {}),
     ...(target.fromDockerfile ? { allowCustomImageWholeStateFileRestore: true } : {}),
     ...(options.authority ? { authority: options.authority } : {}),
+    ...(options.preparedContent ? { preparedContent: options.preparedContent } : {}),
     ...(options.validateBeforeMutation
       ? { validateBeforeMutation: options.validateBeforeMutation }
       : {}),
@@ -2071,6 +2231,7 @@ export function restoreRecreatedSandboxState(
 ): RestoreResult {
   return restoreSandboxStateInternal(sandboxName, backupPath, {
     targetAgentType: options.targetAgentType,
+    ...(options.agentDefinition ? { agentDefinition: options.agentDefinition } : {}),
     ...(options.allowCustomImageWholeStateFileRestore
       ? { allowCustomImageWholeStateFileRestore: true }
       : {}),
@@ -2080,6 +2241,7 @@ export function restoreRecreatedSandboxState(
       : {}),
     freshOpenClawImagePluginInstalls: options.freshOpenClawImagePluginInstalls,
     ...(options.authority ? { authority: options.authority } : {}),
+    ...(options.preparedContent ? { preparedContent: options.preparedContent } : {}),
     ...(options.validateBeforeMutation
       ? { validateBeforeMutation: options.validateBeforeMutation }
       : {}),
@@ -2088,6 +2250,57 @@ export function restoreRecreatedSandboxState(
 
 function restoreSandboxStateInternal(
   sandboxName: string,
+  backupPath: string,
+  options: InternalRestoreOptions,
+): RestoreResult {
+  if (!options.authority || !options.validateBeforeMutation || !options.agentDefinition) {
+    return restoreSandboxStateFromTrustedTree(sandboxName, backupPath, backupPath, options);
+  }
+  if (options.preparedContent) {
+    if (
+      options.preparedContent.selectedBackupPath !== path.resolve(backupPath) ||
+      !isDeepStrictEqual(options.preparedContent.authority, options.authority)
+    ) {
+      return {
+        success: false,
+        restoredDirs: [],
+        failedDirs: ["manifest"],
+        restoredFiles: [],
+        failedFiles: [],
+        error: "Prepared snapshot content does not match the selected restore authority",
+      };
+    }
+    return restoreSandboxStateFromTrustedTree(
+      sandboxName,
+      backupPath,
+      options.preparedContent.stagedBackupPath,
+      options,
+    );
+  }
+  let staged: StagedSnapshotRestoreTree;
+  try {
+    staged = stageSnapshotRestoreTree(backupPath, options.authority);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      success: false,
+      restoredDirs: [],
+      failedDirs: ["manifest"],
+      restoredFiles: [],
+      failedFiles: [],
+      error: `Could not stage selected snapshot safely: ${detail}`,
+    };
+  }
+  try {
+    return restoreSandboxStateFromTrustedTree(sandboxName, backupPath, staged.backupPath, options);
+  } finally {
+    staged.cleanup();
+  }
+}
+
+function restoreSandboxStateFromTrustedTree(
+  sandboxName: string,
+  selectedBackupPath: string,
   backupPath: string,
   options: InternalRestoreOptions,
 ): RestoreResult {
@@ -2162,13 +2375,36 @@ function restoreSandboxStateInternal(
       `Backup agent '${manifest.agentType}' does not match target agent '${options.targetAgentType}'`,
     );
   }
-  let targetAgent: ReturnType<typeof loadAgent>;
-  try {
-    targetAgent = loadAgent(options.targetAgentType);
-  } catch {
-    return failRestoreContract(
-      `Could not load target agent manifest '${options.targetAgentType}' for state restore`,
-    );
+  if (
+    manifest.version === 2 &&
+    (!options.agentDefinition || !options.authority || !options.validateBeforeMutation)
+  ) {
+    return failRestoreContract(SCHEMA_V2_SNAPSHOT_RESTORE_AUTHORITY_ERROR);
+  }
+  let targetAgent: AgentDefinition;
+  if (options.agentDefinition) {
+    if (options.agentDefinition.name !== options.targetAgentType) {
+      return failRestoreContract(
+        `Pinned target agent definition '${options.agentDefinition.name}' does not match target agent '${options.targetAgentType}'`,
+      );
+    }
+    targetAgent = options.agentDefinition;
+  } else {
+    // Authority-bearing restores are package-managed operations. Re-resolving
+    // their definition from the ambient checkout could silently switch package
+    // versions between selection and mutation.
+    if (options.authority || options.validateBeforeMutation) {
+      return failRestoreContract(
+        `Managed state restore for '${options.targetAgentType}' requires its pinned agent definition`,
+      );
+    }
+    try {
+      targetAgent = loadAgent(options.targetAgentType);
+    } catch {
+      return failRestoreContract(
+        `Could not load target agent manifest '${options.targetAgentType}' for state restore`,
+      );
+    }
   }
   const normalizedBackupDir = dir.replace(/\/+$/, "");
   const normalizedTargetDir = targetAgent.configPaths.dir.replace(/\/+$/, "");
@@ -2279,7 +2515,11 @@ function restoreSandboxStateInternal(
   }
 
   if (cleanupStateDirs.length === 0 && localFiles.length === 0) {
-    const mutationAuthorityError = validateSnapshotRestoreMutation(backupPath, options);
+    const mutationAuthorityError = validateSnapshotRestoreMutation(
+      selectedBackupPath,
+      backupPath,
+      options,
+    );
     if (mutationAuthorityError) {
       return failRestoreContract(mutationAuthorityError);
     }
@@ -2374,7 +2614,27 @@ function restoreSandboxStateInternal(
       restoreTar = tarResult.stdout;
     }
 
-    const mutationAuthorityError = validateSnapshotRestoreMutation(backupPath, options);
+    // Stage every state-file payload before the final content and runtime
+    // authority fence. Restore must consume only these operation-owned bytes;
+    // reading backupPath after the fence would let a later local-file change
+    // select different input after the target filesystem has begun mutating.
+    let stagedStateFiles: ReadonlyMap<string, Buffer>;
+    try {
+      stagedStateFiles = new Map(
+        localFiles.map(
+          (spec) => [spec.path, readStableSnapshotStateFile(backupPath, spec.path)] as const,
+        ),
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return failRestoreContract(`Could not stage backup state files safely: ${detail}`);
+    }
+
+    const mutationAuthorityError = validateSnapshotRestoreMutation(
+      selectedBackupPath,
+      backupPath,
+      options,
+    );
     if (mutationAuthorityError) {
       return failRestoreContract(mutationAuthorityError);
     }
@@ -2480,12 +2740,14 @@ function restoreSandboxStateInternal(
     for (const spec of localFiles) {
       const targetStateFile = targetStateFiles.get(spec.path);
       if (!targetStateFile) throw new Error(`Validated target state file missing: ${spec.path}`);
+      const backupContents = stagedStateFiles.get(spec.path);
+      if (!backupContents) throw new Error(`Staged state file missing: ${spec.path}`);
       if (
         restoreStateFile(
           sshArgs(configFile, sandboxName),
           dir,
           spec,
-          backupPath,
+          backupContents,
           targetStateFile.restore,
           options.allowCustomImageWholeStateFileRestore === true,
           _log,
@@ -2517,105 +2779,9 @@ function restoreSandboxStateInternal(
 
 // ── Manifest ───────────────────────────────────────────────────────
 
-type ManifestPublishOps = {
-  write(filePath: string, contents: string, options: { mode: number; flag: "wx" }): void;
-  rename(source: string, destination: string): void;
-  remove(filePath: string, options: { force: true }): void;
-};
-
-const manifestPublishOps: ManifestPublishOps = {
-  write: (filePath, contents, options) => writeFileSync(filePath, contents, options),
-  rename: (source, destination) => renameSync(source, destination),
-  remove: (filePath, options) => rmSync(filePath, options),
-};
-
-function writeManifest(
-  backupPath: string,
-  manifest: RebuildManifest,
-  ops: ManifestPublishOps = manifestPublishOps,
-): void {
-  const manifestPath = path.join(backupPath, "rebuild-manifest.json");
-  const tempPath = path.join(backupPath, `.rebuild-manifest.json.tmp.${String(process.pid)}`);
-  let published = false;
-  try {
-    // A snapshot becomes recoverable only after its complete, private manifest
-    // is atomically renamed into place.
-    ops.write(tempPath, JSON.stringify(manifest, null, 2), { mode: 0o600, flag: "wx" });
-    ops.rename(tempPath, manifestPath);
-    published = true;
-  } finally {
-    if (!published) {
-      try {
-        ops.remove(tempPath, { force: true });
-      } catch {
-        // Preserve the publish failure; a same-directory temp file is never a snapshot.
-      }
-    }
-  }
-}
-
-export const __test = { writeManifest };
-
-function readManifestPayload(backupPath: string): unknown | null {
-  const manifestPath = path.join(backupPath, "rebuild-manifest.json");
-  if (!existsSync(manifestPath)) return null;
-  try {
-    return parseJson<unknown>(readFileSync(manifestPath, "utf-8"));
-  } catch {
-    return null;
-  }
-}
-
-function hasInvalidMarkedOpenClawPluginProvenance(backupPath: string): boolean {
-  const parsed = readManifestPayload(backupPath);
-  return (
-    isObjectRecord(parsed) &&
-    parsed.reconcileOpenClawImagePluginProvenance === true &&
-    !hasAuthoritativeOpenClawImagePluginProvenance(parsed)
-  );
-}
-
-function readManifest(backupPath: string): RebuildManifest | null {
-  try {
-    const parsed = readManifestPayload(backupPath);
-    if (!isRebuildManifest(parsed)) return null;
-    const manifest = parsed as RebuildManifest & { dir?: string; writableDir?: string };
-    const dir = manifest.dir ?? manifest.writableDir;
-    if (!dir) return null;
-    const runtimeSnapshot =
-      manifest.runtimeSnapshot === undefined
-        ? undefined
-        : cloneSandboxRuntimeSnapshot(manifest.runtimeSnapshot);
-    const workload =
-      manifest.workload === undefined ? undefined : cloneSandboxWorkloadReceipt(manifest.workload);
-    const hostLocalInferenceReceipt = registry.cloneSandboxHostLocalInferenceReceipt(
-      manifest.hostLocalInferenceReceipt,
-    );
-    const hostLocalInferenceProvenance = registry.cloneSandboxHostLocalInferenceProvenance(
-      manifest.hostLocalInferenceProvenance,
-    );
-    return {
-      ...manifest,
-      dir,
-      // Preserve repeated normalized paths from this untrusted payload so the
-      // restore contract can reject them instead of silently de-duplicating.
-      stateFiles: normalizeStateFileSpecsPreservingDuplicates(manifest.stateFiles ?? []),
-      blueprintDigest: manifest.blueprintDigest ?? null,
-      ...(runtimeSnapshot === undefined ? {} : { runtimeSnapshot }),
-      ...(workload === undefined ? {} : { workload }),
-      ...(typeof hostLocalInferenceReceipt === "string" ? { hostLocalInferenceReceipt } : {}),
-      ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
-    };
-  } catch {
-    return null;
-  }
-}
+export const __test = { writeManifest, readManifest };
 
 // ── Listing ────────────────────────────────────────────────────────
-
-export type RebuildRecoveryManifestValidation =
-  | { ok: true; manifest: RebuildManifest }
-  | { ok: false; reason: string };
 
 /**
  * Remove one completed rebuild backup without allowing a caller-controlled
@@ -2641,62 +2807,6 @@ export function removeSandboxStateBackup(sandboxName: string, backupPath: string
   } catch {
     return false;
   }
-}
-
-/**
- * Re-read and validate a prepared rebuild backup before a destructive recovery.
- *
- * `getLatestBackup()` validates the manifest schema. Recovery additionally pins
- * the backup to the target sandbox's own timestamped directory and requires the
- * persisted sandbox/agent identity to match the registry entry. This keeps an
- * installer recovery from deleting a sandbox based on a renamed, copied, or
- * otherwise mismatched manifest.
- */
-export function validateRebuildRecoveryManifest(
-  sandboxName: string,
-  agentName: string | null | undefined,
-  candidate: RebuildManifest,
-): RebuildRecoveryManifestValidation {
-  const expectedAgent = String(agentName || "openclaw").trim() || "openclaw";
-  const sandboxBackupRoot = path.resolve(REBUILD_BACKUPS_DIR, sandboxName);
-  const expectedBackupPath = path.resolve(sandboxBackupRoot, candidate.timestamp);
-  const candidateBackupPath = path.resolve(candidate.backupPath);
-
-  if (
-    candidateBackupPath !== expectedBackupPath ||
-    path.dirname(candidateBackupPath) !== sandboxBackupRoot ||
-    path.basename(candidateBackupPath) !== candidate.timestamp
-  ) {
-    return {
-      ok: false,
-      reason: `backup path does not match '${sandboxName}' and timestamp '${candidate.timestamp}'`,
-    };
-  }
-
-  const persisted = readManifest(candidateBackupPath);
-  if (!persisted || persisted.version !== MANIFEST_VERSION) {
-    return { ok: false, reason: "latest backup manifest is missing, malformed, or unsupported" };
-  }
-  if (persisted.sandboxName !== sandboxName) {
-    return {
-      ok: false,
-      reason: `manifest sandbox '${persisted.sandboxName}' does not match '${sandboxName}'`,
-    };
-  }
-  if (persisted.agentType !== expectedAgent) {
-    return {
-      ok: false,
-      reason: `manifest agent '${persisted.agentType}' does not match registry agent '${expectedAgent}'`,
-    };
-  }
-  if (
-    persisted.timestamp !== candidate.timestamp ||
-    path.resolve(persisted.backupPath) !== candidateBackupPath
-  ) {
-    return { ok: false, reason: "persisted backup identity changed during validation" };
-  }
-
-  return { ok: true, manifest: persisted };
 }
 
 /**

@@ -20,7 +20,11 @@ import {
 import { installHarnessPackage } from "../harness/package-install";
 import { HarnessPackageStoreIntegrityError } from "../harness/package-store";
 import type { HarnessPackageMigration } from "../harness/package-identity";
-import { createPromptValidatedSandboxName, resolveSandboxAgent } from "./sandbox-agent";
+import {
+  createPromptValidatedSandboxName,
+  resolveLegacyBackupRecoveryOwner,
+  resolveSandboxAgent,
+} from "./sandbox-agent";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-sandbox-agent-tests");
 const SOURCE_IDENTITY = {
@@ -202,6 +206,23 @@ describe("sandbox agent authority", () => {
     expect(resolved.harnessPackageMigration).toBeNull();
   });
 
+  it("re-reads qualified repository definitions as detached immutable authority", () => {
+    const qualification = candidateQualificationEnvironment();
+    qualificationFixtures.push(qualification);
+    candidateAuthority.digests.push(qualification.receiptDigest);
+
+    const first = resolveSandboxAgent({ agent: "pi" }, { storeRoot, env: qualification.env });
+    const second = resolveSandboxAgent({ agent: "pi" }, { storeRoot, env: qualification.env });
+
+    expect(first.definition).toEqual(second.definition);
+    expect(first.definition).not.toBe(second.definition);
+    expect(Object.isFrozen(first.definition)).toBe(true);
+    expect(Object.isFrozen(first.definition.stateFiles)).toBe(true);
+    expect(() => {
+      (first.definition.stateFiles as unknown as unknown[]).push({ path: "changed" });
+    }).toThrow(TypeError);
+  });
+
   it("keeps NemoCUA behind its existing feature gate and outside package authority", () => {
     expect(() => resolveSandboxAgent({ agent: "nemocua" }, { storeRoot, env: {} })).toThrow(
       /NemoCUA is disabled/u,
@@ -223,6 +244,56 @@ describe("sandbox agent authority", () => {
       resolveSandboxAgent({ agent: "pi", harnessPackage: installed.identity }, { storeRoot }),
     ).toThrow(/must not carry harness package authority/u);
   });
+
+  it("accepts an installed legacy backup owner with matching migration provenance", () => {
+    const installed = installOpenClawPackage();
+    const migration: HarnessPackageMigration = {
+      schemaVersion: 1,
+      source: "legacy-current-bundle",
+      legacyAgent: null,
+      migratedAt: "2026-08-27T12:00:00.000Z",
+    };
+
+    expect(
+      resolveLegacyBackupRecoveryOwner(
+        {
+          agent: null,
+          harnessPackage: installed.identity,
+          harnessPackageMigration: migration,
+        },
+        { storeRoot },
+      ),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["missing", undefined],
+    [
+      "mismatched",
+      {
+        schemaVersion: 1,
+        source: "legacy-current-bundle",
+        legacyAgent: "hermes",
+        migratedAt: "2026-08-27T12:00:00.000Z",
+      },
+    ],
+  ] as const)(
+    "rejects an installed legacy backup owner with %s migration provenance",
+    (_label, migration) => {
+      const installed = installOpenClawPackage();
+
+      expect(() =>
+        resolveLegacyBackupRecoveryOwner(
+          {
+            agent: null,
+            harnessPackage: installed.identity,
+            harnessPackageMigration: migration,
+          },
+          { storeRoot },
+        ),
+      ).toThrow(/migration|malformed/u);
+    },
+  );
 });
 
 describe("sandbox name prompt", () => {

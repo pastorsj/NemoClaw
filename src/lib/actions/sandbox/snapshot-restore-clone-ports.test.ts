@@ -13,6 +13,30 @@ import { HERMES_API_PORT_ENV } from "../../onboard/hermes-api-port";
 import { resolveRebuildHermesDashboardEnv } from "./rebuild-durable-config";
 import * as f from "./snapshot-restore-test-fixture";
 
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "a".repeat(64),
+};
+const HERMES_PACKAGE = {
+  ...OPENCLAW_PACKAGE,
+  id: "hermes",
+  contentDigest: "b".repeat(64),
+};
+
+function packageSnapshot(harnessPackage: typeof OPENCLAW_PACKAGE | typeof HERMES_PACKAGE) {
+  return {
+    ...f.latestBackupFixture,
+    version: 2,
+    backupComplete: true,
+    backupContentSha256: "d".repeat(64),
+    agentType: harnessPackage.id,
+    harnessPackage,
+  };
+}
+
 const dashboardPortMocks = vi.hoisted(() => ({
   findAvailableDashboardPort: vi.fn(() => 18901),
   getRegistryOccupiedDashboardPorts: vi.fn(() => new Map<string, string>()),
@@ -40,15 +64,12 @@ beforeEach(f.resetSnapshotRestoreMocks);
 afterEach(f.cleanupSnapshotRestoreMocks);
 describe("runSandboxSnapshot restore: clone port identity", () => {
   it("allocates the auto-created clone its own dashboard port instead of inheriting the source's (#6746)", async () => {
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
-    f.getSandboxMock.mockImplementation((name) =>
+    const cloneRegistry = f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
             name: "alpha",
             agent: "openclaw",
+            harnessPackage: OPENCLAW_PACKAGE,
             imageTag: "nemoclaw-alpha:test",
             openshellDriver: "docker",
             provider: "nvidia-nim",
@@ -71,7 +92,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
               policyVersion: 1,
             },
           }
-        : registeredClone,
+        : null,
     );
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -80,7 +101,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       }),
     );
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
     expect(dashboardPortMocks.findAvailableDashboardPort).toHaveBeenCalledWith(
@@ -107,16 +128,17 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         gatewayPort: 18080,
       }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
-    expect(registeredClone).not.toHaveProperty("policyAuthority");
-    expect(registeredClone).not.toHaveProperty("policyCreationReceipt");
+    expect(cloneRegistry.getRegisteredClone()).not.toHaveProperty("policyAuthority");
+    expect(cloneRegistry.getRegisteredClone()).not.toHaveProperty("policyCreationReceipt");
   });
 
   it("keeps a --force destination when the source gateway binding is invalid (#7227)", async () => {
     f.getSandboxMock.mockImplementation((name) => ({
       name: name ?? "alpha",
       agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       imageTag: `nemoclaw-${name}:test`,
       openshellDriver: "docker",
       provider: "nvidia-nim",
@@ -131,7 +153,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
 
     await expect(
@@ -144,15 +166,12 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
   });
 
   it("gives a Hermes clone its own API port instead of the source's (#8543)", async () => {
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
-    f.getSandboxMock.mockImplementation((name) =>
+    f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
             name: "alpha",
             agent: "hermes",
+            harnessPackage: HERMES_PACKAGE,
             imageTag: "nemoclaw-alpha:test",
             openshellDriver: "docker",
             provider: "nvidia-nim",
@@ -160,7 +179,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
             dashboardPort: 18790,
             hermesApiPort: 8642,
           }
-        : registeredClone,
+        : null,
     );
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -169,7 +188,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       }),
     );
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(HERMES_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
     expect(hermesApiPortMocks.findAvailableHermesApiPort).toHaveBeenCalledWith(
@@ -184,27 +203,24 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
       expect.objectContaining({ name: "beta", hermesApiPort: 8643 }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
   });
 
   it("leaves a non-Hermes clone without an API port (#8543)", async () => {
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
-    f.getSandboxMock.mockImplementation((name) =>
+    f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
             name: "alpha",
             agent: "openclaw",
+            harnessPackage: OPENCLAW_PACKAGE,
             imageTag: "nemoclaw-alpha:test",
             openshellDriver: "docker",
             provider: "nvidia-nim",
             model: "nvidia/model-a",
             dashboardPort: 18790,
           }
-        : registeredClone,
+        : null,
     );
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -213,7 +229,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       }),
     );
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
     expect(hermesApiPortMocks.findAvailableHermesApiPort).not.toHaveBeenCalled();
@@ -222,21 +238,18 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
       expect.objectContaining({ name: "beta", hermesApiPort: null }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
   });
 
   it("keeps a Hermes clone rebuildable with its new public port and inherited internal port (#6746)", async () => {
     dashboardPortMocks.findAvailableDashboardPort.mockReturnValueOnce(18902);
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
-    f.getSandboxMock.mockImplementation((name) =>
+    const cloneRegistry = f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
             name: "alpha",
             agent: "hermes",
+            harnessPackage: HERMES_PACKAGE,
             imageTag: "nemoclaw-alpha:test",
             openshellDriver: "docker",
             provider: "nvidia-nim",
@@ -247,7 +260,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
             hermesDashboardInternalPort: 18901,
             hermesDashboardTui: true,
           }
-        : registeredClone,
+        : null,
     );
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -256,7 +269,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       }),
     );
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(HERMES_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
 
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
@@ -277,7 +290,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         hermesDashboardTui: true,
       }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
     const createArgs = f.streamSandboxCreateMock.mock.calls[0]?.[1] ?? [];
     expect(createArgs.slice(createArgs.lastIndexOf("--") + 1)).toEqual([
@@ -292,7 +305,13 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       `${HERMES_API_PORT_ENV}=8643`,
       "nemoclaw-start",
     ]);
-    expect(resolveRebuildHermesDashboardEnv("hermes", registeredClone as never, 18902)).toEqual({
+    expect(
+      resolveRebuildHermesDashboardEnv(
+        "hermes",
+        cloneRegistry.getRegisteredClone() as never,
+        18902,
+      ),
+    ).toEqual({
       ok: true,
       env: {
         [HERMES_DASHBOARD_ENABLE_ENV]: "1",
@@ -311,6 +330,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     f.getSandboxMock.mockImplementation((name) => ({
       name: name ?? "alpha",
       agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       imageTag: `nemoclaw-${name}:test`,
       openshellDriver: "docker",
       provider: "nvidia-nim",
@@ -324,7 +344,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
 
     await expect(
@@ -346,6 +366,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     f.getSandboxMock.mockImplementation((name) => ({
       name: name ?? "alpha",
       agent: "hermes",
+      harnessPackage: HERMES_PACKAGE,
       imageTag: `nemoclaw-${name}:test`,
       openshellDriver: "docker",
       provider: "nvidia-nim",
@@ -360,7 +381,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(HERMES_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
 
     await expect(
@@ -375,21 +396,18 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
   });
 
   it("registers a clone of a source without a dashboard port with the field unset (#6746)", async () => {
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
-    f.getSandboxMock.mockImplementation((name) =>
+    f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
             name: "alpha",
             agent: "openclaw",
+            harnessPackage: OPENCLAW_PACKAGE,
             imageTag: "nemoclaw-alpha:test",
             openshellDriver: "docker",
             provider: "nvidia-nim",
             model: "nvidia/model-a",
           }
-        : registeredClone,
+        : null,
     );
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -398,14 +416,14 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
       }),
     );
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha"]));
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const { runSandboxSnapshot } = await import("./snapshot");
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
     expect(dashboardPortMocks.findAvailableDashboardPort).not.toHaveBeenCalled();
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
       expect.objectContaining({ name: "beta", dashboardPort: null }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
   });
 });

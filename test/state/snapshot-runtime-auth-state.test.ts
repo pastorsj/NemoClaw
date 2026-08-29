@@ -13,6 +13,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+  createSnapshotRestoreAuthorityFixture,
+} from "../helpers/snapshot-authority";
 
 // sandbox-state computes its backup root from HOME at module load time.
 // vi.stubEnv records and restores the prior value (including unset) on teardown.
@@ -157,6 +162,7 @@ function writeOpenClawRegistry(sandboxName: string): void {
           gpuEnabled: false,
           policies: [],
           agent: null,
+          harnessPackage: createSnapshotHarnessPackageFixture("openclaw"),
         },
       },
     }),
@@ -199,7 +205,10 @@ describe("runtime auth state across snapshot backup/restore (#6852)", () => {
       vi.stubEnv("PATH", `${binDir}:${process.env.PATH || ""}`);
 
       // ── Backup: runtime auth dirs are not captured at all ──────────
-      const backup = sandboxState.backupSandboxState("alpha");
+      const backup = sandboxState.backupSandboxState(
+        "alpha",
+        createSnapshotBackupAuthorityFixture("openclaw"),
+      );
       expect(backup.success).toBe(true);
       expect(backup.backedUpDirs).toContain("agents");
       expect(backup.backedUpDirs).not.toContain("identity");
@@ -230,6 +239,10 @@ describe("runtime auth state across snapshot backup/restore (#6852)", () => {
       );
       const manifestPath = path.join(backupPath, "rebuild-manifest.json");
       const legacyManifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+      legacyManifest.version = 1;
+      delete legacyManifest.harnessPackage;
+      delete legacyManifest.backupComplete;
+      delete legacyManifest.backupContentSha256;
       legacyManifest.stateDirs = [...legacyManifest.stateDirs, "identity", "devices"];
       legacyManifest.backedUpDirs = [...legacyManifest.backedUpDirs, "identity", "devices"];
       fs.writeFileSync(manifestPath, JSON.stringify(legacyManifest, null, 2));
@@ -238,7 +251,11 @@ describe("runtime auth state across snapshot backup/restore (#6852)", () => {
       fs.writeFileSync(path.join(openclawDir, "agents", "main", "state.txt"), "new-agent-state");
 
       // ── Restore: durable dirs restored, runtime auth dirs untouched ─
-      const restore = sandboxState.restoreSandboxState("alpha", backupPath);
+      const restore = sandboxState.restoreSandboxState(
+        "alpha",
+        backupPath,
+        createSnapshotRestoreAuthorityFixture(sandboxState, "alpha", "openclaw", backupPath),
+      );
       expect(restore.success).toBe(true);
       expect(restore.restoredDirs).toContain("agents");
       expect(restore.restoredDirs).not.toContain("identity");

@@ -97,6 +97,7 @@ interface BackupAllSandboxAttempt {
   orphanManifestMessage: string | null;
   shieldsWindowOpened: boolean;
   stoppedContainerUnavailable: boolean;
+  authorityError?: unknown;
   mutationLockError?: unknown;
 }
 
@@ -130,6 +131,7 @@ function shieldsRelockError(sandboxName: string, cause?: unknown): Error {
 async function backupSandboxWithinShieldsWindow(
   sandboxName: string,
   shouldStartStoppedContainer: boolean,
+  confirmAuthority: () => void,
   backup: (
     startedForBackup: StartedForBackup | null,
   ) => sandboxState.BackupResult | Promise<sandboxState.BackupResult>,
@@ -139,6 +141,17 @@ async function backupSandboxWithinShieldsWindow(
   try {
     return await withSandboxMutationLock(sandboxName, async () => {
       enteredTransactionLock = true;
+      try {
+        confirmAuthority();
+      } catch (error) {
+        return {
+          result: null,
+          orphanManifestMessage: null,
+          shieldsWindowOpened: false,
+          stoppedContainerUnavailable: false,
+          authorityError: error,
+        };
+      }
       const startedForBackup = shouldStartStoppedContainer
         ? startStoppedSandboxContainerForBackup(sandboxName)
         : null;
@@ -152,6 +165,24 @@ async function backupSandboxWithinShieldsWindow(
       }
       if (startedForBackup) {
         console.log(`  Starting stopped sandbox '${sandboxName}' to back it up...`);
+        try {
+          confirmAuthority();
+        } catch (error) {
+          const cleanupError = returnStartedSandboxToStopped(sandboxName, startedForBackup);
+          if (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              `Backup setup for '${sandboxName}' failed after its agent package authority changed and its started container could not be returned to the stopped state.`,
+            );
+          }
+          return {
+            result: null,
+            orphanManifestMessage: null,
+            shieldsWindowOpened: false,
+            stoppedContainerUnavailable: false,
+            authorityError: error,
+          };
+        }
       }
       let window;
       try {
@@ -376,6 +407,17 @@ export async function backupAllUnderPortableHostFence(
       strandedOrphans.push(sb.name);
       return;
     }
+    let agentAuthority: snapshotBackup.SnapshotBackupAgentAuthority;
+    try {
+      agentAuthority = snapshotBackup.resolveSnapshotBackupAgentAuthority(sb.name, {
+        getSandbox: registry.getSandbox,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`  ${RD}✗${R} ${sb.name}: backup failed (agent package: ${detail})`);
+      failed++;
+      return;
+    }
     // A registered docker-driver sandbox whose container is merely stopped is
     // backupable: start it for the duration of the backup and return it to
     // its stopped state after (#6500). Anything else that is not Ready keeps
@@ -387,17 +429,31 @@ export async function backupAllUnderPortableHostFence(
     const attempt = await backupSandboxWithinShieldsWindow(
       sb.name,
       !readyNames.has(sb.name),
+      () =>
+        snapshotBackup.confirmSnapshotBackupAgentAuthority(sb.name, agentAuthority, {
+          getSandbox: registry.getSandbox,
+        }),
       (startedForBackup) =>
         startedForBackup
-          ? backupStartedSandboxState(sb.name)
-          : snapshotBackup.backupSandboxStateWithManagedAuthority(
-              sb.name,
-              {},
-              {
-                getSandbox: registry.getSandbox,
-              },
-            ),
+          ? backupStartedSandboxState(sb.name, {
+              backup: (name) =>
+                snapshotBackup.backupSandboxStateWithManagedAuthority(name, agentAuthority, {
+                  getSandbox: registry.getSandbox,
+                }),
+            })
+          : snapshotBackup.backupSandboxStateWithManagedAuthority(sb.name, agentAuthority, {
+              getSandbox: registry.getSandbox,
+            }),
     );
+    if ("authorityError" in attempt) {
+      const detail =
+        attempt.authorityError instanceof Error
+          ? attempt.authorityError.message
+          : String(attempt.authorityError);
+      console.error(`  ${RD}✗${R} ${sb.name}: backup failed (agent package: ${detail})`);
+      failed++;
+      return;
+    }
     if (attempt.stoppedContainerUnavailable) {
       if (orphanNames.has(sb.name) && isSandboxContainerDefinitivelyAbsent(sb.name)) {
         // Tracked separately from `skipped` so the strict gate stays

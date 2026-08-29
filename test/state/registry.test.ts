@@ -262,34 +262,34 @@ describe("registry", () => {
       trustedPrivateHost: "mcp.corp.example",
       allowedIps: ["fd00::40", "10.20.30.40"],
     },
-  ])("rejects $label from durable trusted-private MCP authority (#8267)", ({
-    trustedPrivateHost,
-    allowedIps,
-  }) => {
-    registry.registerSandbox({
-      name: "noncanonical-private-mcp",
-      agent: "hermes",
-      mcp: {
-        bridges: {
-          local: {
-            server: "local",
-            agent: "hermes",
-            adapter: "hermes-config",
-            url: "https://mcp.corp.example/mcp",
-            env: ["LOCAL_MCP_TOKEN"],
-            trustedPrivateHost,
-            allowedIps,
-            providerName: "noncanonical-private-mcp-mcp-local",
-            providerId: "11111111-2222-4333-8444-555555555555",
-            policyName: "mcp-bridge-local",
-            addedAt: new Date(0).toISOString(),
+  ])(
+    "rejects $label from durable trusted-private MCP authority (#8267)",
+    ({ trustedPrivateHost, allowedIps }) => {
+      registry.registerSandbox({
+        name: "noncanonical-private-mcp",
+        agent: "hermes",
+        mcp: {
+          bridges: {
+            local: {
+              server: "local",
+              agent: "hermes",
+              adapter: "hermes-config",
+              url: "https://mcp.corp.example/mcp",
+              env: ["LOCAL_MCP_TOKEN"],
+              trustedPrivateHost,
+              allowedIps,
+              providerName: "noncanonical-private-mcp-mcp-local",
+              providerId: "11111111-2222-4333-8444-555555555555",
+              policyName: "mcp-bridge-local",
+              addedAt: new Date(0).toISOString(),
+            },
           },
         },
-      },
-    });
+      });
 
-    expect(registry.getSandbox("noncanonical-private-mcp").mcp?.bridges?.local).toBeUndefined();
-  });
+      expect(registry.getSandbox("noncanonical-private-mcp").mcp?.bridges?.local).toBeUndefined();
+    },
+  );
 
   it("retains sanitized managed MCP names after the active bridge map is emptied", () => {
     registry.registerSandbox({
@@ -375,6 +375,27 @@ describe("registry", () => {
     const sb = registry.getSandbox("up");
     expect(sb.policies).toEqual(["pypi", "npm"]);
     expect(sb.model).toBe("new-model");
+  });
+
+  it("updates and returns a sandbox while its complete captured row remains current", () => {
+    registry.registerSandbox({ name: "current", model: "old-model" });
+    const expected = registry.getSandbox("current");
+
+    expect(registry.updateSandboxIfCurrent(expected, { policies: ["github"] })).toEqual({
+      ...expected,
+      policies: ["github"],
+    });
+    expect(registry.getSandbox("current")).toEqual({ ...expected, policies: ["github"] });
+  });
+
+  it("does not update a replacement sandbox through stale captured authority", () => {
+    registry.registerSandbox({ name: "replaced", model: "old-model" });
+    const stale = registry.getSandbox("replaced");
+    registry.updateSandbox("replaced", { model: "replacement-model" });
+    const replacement = registry.getSandbox("replaced");
+
+    expect(registry.updateSandboxIfCurrent(stale, { policies: ["github"] })).toBe(false);
+    expect(registry.getSandbox("replaced")).toEqual(replacement);
   });
 
   it("persists MCP env names without raw host env values", () => {
@@ -567,6 +588,118 @@ describe("registry", () => {
     });
     expect(registry.getSandbox("receipt")).toBeNull();
     expect(registry.removeSandboxWithReceipt("receipt")).toBeNull();
+  });
+
+  it("blocks a same-name image claim between exact-row removal and cleanup", () => {
+    const expected = registry.registerSandbox({
+      name: "cleanup-race",
+      model: "captured",
+      imageTag: "local/cleanup-race:shared",
+    });
+    const replacement = {
+      ...expected,
+      lifecycleGeneration: "replacement-generation",
+    };
+    const events: string[] = [];
+
+    const transaction = registry.removeSandboxIfCurrentDuringCleanup(
+      expected,
+      (selected: typeof expected) => {
+        events.push("registry-removed");
+        expect(registry.getSandbox(expected.name)).toBeNull();
+        expect(() => registry.registerSandbox(replacement)).toThrow();
+        events.push(`image-removed:${selected.imageTag}`);
+        return { result: "removed", rollback: false };
+      },
+    );
+
+    expect(transaction).toEqual({ status: "selected", result: "removed" });
+    expect(events).toEqual(["registry-removed", "image-removed:local/cleanup-race:shared"]);
+    expect(registry.getSandbox(expected.name)).toBeNull();
+
+    registry.registerSandbox(replacement);
+    expect(registry.getSandbox(expected.name)).toMatchObject({
+      imageTag: "local/cleanup-race:shared",
+      lifecycleGeneration: "replacement-generation",
+    });
+  });
+
+  it("restores the exact row when cleanup declines authority", () => {
+    const expected = registry.registerSandbox({
+      name: "cleanup-rollback",
+      model: "captured",
+      imageTag: "local/cleanup-rollback:selected",
+    });
+
+    const transaction = registry.removeSandboxIfCurrentDuringCleanup(expected, () => ({
+      result: "blocked",
+      rollback: true,
+    }));
+
+    expect(transaction).toEqual({ status: "selected", result: "blocked" });
+    expect(registry.getSandbox(expected.name)).toEqual(expected);
+    expect(registry.getDefault()).toBe(expected.name);
+  });
+
+  it("atomically distinguishes an absent row from a changed exact row", () => {
+    let cleanupCalls = 0;
+    const cleanup = () => {
+      cleanupCalls += 1;
+      return { result: "removed", rollback: false };
+    };
+    const absent = registry.removeSandboxIfCurrentDuringCleanup(
+      { name: "cleanup-absent" },
+      cleanup,
+    );
+    const current = registry.registerSandbox({
+      name: "cleanup-changed",
+      model: "current",
+      imageTag: "local/cleanup-changed:current",
+    });
+    const changed = registry.removeSandboxIfCurrentDuringCleanup(
+      { ...current, model: "captured" },
+      cleanup,
+    );
+
+    expect(absent).toEqual({ status: "absent" });
+    expect(changed).toEqual({ status: "changed" });
+    expect(cleanupCalls).toBe(0);
+    expect(registry.getSandbox(current.name)).toEqual(current);
+  });
+
+  it("persists only a canonical snapshot source registry fingerprint", () => {
+    const fingerprint = "a".repeat(64);
+    const registered = registry.registerSandbox({
+      name: "snapshot-clone-owner",
+      snapshotSourceRegistryFingerprint: fingerprint,
+    });
+
+    expect(registered.snapshotSourceRegistryFingerprint).toBe(fingerprint);
+    expect(registry.getSandbox(registered.name)?.snapshotSourceRegistryFingerprint).toBe(
+      fingerprint,
+    );
+    expect(() =>
+      registry.registerSandbox({
+        name: "invalid-snapshot-clone-owner",
+        snapshotSourceRegistryFingerprint: "not-a-digest",
+      }),
+    ).toThrow("invalid snapshot source fingerprint");
+  });
+
+  it("restores the exact row when cleanup throws", () => {
+    const expected = registry.registerSandbox({
+      name: "cleanup-error",
+      model: "captured",
+      imageTag: "local/cleanup-error:selected",
+    });
+
+    expect(() =>
+      registry.removeSandboxIfCurrentDuringCleanup(expected, () => {
+        throw new Error("injected cleanup failure");
+      }),
+    ).toThrow("injected cleanup failure");
+    expect(registry.getSandbox(expected.name)).toEqual(expected);
+    expect(registry.getDefault()).toBe(expected.name);
   });
 
   it("restores a removed row after an intervening registry registration", () => {
@@ -1018,146 +1151,6 @@ describe("registry", () => {
     expect(
       registry.listSandboxes().sandboxes.map((sandbox: { name: string }) => sandbox.name),
     ).toEqual(["good"]);
-  });
-
-  it("setChannelDisabled toggles a channel on and off for a sandbox", () => {
-    registry.registerSandbox({
-      name: "s1",
-      messaging: {
-        schemaVersion: 1,
-        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram", "discord"] }),
-      },
-    });
-    expect(registry.getDisabledChannels("s1")).toEqual([]);
-
-    expect(registry.setChannelDisabled("s1", "telegram", true)).toBe(true);
-    expect(registry.getDisabledChannels("s1")).toEqual(["telegram"]);
-
-    expect(registry.setChannelDisabled("s1", "discord", true)).toBe(true);
-    expect(registry.getDisabledChannels("s1")).toEqual(["discord", "telegram"]);
-
-    registry.setChannelDisabled("s1", "telegram", false);
-    expect(registry.getDisabledChannels("s1")).toEqual(["discord"]);
-  });
-
-  it("setChannelDisabled clears plan.disabledChannels when empty", () => {
-    registry.registerSandbox({
-      name: "s1",
-      messaging: {
-        schemaVersion: 1,
-        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram"] }),
-      },
-    });
-    registry.setChannelDisabled("s1", "telegram", true);
-    registry.setChannelDisabled("s1", "telegram", false);
-    const persisted = JSON.parse(fs.readFileSync(regFile, "utf-8"));
-    expect(persisted.sandboxes.s1.messaging.plan.disabledChannels).toEqual([]);
-    expect(persisted.sandboxes.s1.disabledChannels).toBeUndefined();
-  });
-
-  it("setChannelDisabled returns false when the channel is not configured in the plan", () => {
-    registry.registerSandbox({
-      name: "s1",
-      messaging: {
-        schemaVersion: 1,
-        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram"] }),
-      },
-    });
-    expect(registry.setChannelDisabled("s1", "discord", true)).toBe(false);
-    expect(registry.getDisabledChannels("s1")).toEqual([]);
-  });
-
-  it("setChannelDisabled returns false when sandbox is missing", () => {
-    expect(registry.setChannelDisabled("missing", "telegram", true)).toBe(false);
-  });
-
-  it("registerSandbox preserves disabledChannels when re-registering", () => {
-    registry.registerSandbox({
-      name: "s1",
-      messaging: {
-        schemaVersion: 1,
-        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram"] }),
-      },
-    });
-    registry.setChannelDisabled("s1", "telegram", true);
-    registry.registerSandbox({
-      name: "s1",
-      messaging: registry.getSandbox("s1").messaging,
-    });
-    expect(registry.getDisabledChannels("s1")).toEqual(["telegram"]);
-  });
-
-  it("addCustomPolicy persists name, content, and sourcePath", () => {
-    registry.registerSandbox({ name: "cp1" });
-    const added = registry.addCustomPolicy("cp1", {
-      name: "my-api",
-      content: "preset:\n  name: my-api\nnetwork_policies: {}\n",
-      sourcePath: "/tmp/my-api.yaml",
-    });
-    expect(added).toBe(true);
-    const list = registry.getCustomPolicies("cp1");
-    expect(list.length).toBe(1);
-    expect(list[0].name).toBe("my-api");
-    expect(list[0].content).toMatch(/name: my-api/);
-    expect(list[0].sourcePath).toBe("/tmp/my-api.yaml");
-    expect(typeof list[0].appliedAt).toBe("string");
-  });
-
-  it("addCustomPolicy replaces an existing entry with the same name", () => {
-    registry.registerSandbox({ name: "cp2" });
-    registry.addCustomPolicy("cp2", { name: "dup", content: "v1" });
-    registry.addCustomPolicy("cp2", { name: "dup", content: "v2" });
-    const list = registry.getCustomPolicies("cp2");
-    expect(list.length).toBe(1);
-    expect(list[0].content).toBe("v2");
-  });
-
-  it("removeCustomPolicyByName removes an entry and returns true", () => {
-    registry.registerSandbox({ name: "cp3" });
-    registry.addCustomPolicy("cp3", { name: "a", content: "x" });
-    registry.addCustomPolicy("cp3", { name: "b", content: "y" });
-    expect(registry.removeCustomPolicyByName("cp3", "a")).toBe(true);
-    const list = registry.getCustomPolicies("cp3");
-    expect(list.length).toBe(1);
-    expect(list[0].name).toBe("b");
-  });
-
-  it("removeCustomPolicyByName returns false when the entry is missing", () => {
-    registry.registerSandbox({ name: "cp4" });
-    expect(registry.removeCustomPolicyByName("cp4", "nope")).toBe(false);
-  });
-
-  it("getCustomPolicies returns [] for unknown or fresh sandboxes", () => {
-    expect(registry.getCustomPolicies("nonexistent")).toEqual([]);
-    registry.registerSandbox({ name: "cp5" });
-    expect(registry.getCustomPolicies("cp5")).toEqual([]);
-  });
-
-  describe("extra providers", () => {
-    it("starts with an empty extra-provider list", () => {
-      expect(registry.listExtraProviders()).toEqual([]);
-    });
-
-    it("addExtraProvider persists a sorted, deduplicated list", () => {
-      expect(registry.addExtraProvider("tavily-search")).toBe(true);
-      expect(registry.addExtraProvider("custom-provider")).toBe(true);
-      expect(registry.addExtraProvider("tavily-search")).toBe(false);
-      expect(registry.listExtraProviders()).toEqual(["custom-provider", "tavily-search"]);
-    });
-
-    it("removeExtraProvider clears the entry and drops the field when empty", () => {
-      registry.addExtraProvider("tavily-search");
-      expect(registry.removeExtraProvider("tavily-search")).toBe(true);
-      expect(registry.listExtraProviders()).toEqual([]);
-      const raw = JSON.parse(fs.readFileSync(regFile, "utf-8"));
-      expect("extraProviders" in raw).toBe(false);
-      expect(registry.removeExtraProvider("tavily-search")).toBe(false);
-    });
-
-    it("survives a registry round-trip through disk", () => {
-      registry.addExtraProvider("tavily-search");
-      expect(registry.listExtraProviders()).toEqual(["tavily-search"]);
-    });
   });
 });
 

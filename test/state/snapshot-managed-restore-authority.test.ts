@@ -9,6 +9,7 @@ import path from "node:path";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../scripts/checks/generate-managed-startup-profile-fixture.mts";
+import { loadAgent } from "../../src/lib/agent/defs";
 import { encodeManagedStartupProfile } from "../../src/lib/onboard/managed-startup/profile";
 
 const ORIGINAL_HOME = process.env.HOME;
@@ -158,6 +159,7 @@ describe("managed snapshot restore authority", () => {
       expect(
         sandboxState.restoreRecreatedSandboxState("alpha", manifest.backupPath, {
           targetAgentType: "openclaw",
+          agentDefinition: loadAgent("openclaw"),
           freshOpenClawImagePluginInstalls: [],
           authority: contentAuthority!,
           validateBeforeMutation,

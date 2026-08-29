@@ -105,6 +105,9 @@ describe("onboard exit handler registration", () => {
     const repoRoot = path.join(import.meta.dirname, "../..");
     const scriptPath = path.join(tmpDir, "onboard-exit-registration.cjs");
     const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
+    const fixtureMocksPath = JSON.stringify(
+      path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+    );
     const flowSlicesPath = JSON.stringify(
       path.join(repoRoot, "src", "lib", "onboard", "machine", "flow-slices.ts"),
     );
@@ -124,6 +127,7 @@ describe("onboard exit handler registration", () => {
 const flowSlices = require(${flowSlicesPath});
 const onboardSession = require(${sessionPath});
 const validation = require(${validationPath});
+require(${fixtureMocksPath}).installOnboardProcessHarnessPackage("openclaw");
 const { advanceTo } = require(${resultPath});
 const sentinel = new Error("stop-after-exit-registration");
 const resumeSentinel = new Error("stop-after-resume-checkpoint");
@@ -322,6 +326,9 @@ const { onboard } = require(${onboardPath});
     const scriptPath = path.join(tmpDir, "onboard-exit-completed.cjs");
     const openshellPath = writeSuccessfulOpenShell(tmpDir);
     const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
+    const fixtureMocksPath = JSON.stringify(
+      path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+    );
     const initialPhasesPath = JSON.stringify(
       path.join(repoRoot, "src", "lib", "onboard", "machine", "initial-flow-phases.ts"),
     );
@@ -345,6 +352,7 @@ const initialPhases = require(${initialPhasesPath});
 const corePhases = require(${corePhasesPath});
 const finalPhases = require(${finalPhasesPath});
 const onboardSession = require(${sessionPath});
+require(${fixtureMocksPath}).installOnboardProcessHarnessPackage("openclaw");
 const { advanceTo, branchTo, completeOnboardMachine } = require(${resultPath});
 const exitListeners = [];
 const originalOnce = process.once;

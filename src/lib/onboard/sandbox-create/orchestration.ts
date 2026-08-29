@@ -29,6 +29,7 @@ import * as policyAuthorityPreflight from "../policy-authority/preflight";
 import type { PreparedSandboxBuildContext } from "../build-context-stage";
 import type { DcodeSelectionDriftReader } from "../dcode-selection-drift";
 import { assertProviderlessInterceptorEnvironment } from "../entry-options";
+import type { PreRecreateBackupAuthority } from "../sandbox-backup-on-recreate";
 import type {
   ManagedHermesStateVolumeCleanupResult,
   ManagedHermesStateVolumeContext,
@@ -124,6 +125,43 @@ export function requireSelectedAgentPackageRoot(
     );
   }
   return packageRoot;
+}
+
+/** Bind pre-recreate state capture to the exact registered source agent. */
+export function prepareSourceBackupAuthority(
+  sandboxName: string,
+  sourceEntry: SandboxEntry | null,
+  dependencies: {
+    readonly getSandbox: (name: string) => SandboxEntry | null;
+    readonly resolveSandboxAgent: SandboxCreateOrchestrationRuntime["sandboxAgent"]["resolveSandboxAgent"];
+  },
+): PreRecreateBackupAuthority | null {
+  if (!sourceEntry) return null;
+  const selectedEntry = structuredClone(sourceEntry);
+  const selectedAgent = dependencies.resolveSandboxAgent(selectedEntry);
+  return {
+    agentDefinition: selectedAgent.definition,
+    harnessPackage: selectedAgent.harnessPackage,
+    validateBeforePublish: () => {
+      const currentEntry = dependencies.getSandbox(sandboxName);
+      if (!currentEntry || !isDeepStrictEqual(currentEntry, selectedEntry)) {
+        throw new Error(
+          `Cannot publish sandbox state backup: source registry row for '${sandboxName}' changed.`,
+        );
+      }
+      const currentAgent = dependencies.resolveSandboxAgent(currentEntry);
+      if (
+        currentAgent.effectiveAgentId !== selectedAgent.effectiveAgentId ||
+        currentAgent.definition.packageRoot !== selectedAgent.definition.packageRoot ||
+        !isDeepStrictEqual(currentAgent.definition, selectedAgent.definition) ||
+        !isDeepStrictEqual(currentAgent.harnessPackage, selectedAgent.harnessPackage)
+      ) {
+        throw new Error(
+          `Cannot publish sandbox state backup: source agent package for '${sandboxName}' changed.`,
+        );
+      }
+    },
+  };
 }
 
 /** Select the separately trusted OpenClaw root used to patch custom Dockerfiles. */
@@ -1867,9 +1905,14 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     let notReadyRecreateInProgress = false;
     const customOpenClawImage =
       Boolean(fromDockerfile) && getRequestedSandboxAgentName(agent) === "openclaw";
+    const sourceBackupAuthority = prepareSourceBackupAuthority(sandboxName, existingEntry, {
+      getSandbox: registry.getSandbox,
+      resolveSandboxAgent: sandboxAgent.resolveSandboxAgent,
+    });
     const recreateProtection = createSandboxRecreateProtection({
       sandboxName,
       sandboxEntry: existingEntry,
+      sourceBackupAuthority,
       customOpenClawImage,
       note,
     });
@@ -3040,6 +3083,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       restoreBackupPath,
       pendingStateRestoreBackupPath,
       agent,
+      effectiveAgent,
       fromDockerfile,
       { customOpenClawImage, isManagedDcodeAgent },
       { provider, model, preferredInferenceApi, endpointUrl: createIntent?.endpointUrl ?? null },
@@ -3085,6 +3129,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       managedWorkloadRuntime,
       preparedSandboxWorkload,
       note,
+      (operation) => revalidateHarnessPackageAuthority(operation).harnessPackage,
     );
     // Managed bootstrap can invalidate OpenShell's cached Ready state after it
     // replaces the container. Registry publication stays bound to the durable

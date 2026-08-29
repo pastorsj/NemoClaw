@@ -14,6 +14,7 @@ export {
   prepareSandboxHostLocalInferenceDestroyAuthority,
   retirePreparedHostLocalInferenceAuthority,
 } from "../../../onboard/runtime-provider/host-local-inference-lifecycle";
+export { fingerprintSandboxRecreateValue } from "../../../onboard/sandbox-recreate-transaction";
 export type {
   ManagedWorkloadCloneSnapshot,
   PreparedManagedWorkloadCloneHandoff,
@@ -47,6 +48,17 @@ export {
   prepareSandboxRuntimeRestore,
   SandboxSnapshotProviderError,
 } from "./provider-lifecycle";
+export {
+  confirmSnapshotPackageAndAgentAuthority,
+  confirmSnapshotPackageAuthority,
+  createSnapshotAuthorityDependencies,
+  pendingCloneMatchesPackageAuthority,
+  prepareSnapshotPackageAuthority,
+  resolveSnapshotSourceAgent,
+  type SnapshotPackageAuthority,
+  type SnapshotPackageAuthorityDependencies,
+  type SnapshotSourceRestoreAuthority,
+} from "./restore-authority";
 export type { RuntimeProviderBundle };
 
 /**
@@ -62,10 +74,7 @@ export function requireCurrentSnapshotRuntimeProvider(
 
 export function assertSandboxSnapshotCommandAvailable(
   sandboxName: string,
-  commandId:
-    | "sandbox:snapshot:create"
-    | "sandbox:snapshot:list"
-    | "sandbox:snapshot:restore",
+  commandId: "sandbox:snapshot:create" | "sandbox:snapshot:list" | "sandbox:snapshot:restore",
 ): void {
   assertHermesPortableCommandUnavailable(sandboxName, commandId);
 }

@@ -165,6 +165,11 @@ export interface ValidatedSandboxRuntimeRestore {
   readonly restoreReceipt: RuntimeProviderSnapshotRestoreReceipt;
 }
 
+export interface SandboxRuntimeRestoreConfirmationOptions {
+  /** Re-prove the target immediately before the provider restore mutation. */
+  readonly validateBeforeMutation?: () => void;
+}
+
 /**
  * Perform the read-only restore preflight before a force-delete or filesystem
  * mutation. Source provider handles remain opaque; PR3.8 self-restore requires
@@ -266,22 +271,25 @@ export function confirmSandboxRuntimeRestore(
   bundle: RuntimeProviderBundle,
   target: SandboxEntry,
   prepared: PreparedSandboxRuntimeRestore,
+  options: SandboxRuntimeRestoreConfirmationOptions = {},
 ): ValidatedSandboxRuntimeRestore {
   const authority = normalizePreparedRestore(bundle, target, prepared);
   const surface = requireSnapshotSurface(bundle, "restore");
   const providerTarget = cloneAndDeepFreeze(target);
+  options.validateBeforeMutation?.();
+  const providerRestoreReceipt = surface.restore(
+    providerTarget,
+    authority.preflight,
+    authority.source,
+    authority.managedProfile,
+  );
   const restoreReceipt = requireRestoreReceipt(
     bundle,
     target,
     authority.managedProfile,
     authority.preflight,
     authority.source,
-    surface.restore(
-      providerTarget,
-      authority.preflight,
-      authority.source,
-      authority.managedProfile,
-    ),
+    providerRestoreReceipt,
   );
   return cloneAndDeepFreeze({
     phase: "validated" as const,

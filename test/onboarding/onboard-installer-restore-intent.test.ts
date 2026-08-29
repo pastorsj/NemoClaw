@@ -274,8 +274,8 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
   );
 
   it.each([
-    { change: "changes", race: "changed", error: /source registry row changed/u },
-    { change: "is removed", race: "removed", error: /source registry row is absent/u },
+    { change: "changes", race: "changed", error: /source registry owner changed/u },
+    { change: "is removed", race: "removed", error: /registry owner is absent/u },
   ])(
     "rejects installer restore when the source registry row $change after journal capture (#7736)",
     async ({ race, error }) => {
@@ -299,7 +299,13 @@ const MARKER_SHA = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852
 
       const script = String.raw`
 const runner = require(${runnerPath});
-require(${onboardScriptMocksPath}).mockStandaloneGatewayTeardownAuthority();
+const fixtureMocks = require(${onboardScriptMocksPath});
+fixtureMocks.mockStandaloneGatewayTeardownAuthority();
+const harnessFixture = fixtureMocks.installHarnessRouteFixture({
+  sandboxName: "my-assistant",
+  provider: "nvidia-prod",
+  model: "gpt-5.4",
+});
 const normalize = (command) =>
   (Array.isArray(command) ? command.join(" ") : String(command)).replace(/'/g, "");
 const registry = require(${registryPath});
@@ -314,6 +320,7 @@ const sourceEntry = {
   gpuEnabled: false, policyAuthority: "nemoclaw-managed",
   imageTag: "nemoclaw/my-assistant:1",
   toolDisclosure: "progressive",
+  ...harnessFixture.registryAuthority,
 };
 const racedEntry =
   process.env.NEMOCLAW_TEST_REGISTRY_RACE === "removed"
@@ -361,7 +368,10 @@ const { createSandbox } = require(${onboardPath});
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE = "1";
   try {
-    await createSandbox(null, "gpt-5.4", "nvidia-prod", null, "my-assistant");
+    await createSandbox(...fixtureMocks.buildHarnessRouteArguments(
+      [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
+      harnessFixture,
+    ));
     console.log(JSON.stringify({ error: null, mutations }));
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : String(caught);
@@ -426,6 +436,11 @@ const { createSandbox } = require(${onboardPath});
 const runner = require(${runnerPath});
 const fixtureMocks = require(${onboardScriptMocksPath});
 fixtureMocks.mockStandaloneGatewayTeardownAuthority();
+const harnessFixture = fixtureMocks.installHarnessRouteFixture({
+  sandboxName: "my-assistant",
+  provider: "nvidia-prod",
+  model: "gpt-5.4",
+});
 const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "");
 const registry = require(${registryPath});
 const sandboxState = require(${sandboxStatePath});
@@ -454,6 +469,7 @@ registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
   name: "my-assistant",
   gpuEnabled: false,
   toolDisclosure: "progressive",
+  ...harnessFixture.registryAuthority,
 });
 sandboxState.getLatestBackup = () => {
   throw new Error("unexpected getLatestBackup without installer restore intent");
@@ -468,7 +484,10 @@ const { createSandbox } = require(${onboardPath});
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
   delete process.env.NEMOCLAW_RECREATE_SANDBOX;
   delete process.env.NEMOCLAW_RESTORE_LATEST_BACKUP_ON_RECREATE;
-  await createSandbox(null, "gpt-5.4", "nvidia-prod", null, "my-assistant");
+  await createSandbox(...fixtureMocks.buildHarnessRouteArguments(
+    [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
+    harnessFixture,
+  ));
   console.log("ERROR_DID_NOT_EXIT");
 })().catch((error) => {
   console.error(error);

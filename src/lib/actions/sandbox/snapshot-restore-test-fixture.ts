@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
 import { vi } from "vitest";
 import { resolveTestAgentBaselinePolicy } from "../../../../test/support/snapshot-policy-test-fixture";
+import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../harness/package-identity";
 import type {
   SandboxEntry,
   SandboxHostLocalInferenceProvenance,
@@ -26,6 +29,8 @@ export type SandboxRecord = {
   pendingRouteReservation?: true;
   reservationSessionId?: string;
   agent?: string | null;
+  harnessPackage?: SandboxEntry["harnessPackage"];
+  harnessPackageMigration?: SandboxEntry["harnessPackageMigration"];
   baselineExclusionTransition?: {
     id: string;
     operation: "exclude" | "restore";
@@ -48,6 +53,7 @@ export type SandboxRecord = {
     acknowledgedAt?: string;
     appliedAgentVersion?: string | null;
   }>;
+  hostMounts?: SandboxEntry["hostMounts"];
   fromDockerfile?: string | null;
   gatewayName?: string | null;
   gatewayPort?: number | null;
@@ -63,8 +69,11 @@ export type SandboxRecord = {
   preferredInferenceApi?: string | null;
   lifecycleGeneration?: string;
   lifecycleLiveIdentityFingerprint?: string;
+  snapshotSourceRegistryFingerprint?: string;
   policyAuthority?: SandboxEntry["policyAuthority"];
   policyCreationReceipt?: SandboxEntry["policyCreationReceipt"];
+  policies?: SandboxEntry["policies"];
+  customPolicies?: SandboxEntry["customPolicies"];
   hostLocalInferenceReceipt?: string | null;
   hostLocalInferenceProvenance?: SandboxHostLocalInferenceProvenance;
   dashboardPort?: number | null;
@@ -159,10 +168,71 @@ export const captureSnapshotRestoreAuthorityMock = vi.fn(() => ({
   backupPath: "/tmp/backup-alpha",
   contentSha256: "a".repeat(64),
 }));
+export const preparedSnapshotCleanupMock = vi.fn();
+export const preparedSnapshotValidateMock = vi.fn();
+export const prepareSnapshotRestoreContentMock = vi.fn(() => {
+  const authority = captureSnapshotRestoreAuthorityMock();
+  return authority
+    ? {
+        schemaVersion: 1 as const,
+        selectedBackupPath: authority.backupPath,
+        stagedBackupPath: `${authority.backupPath}.prepared`,
+        authority,
+        validate: preparedSnapshotValidateMock,
+        cleanup: preparedSnapshotCleanupMock,
+      }
+    : null;
+});
 export const loadAgentMock = vi.fn((name: string) => ({
   name,
   policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
 }));
+function installedHarnessPackage(identity: HarnessPackageIdentity) {
+  const packageRoot = `/state/harnesses/objects/${identity.contentDigest}`;
+  const manifestPath = `${packageRoot}/manifest.yaml`;
+  return {
+    state: "installed" as const,
+    identity,
+    packageRoot,
+    packageManifest: {
+      packageRoot,
+      metadataPath: `${packageRoot}/nemoclaw-package.json`,
+      manifestPath,
+      envelope: {
+        schemaVersion: 1 as const,
+        kind: "agent-runtime" as const,
+        id: identity.id,
+        displayName: identity.id,
+        packageVersion: identity.packageVersion,
+        contractVersion: 1 as const,
+        manifest: "manifest.yaml",
+      },
+      manifest: { name: identity.id },
+    },
+    receipt: {
+      schemaVersion: 1 as const,
+      identity,
+      sourceIdentity: {
+        kind: "bundled" as const,
+        nemoclawBuildIdentity: {
+          nemoclawVersion: "0.0.0-test",
+          sourceRevision: "a".repeat(40),
+        },
+      },
+      installedAt: "2026-08-20T00:00:00.000Z",
+    },
+  };
+}
+
+export const buildAgentDefinitionMock = vi.fn(
+  ({ manifest, packageRoot }: { manifest: Record<string, unknown>; packageRoot: string }) =>
+    ({
+      name: manifest.name,
+      packageRoot,
+      policyAdditionsPath: `${packageRoot}/policy-additions.yaml`,
+    }) as AgentDefinition,
+);
+export const resolvePinnedHarnessPackageMock = vi.fn(installedHarnessPackage);
 export const captureOpenshellMock = vi.fn<
   (args: string[], opts?: Record<string, unknown>) => OpenshellCaptureResult
 >((args) => defaultOpenshellResponses(args));
@@ -183,6 +253,13 @@ export const getPresetContentGatewayStateMock = vi.fn<
   (_sandbox: string, _content: string, _policyKey?: string) => "match" | "absent" | "drift" | null
 >(() => "absent");
 export const resolveAgentBaselinePolicyMock = vi.fn(resolveTestAgentBaselinePolicy);
+export const resolveAgentDefinitionBaselinePolicyMock = vi.fn(
+  (agent: Pick<AgentDefinition, "name" | "policyAdditionsPath">) => ({
+    agent: agent.name,
+    policyPath: agent.policyAdditionsPath ?? "/repo/openclaw-policy.yaml",
+    content: "version: 1\nnetwork_policies: {}\n",
+  }),
+);
 export const builtinObservabilityPolicy =
   "network_policies:\n  observability-otlp-local:\n    endpoints:\n      - host: host.openshell.internal\n";
 export const loadPresetForSandboxMock = vi.fn((_sandbox: string, preset: string) =>
@@ -204,18 +281,37 @@ export const prepareInitialSandboxCreatePolicyMock = vi.fn(
   }),
 );
 export const registerSandboxMock = vi.fn();
-export const reserveSandboxInferenceRouteMock = vi.fn(() => true);
+export const reserveSandboxInferenceRouteMock = vi.fn(
+  (_name: string, _route: Partial<SandboxRecord>, _options: { requireAbsent?: boolean } = {}) =>
+    true,
+);
 export const removeSandboxMock = vi.fn();
+export const removeSandboxRouteReservationIfCurrentMock = vi.fn((_expected: SandboxRecord) => true);
+export const removeSandboxIfCurrentMock = vi.fn((_expected: SandboxRecord) => true);
 export const updateSandboxMock = vi.fn();
+export const updateSandboxIfCurrentMock = vi.fn();
 export const finalizePendingSandboxRegistrationMock = vi.fn();
 export const restoreSandboxStateMock = vi.fn();
 export const removeSandboxRegistryEntryOutcomeMock = vi.fn<
   (
     name: string,
+    dependencies?: { removeSandbox?: (sandboxName: string) => boolean },
   ) =>
     | { status: "complete"; removed: true }
-    | { status: "blocked"; reason: "authority-unproven"; removed: false }
->(() => ({ status: "complete", removed: true }));
+    | { status: "not-found"; removed: false }
+    | {
+        status: "blocked";
+        reason: "authority-unproven" | "registry-changed";
+        removed: false;
+      }
+>((name, dependencies) =>
+  dependencies?.removeSandbox && !dependencies.removeSandbox(name)
+    ? { status: "not-found", removed: false }
+    : { status: "complete", removed: true },
+);
+export const removeSandboxRegistryEntryIfCurrentOutcomeMock = vi.fn((expected: SandboxRecord) =>
+  removeSandboxRegistryEntryOutcomeMock(expected.name),
+);
 export const runOpenshellMock = vi.fn((args: string[]) => {
   args[0] === "sandbox" && args[1] === "delete" && lifecycleMock.events.push("delete");
   return { status: 0, output: "" };
@@ -226,9 +322,123 @@ export const streamSandboxCreateMock = vi.fn<SnapshotStreamSandboxCreateMock>(as
   sawProgress: false,
   forcedReady: false,
 }));
+
+export function modelPendingCloneRegistry(
+  resolveExisting: (name?: string) => SandboxRecord | null,
+): { getRegisteredClone: () => SandboxRecord | null } {
+  let registeredClone: SandboxRecord | null = null;
+
+  reserveSandboxInferenceRouteMock.mockImplementation(
+    (name: string, route: Partial<SandboxRecord>, options: { requireAbsent?: boolean } = {}) => {
+      const current = registeredClone?.name === name ? registeredClone : resolveExisting(name);
+      if (options.requireAbsent === true && current) return false;
+      registeredClone = {
+        name,
+        pendingRouteReservation: true,
+        ...structuredClone(route),
+      };
+      return true;
+    },
+  );
+
+  registerSandboxMock.mockImplementation(
+    (
+      entry: SandboxRecord,
+      _routeReservation?: unknown,
+      options: { pending?: boolean; expectedCurrent?: SandboxRecord | null } = {},
+    ) => {
+      const current =
+        registeredClone?.name === entry.name ? registeredClone : resolveExisting(entry.name);
+      if (
+        Object.prototype.hasOwnProperty.call(options, "expectedCurrent") &&
+        !isDeepStrictEqual(current, options.expectedCurrent ?? null)
+      ) {
+        throw new Error(`registry row '${entry.name}' changed before publication`);
+      }
+      registeredClone = {
+        ...structuredClone(entry),
+        ...(options.pending === true ? { pendingRouteReservation: true as const } : {}),
+      };
+      return structuredClone(registeredClone);
+    },
+  );
+  getSandboxMock.mockImplementation((name) => {
+    const existing = resolveExisting(name);
+    if (existing) return existing;
+    return registeredClone?.name === name ? structuredClone(registeredClone) : null;
+  });
+  finalizePendingSandboxRegistrationMock.mockImplementation((expected: SandboxRecord) => {
+    if (!registeredClone || !isDeepStrictEqual(registeredClone, expected)) return false;
+    const { pendingRouteReservation: _pending, ...finalizedClone } = registeredClone;
+    registeredClone = finalizedClone;
+    return true;
+  });
+  removeSandboxIfCurrentMock.mockImplementation((expected: SandboxRecord) => {
+    if (!registeredClone || !isDeepStrictEqual(registeredClone, expected)) return false;
+    registeredClone = null;
+    return true;
+  });
+  removeSandboxRouteReservationIfCurrentMock.mockImplementation((expected: SandboxRecord) => {
+    if (!registeredClone || !isDeepStrictEqual(registeredClone, expected)) return false;
+    registeredClone = null;
+    return true;
+  });
+  updateSandboxMock.mockImplementation((name: string, updates: Partial<SandboxRecord>) => {
+    if (registeredClone?.name === name) {
+      registeredClone = { ...registeredClone, ...structuredClone(updates) };
+      if (
+        Object.prototype.hasOwnProperty.call(updates, "customPolicies") &&
+        updates.customPolicies === undefined
+      ) {
+        delete registeredClone.customPolicies;
+      }
+      return true;
+    }
+    const existing = resolveExisting(name);
+    if (!existing) return false;
+    Object.assign(existing, structuredClone(updates));
+    if (
+      Object.prototype.hasOwnProperty.call(updates, "customPolicies") &&
+      updates.customPolicies === undefined
+    ) {
+      delete existing.customPolicies;
+    }
+    return true;
+  });
+  updateSandboxIfCurrentMock.mockImplementation(
+    (expected: SandboxRecord, updates: Partial<SandboxRecord>) => {
+      const current =
+        registeredClone?.name === expected.name ? registeredClone : resolveExisting(expected.name);
+      if (!current || !isDeepStrictEqual(current, expected)) return false;
+      const next = { ...current, ...structuredClone(updates) };
+      if (
+        Object.prototype.hasOwnProperty.call(updates, "customPolicies") &&
+        updates.customPolicies === undefined
+      ) {
+        delete next.customPolicies;
+      }
+      if (registeredClone?.name === expected.name) registeredClone = next;
+      else Object.assign(current, next);
+      return structuredClone(next);
+    },
+  );
+
+  return {
+    getRegisteredClone: () => (registeredClone === null ? null : structuredClone(registeredClone)),
+  };
+}
+
 export const latestBackupFixture = {
+  version: 1,
+  snapshotVersion: 4,
   timestamp: "2026-06-15T00:00:00.000Z",
   backupPath: "/tmp/backup-alpha",
+  sandboxName: "alpha",
+  agentType: "openclaw",
+  agentVersion: null,
+  expectedVersion: null,
+  stateDirs: [],
+  dir: "/sandbox",
 };
 
 export { lifecycleMock, shieldsMock };
@@ -242,6 +452,15 @@ vi.mock("../../adapters/docker", () => ({
 
 vi.mock("../../agent/defs", () => ({
   loadAgent: loadAgentMock,
+  loadAgentFresh: loadAgentMock,
+}));
+
+vi.mock("../../agent/definition-loader", () => ({
+  buildAgentDefinition: buildAgentDefinitionMock,
+}));
+
+vi.mock("../../harness/package-store", () => ({
+  resolvePinnedHarnessPackage: resolvePinnedHarnessPackageMock,
 }));
 
 vi.mock("../../adapters/openshell/runtime", () => ({
@@ -273,6 +492,7 @@ vi.mock("../../policy", () => ({
   getPresetContentGatewayState: getPresetContentGatewayStateMock,
   loadPresetForSandbox: loadPresetForSandboxMock,
   removePreset: removePresetMock,
+  resolveAgentDefinitionBaselinePolicy: resolveAgentDefinitionBaselinePolicyMock,
   resolveAgentBaselinePolicy: resolveAgentBaselinePolicyMock,
 }));
 
@@ -340,13 +560,18 @@ vi.mock("../../state/registry", () => ({
   registerSandbox: registerSandboxMock,
   reserveSandboxInferenceRoute: reserveSandboxInferenceRouteMock,
   removeSandbox: removeSandboxMock,
+  removeSandboxRouteReservationIfCurrent: removeSandboxRouteReservationIfCurrentMock,
+  removeSandboxIfCurrent: removeSandboxIfCurrentMock,
   updateSandbox: updateSandboxMock,
-  finalizePendingSandboxRegistration: finalizePendingSandboxRegistrationMock,
+  updateSandboxIfCurrent: updateSandboxIfCurrentMock,
+  finalizePendingSandboxRegistrationIfCurrent: finalizePendingSandboxRegistrationMock,
 }));
 
-vi.mock("../../state/sandbox", () => ({
+vi.mock("../../state/sandbox", async (importOriginal) => ({
+  ...(await importOriginal()),
   backupSandboxState: backupSandboxStateMock,
   captureSnapshotRestoreAuthority: captureSnapshotRestoreAuthorityMock,
+  prepareSnapshotRestoreContent: prepareSnapshotRestoreContentMock,
   findBackup: findBackupMock,
   getLatestBackup: getLatestBackupMock,
   listBackups: listBackupsMock,
@@ -361,6 +586,7 @@ vi.mock("./destroy", async () => {
     cleanupShieldsDestroyArtifacts: lifecycleMock.cleanupShieldsDestroyArtifactsMock,
     removeSandboxRegistryEntry: vi.fn(() => true),
     removeSandboxRegistryEntryOutcome: removeSandboxRegistryEntryOutcomeMock,
+    removeSandboxRegistryEntryIfCurrentOutcome: removeSandboxRegistryEntryIfCurrentOutcomeMock,
     requireSandboxDestructiveCleanupAuthority: (sandboxName: string, sandbox: SandboxRecord) =>
       runtimeProviders.requireRuntimeProviderDestructiveCleanupAuthority(
         sandboxName,
@@ -382,6 +608,21 @@ export function resetSnapshotRestoreMocks(): void {
     schemaVersion: 1,
     backupPath: "/tmp/backup-alpha",
     contentSha256: "a".repeat(64),
+  });
+  preparedSnapshotCleanupMock.mockReset();
+  preparedSnapshotValidateMock.mockReset();
+  prepareSnapshotRestoreContentMock.mockImplementation(() => {
+    const authority = captureSnapshotRestoreAuthorityMock();
+    return authority
+      ? {
+          schemaVersion: 1,
+          selectedBackupPath: authority.backupPath,
+          stagedBackupPath: `${authority.backupPath}.prepared`,
+          authority,
+          validate: preparedSnapshotValidateMock,
+          cleanup: preparedSnapshotCleanupMock,
+        }
+      : null;
   });
   shieldsMock.setIsShieldsDownExport(shieldsMock.isShieldsDownMock);
   shieldsMock.isShieldsDownMock.mockReturnValue(true);
@@ -409,7 +650,23 @@ export function resetSnapshotRestoreMocks(): void {
     name,
     policyAdditionsPath: name === "openclaw" ? null : `/repo/agents/${name}/policy-additions.yaml`,
   }));
+  buildAgentDefinitionMock.mockImplementation(
+    ({ manifest, packageRoot }: { manifest: Record<string, unknown>; packageRoot: string }) =>
+      ({
+        name: manifest.name,
+        packageRoot,
+        policyAdditionsPath: `${packageRoot}/policy-additions.yaml`,
+      }) as AgentDefinition,
+  );
+  resolvePinnedHarnessPackageMock.mockImplementation(installedHarnessPackage);
   resolveAgentBaselinePolicyMock.mockImplementation(resolveTestAgentBaselinePolicy);
+  resolveAgentDefinitionBaselinePolicyMock.mockImplementation(
+    (agent: Pick<AgentDefinition, "name" | "policyAdditionsPath">) => ({
+      agent: agent.name,
+      policyPath: agent.policyAdditionsPath ?? "/repo/openclaw-policy.yaml",
+      content: "version: 1\nnetwork_policies: {}\n",
+    }),
+  );
   prepareInitialSandboxCreatePolicyMock.mockImplementation((policyPath: string) => ({
     policyPath,
     appliedPresets: [],
@@ -417,16 +674,57 @@ export function resetSnapshotRestoreMocks(): void {
   registerSandboxMock.mockReset();
   reserveSandboxInferenceRouteMock.mockReset().mockReturnValue(true);
   removeSandboxMock.mockReset();
+  removeSandboxRouteReservationIfCurrentMock.mockReset().mockReturnValue(true);
+  removeSandboxIfCurrentMock.mockReset().mockReturnValue(true);
   removeSandboxRegistryEntryOutcomeMock.mockReturnValue({ status: "complete", removed: true });
-  updateSandboxMock.mockReset().mockReturnValue(true);
+  removeSandboxRegistryEntryIfCurrentOutcomeMock.mockImplementation((expected: SandboxRecord) =>
+    removeSandboxRegistryEntryOutcomeMock(expected.name),
+  );
+  updateSandboxMock
+    .mockReset()
+    .mockImplementation((name: string, updates: Partial<SandboxRecord>) => {
+      const current = getSandboxMock(name);
+      if (!current) return false;
+      Object.assign(current, structuredClone(updates));
+      if (
+        Object.prototype.hasOwnProperty.call(updates, "customPolicies") &&
+        updates.customPolicies === undefined
+      ) {
+        delete current.customPolicies;
+      }
+      return true;
+    });
+  updateSandboxIfCurrentMock
+    .mockReset()
+    .mockImplementation((expected: SandboxRecord, updates: Partial<SandboxRecord>) => {
+      const current = getSandboxMock(expected.name);
+      if (!current || !isDeepStrictEqual(current, expected)) return false;
+      Object.assign(current, structuredClone(updates));
+      if (
+        Object.prototype.hasOwnProperty.call(updates, "customPolicies") &&
+        updates.customPolicies === undefined
+      ) {
+        delete current.customPolicies;
+      }
+      return structuredClone(current);
+    });
   finalizePendingSandboxRegistrationMock.mockReset().mockReturnValue(true);
-  restoreSandboxStateMock.mockReturnValue({
-    success: true,
-    restoredDirs: [],
-    restoredFiles: [],
-    failedDirs: [],
-    failedFiles: [],
-  });
+  restoreSandboxStateMock.mockImplementation(
+    (
+      _sandboxName: string,
+      _backupPath: string,
+      options?: { validateBeforeMutation?: () => void },
+    ) => {
+      options?.validateBeforeMutation?.();
+      return {
+        success: true,
+        restoredDirs: [],
+        restoredFiles: [],
+        failedDirs: [],
+        failedFiles: [],
+      };
+    },
+  );
   streamSandboxCreateMock.mockImplementation(async () => ({
     status: 0,
     output: "",

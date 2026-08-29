@@ -6,10 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   listSandboxes: vi.fn(),
   getSandbox: vi.fn(),
+  resolveSnapshotBackupAgentAuthority: vi.fn(),
+  confirmSnapshotBackupAgentAuthority: vi.fn(),
   backupSandboxState: vi.fn(),
   captureSandboxListWithGatewayPreflightOrExit: vi.fn(),
-  dockerListImagesFormat: vi.fn().mockReturnValue(""),
-  dockerRmi: vi.fn(),
   prompt: vi.fn(),
   startStoppedSandboxContainerForBackup: vi.fn(),
   backupStartedSandboxState: vi.fn(),
@@ -63,6 +63,10 @@ vi.mock("../state/portable-uninstall-retirement", () => ({
   withPortableHostFence: mocks.withPortableHostFence,
 }));
 vi.mock("./sandbox/snapshot/backup-authority", () => ({
+  resolveSnapshotBackupAgentAuthority: (name: string) =>
+    mocks.resolveSnapshotBackupAgentAuthority(name),
+  confirmSnapshotBackupAgentAuthority: (name: string, authority: unknown) =>
+    mocks.confirmSnapshotBackupAgentAuthority(name, authority),
   backupSandboxStateWithManagedAuthority: (name: string) => mocks.backupSandboxState(name),
 }));
 vi.mock("../openshell-sandbox-list", () => ({
@@ -75,10 +79,6 @@ vi.mock("../openshell-sandbox-list", () => ({
 vi.mock("../core/ports", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../core/ports")>()),
   GATEWAY_PORT: 8080,
-}));
-vi.mock("../adapters/docker", () => ({
-  dockerListImagesFormat: mocks.dockerListImagesFormat,
-  dockerRmi: mocks.dockerRmi,
 }));
 vi.mock("../cli/branding", () => ({
   CLI_NAME: "nemoclaw",
@@ -103,18 +103,18 @@ vi.mock("../domain/lifecycle/options", () => ({
 // ../domain/maintenance/images is left unmocked so the gc tests run the real
 // orphan-detection helpers and can assert on gc's actual output.
 
-import {
-  backupAll,
-  backupAllUnderPortableHostFence,
-  garbageCollectImages,
-  rebuildBackupsDirectory,
-  shouldSkipUnreachableSandboxBackup,
-} from "./maintenance";
+import { backupAll, backupAllUnderPortableHostFence, rebuildBackupsDirectory } from "./maintenance";
 
 describe("backupAll", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.backupStartedSandboxState.mockReset();
+    mocks.resolveSnapshotBackupAgentAuthority.mockReset();
+    mocks.confirmSnapshotBackupAgentAuthority.mockReset();
+    mocks.resolveSnapshotBackupAgentAuthority.mockReturnValue({
+      agentDefinition: { name: "openclaw" },
+      harnessPackage: { id: "openclaw" },
+    });
     delete process.env.NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS;
     readySandboxNames = new Set(["sb-good", "sb-bad"]);
     liveSandboxNames = new Set();
@@ -168,6 +168,60 @@ describe("backupAll", () => {
     expect(rebuildBackupsDirectory("/home/tester", 9123)).toBe(
       "/home/tester/.nemoclaw/gateways/9123/rebuild-backups",
     );
+  });
+
+  it("rejects package loss after lock acquisition before container or Shields mutation", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      sandboxes: [{ name: "sb-stopped", openshellDriver: "docker" }],
+      defaultSandbox: null,
+    });
+    readySandboxNames = new Set();
+    mocks.confirmSnapshotBackupAgentAuthority.mockImplementation(() => {
+      throw new Error("retained package object is missing");
+    });
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+    await expect(backupAll()).rejects.toThrow("exit:1");
+    expect(mocks.confirmSnapshotBackupAgentAuthority).toHaveBeenCalledOnce();
+    expect(mocks.startStoppedSandboxContainerForBackup).not.toHaveBeenCalled();
+    expect(mocks.openBackupShieldsWindow).not.toHaveBeenCalled();
+    expect(mocks.backupStartedSandboxState).not.toHaveBeenCalled();
+  });
+
+  it("restores a started container when package authority changes before Shields open", async () => {
+    mocks.listSandboxes.mockReturnValue({
+      sandboxes: [{ name: "sb-stopped", openshellDriver: "docker" }],
+      defaultSandbox: null,
+    });
+    readySandboxNames = new Set();
+    mocks.startStoppedSandboxContainerForBackup.mockReturnValue({
+      containerName: "openshell-sb-stopped-abc",
+    });
+    mocks.confirmSnapshotBackupAgentAuthority
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error("retained package object changed after container start");
+      });
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`exit:${code}`);
+    }) as never);
+
+    await expect(backupAll()).rejects.toThrow("exit:1");
+
+    expect(mocks.confirmSnapshotBackupAgentAuthority).toHaveBeenCalledTimes(2);
+    expect(mocks.startStoppedSandboxContainerForBackup.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.confirmSnapshotBackupAgentAuthority.mock.invocationCallOrder[1]!,
+    );
+    expect(mocks.confirmSnapshotBackupAgentAuthority.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.returnSandboxContainerToStopped.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.returnSandboxContainerToStopped).toHaveBeenCalledWith("openshell-sb-stopped-abc");
+    expect(mocks.openBackupShieldsWindow).not.toHaveBeenCalled();
+    expect(mocks.backupStartedSandboxState).not.toHaveBeenCalled();
+    expect(mocks.backupSandboxState).not.toHaveBeenCalled();
   });
 
   it("returns before gateway preflight when no sandboxes are registered", async () => {
@@ -715,7 +769,10 @@ describe("backupAll", () => {
     await backupAll();
 
     expect(exitSpy).not.toHaveBeenCalled();
-    expect(mocks.backupStartedSandboxState).toHaveBeenCalledWith("sb-stopped");
+    expect(mocks.backupStartedSandboxState).toHaveBeenCalledWith(
+      "sb-stopped",
+      expect.objectContaining({ backup: expect.any(Function) }),
+    );
     expect(mocks.backupSandboxState).toHaveBeenCalledWith("sb-good");
     expect(mocks.returnSandboxContainerToStopped).toHaveBeenCalledWith("openshell-sb-stopped-abc");
     expect(mocks.relockBackupShieldsWindow.mock.invocationCallOrder.at(-1)!).toBeLessThan(
@@ -1387,80 +1444,5 @@ describe("backupAll", () => {
     expect(logOutput).toContain("Skipping 'sb-flapping' (not running");
     expect(logOutput).toContain("0 backed up, 0 failed, 1 skipped");
     expect(logOutput).not.toContain("were not found on their recorded gateway");
-  });
-});
-
-describe("shouldSkipUnreachableSandboxBackup", () => {
-  it("is true only for exactly '1'", () => {
-    expect(
-      shouldSkipUnreachableSandboxBackup({ NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP: "1" }),
-    ).toBe(true);
-    expect(
-      shouldSkipUnreachableSandboxBackup({ NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP: "0" }),
-    ).toBe(false);
-    expect(
-      shouldSkipUnreachableSandboxBackup({ NEMOCLAW_SKIP_UNREACHABLE_SANDBOX_BACKUP: "true" }),
-    ).toBe(false);
-    expect(shouldSkipUnreachableSandboxBackup({})).toBe(false);
-  });
-});
-
-describe("garbageCollectImages", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.assertNoHermesPortableHostAuthority.mockReset();
-    mocks.withPortableHostFence.mockImplementation(async (_home, operation) => operation());
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("rejects schema-5 authority before scanning Docker images (#9203)", async () => {
-    const stateDir = "/private/nemoclaw-test-state";
-    vi.stubEnv("VITEST", "true");
-    vi.stubEnv("NEMOCLAW_TEST_BASE_HOME", process.env.HOME ?? "");
-    vi.stubEnv("NEMOCLAW_TEST_STATE_DIR", stateDir);
-    mocks.assertNoHermesPortableHostAuthority.mockImplementation(() => {
-      throw new Error("Command 'gc' is not supported");
-    });
-
-    await expect(garbageCollectImages({ dryRun: true })).rejects.toThrow(
-      "Command 'gc' is not supported",
-    );
-    expect(mocks.dockerListImagesFormat).not.toHaveBeenCalled();
-    expect(mocks.dockerRmi).not.toHaveBeenCalled();
-    expect(mocks.assertNoHermesPortableHostAuthority).toHaveBeenCalledWith(stateDir, "gc");
-  });
-
-  it("surfaces a local-repo orphan while preserving a registered local image (#6301)", async () => {
-    // Local repo holds an orphan (gc-test-orphan-111) plus a still-registered
-    // image (live-222); the gateway repo holds only an in-use image.
-    mocks.dockerListImagesFormat.mockImplementation((repo: string) =>
-      repo === "nemoclaw-sandbox-local"
-        ? "nemoclaw-sandbox-local:gc-test-orphan-111\t3GB\nnemoclaw-sandbox-local:live-222\t2GB"
-        : "openshell/sandbox-from:in-use\t1GB",
-    );
-    mocks.listSandboxes.mockReturnValue({
-      sandboxes: [
-        { imageTag: "nemoclaw-sandbox-local:live-222" },
-        { imageTag: "openshell/sandbox-from:in-use" },
-      ],
-      defaultSandbox: null,
-    });
-    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
-
-    await garbageCollectImages({ dryRun: true });
-
-    const out = logSpy.mock.calls.flat().join("\n");
-    logSpy.mockRestore();
-
-    // The local orphan is reported, the still-registered local image is not,
-    // and both repos are scanned.
-    expect(out).toContain("nemoclaw-sandbox-local:gc-test-orphan-111");
-    expect(out).not.toContain("nemoclaw-sandbox-local:live-222");
-    const scannedRepos = mocks.dockerListImagesFormat.mock.calls.map((call) => call[0]);
-    expect(scannedRepos).toContain("openshell/sandbox-from");
-    expect(scannedRepos).toContain("nemoclaw-sandbox-local");
   });
 });

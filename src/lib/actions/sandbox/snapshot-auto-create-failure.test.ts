@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   hostLocalInferenceReceipt,
@@ -15,6 +18,18 @@ import {
 } from "../../onboard/runtime-provider/host-local-inference";
 import type { SnapshotStreamSandboxCreateMock } from "./snapshot-create-stream-test-types";
 import { createSandboxHostLocalInferenceProvenance } from "../../state/registry/host-local-inference";
+
+const packageFixture = vi.hoisted(() => {
+  const identity = {
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "1.0.0-test",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  };
+  const packageRoot = `/state/harnesses/objects/${identity.contentDigest}`;
+  return { identity, packageRoot, manifestPath: `${packageRoot}/manifest.yaml` };
+});
 
 const harness = vi.hoisted(() => ({
   entries: new Map<string, Record<string, unknown>>(),
@@ -31,19 +46,32 @@ const registerSandboxMock = vi.fn(
   (
     entry: Record<string, unknown>,
     _routeReservation?: unknown,
-    options: { pending?: boolean } = {},
+    options: { pending?: boolean; expectedCurrent?: Record<string, unknown> | null } = {},
   ) => {
-    harness.entries.set(String(entry.name), {
+    const current = harness.entries.get(String(entry.name)) ?? null;
+    const expectedCurrentMatches =
+      !Object.prototype.hasOwnProperty.call(options, "expectedCurrent") ||
+      isDeepStrictEqual(current, options.expectedCurrent ?? null);
+    assert(
+      expectedCurrentMatches,
+      `registry row '${String(entry.name)}' changed before publication`,
+    );
+    const registered = {
       ...entry,
       ...(options.pending === true ? { pendingRouteReservation: true } : {}),
-    });
+    };
+    harness.entries.set(String(entry.name), registered);
+    return registered;
   },
 );
-const finalizePendingSandboxRegistrationMock = vi.fn((name: string) => {
+const finalizePendingSandboxRegistrationMock = vi.fn((expected: Record<string, unknown>) => {
+  const name = String(expected.name);
   const entry = harness.entries.get(name);
   const finalized =
-    entry?.pendingRouteReservation === true
-      ? { ...entry, pendingRouteReservation: undefined }
+    entry?.pendingRouteReservation === true && isDeepStrictEqual(entry, expected)
+      ? Object.fromEntries(
+          Object.entries(entry).filter(([key]) => key !== "pendingRouteReservation"),
+        )
       : null;
   return finalized === null ? false : Boolean(harness.entries.set(name, finalized));
 });
@@ -57,16 +85,46 @@ const reserveSandboxInferenceRouteMock = vi.fn((name: string, route: Record<stri
 });
 const restoreSandboxStateMock = vi.fn();
 const captureSnapshotRestoreAuthorityMock = vi.fn();
+const preparedSnapshotCleanupMock = vi.fn();
+const preparedSnapshotValidateMock = vi.fn();
+const prepareSnapshotRestoreContentMock = vi.fn(() => {
+  const authority = captureSnapshotRestoreAuthorityMock();
+  return authority
+    ? {
+        schemaVersion: 1,
+        selectedBackupPath: authority.backupPath,
+        stagedBackupPath: `${authority.backupPath}.prepared`,
+        authority,
+        validate: preparedSnapshotValidateMock,
+        cleanup: preparedSnapshotCleanupMock,
+      }
+    : null;
+});
 const streamSandboxCreateMock = vi.fn<SnapshotStreamSandboxCreateMock>(async () => ({
   status: 7,
   output: "create failed before registry write",
   sawProgress: false,
   forcedReady: false,
 }));
-const removeSandboxRegistryEntryOutcomeMock = vi.fn((name: string) => {
-  const removed = harness.entries.delete(name);
-  return { status: removed ? ("complete" as const) : ("not-found" as const), removed };
+const removeSandboxIfCurrentMock = vi.fn((expected: Record<string, unknown>) => {
+  const name = String(expected.name);
+  const current = harness.entries.get(name);
+  return isDeepStrictEqual(current, expected) ? harness.entries.delete(name) : false;
 });
+const removeSandboxRegistryEntryOutcomeMock = vi.fn(
+  (name: string, dependencies: { removeSandbox?: (sandboxName: string) => boolean } = {}) => {
+    const removed = dependencies.removeSandbox
+      ? dependencies.removeSandbox(name)
+      : harness.entries.delete(name);
+    return { status: removed ? ("complete" as const) : ("not-found" as const), removed };
+  },
+);
+const removeSandboxRegistryEntryIfCurrentOutcomeMock = vi.fn((expected: Record<string, unknown>) =>
+  removeSandboxRegistryEntryOutcomeMock(String(expected.name), {
+    removeSandbox: (sandboxName) =>
+      sandboxName === expected.name && removeSandboxIfCurrentMock(expected),
+  }),
+);
 
 const managedRuntime: HostLocalInferenceRuntime = {
   providerId: "mxc",
@@ -123,6 +181,7 @@ function sourceEntry(receipt?: string): Record<string, unknown> {
   return {
     name: "alpha",
     agent: "openclaw",
+    harnessPackage: packageFixture.identity,
     gatewayName: "nemoclaw",
     imageTag: "nemoclaw-alpha:test",
     openshellDriver: receipt ? "mxc" : "docker",
@@ -164,6 +223,37 @@ vi.mock("../../inference/nim", () => ({
   stopNimContainer: vi.fn(),
   stopNimContainerByName: vi.fn(),
 }));
+vi.mock("../../agent/definition-loader", () => ({
+  buildAgentDefinition: vi.fn(() => ({
+    name: "openclaw",
+    packageRoot: packageFixture.packageRoot,
+    manifestPath: packageFixture.manifestPath,
+    policyAdditionsPath: `${packageFixture.packageRoot}/policy-additions.yaml`,
+  })),
+}));
+vi.mock("../../harness/package-store", () => ({
+  resolvePinnedHarnessPackage: vi.fn(() => ({
+    state: "installed",
+    identity: packageFixture.identity,
+    packageRoot: packageFixture.packageRoot,
+    packageManifest: {
+      packageRoot: packageFixture.packageRoot,
+      metadataPath: `${packageFixture.packageRoot}/nemoclaw-package.json`,
+      manifestPath: packageFixture.manifestPath,
+      envelope: {
+        schemaVersion: 1,
+        kind: "agent-runtime",
+        id: "openclaw",
+        displayName: "OpenClaw",
+        packageVersion: "1.0.0-test",
+        contractVersion: 1,
+        manifest: "manifest.yaml",
+      },
+      manifest: { name: "openclaw" },
+    },
+    receipt: {},
+  })),
+}));
 vi.mock("../../messaging/channels", () => ({
   BUILT_IN_CHANNEL_MANIFESTS: [],
   getMessagingConfigEnvAliases: vi.fn(() => ({})),
@@ -181,6 +271,9 @@ vi.mock("../../policy", () => ({
   getPresetContentGatewayState: vi.fn(() => "absent"),
   loadPresetForSandbox: vi.fn(() => null),
   removePreset: vi.fn(() => true),
+  resolveAgentDefinitionBaselinePolicy: vi.fn((agent: { name: string }) =>
+    resolveTestAgentBaselinePolicy(agent.name),
+  ),
   resolveAgentBaselinePolicy: resolveTestAgentBaselinePolicy,
 }));
 vi.mock("../../runner", () => ({
@@ -224,26 +317,57 @@ vi.mock("../../state/registry", () => ({
     sandboxes: [...harness.entries.values()],
     defaultSandbox: "alpha",
   })),
-  finalizePendingSandboxRegistration: finalizePendingSandboxRegistrationMock,
+  finalizePendingSandboxRegistrationIfCurrent: finalizePendingSandboxRegistrationMock,
   registerSandbox: registerSandboxMock,
   reserveSandboxInferenceRoute: reserveSandboxInferenceRouteMock,
+  isRouteOnlySandboxReservation: vi.fn(
+    (entry: { pendingRouteReservation?: true; createdAt?: string }) =>
+      entry.pendingRouteReservation === true && entry.createdAt === undefined,
+  ),
   removeSandbox: vi.fn((name: string) => harness.entries.delete(name)),
+  removeSandboxRouteReservationIfCurrent: vi.fn((expected: Record<string, unknown>) => {
+    const current = harness.entries.get(String(expected.name));
+    return isDeepStrictEqual(current, expected)
+      ? harness.entries.delete(String(expected.name))
+      : false;
+  }),
+  removeSandboxIfCurrent: removeSandboxIfCurrentMock,
   updateSandbox: vi.fn(),
 }));
 vi.mock("../../state/sandbox", () => ({
   backupSandboxState: vi.fn(),
   captureSnapshotRestoreAuthority: captureSnapshotRestoreAuthorityMock,
+  prepareSnapshotRestoreContent: prepareSnapshotRestoreContentMock,
   findBackup: vi.fn(() => ({ match: null })),
   getLatestBackup: vi.fn(() => ({
+    version: 2,
+    backupComplete: true,
+    backupContentSha256: "d".repeat(64),
     timestamp: "2026-06-15T00:00:00.000Z",
     backupPath: "/tmp/backup-alpha",
+    sandboxName: "alpha",
+    agentType: "openclaw",
+    agentVersion: null,
+    expectedVersion: null,
+    harnessPackage: packageFixture.identity,
+    stateDirs: [],
+    dir: "/sandbox",
   })),
   listBackups: vi.fn(() => []),
   restoreSandboxState: restoreSandboxStateMock,
+  inspectRebuildManifestHarnessPackage: vi.fn(
+    (manifest: { version?: number; harnessPackage?: unknown }) =>
+      manifest.version === 2 && manifest.harnessPackage === null
+        ? { status: "candidate", harnessPackage: null }
+        : manifest.version === 2 && typeof manifest.harnessPackage === "object"
+          ? { status: "package", harnessPackage: manifest.harnessPackage }
+          : { status: "invalid" },
+  ),
 }));
 vi.mock("./destroy", () => ({
   cleanupShieldsDestroyArtifacts: vi.fn(),
   removeSandboxRegistryEntryOutcome: removeSandboxRegistryEntryOutcomeMock,
+  removeSandboxRegistryEntryIfCurrentOutcome: removeSandboxRegistryEntryIfCurrentOutcomeMock,
   requireSandboxDestructiveCleanupAuthority: vi.fn(() => ({ provider: runtimeProvider })),
 }));
 vi.mock("./restore-gateway-pairing", () => ({
@@ -265,6 +389,11 @@ describe("snapshot restore auto-create failures", () => {
     vi.clearAllMocks();
     harness.entries.clear();
     harness.entries.set("alpha", sourceEntry());
+    captureSnapshotRestoreAuthorityMock.mockReturnValue({
+      schemaVersion: 1,
+      backupPath: "/tmp/backup-alpha",
+      contentSha256: "b".repeat(64),
+    });
     streamSandboxCreateMock.mockResolvedValue({
       status: 7,
       output: "create failed before registry write",
@@ -325,6 +454,7 @@ describe("snapshot restore auto-create failures", () => {
           runtimeOwnerSandboxName: "alpha",
         }),
       }),
+      { requireAbsent: true },
     );
     expect(getSandboxMock("beta")).toBeNull();
     expect(registerSandboxMock).not.toHaveBeenCalled();
@@ -361,6 +491,7 @@ describe("snapshot restore auto-create failures", () => {
           runtimeOwnerSandboxName: "alpha",
         }),
       }),
+      { requireAbsent: true },
     );
     expect(getSandboxMock("beta")).toBeNull();
     expect(registerSandboxMock).not.toHaveBeenCalled();
@@ -382,9 +513,20 @@ describe("snapshot restore auto-create failures", () => {
     });
     const { getLatestBackup } = await import("../../state/sandbox");
     vi.mocked(getLatestBackup).mockReturnValue({
+      version: 2,
+      backupComplete: true,
       timestamp: "2026-08-02T00-00-00-000Z",
       backupPath: "/tmp/backup-alpha",
+      sandboxName: "alpha",
+      agentType: "openclaw",
+      agentVersion: null,
+      expectedVersion: null,
+      harnessPackage: packageFixture.identity,
+      stateDirs: [],
+      dir: "/sandbox",
+      blueprintDigest: null,
       hostLocalInferenceReceipt: receipt,
+      snapshotVersion: 1,
     } as ReturnType<typeof getLatestBackup>);
     captureSnapshotRestoreAuthorityMock.mockReturnValue({
       schemaVersion: 1,
@@ -403,9 +545,11 @@ describe("snapshot restore auto-create failures", () => {
     expect(registerSandboxMock).toHaveBeenCalledWith(
       expect.objectContaining({ name: "beta", hostLocalInferenceReceipt: receipt }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
-    expect(finalizePendingSandboxRegistrationMock).toHaveBeenCalledWith("beta");
+    expect(finalizePendingSandboxRegistrationMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "beta", pendingRouteReservation: true }),
+    );
     expect(registerSandboxMock.mock.invocationCallOrder[0]).toBeLessThan(
       finalizePendingSandboxRegistrationMock.mock.invocationCallOrder[0]!,
     );
@@ -417,7 +561,9 @@ describe("snapshot restore auto-create failures", () => {
     const nimRuntime = await import("../../inference/nim");
     expect(nimRuntime.stopNimContainer).not.toHaveBeenCalled();
     expect(nimRuntime.stopNimContainerByName).not.toHaveBeenCalled();
-    expect(removeSandboxRegistryEntryOutcomeMock).toHaveBeenCalledWith("beta");
+    expect(removeSandboxRegistryEntryIfCurrentOutcomeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "beta" }),
+    );
     expect(getSandboxMock("beta")).toBeNull();
     expect(consoleError.mock.calls.flat().join("\n")).toContain("injected live route failure");
     expect(restoreSandboxStateMock).not.toHaveBeenCalled();

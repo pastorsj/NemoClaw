@@ -2,9 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
+
+const fixture = vi.hoisted(() => ({
+  harnessPackage: {
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "1.0.0-test",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  },
+}));
 
 const mocks = vi.hoisted(() => ({
-  backupSandboxState: vi.fn(),
+  backupWithAuthority: vi.fn(),
   captureOpenshell: vi.fn(() => ({ status: 0, output: "alpha Ready\n" })),
   findBackup: vi.fn(() => ({ match: null })),
   removeIncompleteSnapshot: vi.fn(
@@ -36,15 +47,28 @@ vi.mock("../../shields/timer-bound-lock", () => ({
   ),
 }));
 
+vi.mock("../../state/mcp-lifecycle-lock", () => ({
+  withSandboxMutationLock: vi.fn((_sandboxName: string, operation: () => unknown) => operation()),
+}));
+
 vi.mock("../../state/registry", () => ({
   getBaselineExclusions: vi.fn(() => []),
-  getSandbox: vi.fn(() => ({ name: "alpha", agent: "openclaw" })),
+  getSandbox: vi.fn(() => ({
+    name: "alpha",
+    agent: "openclaw",
+    harnessPackage: fixture.harnessPackage,
+  })),
 }));
 
 vi.mock("../../state/sandbox", () => ({
-  backupSandboxState: mocks.backupSandboxState,
   findBackup: mocks.findBackup,
   removeIncompleteSnapshot: mocks.removeIncompleteSnapshot,
+}));
+
+vi.mock("./snapshot/dependencies", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./snapshot/dependencies")>()),
+  assertSandboxSnapshotCommandAvailable: vi.fn(),
+  backupSandboxStateWithManagedAuthority: mocks.backupWithAuthority,
 }));
 
 vi.mock("./sandbox-gateway-routing", () => ({
@@ -88,8 +112,8 @@ describe("snapshot create cleanup after a failed capture", () => {
     return vi.mocked(console.error).mock.calls.flat().join("\n");
   }
 
-  it("reports the failed directories and files", async () => {
-    mocks.backupSandboxState.mockReturnValue(
+  it("reports the failed directories and files", testTimeoutOptions(10_000), async () => {
+    mocks.backupWithAuthority.mockReturnValue(
       failedCaptureWithPublishedSnapshot({
         failedDirs: ["workspace", "skills"],
         failedDirReasons: { workspace: "permission denied" },
@@ -104,7 +128,7 @@ describe("snapshot create cleanup after a failed capture", () => {
   });
 
   it("removes the snapshot so a later restore cannot select an incomplete capture (#8201)", async () => {
-    mocks.backupSandboxState.mockReturnValue(failedCaptureWithPublishedSnapshot());
+    mocks.backupWithAuthority.mockReturnValue(failedCaptureWithPublishedSnapshot());
 
     const errors = await createSnapshot();
 
@@ -113,7 +137,7 @@ describe("snapshot create cleanup after a failed capture", () => {
   });
 
   it("names the snapshot that is still listed when removal fails", async () => {
-    mocks.backupSandboxState.mockReturnValue(failedCaptureWithPublishedSnapshot());
+    mocks.backupWithAuthority.mockReturnValue(failedCaptureWithPublishedSnapshot());
     mocks.removeIncompleteSnapshot.mockReturnValue({
       removed: false,
       error: "EACCES: permission denied",
@@ -128,7 +152,7 @@ describe("snapshot create cleanup after a failed capture", () => {
   });
 
   it("does not attempt removal when the capture failed before publishing a snapshot", async () => {
-    mocks.backupSandboxState.mockReturnValue({
+    mocks.backupWithAuthority.mockReturnValue({
       success: false,
       backedUpDirs: [],
       failedDirs: [],
@@ -144,7 +168,7 @@ describe("snapshot create cleanup after a failed capture", () => {
   });
 
   it("does not touch a snapshot whose capture succeeded", async () => {
-    mocks.backupSandboxState.mockReturnValue({
+    mocks.backupWithAuthority.mockReturnValue({
       success: true,
       manifest: { backupPath: INCOMPLETE_PATH, timestamp: "2026-08-04T06-53-38-310Z" },
       backedUpDirs: ["workspace"],

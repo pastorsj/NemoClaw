@@ -5,6 +5,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as f from "./snapshot-restore-test-fixture";
 
+const HERMES_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "hermes",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "b".repeat(64),
+};
+const HERMES_PACKAGE_ROOT = `/state/harnesses/objects/${HERMES_PACKAGE.contentDigest}`;
+const HERMES_SNAPSHOT = {
+  ...f.latestBackupFixture,
+  version: 2,
+  backupComplete: true,
+  agentType: HERMES_PACKAGE.id,
+  harnessPackage: HERMES_PACKAGE,
+};
+
 beforeEach(f.resetSnapshotRestoreMocks);
 afterEach(f.cleanupSnapshotRestoreMocks);
 
@@ -31,29 +47,26 @@ describe("runSandboxSnapshot restore: baseline exclusions", () => {
       appliedAgentVersion: "0.18.0",
     };
     const cleanup = vi.fn(() => true);
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
-    f.getSandboxMock.mockImplementation((name) =>
+    f.modelPendingCloneRegistry((name) =>
       name === "alpha"
         ? {
             name: "alpha",
             agent: "hermes",
+            harnessPackage: HERMES_PACKAGE,
             imageTag: "nemoclaw-alpha:test",
             openshellDriver: "docker",
             provider: "nvidia-nim",
             model: "nvidia/model-a",
             baselineExclusions: [exclusion],
           }
-        : registeredClone,
+        : null,
     );
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue({ ...HERMES_SNAPSHOT });
     f.prepareInitialSandboxCreatePolicyMock.mockReturnValue({
       policyPath: "/tmp/snapshot-clone-policy.yaml",
       appliedPresets: [],
@@ -63,18 +76,29 @@ describe("runSandboxSnapshot restore: baseline exclusions", () => {
     const { runSandboxSnapshot } = await import("./snapshot");
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
 
-    expect(f.resolveAgentBaselinePolicyMock).toHaveBeenCalledWith("hermes");
+    expect(f.resolveAgentDefinitionBaselinePolicyMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "hermes",
+        packageRoot: HERMES_PACKAGE_ROOT,
+        policyAdditionsPath: `${HERMES_PACKAGE_ROOT}/policy-additions.yaml`,
+      }),
+    );
+    expect(f.resolveAgentBaselinePolicyMock).not.toHaveBeenCalled();
     expect(f.prepareInitialSandboxCreatePolicyMock).toHaveBeenCalledWith(
-      "/repo/agents/hermes/policy-additions.yaml",
+      `${HERMES_PACKAGE_ROOT}/policy-additions.yaml`,
       [],
       { agentName: "hermes", sandboxName: "beta", baselineExclusions: [exclusion] },
     );
     const createArgs = f.streamSandboxCreateMock.mock.calls[0]?.[1] ?? [];
     expect(createArgs[createArgs.indexOf("--policy") + 1]).toBe("/tmp/snapshot-clone-policy.yaml");
     expect(f.registerSandboxMock).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "beta", baselineExclusions: [exclusion] }),
+      expect.objectContaining({
+        name: "beta",
+        harnessPackage: HERMES_PACKAGE,
+        baselineExclusions: [exclusion],
+      }),
       undefined,
-      { pending: true },
+      { pending: true, expectedCurrent: null },
     );
     expect(cleanup).toHaveBeenCalledOnce();
   });

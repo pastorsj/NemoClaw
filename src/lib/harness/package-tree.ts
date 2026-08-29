@@ -402,7 +402,11 @@ export function refreshOpenedDirectory(
 
 export function assertSnapshot(snapshot: EntrySnapshot | AncestorSnapshot): void {
   const current = fs.lstatSync(snapshot.absolutePath, { bigint: true });
-  if (!sameSnapshot(snapshot.stat, current)) {
+  const unchanged =
+    "type" in snapshot
+      ? sameSnapshot(snapshot.stat, current)
+      : sameDirectoryIdentity(snapshot.stat, current);
+  if (!unchanged) {
     throw new Error(
       `Harness package path changed during validation: ${diagnosticPath(snapshot.absolutePath)}`,
     );

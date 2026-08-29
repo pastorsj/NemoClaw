@@ -4,6 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeEach, expect, it } from "vitest";
+import {
+  createSnapshotBackupAuthorityFixture,
+  createSnapshotHarnessPackageFixture,
+  createSnapshotRestoreAuthorityFixture,
+} from "../helpers/snapshot-authority";
 
 const ORIGINAL_HOME = process.env.HOME;
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-stale-dir-restore-"));
@@ -31,6 +36,7 @@ function restoreEnv(name: string, value: string | undefined): void {
 }
 
 function writeSandboxRegistry(sandboxName: string, agent: string | null = null): void {
+  const effectiveAgent = agent || "openclaw";
   const stateRoot = path.join(TMP_HOME, ".nemoclaw");
   fs.mkdirSync(stateRoot, { recursive: true });
   fs.writeFileSync(
@@ -45,6 +51,7 @@ function writeSandboxRegistry(sandboxName: string, agent: string | null = null):
           gpuEnabled: false,
           policies: [],
           agent,
+          harnessPackage: createSnapshotHarnessPackageFixture(effectiveAgent),
         },
       },
     }),
@@ -99,7 +106,10 @@ process.exit(0);
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-    const backup = sandboxState.backupSandboxState("alpha");
+    const backup = sandboxState.backupSandboxState(
+      "alpha",
+      createSnapshotBackupAuthorityFixture("openclaw"),
+    );
     expect(backup.success).toBe(true);
     expect(backup.manifest?.backedUpDirs).toEqual([]);
     expect(backup.manifest?.failedBackupDirs).toEqual([]);
@@ -109,7 +119,16 @@ process.exit(0);
     manifest.stateDirs = manifest.stateDirs.filter((stateDir: string) => stateDir !== "agents");
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-    const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+    const restore = sandboxState.restoreSandboxState(
+      "alpha",
+      backup.manifest!.backupPath,
+      createSnapshotRestoreAuthorityFixture(
+        sandboxState,
+        "alpha",
+        "openclaw",
+        backup.manifest!.backupPath,
+      ),
+    );
     expect(restore.success).toBe(true);
     expect(restore.restoredDirs).toEqual([]);
 
@@ -176,13 +195,25 @@ process.exit(0);
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-    const backup = sandboxState.backupSandboxState("alpha");
+    const backup = sandboxState.backupSandboxState(
+      "alpha",
+      createSnapshotBackupAuthorityFixture("hermes"),
+    );
     expect(backup.success).toBe(true);
     expect(backup.manifest?.stateDirs).toContain("workspace");
     expect(backup.manifest?.backedUpDirs).not.toContain("workspace");
     expect(backup.manifest?.failedBackupDirs).not.toContain("workspace");
 
-    const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+    const restore = sandboxState.restoreSandboxState(
+      "alpha",
+      backup.manifest!.backupPath,
+      createSnapshotRestoreAuthorityFixture(
+        sandboxState,
+        "alpha",
+        "hermes",
+        backup.manifest!.backupPath,
+      ),
+    );
 
     expect(restore.success).toBe(true);
     expect(fs.existsSync(workspaceMarker)).toBe(false);
@@ -228,14 +259,26 @@ process.exit(0);
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
 
-    const backup = sandboxState.backupSandboxState("alpha");
+    const backup = sandboxState.backupSandboxState(
+      "alpha",
+      createSnapshotBackupAuthorityFixture("openclaw"),
+    );
     expect(backup.success).toBe(true);
     const manifestPath = path.join(backup.manifest!.backupPath, "rebuild-manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
     manifest.failedBackupDirs = ["workspace"];
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
-    const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+    const restore = sandboxState.restoreSandboxState(
+      "alpha",
+      backup.manifest!.backupPath,
+      createSnapshotRestoreAuthorityFixture(
+        sandboxState,
+        "alpha",
+        "openclaw",
+        backup.manifest!.backupPath,
+      ),
+    );
 
     expect(restore.success).toBe(true);
     const cleanupCommands = fs
@@ -252,7 +295,16 @@ process.exit(0);
     Reflect.deleteProperty(manifest, "failedBackupDirs");
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     fs.writeFileSync(sshLog, "");
-    const legacyRestore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+    const legacyRestore = sandboxState.restoreSandboxState(
+      "alpha",
+      backup.manifest!.backupPath,
+      createSnapshotRestoreAuthorityFixture(
+        sandboxState,
+        "alpha",
+        "openclaw",
+        backup.manifest!.backupPath,
+      ),
+    );
 
     expect(legacyRestore.success).toBe(true);
     expect(fs.readFileSync(sshLog, "utf-8")).not.toContain("d='/sandbox/.openclaw/workspace'");
@@ -289,14 +341,26 @@ process.exit(0);
     writeSandboxRegistry("alpha");
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}${path.delimiter}${oldPath || ""}`;
-    const backup = sandboxState.backupSandboxState("alpha");
+    const backup = sandboxState.backupSandboxState(
+      "alpha",
+      createSnapshotBackupAuthorityFixture("openclaw"),
+    );
     expect(backup.success).toBe(true);
     expect(backup.manifest?.failedBackupDirs).toEqual([]);
 
     const failingOpenshell = path.join(binDir, "openshell-fail");
     writeExecutable(failingOpenshell, "#!/usr/bin/env node\nprocess.exit(1);\n");
     process.env.NEMOCLAW_OPENSHELL_BIN = failingOpenshell;
-    const restore = sandboxState.restoreSandboxState("alpha", backup.manifest!.backupPath);
+    const restore = sandboxState.restoreSandboxState(
+      "alpha",
+      backup.manifest!.backupPath,
+      createSnapshotRestoreAuthorityFixture(
+        sandboxState,
+        "alpha",
+        "openclaw",
+        backup.manifest!.backupPath,
+      ),
+    );
 
     expect(restore.success).toBe(false);
     expect(restore.failedDirs).toEqual(

@@ -9,23 +9,36 @@ import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { fingerprintSandboxLiveIdentity } from "../../onboard/sandbox-recreate-transaction";
 import {
   makeActiveTeamsMessagingPlan,
   makePreparedRecoveryManifest,
 } from "./rebuild-flow-test-fixtures";
 
+const LEGACY_OPENCLAW_MIGRATION = {
+  schemaVersion: 1 as const,
+  source: "legacy-current-bundle" as const,
+  legacyAgent: null,
+  migratedAt: "2026-08-28T05:00:00.000Z",
+};
+
 describe("rebuildSandbox flow: recovery", () => {
   installRebuildFlowTestHooks();
 
   it("uses marked manifest provenance when the custom-image registry baseline is missing (#6108)", async () => {
     const customDockerfile = path.join(process.cwd(), "Dockerfile");
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    expect(harnessPackage).not.toBeNull();
     const recoveryManifest = {
       ...makePreparedRecoveryManifest(),
+      version: 2 as const,
+      harnessPackage,
       reconcileOpenClawImagePluginProvenance: true,
       openclawImagePluginInstalls: [],
     };
     const harness = createRebuildFlowHarness({
+      harnessPackage,
       sandboxEntry: {
         fromDockerfile: customDockerfile,
         nemoclawVersion: null,
@@ -50,7 +63,10 @@ describe("rebuildSandbox flow: recovery", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
-      { targetAgentType: "openclaw", allowCustomImageWholeStateFileRestore: true },
+      expect.objectContaining({
+        targetAgentType: "openclaw",
+        allowCustomImageWholeStateFileRestore: true,
+      }),
     );
   });
 
@@ -59,6 +75,7 @@ describe("rebuildSandbox flow: recovery", () => {
     harness = createRebuildFlowHarness({
       defaultSandbox: "alpha",
       defaultSelectionRevision: 10,
+      sandboxEntry: { harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION },
       onboard: () => {
         expect(harness.setDefault("beta")).toBe(true);
         throw new Error("recreate failed after explicit default choice");
@@ -319,7 +336,10 @@ describe("rebuildSandbox flow: recovery", () => {
     const mcpEntry = { server: "github", providerName: "nemoclaw-mcp-alpha-github" };
     const harness = createRebuildFlowHarness({
       defaultSandbox: "alpha",
-      sandboxEntry: { toolDisclosure: "progressive" },
+      sandboxEntry: {
+        toolDisclosure: "progressive",
+        harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION,
+      },
       mcpPreparation: {
         entries: [mcpEntry],
         detachedProviderEntries: [mcpEntry],
@@ -352,7 +372,10 @@ describe("rebuildSandbox flow: recovery", () => {
   it("keeps the requested disclosure mode in a zero-MCP prepared-recovery retry", async () => {
     const harness = createRebuildFlowHarness({
       defaultSandbox: "alpha",
-      sandboxEntry: { toolDisclosure: "progressive" },
+      sandboxEntry: {
+        toolDisclosure: "progressive",
+        harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION,
+      },
       onboard: () => {
         throw new Error("recreate failed");
       },
@@ -381,6 +404,7 @@ describe("rebuildSandbox flow: recovery", () => {
   it("blocks installer recovery when MCP post-restore verification is incomplete", async () => {
     const mcpEntry = { server: "github", providerName: "nemoclaw-mcp-alpha-github" };
     const harness = createRebuildFlowHarness({
+      sandboxEntry: { harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION },
       mcpPreparation: {
         entries: [mcpEntry],
         detachedProviderEntries: [mcpEntry],

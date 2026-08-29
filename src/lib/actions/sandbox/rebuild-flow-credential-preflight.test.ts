@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
+
 import { describe, expect, it } from "vitest";
 import { makeMessagingPlan } from "../../../../test/helpers/messaging-plan-fixtures";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
@@ -9,6 +11,7 @@ import {
   installRebuildFlowTestHooks,
   snapshotEnv,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { makePreparedRecoveryManifest } from "./rebuild-flow-test-fixtures";
 
 type Harness = ReturnType<typeof createRebuildFlowHarness>;
@@ -57,6 +60,19 @@ function providerRuntime(
 
 function diagnostics(harness: Harness): string {
   return harness.errorSpy.mock.calls.flat().map(String).join("\n");
+}
+
+function installPreparedOpenClawRecovery() {
+  const harnessPackage = installRebuildHarnessPackage("openclaw");
+  assert(harnessPackage, "OpenClaw package fixture was not installed.");
+  return {
+    harnessPackage,
+    recoveryManifest: {
+      ...makePreparedRecoveryManifest(),
+      version: 2 as const,
+      harnessPackage,
+    },
+  };
 }
 
 function makeStagedHermesMessagingPlan() {
@@ -152,7 +168,9 @@ describe("rebuildSandbox flow: credential preflight", () => {
   });
 
   it("lets validated prepared recovery recreate a missing provider from a host key (#6114)", async () => {
+    const { harnessPackage, recoveryManifest } = installPreparedOpenClawRecovery();
     const harness = createRebuildFlowHarness({
+      harnessPackage,
       sandboxEntry: {
         provider: "compatible-endpoint",
         model: MODEL,
@@ -165,6 +183,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
       sandboxInventory: {
         sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
       },
+      preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
       endpointUrl: "https://inference.example.test/v1",
@@ -174,7 +193,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
-        recoveryManifest: makePreparedRecoveryManifest(),
+        recoveryManifest,
       }),
     ).resolves.toBeUndefined();
 
@@ -198,12 +217,14 @@ describe("rebuildSandbox flow: credential preflight", () => {
   });
 
   it("aborts if the missing provider appears at the delete edge (#6114)", async () => {
+    const { harnessPackage, recoveryManifest } = installPreparedOpenClawRecovery();
     const missingProvider = providerRuntime([]);
     const registeredProvider = providerRuntime(["compatible-endpoint"], {
       "compatible-endpoint": "COMPATIBLE_API_KEY",
     });
     const providerLookups = [missingProvider, registeredProvider];
     const harness = createRebuildFlowHarness({
+      harnessPackage,
       sandboxEntry: {
         provider: "compatible-endpoint",
         model: MODEL,
@@ -215,6 +236,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
       runOpenshell: (args) =>
         args[0] === "provider" ? (providerLookups.shift() ?? registeredProvider)(args) : undefined,
       staleRecovery: true,
+      preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
       endpointUrl: "https://inference.example.test/v1",
@@ -224,7 +246,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
-        recoveryManifest: makePreparedRecoveryManifest(),
+        recoveryManifest,
       }),
     ).rejects.toThrow("changed during rebuild preflight");
 
@@ -233,8 +255,10 @@ describe("rebuildSandbox flow: credential preflight", () => {
   });
 
   it("aborts if the provider credential disappears at the delete edge (#6114)", async () => {
+    const { harnessPackage, recoveryManifest } = installPreparedOpenClawRecovery();
     let credentialHydrations = 0;
     const harness = createRebuildFlowHarness({
+      harnessPackage,
       sandboxEntry: {
         provider: "compatible-endpoint",
         model: MODEL,
@@ -248,6 +272,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
       },
       runOpenshell: providerRuntime([]),
       staleRecovery: true,
+      preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
       endpointUrl: "https://inference.example.test/v1",
@@ -257,7 +282,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
-        recoveryManifest: makePreparedRecoveryManifest(),
+        recoveryManifest,
       }),
     ).rejects.toThrow("became unavailable before sandbox deletion");
 
@@ -266,6 +291,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
   });
 
   it("aborts when the delete-edge provider lookup is indeterminate (#6114)", async () => {
+    const { harnessPackage, recoveryManifest } = installPreparedOpenClawRecovery();
     const missingProvider = providerRuntime([]);
     const indeterminateProvider = () => ({
       status: 7,
@@ -275,6 +301,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
     });
     const providerLookups = [missingProvider, indeterminateProvider];
     const harness = createRebuildFlowHarness({
+      harnessPackage,
       sandboxEntry: {
         provider: "compatible-endpoint",
         model: MODEL,
@@ -288,6 +315,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
           ? (providerLookups.shift() ?? indeterminateProvider)(args)
           : undefined,
       staleRecovery: true,
+      preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
       endpointUrl: "https://inference.example.test/v1",
@@ -297,7 +325,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
-        recoveryManifest: makePreparedRecoveryManifest(),
+        recoveryManifest,
       }),
     ).rejects.toThrow("could not be verified before sandbox deletion");
 
@@ -306,7 +334,9 @@ describe("rebuildSandbox flow: credential preflight", () => {
   });
 
   it("keeps prepared recovery fail-closed when the missing provider has no host key (#6114)", async () => {
+    const { harnessPackage, recoveryManifest } = installPreparedOpenClawRecovery();
     const harness = createRebuildFlowHarness({
+      harnessPackage,
       sandboxEntry: {
         provider: "compatible-endpoint",
         model: MODEL,
@@ -317,6 +347,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
       hydrateCredentialEnv: () => null,
       runOpenshell: providerRuntime([]),
       staleRecovery: true,
+      preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
       endpointUrl: "https://inference.example.test/v1",
@@ -326,7 +357,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
     await expect(
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
-        recoveryManifest: makePreparedRecoveryManifest(),
+        recoveryManifest,
       }),
     ).rejects.toThrow("Missing gateway provider: compatible-endpoint");
 
@@ -392,25 +423,25 @@ describe("rebuildSandbox flow: credential preflight", () => {
     expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    "ollama-local",
-    "vllm-local",
-  ])("migrates a legacy %s target away from OPENAI_API_KEY (#2519)", async (provider) => {
-    const harness = createRebuildFlowHarness({
-      sandboxEntry: { provider, model: MODEL, credentialEnv: "OPENAI_API_KEY" },
-    });
-    configureSession(harness, provider, "OPENAI_API_KEY");
+  it.each(["ollama-local", "vllm-local"])(
+    "migrates a legacy %s target away from OPENAI_API_KEY (#2519)",
+    async (provider) => {
+      const harness = createRebuildFlowHarness({
+        sandboxEntry: { provider, model: MODEL, credentialEnv: "OPENAI_API_KEY" },
+      });
+      configureSession(harness, provider, "OPENAI_API_KEY");
 
-    await expect(
-      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
-    ).resolves.toBeUndefined();
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).resolves.toBeUndefined();
 
-    const output = harness.logSpy.mock.calls.flat().map(String).join("\n");
-    expect(output).toContain("GH #2519");
-    expect(output).toContain(provider);
-    expect(harness.session.credentialEnv).toBeNull();
-    expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
-  });
+      const output = harness.logSpy.mock.calls.flat().map(String).join("\n");
+      expect(output).toContain("GH #2519");
+      expect(output).toContain(provider);
+      expect(harness.session.credentialEnv).toBeNull();
+      expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
+    },
+  );
 
   it("fails closed when a matching session omits the remote target credential", async () => {
     const harness = createRebuildFlowHarness({

@@ -1,23 +1,50 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+
+import { describe, expect, it, vi } from "vitest";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
   makePreparedRecoveryManifest,
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
+import {
+  installRebuildHarnessPackage,
+  sandboxAgent,
+  sandboxState,
+} from "../../../../test/helpers/rebuild-flow-harness";
+
+const LEGACY_OPENCLAW_MIGRATION = {
+  schemaVersion: 1 as const,
+  source: "legacy-current-bundle" as const,
+  legacyAgent: null,
+  migratedAt: "2026-08-28T05:00:00.000Z",
+};
+
+type RebuildFlowOverrides = NonNullable<Parameters<typeof createRebuildFlowHarness>[0]>;
+
+function createPreparedRecoveryHarness(overrides: RebuildFlowOverrides = {}) {
+  return createRebuildFlowHarness({
+    ...overrides,
+    sandboxEntry: {
+      harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION,
+      ...(overrides.sandboxEntry ?? {}),
+    },
+  });
+}
 
 describe("prepared rebuild recovery", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
   it("restores the validated pre-upgrade manifest without taking a second backup (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       applyPreset: () => true,
       sandboxInventory: {
         sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
       },
+      sandboxEntry: { harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION },
     });
     const recoveryManifest = makePreparedRecoveryManifest();
 
@@ -39,12 +66,119 @@ describe("prepared rebuild recovery", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
-      { targetAgentType: "openclaw" },
+      expect.objectContaining({ targetAgentType: "openclaw" }),
+    );
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
+      1,
+      "alpha",
+      null,
+      recoveryManifest,
+    );
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
+      2,
+      "alpha",
+      null,
+      recoveryManifest,
+    );
+  });
+
+  it.each([
+    ["missing", null],
+    [
+      "mismatched",
+      {
+        ...LEGACY_OPENCLAW_MIGRATION,
+        legacyAgent: "hermes",
+      },
+    ],
+  ] as const)(
+    "rejects %s legacy package migration authority before delete",
+    async (_case, migration) => {
+      const harness = createPreparedRecoveryHarness({
+        sandboxEntry: { harnessPackageMigration: migration },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], {
+          throwOnError: true,
+          recoveryManifest: makePreparedRecoveryManifest(),
+        }),
+      ).rejects.toThrow("legacy backup owner could not be resolved");
+
+      expect(sandboxState.validateRebuildRecoveryManifest).not.toHaveBeenCalled();
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+    },
+  );
+
+  it("re-resolves the pinned legacy package before delete", async () => {
+    const resolveLegacyOwner = sandboxAgent.resolveLegacyBackupRecoveryOwner.bind(sandboxAgent);
+    let resolutionCount = 0;
+    vi.spyOn(sandboxAgent, "resolveLegacyBackupRecoveryOwner").mockImplementation(
+      (...args: unknown[]) => {
+        resolutionCount++;
+        assert.notEqual(resolutionCount, 2, "pinned package authority changed");
+        return resolveLegacyOwner(...args);
+      },
+    );
+    const harness = createPreparedRecoveryHarness({
+      harnessPackage: installRebuildHarnessPackage("openclaw"),
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], {
+        throwOnError: true,
+        recoveryManifest: makePreparedRecoveryManifest(),
+      }),
+    ).rejects.toThrow(
+      "legacy backup owner could not be resolved: pinned package authority changed",
+    );
+
+    expect(resolutionCount).toBe(2);
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledOnce();
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+  });
+
+  it("keeps the complete package owner at both schema v2 recovery fences", async () => {
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    expect(harnessPackage).not.toBeNull();
+    const recoveryManifest = {
+      ...makePreparedRecoveryManifest(),
+      version: 2,
+      harnessPackage,
+      backupComplete: true,
+    };
+    const harness = createPreparedRecoveryHarness({
+      harnessPackage,
+      preDeleteLatestManifest: recoveryManifest,
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], {
+        throwOnError: true,
+        recoveryManifest,
+      }),
+    ).resolves.toBeUndefined();
+
+    const expectedOwner = expect.objectContaining({
+      agent: null,
+      harnessPackage,
+    });
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
+      1,
+      "alpha",
+      expectedOwner,
+      recoveryManifest,
+    );
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
+      2,
+      "alpha",
+      expectedOwner,
+      recoveryManifest,
     );
   });
 
   it("does not defer route validation for an ordinary rebuild (#6114)", async () => {
-    const harness = createRebuildFlowHarness({ applyPreset: () => true });
+    const harness = createPreparedRecoveryHarness({ applyPreset: () => true });
 
     await expect(harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true })).resolves.toBe(
       undefined,
@@ -56,12 +190,15 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("carries confirmed legacy managed-image recovery through the delete edge (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       applyPreset: () => true,
       sandboxInventory: {
         sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
       },
-      sandboxEntry: { nemoclawVersion: null },
+      sandboxEntry: {
+        nemoclawVersion: null,
+        harnessPackageMigration: LEGACY_OPENCLAW_MIGRATION,
+      },
       managedImageEvidence: false,
     });
     const recoveryManifest = makePreparedRecoveryManifest();
@@ -82,12 +219,12 @@ describe("prepared rebuild recovery", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
-      { targetAgentType: "openclaw" },
+      expect.objectContaining({ targetAgentType: "openclaw" }),
     );
   });
 
   it("rejects an ambiguous legacy image without the scoped recovery capability (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       sandboxInventory: {
         sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
       },
@@ -107,7 +244,7 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("rejects recorded custom-image evidence despite the scoped recovery capability (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       sandboxInventory: {
         sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
       },
@@ -130,7 +267,7 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("rejects a mismatched prepared manifest before deleting the sandbox (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       recoveryManifestValidation: () => ({
         ok: false,
         reason: "manifest sandbox 'beta' does not match 'alpha'",
@@ -151,7 +288,7 @@ describe("prepared rebuild recovery", () => {
 
   it("revalidates the prepared manifest immediately before deleting the sandbox (#6114)", async () => {
     let validationCount = 0;
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       recoveryManifestValidation: (manifest) => {
         validationCount++;
         return validationCount === 1
@@ -174,7 +311,7 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("rejects same-agent registry configuration drift before deleting the sandbox (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       preDeleteSandboxEntry: {
         name: "alpha",
         provider: "compatible-endpoint",
@@ -198,7 +335,7 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("uses the single refreshed registry snapshot for recreate rollback (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       preDeleteDefaultSandbox: "beta",
       onboard: () => {
         throw new Error("recreate failed");
@@ -219,7 +356,7 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("rejects a latest-backup change immediately before deleting the sandbox (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       preDeleteLatestManifest: {
         ...makePreparedRecoveryManifest(),
         timestamp: "2026-07-01T07-00-00-000Z",
@@ -239,7 +376,7 @@ describe("prepared rebuild recovery", () => {
   });
 
   it("restores the registry entry when prepared-backup recreation fails (#6114)", async () => {
-    const harness = createRebuildFlowHarness({
+    const harness = createPreparedRecoveryHarness({
       onboard: () => {
         throw new Error("recreate failed");
       },

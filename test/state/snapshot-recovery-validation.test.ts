@@ -7,6 +7,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { hashSnapshotBackupContent } from "../../src/lib/state/snapshot/content-digest.js";
 
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-recovery-validation-"));
 vi.stubEnv("HOME", TMP_HOME);
@@ -15,14 +16,34 @@ const sandboxState = (await import(
   pathToFileURL(path.join(REPO_ROOT, "src", "lib", "state", "sandbox.ts")).href
 )) as typeof import("../../src/lib/state/sandbox.js");
 const BACKUPS_ROOT = path.join(TMP_HOME, ".nemoclaw", "rebuild-backups");
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.0.0-test",
+  contractVersion: 1 as const,
+  contentDigest: "a".repeat(64),
+};
+const OPENCLAW_OWNER = {
+  agent: "openclaw",
+  harnessPackage: OPENCLAW_PACKAGE,
+};
 
 function writeBackup(
   sandboxName: string,
   timestamp: string,
   overrides: Record<string, unknown> = {},
+  options: {
+    payloadFiles?: Readonly<Record<string, string>>;
+    publishContentDigest?: boolean;
+  } = {},
 ): Record<string, unknown> {
   const backupPath = path.join(BACKUPS_ROOT, sandboxName, timestamp);
   fs.mkdirSync(backupPath, { recursive: true });
+  for (const [relativePath, contents] of Object.entries(options.payloadFiles ?? {})) {
+    const payloadPath = path.join(backupPath, relativePath);
+    fs.mkdirSync(path.dirname(payloadPath), { recursive: true });
+    fs.writeFileSync(payloadPath, contents);
+  }
   const manifest = {
     version: 1,
     sandboxName,
@@ -35,7 +56,10 @@ function writeBackup(
     backupPath,
     blueprintDigest: null,
     ...overrides,
-  };
+  } as Record<string, unknown>;
+  manifest.version === 2 &&
+    options.publishContentDigest !== false &&
+    Object.assign(manifest, { backupContentSha256: hashSnapshotBackupContent(backupPath) });
   fs.writeFileSync(
     path.join(backupPath, "rebuild-manifest.json"),
     JSON.stringify(manifest, null, 2),
@@ -88,6 +112,44 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
     expect(sandboxState.getLatestBackup("alpha")).toBeNull();
   });
 
+  it("does not follow a snapshot manifest symbolic link", () => {
+    const manifest = writeBackup("alpha", "2026-07-01T06-50-41-045Z");
+    const manifestPath = path.join(String(manifest.backupPath), "rebuild-manifest.json");
+    const outsideManifestPath = path.join(TMP_HOME, "outside-rebuild-manifest.json");
+    fs.copyFileSync(manifestPath, outsideManifestPath);
+    fs.rmSync(manifestPath);
+    fs.symlinkSync(outsideManifestPath, manifestPath);
+
+    expect(sandboxState.getLatestBackup("alpha")).toBeNull();
+    expect(
+      sandboxState.validateRebuildRecoveryManifest("alpha", "openclaw", manifest as never),
+    ).toEqual({
+      ok: false,
+      reason: "latest backup manifest is missing, malformed, or unsupported",
+    });
+  });
+
+  it("rejects a sandbox backup root that resolves through a symbolic link", () => {
+    const manifest = writeBackup("alpha", "2026-07-01T06-50-41-046Z");
+    const sandboxBackupRoot = path.join(BACKUPS_ROOT, "alpha");
+    const externalBackupRoot = path.join(TMP_HOME, "external-alpha-backups");
+    fs.rmSync(externalBackupRoot, { recursive: true, force: true });
+    fs.renameSync(sandboxBackupRoot, externalBackupRoot);
+    fs.symlinkSync(externalBackupRoot, sandboxBackupRoot, "dir");
+
+    try {
+      expect(
+        sandboxState.validateRebuildRecoveryManifest("alpha", "openclaw", manifest as never),
+      ).toEqual({
+        ok: false,
+        reason: "backup path or one of its NemoClaw state ancestors is a symbolic link",
+      });
+    } finally {
+      fs.unlinkSync(sandboxBackupRoot);
+      fs.rmSync(externalBackupRoot, { recursive: true, force: true });
+    }
+  });
+
   it("accepts an exact sandbox and agent identity from its timestamped backup path", () => {
     writeBackup("alpha", "2026-07-01T06-50-42-044Z", {
       agentVersion: "2026.5.27",
@@ -103,6 +165,189 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
         agentType: "openclaw",
         timestamp: "2026-07-01T06-50-42-044Z",
       }),
+    });
+  });
+
+  it.each([1, 2] as const)("rejects an explicitly incomplete schema v%s backup", (version) => {
+    writeBackup("alpha", `2026-07-01T06-50-42-05${String(version)}Z`, {
+      version,
+      ...(version === 2 ? { harnessPackage: OPENCLAW_PACKAGE } : {}),
+      backupComplete: false,
+    });
+    const latest = sandboxState.getLatestBackup("alpha");
+
+    expect(latest).not.toBeNull();
+    expect(
+      sandboxState.validateRebuildRecoveryManifest(
+        "alpha",
+        version === 2 ? OPENCLAW_OWNER : "openclaw",
+        latest!,
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "backup manifest records an incomplete capture",
+    });
+  });
+
+  it("rejects automatic recovery from a legacy manifest with failed directory captures", () => {
+    writeBackup("alpha", "2026-07-01T06-50-42-052Z", {
+      version: 1,
+      stateDirs: ["workspace"],
+      failedBackupDirs: ["workspace"],
+    });
+    const latest = sandboxState.getLatestBackup("alpha");
+
+    expect(latest).not.toBeNull();
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", "openclaw", latest!)).toEqual({
+      ok: false,
+      reason: "legacy backup manifest records failed directory captures",
+    });
+  });
+
+  it("requires explicit completion evidence for schema v2 recovery", () => {
+    writeBackup("alpha", "2026-07-01T06-50-42-053Z", {
+      version: 2,
+      harnessPackage: OPENCLAW_PACKAGE,
+    });
+    const latest = sandboxState.getLatestBackup("alpha");
+
+    expect(latest).not.toBeNull();
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", OPENCLAW_OWNER, latest!)).toEqual({
+      ok: false,
+      reason: "schema v2 backup manifest lacks completion evidence",
+    });
+  });
+
+  it("accepts a complete schema v2 recovery manifest", () => {
+    writeBackup("alpha", "2026-07-01T06-50-42-054Z", {
+      version: 2,
+      harnessPackage: OPENCLAW_PACKAGE,
+      backupComplete: true,
+    });
+    const latest = sandboxState.getLatestBackup("alpha");
+
+    expect(latest).not.toBeNull();
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", OPENCLAW_OWNER, latest!)).toEqual({
+      ok: true,
+      manifest: expect.objectContaining({
+        version: 2,
+        backupComplete: true,
+        backupContentSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      }),
+    });
+  });
+
+  it("requires publication-time content integrity evidence for schema v2 recovery", () => {
+    writeBackup(
+      "alpha",
+      "2026-07-01T06-50-42-055Z",
+      {
+        version: 2,
+        harnessPackage: OPENCLAW_PACKAGE,
+        backupComplete: true,
+      },
+      { publishContentDigest: false },
+    );
+    const latest = sandboxState.getLatestBackup("alpha");
+
+    expect(latest).not.toBeNull();
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", OPENCLAW_OWNER, latest!)).toEqual({
+      ok: false,
+      reason: "schema v2 backup manifest lacks content integrity evidence",
+    });
+  });
+
+  it("does not authorize automatic recovery after published payload bytes change", () => {
+    const timestamp = "2026-07-01T06-50-42-056Z";
+    writeBackup(
+      "alpha",
+      timestamp,
+      {
+        version: 2,
+        harnessPackage: OPENCLAW_PACKAGE,
+        backupComplete: true,
+        stateDirs: ["workspace"],
+        backedUpDirs: ["workspace"],
+      },
+      { payloadFiles: { "workspace/note.txt": "published\n" } },
+    );
+    const latest = sandboxState.getLatestBackup("alpha");
+    expect(latest).not.toBeNull();
+
+    fs.writeFileSync(
+      path.join(BACKUPS_ROOT, "alpha", timestamp, "workspace", "note.txt"),
+      "changed\n",
+    );
+
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", OPENCLAW_OWNER, latest!)).toEqual({
+      ok: false,
+      reason: "backup payload changed after publication",
+    });
+  });
+
+  it("does not authorize a selected backup after its manifest disappears", () => {
+    const manifest = writeBackup("alpha", "2026-07-01T06-50-42-057Z", {
+      version: 2,
+      harnessPackage: OPENCLAW_PACKAGE,
+      backupComplete: true,
+    });
+    const latest = sandboxState.getLatestBackup("alpha");
+    expect(latest).not.toBeNull();
+    fs.rmSync(path.join(String(manifest.backupPath), "rebuild-manifest.json"));
+
+    expect(sandboxState.validateSnapshotBackupContent(latest!)).toEqual({
+      ok: false,
+      reason: "persisted backup manifest changed during payload validation",
+    });
+  });
+
+  it("does not capture manual restore authority from a damaged schema v2 payload", () => {
+    const timestamp = "2026-07-01T06-50-42-057Z";
+    const manifest = writeBackup(
+      "alpha",
+      timestamp,
+      {
+        version: 2,
+        harnessPackage: OPENCLAW_PACKAGE,
+        backupComplete: true,
+        stateDirs: ["workspace"],
+        backedUpDirs: ["workspace"],
+      },
+      { payloadFiles: { "workspace/state.txt": "published\n" } },
+    );
+    const latest = sandboxState.getLatestBackup("alpha");
+    expect(latest).not.toBeNull();
+    expect(
+      sandboxState.captureSnapshotRestoreAuthority(String(manifest.backupPath), latest!),
+    ).not.toBeNull();
+
+    fs.writeFileSync(path.join(String(manifest.backupPath), "workspace", "state.txt"), "changed\n");
+
+    expect(
+      sandboxState.captureSnapshotRestoreAuthority(String(manifest.backupPath), latest!),
+    ).toBeNull();
+  });
+
+  it("keeps a schema v2 snapshot selectable for manual salvage without publication evidence", () => {
+    const manifest = writeBackup(
+      "alpha",
+      "2026-07-01T06-50-42-058Z",
+      {
+        version: 2,
+        harnessPackage: OPENCLAW_PACKAGE,
+        backupComplete: true,
+      },
+      { publishContentDigest: false },
+    );
+    const latest = sandboxState.getLatestBackup("alpha");
+    expect(latest).not.toBeNull();
+
+    expect(
+      sandboxState.captureSnapshotRestoreAuthority(String(manifest.backupPath), latest!),
+    ).toMatchObject({
+      schemaVersion: 1,
+      backupPath: String(manifest.backupPath),
+      contentSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
     });
   });
 

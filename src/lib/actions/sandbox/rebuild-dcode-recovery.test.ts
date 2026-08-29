@@ -11,19 +11,25 @@ import {
   installRebuildFlowTestHooks,
   makePreparedRecoveryManifest,
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
+import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 
 describe("rebuildSandbox DCode flow: recovery", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
   it("recreates non-Ready DCode from a validated backup without requiring a live route (#6195)", async () => {
+    const harnessPackage = installRebuildHarnessPackage("langchain-deepagents-code");
+    expect(harnessPackage).not.toBeNull();
     const recoveryManifest = {
       ...makePreparedRecoveryManifest(),
+      version: 2 as const,
       agentType: "langchain-deepagents-code",
       agentVersion: "0.1.12",
+      harnessPackage,
       dir: "/sandbox/.deepagents",
     };
     const harness = createRebuildFlowHarness({
       agentName: "langchain-deepagents-code",
+      harnessPackage,
       sandboxEntry: makeDcodeSandboxEntry(),
       sandboxInventory: {
         sandboxes: [{ name: "alpha", phase: "Error", readiness: "terminal" }],
@@ -50,7 +56,7 @@ describe("rebuildSandbox DCode flow: recovery", () => {
     expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
       "alpha",
       recoveryManifest.backupPath,
-      { targetAgentType: "langchain-deepagents-code" },
+      expect.objectContaining({ targetAgentType: "langchain-deepagents-code" }),
     );
   });
   it("replays captured custom policies during stale DCode recovery without a backup (#6195)", async () => {
@@ -181,68 +187,71 @@ describe("rebuildSandbox DCode flow: recovery", () => {
       backupPresets: ["observability-otlp-local"],
       gatewayPresets: ["observability-otlp-local"],
     },
-  ])("$label observability transactionally while preserving managed MCP state", async ({
-    flag,
-    before,
-    expected,
-    expectedObservabilityApplyCalls,
-    backupPresets,
-    gatewayPresets,
-  }) => {
-    const mcpEntry = { server: "search", providerName: "mcp-search" };
-    const harness = createRebuildFlowHarness({
-      agentName: "langchain-deepagents-code",
-      applyPreset: () => true,
-      backupPolicyPresets: backupPresets,
-      dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }],
+  ])(
+    "$label observability transactionally while preserving managed MCP state",
+    async ({
+      flag,
+      before,
+      expected,
+      expectedObservabilityApplyCalls,
+      backupPresets,
       gatewayPresets,
-      mcpPreparation: {
-        entries: [mcpEntry],
-        detachedProviderEntries: [mcpEntry],
-        scrubbedAdapterEntries: [],
-      },
-      sandboxEntry: {
-        ...makeDcodeSandboxEntry(),
-        observabilityEnabled: before,
-        policies: backupPresets,
-        policyPresetsFinalized: true,
-        policyTier: "balanced",
-        mcp: {
-          bridges: { search: mcpEntry },
-          managedServerNames: ["search"],
+    }) => {
+      const mcpEntry = { server: "search", providerName: "mcp-search" };
+      const harness = createRebuildFlowHarness({
+        agentName: "langchain-deepagents-code",
+        applyPreset: () => true,
+        backupPolicyPresets: backupPresets,
+        dcodeRouteResults: [{ ok: true }, { ok: true }, { ok: true }, { ok: true }],
+        gatewayPresets,
+        mcpPreparation: {
+          entries: [mcpEntry],
+          detachedProviderEntries: [mcpEntry],
+          scrubbedAdapterEntries: [],
         },
-      },
-    });
-    configureDcodeSession(harness);
-    harness.session.observabilityEnabled = before;
+        sandboxEntry: {
+          ...makeDcodeSandboxEntry(),
+          observabilityEnabled: before,
+          policies: backupPresets,
+          policyPresetsFinalized: true,
+          policyTier: "balanced",
+          mcp: {
+            bridges: { search: mcpEntry },
+            managedServerNames: ["search"],
+          },
+        },
+      });
+      configureDcodeSession(harness);
+      harness.session.observabilityEnabled = before;
 
-    await expect(
-      harness.rebuildSandbox("alpha", ["--yes", flag], { throwOnError: true }),
-    ).resolves.toBeUndefined();
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes", flag], { throwOnError: true }),
+      ).resolves.toBeUndefined();
 
-    expect(harness.onboardSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        observabilityEnabled: expected,
-        observabilityRequestedExplicitly: true,
-      }),
-    );
-    expect(harness.session.observabilityEnabled).toBe(expected);
-    expect(harness.session.observabilityRequestedExplicitly).toBe(true);
-    const observabilityApplyCalls = harness.applyPresetSpy.mock.calls.filter(
-      ([sandboxName, presetName]) =>
-        sandboxName === "alpha" && presetName === "observability-otlp-local",
-    );
-    expect(observabilityApplyCalls).toEqual(expectedObservabilityApplyCalls);
-    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
-    expect(harness.registryUpdateSpy).toHaveBeenCalledWith(
-      "alpha",
-      expect.objectContaining({
-        policies: expected ? ["observability-otlp-local"] : [],
-        policyTier: "balanced",
-        policyPresetsFinalized: true,
-      }),
-    );
-  });
+      expect(harness.onboardSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          observabilityEnabled: expected,
+          observabilityRequestedExplicitly: true,
+        }),
+      );
+      expect(harness.session.observabilityEnabled).toBe(expected);
+      expect(harness.session.observabilityRequestedExplicitly).toBe(true);
+      const observabilityApplyCalls = harness.applyPresetSpy.mock.calls.filter(
+        ([sandboxName, presetName]) =>
+          sandboxName === "alpha" && presetName === "observability-otlp-local",
+      );
+      expect(observabilityApplyCalls).toEqual(expectedObservabilityApplyCalls);
+      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+      expect(harness.registryUpdateSpy).toHaveBeenCalledWith(
+        "alpha",
+        expect.objectContaining({
+          policies: expected ? ["observability-otlp-local"] : [],
+          policyTier: "balanced",
+          policyPresetsFinalized: true,
+        }),
+      );
+    },
+  );
 
   it("preserves a fresh agent-required preset introduced by inner onboard", async () => {
     const freshRequiredPreset = "future-dcode-required";

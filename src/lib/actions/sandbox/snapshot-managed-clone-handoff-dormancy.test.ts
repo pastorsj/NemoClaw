@@ -10,6 +10,14 @@ import { MANAGED_IMAGE_REPOSITORIES } from "../../onboard/managed-image/contract
 import { encodeManagedStartupProfile } from "../../onboard/managed-startup/profile";
 import * as fixture from "./snapshot-restore-test-fixture";
 
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.2.3",
+  contractVersion: 1 as const,
+  contentDigest: "a".repeat(64),
+};
+
 beforeEach(() => fixture.resetSnapshotRestoreMocks());
 afterEach(() => fixture.cleanupSnapshotRestoreMocks());
 
@@ -18,10 +26,14 @@ describe("managed snapshot clone activation boundary", () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const encodedProfile = encodeManagedStartupProfile(managedStartupE2eProfile("openclaw"));
     fixture.getLatestBackupMock.mockReturnValue({
+      version: 2,
+      backupComplete: true,
       snapshotVersion: 4,
       timestamp: "2026-07-30T00:00:00.000Z",
       backupPath: "/tmp/backup-alpha",
+      sandboxName: "alpha",
       agentType: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       workload: {
         schemaVersion: 1,
         kind: "managed-image",
@@ -52,7 +64,14 @@ describe("managed snapshot clone activation boundary", () => {
       },
     });
     fixture.getSandboxMock.mockImplementation((name) =>
-      name === "alpha" ? { name: "alpha", agent: "openclaw", openshellDriver: "docker" } : null,
+      name === "alpha"
+        ? {
+            name: "alpha",
+            agent: "openclaw",
+            harnessPackage: OPENCLAW_PACKAGE,
+            openshellDriver: "docker",
+          }
+        : null,
     );
     const { runSandboxSnapshot } = await import("./snapshot");
 

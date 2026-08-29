@@ -557,7 +557,7 @@ describe("prepareSandboxCreateLaunch", () => {
         buildEnv: () => ({}),
       });
 
-      execFileSync("bash", ["-lc", result.createCommand], {
+      execFileSync("bash", ["-c", result.createCommand], {
         env: { ...process.env, CAPTURE_ARGS: capturedArgsPath },
       });
 

@@ -30,9 +30,6 @@ import { sanitizeMigrationDirectory, sanitizeOpenClawConfigFile } from "./snapsh
 
 const roots: string[] = [];
 
-const LARGE_INSTALL_CONTENT = "x".repeat(15 * 1024 * 1024);
-const SHELL_WAIT_ATTEMPTS = 10_000;
-
 function makeRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), "nemoclaw-migration-sanitizer-failure-"));
   roots.push(root);
@@ -43,21 +40,57 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-function boundedShellWait(condition: string, pauseCommand = "sleep 0.001"): string[] {
-  return [
-    "    wait_attempt=0",
-    `    while ${condition}; do`,
-    "      wait_attempt=$((wait_attempt + 1))",
-    `      [ "$wait_attempt" -lt ${String(SHELL_WAIT_ATTEMPTS)} ] || exit 1`,
-    `      ${pauseCommand}`,
-    "    done",
-  ];
-}
-
 function writePythonWrapper(lines: readonly string[]): string {
   const wrapperRoot = makeRoot();
   const wrapper = path.join(wrapperRoot, "python3");
   writeFileSync(wrapper, ["#!/bin/sh", ...lines].join("\n"));
+  chmodSync(wrapper, 0o755);
+  setSnapshotSanitizerPythonPathForTest(wrapper);
+  return wrapper;
+}
+
+function writePythonInstallMutationWrapper(
+  python: string,
+  targetPath: string,
+  aliasPath: string,
+  mutateAndRemove: boolean,
+): string {
+  const wrapperRoot = makeRoot();
+  const wrapper = path.join(wrapperRoot, "python3");
+  const mutationDriver = path.join(wrapperRoot, "mutation-driver.py");
+  const mutation = [
+    `        os.link(${JSON.stringify(targetPath)}, ${JSON.stringify(aliasPath)})`,
+    ...(mutateAndRemove
+      ? [
+          `        with open(${JSON.stringify(aliasPath)}, "r+b", buffering=0) as alias:`,
+          '            alias.write(b"M")',
+          `        os.unlink(${JSON.stringify(aliasPath)})`,
+        ]
+      : []),
+    "",
+  ].join("\n");
+  writeFileSync(
+    mutationDriver,
+    [
+      "import os",
+      "import sys",
+      "arguments = sys.argv[1:]",
+      'needle = "        verified_before = os.fstat(target_fd)"',
+      'if len(arguments) < 3 or arguments[0:2] != ["-I", "-c"]:',
+      '    raise SystemExit("unexpected helper invocation")',
+      "if arguments[2].count(needle) != 1:",
+      '    raise SystemExit("install verification boundary was not found")',
+      `mutation = ${JSON.stringify(mutation)}`,
+      "arguments[2] = arguments[2].replace(needle, mutation + needle)",
+      `os.execv(${JSON.stringify(python)}, [${JSON.stringify(python)}, *arguments])`,
+    ].join("\n"),
+  );
+  writeFileSync(
+    wrapper,
+    ["#!/bin/sh", `exec ${shellQuote(python)} -I ${shellQuote(mutationDriver)} "$@"`].join(
+      "\n",
+    ),
+  );
   chmodSync(wrapper, 0o755);
   setSnapshotSanitizerPythonPathForTest(wrapper);
   return wrapper;
@@ -218,21 +251,13 @@ describe("migration snapshot sanitizer fallbacks", () => {
       const root = inspectDescriptorSnapshotRoot(rootPath);
       expect(root).not.toBeNull();
       const python = requireTrustedPython();
-      writePythonWrapper([
-        `if [ "\${4-}" = install ]; then`,
-        "  (",
-        ...boundedShellWait(`[ ! -s ${shellQuote(targetPath)} ]`),
-        `    ln ${shellQuote(targetPath)} ${shellQuote(aliasPath)}`,
-        "  ) &",
-        "fi",
-        `exec ${shellQuote(python)} "$@"`,
-      ]);
+      writePythonInstallMutationWrapper(python, targetPath, aliasPath, false);
 
       expect(
         installDescriptorSnapshotFile(
           root as NonNullable<typeof root>,
           "openclaw.json",
-          LARGE_INSTALL_CONTENT,
+          "sanitized-content",
         ),
       ).toBe(false);
       expect(() => statSync(targetPath)).toThrow();
@@ -249,27 +274,13 @@ describe("migration snapshot sanitizer fallbacks", () => {
       const root = inspectDescriptorSnapshotRoot(rootPath);
       expect(root).not.toBeNull();
       const python = requireTrustedPython();
-      writePythonWrapper([
-        `if [ "\${4-}" = install ]; then`,
-        "  (",
-        ...boundedShellWait(`[ ! -s ${shellQuote(targetPath)} ]`),
-        `    ln ${shellQuote(targetPath)} ${shellQuote(aliasPath)}`,
-        ...boundedShellWait(
-          `[ "$(wc -c < ${shellQuote(aliasPath)})" -lt ${String(LARGE_INSTALL_CONTENT.length)} ]`,
-          "sleep 0.001",
-        ),
-        `    printf M | dd of=${shellQuote(aliasPath)} bs=1 count=1 conv=notrunc 2>/dev/null`,
-        `    rm ${shellQuote(aliasPath)}`,
-        "  ) &",
-        "fi",
-        `exec ${shellQuote(python)} "$@"`,
-      ]);
+      writePythonInstallMutationWrapper(python, targetPath, aliasPath, true);
 
       expect(
         installDescriptorSnapshotFile(
           root as NonNullable<typeof root>,
           "openclaw.json",
-          LARGE_INSTALL_CONTENT,
+          "sanitized-content",
         ),
       ).toBe(false);
       expect(() => statSync(targetPath)).toThrow();

@@ -31,21 +31,35 @@ function patchResult(): DockerGpuPatchResult {
 }
 
 function baseDeps(overrides: ManagedSupervisorRelaunchDeps = {}) {
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: "openclaw",
+    packageVersion: "1.2.3",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  };
+  const agentDefinition = {
+    name: "openclaw",
+    displayName: "OpenClaw",
+    forwardPort: 18789,
+    packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+  };
+  const resolvedAgent = {
+    recordedAgent: "openclaw",
+    effectiveAgentId: "openclaw",
+    definition: agentDefinition,
+    harnessPackage,
+    harnessPackageMigration: null,
+  };
   return {
     getSandbox: vi.fn(() => ({
       name: "alpha",
       agent: "openclaw",
+      harnessPackage,
       dashboardPort: 18789,
       openshellDriver: "docker",
     })),
-    getSessionAgent: vi.fn(
-      () =>
-        ({
-          name: "openclaw",
-          displayName: "OpenClaw",
-          forwardPort: 18789,
-        }) as never,
-    ),
+    resolveSandboxAgent: vi.fn(() => resolvedAgent) as never,
     resolveDashboardPort: vi.fn(() => 18789),
     resolveContainer: vi
       .fn()
@@ -168,6 +182,140 @@ describe("relaunchManagedSupervisorSession", () => {
         runOpenshell: deps.runOpenshell,
       },
     );
+  });
+
+  it("uses one selected agent package for relaunch backup and restore", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contractVersion: 1 as const,
+      contentDigest: "a".repeat(64),
+    };
+    const agentDefinition = {
+      name: "openclaw",
+      packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+    };
+    const resolveSandboxAgent = vi.fn(() => ({
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: agentDefinition,
+      harnessPackage,
+      harnessPackageMigration: null,
+    }));
+    const manifest = {
+      version: 2,
+      sandboxName: "alpha",
+      agentType: "openclaw",
+      harnessPackage,
+      backupPath: "/tmp/rebuild-backups/alpha/recovery",
+    };
+    const backupStateWithManagedAuthority = vi.fn(() => ({
+      success: true,
+      manifest,
+      backedUpDirs: ["workspace"],
+      failedDirs: [],
+      backedUpFiles: [],
+      failedFiles: [],
+    }));
+    const restoreStateWithManagedAuthority = vi.fn(() => ({
+      success: true,
+      restoredDirs: ["workspace"],
+      failedDirs: [],
+      restoredFiles: [],
+      failedFiles: [],
+    }));
+    const deps = baseDeps({
+      backupState: undefined,
+      restoreState: undefined,
+      resolveSandboxAgent: resolveSandboxAgent as never,
+      backupStateWithManagedAuthority: backupStateWithManagedAuthority as never,
+      restoreStateWithManagedAuthority: restoreStateWithManagedAuthority as never,
+    });
+
+    const relaunch = relaunchManagedSupervisorSession("alpha", { quiet: true, deps });
+
+    expect(relaunch?.finalize(true)).toMatchObject({ stateRestored: true });
+    expect(resolveSandboxAgent).toHaveBeenCalledTimes(2);
+    expect(backupStateWithManagedAuthority).toHaveBeenCalledWith(
+      "alpha",
+      { agentDefinition, harnessPackage },
+      { getSandbox: deps.getSandbox },
+    );
+    expect(restoreStateWithManagedAuthority).toHaveBeenCalledWith(
+      "alpha",
+      manifest,
+      { targetAgentType: "openclaw", agentDefinition },
+      {
+        getSandbox: deps.getSandbox,
+        captureOpenshell: expect.any(Function),
+      },
+    );
+  });
+
+  it("refuses recreation when the selected package definition changes after backup", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contractVersion: 1 as const,
+      contentDigest: "a".repeat(64),
+    };
+    const selectedAgent = {
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: {
+        name: "openclaw",
+        forwardPort: 18789,
+        packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+        stateFiles: [{ path: "openclaw.json", strategy: "copy" as const }],
+      },
+      harnessPackage,
+      harnessPackageMigration: null,
+    };
+    const changedAgent = {
+      ...selectedAgent,
+      definition: {
+        ...selectedAgent.definition,
+        stateFiles: [{ path: "changed.json", strategy: "copy" as const }],
+      },
+    };
+    const resolveSandboxAgent = vi
+      .fn()
+      .mockReturnValueOnce(selectedAgent)
+      .mockReturnValueOnce(changedAgent);
+    const deps = baseDeps({ resolveSandboxAgent: resolveSandboxAgent as never });
+
+    expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).toBeNull();
+    expect(resolveSandboxAgent).toHaveBeenCalledTimes(2);
+    expect(deps.recreate).not.toHaveBeenCalled();
+    expect(deps.removeBackup).toHaveBeenCalledWith("alpha", "/tmp/rebuild-backups/alpha/recovery");
+  });
+
+  it("refuses recreation when the selected registry row changes after backup", () => {
+    const initial = {
+      name: "alpha",
+      agent: "openclaw",
+      harnessPackage: {
+        kind: "agent-runtime" as const,
+        id: "openclaw",
+        packageVersion: "1.2.3",
+        contractVersion: 1 as const,
+        contentDigest: "a".repeat(64),
+      },
+      dashboardPort: 18789,
+      openshellDriver: "docker",
+    };
+    const getSandbox = vi
+      .fn()
+      .mockReturnValueOnce(initial)
+      .mockReturnValue({ ...initial, dashboardPort: 18888 });
+    const deps = baseDeps({ getSandbox });
+
+    expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).toBeNull();
+    expect(getSandbox).toHaveBeenCalledTimes(2);
+    expect(deps.recreate).not.toHaveBeenCalled();
+    expect(deps.removeBackup).toHaveBeenCalledWith("alpha", "/tmp/rebuild-backups/alpha/recovery");
   });
 
   it("retries only transport-level state backup failures after a container restart", () => {

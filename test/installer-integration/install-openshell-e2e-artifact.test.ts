@@ -120,7 +120,7 @@ describe("OpenShell retained E2E artifact installation", () => {
     }
   });
 
-  it("blocks network fallback when a retained asset is a symbolic link (#9051)", () => {
+  it("rejects a symbolic-link retained asset before any network fallback (#9051)", () => {
     const fixture = createFixture();
     try {
       const archive = path.join(
@@ -131,7 +131,10 @@ describe("OpenShell retained E2E artifact installation", () => {
       fs.symlinkSync(path.join(fixture.root, "source", "openshell"), archive);
       const result = runInstallStep(fixture);
       expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain("Network fallback is disabled for retained OpenShell assets");
+      expect(result.stderr).toContain("SHA-256 checksum verification failed");
+      expect(result.stderr).not.toContain(
+        "Network fallback is disabled for retained OpenShell assets",
+      );
     } finally {
       fs.rmSync(fixture.root, { force: true, recursive: true });
     }

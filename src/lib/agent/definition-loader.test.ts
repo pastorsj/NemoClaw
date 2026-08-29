@@ -124,6 +124,19 @@ describe("buildAgentDefinition", () => {
     expect(first.dockerfilePath).not.toBe(second.dockerfilePath);
   });
 
+  it("uses the selected package's legacy baseline policy when no ordinary policy exists", () => {
+    const manifestPath = writeFile(
+      fixtureRoot,
+      "agents/openclaw/manifest.yaml",
+      "name: openclaw\n_legacy_paths:\n  policy: runtime/openclaw-policy.yaml\n",
+    );
+    const legacyPolicy = writeFile(fixtureRoot, "runtime/openclaw-policy.yaml", "version: 1\n");
+
+    const definition = buildFromRoot(fixtureRoot, manifestPath);
+
+    expect(definition.policyAdditionsPath).toBe(legacyPolicy);
+  });
+
   it("rejects manifest paths outside or aliased beneath the trusted root", () => {
     const manifestPath = writeAgentRoot(fixtureRoot);
     const outsideRoot = fs.mkdtempSync(path.join(TEST_PARENT, "outside-"));

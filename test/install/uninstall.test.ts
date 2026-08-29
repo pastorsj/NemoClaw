@@ -23,6 +23,7 @@ import {
 } from "../../src/lib/onboard/docker-driver-gateway-service";
 import { deriveCheckpointFromSession } from "../../src/lib/state/onboard-checkpoint-migrate";
 import { createSession } from "../../src/lib/state/onboard-session";
+import { createHarnessPackageFixture } from "../helpers/harness-packages";
 
 const UNINSTALL_SCRIPT = path.join(import.meta.dirname, "../..", "uninstall.sh");
 
@@ -105,7 +106,8 @@ esac
       workload?: { kind: "managed-image" };
     } = { agent: "openclaw", name: "ordinary-authority" },
   ): string {
-    const stateDir = path.join(tmp, ".nemoclaw");
+    const canonicalHome = fs.realpathSync(tmp);
+    const stateDir = path.join(canonicalHome, ".nemoclaw");
     const sandboxName = sandbox.name;
     const gateway = {
       gatewayName: "nemoclaw",
@@ -119,9 +121,21 @@ esac
     };
     fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(stateDir, 0o700);
+    const packageFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(canonicalHome, "harness-package-fixtures"),
+      storeRoot: path.join(stateDir, "harnesses"),
+    });
+    const packageRoot = packageFixture.packageRoots.get(sandbox.agent);
+    expect(packageRoot, `Missing harness package fixture for '${sandbox.agent}'`).toBeDefined();
+    fs.copyFileSync(
+      path.join(import.meta.dirname, "../..", "agents", sandbox.agent, "manifest.yaml"),
+      path.join(packageRoot!, "agents", sandbox.agent, "manifest.yaml"),
+    );
+    const installedHarness = packageFixture.install(sandbox.agent);
     const session = createSession({
       agent: sandbox.agent,
       sandboxName,
+      harnessPackage: installedHarness.identity,
       metadata: { gatewayName: gateway.gatewayName, fromDockerfile: null },
     });
     session.status = "complete";
@@ -151,6 +165,7 @@ esac
             gatewayPort: gateway.gatewayPort,
             lifecycleGeneration: `${sandboxName}-generation`,
             openshellDriver: "docker",
+            harnessPackage: installedHarness.identity,
             ...(sandbox.workload ? { workload: sandbox.workload } : {}),
           },
         },
@@ -171,17 +186,18 @@ esac
     args: string[],
     extraEnv: NodeJS.ProcessEnv = {},
   ): ReturnType<typeof spawnSync> {
+    const canonicalHome = fs.realpathSync(tmp);
     return spawnSync("bash", [UNINSTALL_SCRIPT, ...args], {
       cwd: path.join(import.meta.dirname, "../.."),
       encoding: "utf-8",
       env: {
         ...sanitizedParentEnv(),
-        HOME: tmp,
-        PATH: `${path.join(tmp, "bin")}:/usr/bin:/bin`,
-        XDG_BIN_HOME: path.join(tmp, ".local", "bin"),
-        XDG_CONFIG_HOME: path.join(tmp, ".config"),
+        HOME: canonicalHome,
+        PATH: `${path.join(canonicalHome, "bin")}:/usr/bin:/bin`,
+        XDG_BIN_HOME: path.join(canonicalHome, ".local", "bin"),
+        XDG_CONFIG_HOME: path.join(canonicalHome, ".config"),
         NEMOCLAW_NODE: process.execPath,
-        TMPDIR: tmp,
+        TMPDIR: canonicalHome,
         ...extraEnv,
       },
     });
@@ -387,12 +403,12 @@ esac
     try {
       const result = runUninstall(tmp, ["--yes"]);
       const output = `${result.stdout}${result.stderr}`;
+      expect(result.status, output).toBe(0);
       const backupRoot = path.join(stateDir, "rebuild-backups", "ordinary-authority");
       const snapshot = fs.readdirSync(backupRoot).at(0);
       const backupFile = path.join(backupRoot, String(snapshot), "workspace", "USER.md");
       const events = fs.readFileSync(path.join(tmp, "uninstall-events"), "utf8").trim().split("\n");
 
-      expect(result.status, output).toBe(0);
       expect(createHash("sha256").update(fs.readFileSync(backupFile)).digest("hex")).toBe(
         workspaceDigest,
       );
@@ -487,7 +503,9 @@ esac
   );
 
   it("completes selected-gateway cleanup and exits 0 when the recorded sandbox is already absent (#7906)", async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-absent-sandbox-"));
+    const tmp = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-uninstall-absent-sandbox-")),
+    );
     const fakeBin = path.join(tmp, "bin");
     writeFakeTools(fakeBin);
     const managedGateway = startManagedGatewayProcess(tmp);

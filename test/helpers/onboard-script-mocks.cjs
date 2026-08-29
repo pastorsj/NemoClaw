@@ -289,6 +289,15 @@ const OPENCLAW_SECURITY_INVENTORY_PROBE = [
 
 const ONBOARD_SANDBOX_OLD_CONTAINER_ID = "a".repeat(64);
 const ONBOARD_SANDBOX_NEW_CONTAINER_ID = "b".repeat(64);
+const PROCESS_HARNESS_PACKAGE_AGENTS = new Set(["openclaw", "hermes"]);
+const PROCESS_HARNESS_PACKAGE_SOURCE = Object.freeze({
+  kind: "bundled",
+  nemoclawBuildIdentity: Object.freeze({
+    nemoclawVersion: "0.0.113",
+    sourceRevision: "e".repeat(40),
+  }),
+});
+const processHarnessPackages = new Map();
 const ONBOARD_SANDBOX_INSPECT = {
   Id: ONBOARD_SANDBOX_OLD_CONTAINER_ID,
   Image: `sha256:${"c".repeat(64)}`,
@@ -311,6 +320,239 @@ const ONBOARD_SANDBOX_INSPECT = {
     RestartPolicy: { Name: "unless-stopped" },
   },
 };
+
+function ensurePrivateDirectory(directory) {
+  const fs = require("node:fs");
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  fs.chmodSync(directory, 0o700);
+}
+
+function copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, targetRelativePath) {
+  const fs = require("node:fs");
+  const repositoryRoot = path.resolve(__dirname, "../..");
+  const source = path.join(repositoryRoot, ...sourceRelativePath.split("/"));
+  const target = path.join(packageRoot, ...targetRelativePath.split("/"));
+  ensurePrivateDirectory(path.dirname(target));
+  fs.writeFileSync(target, fs.readFileSync(source), { mode: 0o600 });
+  fs.chmodSync(target, 0o600);
+}
+
+/**
+ * Install one small package boundary with the real agent manifest for process-level onboarding.
+ * Package-store tests own filesystem integrity. These higher-level tests keep an exact process-local
+ * identity so unrelated macOS temporary-directory activity cannot invalidate package ancestry.
+ */
+function installOnboardProcessHarnessPackage(agentName = "openclaw") {
+  if (!PROCESS_HARNESS_PACKAGE_AGENTS.has(agentName)) {
+    throw new Error(`Unsupported onboarding process harness fixture '${agentName}'`);
+  }
+  const fs = require("node:fs");
+  const configuredHome = process.env.HOME;
+  if (!configuredHome) throw new Error("Onboarding process harness fixture requires HOME");
+  const home = fs.realpathSync(configuredHome);
+  const sourceParent = path.join(home, ".nemoclaw-process-harness-sources");
+  const packageRoot = path.join(sourceParent, `nemoclaw-${agentName}`);
+  ensurePrivateDirectory(sourceParent);
+  if (!fs.existsSync(packageRoot)) {
+    ensurePrivateDirectory(packageRoot);
+    const envelope = {
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: agentName,
+      displayName: agentName === "openclaw" ? "OpenClaw" : "Hermes Agent",
+      packageVersion: "0.1.0-process-fixture",
+      contractVersion: 1,
+      manifest: `agents/${agentName}/manifest.yaml`,
+    };
+    fs.writeFileSync(
+      path.join(packageRoot, "nemoclaw-package.json"),
+      `${JSON.stringify(envelope)}\n`,
+      { mode: 0o600 },
+    );
+    copyProcessHarnessPackageFile(
+      packageRoot,
+      `agents/${agentName}/manifest.yaml`,
+      `agents/${agentName}/manifest.yaml`,
+    );
+    for (const asset of [
+      "Dockerfile",
+      "Dockerfile.base",
+      "policy-additions.yaml",
+      "policy-permissive.yaml",
+      "start.sh",
+    ]) {
+      const sourceRelativePath = `agents/${agentName}/${asset}`;
+      if (fs.existsSync(path.join(path.resolve(__dirname, "../.."), sourceRelativePath))) {
+        copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, sourceRelativePath);
+      }
+    }
+    if (agentName === "openclaw") {
+      for (const asset of [
+        "Dockerfile",
+        "Dockerfile.base",
+        "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+      ]) {
+        copyProcessHarnessPackageFile(packageRoot, asset, asset);
+      }
+    }
+  }
+
+  const packageStore = require(path.resolve(__dirname, "../../src/lib/harness/package-store.ts"));
+  const { parseHarnessPackageManifest } = require(
+    path.resolve(__dirname, "../../src/lib/harness/package-manifest.ts"),
+  );
+  const packageManifest = parseHarnessPackageManifest(packageRoot);
+  const contentDigest = require("node:crypto")
+    .createHash("sha256")
+    .update(`nemoclaw-onboard-process-fixture:${agentName}:v1`)
+    .digest("hex");
+  const identity = Object.freeze({
+    kind: packageManifest.envelope.kind,
+    id: packageManifest.envelope.id,
+    packageVersion: packageManifest.envelope.packageVersion,
+    contractVersion: packageManifest.envelope.contractVersion,
+    contentDigest,
+  });
+  const installed = Object.freeze({
+    state: "installed",
+    identity,
+    receipt: Object.freeze({
+      schemaVersion: 1,
+      identity,
+      sourceIdentity: PROCESS_HARNESS_PACKAGE_SOURCE,
+      installedAt: "2026-08-25T00:00:00.000Z",
+    }),
+    packageRoot,
+    packageManifest,
+  });
+  processHarnessPackages.set(`${identity.id}\0${identity.contentDigest}`, installed);
+  const packageCatalog = require(
+    path.resolve(__dirname, "../../src/lib/harness/package-catalog.ts"),
+  );
+  packageCatalog.listHarnessPackageInventory = () => {
+    const packagesById = new Map(
+      [...processHarnessPackages.values()].map((fixturePackage) => [
+        fixturePackage.identity.id,
+        fixturePackage,
+      ]),
+    );
+    const fixturePackages = [...packagesById.values()].sort((left, right) =>
+      left.identity.id.localeCompare(right.identity.id),
+    );
+    return Object.freeze({
+      available: Object.freeze(
+        fixturePackages.map((fixturePackage) =>
+          Object.freeze({
+            state: "available",
+            id: fixturePackage.identity.id,
+            displayName: fixturePackage.packageManifest.envelope.displayName,
+            description: null,
+            identity: fixturePackage.identity,
+            packageRoot: fixturePackage.packageRoot,
+          }),
+        ),
+      ),
+      installed: Object.freeze(
+        fixturePackages.map((fixturePackage) =>
+          Object.freeze({
+            state: "installed",
+            id: fixturePackage.identity.id,
+            displayName: fixturePackage.packageManifest.envelope.displayName,
+            description: null,
+            identity: fixturePackage.identity,
+            packageRoot: fixturePackage.packageRoot,
+            matchesAvailableIdentity: true,
+          }),
+        ),
+      ),
+    });
+  };
+  packageStore.resolvePinnedHarnessPackage = (requestedIdentity) => {
+    const key = `${requestedIdentity?.id ?? ""}\0${requestedIdentity?.contentDigest ?? ""}`;
+    const fixturePackage = processHarnessPackages.get(key);
+    if (
+      !fixturePackage ||
+      JSON.stringify(fixturePackage.identity) !== JSON.stringify(requestedIdentity)
+    ) {
+      throw new packageStore.HarnessPackageStoreIntegrityError();
+    }
+    return fixturePackage;
+  };
+  const recordedAgent = agentName === "openclaw" ? null : agentName;
+  const { resolveSandboxAgent } = require(
+    path.resolve(__dirname, "../../src/lib/onboard/sandbox-agent.ts"),
+  );
+  const resolved = resolveSandboxAgent({
+    agent: recordedAgent,
+    harnessPackage: installed.identity,
+  });
+  return Object.freeze({
+    agentName,
+    recordedAgent,
+    harnessPackage: installed.identity,
+    harnessPackageMigration: null,
+    agentDefinition: resolved.definition,
+    registryAuthority: Object.freeze({
+      agent: recordedAgent,
+      harnessPackage: installed.identity,
+    }),
+  });
+}
+
+/**
+ * Pin one direct createSandbox call to the same package object in Session and its route handoff.
+ * Full create fixtures use installVerifiedSandboxCreateFixture; reuse-only process tests do not
+ * enter that transaction, but they still cross the exact package-authority boundary.
+ */
+function installHarnessRouteFixture(options = {}) {
+  const agentName = options.agentName || "openclaw";
+  const sandboxName = options.sandboxName || "my-assistant";
+  const sessionId = options.sessionId || "integration-fixture-session";
+  const packageFixture = installOnboardProcessHarnessPackage(agentName);
+  const selection = {
+    provider: options.provider ?? null,
+    model: options.model ?? null,
+    endpointUrl: options.endpointUrl ?? null,
+    endpointSource: options.endpointSource ?? null,
+    credentialEnv: options.credentialEnv ?? null,
+    preferredInferenceApi: options.preferredInferenceApi ?? null,
+    compatibleEndpointReasoning: options.compatibleEndpointReasoning ?? null,
+    compatibleEndpointReasoningEffort: options.compatibleEndpointReasoningEffort ?? null,
+    nimContainer: options.nimContainer ?? null,
+  };
+  const onboardSession = require(path.resolve(__dirname, "../../src/lib/state/onboard-session.ts"));
+  const session = onboardSession.createSession({
+    sessionId,
+    sandboxName,
+    agent: agentName,
+    harnessPackage: packageFixture.harnessPackage,
+    harnessPackageMigration: packageFixture.harnessPackageMigration,
+    ...selection,
+  });
+  onboardSession.saveSession(session);
+  return Object.freeze({
+    ...packageFixture,
+    sessionId,
+    selection: Object.freeze(selection),
+    routeAuthority: Object.freeze({
+      sessionId,
+      selection,
+      harnessPackage: packageFixture.harnessPackage,
+      harnessPackageMigration: packageFixture.harnessPackageMigration,
+    }),
+  });
+}
+
+/** Build the positional createSandbox arguments for a direct package-authorized route. */
+function buildHarnessRouteArguments(args, fixture) {
+  const createArgs = [...args];
+  // Preserve createSandbox's default values for omitted positional arguments such as
+  // hermesToolGateways; explicit null would suppress those defaults.
+  while (createArgs.length < 15) createArgs.push(undefined);
+  createArgs[8] = fixture.agentDefinition;
+  createArgs[14] = fixture.routeAuthority;
+  return createArgs;
+}
 
 function isOpenClawSecurityInventoryProbe(command) {
   const commandArgs = Array.isArray(command) ? command.map(String) : [];
@@ -444,6 +686,16 @@ function installVerifiedSandboxCreateFixture(registry, options) {
   publishedCreatedGatewayName = gatewayName;
   publishedCreatedGatewayPort = options.gatewayPort || 8080;
   const sessionId = options.sessionId || "integration-fixture-session";
+  const agentName = options.agentName || "openclaw";
+  const installedHarness = hasOwn(options, "harnessPackage")
+    ? null
+    : installOnboardProcessHarnessPackage(agentName);
+  const harnessPackage = installedHarness?.harnessPackage ?? options.harnessPackage ?? null;
+  const harnessPackageMigration =
+    installedHarness?.harnessPackageMigration ?? options.harnessPackageMigration ?? null;
+  const agentDefinition = installedHarness?.agentDefinition ?? options.agentDefinition ?? null;
+  const recordedAgent =
+    installedHarness?.recordedAgent ?? (agentName === "openclaw" ? null : agentName);
   const selection = {
     provider: options.provider,
     model: options.model,
@@ -455,11 +707,11 @@ function installVerifiedSandboxCreateFixture(registry, options) {
     compatibleEndpointReasoningEffort: options.compatibleEndpointReasoningEffort || null,
     nimContainer: options.nimContainer || null,
   };
-  const packageAuthority = options.harnessPackage
+  const packageAuthority = harnessPackage
     ? {
-        harnessPackage: structuredClone(options.harnessPackage),
-        ...(options.harnessPackageMigration
-          ? { harnessPackageMigration: structuredClone(options.harnessPackageMigration) }
+        harnessPackage: structuredClone(harnessPackage),
+        ...(harnessPackageMigration
+          ? { harnessPackageMigration: structuredClone(harnessPackageMigration) }
           : {}),
       }
     : {};
@@ -475,6 +727,18 @@ function installVerifiedSandboxCreateFixture(registry, options) {
   let pendingEntry = null;
   let publishedEntry = null;
   let sourceEntry = options.getSandbox ? options.getSandbox(sandboxName) : null;
+  if (
+    sourceEntry &&
+    harnessPackage &&
+    !hasOwn(sourceEntry, "harnessPackage") &&
+    !hasOwn(sourceEntry, "harnessPackageMigration")
+  ) {
+    sourceEntry = {
+      ...sourceEntry,
+      agent: hasOwn(sourceEntry, "agent") ? sourceEntry.agent : recordedAgent,
+      ...packageAuthority,
+    };
+  }
   const qualifyPendingSandboxCreateReservation = (authority) => {
     const selectionMatches = [
       "provider",
@@ -489,8 +753,8 @@ function installVerifiedSandboxCreateFixture(registry, options) {
       authority.gatewayName !== gatewayName ||
       authority.sessionId !== sessionId ||
       !selectionMatches ||
-      (options.harnessPackage &&
-        JSON.stringify(authority.harnessPackage) !== JSON.stringify(options.harnessPackage))
+      (harnessPackage &&
+        JSON.stringify(authority.harnessPackage) !== JSON.stringify(harnessPackage))
     ) {
       throw new Error("integration fixture received unexpected create reservation authority");
     }
@@ -653,9 +917,9 @@ function installVerifiedSandboxCreateFixture(registry, options) {
       const session = onboardSession.createSession({
         sessionId,
         sandboxName,
-        agent: options.agentName || "openclaw",
-        harnessPackage: options.harnessPackage || null,
-        harnessPackageMigration: options.harnessPackageMigration || null,
+        agent: agentName,
+        harnessPackage,
+        harnessPackageMigration,
       });
       const sourceIdentity =
         currentEntry?.lifecycleLiveIdentityFingerprint ||
@@ -681,7 +945,7 @@ function installVerifiedSandboxCreateFixture(registry, options) {
         ...session.checkpoint,
         sandboxIdentity: {
           kind: "selected",
-          value: { name: sandboxName, agent: options.agentName || "openclaw" },
+          value: { name: sandboxName, agent: agentName },
         },
         gatewayAuthority: {
           kind: "selected",
@@ -699,35 +963,42 @@ function installVerifiedSandboxCreateFixture(registry, options) {
       };
       onboardSession.saveSession(session);
     }
+    if (transaction.version !== 2) {
+      throw new Error("integration fixture requires a package-aware recreate transaction");
+    }
     return {
       recreate: false,
       toolDisclosure: "progressive",
       observabilityEnabled: false,
       recreateTransaction: {
+        version: transaction.version,
         id: transaction.id,
         targetGeneration: transaction.targetGeneration,
         targetIntentFingerprint: transaction.targetIntentFingerprint,
+        harnessPackage: transaction.harnessPackage,
       },
     };
   };
   return {
     sessionId,
     selection,
-    harnessPackage: options.harnessPackage || null,
-    harnessPackageMigration: options.harnessPackageMigration || null,
+    harnessPackage,
+    harnessPackageMigration,
+    agentDefinition,
     prepareCreateIntent,
   };
 }
 
 function sandboxCreateArgsWithVerifiedReservation(args, fixture) {
   const createArgs = [...args];
-  while (createArgs.length < 16) createArgs.push(null);
+  while (createArgs.length < 16) createArgs.push(undefined);
   createArgs[14] = {
     sessionId: fixture.sessionId,
     selection: fixture.selection,
     harnessPackage: fixture.harnessPackage,
     harnessPackageMigration: fixture.harnessPackageMigration,
   };
+  if (fixture.agentDefinition) createArgs[8] = fixture.agentDefinition;
   const fixtureIntent = fixture.prepareCreateIntent();
   const requestedIntent = createArgs[15];
   createArgs[15] =
@@ -1211,7 +1482,10 @@ module.exports = {
   clearMockCreatedSandboxIdentity,
   mockCreatedSandboxIdentityList,
   mockStructuredOpenShellCaptureFromRunner,
+  installOnboardProcessHarnessPackage,
+  installHarnessRouteFixture,
   installVerifiedSandboxCreateFixture,
+  buildHarnessRouteArguments,
   managedSandboxPolicyReceiptFixture,
   mockOnboardRunCapture,
   mockStandaloneGatewayTeardownAuthority,

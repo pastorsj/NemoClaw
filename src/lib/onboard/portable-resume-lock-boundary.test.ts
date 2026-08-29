@@ -30,7 +30,9 @@ const preparePortableHost = vi.fn((): never => {
 });
 
 beforeAll(async () => {
-  tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-portable-lock-boundary-"));
+  tempHome = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-portable-lock-boundary-")),
+  );
   process.env = {
     ...originalEnv,
     HOME: tempHome,
@@ -96,7 +98,8 @@ async function loadBoundaryModules() {
     onboardSession: typeof import("../state/onboard-session");
     onboardPackageBoundary: typeof import("./package/boundary");
   };
-  const prepareHarnessOperation = onboardModule.onboardPackageBoundary.prepareOnboardHarnessOperation;
+  const prepareHarnessOperation =
+    onboardModule.onboardPackageBoundary.prepareOnboardHarnessOperation;
   const checkpointMigration = await import("../state/onboard-checkpoint-migrate");
   const resumeIntent = await import("./resume/portable-resume-intent");
   const retirement = await import("../state/portable-uninstall-retirement");
@@ -655,10 +658,23 @@ describe("portable resume command lock boundary", () => {
       options: import("./types").OnboardOptions,
     ) => Promise<void>;
     const { retirement } = boundaryModules;
+    const packageStoreRoot = path.join(tempHome, ".nemoclaw", "harnesses");
+    const { createHarnessPackageFixture } = await import("../../../test/helpers/harness-packages");
+    const localPackageFixture = createHarnessPackageFixture({ storeRoot: packageStoreRoot });
+    const localOpenclaw = localPackageFixture.install("openclaw");
+    vi.mocked(
+      boundaryModules.onboardModule.onboardPackageBoundary.prepareOnboardHarnessOperation,
+    ).mockImplementation((input, dependencies) =>
+      boundaryModules.prepareHarnessOperation(input, {
+        ...dependencies,
+        getBundledRoot: () => harnessFixture.bundledRoot,
+        getStoreRoot: () => packageStoreRoot,
+      }),
+    );
     let innerObserved = false;
     let innerError = "";
     const harness = harnessModule.createRebuildFlowHarness({
-      harnessPackage: installedOpenclaw.identity,
+      harnessPackage: localOpenclaw.identity,
       onboard: async (_session, options) => {
         const lockPath = retirement.portableHostFencePath(tempHome);
         const outerInode = fs.lstatSync(lockPath, { bigint: true }).ino;
@@ -681,14 +697,22 @@ describe("portable resume command lock boundary", () => {
     vi.mocked(rebuildOnboardSession.releaseOnboardLock).mockRestore();
 
     try {
-      await harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }).catch(() => {});
-      expect(innerObserved, innerError).toBe(true);
+      let outerError = "";
+      await harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }).catch((error) => {
+        outerError = String(error);
+      });
+      const rebuildErrors = harness.errorSpy.mock.calls.flat().join("\n");
+      expect(
+        innerObserved,
+        [outerError, innerError, rebuildErrors].filter(Boolean).join("\n"),
+      ).toBe(true);
       expect(fs.existsSync(retirement.portableHostFencePath(tempHome))).toBe(false);
     } finally {
       mkdtemp.mockRestore();
       createdDirectories.reverse().forEach((directory) => {
         fs.rmSync(directory, { recursive: true, force: true });
       });
+      localPackageFixture.cleanup();
     }
   }, 30_000);
 });

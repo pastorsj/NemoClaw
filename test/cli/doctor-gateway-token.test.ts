@@ -441,6 +441,9 @@ describe("CLI dispatch", () => {
         '  "sandbox list -g nemoclaw") echo "queried wrong gateway sandbox list" >> "$marker_file"; exit 0 ;;',
         "esac",
       ]);
+      fs.writeFileSync(path.join(setup.localBin, "brew"), "#!/usr/bin/env bash\nexit 1\n", {
+        mode: 0o755,
+      });
 
       const r = setup.runDoctor("alpha doctor");
 

@@ -12,7 +12,7 @@ import "../helpers/onboard-script-mocks.cjs";
 
 import { loadAgent } from "../../src/lib/agent/defs";
 import { normalizeInferenceSelection } from "../../src/lib/inference/selection";
-import { createSession } from "../../src/lib/state/onboard-session";
+import { deriveCheckpointFromSession } from "../../src/lib/state/onboard-checkpoint-migrate";
 import type { SandboxEntry } from "../../src/lib/state/registry/types";
 import { createHermesPortableBuildContextPlan } from "../../src/lib/onboard/experimental/hermes-portable-build-context";
 import { readHermesPortableLifecycleReceipt } from "../../src/lib/onboard/experimental/hermes-portable-receipt";
@@ -27,11 +27,11 @@ import { createPortableOnboardEnvironmentScope } from "../../src/lib/onboard/ses
 import {
   createHermesPortableTransactionFixture,
   HERMES_PORTABLE_TEST_LIVE_IDENTITY,
-  HERMES_PORTABLE_TEST_PACKAGE,
   hermesPortableDescendantNames,
   hermesPortableTestOpenShellAuthority,
   makeHermesPortableCheckoutPrivate,
 } from "../helpers/hermes-portable-onboarding-fixture";
+import { createHarnessPackageFixture } from "../helpers/harness-packages";
 import { INSTALLER_PAYLOAD } from "../helpers/installer-sourced-env";
 import { testTimeoutOptions } from "../helpers/timeouts";
 
@@ -123,6 +123,7 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
     vi.stubEnv("HOME", homeDir);
     vi.resetModules();
     const registry = await import("../../src/lib/state/registry");
+    const onboardSession = await import("../../src/lib/state/onboard-session");
     const { registerCreatedSandbox } = await import("../../src/lib/onboard/sandbox-registration");
     const sourceRevision = spawnSync("git", ["rev-parse", "HEAD"], {
       cwd: ROOT,
@@ -190,9 +191,23 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
       });
 
       vi.stubEnv("NEMOCLAW_EXPERIMENTAL_PROFILE", "portable");
-      const session = createSession();
+      const harnessPackage = createHarnessPackageFixture({
+        fixtureParent: path.join(fixtureRoot, "harness-packages"),
+        storeRoot: path.join(homeDir, ".nemoclaw", "harnesses"),
+      }).install("hermes").identity;
+      const session = onboardSession.createSession({
+        agent: "hermes",
+        sandboxName,
+        harnessPackage,
+        harnessPackageMigration: null,
+      });
+      session.checkpoint = deriveCheckpointFromSession(session, {
+        profile: "portable",
+        runtimeAuthority,
+      });
+      onboardSession.saveSession(session);
       const harnessPackageAuthority = {
-        harnessPackage: HERMES_PORTABLE_TEST_PACKAGE,
+        harnessPackage,
         harnessPackageMigration: null,
       } as const;
       const lifecycleGeneration = "11111111-1111-4111-8111-111111111111";
@@ -387,7 +402,7 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
         agent: "hermes",
         endpointSource: null,
         gatewayName,
-        harnessPackage: HERMES_PORTABLE_TEST_PACKAGE,
+        harnessPackage,
         lifecycleGeneration,
         lifecycleLiveIdentityFingerprint: HERMES_PORTABLE_TEST_LIVE_IDENTITY,
       });

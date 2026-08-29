@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serializedLlamaCppHostLocalInferenceReceipt } from "../../../../test/helpers/host-local-inference-receipt";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
+import type { HarnessPackageIdentity } from "../../harness/package-identity";
 import { createSandboxHostLocalInferenceProvenance } from "../../state/registry/host-local-inference";
 import {
   type DcodeProbeState,
@@ -16,14 +17,42 @@ import {
 import { SANDBOX_EXEC_STARTED_MARKER } from "./sandbox-exec-output";
 import * as f from "./snapshot-restore-test-fixture";
 
-const dcodeSandboxEntry = {
-  name: "alpha",
-  agent: "langchain-deepagents-code",
-};
+function harnessPackage(agent: string, digestCharacter: string): HarnessPackageIdentity {
+  return {
+    kind: "agent-runtime",
+    id: agent,
+    packageVersion: "1.0.0-test",
+    contractVersion: 1,
+    contentDigest: digestCharacter.repeat(64),
+  };
+}
+
+const OPENCLAW_PACKAGE = harnessPackage("openclaw", "a");
+const HERMES_PACKAGE = harnessPackage("hermes", "b");
+const DCODE_PACKAGE = harnessPackage("langchain-deepagents-code", "c");
+
+function packageSandbox(
+  name: string,
+  agent: string,
+  identity: HarnessPackageIdentity,
+): f.SandboxRecord {
+  return { name, agent, harnessPackage: identity };
+}
+
+const dcodeSandboxEntry = packageSandbox("alpha", "langchain-deepagents-code", DCODE_PACKAGE);
 
 describe("runSandboxSnapshot", () => {
   beforeEach(() => {
     f.resetSnapshotRestoreMocks();
+    f.buildAgentDefinitionMock.mockImplementation((input) => {
+      const definition = input as typeof input & { manifestPath: string };
+      return {
+        name: definition.manifest.name,
+        packageRoot: definition.packageRoot,
+        manifestPath: definition.manifestPath,
+        policyAdditionsPath: `${definition.packageRoot}/policy-additions.yaml`,
+      } as never;
+    });
   });
 
   afterEach(() => {
@@ -106,19 +135,17 @@ describe("runSandboxSnapshot", () => {
   });
 
   it("rejects a schema-5 snapshot restore source or destination before effects (#9203)", async () => {
-    f.assertHermesPortableCommandUnavailableMock.mockImplementation(
-      (sandboxName: string) => {
-        switch (sandboxName) {
-          case "beta":
-            throw new Error("schema-5 destination rejected");
-        }
-      },
-    );
+    f.assertHermesPortableCommandUnavailableMock.mockImplementation((sandboxName: string) => {
+      switch (sandboxName) {
+        case "beta":
+          throw new Error("schema-5 destination rejected");
+      }
+    });
     const { runSandboxSnapshot } = await import("./snapshot");
 
-    await expect(
-      runSandboxSnapshot("alpha", { kind: "restore", to: "beta" }),
-    ).rejects.toThrow("schema-5 destination rejected");
+    await expect(runSandboxSnapshot("alpha", { kind: "restore", to: "beta" })).rejects.toThrow(
+      "schema-5 destination rejected",
+    );
 
     expect(f.assertHermesPortableCommandUnavailableMock).toHaveBeenCalledWith(
       "alpha",
@@ -272,9 +299,10 @@ describe("runSandboxSnapshot", () => {
 
     await runSandboxSnapshot("alpha", { kind: "create", name: "idle" });
 
-    expect(f.backupSandboxStateMock).toHaveBeenCalledWith("alpha", {
-      name: "idle",
-    });
+    expect(f.backupSandboxStateMock).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ name: "idle", harnessPackage: DCODE_PACKAGE }),
+    );
     expect(consoleLog.mock.calls.flat().join("\n")).toContain("Snapshot v8 name=idle created");
   });
 
@@ -302,7 +330,10 @@ describe("runSandboxSnapshot", () => {
 
     await runSandboxSnapshot("alpha", { kind: "create", name: "framed-idle" });
 
-    expect(f.backupSandboxStateMock).toHaveBeenCalledWith("alpha", { name: "framed-idle" });
+    expect(f.backupSandboxStateMock).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ name: "framed-idle", harnessPackage: DCODE_PACKAGE }),
+    );
     expect(consoleLog.mock.calls.flat().join("\n")).toContain(
       "Snapshot v9 name=framed-idle created",
     );
@@ -486,7 +517,7 @@ describe("runSandboxSnapshot", () => {
   });
 
   it("keeps registered non-dcode snapshots on the existing path when the dcode probe fails", async () => {
-    f.getSandboxMock.mockReturnValue({ name: "alpha", agent: "hermes" });
+    f.getSandboxMock.mockReturnValue(packageSandbox("alpha", "hermes", HERMES_PACKAGE));
     mockDcodeProbeResult({ status: 1, output: "exec unsupported" });
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const manifest = {
@@ -513,9 +544,10 @@ describe("runSandboxSnapshot", () => {
         ([args]) => args[0] === "sandbox" && args[1] === "exec",
       ),
     ).toBe(false);
-    expect(f.backupSandboxStateMock).toHaveBeenCalledWith("alpha", {
-      name: null,
-    });
+    expect(f.backupSandboxStateMock).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ name: null, harnessPackage: HERMES_PACKAGE }),
+    );
     expect(consoleLog.mock.calls.flat().join("\n")).toContain("Snapshot v3 created");
   });
 
@@ -616,24 +648,16 @@ describe("runSandboxSnapshot", () => {
     expect(output).toContain("alpha snapshot restore");
   });
 
-
-
-
-
-
   it("reserves an explicit llama.cpp clone with the original owner and exact gateway authority", async () => {
     const hostLocalInferenceReceipt = serializedLlamaCppHostLocalInferenceReceipt("docker");
     const hostLocalInferenceProvenance = createSandboxHostLocalInferenceProvenance(
       "alpha",
       hostLocalInferenceReceipt,
     );
-    let registeredClone: f.SandboxRecord | null = null;
-    f.registerSandboxMock.mockImplementation(
-      (entry) => (registeredClone = entry as f.SandboxRecord),
-    );
     const source: f.SandboxRecord = {
       name: "alpha",
       agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       imageTag: "nemoclaw-alpha:test",
       openshellDriver: "docker",
       provider: "llama-cpp-local",
@@ -648,10 +672,13 @@ describe("runSandboxSnapshot", () => {
       hostLocalInferenceReceipt,
       hostLocalInferenceProvenance,
     };
-    f.getSandboxMock.mockImplementation((name) => (name === "alpha" ? source : registeredClone));
+    const cloneRegistry = f.modelPendingCloneRegistry((name) => (name === "alpha" ? source : null));
     f.getLatestBackupMock.mockReturnValue({
       ...f.latestBackupFixture,
+      version: 2,
+      backupComplete: true,
       agentType: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       hostLocalInferenceReceipt,
       hostLocalInferenceProvenance,
     });
@@ -687,20 +714,24 @@ describe("runSandboxSnapshot", () => {
 
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
 
-    expect(f.reserveSandboxInferenceRouteMock).toHaveBeenCalledWith("beta", {
-      provider: "llama-cpp-local",
-      model: "nemotron-llama-cpp",
-      endpointUrl: "https://inference.local/v1",
-      endpointSource: "inference-set",
-      credentialEnv: "NEMOCLAW_LLAMACPP_LOCAL_TOKEN",
-      preferredInferenceApi: "openai-completions",
-      gatewayName: "nemoclaw",
-      gatewayPort: 8080,
-      openshellDriver: "docker",
-      hostLocalInferenceReceipt,
-      hostLocalInferenceProvenance,
-    });
-    expect(registeredClone).toMatchObject({
+    expect(f.reserveSandboxInferenceRouteMock).toHaveBeenCalledWith(
+      "beta",
+      {
+        provider: "llama-cpp-local",
+        model: "nemotron-llama-cpp",
+        endpointUrl: "https://inference.local/v1",
+        endpointSource: "inference-set",
+        credentialEnv: "NEMOCLAW_LLAMACPP_LOCAL_TOKEN",
+        preferredInferenceApi: "openai-completions",
+        gatewayName: "nemoclaw",
+        gatewayPort: 8080,
+        openshellDriver: "docker",
+        hostLocalInferenceReceipt,
+        hostLocalInferenceProvenance,
+      },
+      { requireAbsent: true },
+    );
+    expect(cloneRegistry.getRegisteredClone()).toMatchObject({
       name: "beta",
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
@@ -708,23 +739,11 @@ describe("runSandboxSnapshot", () => {
       hostLocalInferenceProvenance,
     });
     expect(
-      (registeredClone as f.SandboxRecord | null)?.hostLocalInferenceProvenance
-        ?.runtimeOwnerSandboxName,
+      cloneRegistry.getRegisteredClone()?.hostLocalInferenceProvenance?.runtimeOwnerSandboxName,
     ).toBe("alpha");
     expect(prepare).toHaveBeenCalledTimes(2);
     expect(confirm).toHaveBeenCalledTimes(2);
   });
-
-
-
-
-
-
-
-
-
-
-
 
   it("refuses snapshot creation before backup when the sandbox is not live", async () => {
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["beta"]));
@@ -764,7 +783,17 @@ describe("runSandboxSnapshot", () => {
   it("reconciles snapshot policies after restore and warns without failing on repair misses", async () => {
     const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    f.getSandboxMock.mockReturnValue(packageSandbox("alpha", "openclaw", OPENCLAW_PACKAGE));
     f.getLatestBackupMock.mockReturnValue({
+      version: 2,
+      backupComplete: true,
+      sandboxName: "alpha",
+      agentType: "openclaw",
+      agentVersion: null,
+      expectedVersion: null,
+      harnessPackage: OPENCLAW_PACKAGE,
+      stateDirs: [],
+      dir: "/sandbox",
       backupPath: "/tmp/alpha/v2",
       timestamp: "2026-06-02T00:00:00.000Z",
       policyPresets: ["npm", "github"],
@@ -776,12 +805,20 @@ describe("runSandboxSnapshot", () => {
         },
       ],
     });
-    f.restoreSandboxStateMock.mockReturnValue({
-      success: true,
-      restoredDirs: ["workspace"],
-      restoredFiles: ["openclaw.json"],
-      failedDirs: [],
-      failedFiles: [],
+    f.captureSnapshotRestoreAuthorityMock.mockReturnValue({
+      schemaVersion: 1,
+      backupPath: "/tmp/alpha/v2",
+      contentSha256: "d".repeat(64),
+    });
+    f.restoreSandboxStateMock.mockImplementation((_name, _path, options) => {
+      options?.validateBeforeMutation?.();
+      return {
+        success: true,
+        restoredDirs: ["workspace"],
+        restoredFiles: ["openclaw.json"],
+        failedDirs: [],
+        failedFiles: [],
+      };
     });
     f.getAppliedPresetsMock.mockReturnValue(["npm", "team-egress", "old-preset"]);
     f.getCustomPoliciesMock.mockReturnValue([
@@ -797,10 +834,26 @@ describe("runSandboxSnapshot", () => {
 
     await runSandboxSnapshot("alpha", { kind: "restore" });
 
-    expect(f.restoreSandboxStateMock).toHaveBeenCalledWith("alpha", "/tmp/alpha/v2");
-    expect(f.removePresetMock).toHaveBeenCalledWith("alpha", "old-preset", { nonFatal: true });
-    expect(f.applyPresetMock).toHaveBeenCalledWith("alpha", "github", { nonFatal: true });
-    expect(f.removePresetMock).toHaveBeenCalledWith("alpha", "old-custom", { nonFatal: true });
+    expect(f.restoreSandboxStateMock).toHaveBeenCalledWith(
+      "alpha",
+      "/tmp/alpha/v2",
+      expect.objectContaining({
+        authority: expect.objectContaining({ contentSha256: "d".repeat(64) }),
+        validateBeforeMutation: expect.any(Function),
+      }),
+    );
+    expect(f.removePresetMock).toHaveBeenCalledWith("alpha", "old-preset", {
+      nonFatal: true,
+      skipRegistryUpdate: true,
+    });
+    expect(f.applyPresetMock).toHaveBeenCalledWith("alpha", "github", {
+      nonFatal: true,
+      skipRegistryUpdate: true,
+    });
+    expect(f.removePresetMock).toHaveBeenCalledWith("alpha", "old-custom", {
+      nonFatal: true,
+      skipRegistryUpdate: true,
+    });
     expect(f.removePresetMock).not.toHaveBeenCalledWith("alpha", "team-egress");
     expect(f.applyPresetContentMock).not.toHaveBeenCalled();
     const output = consoleLog.mock.calls.flat().join("\n");

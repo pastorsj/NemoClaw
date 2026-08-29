@@ -21,6 +21,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { testTimeoutOptions } from "../../helpers/timeouts.ts";
 import { ArtifactSink } from "../fixtures/artifacts.ts";
 import { startTestProgress } from "../fixtures/progress.ts";
 import { buildChildEnv, isValidSecretEnvKey, redactString } from "../fixtures/redaction.ts";
@@ -37,10 +38,16 @@ function supportProgress() {
 
 describe("fixture redaction entry point", () => {
   it("recognizes pass env names only at exact or underscore-delimited boundaries", () => {
-    expect(["PASS", "PASSWD", "CUSTOM_PASS", "CUSTOM_PASSWD"].every((key) =>
-        Object.is(isValidSecretEnvKey(key), true))).toBe(true);
-    expect(["COMPASS", "BYPASS", "PASSENGER_COUNT", "PASSED"].every((key) =>
-        Object.is(isValidSecretEnvKey(key), false))).toBe(true);
+    expect(
+      ["PASS", "PASSWD", "CUSTOM_PASS", "CUSTOM_PASSWD"].every((key) =>
+        Object.is(isValidSecretEnvKey(key), true),
+      ),
+    ).toBe(true);
+    expect(
+      ["COMPASS", "BYPASS", "PASSENGER_COUNT", "PASSED"].every((key) =>
+        Object.is(isValidSecretEnvKey(key), false),
+      ),
+    ).toBe(true);
 
     expect(
       buildChildEnv(
@@ -255,106 +262,110 @@ describe("fixture redaction entry point", () => {
     { scenario: "GitHub token" },
     { scenario: "messaging token" },
     { scenario: "private key" },
-  ])("redacts raw secrets at the uploaded artifact sink [$scenario]", async ({ scenario }) => {
-    const fakeHostedKey = "fake-hosted-inference-key-for-artifact-scan";
-    const fakeDockerToken = "fake-docker-token-for-artifact-scan";
-    const generatedGatewayToken = "generated-gateway-token-for-artifact-scan";
-    const fakeGitHubToken = `ghp_${"g".repeat(36)}`;
-    const fakeMessagingToken = ["xox", "b-1234567890-abcdefghij"].join("");
-    const generatedPrivateKey = [
-      ["-----BEGIN", "PRIVATE KEY-----"].join(" "),
-      "unknown-generated-artifact-private-key-material",
-      ["-----END", "PRIVATE KEY-----"].join(" "),
-    ].join("\\n");
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-e2e-artifact-redaction-"));
-    const artifacts = new ArtifactSink(path.join(rootDir, "e2e-artifacts/live/redaction-smoke"), [
-      fakeHostedKey,
-      fakeDockerToken,
-    ]);
-    artifacts.addRedactionValues([generatedGatewayToken]);
-    await artifacts.ensureRoot();
-    const secrets = new SecretStore(
-      { NVIDIA_INFERENCE_API_KEY: fakeHostedKey },
-      (note?: string): never => {
-        throw new Error(note ?? "skipped");
-      },
-    );
-    const probe = new ShellProbe({
-      artifacts,
-      progress: supportProgress(),
-      redact: (text, extra) => secrets.redact(text, extra),
-      signal: new AbortController().signal,
-    });
+  ])(
+    "redacts raw secrets at the uploaded artifact sink [$scenario]",
+    testTimeoutOptions(15_000),
+    async ({ scenario }) => {
+      const fakeHostedKey = "fake-hosted-inference-key-for-artifact-scan";
+      const fakeDockerToken = "fake-docker-token-for-artifact-scan";
+      const generatedGatewayToken = "generated-gateway-token-for-artifact-scan";
+      const fakeGitHubToken = `ghp_${"g".repeat(36)}`;
+      const fakeMessagingToken = ["xox", "b-1234567890-abcdefghij"].join("");
+      const generatedPrivateKey = [
+        ["-----BEGIN", "PRIVATE KEY-----"].join(" "),
+        "unknown-generated-artifact-private-key-material",
+        ["-----END", "PRIVATE KEY-----"].join(" "),
+      ].join("\\n");
+      const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-e2e-artifact-redaction-"));
+      const artifacts = new ArtifactSink(path.join(rootDir, "e2e-artifacts/live/redaction-smoke"), [
+        fakeHostedKey,
+        fakeDockerToken,
+      ]);
+      artifacts.addRedactionValues([generatedGatewayToken]);
+      await artifacts.ensureRoot();
+      const secrets = new SecretStore(
+        { NVIDIA_INFERENCE_API_KEY: fakeHostedKey },
+        (note?: string): never => {
+          throw new Error(note ?? "skipped");
+        },
+      );
+      const probe = new ShellProbe({
+        artifacts,
+        progress: supportProgress(),
+        redact: (text, extra) => secrets.redact(text, extra),
+        signal: new AbortController().signal,
+      });
 
-    const directArtifactPaths = await Promise.all([
-      artifacts.writeJson("run-plan.json", {
-        targetId: "redaction-smoke",
-        note: `plan saw ${fakeHostedKey}`,
-        githubToken: fakeGitHubToken,
-      }),
-      artifacts.writeJson("target-result.json", {
-        id: "redaction-smoke",
-        output: `result saw ${fakeDockerToken}`,
-        messagingToken: fakeMessagingToken,
-        generatedPrivateKey,
-      }),
-      artifacts.writeText("actions/redacted-action.log", `action saw ${fakeHostedKey}`),
-      artifacts.writeText("logs/redacted-live.log", `log saw ${generatedGatewayToken}`),
-    ]);
-    const result = await probe.run(
-      trustedShellCommand({
-        command: "bash",
-        args: [
-          "-lc",
-          "printf 'stdout:%s\\n' \"$NVIDIA_INFERENCE_API_KEY\"; printf 'stderr:%s\\n' \"$NVIDIA_INFERENCE_API_KEY\" >&2",
-        ],
-        reason: "exercise hosted inference secret redaction in uploaded shell-probe artifacts",
-      }),
-      {
-        artifactName: "hosted-inference-secret-smoke",
-        env: { NVIDIA_INFERENCE_API_KEY: fakeHostedKey },
-        redactionValues: [fakeHostedKey],
-      },
-    );
-    const uploadedPaths = [...directArtifactPaths, ...Object.values(result.artifacts)];
-    const uploadedTexts = await Promise.all(
-      uploadedPaths.map((artifactPath) => fs.readFile(artifactPath, "utf8")),
-    );
+      const directArtifactPaths = await Promise.all([
+        artifacts.writeJson("run-plan.json", {
+          targetId: "redaction-smoke",
+          note: `plan saw ${fakeHostedKey}`,
+          githubToken: fakeGitHubToken,
+        }),
+        artifacts.writeJson("target-result.json", {
+          id: "redaction-smoke",
+          output: `result saw ${fakeDockerToken}`,
+          messagingToken: fakeMessagingToken,
+          generatedPrivateKey,
+        }),
+        artifacts.writeText("actions/redacted-action.log", `action saw ${fakeHostedKey}`),
+        artifacts.writeText("logs/redacted-live.log", `log saw ${generatedGatewayToken}`),
+      ]);
+      const result = await probe.run(
+        trustedShellCommand({
+          command: "bash",
+          args: [
+            "-lc",
+            "printf 'stdout:%s\\n' \"$NVIDIA_INFERENCE_API_KEY\"; printf 'stderr:%s\\n' \"$NVIDIA_INFERENCE_API_KEY\" >&2",
+          ],
+          reason: "exercise hosted inference secret redaction in uploaded shell-probe artifacts",
+        }),
+        {
+          artifactName: "hosted-inference-secret-smoke",
+          env: { NVIDIA_INFERENCE_API_KEY: fakeHostedKey },
+          redactionValues: [fakeHostedKey],
+        },
+      );
+      const uploadedPaths = [...directArtifactPaths, ...Object.values(result.artifacts)];
+      const uploadedTexts = await Promise.all(
+        uploadedPaths.map((artifactPath) => fs.readFile(artifactPath, "utf8")),
+      );
 
-    expect(result.stdout).toContain("[REDACTED]");
-    expect(result.stderr).toContain("[REDACTED]");
-    const uploadedText = uploadedTexts.join("\n");
-    const secret = (
-      {
-        "hosted inference key": fakeHostedKey,
-        "Docker token": fakeDockerToken,
-        "gateway token": generatedGatewayToken,
-        "GitHub token": fakeGitHubToken,
-        "messaging token": fakeMessagingToken,
-        "private key": generatedPrivateKey,
-      } as const
-    )[scenario]!;
-    expect(uploadedText).not.toContain(secret);
+      expect(result.stdout).toContain("[REDACTED]");
+      expect(result.stderr).toContain("[REDACTED]");
+      const uploadedText = uploadedTexts.join("\n");
+      const secret = (
+        {
+          "hosted inference key": fakeHostedKey,
+          "Docker token": fakeDockerToken,
+          "gateway token": generatedGatewayToken,
+          "GitHub token": fakeGitHubToken,
+          "messaging token": fakeMessagingToken,
+          "private key": generatedPrivateKey,
+        } as const
+      )[scenario]!;
+      expect(uploadedText).not.toContain(secret);
 
-    expect(uploadedText).toContain("[REDACTED]");
-    expect(uploadedText).toContain("<REDACTED>");
-    expect(uploadedText).not.toContain("PRIVATE KEY");
-    expect(
-      uploadedPaths.map((artifactPath) => path.relative(artifacts.rootDir, artifactPath)),
-    ).toEqual(
-      expect.arrayContaining([
-        "run-plan.json",
-        "target-result.json",
-        "actions/redacted-action.log",
-        "logs/redacted-live.log",
-        "shell/hosted-inference-secret-smoke.stdout.txt",
-        "shell/hosted-inference-secret-smoke.stderr.txt",
-        "shell/hosted-inference-secret-smoke.result.json",
-      ]),
-    );
+      expect(uploadedText).toContain("[REDACTED]");
+      expect(uploadedText).toContain("<REDACTED>");
+      expect(uploadedText).not.toContain("PRIVATE KEY");
+      expect(
+        uploadedPaths.map((artifactPath) => path.relative(artifacts.rootDir, artifactPath)),
+      ).toEqual(
+        expect.arrayContaining([
+          "run-plan.json",
+          "target-result.json",
+          "actions/redacted-action.log",
+          "logs/redacted-live.log",
+          "shell/hosted-inference-secret-smoke.stdout.txt",
+          "shell/hosted-inference-secret-smoke.stderr.txt",
+          "shell/hosted-inference-secret-smoke.result.json",
+        ]),
+      );
 
-    await fs.rm(rootDir, { recursive: true, force: true });
-  });
+      await fs.rm(rootDir, { recursive: true, force: true });
+    },
+  );
 
   it("bounds high-volume shell output while preserving a redacted diagnostic tail", async () => {
     const secret = "fake-rebuild-output-secret-value";

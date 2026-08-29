@@ -22,6 +22,7 @@ import {
   installPostCreateRecoveryRetryOwner,
   readManagedDcodeCreateSelectionDrift,
   readSandboxRecreateRegistryEntry,
+  prepareSourceBackupAuthority,
   requireSandboxDockerfilePatchPackageRoot,
   reconcileCreatedHermesCredentialEnvironment,
   requireSelectedAgentPackageRoot,
@@ -31,6 +32,23 @@ import {
 } from "./orchestration";
 
 describe("selected agent package authority", () => {
+  const SOURCE_PACKAGE = {
+    kind: "agent-runtime" as const,
+    id: "hermes",
+    packageVersion: "0.13.0",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  };
+  const SOURCE_ENTRY = {
+    name: "alpha",
+    agent: "hermes",
+    harnessPackage: SOURCE_PACKAGE,
+  };
+  const SOURCE_DEFINITION = {
+    name: "hermes",
+    packageRoot: `/state/harnesses/objects/${SOURCE_PACKAGE.contentDigest}`,
+  } as AgentDefinition;
+
   it("keeps the OpenClaw null sentinel separate from its effective package root", () => {
     const packageRoot = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-package-")),
@@ -104,6 +122,73 @@ describe("selected agent package authority", () => {
       fs.rmSync(hermesRoot, { recursive: true, force: true });
       fs.rmSync(openClawRoot, { recursive: true, force: true });
     }
+  });
+
+  it("selects pre-recreate backup authority from the registered source agent", () => {
+    const resolveSandboxAgent = vi.fn(() => ({
+      recordedAgent: "hermes",
+      effectiveAgentId: "hermes",
+      definition: SOURCE_DEFINITION,
+      harnessPackage: SOURCE_PACKAGE,
+      harnessPackageMigration: null,
+    }));
+    const getSandbox = vi.fn(() => structuredClone(SOURCE_ENTRY));
+
+    const authority = prepareSourceBackupAuthority("alpha", SOURCE_ENTRY, {
+      getSandbox: getSandbox as never,
+      resolveSandboxAgent: resolveSandboxAgent as never,
+    });
+
+    expect(authority).toMatchObject({
+      agentDefinition: SOURCE_DEFINITION,
+      harnessPackage: SOURCE_PACKAGE,
+    });
+    expect(() => authority?.validateBeforePublish?.()).not.toThrow();
+    expect(resolveSandboxAgent).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects source registry or package-object drift before backup publication", () => {
+    let currentEntry = structuredClone(SOURCE_ENTRY) as SandboxEntry;
+    const changedDefinition = {
+      ...SOURCE_DEFINITION,
+      packageRoot: "/state/harnesses/objects/replaced",
+    } as AgentDefinition;
+    const resolveSandboxAgent = vi
+      .fn()
+      .mockReturnValueOnce({
+        recordedAgent: "hermes",
+        effectiveAgentId: "hermes",
+        definition: SOURCE_DEFINITION,
+        harnessPackage: SOURCE_PACKAGE,
+        harnessPackageMigration: null,
+      })
+      .mockReturnValue({
+        recordedAgent: "hermes",
+        effectiveAgentId: "hermes",
+        definition: changedDefinition,
+        harnessPackage: SOURCE_PACKAGE,
+        harnessPackageMigration: null,
+      });
+    const getSandbox = vi.fn(() => currentEntry);
+    const packageDriftAuthority = prepareSourceBackupAuthority("alpha", SOURCE_ENTRY, {
+      getSandbox: getSandbox as never,
+      resolveSandboxAgent: resolveSandboxAgent as never,
+    });
+
+    expect(() => packageDriftAuthority?.validateBeforePublish?.()).toThrow("source agent package");
+
+    currentEntry = { ...SOURCE_ENTRY, model: "changed-model" };
+    const rowDriftAuthority = prepareSourceBackupAuthority("alpha", SOURCE_ENTRY, {
+      getSandbox: getSandbox as never,
+      resolveSandboxAgent: vi.fn(() => ({
+        recordedAgent: "hermes",
+        effectiveAgentId: "hermes",
+        definition: SOURCE_DEFINITION,
+        harnessPackage: SOURCE_PACKAGE,
+        harnessPackageMigration: null,
+      })) as never,
+    });
+    expect(() => rowDriftAuthority?.validateBeforePublish?.()).toThrow("source registry row");
   });
 });
 
@@ -194,7 +279,10 @@ describe("created Hermes credential environment reconciliation", () => {
     let liveIdentity = expectedIdentity;
     const mutations: string[] = [];
     const revalidatePolicyAuthority = vi.fn(() => {
-      liveIdentity === expectedIdentity || (() => { throw new Error("sandbox identity changed"); })();
+      liveIdentity === expectedIdentity ||
+        (() => {
+          throw new Error("sandbox identity changed");
+        })();
       liveIdentity = "identity-b";
     });
 

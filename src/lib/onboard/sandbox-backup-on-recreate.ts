@@ -1,15 +1,27 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentDefinition } from "../agent/defs";
+import type { HarnessPackageIdentity } from "../harness/package-identity";
 import type { SandboxEntry } from "../state/registry";
-import type { BackupResult } from "../state/sandbox";
+import { type BackupResult } from "../state/sandbox";
 import * as sandboxState from "../state/sandbox";
 
-export type SandboxBackupImpl = (sandboxName: string) => BackupResult;
+export interface PreRecreateBackupAuthority {
+  readonly agentDefinition: AgentDefinition;
+  readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly validateBeforePublish?: () => void;
+}
+
+export type SandboxBackupImpl = (
+  sandboxName: string,
+  authority?: PreRecreateBackupAuthority,
+) => BackupResult;
 
 export interface PreRecreateBackupOptions {
   sandboxName: string;
   sandboxEntry?: SandboxEntry | null;
+  sourceBackupAuthority?: PreRecreateBackupAuthority | null;
   requireOpenClawImagePluginProvenance?: boolean;
   backupImpl?: SandboxBackupImpl;
   log?: (msg: string) => void;
@@ -35,14 +47,24 @@ export function backupSandboxBeforeRecreate(
 ): PreRecreateBackupResult {
   const log = opts.log ?? ((m: string) => console.log(m));
   const errorLog = opts.errorLog ?? ((m: string) => console.error(m));
-  const backupImpl = opts.backupImpl ?? sandboxState.backupSandboxState;
   const sandboxEntry = opts.sandboxEntry ?? null;
   const customOpenClaw =
     opts.requireOpenClawImagePluginProvenance === true ||
     (Boolean(sandboxEntry?.fromDockerfile) &&
       (!sandboxEntry?.agent || sandboxEntry.agent === "openclaw"));
   try {
-    const backup = backupImpl(opts.sandboxName);
+    const sourceBackupAuthority = opts.sourceBackupAuthority ?? null;
+    const backup = opts.backupImpl
+      ? sourceBackupAuthority
+        ? opts.backupImpl(opts.sandboxName, sourceBackupAuthority)
+        : opts.backupImpl(opts.sandboxName)
+      : sourceBackupAuthority
+        ? sandboxState.backupSandboxState(opts.sandboxName, sourceBackupAuthority)
+        : (() => {
+            throw new Error(
+              `Sandbox '${opts.sandboxName}' has no registered agent package authority.`,
+            );
+          })();
     if (backup.success && backup.manifest?.backupPath) {
       if (
         (customOpenClaw || backup.manifest.reconcileOpenClawImagePluginProvenance === true) &&

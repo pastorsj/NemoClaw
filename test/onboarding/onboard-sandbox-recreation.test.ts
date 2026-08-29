@@ -47,6 +47,7 @@ const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "")
 let _deleted = false;
 const registry = require(${registryPath});
 const childProcess = require("node:child_process");
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage();
 
 runner.run = (command) => {
   _deleted = _deleted || _n(command).includes("sandbox delete");
@@ -67,6 +68,7 @@ runner.run = (command) => {
 	  return "";
 	};
 	registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
+	  ...harnessFixture.registryAuthority,
 	  name: "my-assistant",
 	  toolDisclosure: "progressive",
 	}, { sandboxId: "sbx-4f2a91c0d7" });
@@ -89,7 +91,7 @@ const { createSandbox } = require(${onboardPath});
 
       const env: Record<string, string | undefined> = {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_NON_INTERACTIVE: "1",
       };
@@ -237,7 +239,7 @@ const { createSandbox } = require(${onboardPath});
         encoding: "utf-8",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_NON_INTERACTIVE: "1",
           NEMOCLAW_POLICY_TIER: policyTier,
@@ -421,7 +423,7 @@ const { createSandbox } = require(${onboardPath});
         encoding: "utf-8",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_NON_INTERACTIVE: "1",
         },
@@ -595,7 +597,7 @@ const { createSandbox } = require(${onboardPath});
         encoding: "utf-8",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_NON_INTERACTIVE: "1",
         },
@@ -766,7 +768,7 @@ const { createSandbox } = require(${onboardPath});
         encoding: "utf-8",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_NON_INTERACTIVE: "1",
         },
@@ -925,7 +927,7 @@ const { createSandbox } = require(${onboardPath});
         encoding: "utf-8",
         env: {
           ...process.env,
-          HOME: tmpDir,
+          HOME: fs.realpathSync(tmpDir),
           PATH: `${fakeBin}:${process.env.PATH || ""}`,
           NEMOCLAW_NON_INTERACTIVE: "1",
         },
@@ -980,6 +982,11 @@ let _deleted = false;
 const registry = require(${registryPath});
 const credentials = require(${credentialsPath});
 const childProcess = require("node:child_process");
+const harnessFixture = fixtureMocks.installHarnessRouteFixture({
+  sandboxName: "my-assistant",
+  provider: "nvidia-prod",
+  model: "gpt-5.4",
+});
 const { EventEmitter } = require("node:events");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -1028,6 +1035,7 @@ runner.runFile = (file, args = [], opts = {}) => {
 	  return "";
 	};
 	registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
+	  ...harnessFixture.registryAuthority,
 	  name: "my-assistant",
 	  toolDisclosure: "progressive",
 	}, { sandboxId: "sbx-4f2a91c0d7" });
@@ -1054,7 +1062,11 @@ const { createSandbox } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
-  const sandboxName = await createSandbox(null, "gpt-5.4", "nvidia-prod", null, "my-assistant");
+  const createArgs = fixtureMocks.buildHarnessRouteArguments(
+    [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
+    harnessFixture,
+  );
+  const sandboxName = await createSandbox(...createArgs);
   console.log(JSON.stringify({ sandboxName, commands }));
 })().catch((error) => {
   console.error(error);
@@ -1066,7 +1078,7 @@ const { createSandbox } = require(${onboardPath});
       // Run WITHOUT NEMOCLAW_NON_INTERACTIVE to exercise interactive path
       const env: Record<string, string | undefined> = {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
       };
       delete env["NEMOCLAW_NON_INTERACTIVE"];
@@ -1244,7 +1256,7 @@ const { createSandbox } = require(${onboardPath});
       // Run WITHOUT NEMOCLAW_NON_INTERACTIVE to exercise interactive path
       const env: Record<string, string | undefined> = {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_RECREATE_WITHOUT_BACKUP: "1",
       };
@@ -1424,7 +1436,7 @@ const { createSandbox } = require(${onboardPath});
       // Run WITHOUT NEMOCLAW_NON_INTERACTIVE to exercise interactive path
       const env: Record<string, string | undefined> = {
         ...process.env,
-        HOME: tmpDir,
+        HOME: fs.realpathSync(tmpDir),
         PATH: `${fakeBin}:${process.env.PATH || ""}`,
         NEMOCLAW_RECREATE_WITHOUT_BACKUP: "1",
       };

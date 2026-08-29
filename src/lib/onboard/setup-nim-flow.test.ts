@@ -1,18 +1,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentDefinition } from "../agent/defs";
 import { MIN_HERMES_OLLAMA_CONTEXT_WINDOW } from "../inference/ollama-runtime-context";
 import type { VllmProfile } from "../inference/vllm";
+import * as onboardSession from "../state/onboard-session";
 import { makeDeps, makeHostState, unexpected } from "./__test-helpers__/setup-nim-flow";
 import { OnboardInferenceCapabilityCache } from "./inference-capability-cache";
 import type { LocalModelProfilePlan } from "./local-model-profile/integration";
 import { createSetupNim, type SetupNimFlowDeps, withServingPortGuard } from "./setup-nim-flow";
 
+beforeEach(() => {
+  vi.spyOn(onboardSession, "loadSession").mockReturnValue(null);
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("withServingPortGuard", () => {
@@ -882,6 +888,10 @@ describe("createSetupNim", () => {
       makeDeps({
         isNonInteractive: () => true,
         getNonInteractiveProvider: () => null,
+        resolveManagedLlamaCppSelection: () => ({
+          kind: "rejected",
+          reason: "managed llama.cpp is outside this vLLM test",
+        }),
         detectInferenceProviderHostState,
         handleVllmSelection,
       }),
@@ -1018,6 +1028,10 @@ describe("createSetupNim", () => {
       makeDeps({
         isNonInteractive: () => true,
         getNonInteractiveProvider: () => "vllm",
+        resolveManagedLlamaCppSelection: () => ({
+          kind: "rejected",
+          reason: "managed llama.cpp is outside this vLLM test",
+        }),
         detectInferenceProviderHostState: () =>
           makeHostState({
             vllmRunning: true,
@@ -1094,9 +1108,7 @@ describe("createSetupNim", () => {
             vllmRunning: true,
             vllmProfile: profile,
             hasVllmImage: true,
-            vllmEntries: [
-              { key: "install-vllm", label: "Start vLLM (N1x) [Deferred preview]" },
-            ],
+            vllmEntries: [{ key: "install-vllm", label: "Start vLLM (N1x) [Deferred preview]" }],
           }),
         installVllm,
         handleVllmSelection,
@@ -1112,9 +1124,7 @@ describe("createSetupNim", () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining("requires managed vLLM"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("localhost:8000"));
     expect(error).toHaveBeenCalledWith(expect.stringContaining("Stop the existing server"));
-    expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("NEMOCLAW_PROVIDER=install-vllm"),
-    );
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("NEMOCLAW_PROVIDER=install-vllm"));
     expect(abortNonInteractive).toHaveBeenCalledOnce();
     expect(installVllm).not.toHaveBeenCalled();
     expect(handleVllmSelection).not.toHaveBeenCalled();

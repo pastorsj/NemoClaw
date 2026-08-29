@@ -236,6 +236,8 @@ export interface SandboxEntry extends Partial<InferenceSelection> {
   lifecycleGeneration?: string;
   /** Hashed OpenShell identity paired with lifecycleGeneration for exact recovery. */
   lifecycleLiveIdentityFingerprint?: string;
+  /** Exact source registry row that authorized a pending snapshot clone. */
+  snapshotSourceRegistryFingerprint?: string;
   // OpenShell gateway registration name and host port bound to this sandbox.
   // Persisted so later lifecycle commands operate on the sandbox's own gateway
   // instead of the process-global `nemoclaw` singleton — a second sandbox on a

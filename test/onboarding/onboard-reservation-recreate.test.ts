@@ -91,6 +91,7 @@ const fixtureMocks = require(${onboardScriptMocksPath});
 const onboardSession = require(${onboardSessionPath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage("openclaw");
 
 const events = [];
 let sandboxDeleted = false;
@@ -132,6 +133,8 @@ onboardSession.saveSession(onboardSession.createSession({
   sessionId: "session-owner",
   sandboxName: "my-assistant",
   agent: "openclaw",
+  harnessPackage: harnessFixture.harnessPackage,
+  harnessPackageMigration: harnessFixture.harnessPackageMigration,
 }));
 
 const reservationSessionId = ${JSON.stringify(reservationSessionId)};
@@ -140,6 +143,7 @@ const initialSourceEntry = {
   gpuEnabled: false,
   pendingRouteReservation: true,
   ...(reservationSessionId === null ? {} : { reservationSessionId }),
+  ...harnessFixture.registryAuthority,
 };
 registry.save({ defaultSandbox: null, sandboxes: { "my-assistant": initialSourceEntry } });
 let sourceEntry = registry.getSandbox("my-assistant");
@@ -178,6 +182,9 @@ const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry,
   getSandbox: registry.getSandbox,
   removeSandbox,
   sourceSandboxId: "sbx-4f2a91c0d7",
+  harnessPackage: harnessFixture.harnessPackage,
+  harnessPackageMigration: harnessFixture.harnessPackageMigration,
+  agentDefinition: harnessFixture.agentDefinition,
 });
 
 const preflight = require(${JSON.stringify(path.join(repoRoot, "src", "lib", "onboard", "preflight.ts"))});
@@ -237,6 +244,7 @@ const { createSandbox } = require(${onboardPath});
       sandboxName,
       events,
       retainedReservation: registry.load().sandboxes["my-assistant"] || null,
+      expectedRegistryAuthority: harnessFixture.registryAuthority,
     }));
   } finally {
     onboardSession.releaseOnboardLock();
@@ -247,6 +255,7 @@ const { createSandbox } = require(${onboardPath});
     error: error instanceof Error ? error.message : String(error),
     events,
     retainedReservation: registry.load().sandboxes["my-assistant"] || null,
+    expectedRegistryAuthority: harnessFixture.registryAuthority,
   }));
   process.exitCode = 1;
 });
@@ -274,6 +283,10 @@ const { createSandbox } = require(${onboardPath});
         error?: string;
         events: Array<{ kind: string; cmd?: string; name?: string; removed?: boolean }>;
         retainedReservation: { reservationSessionId?: string; model?: string } | null;
+        expectedRegistryAuthority: {
+          agent: null;
+          harnessPackage: Record<string, unknown>;
+        };
       }>(result.stdout);
       assert.equal(payload.sandboxName, replaceBeforeCleanup ? null : "my-assistant");
       assert.match(
@@ -305,7 +318,12 @@ const { createSandbox } = require(${onboardPath});
         !replaceBeforeCleanup,
         "must refuse before creating after the reservation snapshot changes",
       );
-      assert.deepEqual(payload.retainedReservation, expectedRetainedReservation);
+      assert.deepEqual(
+        payload.retainedReservation,
+        expectedRetainedReservation === null
+          ? null
+          : { ...expectedRetainedReservation, ...payload.expectedRegistryAuthority },
+      );
     },
   );
 
@@ -374,11 +392,21 @@ dockerExec.dockerSpawn = () => {
   return child;
 };
 
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  sandboxName: "my-assistant",
+  provider: null,
+  model: null,
+  sessionId: "session-owner",
+  durableRegistry: true,
+});
+
 if (mode === "seed") {
   onboardSession.saveSession(onboardSession.createSession({
     sessionId: "session-owner",
     sandboxName: "my-assistant",
     agent: "openclaw",
+    harnessPackage: createFixture.harnessPackage,
+    harnessPackageMigration: createFixture.harnessPackageMigration,
   }));
   registry.save({
     defaultSandbox: null,
@@ -394,6 +422,8 @@ if (mode === "seed") {
         preferredInferenceApi: null,
         pendingRouteReservation: true,
         reservationSessionId: "session-owner",
+        agent: null,
+        harnessPackage: createFixture.harnessPackage,
       },
     },
   });
@@ -415,17 +445,10 @@ if (mode === "seed") {
       dcodeAutoApprovalMode: null,
       observabilityEnabled: false,
       policyTier: null,
+      harnessPackage: createFixture.harnessPackage,
     },
   });
 }
-
-const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
-  sandboxName: "my-assistant",
-  provider: null,
-  model: null,
-  sessionId: "session-owner",
-  durableRegistry: true,
-});
 
 if (mode === "resume" && scenario === "foreign-reservation") {
   const data = registry.load();
@@ -532,9 +555,11 @@ createArgs[15] = {
   toolDisclosure: "progressive",
   observabilityEnabled: false,
   recreateTransaction: {
+    version: transaction.version,
     id: transaction.id,
     targetGeneration: transaction.targetGeneration,
     targetIntentFingerprint: transaction.targetIntentFingerprint,
+    harnessPackage: transaction.harnessPackage,
   },
 };
 createArgs[16] = async () => {
