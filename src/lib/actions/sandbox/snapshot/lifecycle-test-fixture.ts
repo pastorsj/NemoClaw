@@ -11,6 +11,7 @@ import type {
 import { fingerprintSandboxRecreateValue } from "../../../onboard/sandbox-recreate-transaction";
 import * as f from "../snapshot-restore-test-fixture";
 
+/** Keep conditional fixture setup outside individual test callbacks. */
 export function runWhen(condition: boolean, action: () => void): void {
   if (condition) action();
 }

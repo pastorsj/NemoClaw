@@ -20,7 +20,7 @@ import {
   packageManagedSandbox,
   packageManagedSnapshot,
   runWhen,
-} from "./snapshot/lifecycle-fixture";
+} from "./snapshot/lifecycle-test-fixture";
 
 const tempHomes: string[] = [];
 beforeEach(() => {

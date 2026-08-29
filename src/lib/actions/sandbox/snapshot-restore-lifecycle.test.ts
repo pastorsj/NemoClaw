@@ -22,7 +22,7 @@ import {
   pendingPackageManagedSandbox,
   runWhen,
   storePendingClone,
-} from "./snapshot/lifecycle-fixture";
+} from "./snapshot/lifecycle-test-fixture";
 
 beforeEach(() => {
   f.resetSnapshotRestoreMocks();

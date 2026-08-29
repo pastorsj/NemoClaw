@@ -18,7 +18,7 @@ import {
   packageManagedSnapshot,
   pendingPackageManagedSandbox,
   runWhen,
-} from "./snapshot/lifecycle-fixture";
+} from "./snapshot/lifecycle-test-fixture";
 
 beforeEach(() => {
   f.resetSnapshotRestoreMocks();
