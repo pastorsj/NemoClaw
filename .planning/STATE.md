@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plans 02-05 through 02-21 established harness CLI, pinned definitions, package-bound
+status: Plans 02-05 through 02-22 established harness CLI, pinned definitions, package-bound
   onboarding and recovery authority, installer reconciliation, snapshot mutation authority, and
-  pinned downstream rebuild consumers
-last_updated: "2026-08-29T21:25:43.000Z"
+  package-aware typed E2E fixtures
+last_updated: "2026-08-29T21:29:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
   total_plans: 24
-  completed_plans: 22
-  percent: 92
+  completed_plans: 23
+  percent: 96
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -23,14 +23,15 @@ progress:
 
 Phase: 2 of 8 — Agent Package Foundation
 
-Status: Plans 02-05 through 02-21 completed the public harness inventory/install workflow,
+Status: Plans 02-05 through 02-22 completed the public harness inventory/install workflow,
 installed-only agent compatibility list, exact registry authority, package-root definitions and
 builds, installed-package selection, writer-locked Session binding, and exact package-managed
 resume through route reservation, policy verification, sandbox creation, recreate journals,
 checkpoint replay, final publication, recovery-only retained records, installer reconciliation,
 exact snapshot backup, restore, clone, and manifest authority, prepared rebuild recovery with one
 pinned target definition, and one immutable definition across all downstream rebuild consumers.
-Plan 02-22 is next.
+The existing typed E2E fixture now installs standard packages and proves exact final identity.
+Plan 02-23 is next.
 This work does not activate or support an upstream product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
@@ -112,6 +113,8 @@ tree.
   agent definition through the synchronous deletion fence and image preparation.
 - [x] Messaging, dashboard, GPU, DCode, MCP, policy, gateway, backup, restore, and post-restore
   rebuild consumers retain that definition and revalidate durable authority before mutation.
+- [x] Standard typed E2E profiles install before onboarding and require receipt, Session, and
+  registry package identity equality without a parallel target or workflow registry.
 
 ## Architecture Recommendations
 
@@ -132,9 +135,9 @@ tree.
 
 ## Next Execution
 
-Complete Plan 02-22 by carrying exact package installation evidence through the existing typed E2E
-fixtures. Keep arbitrary installed host code, remote package discovery, product activation, and
-support claims outside this work. An upstream contribution still requires its own accepted
+Complete Plan 02-23 with deterministic checks and bounded no-messaging Mac and Brev development
+qualification. Keep arbitrary installed host code, remote package discovery, product activation,
+and support claims outside this work. An upstream contribution still requires its own accepted
 NVIDIA/NemoClaw product decision.
 
 ## Preserved Local State

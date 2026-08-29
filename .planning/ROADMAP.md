@@ -113,7 +113,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 - [x] `02-19` — Persist rebuild-manifest identity and bind snapshot, backup, restore, and clone.
 - [x] `02-20` — Bind prepared rebuild recovery and target context to exact identity.
 - [x] `02-21` — Carry one pinned definition through downstream rebuild consumers.
-- [ ] `02-22` — Extend the existing typed E2E fixture with exact package installation and assertions.
+- [x] `02-22` — Extend the existing typed E2E fixture with exact package installation and assertions.
 - [ ] `02-23` — Run deterministic and no-messaging development qualification.
 
 **Implementation slices:**
