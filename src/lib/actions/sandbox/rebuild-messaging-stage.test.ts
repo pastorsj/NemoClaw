@@ -8,10 +8,12 @@
 //
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as defs from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
 import { MessagingSetupApplier } from "../../messaging/applier/setup-applier";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxEntry } from "../../state/registry";
+import { stageRebuildMessagingPlanOrBail } from "./rebuild-messaging-phase";
 import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-stage";
 
 const emptyStoredMessagingPlan = {
@@ -29,26 +31,43 @@ const emptyStoredMessagingPlan = {
   healthChecks: [],
 } satisfies SandboxMessagingPlan;
 
+function pinnedAgent(name: string): AgentDefinition {
+  return { name, packageRoot: `/pinned/${name}` } as AgentDefinition;
+}
+
+const OPENCLAW_PACKAGE = {
+  kind: "agent-runtime",
+  id: "openclaw",
+  packageVersion: "1.0.0",
+  contractVersion: 1,
+  contentDigest: "a".repeat(64),
+} as const;
+
+const OPENCLAW_AUTHORITY = {
+  recordedAgent: null,
+  effectiveAgentId: "openclaw",
+  definition: pinnedAgent("openclaw"),
+  harnessPackage: OPENCLAW_PACKAGE,
+  harnessPackageMigration: null,
+} satisfies ResolvedSandboxAgent;
+
 describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("emits the skip message for any agent whose name is not supported by channel manifests", async () => {
-    const loadAgentSpy = vi
-      .spyOn(defs, "loadAgent")
-      .mockReturnValue({ name: "future-non-messaging-agent" } as never);
     const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
+    const agent = pinnedAgent("future-non-messaging-agent");
 
     const messages: string[] = [];
     const result = await stageMessagingManifestPlanForRebuild(
       "future-sandbox",
       { name: "future-sandbox" },
-      "future-non-messaging-agent",
+      agent,
       (msg) => messages.push(msg),
     );
 
-    expect(loadAgentSpy).toHaveBeenCalledWith("future-non-messaging-agent");
     expect(clearPlanEnvSpy).toHaveBeenCalledTimes(1);
     expect(messages).toContain(
       "Messaging manifest rebuild plan skipped: agent 'future-non-messaging-agent' is not supported by any channel manifest",
@@ -58,7 +77,6 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
   });
 
   it("stages an explicit empty rebuild plan so token-backed channels are not rediscovered", async () => {
-    vi.spyOn(defs, "loadAgent").mockReturnValue({ name: "openclaw" } as never);
     const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
     const writePlanEnvSpy = vi
       .spyOn(MessagingSetupApplier, "writePlanToEnv")
@@ -71,7 +89,7 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
         name: "openclaw-sandbox",
         messaging: { schemaVersion: 1, plan: emptyStoredMessagingPlan },
       },
-      "openclaw",
+      pinnedAgent("openclaw"),
       (msg) => messages.push(msg),
     );
 
@@ -87,7 +105,6 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
   });
 
   it("stages a plan for a known agent using channel-manifest supported channels", async () => {
-    vi.spyOn(defs, "loadAgent").mockReturnValue({ name: "openclaw" } as never);
     const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
     const writePlanEnvSpy = vi.spyOn(MessagingSetupApplier, "writePlanToEnv");
 
@@ -128,7 +145,7 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
     const result = await stageMessagingManifestPlanForRebuild(
       "openclaw-sandbox",
       sandboxEntryWithStoredPlan,
-      "openclaw",
+      pinnedAgent("openclaw"),
       (msg) => messages.push(msg),
     );
 
@@ -137,4 +154,116 @@ describe("stageMessagingManifestPlanForRebuild non-messaging agent guard", () =>
     expect(messages).toContain("Messaging manifest rebuild plan staged: telegram");
     expect(result).not.toBeNull();
   });
+});
+
+describe("stageRebuildMessagingPlanOrBail agent authority", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("rejects package authority drift before staging messaging state", async () => {
+    const sandboxEntry = {
+      name: "openclaw-sandbox",
+      agent: null,
+      harnessPackage: OPENCLAW_PACKAGE,
+    } satisfies SandboxEntry;
+    const bail = (message: string): never => {
+      throw new Error(message);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      stageRebuildMessagingPlanOrBail(
+        "openclaw-sandbox",
+        sandboxEntry,
+        {
+          ...OPENCLAW_AUTHORITY,
+          harnessPackage: { ...OPENCLAW_PACKAGE, packageVersion: "1.0.1" },
+        },
+        vi.fn(),
+        bail,
+      ),
+    ).rejects.toThrow("Pinned rebuild agent authority does not match messaging registry state.");
+  });
+
+  it("rejects absent package authority for a standard agent", async () => {
+    const bail = (message: string): never => {
+      throw new Error(message);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      stageRebuildMessagingPlanOrBail(
+        "openclaw-sandbox",
+        { name: "openclaw-sandbox", agent: null },
+        { ...OPENCLAW_AUTHORITY, harnessPackage: null },
+        vi.fn(),
+        bail,
+      ),
+    ).rejects.toThrow("Pinned rebuild agent authority does not match messaging registry state.");
+  });
+
+  it("rejects a standard package whose id does not name the effective agent", async () => {
+    const wrongPackage = { ...OPENCLAW_PACKAGE, id: "hermes" } as const;
+    const bail = (message: string): never => {
+      throw new Error(message);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      stageRebuildMessagingPlanOrBail(
+        "openclaw-sandbox",
+        { name: "openclaw-sandbox", agent: null, harnessPackage: wrongPackage },
+        { ...OPENCLAW_AUTHORITY, harnessPackage: wrongPackage },
+        vi.fn(),
+        bail,
+      ),
+    ).rejects.toThrow("Pinned rebuild agent authority does not match messaging registry state.");
+  });
+
+  it("rejects a pinned definition whose name does not match its effective agent", async () => {
+    const bail = (message: string): never => {
+      throw new Error(message);
+    };
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(
+      stageRebuildMessagingPlanOrBail(
+        "openclaw-sandbox",
+        {
+          name: "openclaw-sandbox",
+          agent: null,
+          harnessPackage: OPENCLAW_PACKAGE,
+        },
+        { ...OPENCLAW_AUTHORITY, definition: pinnedAgent("hermes") },
+        vi.fn(),
+        bail,
+      ),
+    ).rejects.toThrow("Pinned rebuild agent authority does not match messaging registry state.");
+  });
+
+  it.each(["pi", "nemocua"] as const)(
+    "preserves qualified %s messaging staging without fabricated package authority",
+    async (agentId) => {
+      const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
+      const result = await stageRebuildMessagingPlanOrBail(
+        `${agentId}-sandbox`,
+        { name: `${agentId}-sandbox`, agent: agentId },
+        {
+          recordedAgent: agentId,
+          effectiveAgentId: agentId,
+          definition: pinnedAgent(agentId),
+          harnessPackage: null,
+          harnessPackageMigration: null,
+        },
+        vi.fn(),
+        (message): never => {
+          throw new Error(message);
+        },
+      );
+
+      expect(result).toBeNull();
+      expect(clearPlanEnvSpy).toHaveBeenCalledOnce();
+    },
+  );
 });

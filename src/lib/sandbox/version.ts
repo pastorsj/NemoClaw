@@ -17,7 +17,7 @@ import {
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
 import { openshellSandboxSshHost } from "../adapters/openshell/sandbox-ssh-host.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
-import { loadAgent } from "../agent/defs.js";
+import { loadAgent, type AgentDefinition } from "../agent/defs.js";
 import { resolveSandboxGatewayName } from "../onboard/gateway-binding.js";
 import * as registry from "../state/registry.js";
 import { createTempSshConfig } from "./temp-ssh-config.js";
@@ -73,13 +73,19 @@ export interface VersionCheckResult {
 export interface VersionCheckOptions {
   forceProbe?: boolean;
   skipProbe?: boolean;
+  /** Exact definition already authorized by a package-bound lifecycle operation. */
+  agentDefinition?: AgentDefinition;
 }
 
 /**
  * Resolve the agent definition for a sandbox.
  * Falls back to "openclaw" when the sandbox has no agent set.
  */
-function resolveAgentForSandbox(sandboxName: string): ReturnType<typeof loadAgent> {
+function resolveAgentForSandbox(
+  sandboxName: string,
+  agentDefinition?: AgentDefinition,
+): AgentDefinition {
+  if (agentDefinition) return agentDefinition;
   const sb = registry.getSandbox(sandboxName);
   const agentName = sb?.agent || "openclaw";
   return loadAgent(agentName);
@@ -99,13 +105,11 @@ function resolveProbeGatewayName(sandboxName: string): string | null {
   }
 }
 
-/**
- * Probe the live agent version inside a sandbox via SSH.
- * Returns the parsed version string or null on failure.
- */
-export function probeAgentVersion(sandboxName: string, gatewayName?: string): string | null {
-  const agent = resolveAgentForSandbox(sandboxName);
-
+function probePinnedAgentVersion(
+  sandboxName: string,
+  agent: AgentDefinition,
+  gatewayName?: string,
+): string | null {
   // Scope the lookup to the sandbox's own gateway. Without it OpenShell
   // resolves `sandbox get`/`ssh-config` against its mutable current selection,
   // so a sandbox bound to a sibling gateway is reported missing and its
@@ -161,6 +165,18 @@ export function probeAgentVersion(sandboxName: string, gatewayName?: string): st
 }
 
 /**
+ * Probe the live agent version inside a sandbox via SSH.
+ * Returns the parsed version string or null on failure.
+ */
+export function probeAgentVersion(sandboxName: string, gatewayName?: string): string | null {
+  return probePinnedAgentVersion(
+    sandboxName,
+    resolveAgentForSandbox(sandboxName),
+    gatewayName,
+  );
+}
+
+/**
  * Check whether a sandbox is running an outdated agent version.
  *
  * Fast path: compare registry.agentVersion against manifest expected_version.
@@ -170,7 +186,7 @@ export function checkAgentVersion(
   sandboxName: string,
   opts?: VersionCheckOptions,
 ): VersionCheckResult {
-  const agent = resolveAgentForSandbox(sandboxName);
+  const agent = resolveAgentForSandbox(sandboxName, opts?.agentDefinition);
   const expectedVersion = agent.expectedVersion;
 
   if (!expectedVersion) {
@@ -238,7 +254,7 @@ export function checkAgentVersion(
   }
 
   // Slow path: SSH exec into sandbox
-  const probed = probeAgentVersion(sandboxName, probeGatewayName);
+  const probed = probePinnedAgentVersion(sandboxName, agent, probeGatewayName);
   if (probed && sb) {
     // Cache for future fast-path lookups
     registry.updateSandbox(sandboxName, { agentVersion: probed });

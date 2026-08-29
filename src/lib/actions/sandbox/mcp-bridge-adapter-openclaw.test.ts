@@ -566,6 +566,44 @@ process.stdout.write(JSON.stringify(commands));
     });
   });
 
+  it("uses one pinned OpenClaw workspace without loading an ambient definition", () => {
+    const projectRoot = "/sandbox/.installed-openclaw/workspace";
+    const script = `
+const agentDefs = require("./src/lib/agent/defs.js");
+const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
+agentDefs.loadAgent = () => { throw new Error("ambient agent definition lookup attempted"); };
+const commands = [];
+processRecovery.executeSandboxCommand = (_sandboxName, command) => {
+  commands.push(command);
+  return command === "command -v mcporter"
+    ? { status: 0, stdout: "/usr/bin/mcporter\\n", stderr: "" }
+    : { status: 0, stdout: command.includes("config get") ? "registered\\n" : "", stderr: "" };
+};
+const adapter = require("./src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.js");
+const entry = ${JSON.stringify(baseEntry)};
+const root = ${JSON.stringify(projectRoot)};
+adapter.inspectOpenClawAdapterRegistration("pinned-root-lifecycle", entry, root);
+adapter.registerOpenClawAdapter("pinned-root-lifecycle", entry, {}, false, undefined, root);
+adapter.unregisterOpenClawAdapter("pinned-root-lifecycle", entry, {}, root);
+process.stdout.write(JSON.stringify(commands));
+`;
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: { ...process.env, NODE_OPTIONS: sourceNodeOptions },
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const commands = JSON.parse(result.stdout) as string[];
+    expect(commands).toHaveLength(5);
+    commands
+      .filter((command) => command !== "command -v mcporter")
+      .forEach((command) => {
+        expect(command).toContain(projectRoot);
+        expect(command).not.toContain(OPENCLAW_MCPORTER_ROOT);
+      });
+  });
+
   it("keeps the mcporter runtime pin visible for image tests", () => {
     expect(MCPORTER_VERSION).toBe("0.7.3");
   });

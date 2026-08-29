@@ -127,10 +127,16 @@ function resolveConfigFile(configDir: string, value: string, field: string): str
 export function resolveAgentConfig(
   sandboxName: string,
   dependencies: AgentConfigDependencies = defaultDependencies(),
+  pinnedAgentDefinition?: AgentDefinition,
 ): AgentConfigTarget {
   const entry = dependencies.getSandbox(sandboxName);
   const agentName = entry?.agent ?? DEFAULT_AGENT_CONFIG.agentName;
-  const agent = dependencies.loadAgent(agentName);
+  if (pinnedAgentDefinition && pinnedAgentDefinition.name !== agentName) {
+    throw new Error(
+      `Pinned agent definition '${pinnedAgentDefinition.name}' does not match sandbox '${sandboxName}' agent '${agentName}'`,
+    );
+  }
+  const agent = pinnedAgentDefinition ?? dependencies.loadAgent(agentName);
   const cfg = agent.configPaths;
 
   const dir = requireCanonicalConfigDir(cfg.dir);

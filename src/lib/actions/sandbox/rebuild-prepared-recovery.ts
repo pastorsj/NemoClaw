@@ -14,6 +14,7 @@ import { load as loadRegistry } from "../../state/registry/persistence";
 import * as sandboxState from "../../state/sandbox";
 import type { RebuildBail } from "./rebuild-credential-preflight";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
+import { rebuildAgentAuthoritiesMatch } from "./rebuild/authority";
 
 export interface RebuildSandboxExecutionOptions {
   throwOnError?: boolean;
@@ -182,6 +183,7 @@ type PreparedRecoveryReread =
 function rereadPreparedRecoveryAuthority(
   sandboxName: string,
   initialEntry: RebuildSandboxEntry,
+  selectedAuthority: ResolvedSandboxAgent,
   candidate: sandboxState.RebuildManifest | null,
   registrySnapshot: SandboxRegistry | null,
   allowLegacyManagedImageRecovery: boolean,
@@ -213,6 +215,29 @@ function rereadPreparedRecoveryAuthority(
     };
   }
 
+  let currentAuthority: ResolvedSandboxAgent;
+  try {
+    // Re-run candidate qualification and retained-package receipt validation,
+    // then compare the complete definition selected before any mutation.
+    currentAuthority = resolveSandboxAgent(currentEntry);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const reason = `prepared recovery agent authority could not be resolved: ${detail}`;
+    return {
+      ok: false,
+      detail: reason,
+      message: `Invalid recovery manifest: ${reason}`,
+    };
+  }
+  if (!rebuildAgentAuthoritiesMatch(currentAuthority, selectedAuthority)) {
+    const reason = "resolved agent authority does not match the owning sandbox";
+    return {
+      ok: false,
+      detail: reason,
+      message: `Invalid recovery manifest: ${reason}`,
+    };
+  }
+
   const latestManifest = sandboxState.getLatestBackup(sandboxName);
   // candidate and latestManifest are independent reads of the same prepared
   // backup, enforced by the identity and persisted-authority checks below.
@@ -230,7 +255,12 @@ function rereadPreparedRecoveryAuthority(
     };
   }
 
-  const validation = validatePreparedRecoveryCandidate(sandboxName, currentEntry, latestManifest);
+  const validation = validatePreparedRecoveryCandidate(
+    sandboxName,
+    currentEntry,
+    latestManifest,
+    currentAuthority,
+  );
   if (!validation.ok) {
     return {
       ok: false,
@@ -262,6 +292,7 @@ function rereadPreparedRecoveryAuthority(
 export function revalidatePreparedRecoveryBeforeDelete(
   sandboxName: string,
   initialEntry: RebuildSandboxEntry,
+  selectedAuthority: ResolvedSandboxAgent,
   candidate: sandboxState.RebuildManifest | null,
   registrySnapshot: SandboxRegistry | null,
   allowLegacyManagedImageRecovery: boolean,
@@ -273,6 +304,7 @@ export function revalidatePreparedRecoveryBeforeDelete(
   const reread = rereadPreparedRecoveryAuthority(
     sandboxName,
     initialEntry,
+    selectedAuthority,
     candidate,
     registrySnapshot,
     allowLegacyManagedImageRecovery,
@@ -298,6 +330,7 @@ export type PreparedRecoveryDeleteEdgeValidation =
 export function validatePreparedRecoveryAtDeleteEdge(
   sandboxName: string,
   initialEntry: RebuildSandboxEntry,
+  selectedAuthority: ResolvedSandboxAgent,
   candidate: sandboxState.RebuildManifest | null,
   registrySnapshot: SandboxRegistry | null,
   allowLegacyManagedImageRecovery: boolean,
@@ -305,6 +338,7 @@ export function validatePreparedRecoveryAtDeleteEdge(
   const reread = rereadPreparedRecoveryAuthority(
     sandboxName,
     initialEntry,
+    selectedAuthority,
     candidate,
     registrySnapshot,
     allowLegacyManagedImageRecovery,

@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { vi } from "vitest";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
 import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
@@ -68,21 +69,16 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
 
   const session = createRebuildFlowSession(onboardSession.MACHINE_SNAPSHOT_VERSION);
   const rebuildShieldsWindow = { relocked: false, wasLocked: false };
-  let policyAdditionsPath: string | null = null;
-  if (typeof overrides.agentPolicyAdditionsContent === "string") {
-    const policyDir = createHarnessTempDir("nemoclaw-rebuild-agent-policy-");
-    policyAdditionsPath = path.join(policyDir, "policy-additions.yaml");
-    fs.writeFileSync(policyAdditionsPath, overrides.agentPolicyAdditionsContent);
-  }
   const agentDef = {
     name:
       typeof overrides.sandboxEntry?.agent === "string" ? overrides.sandboxEntry.agent : "openclaw",
     expectedVersion: "0.2.0",
-    policyAdditionsPath,
   };
   const harnessPackage = Object.hasOwn(overrides, "harnessPackage")
     ? (overrides.harnessPackage ?? null)
-    : installRebuildHarnessPackage(agentDef.name);
+    : installRebuildHarnessPackage(agentDef.name, {
+        agentPolicyAdditionsContent: overrides.agentPolicyAdditionsContent,
+      });
   session.agent = agentDef.name === "openclaw" ? null : agentDef.name;
   session.harnessPackage = harnessPackage;
   session.harnessPackageMigration = null;
@@ -191,7 +187,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .spyOn(rebuildFlowHelpers, "warnUnpreservedUserManagedFiles")
     .mockImplementation(() => undefined);
   vi.spyOn(resolve, "resolveOpenshell").mockReturnValue(null);
-  vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agentDef);
+  vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
+    throw new Error("Rebuild reloaded an ambient agent definition after authority selection");
+  });
   vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue(
     agentDef.name === "openclaw" ? null : ({ name: agentDef.name } as never),
   );
@@ -331,6 +329,12 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       Object.assign(currentSandboxEntry, updates);
       return true;
     });
+  vi.spyOn(registry, "updateSandboxIfCurrent").mockImplementation((expected, updates) => {
+    const expectedEntry = expected as typeof currentSandboxEntry;
+    if (!isDeepStrictEqual(expectedEntry, currentSandboxEntry)) return false;
+    registry.updateSandbox(expectedEntry.name, updates);
+    return structuredClone(currentSandboxEntry);
+  });
   vi.spyOn(rebuildRoutePreflight, "commitRebuildRoutePreflight").mockImplementation(
     (...args: unknown[]) => {
       const input = args[0] as {
@@ -616,7 +620,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     async (options: unknown) => {
       const preflightOptions = (options ?? {}) as Record<string, unknown>;
       if (overrides.preflightWithProductionBaselineResolver) {
-        policies.resolveSandboxBaselinePolicy(String(preflightOptions.sandboxName ?? ""));
+        policies.resolveAgentDefinitionBaselinePolicy(preflightOptions.agentDefinition);
       }
       await overrides.preflightAuthoritativeRebuildTarget?.(preflightOptions);
       return {

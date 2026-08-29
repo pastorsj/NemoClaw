@@ -3,20 +3,24 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { HERMES_DASHBOARD_ENABLE_ENV } from "../../hermes-dashboard";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import {
   createRebuildProviderReconfigureHandoff,
   type RegistryInferenceRoute,
   validateRebuildProviderReconfigureHandoff,
 } from "../../onboard/rebuild-route-handoff";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import * as onboardSession from "../../state/onboard-session";
 import type { Session } from "../../state/onboard-session";
 import * as registry from "../../state/registry";
+import { REBUILD_HERMES_DASHBOARD_ENV_KEYS } from "./rebuild-durable-config";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import {
   hydrateMessagingConfigForRebuild,
   prepareRebuildRecreateOptions,
+  stageRebuildHermesDashboardConfig,
 } from "./rebuild-target-staging";
 
 const OPENCLAW_PACKAGE = {
@@ -27,6 +31,37 @@ const OPENCLAW_PACKAGE = {
   contentDigest: "a".repeat(64),
 } as const;
 
+const OPENCLAW_AGENT_AUTHORITY = {
+  recordedAgent: null,
+  effectiveAgentId: "openclaw",
+  definition: {
+    name: "openclaw",
+    packageRoot: "/pinned/openclaw",
+    runtime: { kind: "service" },
+    forward_ports: [18_789],
+  } as unknown as ResolvedSandboxAgent["definition"],
+  harnessPackage: OPENCLAW_PACKAGE,
+  harnessPackageMigration: null,
+} satisfies ResolvedSandboxAgent;
+
+const HERMES_PACKAGE = {
+  ...OPENCLAW_PACKAGE,
+  id: "hermes",
+} as const;
+
+const HERMES_AGENT_AUTHORITY = {
+  recordedAgent: "hermes",
+  effectiveAgentId: "hermes",
+  definition: {
+    name: "hermes",
+    packageRoot: "/pinned/hermes",
+    runtime: { kind: "service" },
+    forward_ports: [9_119],
+  } as unknown as ResolvedSandboxAgent["definition"],
+  harnessPackage: HERMES_PACKAGE,
+  harnessPackageMigration: null,
+} satisfies ResolvedSandboxAgent;
+
 const SANDBOX_ENTRY = {
   name: "alpha",
   agent: null,
@@ -34,6 +69,16 @@ const SANDBOX_ENTRY = {
   dashboardPort: 18789,
   gatewayName: "nemoclaw",
   gatewayPort: 8080,
+} as RebuildSandboxEntry;
+
+const HERMES_SANDBOX_ENTRY = {
+  name: "hermes",
+  agent: "hermes",
+  harnessPackage: HERMES_PACKAGE,
+  dashboardPort: 9_119,
+  hermesDashboardEnabled: true,
+  hermesDashboardPort: 9_119,
+  hermesDashboardInternalPort: 19_119,
 } as RebuildSandboxEntry;
 
 const REGISTRY_ROUTE: RegistryInferenceRoute = {
@@ -106,6 +151,7 @@ function messagingConfigPlan(requireMention: "0" | "1"): SandboxMessagingPlan {
 afterEach(() => {
   delete process.env.TELEGRAM_REQUIRE_MENTION;
   delete process.env.NEMOCLAW_MESSAGING_PLAN_B64;
+  for (const key of REBUILD_HERMES_DASHBOARD_ENV_KEYS) delete process.env[key];
   vi.restoreAllMocks();
 });
 
@@ -133,7 +179,7 @@ describe("prepareRebuildRecreateOptions", () => {
     const options = prepareRebuildRecreateOptions(
       "alpha",
       SANDBOX_ENTRY,
-      "openclaw",
+      OPENCLAW_AGENT_AUTHORITY,
       null,
       REGISTRY_ROUTE,
       true,
@@ -155,7 +201,7 @@ describe("prepareRebuildRecreateOptions", () => {
     const options = prepareRebuildRecreateOptions(
       "alpha",
       SANDBOX_ENTRY,
-      "openclaw",
+      OPENCLAW_AGENT_AUTHORITY,
       null,
       null,
       true,
@@ -165,6 +211,36 @@ describe("prepareRebuildRecreateOptions", () => {
 
     expect(options?.baseImageResolutionHint).toBeNull();
     expect(options).not.toHaveProperty("rebuildRegistryInferenceRoute");
+  });
+});
+
+describe("stageRebuildHermesDashboardConfig", () => {
+  it("stages Hermes dashboard state from the matching pinned definition", () => {
+    expect(
+      stageRebuildHermesDashboardConfig(HERMES_AGENT_AUTHORITY, HERMES_SANDBOX_ENTRY, 9_119, bail),
+    ).toBe(true);
+
+    expect(process.env[HERMES_DASHBOARD_ENABLE_ENV]).toBe("1");
+  });
+
+  it("rejects a pinned definition whose name does not match the Hermes authority", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    expect(() =>
+      stageRebuildHermesDashboardConfig(
+        {
+          ...HERMES_AGENT_AUTHORITY,
+          definition: {
+            ...HERMES_AGENT_AUTHORITY.definition,
+            name: "openclaw",
+          },
+        },
+        HERMES_SANDBOX_ENTRY,
+        9_119,
+        bail,
+      ),
+    ).toThrow("Pinned rebuild agent authority does not match Hermes dashboard registry state");
+    expect(process.env[HERMES_DASHBOARD_ENABLE_ENV]).toBeUndefined();
   });
 });
 

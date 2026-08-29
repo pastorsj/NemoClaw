@@ -206,9 +206,13 @@ describe("preflightRebuildTargetRuntime GPU route", () => {
 });
 
 describe("authoritative rebuild readiness", () => {
-  it("passes recorded managed-vLLM intent to the pre-delete readiness gate (#9292)", async () => {
+  it("passes the exact pinned agent definition and managed-vLLM intent to readiness", async () => {
     const authority = { checkpoint: "gateway-authority" };
     mocks.preflightAuthoritativeRebuildTarget.mockResolvedValue(authority);
+    const packageDefinition = {
+      ...OPENCLAW_DEFINITION,
+      policyAdditionsPath: "/installed/openclaw/policy-additions.yaml",
+    };
     const recreateOptions = {
       ...RECREATE_OPTIONS,
       allowDeferredN1xManagedVllm: true,
@@ -220,7 +224,11 @@ describe("authoritative rebuild readiness", () => {
     await expect(
       preflightAuthoritativeOnboardRuntime(
         "alpha",
-        { provider: "vllm-local", model: "test-model" } as RebuildResumeConfig,
+        {
+          agentAuthority: { ...OPENCLAW_AUTHORITY, definition: packageDefinition },
+          provider: "vllm-local",
+          model: "test-model",
+        } as RebuildResumeConfig,
         recreateOptions,
         bail,
       ),
@@ -228,11 +236,15 @@ describe("authoritative rebuild readiness", () => {
 
     expect(mocks.preflightAuthoritativeRebuildTarget).toHaveBeenCalledWith(
       expect.objectContaining({
+        agentDefinition: packageDefinition,
         allowDeferredN1xManagedVllm: true,
         provider: "vllm-local",
         model: "test-model",
         sandboxName: "alpha",
       }),
+    );
+    expect(mocks.preflightAuthoritativeRebuildTarget.mock.calls[0]?.[0].agentDefinition).toBe(
+      packageDefinition,
     );
     expect(recreateOptions.rebuildGatewayAuthority).toBe(authority);
     expect(bail).not.toHaveBeenCalled();

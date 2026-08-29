@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { resolveOpenshell } from "../../adapters/openshell/resolve";
+import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
 import { B, D, R, YW } from "../../cli/terminal-style";
 import { prompt as askPrompt } from "../../credentials/store";
@@ -86,6 +87,7 @@ export function countActiveSandboxSessionsForRebuild(sandboxName: string): numbe
   }
 }
 
+/** Preserve the source API used by callers that only need the recorded display name. */
 export function getRebuildAgentDisplayName(sandboxName: string): string {
   return agentRuntime.getAgentDisplayName(agentRuntime.getSessionAgent(sandboxName));
 }
@@ -152,13 +154,17 @@ async function ensureRebuildUsageNoticeOrBail(bail: RebuildBail): Promise<void> 
 
 export async function confirmRebuildIntent(
   sandboxName: string,
-  agentName: string,
+  agent: AgentDefinition | string,
   skipConfirm: boolean,
   activeSessionCount: number,
   bail: RebuildBail,
   requestedDcodeAutoApprovalMode?: DcodeAutoApprovalMode,
 ): Promise<RebuildVersionCheck | null> {
-  const versionCheck = sandboxVersion.checkAgentVersion(sandboxName);
+  const versionCheck =
+    typeof agent === "string"
+      ? sandboxVersion.checkAgentVersion(sandboxName)
+      : sandboxVersion.checkAgentVersion(sandboxName, { agentDefinition: agent });
+  const agentName = typeof agent === "string" ? agent : agent.displayName;
   console.log("");
   console.log(`  ${B}Rebuild sandbox '${sandboxName}'${R}`);
   if (versionCheck.sandboxVersion) {

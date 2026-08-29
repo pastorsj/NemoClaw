@@ -19,6 +19,7 @@ import {
   ensureRequiredTierPolicyPresets,
   filterSuppressedAgentRequiredPresets,
 } from "../../onboard/policy-tier-suppression";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import { parsePresetPolicyKeys } from "../../policy";
 import { hasCompleteOpenClawImagePluginProvenance } from "../../state/openclaw-plugin-restore";
 import { hasAuthoritativeOpenClawImagePluginProvenance } from "../../state/sandbox";
@@ -32,6 +33,10 @@ export type RebuildBackupManifest = Exclude<
 
 export interface RebuildBackupPhaseInput {
   sandboxName: string;
+  /** Exact live row captured when the selected agent authority was resolved. */
+  backupRegistryEntry: RebuildSandboxEntry;
+  agentAuthority: ResolvedSandboxAgent;
+  /** Replacement target values used only for policy normalization. */
   sandboxEntry: RebuildSandboxEntry;
   staleRecovery: boolean;
   preparedRecoveryManifest: RebuildBackupManifest;
@@ -195,7 +200,8 @@ export function runRebuildBackupPhase(
     preparedRecoveryManifest ??
     backupStateForRebuild(
       input.sandboxName,
-      input.sandboxEntry,
+      input.backupRegistryEntry,
+      input.agentAuthority,
       input.staleRecovery,
       input.log,
       input.relockShieldsIfNeeded,

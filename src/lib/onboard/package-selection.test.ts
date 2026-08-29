@@ -73,6 +73,7 @@ describe("selectOnboardHarnessPackage", () => {
     expect(result.resolvedPackage.identity).toEqual(installed.identity);
     expect(result.effectiveDefinition.name).toBe("hermes");
     expect(result.effectiveDefinition.packageRoot).toBe(installed.packageRoot);
+    expect(result.effectiveDefinition.expectedVersion).toBeNull();
     expect(prompt).not.toHaveBeenCalled();
     expect(fs.existsSync(fixture.executionSentinel)).toBe(false);
   });

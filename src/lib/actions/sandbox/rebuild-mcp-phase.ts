@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CLI_NAME } from "../../cli/branding";
+import type { AgentDefinition } from "../../agent/defs";
 import { G, R, YW } from "../../cli/terminal-style";
 import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
 import { explicitObservabilityFlag } from "../../onboard/observability-command-flag";
@@ -38,6 +39,7 @@ export async function prepareMcpForRebuild(
   force: boolean,
   relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean,
   bail: RebuildBail,
+  agentDefinition?: AgentDefinition,
 ): Promise<McpRebuildPreparation | null> {
   // invalidState: OpenShell still reports a live sandbox, but the
   // side-effect-free `:` command cannot cross every transport required by live
@@ -54,7 +56,9 @@ export async function prepareMcpForRebuild(
   if (force && !staleRecovery && !canExecuteMcpPreparation(sandboxName)) {
     console.error(`  ${YW}⚠${R} MCP transport probe failed; --force using host-side MCP recovery`);
     try {
-      return await prepareMcpBridgesForExecUnavailableRebuild(sandboxName);
+      return await (agentDefinition
+        ? prepareMcpBridgesForExecUnavailableRebuild(sandboxName, { agentDefinition })
+        : prepareMcpBridgesForExecUnavailableRebuild(sandboxName));
     } catch (error) {
       relockShieldsIfNeeded(true);
       bail(
@@ -66,8 +70,12 @@ export async function prepareMcpForRebuild(
 
   try {
     return await (staleRecovery
-      ? prepareMcpBridgesForAbsentSandboxRebuild(sandboxName)
-      : prepareMcpBridgesForRebuild(sandboxName));
+      ? agentDefinition
+        ? prepareMcpBridgesForAbsentSandboxRebuild(sandboxName, { agentDefinition })
+        : prepareMcpBridgesForAbsentSandboxRebuild(sandboxName)
+      : agentDefinition
+        ? prepareMcpBridgesForRebuild(sandboxName, { agentDefinition })
+        : prepareMcpBridgesForRebuild(sandboxName));
   } catch (error) {
     relockShieldsIfNeeded(!staleRecovery);
     bail(
@@ -81,9 +89,16 @@ export async function reattachMcpAfterDeleteFailure(
   sandboxName: string,
   entries: McpRebuildPreparation["detachedProviderEntries"],
   scrubbedAdapterEntries: McpRebuildPreparation["scrubbedAdapterEntries"],
+  agentDefinition?: AgentDefinition,
 ): Promise<string | undefined> {
   try {
-    await reattachMcpProvidersAfterRebuildAbort(sandboxName, entries, scrubbedAdapterEntries);
+    if (agentDefinition) {
+      await reattachMcpProvidersAfterRebuildAbort(sandboxName, entries, scrubbedAdapterEntries, {
+        agentDefinition,
+      });
+    } else {
+      await reattachMcpProvidersAfterRebuildAbort(sandboxName, entries, scrubbedAdapterEntries);
+    }
     return undefined;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
@@ -150,11 +165,16 @@ export function printMcpRebuildRetryCommand(
 export async function restoreMcpAfterRebuild(
   sandboxName: string,
   entries: McpRebuildPreparation["entries"],
+  agentDefinition?: AgentDefinition,
 ): Promise<boolean> {
   if (entries.length === 0) return true;
   console.log("  Restoring MCP bridges...");
   try {
-    await restoreMcpBridgesAfterRebuild(sandboxName, entries);
+    if (agentDefinition) {
+      await restoreMcpBridgesAfterRebuild(sandboxName, entries, { agentDefinition });
+    } else {
+      await restoreMcpBridgesAfterRebuild(sandboxName, entries);
+    }
     console.log(`  ${G}✓${R} MCP bridges restored`);
     return true;
   } catch (error) {

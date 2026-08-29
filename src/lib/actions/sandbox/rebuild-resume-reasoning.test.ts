@@ -15,8 +15,18 @@ const noopLog = () => undefined;
 const throwingBail = (message: string): never => {
   throw new Error(message);
 };
+const harnessPackage = Object.freeze({
+  kind: "agent-runtime" as const,
+  id: "openclaw",
+  packageVersion: "1.0.0",
+  contractVersion: 1 as const,
+  contentDigest: "a".repeat(64),
+});
 const entry = (overrides: Record<string, unknown> = {}) => ({
   name: "alpha",
+  agent: null,
+  harnessPackage,
+  harnessPackageMigration: null,
   provider: "compatible-endpoint",
   model: "m",
   nimContainer: null,
@@ -35,12 +45,12 @@ function prepareRebuildResumeConfig(
     recordedAgent: null,
     effectiveAgentId: "openclaw",
     definition: Object.freeze({ name: "openclaw", packageRoot: "/installed/openclaw" }),
-    harnessPackage: null,
+    harnessPackage,
     harnessPackageMigration: null,
   });
   return preparePinnedRebuildResumeConfig(
     sandboxName,
-    { ...sandboxEntry, agent: null },
+    sandboxEntry,
     authority,
     log,
     bail,

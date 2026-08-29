@@ -17,6 +17,7 @@ import {
 } from "./mcp-bridge-destroy";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import {
+  type McpRebuildAgentOptions,
   type McpRebuildPreparation,
   prepareMcpBridgesForAbsentSandboxRebuild as prepareMcpBridgesForAbsentSandboxRebuildLifecycle,
   prepareMcpBridgesForRebuild as prepareMcpBridgesForRebuildLifecycle,
@@ -81,7 +82,7 @@ export {
   validateMcpCredentialEnvName,
   validateMcpServerName,
 } from "./mcp-bridge-validation";
-export type { McpRebuildPreparation };
+export type { McpRebuildAgentOptions, McpRebuildPreparation };
 export { statusMcpBridge };
 
 export interface McpDestroyPreparation {
@@ -143,33 +144,38 @@ export async function finalizeMcpBridgesAfterSandboxDelete(
 
 export async function prepareMcpBridgesForAbsentSandboxRebuild(
   sandboxName: string,
+  options: McpRebuildAgentOptions = {},
 ): Promise<McpRebuildPreparation> {
-  return prepareMcpBridgesForAbsentSandboxRebuildLifecycle(sandboxName);
+  return prepareMcpBridgesForAbsentSandboxRebuildLifecycle(sandboxName, options);
 }
 
 export async function prepareMcpBridgesForRebuild(
   sandboxName: string,
+  options: McpRebuildAgentOptions = {},
 ): Promise<McpRebuildPreparation> {
-  return prepareMcpBridgesForRebuildLifecycle(sandboxName);
+  return prepareMcpBridgesForRebuildLifecycle(sandboxName, options);
 }
 
 export async function reattachMcpProvidersAfterRebuildAbort(
   sandboxName: string,
   entries: readonly McpBridgeEntry[],
   scrubbedAdapterEntries: readonly McpScrubbedAdapterEntry[] = [],
+  options: McpRebuildAgentOptions = {},
 ): Promise<void> {
   return reattachMcpProvidersAfterRebuildAbortLifecycle(
     sandboxName,
     entries,
     scrubbedAdapterEntries,
+    options,
   );
 }
 
 export async function restoreMcpBridgesAfterRebuild(
   sandboxName: string,
   entries: readonly McpBridgeEntry[],
+  options: McpRebuildAgentOptions = {},
 ): Promise<void> {
-  return restoreMcpBridgesAfterRebuildLifecycle(sandboxName, entries);
+  return restoreMcpBridgesAfterRebuildLifecycle(sandboxName, entries, options);
 }
 
 function parseJsonFlag(args: string[]): { json: boolean; rest: string[] } {

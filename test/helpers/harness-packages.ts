@@ -17,6 +17,10 @@ export type HarnessPackageFixtureId = BundledHarnessSourceDeclaration["id"];
 export interface HarnessPackageFixtureOptions {
   readonly fixtureParent?: string;
   readonly storeRoot?: string;
+  /** Optional agent runtime version declared by generated package manifests. */
+  readonly agentExpectedVersion?: string;
+  /** Optional non-OpenClaw baseline used by package-authority tests. */
+  readonly agentPolicyAdditionsContent?: string;
 }
 
 export interface HarnessPackageFixture {
@@ -62,6 +66,7 @@ function writePrivateFile(root: string, relativePath: string, contents: string):
 function fixtureManifest(
   declaration: BundledHarnessSourceDeclaration,
   executionSentinel: string,
+  agentExpectedVersion?: string,
 ): string {
   const terminalRuntime =
     declaration.id === "langchain-deepagents-code"
@@ -72,6 +77,7 @@ function fixtureManifest(
     `display_name: ${JSON.stringify(declaration.displayName)}`,
     `description: ${JSON.stringify(`Reviewed ${declaration.displayName} fixture adapter`)}`,
     `binary_path: ${declaration.id}`,
+    ...(agentExpectedVersion ? [`expected_version: ${JSON.stringify(agentExpectedVersion)}`] : []),
     ...terminalRuntime,
     `fixture_execution_sentinel: ${JSON.stringify(executionSentinel)}`,
     "",
@@ -79,8 +85,10 @@ function fixtureManifest(
 }
 
 function writePackageArtifact(input: {
+  readonly agentPolicyAdditionsContent?: string;
   readonly declaration: BundledHarnessSourceDeclaration;
   readonly executionSentinel: string;
+  readonly agentExpectedVersion?: string;
   readonly packageRoot: string;
   readonly packageVersion: string;
   readonly payload: string;
@@ -102,8 +110,29 @@ function writePackageArtifact(input: {
   writePrivateFile(
     input.packageRoot,
     input.declaration.manifestPath,
-    fixtureManifest(input.declaration, input.executionSentinel),
+    fixtureManifest(input.declaration, input.executionSentinel, input.agentExpectedVersion),
   );
+  const baselineContent = input.agentPolicyAdditionsContent ?? "version: 1\nnetwork_policies: {}\n";
+  if (input.declaration.id === "openclaw") {
+    writePrivateFile(
+      input.packageRoot,
+      "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+      baselineContent,
+    );
+  } else {
+    writePrivateFile(
+      input.packageRoot,
+      path.posix.join(path.posix.dirname(input.declaration.manifestPath), "policy-additions.yaml"),
+      baselineContent,
+    );
+  }
+  if (input.declaration.id === "langchain-deepagents-code") {
+    writePrivateFile(
+      input.packageRoot,
+      path.posix.join(path.posix.dirname(input.declaration.manifestPath), "Dockerfile.base"),
+      "FROM scratch\n",
+    );
+  }
   writePrivateFile(input.packageRoot, "runtime/payload.txt", input.payload);
   writePrivateFile(
     input.packageRoot,
@@ -140,8 +169,10 @@ export function createHarnessPackageFixture(
     declarations.map((declaration) => {
       const packageRoot = path.join(bundledRoot, `nemoclaw-${declaration.id}`);
       writePackageArtifact({
+        agentPolicyAdditionsContent: options.agentPolicyAdditionsContent,
         declaration,
         executionSentinel,
+        agentExpectedVersion: options.agentExpectedVersion,
         packageRoot,
         packageVersion: declaration.packageVersion,
         payload: `${declaration.id} reviewed fixture\n`,
@@ -169,8 +200,10 @@ export function createHarnessPackageFixture(
       `${id}-${packageVersion}-${String(advancedVersionSequence)}`,
     );
     writePackageArtifact({
+      agentPolicyAdditionsContent: options.agentPolicyAdditionsContent,
       declaration,
       executionSentinel,
+      agentExpectedVersion: options.agentExpectedVersion,
       packageRoot,
       packageVersion,
       payload: `${id} advanced fixture ${String(advancedVersionSequence)}\n`,

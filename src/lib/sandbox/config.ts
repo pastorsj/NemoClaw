@@ -12,6 +12,7 @@
 // config set:          Host-initiated config mutation with validation.
 // config rotate-token: Credential rotation via stdin or env var.
 
+import type { AgentDefinition } from "../agent/definition-types";
 import type { AgentConfigTarget } from "./agent-config";
 
 export type { AgentConfigTarget } from "./agent-config";
@@ -249,8 +250,11 @@ function openClawConfigGuardExec(sandboxName: string, expectedContainerId?: stri
   };
 }
 
-function resolveAgentConfig(sandboxName: string): AgentConfigTarget {
-  return resolveAgentConfigTarget(sandboxName);
+function resolveAgentConfig(
+  sandboxName: string,
+  pinnedAgentDefinition?: AgentDefinition,
+): AgentConfigTarget {
+  return resolveAgentConfigTarget(sandboxName, undefined, pinnedAgentDefinition);
 }
 
 // ---------------------------------------------------------------------------

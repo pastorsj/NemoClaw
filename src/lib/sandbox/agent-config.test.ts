@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import type { AgentStateLockPlan } from "../agent/definition-types";
+import type { AgentDefinition, AgentStateLockPlan } from "../agent/definition-types";
 import {
   type AgentConfigDependencies,
   resolveAgentConfig,
@@ -156,6 +156,39 @@ describe("agent config resolution", () => {
       stateLockPlan: PLAN,
       stateLockPlanInImage: true,
     });
+  });
+
+  it("uses a pinned agent definition without loading ambient package metadata", () => {
+    const loadAgent = vi.fn(() => {
+      throw new Error("ambient agent metadata must not be loaded");
+    });
+    const deps = dependencies({
+      getSandbox: vi.fn(() => ({ agent: "hermes" })),
+      loadAgent,
+    });
+    const pinnedAgentDefinition = {
+      name: "hermes",
+      configPaths: {
+        dir: "/sandbox/.installed-hermes",
+        configFile: "installed.yaml",
+        envFile: ".installed-secrets",
+        format: "yaml",
+        shieldsFiles: [".installed-secrets"],
+      },
+      stateLockPlan: PLAN,
+      stateLockPlanInImage: true,
+    } as AgentDefinition;
+
+    expect(resolveAgentConfig("alpha", deps, pinnedAgentDefinition)).toMatchObject({
+      agentName: "hermes",
+      configDir: "/sandbox/.installed-hermes",
+      configPath: "/sandbox/.installed-hermes/installed.yaml",
+      sensitiveFiles: [
+        "/sandbox/.installed-hermes/.config-hash",
+        "/sandbox/.installed-hermes/.installed-secrets",
+      ],
+    });
+    expect(loadAgent).not.toHaveBeenCalled();
   });
 
   it("does not require an optional environment file unless the manifest protects it", () => {

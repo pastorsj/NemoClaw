@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import type { McpBridgeEntry } from "../../state/registry";
 import {
   assertDeepAgentsMcpMutationRuntimeCapability,
@@ -21,11 +21,13 @@ import type {
   AdapterRegistrationInspection,
   AdapterRemovalOutcome,
 } from "./mcp-bridge-adapter-inspection";
+import { McpBridgeError } from "./mcp-bridge-contracts";
 import {
   inspectOpenClawAdapterRegistration,
   registerOpenClawAdapter,
   unregisterOpenClawAdapter,
 } from "./mcp-bridge-adapter-openclaw";
+import { openClawMcporterRoot } from "./mcp-bridge-adapter-status";
 import {
   mcpAdapterCredentialRevisionUnavailableError,
   mcpAdapterCredentialRevisionUnstableError,
@@ -36,6 +38,31 @@ import { waitForMcpBridgeCondition } from "./mcp-bridge/timing";
 
 const STABLE_CREDENTIAL_REVISION_OBSERVATIONS = 3;
 const MAX_CREDENTIAL_REVISION_REGISTRATIONS = 2;
+
+function assertPinnedDefinitionMatchesEntry(
+  adapter: AgentMcpAdapter,
+  entry: McpBridgeEntry,
+  agentDefinition: AgentDefinition | undefined,
+): void {
+  if (!agentDefinition) return;
+  const agent = agentDefinition;
+  if (entry.agent !== agent.name) {
+    throw new McpBridgeError(
+      `MCP server '${entry.server}' records agent '${entry.agent}', not the pinned '${agent.name}' definition.`,
+    );
+  }
+  const pinnedAdapter = agent.mcpCapability.adapter;
+  if (agent.mcpCapability.support !== "bridge" || !pinnedAdapter) {
+    throw new McpBridgeError(
+      `Pinned agent '${agent.name}' does not declare a managed MCP adapter.`,
+    );
+  }
+  if (adapter !== pinnedAdapter || entry.adapter !== pinnedAdapter) {
+    throw new McpBridgeError(
+      `MCP server '${entry.server}' does not match the pinned '${pinnedAdapter}' adapter.`,
+    );
+  }
+}
 
 export {
   buildDeepAgentsMcpRegisterCommand,
@@ -69,10 +96,16 @@ export function inspectAgentAdapterRegistration(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  agentDefinition?: AgentDefinition,
 ): AdapterRegistrationInspection {
+  assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   switch (adapter) {
     case "mcporter":
-      return inspectOpenClawAdapterRegistration(sandboxName, entry);
+      return inspectOpenClawAdapterRegistration(
+        sandboxName,
+        entry,
+        agentDefinition ? openClawMcporterRoot(agentDefinition.configPaths.dir) : undefined,
+      );
     case "hermes-config":
       return inspectHermesAdapterRegistration(sandboxName, entry);
     case "deepagents-config":
@@ -140,7 +173,9 @@ export function registerAgentAdapter(
     teardownRollback?: boolean;
     credentialRevision?: McpAttachedCredentialRevision;
   } = {},
+  agentDefinition?: AgentDefinition,
 ): void {
+  assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   switch (adapter) {
     case "mcporter":
       registerOpenClawAdapter(
@@ -149,6 +184,7 @@ export function registerAgentAdapter(
         envValues,
         options.replaceExisting === true,
         options.credentialRevision,
+        agentDefinition ? openClawMcporterRoot(agentDefinition.configPaths.dir) : undefined,
       );
       return;
     case "hermes-config":
@@ -181,6 +217,7 @@ export function registerAgentAdapterAtCurrentCredentialRevision(
   envValues: Record<string, string>,
   initialCredentialRevision: McpAttachedCredentialRevision,
   options: { replaceExisting?: boolean; teardownRollback?: boolean } = {},
+  agentDefinition?: AgentDefinition,
 ): McpAttachedCredentialRevision {
   const timeoutSeconds = Number.parseInt(
     process.env.NEMOCLAW_MCP_PROVIDER_SYNC_TIMEOUT_SECONDS ?? "30",
@@ -193,11 +230,23 @@ export function registerAgentAdapterAtCurrentCredentialRevision(
     registration <= MAX_CREDENTIAL_REVISION_REGISTRATIONS;
     registration += 1
   ) {
-    registerAgentAdapter(sandboxName, adapter, entry, envValues, {
+    const registrationOptions = {
       replaceExisting,
       teardownRollback: options.teardownRollback === true,
       credentialRevision,
-    });
+    };
+    if (agentDefinition) {
+      registerAgentAdapter(
+        sandboxName,
+        adapter,
+        entry,
+        envValues,
+        registrationOptions,
+        agentDefinition,
+      );
+    } else {
+      registerAgentAdapter(sandboxName, adapter, entry, envValues, registrationOptions);
+    }
     let candidateRevision: McpAttachedCredentialRevision | undefined;
     let stableObservations = 0;
     let observedRevision: McpAttachedCredentialRevision | undefined;
@@ -242,10 +291,17 @@ export function unregisterAgentAdapter(
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
   options: AdapterMutationOptions = {},
+  agentDefinition?: AgentDefinition,
 ): AdapterRemovalOutcome {
+  assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   switch (adapter) {
     case "mcporter":
-      unregisterOpenClawAdapter(sandboxName, entry, options);
+      unregisterOpenClawAdapter(
+        sandboxName,
+        entry,
+        options,
+        agentDefinition ? openClawMcporterRoot(agentDefinition.configPaths.dir) : undefined,
+      );
       return "removed";
     case "hermes-config":
       unregisterHermesAdapter(sandboxName, entry, options);

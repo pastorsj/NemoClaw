@@ -3,6 +3,7 @@
 
 import { captureOpenshell, runOpenshell } from "../../adapters/openshell/runtime";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
+import type { AgentDefinition } from "../../agent/defs";
 import { G, R } from "../../cli/terminal-style";
 import { waitUntil } from "../../core/wait";
 import { getSandboxDeleteOutcome } from "../../domain/sandbox/destroy";
@@ -35,6 +36,7 @@ export type RebuildDeleteValidationResult =
 export interface RebuildDestroyPhaseInput {
   sandboxName: string;
   sandboxEntry: RebuildSandboxEntry;
+  agentDefinition: AgentDefinition;
   staleRecovery: boolean;
   recreateJournal: RebuildRecreateJournal;
   backupManifest: RebuildBackupManifest;
@@ -276,6 +278,7 @@ export async function runRebuildDestroyPhase(
         input.force === true,
         relockShieldsIfNeeded,
         bail,
+        input.agentDefinition,
       );
       return preparation;
     },
@@ -302,6 +305,7 @@ export async function runRebuildDestroyPhase(
           sandboxName,
           preparation.detachedProviderEntries,
           preparation.scrubbedAdapterEntries,
+          input.agentDefinition,
         );
         relockShieldsIfNeeded(true);
         bail(
@@ -351,6 +355,7 @@ export async function runRebuildDestroyPhase(
       sandboxName,
       rebuildDetachedMcpProviderEntries,
       rebuildScrubbedMcpAdapterEntries,
+      input.agentDefinition,
     );
     relockShieldsIfNeeded(true);
     bail(
@@ -378,6 +383,7 @@ export async function runRebuildDestroyPhase(
         sandboxName,
         rebuildDetachedMcpProviderEntries,
         rebuildScrubbedMcpAdapterEntries,
+        input.agentDefinition,
       );
       relockShieldsIfNeeded(true);
       bail(
@@ -402,6 +408,7 @@ export async function runRebuildDestroyPhase(
       sandboxName,
       rebuildDetachedMcpProviderEntries,
       rebuildScrubbedMcpAdapterEntries,
+      input.agentDefinition,
     );
     relockShieldsIfNeeded(true);
     const detail = error instanceof Error ? error.message : String(error);
@@ -441,6 +448,7 @@ export async function runRebuildDestroyPhase(
         sandboxName,
         rebuildDetachedMcpProviderEntries,
         rebuildScrubbedMcpAdapterEntries,
+        input.agentDefinition,
       );
       if (mcpRecoveryFailure) {
         console.error(

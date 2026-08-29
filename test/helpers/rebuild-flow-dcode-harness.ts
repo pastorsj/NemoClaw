@@ -3,9 +3,11 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { type MockInstance, vi } from "vitest";
 import type { GatewayRestartResult } from "../../src/lib/actions/sandbox/gateway-restart";
 import type { OpenShellSandboxInventory } from "../../src/lib/adapters/openshell/sandbox-observer";
+import { DASHBOARD_PORT_RANGE_START } from "../../src/lib/core/ports";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
 import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
 import {
@@ -60,6 +62,7 @@ export { makePreparedRecoveryManifest, snapshotEnv };
 
 export type RebuildFlowOverrides = {
   agentName?: string;
+  /** Override the durable Session agent produced by the mocked recreate/onboard step. */
   sessionAgentName?: string | null;
   applyPreset?: (presetName: string) => boolean;
   captureOpenshell?: (
@@ -294,7 +297,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     if (sourceId) imageIdsByRef.set(String(target), sourceId);
     return { status: 0 };
   });
-  vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agentDef);
+  vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
+    throw new Error("Rebuild reloaded an ambient agent definition after authority selection");
+  });
   const trustedLocalOverride = {
     ref: agentBaseImageRef,
     provenance: `${"b".repeat(64)}.${"c".repeat(64)}`,
@@ -313,15 +318,14 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const pinTrustedAgentRemoteBaseImageOverrideForOperationSpy = vi
     .spyOn(agentOnboard, "pinTrustedAgentRemoteBaseImageOverrideForOperation")
     .mockReturnValue(restoreTrustedAgentRemoteBaseImageOverrideSpy);
-  const sessionAgentName =
+  const recreatedSessionAgentName =
     overrides.sessionAgentName === undefined ? agentName : overrides.sessionAgentName;
   vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue(
-    sessionAgentName === null || sessionAgentName === "openclaw"
+    recreatedSessionAgentName === null || recreatedSessionAgentName === "openclaw"
       ? null
-      : ({ name: sessionAgentName } as never),
+      : ({ name: recreatedSessionAgentName } as never),
   );
-  session.agent =
-    sessionAgentName === null || sessionAgentName === "openclaw" ? null : sessionAgentName;
+  session.agent = agentName === "openclaw" ? null : agentName;
   session.harnessPackage = harnessPackage;
   session.harnessPackageMigration = null;
   vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue(agentDisplayName);
@@ -370,6 +374,11 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     // Tests that exercise the legacy ambiguous-image path override this explicitly.
     nemoclawVersion: "0.0.71",
     nimContainer: null,
+    // Installed OpenClaw and Hermes fixtures declare gateway runtimes, so a
+    // valid durable registry row must retain the dashboard port selected at onboard.
+    ...(agentName === "langchain-deepagents-code"
+      ? {}
+      : { dashboardPort: DASHBOARD_PORT_RANGE_START }),
     ...(harnessPackage ? { harnessPackage } : {}),
     ...(overrides.sandboxEntry ?? {}),
   };
@@ -408,6 +417,13 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   });
   vi.spyOn(registry, "listSandboxes").mockReturnValue({ sandboxes: [] });
   const registryUpdateSpy = vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
+  vi.spyOn(registry, "updateSandboxIfCurrent").mockImplementation((expected, updates) => {
+    const expectedEntry = expected as typeof sandboxEntry;
+    if (!isDeepStrictEqual(expectedEntry, sandboxEntry)) return false;
+    Object.assign(sandboxEntry, updates);
+    registry.updateSandbox(expectedEntry.name, updates);
+    return structuredClone(sandboxEntry) as never;
+  });
   vi.spyOn(rebuildRoutePreflight, "commitRebuildRoutePreflight").mockImplementation(
     (...args: unknown[]) => {
       const input = args[0] as {
@@ -648,6 +664,12 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .spyOn(rebuildOnboardDependencies, "onboard")
     .mockImplementation(async () => {
       await overrides.onboard?.(session);
+      if (overrides.sessionAgentName !== undefined) {
+        session.agent =
+          recreatedSessionAgentName === null || recreatedSessionAgentName === "openclaw"
+            ? null
+            : recreatedSessionAgentName;
+      }
       recreatedSandboxRegistered = true;
       Object.assign(sandboxEntry, {
         lifecycleGeneration: "11111111-1111-4111-8111-111111111111",

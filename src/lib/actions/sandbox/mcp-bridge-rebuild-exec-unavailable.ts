@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import { McpBridgeError } from "./mcp-bridge-contracts";
@@ -72,7 +72,10 @@ function assertUniqueMcpOwnership(entries: readonly McpBridgeEntry[]): void {
   }
 }
 
-function snapshotCompleteEntries(sandboxName: string): {
+function snapshotCompleteEntries(
+  sandboxName: string,
+  agentDefinition?: AgentDefinition,
+): {
   entries: ExplicitAdapterMcpBridgeEntry[];
   gatewayName: string;
   agentName: string;
@@ -88,7 +91,7 @@ function snapshotCompleteEntries(sandboxName: string): {
       `MCP server '${incomplete.server}' has an incomplete add transaction (${incomplete.addState}). Read-only host-side rebuild recovery cannot discard or adopt it; re-run the original mcp add command or remove it with --force before rebuilding the sandbox.`,
     );
   }
-  const agent = getSandboxAgent(sandbox);
+  const agent = getSandboxAgent(sandbox, agentDefinition);
   const adapter = getBridgeAdapter(agent);
   const incompatible = entries.find(
     (entry) => entry.agent !== agent.name || entry.adapter !== adapter,
@@ -193,11 +196,12 @@ function assertDeleteEdgeUnchanged(
   expectedGatewayName: string,
   expectedAgentName: string,
   expectedAdapter: AgentMcpAdapter,
+  agentDefinition?: AgentDefinition,
 ): void {
   const sandbox: SandboxEntry = assertMcpDestroySnapshotCurrent(sandboxName, expectedEntries);
   assertMcpDestroyNotPending(sandbox);
   try {
-    const agent = getSandboxAgent(sandbox);
+    const agent = getSandboxAgent(sandbox, agentDefinition);
     if (agent.name !== expectedAgentName || getBridgeAdapter(agent) !== expectedAdapter) {
       throw new Error("adapter binding changed");
     }
@@ -220,6 +224,7 @@ async function revalidateBeforeDelete(
   expectedAgentName: string,
   expectedAdapter: AgentMcpAdapter,
   expectedValidation: ReadOnlyValidationSnapshot,
+  agentDefinition?: AgentDefinition,
 ): Promise<void> {
   assertDeleteEdgeUnchanged(
     sandboxName,
@@ -227,6 +232,7 @@ async function revalidateBeforeDelete(
     expectedGatewayName,
     expectedAgentName,
     expectedAdapter,
+    agentDefinition,
   );
   const currentValidation = await inspectReadOnlyRecoveryState(
     sandboxName,
@@ -246,8 +252,12 @@ async function revalidateBeforeDelete(
  */
 export async function prepareMcpBridgesForExecUnavailableRebuild(
   sandboxName: string,
+  options: { agentDefinition?: AgentDefinition } = {},
 ): Promise<ExecUnavailableMcpRebuildPreparation> {
-  const { entries, gatewayName, agentName, adapter } = snapshotCompleteEntries(sandboxName);
+  const { entries, gatewayName, agentName, adapter } = snapshotCompleteEntries(
+    sandboxName,
+    options.agentDefinition,
+  );
   const expectedEntries = entries.map(cloneMcpBridgeEntry);
   const expectedValidation = await inspectReadOnlyRecoveryState(
     sandboxName,
@@ -266,8 +276,16 @@ export async function prepareMcpBridgesForExecUnavailableRebuild(
         agentName,
         adapter,
         expectedValidation,
+        options.agentDefinition,
       ),
     assertDeleteEdgeUnchanged: () =>
-      assertDeleteEdgeUnchanged(sandboxName, expectedEntries, gatewayName, agentName, adapter),
+      assertDeleteEdgeUnchanged(
+        sandboxName,
+        expectedEntries,
+        gatewayName,
+        agentName,
+        adapter,
+        options.agentDefinition,
+      ),
   };
 }

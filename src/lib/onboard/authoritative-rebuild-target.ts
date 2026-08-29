@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentDefinition } from "../agent/defs";
 import { findDashboardForwardOwner } from "./dashboard-port";
 import { resolveGatewayName } from "./gateway-binding";
 import type { InferenceRouteState } from "./inference-route";
@@ -41,6 +42,8 @@ export type AuthoritativeRebuildPreflightOptions = Pick<
   OnboardOptions,
   "sandboxGpu" | "sandboxGpuDevice" | "noGpu" | "controlUiPort" | "allowDeferredN1xManagedVllm"
 > & {
+  /** Exact package or repository definition pinned before rebuild mutation. */
+  agentDefinition: AgentDefinition;
   authoritativeResumeConfig: true;
   /** Internal prepared-backup recovery defers route repair to authoritative onboard. */
   deferInferenceRouteUntilOnboard?: true;
@@ -99,6 +102,7 @@ export function resolveAuthoritativeOnboardGatewayBinding(
 }
 
 export type AuthoritativeRebuildTarget = {
+  agentDefinition: AgentDefinition;
   deferInferenceRouteUntilOnboard?: true;
   sandboxName: string;
   provider: string;
@@ -208,7 +212,7 @@ export function rebuildProviderFlowOptions(
 }
 
 export type AuthoritativeRebuildTargetDeps = {
-  resolveBaselinePolicy(sandboxName: string): unknown | null;
+  resolveBaselinePolicy(agentDefinition: AgentDefinition): unknown | null;
   bindGatewayAuthority(): void;
   runFatalRuntimePreflight(): unknown | Promise<unknown>;
   ensureOpenshell(): unknown;
@@ -231,7 +235,7 @@ export async function preflightAuthoritativeRebuildTarget(
   };
   env.OPENSHELL_GATEWAY = target.targetGatewayName;
   try {
-    if (!deps.resolveBaselinePolicy(target.sandboxName)) {
+    if (!deps.resolveBaselinePolicy(target.agentDefinition)) {
       fail(`Could not read the baseline policy for sandbox '${target.sandboxName}'.`);
     }
     deps.bindGatewayAuthority();

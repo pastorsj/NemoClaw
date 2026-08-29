@@ -17,11 +17,13 @@ import {
   type CandidateQualificationFixture,
   candidateQualificationEnvironment,
 } from "../agent/candidate-test-fixture";
+import * as agentDefs from "../agent/defs";
 import { installHarnessPackage } from "../harness/package-install";
 import { HarnessPackageStoreIntegrityError } from "../harness/package-store";
 import type { HarnessPackageMigration } from "../harness/package-identity";
 import {
   createPromptValidatedSandboxName,
+  getAgentInferenceProviderOptions,
   resolveLegacyBackupRecoveryOwner,
   resolveSandboxAgent,
 } from "./sandbox-agent";
@@ -47,7 +49,11 @@ function writeFixtureFile(relativePath: string, contents: string): void {
   fs.writeFileSync(target, contents, { mode: 0o600 });
 }
 
-function writeOpenClawPackage(packageVersion = "1.0.0", displayName = "Pinned OpenClaw"): void {
+function writeOpenClawPackage(
+  packageVersion = "1.0.0",
+  displayName = "Pinned OpenClaw",
+  inferenceProviderOptions: readonly string[] = [],
+): void {
   fs.mkdirSync(sourceRoot, { recursive: true, mode: 0o700 });
   writeFixtureFile(
     "nemoclaw-package.json",
@@ -63,7 +69,19 @@ function writeOpenClawPackage(packageVersion = "1.0.0", displayName = "Pinned Op
   );
   writeFixtureFile(
     "agents/openclaw/manifest.yaml",
-    `name: openclaw\ndisplay_name: ${displayName}\nbinary_path: /usr/local/bin/openclaw\n`,
+    [
+      "name: openclaw",
+      `display_name: ${displayName}`,
+      "binary_path: /usr/local/bin/openclaw",
+      ...(inferenceProviderOptions.length > 0
+        ? [
+            "inference:",
+            "  provider_options:",
+            ...inferenceProviderOptions.map((provider) => `    - ${provider}`),
+          ]
+        : []),
+      "",
+    ].join("\n"),
   );
   writeFixtureFile("runtime/payload.txt", `${packageVersion}\n`);
 }
@@ -116,6 +134,45 @@ describe("sandbox agent authority", () => {
     expect(resolved.definition.packageRoot).toBe(installed.packageRoot);
     expect(resolved.harnessPackage).toEqual(installed.identity);
     expect(resolved.harnessPackageMigration).toEqual(migration);
+  });
+
+  it("returns installed package definitions as detached immutable authority", () => {
+    const installed = installOpenClawPackage();
+
+    const first = resolveSandboxAgent(
+      { agent: null, harnessPackage: installed.identity },
+      { storeRoot },
+    );
+    const second = resolveSandboxAgent(
+      { agent: null, harnessPackage: installed.identity },
+      { storeRoot },
+    );
+
+    expect(first.definition).toEqual(second.definition);
+    expect(first.definition).not.toBe(second.definition);
+    expect(Object.isFrozen(first.definition)).toBe(true);
+    expect(Object.isFrozen(first.definition.stateFiles)).toBe(true);
+    expect(() => {
+      (first.definition as unknown as { name: string }).name = "changed";
+    }).toThrow(TypeError);
+    expect(() => {
+      (first.definition.stateFiles as unknown as unknown[]).push({ path: "changed" });
+    }).toThrow(TypeError);
+  });
+
+  it("uses installed provider options without reloading the repository definition", () => {
+    writeOpenClawPackage("1.0.0", "Pinned OpenClaw", ["installed-provider"]);
+    const installed = installOpenClawPackage();
+    const definition = resolveSandboxAgent(
+      { agent: null, harnessPackage: installed.identity },
+      { storeRoot },
+    ).definition;
+    const loadAgent = vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
+      throw new Error("ambient agent definition reload");
+    });
+
+    expect(getAgentInferenceProviderOptions(definition)).toEqual(["installed-provider"]);
+    expect(loadAgent).not.toHaveBeenCalled();
   });
 
   it("resolves the recorded digest after the active pointer advances", () => {

@@ -21,13 +21,13 @@ import type { RebuildDurableConfig } from "./rebuild-durable-config";
 import { isolateAmbientRecreateEnv } from "./rebuild-env-isolation";
 import {
   pinRebuildAgentBaseImageForRecreate,
+  rebuildPackageAuthorityMatches,
+  rebuildPackageIdentityMatches,
   type RebuildAgentBaseImagePreflight,
   type RebuildSandboxEntry,
 } from "./rebuild-flow-helpers";
 import {
   getRebuildSandboxGpuOverrides,
-  rebuildPackageAuthorityMatches,
-  rebuildPackageIdentityMatches,
   type RebuildRecreateOnboardOpts,
 } from "./rebuild-gpu-opt-out";
 import {
@@ -318,6 +318,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   try {
     await rebuildOnboardDependencies.onboard({
       ...recreateOptions,
+      authoritativeRebuildAgentAuthority: resumeConfig.agentAuthority,
       rebuildGatewayAuthority,
       ...(Array.isArray(recreatePolicyPresets)
         ? { rebuildPolicyPresets: recreatePolicyPresets }

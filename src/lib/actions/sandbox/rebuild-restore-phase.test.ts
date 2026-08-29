@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentDefinition } from "../../agent/definition-types";
 import * as policies from "../../policy";
 import * as sandboxConfig from "../../sandbox/config";
 import * as sandboxState from "../../state/sandbox";
@@ -18,16 +19,18 @@ import * as snapshotRestore from "./snapshot/restore-authority";
 
 const BUILTIN_OBSERVABILITY_CONTENT =
   "network_policies:\n  observability-otlp-local:\n    name: observability-otlp-local\n";
+const OPENCLAW_DEFINITION = { name: "openclaw" } as AgentDefinition;
+const HERMES_DEFINITION = { name: "hermes" } as AgentDefinition;
 
 type StandardRestoreOptions = Omit<
   Parameters<typeof runRebuildRestorePhase>[0],
-  "targetAgentType" | "targetImageIsCustom"
+  "agentDefinition" | "targetImageIsCustom"
 >;
 
 function runStandardRebuildRestorePhase(options: StandardRestoreOptions) {
   return runRebuildRestorePhase({
     ...options,
-    targetAgentType: "openclaw",
+    agentDefinition: OPENCLAW_DEFINITION,
     targetImageIsCustom: false,
   });
 }
@@ -61,7 +64,9 @@ describe("rebuild policy restore fidelity", () => {
       format: "yaml",
       stateLockPlanInImage: true,
     } as const;
-    vi.spyOn(sandboxConfig, "resolveAgentConfig").mockReturnValue(target);
+    const resolveDashboardTarget = vi
+      .spyOn(sandboxConfig, "resolveAgentConfig")
+      .mockReturnValue(target);
     const seedDashboard = vi
       .spyOn(sandboxConfig, "restoreHermesDashboardConfig")
       .mockReturnValue("converged");
@@ -69,7 +74,7 @@ describe("rebuild policy restore fidelity", () => {
 
     const result = runRebuildRestorePhase({
       sandboxName: "hermes",
-      targetAgentType: "hermes",
+      agentDefinition: HERMES_DEFINITION,
       targetImageIsCustom: false,
       backupManifest: { agentType: "hermes", backupPath: "/tmp/rebuild-backup" } as never,
       policyPresets: [],
@@ -78,6 +83,7 @@ describe("rebuild policy restore fidelity", () => {
       log,
     });
 
+    expect(resolveDashboardTarget).toHaveBeenCalledWith("hermes", HERMES_DEFINITION);
     expect(seedDashboard).toHaveBeenCalledWith("hermes", target);
     expect(log).toHaveBeenCalledWith("Hermes dashboard state after restore: converged");
     expect(result.restoreSucceeded).toBe(true);
@@ -105,7 +111,7 @@ describe("rebuild policy restore fidelity", () => {
 
     const result = runRebuildRestorePhase({
       sandboxName: "hermes",
-      targetAgentType: "hermes",
+      agentDefinition: HERMES_DEFINITION,
       targetImageIsCustom: false,
       backupManifest: { agentType: "hermes", backupPath: "/tmp/rebuild-backup" } as never,
       policyPresets: [],
@@ -142,7 +148,7 @@ describe("rebuild policy restore fidelity", () => {
 
     const result = runRebuildRestorePhase({
       sandboxName: "hermes",
-      targetAgentType: "hermes",
+      agentDefinition: HERMES_DEFINITION,
       targetImageIsCustom: false,
       backupManifest: { agentType: "hermes", backupPath: "/tmp/rebuild-backup" } as never,
       policyPresets: [],
@@ -227,6 +233,7 @@ describe("rebuild policy restore fidelity", () => {
       expect.objectContaining({ backupPath: "/tmp/rebuild-backup" }),
       {
         targetAgentType: "openclaw",
+        agentDefinition: OPENCLAW_DEFINITION,
       },
       {
         getSandbox: expect.any(Function),
@@ -234,7 +241,9 @@ describe("rebuild policy restore fidelity", () => {
       },
     );
     expect(applyPreset).toHaveBeenCalledOnce();
-    expect(applyPreset).toHaveBeenCalledWith("alpha", "npm");
+    expect(applyPreset).toHaveBeenCalledWith("alpha", "npm", {
+      agentDefinition: OPENCLAW_DEFINITION,
+    });
     customPolicies.forEach((entry) => {
       expect(applyPresetContent).toHaveBeenCalledWith("alpha", entry.name, entry.content, {
         custom: { sourcePath: entry.sourcePath },

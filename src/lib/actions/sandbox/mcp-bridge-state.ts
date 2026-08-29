@@ -29,8 +29,20 @@ function getSandboxAgentName(sandbox: SandboxEntry): string {
   return sandbox.agent || "openclaw";
 }
 
-export function getSandboxAgent(sandbox: SandboxEntry): AgentDefinition {
-  return loadAgent(getSandboxAgentName(sandbox));
+export function getSandboxAgent(
+  sandbox: SandboxEntry,
+  agentDefinition?: AgentDefinition,
+): AgentDefinition {
+  const recordedAgentName = getSandboxAgentName(sandbox);
+  if (agentDefinition) {
+    if (agentDefinition.name !== recordedAgentName) {
+      throw new McpBridgeError(
+        `Sandbox '${sandbox.name}' records agent '${recordedAgentName}', not the pinned '${agentDefinition.name}' definition.`,
+      );
+    }
+    return agentDefinition;
+  }
+  return loadAgent(recordedAgentName);
 }
 
 /** Return the configured state directory for a registered agent. */

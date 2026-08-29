@@ -176,3 +176,32 @@ it("sanitizes an injected Hermes reconciliation refusal before post-restart muta
     vi.restoreAllMocks();
   }
 });
+
+it("rejects a supplied Hermes definition when the persisted sandbox agent changed", () => {
+  const requestGatewaySupervisorAction = vi.fn(() => ({
+    status: 0,
+    stdout: "GATEWAY_PID=123",
+    stderr: "",
+  }));
+  const deps: GatewayRestartDeps = {
+    getSessionAgent: () => hermesAgent,
+    getSandbox: () => ({ agent: "openclaw" }),
+    resolveSandboxDashboardPort: () => 18789,
+    requestGatewaySupervisorAction,
+    executeSandboxExecCommand: vi.fn(() => null),
+    waitForRecoveredSandboxGateway: vi.fn(() => true),
+    ensureSandboxPortForward: vi.fn(() => true),
+    ensureHermesDashboardPortForwardIfEnabled: vi.fn(() => null),
+    recoverMessagingHostForward: vi.fn(() => null),
+    recoverDeclaredAgentForwardPorts: vi.fn(() => null),
+    printGatewayWedgeDiagnostics: vi.fn(() => false),
+    inspectHermesMcpReconciliationRefusal: vi.fn(() => null),
+  };
+
+  expect(restartSandboxGatewayWithDeps("alpha", { quiet: true, deps })).toMatchObject({
+    ok: false,
+    failureLayer: "unsupported agent",
+    detail: expect.stringContaining("does not match the sandbox's persisted 'openclaw' agent"),
+  });
+  expect(requestGatewaySupervisorAction).not.toHaveBeenCalled();
+});

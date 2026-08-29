@@ -218,7 +218,9 @@ export function createOnboardPolicyApplication(deps: OnboardPolicyApplicationDep
       return preparePolicyPresetResumeSelection({ policies }, sandboxName, options);
     },
     presetsCheckboxSelector,
-    resolveSandboxBaselinePolicy: policies.resolveSandboxBaselinePolicy,
+    resolveAgentDefinitionBaselinePolicy: (
+      ...args: Parameters<typeof policies.resolveAgentDefinitionBaselinePolicy>
+    ) => policies.resolveAgentDefinitionBaselinePolicy(...args),
     selectPolicyTier,
     selectTierPresetsAndAccess,
     setupPoliciesWithSelection(

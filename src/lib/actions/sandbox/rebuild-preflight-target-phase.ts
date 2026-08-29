@@ -192,7 +192,7 @@ export async function prepareRebuildTargetPreflights(args: {
   const recreateOptions = prepareRebuildRecreateOptions(
     sandboxName,
     sandboxEntry,
-    rebuildAgent,
+    agentAuthority,
     fromDockerfile,
     resumeConfig.registryInferenceRoute,
     autoYes,
@@ -239,7 +239,7 @@ export async function prepareRebuildTargetPreflights(args: {
   stageRecordedManagedVllmIntent(recreateOptions, sandboxEntry, resumeConfig);
   if (
     !stageRebuildHermesDashboardConfig(
-      rebuildAgent,
+      agentAuthority,
       sandboxEntry,
       recreateOptions.controlUiPort,
       bail,
@@ -251,7 +251,7 @@ export async function prepareRebuildTargetPreflights(args: {
   const messagingPlan = await stageRebuildMessagingPlanOrBail(
     sandboxName,
     sandboxEntry,
-    rebuildAgent,
+    agentAuthority,
     log,
     bail,
   );

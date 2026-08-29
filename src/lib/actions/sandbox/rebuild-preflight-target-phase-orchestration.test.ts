@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   prepareRebuildRecreateOptions: vi.fn(),
   resolveContextWindowForModel: vi.fn(() => 131_072),
   resolveManagedStartupInferenceRoute: vi.fn(),
+  stageRebuildHermesDashboardConfig: vi.fn((..._args: unknown[]) => true),
+  stageRebuildMessagingPlanOrBail: vi.fn(async (..._args: unknown[]) => null),
   stageManagedWorkloadRebuildProfile: vi.fn(),
 }));
 
@@ -55,11 +57,11 @@ vi.mock("./rebuild-target-preflight", async (importOriginal) => ({
   preflightAuthoritativeOnboardRuntime: mocks.preflightAuthoritativeOnboardRuntime,
   prepareRebuildRecreateOptions: mocks.prepareRebuildRecreateOptions,
   prepareRebuildTargetConfig: mocks.prepareRebuildTargetConfig,
-  stageRebuildHermesDashboardConfig: vi.fn(() => true),
+  stageRebuildHermesDashboardConfig: mocks.stageRebuildHermesDashboardConfig,
 }));
 
 vi.mock("./rebuild-messaging-phase", () => ({
-  stageRebuildMessagingPlanOrBail: vi.fn(async () => null),
+  stageRebuildMessagingPlanOrBail: mocks.stageRebuildMessagingPlanOrBail,
 }));
 
 vi.mock("./rebuild-messaging-conflict-preflight", () => ({
@@ -204,6 +206,11 @@ describe("prepareRebuildTargetPreflights", () => {
     const readinessOptions = await prepareN1xTarget("onboard");
 
     expect(mocks.prepareRebuildTargetConfig.mock.calls[0]?.[2]).toBe(OPENCLAW_AGENT_AUTHORITY);
+    expect(mocks.prepareRebuildRecreateOptions.mock.calls[0]?.[2]).toBe(OPENCLAW_AGENT_AUTHORITY);
+    expect(mocks.stageRebuildHermesDashboardConfig.mock.calls[0]?.[0]).toBe(
+      OPENCLAW_AGENT_AUTHORITY,
+    );
+    expect(mocks.stageRebuildMessagingPlanOrBail.mock.calls[0]?.[2]).toBe(OPENCLAW_AGENT_AUTHORITY);
     expect(readinessOptions).toEqual(
       expect.objectContaining({ allowDeferredN1xManagedVllm: true }),
     );

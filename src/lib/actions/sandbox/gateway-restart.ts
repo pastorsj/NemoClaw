@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { GATEWAY_RESTART_MARKERS as MARKERS } from "../../agent/gateway-restart-markers";
+import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
 import { G, R } from "../../cli/terminal-style";
 import { redactFullWithUrls } from "../../security/redact";
@@ -153,6 +154,8 @@ export type GatewayRestartDeps = {
 
 export type RestartSandboxGatewayOptions = {
   quiet?: boolean;
+  /** Rebuilds pin the definition selected at preflight; standalone restarts omit it. */
+  agentDefinition?: AgentDefinition;
   deps?: Partial<GatewayRestartDeps>;
 };
 
@@ -223,7 +226,10 @@ export function classifyGatewayRestartFailure(result: GatewayRestartCommandResul
       layer: "container identity changed",
       detail:
         sanitizeGatewayRestartFailureDetail(
-          outputLines.filter((line) => !isIdentityChangedMarkerLine(line)).join("\n").trim(),
+          outputLines
+            .filter((line) => !isIdentityChangedMarkerLine(line))
+            .join("\n")
+            .trim(),
         ) || "the selected container identity changed",
     };
   }
@@ -418,6 +424,16 @@ export function restartSandboxGatewayWithDeps(
   }
   const agentName = agent?.name ?? persistedAgent ?? "openclaw";
   const dashboardPort = deps.resolveSandboxDashboardPort(sandboxName);
+  const persistedAgentName = persistedAgent ?? "openclaw";
+
+  if (agent && agent.name !== persistedAgentName) {
+    const detail = unsupportedGatewayRestartAgentDetail(
+      agent.name,
+      `The supplied agent definition does not match the sandbox's persisted '${persistedAgentName}' agent.`,
+    );
+    printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
+    return { ok: false, failureLayer: "unsupported agent", detail };
+  }
 
   if (!agent && persistedAgent && persistedAgent !== "openclaw") {
     const detail = unsupportedGatewayRestartAgentDetail(

@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentDefinition } from "../agent/defs";
 import {
   authoritativeRebuildSandboxFlowOptions,
   authoritativeRebuildRuntimePreflightOptions,
@@ -18,7 +19,12 @@ import {
   type ProviderRecoveryReceiptTarget,
 } from "./rebuild-route-handoff";
 
+const pinnedAgentDefinition = {
+  name: "hermes",
+  policyAdditionsPath: "/installed/hermes/policy-additions.yaml",
+} as AgentDefinition;
 const target = {
+  agentDefinition: pinnedAgentDefinition,
   sandboxName: "alpha",
   provider: "nvidia-prod",
   model: "nvidia/nemotron",
@@ -55,6 +61,7 @@ describe("authoritative rebuild sandbox flow options", () => {
 describe("authoritative rebuild runtime preflight options", () => {
   it("carries only target GPU state and recorded N1x preview intent (#9292)", () => {
     const options = {
+      agentDefinition: pinnedAgentDefinition,
       authoritativeResumeConfig: true,
       sandboxName: "alpha",
       provider: "vllm-local",
@@ -267,6 +274,14 @@ describe("prepared provider reconfiguration handoff", () => {
 });
 
 describe("authoritative rebuild target preflight", () => {
+  it("resolves policy from the exact definition pinned before rebuild mutation", async () => {
+    const resolveBaselinePolicy = vi.fn(() => ({}));
+
+    await preflightAuthoritativeRebuildTarget(target, deps({ resolveBaselinePolicy }));
+
+    expect(resolveBaselinePolicy).toHaveBeenCalledExactlyOnceWith(pinnedAgentDefinition);
+  });
+
   it("binds process-local gateway authority before readiness and install (#7411)", async () => {
     const calls: string[] = [];
     const targetDeps = deps({

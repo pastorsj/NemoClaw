@@ -3,24 +3,89 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as openshellResolve from "../../adapters/openshell/resolve";
+import type { AgentDefinition } from "../../agent/defs";
+import * as agentRuntime from "../../agent/runtime";
+import * as sandboxVersion from "../../sandbox/version";
 import { redact } from "../../security/redact";
 import * as onboardSession from "../../state/onboard-session";
 import * as sandboxSession from "../../state/sandbox-session";
 import {
+  confirmRebuildIntent,
   confirmSandboxRebuildIfNeeded,
   countActiveSandboxSessionsForRebuild,
   createRebuildCommandContext,
+  getRebuildAgentDisplayName,
 } from "./rebuild-preflight-confirmation";
 import {
   acquireRebuildOnboardLock,
   isSingleAgentRebuildSupported,
 } from "./rebuild-preflight-guards";
+import * as rebuildUsageNotice from "./rebuild-usage-notice";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("rebuild confirmation", () => {
+  it("preserves the display-name helper for source callers", () => {
+    const getSessionAgent = vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue(null);
+    const getAgentDisplayName = vi
+      .spyOn(agentRuntime, "getAgentDisplayName")
+      .mockReturnValue("OpenClaw");
+
+    expect(getRebuildAgentDisplayName("alpha")).toBe("OpenClaw");
+    expect(getSessionAgent).toHaveBeenCalledWith("alpha");
+    expect(getAgentDisplayName).toHaveBeenCalledWith(null);
+  });
+
+  it("preserves string-based confirmation for source callers", async () => {
+    const versionCheck = {
+      sandboxVersion: "1.0.0",
+      expectedVersion: "1.0.1",
+      isStale: true,
+      verificationFailed: false,
+      detectionMethod: "registry" as const,
+    };
+    const checkAgentVersion = vi
+      .spyOn(sandboxVersion, "checkAgentVersion")
+      .mockReturnValue(versionCheck);
+    vi.spyOn(rebuildUsageNotice, "ensureRebuildUsageNoticeAccepted").mockResolvedValue(true);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      confirmRebuildIntent("alpha", "OpenClaw", true, 0, vi.fn() as never),
+    ).resolves.toEqual(versionCheck);
+
+    expect(checkAgentVersion).toHaveBeenCalledWith("alpha");
+  });
+
+  it("checks the target version with the package-pinned definition", async () => {
+    const agentDefinition = {
+      name: "hermes",
+      displayName: "Installed Hermes",
+      expectedVersion: "9.8.7",
+      versionCommand: "installed-hermes --version",
+    } as AgentDefinition;
+    const versionCheck = {
+      sandboxVersion: "9.8.6",
+      expectedVersion: "9.8.7",
+      isStale: true,
+      verificationFailed: false,
+      detectionMethod: "registry" as const,
+    };
+    const checkAgentVersion = vi
+      .spyOn(sandboxVersion, "checkAgentVersion")
+      .mockReturnValue(versionCheck);
+    vi.spyOn(rebuildUsageNotice, "ensureRebuildUsageNoticeAccepted").mockResolvedValue(true);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await expect(
+      confirmRebuildIntent("alpha", agentDefinition, true, 0, vi.fn() as never),
+    ).resolves.toEqual(versionCheck);
+
+    expect(checkAgentVersion).toHaveBeenCalledWith("alpha", { agentDefinition });
+  });
+
   it("accepts trimmed case-insensitive affirmative input", async () => {
     const prompt = vi.fn(async () => " YES ");
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);

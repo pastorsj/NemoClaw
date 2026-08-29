@@ -23,6 +23,16 @@ const LEGACY_OPENCLAW_MIGRATION = {
   migratedAt: "2026-08-28T05:00:00.000Z",
 };
 
+function expectPinnedOpenClawOptions() {
+  return expect.objectContaining({
+    agentDefinition: expect.objectContaining({
+      name: "openclaw",
+      expectedVersion: "0.2.0",
+      packageRoot: expect.stringContaining("/harnesses/objects/sha256/"),
+    }),
+  });
+}
+
 describe("rebuildSandbox flow: recovery", () => {
   installRebuildFlowTestHooks();
 
@@ -451,8 +461,16 @@ describe("rebuildSandbox flow: recovery", () => {
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "npm");
-    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith("alpha", "teams");
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "npm",
+      expectPinnedOpenClawOptions(),
+    );
+    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith(
+      "alpha",
+      "teams",
+      expectPinnedOpenClawOptions(),
+    );
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith("alpha", {
       agentVersion: "0.2.0",
       policies: ["npm"],
@@ -518,6 +536,7 @@ describe("rebuildSandbox flow: recovery", () => {
       "alpha",
       [attached],
       undefined,
+      expectPinnedOpenClawOptions(),
     );
     expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
@@ -597,8 +616,16 @@ describe("rebuildSandbox flow: recovery", () => {
     expect(output).toContain("State restore was incomplete");
     expect(output).toContain("Mutable config permissions were not verified");
     expect(output).toContain("Mutable OpenClaw config hash was not refreshed");
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "bad");
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "throw");
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "bad",
+      expectPinnedOpenClawOptions(),
+    );
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "throw",
+      expectPinnedOpenClawOptions(),
+    );
     expect(harness.errorSpy).toHaveBeenCalledWith(expect.stringContaining("bad, throw"));
     expect(harness.relockSpy).toHaveBeenCalledWith("alpha", expect.any(Object), true, "nemoclaw");
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith("alpha", {

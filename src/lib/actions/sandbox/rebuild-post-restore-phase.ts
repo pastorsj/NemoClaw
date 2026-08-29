@@ -1,11 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { loadAgent } from "../../agent/defs";
-import * as agentRuntime from "../../agent/runtime";
 import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import type { SandboxMessagingPlan } from "../../messaging";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import { normalizePolicyTierName } from "../../onboard/policy-tier-suppression";
 import { BASELINE_EXCLUSION_SUPPORT_IMPACT } from "../../policy/baseline-exclusion";
 import type * as sandboxVersion from "../../sandbox/version";
@@ -13,6 +12,7 @@ import * as shields from "../../shields";
 import * as registry from "../../state/registry";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
 import { executeSandboxExecCommand } from "./process-recovery";
+import { verifyCurrentAgentAuthority } from "./rebuild/authority";
 import type { RebuildBackupManifest } from "./rebuild-backup-phase";
 import {
   refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
@@ -76,7 +76,7 @@ function bailAfterHermesCronRestoreFailure(
 export interface RebuildPostRestorePhaseInput {
   sandboxName: string;
   sandboxEntry: RebuildSandboxEntry;
-  targetAgentName: string;
+  agentAuthority: ResolvedSandboxAgent;
   messagingPlan: SandboxMessagingPlan | null;
   backupManifest: RebuildBackupManifest;
   mcpEntries: McpRebuildPreparation["entries"];
@@ -179,7 +179,7 @@ export async function runRebuildPostRestorePhase(
   const {
     sandboxName,
     sandboxEntry: sb,
-    targetAgentName,
+    agentAuthority,
     messagingPlan,
     backupManifest,
     mcpEntries,
@@ -199,32 +199,44 @@ export async function runRebuildPostRestorePhase(
     log,
     bail,
   } = input;
-  const recreatedEntry = registry.getSandbox(sandboxName);
-  const recreatedAgent = agentRuntime.getSessionAgent(sandboxName);
-  // OpenClaw is represented by a null registry agent and a null runtime definition.
-  const recreatedRegistryAgentName = recreatedEntry?.agent ?? "openclaw";
-  const recreatedRuntimeAgentName = recreatedAgent?.name ?? "openclaw";
-  if (
-    !recreatedEntry ||
-    recreatedRegistryAgentName !== targetAgentName ||
-    recreatedRuntimeAgentName !== targetAgentName
-  ) {
+  let hermesCronRestoreCompleted = false;
+
+  const rejectAgentAuthority = (stage: string, issue: string): null => {
+    log(`Post-restore agent authority rejected ${stage}: ${issue}`);
     console.error(
       `  ${YW}\u26a0${R} Recreated sandbox agent identity could not be verified against the rebuild target.`,
     );
-    if (hermesCronRestoreIdentity) {
-      return bailAfterHermesCronRestoreFailure(
+    if (hermesCronRestoreIdentity && !hermesCronRestoreCompleted) {
+      bailAfterHermesCronRestoreFailure(
         sandboxName,
         backupManifest,
         "  Hermes cron dispatch remains drained because the replacement identity is unverified.",
         "Recreated sandbox agent identity did not match the authoritative rebuild target.",
         bail,
       );
+      return null;
     }
     bail("Recreated sandbox agent identity did not match the authoritative rebuild target.");
+    return null;
+  };
+
+  const requireCurrentAgentAuthority = (stage: string): RebuildSandboxEntry | null => {
+    let recreatedEntry: RebuildSandboxEntry | null;
+    try {
+      recreatedEntry = registry.getSandbox(sandboxName);
+    } catch {
+      return rejectAgentAuthority(stage, "the recreated registry row could not be read");
+    }
+    const issue = verifyCurrentAgentAuthority(sandboxName, agentAuthority, recreatedEntry);
+    return issue ? rejectAgentAuthority(stage, issue) : recreatedEntry;
+  };
+
+  let verifiedRecreatedEntry = requireCurrentAgentAuthority("before harness-owned repair");
+  if (!verifiedRecreatedEntry) {
     return;
   }
-  const agentDef = loadAgent(targetAgentName);
+  const targetAgentName = agentAuthority.effectiveAgentId;
+  const agentDef = agentAuthority.definition;
   const rebuiltAgentName = agentDef.displayName;
   let mutablePermsRepairUnverified = false;
   let mutableConfigHashRefreshUnverified = false;
@@ -258,11 +270,28 @@ export async function runRebuildPostRestorePhase(
     }
     console.log(`  ${G}\u2713${R} Post-upgrade structure check passed`);
 
+    verifiedRecreatedEntry = requireCurrentAgentAuthority("after OpenClaw doctor");
+    if (!verifiedRecreatedEntry) {
+      return;
+    }
+
     // #7102: clear stale per-session pinned models left over from an
     // `inference set` before this rebuild, while the gateway is still down.
     reconcileStalePinnedSessionModelsAfterRebuild(sandboxName, log);
 
+    verifiedRecreatedEntry = requireCurrentAgentAuthority(
+      "after OpenClaw session-model reconciliation",
+    );
+    if (!verifiedRecreatedEntry) {
+      return;
+    }
+
     await reapplyMessagingManifestAfterOpenClawDoctor(sandboxName, messagingPlan, log);
+
+    verifiedRecreatedEntry = requireCurrentAgentAuthority("after messaging replay");
+    if (!verifiedRecreatedEntry) {
+      return;
+    }
 
     log("Restoring mutable OpenClaw config permissions after post-restore config writes");
     let permRepair: ReturnType<typeof shields.repairMutableConfigPerms> | null = null;
@@ -298,19 +327,44 @@ export async function runRebuildPostRestorePhase(
   // Restart before restoring MCP. The Hermes MCP transaction performs an
   // acknowledged reload of its own; restarting afterwards would replace the
   // only runtime whose managed MCP configuration was proven to have loaded.
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("before Hermes gateway restart");
+  if (!verifiedRecreatedEntry) {
+    return;
+  }
   const hermesGatewayRestartState = restartHermesGatewayAfterStateRestore(
     sandboxName,
     targetAgentName,
+    { agentDefinition: agentDef },
   );
-  const mcpBridgeRestoreUnverified = !(await restoreMcpAfterRebuild(sandboxName, mcpEntries));
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("before managed MCP restoration");
+  if (!verifiedRecreatedEntry) {
+    return;
+  }
+  const mcpBridgeRestoreUnverified = !(await restoreMcpAfterRebuild(
+    sandboxName,
+    mcpEntries,
+    agentDef,
+  ));
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("after managed MCP restoration");
+  if (!verifiedRecreatedEntry) {
+    return;
+  }
   if (targetAgentName === "openclaw" && mcpBridgeRestoreUnverified) {
     mutableConfigHashRefreshUnverified = true;
   } else if (targetAgentName === "openclaw") {
     log("Refreshing mutable OpenClaw config hash after MCP restoration");
     if (!refreshMutableOpenClawConfigHashAfterPostRestoreWrites(sandboxName, log)) {
       mutableConfigHashRefreshUnverified = true;
-    } else if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log)) {
-      finalMutableConfigHashUnverified = true;
+    } else {
+      verifiedRecreatedEntry = requireCurrentAgentAuthority(
+        "after mutable OpenClaw config hash refresh",
+      );
+      if (!verifiedRecreatedEntry) {
+        return;
+      }
+      if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log)) {
+        finalMutableConfigHashUnverified = true;
+      }
     }
   }
   const hermesGatewayVerification = hermesCronRestoreIdentity
@@ -319,12 +373,14 @@ export async function runRebuildPostRestorePhase(
         targetAgentName,
         hermesGatewayRestartState,
         hermesCronRestoreIdentity,
+        { agentDefinition: agentDef },
       )
     : {
         state: verifyHermesGatewayAfterStateRestore(
           sandboxName,
           targetAgentName,
           hermesGatewayRestartState,
+          { agentDefinition: agentDef },
         ),
         replacementIdentity: undefined,
       };
@@ -356,6 +412,10 @@ export async function runRebuildPostRestorePhase(
         () => printMcpRestoreRecovery(sandboxName, true),
       );
     }
+    verifiedRecreatedEntry = requireCurrentAgentAuthority("before Hermes cron restore completion");
+    if (!verifiedRecreatedEntry) {
+      return;
+    }
     let completedIdentity: HermesCronRestoreIdentity;
     try {
       completedIdentity = completeHermesCronRestoreAfterGatewayReplacement(
@@ -363,6 +423,7 @@ export async function runRebuildPostRestorePhase(
         hermesCronRestoreIdentity,
         replacementIdentity,
       );
+      hermesCronRestoreCompleted = true;
     } catch (error) {
       const errorDetail = error instanceof Error ? error.message : String(error);
       if (isHermesCronRestoreDrainMarkerRollbackFailure(error)) {
@@ -400,18 +461,43 @@ export async function runRebuildPostRestorePhase(
       failedPresets,
       policyPresetReconciliationVerified,
     );
-  registry.updateSandbox(sandboxName, {
-    agentVersion: agentDef.expectedVersion || null,
-    policies: restoredBuiltinPresets,
-    policyTier: normalizePolicyTierName(sb.policyTier),
-    policyPresetsFinalized,
-  });
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("before final registry publication");
+  if (!verifiedRecreatedEntry) {
+    return;
+  }
+  let publishedRegistryEntry: RebuildSandboxEntry | false;
+  try {
+    publishedRegistryEntry = registry.updateSandboxIfCurrent(verifiedRecreatedEntry, {
+      agentVersion: agentDef.expectedVersion || null,
+      policies: restoredBuiltinPresets,
+      policyTier: normalizePolicyTierName(sb.policyTier),
+      policyPresetsFinalized,
+    });
+  } catch {
+    publishedRegistryEntry = false;
+  }
+  if (!publishedRegistryEntry) {
+    rejectAgentAuthority(
+      "during final registry publication",
+      "the verified recreated registry row changed before its conditional update",
+    );
+    return;
+  }
   log(
     `Registry updated: agentVersion=${agentDef.expectedVersion}, policies=[${restoredBuiltinPresets.join(",")}], policyPresetsFinalized=${String(policyPresetsFinalized === true)}`,
   );
 
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("after final registry publication");
+  if (!verifiedRecreatedEntry) {
+    return;
+  }
+
   if (!relockShieldsIfNeeded(true)) {
     bail("Failed to re-apply shields lockdown.");
+    return;
+  }
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("after shields relock");
+  if (!verifiedRecreatedEntry) {
     return;
   }
   if (!ensureMessagingHostForwardAfterRebuild(sandboxName, messagingPlan)) {
@@ -420,10 +506,22 @@ export async function runRebuildPostRestorePhase(
   if (
     targetAgentName === "openclaw" &&
     !mcpBridgeRestoreUnverified &&
-    !mutableConfigHashRefreshUnverified &&
-    !verifyFinalMutableOpenClawConfigHash(sandboxName, log)
+    !mutableConfigHashRefreshUnverified
   ) {
-    finalMutableConfigHashUnverified = true;
+    verifiedRecreatedEntry = requireCurrentAgentAuthority(
+      "before final OpenClaw config hash verification",
+    );
+    if (!verifiedRecreatedEntry) {
+      return;
+    }
+    if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log)) {
+      finalMutableConfigHashUnverified = true;
+    }
+  }
+
+  verifiedRecreatedEntry = requireCurrentAgentAuthority("before final rebuild reporting");
+  if (!verifiedRecreatedEntry) {
+    return;
   }
 
   console.log("");

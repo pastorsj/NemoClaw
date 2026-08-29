@@ -8,9 +8,11 @@ import {
   createRebuildRouteHandoff,
   type RegistryInferenceRoute,
 } from "../../onboard/rebuild-route-handoff";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import { parseHostLocalInferenceReceipt } from "../../onboard/runtime-provider/host-local-inference";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import * as onboardSession from "../../state/onboard-session";
+import { checkPinnedAgentAuthority } from "./rebuild/authority";
 import type { RebuildBail } from "./rebuild-credential-preflight";
 import {
   REBUILD_HERMES_DASHBOARD_ENV_KEYS,
@@ -26,7 +28,7 @@ import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
 export function prepareRebuildRecreateOptions(
   sandboxName: string,
   sb: RebuildSandboxEntry,
-  rebuildAgent: string | null,
+  agentAuthority: ResolvedSandboxAgent,
   storedFromDockerfile: string | null,
   registryInferenceRoute: RegistryInferenceRoute | null,
   autoYes: boolean,
@@ -36,7 +38,7 @@ export function prepareRebuildRecreateOptions(
   try {
     const options = buildRebuildRecreateOnboardOpts({
       sb,
-      rebuildAgent,
+      agentAuthority,
       storedFromDockerfile,
       autoYes,
       baseImageResolutionHint,
@@ -63,11 +65,21 @@ export function prepareRebuildRecreateOptions(
 }
 
 export function stageRebuildHermesDashboardConfig(
-  rebuildAgent: string | null,
+  agentAuthority: ResolvedSandboxAgent,
   sb: RebuildSandboxEntry,
   controlUiPort: number | null,
   bail: RebuildBail,
 ): boolean {
+  if (checkPinnedAgentAuthority(sb, agentAuthority) !== null) {
+    printRebuildPreflightFailure(
+      "the pinned Hermes dashboard target is invalid.",
+      "Pinned rebuild agent authority does not match the sandbox registry entry.",
+      "Pinned rebuild agent authority does not match Hermes dashboard registry state",
+      bail,
+    );
+    return false;
+  }
+  const rebuildAgent = agentAuthority.definition.name;
   const resolved = resolveRebuildHermesDashboardEnv(rebuildAgent, sb, controlUiPort);
   if (!resolved.ok) {
     printRebuildPreflightFailure(

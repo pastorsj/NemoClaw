@@ -3,6 +3,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentDefinition } from "../../agent/definition-types";
 import { runRebuildRestorePhase } from "./rebuild-restore-phase";
 import * as snapshotRestore from "./snapshot/restore-authority";
 
@@ -23,9 +24,14 @@ describe("rebuild restore target forwarding", () => {
         failedFiles: [],
       });
 
+    const agentDefinition = {
+      name: "langchain-deepagents-code",
+      packageRoot: "/selected/deepagents",
+    } as AgentDefinition;
+
     runRebuildRestorePhase({
       sandboxName: "alpha",
-      targetAgentType: "langchain-deepagents-code",
+      agentDefinition,
       targetImageIsCustom: true,
       backupManifest: { agentType: "openclaw", backupPath: "/tmp/rebuild-backup" } as never,
       policyPresets: [],
@@ -39,6 +45,7 @@ describe("rebuild restore target forwarding", () => {
       expect.objectContaining({ backupPath: "/tmp/rebuild-backup" }),
       {
         targetAgentType: "langchain-deepagents-code",
+        agentDefinition,
         allowCustomImageWholeStateFileRestore: true,
       },
       {
@@ -46,5 +53,6 @@ describe("rebuild restore target forwarding", () => {
         captureOpenshell: expect.any(Function),
       },
     );
+    expect(restoreRecreatedSandboxState.mock.calls[0]?.[2].agentDefinition).toBe(agentDefinition);
   });
 });

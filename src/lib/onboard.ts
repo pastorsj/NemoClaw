@@ -2641,7 +2641,7 @@ const {
   mergePolicyMessagingChannels,
   preparePolicyPresetResumeSelection,
   presetsCheckboxSelector,
-  resolveSandboxBaselinePolicy,
+  resolveAgentDefinitionBaselinePolicy,
   selectPolicyTier,
   selectTierPresetsAndAccess,
   setupPoliciesWithSelection,
@@ -2698,7 +2698,7 @@ async function preflightAuthoritativeRebuildTarget(
     await authoritativeRebuildTarget.preflightAuthoritativeRebuildTarget(
       { ...opts, controlUiPort: opts.controlUiPort ?? null },
       {
-        resolveBaselinePolicy: resolveSandboxBaselinePolicy,
+        resolveBaselinePolicy: resolveAgentDefinitionBaselinePolicy,
         bindGatewayAuthority: () => bindGatewayOwner(getGatewayOwner()),
         runFatalRuntimePreflight: async () =>
           onboardPreflightGatewayAuthority.runRuntimePreflight(
@@ -2784,7 +2784,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
     const validatePolicyTierBeforeRuntime =
       isNonInteractive() && !resume && opts.experimentalProfile !== "portable";
     const harnessPackageOperation = await onboardPackageBoundary.prepareOnboardHarnessOperation(
-      { agentFlag: opts.agent || null, canPrompt: !cannotPrompt, prompt, resume, rootDir: ROOT },
+      { agentFlag: opts.agent || null, authoritativeRebuildAgentAuthority: opts.authoritativeRebuildAgentAuthority, canPrompt: !cannotPrompt, prompt, resume, rootDir: ROOT },
       { assertWriterLockOwned: onboardSession.assertOnboardLockOwned, compareAndSwapSession: onboardSession.compareAndSwapSession, loadSession: onboardSession.loadSession },
     );
     await portableRetirementEntry.run(async () => {

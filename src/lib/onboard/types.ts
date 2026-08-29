@@ -160,6 +160,8 @@ export type OnboardOptions = {
   targetGatewayPort?: number | null;
   /** Internal rebuild handoff: the outer destructive lifecycle owns the onboard lock. */
   onboardLockAlreadyHeld?: boolean;
+  /** Internal outer-rebuild agent authority consumed before inner runtime effects. */
+  authoritativeRebuildAgentAuthority?: import("./sandbox-agent").ResolvedSandboxAgent;
   /** Internal command handoff: propagate an exit request after onboarding restores its scopes. */
   deferProcessExit?: boolean;
   /** Internal rebuild handoff: target fingerprint of the journal opened before deletion. */

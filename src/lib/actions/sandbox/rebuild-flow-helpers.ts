@@ -26,6 +26,7 @@ import {
 } from "../../gateway-runtime-action";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
 import { removeStaleRebuildDockerOrphan } from "../../onboard/openshell-docker-sandbox-containers";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   captureSandboxListWithGatewayRecovery,
   printSandboxListFailureWithRecoveryContext,
@@ -49,6 +50,7 @@ import { openRebuildShieldsWindow, type RebuildShieldsWindow } from "./rebuild-s
 import * as snapshotBackup from "./snapshot/backup-authority";
 
 export type RebuildSandboxEntry = SandboxEntry & { agents?: unknown[] };
+export { rebuildPackageAuthorityMatches, rebuildPackageIdentityMatches } from "./rebuild/authority";
 
 export type RebuildLiveState = {
   staleRecovery: boolean;
@@ -457,6 +459,7 @@ export function pinRebuildAgentBaseImageForRecreate(
 export function backupSandboxStateForRebuild(
   sandboxName: string,
   sb: RebuildSandboxEntry,
+  agentAuthority: ResolvedSandboxAgent,
   staleRecovery: boolean,
   log: (msg: string) => void,
   relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean,
@@ -469,7 +472,11 @@ export function backupSandboxStateForRebuild(
   log(`Agent type: ${sb.agent || "openclaw"}, stateDirs from manifest`);
   const backup = snapshotBackup.backupSandboxStateWithManagedAuthority(
     sandboxName,
-    {},
+    {
+      agentDefinition: agentAuthority.definition,
+      harnessPackage: agentAuthority.harnessPackage,
+      registryEntry: sb,
+    },
     {
       getSandbox: (name) => loadRegistry().sandboxes[name] ?? null,
     },

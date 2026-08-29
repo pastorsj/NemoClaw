@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentDefinition } from "../../agent/defs";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
 import type { RebuildDurableConfig } from "./rebuild-durable-config";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 
 type RebuildAuthoritativePreflightOptions = RebuildRecreateOnboardOpts & {
+  agentDefinition: AgentDefinition;
   deferInferenceRouteUntilOnboard?: true;
   model: string;
   provider: string;

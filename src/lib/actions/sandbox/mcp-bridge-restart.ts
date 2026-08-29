@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock";
 import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { McpBridgeEntry } from "../../state/registry";
 import { registerAgentAdapterAtCurrentCredentialRevision } from "./mcp-bridge-adapters";
 import { McpBridgeError } from "./mcp-bridge-contracts";
+import {
+  assertMcpBridgeSnapshotCurrent,
+  cloneMcpBridgeEntry,
+} from "./mcp-bridge-destroy-preflight";
 import { assertHermesMcpRuntimeIntent } from "./mcp-bridge-hermes-reconciliation";
 import { applyGeneratedPolicy, assertGeneratedPolicyMutationSafe } from "./mcp-bridge-policy";
 import {
@@ -200,16 +204,43 @@ async function restartMcpBridgeUnlocked(sandboxName: string, server?: string): P
 export async function restoreExistingMcpBridgeRuntime(
   sandboxName: string,
   entries: readonly McpBridgeEntry[],
-  options: { lifecyclePhase?: "active-mutation" | "teardown-rollback" } = {},
+  options: {
+    agentDefinition?: AgentDefinition;
+    lifecyclePhase?: "active-mutation" | "teardown-rollback";
+  } = {},
 ): Promise<void> {
   if (entries.length === 0) return;
   for (const entry of entries) assertAuthenticatedBridgeEntry(entry);
+  const pinnedBridgeSnapshot = options.agentDefinition
+    ? Object.values(bridgeState(getSandboxOrThrow(sandboxName))).map(cloneMcpBridgeEntry)
+    : undefined;
   const resolvedByServer = await preflightMcpEntryTargets(entries);
   if (options.lifecyclePhase !== "teardown-rollback") {
     assertMcpCredentialBoundaryRuntimeVersion();
   }
   await ensureSandboxGatewaySelected(sandboxName);
-  const sandbox = getSandboxOrThrow(sandboxName);
+  const sandbox = pinnedBridgeSnapshot
+    ? assertMcpBridgeSnapshotCurrent(
+        sandboxName,
+        pinnedBridgeSnapshot,
+        `MCP bridge definitions changed while sandbox '${sandboxName}' runtime restoration was being preflighted. No MCP runtime mutation was attempted; retry after the registry state is stable.`,
+      )
+    : getSandboxOrThrow(sandboxName);
+  let defaultAdapter: AgentMcpAdapter;
+  if (options.agentDefinition) {
+    const agent = getSandboxAgent(sandbox, options.agentDefinition);
+    defaultAdapter = getBridgeAdapter(agent);
+    const incompatible = entries.find(
+      (entry) => entry.agent !== agent.name || entry.adapter !== defaultAdapter,
+    );
+    if (incompatible) {
+      throw new McpBridgeError(
+        `MCP server '${incompatible.server}' does not match the pinned '${agent.name}' agent and '${defaultAdapter}' adapter.`,
+      );
+    }
+  } else {
+    defaultAdapter = getBridgeAdapter(getSandboxAgent(sandbox));
+  }
   assertMcpDestroyNotPending(sandbox);
   if (options.lifecyclePhase === "teardown-rollback") {
     // A failed delete/rebuild must be able to restore a backward-compatible
@@ -220,7 +251,6 @@ export async function restoreExistingMcpBridgeRuntime(
   } else {
     assertMcpAdapterMutationRuntimeCapabilities(sandboxName, sandbox, entries);
   }
-  const defaultAdapter = getBridgeAdapter(getSandboxAgent(sandbox));
   for (const entry of entries) {
     assertGeneratedPolicyMutationSafe(sandboxName, entry);
     const provider = assertMcpProviderRecoverable(entry);
@@ -256,6 +286,7 @@ export async function restoreExistingMcpBridgeRuntime(
         replaceExisting: true,
         teardownRollback: options.lifecyclePhase === "teardown-rollback",
       },
+      options.agentDefinition,
     );
     writeBridgeEntry(sandboxName, { ...entry, adapter, updatedAt: nowIso() });
   }

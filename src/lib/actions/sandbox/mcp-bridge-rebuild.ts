@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { McpBridgeEntry } from "../../state/registry";
+import type { AgentDefinition } from "../../agent/defs";
+import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import {
   rollbackScrubbedMcpAdapters,
   scrubManagedMcpAdapterOrThrow,
@@ -35,6 +36,8 @@ import {
   assertMcpDestroyNotPending,
   bridgeState,
   ensureSandboxGatewaySelected,
+  getBridgeAdapter,
+  getSandboxAgent,
   getSandboxOrThrow,
   setBridgeState,
 } from "./mcp-bridge-state";
@@ -50,17 +53,24 @@ export interface McpRebuildPreparation {
   assertDeleteEdgeUnchanged?: () => void;
 }
 
+export type McpRebuildAgentOptions = {
+  /** Definition pinned by rebuild preflight. Ordinary MCP commands omit it. */
+  agentDefinition?: AgentDefinition;
+};
+
 export { prepareMcpBridgesForExecUnavailableRebuild } from "./mcp-bridge-rebuild-exec-unavailable";
 
 async function getCompleteMcpRebuildEntries(
   sandboxName: string,
-  options: { sandboxAbsent?: boolean } = {},
+  options: McpRebuildAgentOptions & { sandboxAbsent?: boolean } = {},
 ): Promise<McpBridgeEntry[]> {
   validateSandboxName(sandboxName);
   const currentSandbox = getSandboxOrThrow(sandboxName);
   assertMcpDestroyNotPending(currentSandbox);
+  const currentEntries = Object.values(bridgeState(currentSandbox)).map(cloneMcpBridgeEntry);
+  assertEntriesMatchPinnedAgent(currentSandbox, currentEntries, options.agentDefinition);
   if (!options.sandboxAbsent) {
-    const entriesRequiringExternalCleanup = Object.values(bridgeState(currentSandbox)).filter(
+    const entriesRequiringExternalCleanup = currentEntries.filter(
       (entry) => entry.addState !== "prepared",
     );
     // This host-visible config preflight must precede
@@ -75,6 +85,7 @@ async function getCompleteMcpRebuildEntries(
   }
   const sandbox = await discardSafeIncompleteMcpAdds(sandboxName, currentSandbox, options);
   const entries = Object.values(bridgeState(sandbox)).map(cloneMcpBridgeEntry);
+  assertEntriesMatchPinnedAgent(sandbox, entries, options.agentDefinition);
   const incompleteAdd = entries.find((entry) => entry.addState);
   if (incompleteAdd) {
     throw new McpBridgeError(
@@ -82,6 +93,24 @@ async function getCompleteMcpRebuildEntries(
     );
   }
   return entries;
+}
+
+function assertEntriesMatchPinnedAgent(
+  sandbox: SandboxEntry,
+  entries: readonly McpBridgeEntry[],
+  agentDefinition?: AgentDefinition,
+): void {
+  if (!agentDefinition || entries.length === 0) return;
+  const agent = getSandboxAgent(sandbox, agentDefinition);
+  const adapter = getBridgeAdapter(agent);
+  const incompatible = entries.find(
+    (entry) => entry.agent !== agent.name || entry.adapter !== adapter,
+  );
+  if (incompatible) {
+    throw new McpBridgeError(
+      `MCP server '${incompatible.server}' does not match the pinned '${agent.name}' agent and '${adapter}' adapter.`,
+    );
+  }
 }
 
 /**
@@ -92,8 +121,12 @@ async function getCompleteMcpRebuildEntries(
  */
 export async function prepareMcpBridgesForAbsentSandboxRebuild(
   sandboxName: string,
+  options: McpRebuildAgentOptions = {},
 ): Promise<McpRebuildPreparation> {
-  const entries = await getCompleteMcpRebuildEntries(sandboxName, { sandboxAbsent: true });
+  const entries = await getCompleteMcpRebuildEntries(sandboxName, {
+    ...options,
+    sandboxAbsent: true,
+  });
   if (entries.length === 0) {
     return {
       entries: [],
@@ -117,9 +150,9 @@ export async function prepareMcpBridgesForAbsentSandboxRebuild(
 
 export async function prepareMcpBridgesForRebuild(
   sandboxName: string,
+  options: McpRebuildAgentOptions = {},
 ): Promise<McpRebuildPreparation> {
-  const sandbox = getSandboxOrThrow(sandboxName);
-  const entries = await getCompleteMcpRebuildEntries(sandboxName);
+  const entries = await getCompleteMcpRebuildEntries(sandboxName, options);
   if (entries.length === 0) {
     return {
       entries: [],
@@ -127,6 +160,7 @@ export async function prepareMcpBridgesForRebuild(
       scrubbedAdapterEntries: [],
     };
   }
+  const sandbox = getSandboxOrThrow(sandboxName);
   await preflightMcpEntryTargets(entries);
   await ensureSandboxGatewaySelected(sandboxName);
   for (const entry of entries) assertGeneratedPolicyMutationSafe(sandboxName, entry);
@@ -141,7 +175,9 @@ export async function prepareMcpBridgesForRebuild(
       // `/sandbox` may be a retained PVC. Scrub before delete so a replacement
       // Hermes/agent cannot boot with a stale placeholder while its provider
       // is intentionally detached during recreate.
-      scrubbedAdapters.push(scrubManagedMcpAdapterOrThrow(sandboxName, sandbox, entry));
+      scrubbedAdapters.push(
+        scrubManagedMcpAdapterOrThrow(sandboxName, sandbox, entry, options.agentDefinition),
+      );
     }
     for (const entry of entries) {
       // The same-name replacement journal fingerprints this source row before
@@ -173,6 +209,7 @@ export async function prepareMcpBridgesForRebuild(
     if (removedPolicies.length > 0) {
       try {
         await restoreExistingMcpBridgeRuntime(sandboxName, removedPolicies, {
+          agentDefinition: options.agentDefinition,
           lifecyclePhase: "teardown-rollback",
         });
         runtimeRestored = true;
@@ -184,7 +221,12 @@ export async function prepareMcpBridgesForRebuild(
     }
     if (!runtimeRestored) {
       rollbackFailures.push(
-        ...rollbackScrubbedMcpAdapters(sandboxName, sandbox, scrubbedAdapters),
+        ...rollbackScrubbedMcpAdapters(
+          sandboxName,
+          sandbox,
+          scrubbedAdapters,
+          options.agentDefinition,
+        ),
       );
     }
     const detail = error instanceof Error ? error.message : String(error);
@@ -205,10 +247,16 @@ export async function reattachMcpProvidersAfterRebuildAbort(
   sandboxName: string,
   entries: readonly McpBridgeEntry[],
   scrubbedAdapterEntries: readonly McpScrubbedAdapterEntry[] = [],
+  options: McpRebuildAgentOptions = {},
 ): Promise<void> {
   if (entries.length === 0 && scrubbedAdapterEntries.length === 0) return;
-  await ensureSandboxGatewaySelected(sandboxName);
   const sandbox = getSandboxOrThrow(sandboxName);
+  assertEntriesMatchPinnedAgent(
+    sandbox,
+    [...entries, ...scrubbedAdapterEntries],
+    options.agentDefinition,
+  );
+  await ensureSandboxGatewaySelected(sandboxName);
   assertMcpAdapterTeardownRuntimeCapabilities(sandboxName, sandbox, [
     ...entries,
     ...scrubbedAdapterEntries,
@@ -219,6 +267,7 @@ export async function reattachMcpProvidersAfterRebuildAbort(
   if (entries.length > 0) {
     try {
       await restoreExistingMcpBridgeRuntime(sandboxName, entries, {
+        agentDefinition: options.agentDefinition,
         lifecyclePhase: "teardown-rollback",
       });
       runtimeRestored = true;
@@ -227,7 +276,14 @@ export async function reattachMcpProvidersAfterRebuildAbort(
     }
   }
   if (!runtimeRestored) {
-    failures.push(...rollbackScrubbedMcpAdapters(sandboxName, sandbox, scrubbedAdapterEntries));
+    failures.push(
+      ...rollbackScrubbedMcpAdapters(
+        sandboxName,
+        sandbox,
+        scrubbedAdapterEntries,
+        options.agentDefinition,
+      ),
+    );
   }
   if (failures.length > 0) {
     throw new McpBridgeError(failures.join("; "));
@@ -237,14 +293,19 @@ export async function reattachMcpProvidersAfterRebuildAbort(
 export async function restoreMcpBridgesAfterRebuild(
   sandboxName: string,
   entries: readonly McpBridgeEntry[],
+  options: McpRebuildAgentOptions = {},
 ): Promise<void> {
   if (entries.length === 0) return;
   for (const entry of entries) assertAuthenticatedBridgeEntry(entry);
+  const sandbox = getSandboxOrThrow(sandboxName);
+  assertEntriesMatchPinnedAgent(sandbox, entries, options.agentDefinition);
   const bridges = Object.fromEntries(
     entries.map((entry) => [entry.server, cloneMcpBridgeEntry(entry)]),
   );
   // Persist the recovery contract before touching the gateway. If refresh
   // fails, `mcp restart` remains retryable after the operator fixes the cause.
   setBridgeState(sandboxName, bridges);
-  await restoreExistingMcpBridgeRuntime(sandboxName, entries);
+  await restoreExistingMcpBridgeRuntime(sandboxName, entries, {
+    agentDefinition: options.agentDefinition,
+  });
 }

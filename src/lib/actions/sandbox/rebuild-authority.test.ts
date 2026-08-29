@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -12,10 +14,12 @@ vi.mock("../../onboard/gateway-teardown-authority", async (importOriginal) => ({
   resolveGatewayRebuildAuthority: mocks.resolveGatewayRebuildAuthority,
 }));
 
+import { REPOSITORY_ROOT } from "../../core/repository-root";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
 } from "../../harness/package-identity";
+import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
 import type { CheckpointSandboxRecreateTransactionV2 } from "../../state/onboard-checkpoint-types";
 import type { Session } from "../../state/onboard-session";
@@ -58,6 +62,26 @@ const GATEWAY_AUTHORITY: CheckpointGatewayAuthority = {
   requiredCapabilities: [],
 };
 
+function pinnedAgentAuthority(
+  recordedAgent: string | null,
+  harnessPackage: HarnessPackageIdentity | null,
+  harnessPackageMigration: HarnessPackageMigration | null = null,
+): ResolvedSandboxAgent {
+  const effectiveAgentId = recordedAgent ?? "openclaw";
+  return {
+    recordedAgent,
+    effectiveAgentId,
+    definition: {
+      name: effectiveAgentId,
+      packageRoot: `/pinned/${effectiveAgentId}`,
+      runtime: { kind: "terminal" },
+      forward_ports: [],
+    } as unknown as ResolvedSandboxAgent["definition"],
+    harnessPackage,
+    harnessPackageMigration,
+  };
+}
+
 function buildOptions(
   overrides: Partial<RebuildRecreateOnboardOpts> = {},
 ): RebuildRecreateOnboardOpts {
@@ -93,17 +117,13 @@ function buildOptions(
 }
 
 describe("rebuild package authority selection", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it.each([null, "hermes", "langchain-deepagents-code"])(
     "rejects standard agent %s without package authority",
-    (rebuildAgent) => {
+    (recordedAgent) => {
       expect(() =>
         buildRebuildRecreateOnboardOpts({
-          sb: { dashboardPort: 18789 },
-          rebuildAgent,
+          sb: { agent: recordedAgent, dashboardPort: 18789 },
+          agentAuthority: pinnedAgentAuthority(recordedAgent, null),
           storedFromDockerfile: null,
           autoYes: true,
           usageNoticeAccepted: true,
@@ -112,29 +132,57 @@ describe("rebuild package authority selection", () => {
     },
   );
 
-  it("keeps a separately qualified repository agent on explicit null authority", () => {
-    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "1");
+  it.each([
+    ["NemoCUA", "nemocua", { NEMOCLAW_CUA_ENABLED: "1" }],
+    [
+      "Pi",
+      "pi",
+      {
+        NEMOCLAW_CANDIDATE_AGENTS: "1",
+        NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT: path.join(
+          REPOSITORY_ROOT,
+          "ci/pi-agent-qualification-v1-linux-amd64.json",
+        ),
+      },
+    ],
+  ] as const)(
+    "carries the repository-qualified %s definition with explicit null package authority",
+    (_label, agent, env) => {
+      const agentAuthority = resolveSandboxAgent({ agent }, { env });
 
-    const options = buildRebuildRecreateOnboardOpts({
-      sb: { dashboardPort: 18789 },
-      rebuildAgent: "nemocua",
-      storedFromDockerfile: null,
-      autoYes: true,
-      usageNoticeAccepted: true,
-    });
+      const options = buildRebuildRecreateOnboardOpts({
+        sb: { agent, dashboardPort: 18789 },
+        agentAuthority,
+        storedFromDockerfile: null,
+        autoYes: true,
+        usageNoticeAccepted: true,
+      });
 
-    expect(options.harnessPackage).toBeNull();
-    expect(options.harnessPackageMigration).toBeNull();
-  });
+      expect(agentAuthority.definition).toMatchObject({
+        name: agent,
+        packageRoot: REPOSITORY_ROOT,
+        manifestPath: path.join(REPOSITORY_ROOT, "agents", agent, "manifest.yaml"),
+        runtime: { kind: "terminal" },
+      });
+      expect(Object.isFrozen(agentAuthority.definition)).toBe(true);
+      expect(options).toMatchObject({
+        agent,
+        controlUiPort: null,
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      });
+    },
+  );
 
   it("carries the exact installed identity and owner migration into recreate options", () => {
     const options = buildRebuildRecreateOnboardOpts({
       sb: {
+        agent: "hermes",
         dashboardPort: 18789,
         harnessPackage: PACKAGE,
         harnessPackageMigration: MIGRATION,
       },
-      rebuildAgent: "hermes",
+      agentAuthority: pinnedAgentAuthority("hermes", PACKAGE, MIGRATION),
       storedFromDockerfile: null,
       autoYes: true,
       usageNoticeAccepted: true,

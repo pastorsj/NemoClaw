@@ -3,7 +3,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import type { McpBridgeEntry } from "../../state/registry";
 
 const mocks = vi.hoisted(() => ({
@@ -226,6 +226,40 @@ describe("OpenClaw MCP adapter registration", () => {
       "Bearer openshell:resolve:env:v12_GITHUB_TOKEN",
     );
   });
+
+  it("derives the mcporter project root from the pinned definition at dispatch", () => {
+    const entry: McpBridgeEntry = {
+      ...baseEntry,
+      agent: "openclaw",
+      adapter: "mcporter",
+    };
+    const agentDefinition = {
+      name: "openclaw",
+      configPaths: { dir: "/sandbox/.installed-openclaw" },
+      mcpCapability: { support: "bridge", adapter: "mcporter" },
+    } as AgentDefinition;
+    mocks.executeSandboxCommand.mockImplementation((_sandbox, command: string) =>
+      command === "command -v mcporter"
+        ? { status: 0, stdout: "/usr/bin/mcporter\n", stderr: "" }
+        : command.includes("config' 'add")
+          ? commandSuccess
+          : registered,
+    );
+
+    expect(() =>
+      registerAgentAdapter("alpha", "mcporter", entry, {}, {}, agentDefinition),
+    ).not.toThrow();
+
+    const adapterCommands = mocks.executeSandboxCommand.mock.calls
+      .map(([, command]) => String(command))
+      .filter((command) => command !== "command -v mcporter");
+    expect(adapterCommands).toHaveLength(2);
+    expect(
+      adapterCommands.every((command) =>
+        command.includes("/sandbox/.installed-openclaw/workspace"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("Deep Agents MCP adapter credential revision", () => {
@@ -297,35 +331,38 @@ describe("Hermes MCP adapter credential revision", () => {
   });
 });
 
-describe.each(reconciliationCases)("$name MCP credential revision reconciliation", (adapterCase) => {
-  beforeEach(() => {
-    mocks.executeSandboxCommand.mockReset();
-    mocks.runOpenshellProviderCommand.mockReset();
-    mocks.getSandbox.mockReset();
-    mocks.observeMcpCredentialRevision.mockReset();
-    mocks.observeMcpCredentialRevision.mockReturnValue("v12");
-  });
+describe.each(reconciliationCases)(
+  "$name MCP credential revision reconciliation",
+  (adapterCase) => {
+    beforeEach(() => {
+      mocks.executeSandboxCommand.mockReset();
+      mocks.runOpenshellProviderCommand.mockReset();
+      mocks.getSandbox.mockReset();
+      mocks.observeMcpCredentialRevision.mockReset();
+      mocks.observeMcpCredentialRevision.mockReturnValue("v12");
+    });
 
-  it("reconciles registration to a later stable revision", () => {
-    mocks.observeMcpCredentialRevision.mockReturnValueOnce("v11");
-    adapterCase.arrange();
+    it("reconciles registration to a later stable revision", () => {
+      mocks.observeMcpCredentialRevision.mockReturnValueOnce("v11");
+      adapterCase.arrange();
 
-    expect(
-      registerAgentAdapterAtCurrentCredentialRevision(
-        "alpha",
-        adapterCase.adapter,
-        adapterCase.entry,
-        { GITHUB_TOKEN: "host-only-secret" },
-        "v11",
-      ),
-    ).toBe("v12");
+      expect(
+        registerAgentAdapterAtCurrentCredentialRevision(
+          "alpha",
+          adapterCase.adapter,
+          adapterCase.entry,
+          { GITHUB_TOKEN: "host-only-secret" },
+          "v11",
+        ),
+      ).toBe("v12");
 
-    const mutationCalls = adapterCase.mutationCalls();
-    expect(mutationCalls).toContain("openshell:resolve:env:v11_GITHUB_TOKEN");
-    expect(mutationCalls).toContain("openshell:resolve:env:v12_GITHUB_TOKEN");
-    expect(mutationCalls).not.toContain("host-only-secret");
-  });
-});
+      const mutationCalls = adapterCase.mutationCalls();
+      expect(mutationCalls).toContain("openshell:resolve:env:v11_GITHUB_TOKEN");
+      expect(mutationCalls).toContain("openshell:resolve:env:v12_GITHUB_TOKEN");
+      expect(mutationCalls).not.toContain("host-only-secret");
+    });
+  },
+);
 
 describe("MCP adapter credential revision reconciliation failures", () => {
   beforeEach(() => {

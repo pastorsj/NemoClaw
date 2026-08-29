@@ -23,6 +23,16 @@ function entry(overrides: Record<string, unknown> = {}) {
   return { name: "alpha", provider: null, model: null, nimContainer: null, ...overrides };
 }
 
+function makePackageIdentity(agentId: string) {
+  return Object.freeze({
+    kind: "agent-runtime" as const,
+    id: agentId,
+    packageVersion: "1.0.0",
+    contractVersion: 1 as const,
+    contentDigest: "a".repeat(64),
+  });
+}
+
 function prepareRebuildResumeConfig(
   sandboxName: string,
   sandboxEntry: Record<string, unknown>,
@@ -31,6 +41,8 @@ function prepareRebuildResumeConfig(
   bail: (message: string, code?: number) => never,
 ) {
   const effectiveAgentId = recordedAgent ?? "openclaw";
+  const usesRepositoryAuthority = effectiveAgentId === "pi" || effectiveAgentId === "nemocua";
+  const harnessPackage = usesRepositoryAuthority ? null : makePackageIdentity(effectiveAgentId);
   const authority = Object.freeze({
     recordedAgent,
     effectiveAgentId,
@@ -38,12 +50,12 @@ function prepareRebuildResumeConfig(
       name: effectiveAgentId,
       packageRoot: `/installed/${effectiveAgentId}`,
     }),
-    harnessPackage: null,
+    harnessPackage,
     harnessPackageMigration: null,
   });
   return preparePinnedRebuildResumeConfig(
     sandboxName,
-    { ...sandboxEntry, agent: recordedAgent },
+    { ...sandboxEntry, agent: recordedAgent, harnessPackage, harnessPackageMigration: null },
     authority,
     log,
     bail,
@@ -193,18 +205,25 @@ describe("getRebuildEndpointFromRegistry", () => {
 describe("prepareRebuildResumeConfig", () => {
   it("carries the same pinned definition and package root through resume configuration", () => {
     vi.spyOn(onboardSession, "loadSession").mockReturnValue(null);
+    const harnessPackage = makePackageIdentity("openclaw");
     const definition = Object.freeze({ name: "openclaw", packageRoot: "/installed/openclaw" });
     const authority = Object.freeze({
       recordedAgent: null,
       effectiveAgentId: "openclaw",
       definition,
-      harnessPackage: null,
+      harnessPackage,
       harnessPackageMigration: null,
     });
 
     const config = preparePinnedRebuildResumeConfig(
       "alpha",
-      entry({ agent: null, provider: "ollama-local", model: "test-model" }),
+      entry({
+        agent: null,
+        harnessPackage,
+        harnessPackageMigration: null,
+        provider: "ollama-local",
+        model: "test-model",
+      }),
       authority,
       noopLog,
       throwingBail,
@@ -294,10 +313,38 @@ describe("prepareRebuildResumeConfig", () => {
   );
 
   it("rejects a pinned definition whose name differs from the recorded agent", () => {
+    const harnessPackage = makePackageIdentity("hermes");
     const authority = Object.freeze({
       recordedAgent: "hermes",
       effectiveAgentId: "hermes",
       definition: Object.freeze({ name: "openclaw", packageRoot: "/installed/hermes" }),
+      harnessPackage,
+      harnessPackageMigration: null,
+    });
+
+    expect(() =>
+      preparePinnedRebuildResumeConfig(
+        "alpha",
+        entry({
+          agent: "hermes",
+          harnessPackage,
+          harnessPackageMigration: null,
+          provider: "ollama-local",
+          model: "test-model",
+        }),
+        authority,
+        noopLog,
+        throwingBail,
+      ),
+    ).toThrow("Pinned rebuild agent authority does not match the sandbox registry entry");
+  });
+
+  it("rejects package-free authority for a standard agent", () => {
+    const definition = Object.freeze({ name: "openclaw", packageRoot: "/installed/openclaw" });
+    const authority = Object.freeze({
+      recordedAgent: null,
+      effectiveAgentId: "openclaw",
+      definition,
       harnessPackage: null,
       harnessPackageMigration: null,
     });
@@ -305,7 +352,7 @@ describe("prepareRebuildResumeConfig", () => {
     expect(() =>
       preparePinnedRebuildResumeConfig(
         "alpha",
-        entry({ agent: "hermes", provider: "ollama-local", model: "test-model" }),
+        entry({ agent: null, provider: "ollama-local", model: "test-model" }),
         authority,
         noopLog,
         throwingBail,

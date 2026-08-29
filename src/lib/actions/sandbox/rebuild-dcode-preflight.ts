@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 
 import { dockerImageInspectFormat, dockerRmi } from "../../adapters/docker";
 import type { TrustedRemoteBaseImageOverride } from "../../agent/base-image";
-import { loadAgent } from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
 import {
   ensureAgentBaseImage,
   getAgentSandboxBaseImageEnvVar,
@@ -19,6 +19,7 @@ import type { WebSearchConfig } from "../../inference/web-search";
 import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
 import { isSandboxBaseImageRefreshRequested } from "../../onboard/base-image-resolution-flow";
 import { resolveSandboxGatewayName } from "../../onboard/gateway-binding";
+import { resolveSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   getResumeSandboxGpuOverrides,
   resolveSandboxGpuConfig,
@@ -39,6 +40,10 @@ import {
   resolveDcodeRebuildTarget,
 } from "./rebuild-dcode-target";
 import type { RebuildAgentBaseImageOptions, RebuildSandboxEntry } from "./rebuild-flow-helpers";
+import {
+  checkPinnedAgentAuthority,
+  rebuildAgentAuthoritiesMatch,
+} from "./rebuild/authority";
 import {
   disposePreparedDcodeRebuildImage,
   type PreparedDcodeRebuildImage,
@@ -214,6 +219,50 @@ function resolveTarget(
   }
 }
 
+function requireDcodeAgentAuthority(
+  entry: RebuildSandboxEntry,
+  resumeConfig: RebuildResumeConfig,
+  bail: DcodeRebuildPreflightBail,
+): AgentDefinition {
+  const authority = resumeConfig.agentAuthority;
+  // DCode is package-managed. Qualified Pi/NemoCUA rebuilds never enter this
+  // helper and retain their explicit null-package repository authority.
+  if (
+    resumeConfig.agent !== DCODE_AGENT_NAME ||
+    authority.recordedAgent !== DCODE_AGENT_NAME ||
+    authority.effectiveAgentId !== DCODE_AGENT_NAME ||
+    authority.definition.name !== DCODE_AGENT_NAME ||
+    checkPinnedAgentAuthority(entry, authority) !== null
+  ) {
+    fail("the pinned DCode agent authority does not match the recorded sandbox", bail);
+  }
+
+  let currentAuthority: ReturnType<typeof resolveSandboxAgent>;
+  try {
+    currentAuthority = resolveSandboxAgent(entry);
+  } catch (error) {
+    fail(
+      `the pinned DCode package object could not be revalidated: ${error instanceof Error ? error.message : String(error)}`,
+      bail,
+      "The pinned DCode package object could not be revalidated",
+    );
+  }
+  let authorityChanged: boolean;
+  try {
+    authorityChanged = !rebuildAgentAuthoritiesMatch(currentAuthority, authority);
+  } catch (error) {
+    fail(
+      `the pinned DCode definition could not be compared with its package object: ${error instanceof Error ? error.message : String(error)}`,
+      bail,
+      "The pinned DCode definition could not be revalidated",
+    );
+  }
+  if (authorityChanged) {
+    fail("the pinned DCode definition or package object changed during preflight", bail);
+  }
+  return authority.definition;
+}
+
 function requireInferenceRoute(
   sandboxName: string,
   target: ResolvedDcodeRebuildTarget,
@@ -252,6 +301,7 @@ function requireCurrentTarget(
   if (!currentEntry || !isDeepStrictEqual(currentEntry, entry)) {
     fail("the recorded sandbox target changed during preflight", bail);
   }
+  requireDcodeAgentAuthority(currentEntry, resumeConfig, bail);
   const currentTarget = resolveTarget(currentEntry, resumeConfig, bail, gatewayPort);
   if (!isDeepStrictEqual(currentTarget, target)) {
     fail("the resolved DCode target changed during preflight", bail);
@@ -310,7 +360,7 @@ function recordedDcodeOverrideReference(
 }
 
 function reuseRecordedDcodeBaseImage(
-  agent: ReturnType<typeof loadAgent>,
+  agent: AgentDefinition,
   options: RebuildAgentBaseImageOptions,
   bail: DcodeRebuildPreflightBail,
 ): ReturnType<typeof ensureAgentBaseImage> | null {
@@ -356,10 +406,10 @@ function reuseRecordedDcodeBaseImage(
 }
 
 function resolvePinnedDcodeBaseImage(
+  agent: AgentDefinition,
   bail: DcodeRebuildPreflightBail,
   options: RebuildAgentBaseImageOptions = {},
 ): PinnedDcodeBaseImage {
-  const agent = loadAgent(DCODE_AGENT_NAME);
   if (!agent.dockerfileBasePath) {
     fail("DCode is missing its sandbox base Dockerfile", bail);
   }
@@ -466,10 +516,11 @@ function resolvePinnedDcodeBaseImage(
 }
 
 async function withPinnedBaseImage<T>(
+  agent: AgentDefinition,
   pinned: PinnedDcodeBaseImage,
   action: () => Promise<T>,
 ): Promise<T> {
-  const envName = "NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF";
+  const envName = getAgentSandboxBaseImageEnvVar(agent.name);
   const hadPrevious = Object.hasOwn(process.env, envName);
   const previous = process.env[envName];
   const restoreTrustedLocalOverride = pinned.trustedLocalOverride
@@ -518,6 +569,7 @@ export async function prepareDcodeReplacementBeforeMutation(
   let pinnedBase: PinnedDcodeBaseImage | null = null;
   let transferred = false;
   try {
+    const agentDefinition = requireDcodeAgentAuthority(entry, resumeConfig, bail);
     if (!sandboxState.hasPositiveManagedImageEvidence(entry)) {
       fail(
         "the registry has no NemoClaw-managed image fingerprint; custom and legacy images cannot be safely prebuilt and recreated automatically",
@@ -528,14 +580,18 @@ export async function prepareDcodeReplacementBeforeMutation(
     const session = loadMatchingDcodeSession(sandboxName);
     const target = resolveTarget(entry, resumeConfig, bail, gatewayPort);
     if (!skipLiveRoute) requireInferenceRoute(sandboxName, target, bail);
+    // Re-read the registry and retained package before any Docker/base-image
+    // work. The later copy remains the post-build fence before we retain the
+    // prepared replacement.
+    requireCurrentTarget(sandboxName, entry, target, resumeConfig, bail, gatewayPort);
 
-    pinnedBase = resolvePinnedDcodeBaseImage(bail, input.baseImageOptions);
+    pinnedBase = resolvePinnedDcodeBaseImage(agentDefinition, bail, input.baseImageOptions);
     const sandboxGpuConfig = getRecordedGpuConfig(sandboxName, entry, session);
     if (sandboxGpuConfig.errors.length > 0) fail(sandboxGpuConfig.errors.join(" "), bail);
     const pinnedBaseForPreparation = pinnedBase;
-    const imageResult = await withPinnedBaseImage(pinnedBaseForPreparation, () =>
+    const imageResult = await withPinnedBaseImage(agentDefinition, pinnedBaseForPreparation, () =>
       prepareManagedDcodeRebuildImage({
-        agent: loadAgent(DCODE_AGENT_NAME),
+        agent: agentDefinition,
         provider: target.provider,
         model: target.model,
         preferredInferenceApi: target.preferredInferenceApi,

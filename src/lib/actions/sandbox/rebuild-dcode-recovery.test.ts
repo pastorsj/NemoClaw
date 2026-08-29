@@ -13,6 +13,15 @@ import {
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
 import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 
+function expectPinnedDcodeAgentOptions() {
+  return expect.objectContaining({
+    agentDefinition: expect.objectContaining({
+      name: "langchain-deepagents-code",
+      packageRoot: expect.stringContaining("/harnesses/objects/sha256/"),
+    }),
+  });
+}
+
 describe("rebuildSandbox DCode flow: recovery", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
@@ -126,7 +135,11 @@ describe("rebuildSandbox DCode flow: recovery", () => {
       expect.objectContaining({ observabilityRequestedExplicitly: false }),
     );
     expect(harness.session.observabilityRequestedExplicitly).toBe(false);
-    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith("alpha", "observability-otlp-local");
+    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith(
+      "alpha",
+      "observability-otlp-local",
+      expect.anything(),
+    );
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith("alpha", {
       agentVersion: "0.2.0",
       policies: ["npm"],
@@ -157,7 +170,11 @@ describe("rebuildSandbox DCode flow: recovery", () => {
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "observability-otlp-local");
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "observability-otlp-local",
+      expectPinnedDcodeAgentOptions(),
+    );
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith(
       "alpha",
       expect.objectContaining({
@@ -240,8 +257,18 @@ describe("rebuildSandbox DCode flow: recovery", () => {
         ([sandboxName, presetName]) =>
           sandboxName === "alpha" && presetName === "observability-otlp-local",
       );
-      expect(observabilityApplyCalls).toEqual(expectedObservabilityApplyCalls);
-      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+      expect(observabilityApplyCalls).toEqual(
+        expectedObservabilityApplyCalls.map(([sandboxName, presetName]) => [
+          sandboxName,
+          presetName,
+          expectPinnedDcodeAgentOptions(),
+        ]),
+      );
+      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith(
+        "alpha",
+        [mcpEntry],
+        expectPinnedDcodeAgentOptions(),
+      );
       expect(harness.registryUpdateSpy).toHaveBeenCalledWith(
         "alpha",
         expect.objectContaining({

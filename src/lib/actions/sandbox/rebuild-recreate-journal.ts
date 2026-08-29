@@ -45,10 +45,10 @@ import * as registry from "../../state/registry";
 import {
   rebuildPackageAuthorityMatches,
   type RebuildPackageAuthority,
-  type RebuildRecreateOnboardOpts,
-} from "./rebuild-gpu-opt-out";
+} from "./rebuild/authority";
+import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 
-export type { RebuildPackageAuthority } from "./rebuild-gpu-opt-out";
+export type { RebuildPackageAuthority } from "./rebuild/authority";
 
 export type RebuildRecreateJournalTarget = SandboxRecreateTarget;
 

@@ -71,8 +71,25 @@ vi.mock("./rebuild-mcp-phase", () => ({
   reattachMcpAfterDeleteFailure: mocks.reattachMcpAfterDeleteFailure,
 }));
 
-import { runRebuildDestroyPhase, waitForRebuildDeleteAbsence } from "./rebuild-destroy-phase";
+import { loadAgent } from "../../agent/defs";
+import {
+  runRebuildDestroyPhase as runProductionRebuildDestroyPhase,
+  type RebuildDestroyPhaseInput,
+  waitForRebuildDeleteAbsence,
+} from "./rebuild-destroy-phase";
 import type { RebuildRecreateJournal } from "./rebuild-recreate-journal";
+
+type TestRebuildDestroyPhaseInput = Omit<RebuildDestroyPhaseInput, "agentDefinition"> &
+  Partial<Pick<RebuildDestroyPhaseInput, "agentDefinition">>;
+
+const testAgentDefinition = loadAgent("openclaw");
+
+function runRebuildDestroyPhase(input: TestRebuildDestroyPhaseInput) {
+  return runProductionRebuildDestroyPhase({
+    ...input,
+    agentDefinition: input.agentDefinition ?? testAgentDefinition,
+  });
+}
 
 function stubRecreateJournal(): RebuildRecreateJournal {
   return {
@@ -263,6 +280,7 @@ describe("rebuild destroy phase", () => {
       true,
       expect.any(Function),
       expect.any(Function),
+      testAgentDefinition,
     );
   });
 
@@ -360,6 +378,7 @@ describe("rebuild destroy phase", () => {
       "alpha",
       [{ server: "github" }],
       [],
+      testAgentDefinition,
     );
     expect(mocks.removeSandboxRegistryEntryWithReceipt).not.toHaveBeenCalled();
     expect(mocks.stopNimContainer).not.toHaveBeenCalled();
@@ -443,7 +462,12 @@ describe("rebuild destroy phase", () => {
     expect(revalidateBeforeDelete.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.runOpenshell.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
-    expect(mocks.reattachMcpAfterDeleteFailure).toHaveBeenCalledWith("alpha", [], []);
+    expect(mocks.reattachMcpAfterDeleteFailure).toHaveBeenCalledWith(
+      "alpha",
+      [],
+      [],
+      testAgentDefinition,
+    );
     expect(mocks.removeSandboxRegistryEntryWithReceipt).not.toHaveBeenCalled();
     expect(onDeleted).not.toHaveBeenCalled();
     expect(mocks.stopNimContainer).not.toHaveBeenCalled();
@@ -1002,6 +1026,7 @@ describe("rebuild destroy phase", () => {
       "alpha",
       [{ providerName: "nemoclaw-mcp-alpha-github" }],
       [{ server: "github" }],
+      testAgentDefinition,
     );
     expect(relockShieldsIfNeeded).toHaveBeenCalledWith(true);
     expect(mocks.runOpenshell).not.toHaveBeenCalledWith(

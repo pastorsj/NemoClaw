@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentMcpAdapter } from "../../src/lib/agent/defs";
+import { loadAgent, type AgentMcpAdapter } from "../../src/lib/agent/defs";
 import type { McpBridgeEntry } from "../../src/lib/state/registry";
 import { findObservedCredentialRevision } from "../helpers/mcp-provider-revision";
 import { mockManagedEndpointlessProviderProfileRun } from "../helpers/onboard-script-mocks.cjs";
@@ -102,6 +102,8 @@ import { runRebuildDestroyPhase } from "../../src/lib/actions/sandbox/rebuild-de
 import type { RebuildRecreateJournal } from "../../src/lib/actions/sandbox/rebuild-recreate-journal";
 import * as registry from "../../src/lib/state/registry";
 
+const openClawAgentDefinition = loadAgent("openclaw");
+
 function stubRecreateJournal(): RebuildRecreateJournal {
   return {
     id: "journal-1",
@@ -124,6 +126,22 @@ function stubRecreateJournal(): RebuildRecreateJournal {
     observeSourceForDelete: vi.fn(() => "source" as const),
     confirmDeleted: vi.fn(),
     completeAcceptedTarget: vi.fn(),
+  };
+}
+
+function stubRebuildDestroyPhaseInput() {
+  return {
+    sandboxName: "alpha",
+    agentDefinition: openClawAgentDefinition,
+    staleRecovery: false,
+    recreateJournal: stubRecreateJournal(),
+    backupManifest: null,
+    force: true,
+    log: vi.fn(),
+    bail: vi.fn((message: string): never => {
+      throw new Error(message);
+    }),
+    relockShieldsIfNeeded: vi.fn(() => true),
   };
 }
 
@@ -1025,17 +1043,8 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     const onDeleted = vi.fn();
 
     const result = await runRebuildDestroyPhase({
-      sandboxName: "alpha",
+      ...stubRebuildDestroyPhaseInput(),
       sandboxEntry: before ?? { name: "alpha", agent: "openclaw" },
-      staleRecovery: false,
-      recreateJournal: stubRecreateJournal(),
-      backupManifest: null,
-      force: true,
-      log: vi.fn(),
-      bail: vi.fn((message: string): never => {
-        throw new Error(message);
-      }),
-      relockShieldsIfNeeded: vi.fn(() => true),
       onDeleted,
     });
 
@@ -1102,17 +1111,8 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
 
     await expect(
       runRebuildDestroyPhase({
-        sandboxName: "alpha",
+        ...stubRebuildDestroyPhaseInput(),
         sandboxEntry: beforeRegistry ?? { name: "alpha", agent: "openclaw" },
-        staleRecovery: false,
-        recreateJournal: stubRecreateJournal(),
-        backupManifest: null,
-        force: true,
-        log: vi.fn(),
-        bail: vi.fn((message: string): never => {
-          throw new Error(message);
-        }),
-        relockShieldsIfNeeded: vi.fn(() => true),
         onDeleted,
       }),
     ).rejects.toThrow("Failed to delete sandbox.");

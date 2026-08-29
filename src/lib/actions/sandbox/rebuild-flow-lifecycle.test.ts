@@ -13,6 +13,12 @@ import {
 import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { makePreparedRecoveryManifest } from "./rebuild-flow-test-fixtures";
 
+function expectPinnedAgentDefinition(agentName = "openclaw") {
+  return expect.objectContaining({
+    agentDefinition: expect.objectContaining({ name: agentName }),
+  });
+}
+
 describe("rebuildSandbox flow: lifecycle", () => {
   installRebuildFlowTestHooks();
 
@@ -94,7 +100,10 @@ describe("rebuildSandbox flow: lifecycle", () => {
       "alpha",
       expect.objectContaining({ captureStateFile: expect.any(Function) }),
     );
-    expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith("alpha");
+    expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      expectPinnedAgentDefinition(),
+    );
     expect(harness.prepareMcpBridgesForRebuildSpy.mock.invocationCallOrder[0]).toBeLessThan(
       harness.warnUnpreservedUserManagedFilesSpy.mock.invocationCallOrder[0],
     );
@@ -144,15 +153,35 @@ describe("rebuildSandbox flow: lifecycle", () => {
         validateBeforeMutation: expect.any(Function),
       }),
     );
-    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      [mcpEntry],
+      expectPinnedAgentDefinition(),
+    );
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
     expect(harness.errorSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
       "Preserving journaled source registry entry across sandbox recreation",
     );
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "npm");
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "bad");
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "throw");
-    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith("alpha", "mcp-bridge-github");
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "npm",
+      expectPinnedAgentDefinition(),
+    );
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "bad",
+      expectPinnedAgentDefinition(),
+    );
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "throw",
+      expectPinnedAgentDefinition(),
+    );
+    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith(
+      "alpha",
+      "mcp-bridge-github",
+      expect.anything(),
+    );
     expect(harness.registryUpdateSpy).toHaveBeenCalledWith("alpha", {
       agentVersion: "0.2.0",
       policies: ["npm", "bad", "throw"],
@@ -211,7 +240,10 @@ describe("rebuildSandbox flow: lifecycle", () => {
       harness.rebuildSandbox("alpha", ["--yes", "--verbose"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith("alpha");
+    expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      expectPinnedAgentDefinition(),
+    );
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
     expect(harness.onboardSpy).toHaveBeenCalledOnce();
     expect(harness.errorSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
@@ -441,7 +473,11 @@ network_policies:
       expect.objectContaining({ toolDisclosure: "direct" }),
     );
     expect(harness.session.toolDisclosure).toBe("direct");
-    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      [mcpEntry],
+      expectPinnedAgentDefinition(),
+    );
     harness.registryUpdateSpy.mock.calls.forEach(([, update]) => {
       expect(update).not.toHaveProperty("toolDisclosure");
     });
@@ -536,11 +572,18 @@ network_policies:
 
       expect(process.env[overrideEnvVar]).toBe("nemoclaw-hermes-sandbox-base-local:image-caller");
       expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
-      expect(harness.prepareMcpBridgesForAbsentSandboxRebuildSpy).toHaveBeenCalledWith("alpha");
+      expect(harness.prepareMcpBridgesForAbsentSandboxRebuildSpy).toHaveBeenCalledWith(
+        "alpha",
+        expectPinnedAgentDefinition(),
+      );
       expect(harness.prepareMcpBridgesForRebuildSpy).not.toHaveBeenCalled();
       expect(harness.warnUnpreservedUserManagedFilesSpy).not.toHaveBeenCalled();
       expect(harness.reattachMcpProvidersAfterRebuildAbortSpy).not.toHaveBeenCalled();
-      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith(
+        "alpha",
+        [mcpEntry],
+        expectPinnedAgentDefinition(),
+      );
       expect(disposeImageRef).toHaveBeenCalledOnce();
     } finally {
       restoreEnv();
@@ -627,7 +670,11 @@ network_policies:
       expect(harness.session.compatibleEndpointReasoningEffort).toBe("high");
       expect(process.env.NEMOCLAW_REASONING).toBe("false");
       expect(process.env.NEMOCLAW_REASONING_EFFORT).toBe("low");
-      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+      expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith(
+        "alpha",
+        [mcpEntry],
+        expectPinnedAgentDefinition(),
+      );
     } finally {
       restoreEnv();
     }

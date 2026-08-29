@@ -214,6 +214,7 @@ async function rebuildSandboxUnlocked(
       const preDeleteRecovery = revalidatePreparedRecoveryBeforeDelete(
         sandboxName,
         sandboxEntry,
+        targetConfig.agentAuthority,
         recoveryManifest,
         recoveryRegistrySnapshot,
         opts.allowLegacyManagedImageRecovery === true,
@@ -224,6 +225,8 @@ async function rebuildSandboxUnlocked(
 
       const backup = runRebuildBackupPhase({
         sandboxName,
+        backupRegistryEntry: sandboxEntry,
+        agentAuthority: targetConfig.agentAuthority,
         // The requested observability bit is replacement intent, not a
         // preflight mutation of the old registry row. Use a copy only for
         // target policy normalization; replacement registration commits it.
@@ -389,6 +392,7 @@ async function rebuildSandboxUnlocked(
       const mcpPreparation = await runRebuildDestroyPhase({
         sandboxName,
         sandboxEntry,
+        agentDefinition: targetConfig.agentAuthority.definition,
         staleRecovery,
         recreateJournal,
         backupManifest: backup.backupManifest,
@@ -432,6 +436,7 @@ async function rebuildSandboxUnlocked(
           const deleteEdgeRecovery = validatePreparedRecoveryAtDeleteEdge(
             sandboxName,
             sandboxEntry,
+            targetConfig.agentAuthority,
             recoveryManifest,
             recoveryRegistrySnapshot,
             opts.allowLegacyManagedImageRecovery === true,
@@ -531,7 +536,7 @@ async function rebuildSandboxUnlocked(
       const restore = () =>
         runRebuildRestorePhase({
           sandboxName,
-          targetAgentType: rebuildAgent || "openclaw",
+          agentDefinition: targetConfig.agentDefinition,
           targetImageIsCustom: Boolean(fromDockerfile),
           backupManifest: backup.backupManifest,
           policyPresets: targetPolicyPresets,
@@ -570,7 +575,7 @@ async function rebuildSandboxUnlocked(
       await runRebuildPostRestorePhase({
         sandboxName,
         sandboxEntry,
-        targetAgentName: rebuildAgent || "openclaw",
+        agentAuthority: targetConfig.agentAuthority,
         messagingPlan,
         backupManifest: backup.backupManifest,
         mcpEntries: mcpPreparation.entries,

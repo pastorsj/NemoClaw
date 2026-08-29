@@ -10,22 +10,39 @@ import type {
 } from "../../messaging/applier/types";
 import type { MessagingHookOutputMap } from "../../messaging/hooks";
 import type { SandboxMessagingPlan } from "../../messaging/manifest";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxEntry } from "../../state/registry";
+import { checkPinnedAgentAuthority } from "./rebuild/authority";
 import type { RebuildBail } from "./rebuild-credential-preflight";
 import { stageMessagingManifestPlanForRebuild } from "./rebuild-messaging-stage";
 
 export { stageMessagingManifestPlanForRebuild };
 
+function assertPinnedMessagingAgentAuthority(
+  sandboxEntry: SandboxEntry,
+  authority: ResolvedSandboxAgent,
+): void {
+  if (checkPinnedAgentAuthority(sandboxEntry, authority) !== null) {
+    throw new Error("Pinned rebuild agent authority does not match messaging registry state.");
+  }
+}
+
 /** Stage the manifest plan while preserving rebuild's fail-before-delete boundary. */
 export async function stageRebuildMessagingPlanOrBail(
   sandboxName: string,
   sandboxEntry: SandboxEntry,
-  rebuildAgent: string | null,
+  agentAuthority: ResolvedSandboxAgent,
   log: (message: string) => void,
   bail: RebuildBail,
 ): Promise<SandboxMessagingPlan | null> {
   try {
-    return await stageMessagingManifestPlanForRebuild(sandboxName, sandboxEntry, rebuildAgent, log);
+    assertPinnedMessagingAgentAuthority(sandboxEntry, agentAuthority);
+    return await stageMessagingManifestPlanForRebuild(
+      sandboxName,
+      sandboxEntry,
+      agentAuthority.definition,
+      log,
+    );
   } catch (err) {
     // Source boundary: persisted registry messaging plans and current channel
     // manifests are host-side inputs. If they drift or become invalid, rebuild

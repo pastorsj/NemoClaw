@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import {
   registerAgentAdapterAtCurrentCredentialRevision,
@@ -22,7 +22,9 @@ export type McpScrubbedAdapterEntry = McpBridgeEntry & {
 export function resolveManagedMcpAdapter(
   sandbox: SandboxEntry,
   entry: McpBridgeEntry,
+  agentDefinition?: AgentDefinition,
 ): AgentMcpAdapter {
+  if (agentDefinition) return getBridgeAdapter(getSandboxAgent(sandbox, agentDefinition));
   return isAgentMcpAdapter(entry.adapter)
     ? entry.adapter
     : getBridgeAdapter(getSandboxAgent(sandbox));
@@ -33,6 +35,7 @@ export function scrubManagedMcpAdapterOrThrow(
   sandboxName: string,
   sandbox: SandboxEntry,
   entry: McpBridgeEntry,
+  agentDefinition?: AgentDefinition,
 ): McpScrubbedAdapterEntry {
   const observation = observeMcpCredentialRevision(sandboxName, entry);
   if (observation === "absent" || observation === "canonical") {
@@ -41,11 +44,11 @@ export function scrubManagedMcpAdapterOrThrow(
     );
   }
   const credentialRevision: McpAttachedCredentialRevision = observation;
-  const adapter = resolveManagedMcpAdapter(sandbox, entry);
-  const removal = unregisterAgentAdapter(sandboxName, adapter, entry, {
-    envValues: {},
-    teardown: true,
-  });
+  const adapter = resolveManagedMcpAdapter(sandbox, entry, agentDefinition);
+  const removalOptions = { envValues: {}, teardown: true };
+  const removal = agentDefinition
+    ? unregisterAgentAdapter(sandboxName, adapter, entry, removalOptions, agentDefinition)
+    : unregisterAgentAdapter(sandboxName, adapter, entry, removalOptions);
   if (removal === "unowned") {
     throw new McpBridgeError(
       `Could not prove removal of the exact managed adapter entry for MCP server '${entry.server}'.`,
@@ -62,6 +65,7 @@ export function rollbackScrubbedMcpAdapters(
   sandboxName: string,
   sandbox: SandboxEntry,
   entries: readonly McpScrubbedAdapterEntry[],
+  agentDefinition?: AgentDefinition,
 ): string[] {
   const failures: string[] = [];
   for (const entry of entries) {
@@ -80,17 +84,28 @@ export function rollbackScrubbedMcpAdapters(
       continue;
     }
     try {
-      registerAgentAdapterAtCurrentCredentialRevision(
-        sandboxName,
-        resolveManagedMcpAdapter(sandbox, entry),
-        entry,
-        {},
-        credentialRevision,
-        {
-          replaceExisting: true,
-          teardownRollback: true,
-        },
-      );
+      const adapter = resolveManagedMcpAdapter(sandbox, entry, agentDefinition);
+      const registrationOptions = { replaceExisting: true, teardownRollback: true };
+      if (agentDefinition) {
+        registerAgentAdapterAtCurrentCredentialRevision(
+          sandboxName,
+          adapter,
+          entry,
+          {},
+          credentialRevision,
+          registrationOptions,
+          agentDefinition,
+        );
+      } else {
+        registerAgentAdapterAtCurrentCredentialRevision(
+          sandboxName,
+          adapter,
+          entry,
+          {},
+          credentialRevision,
+          registrationOptions,
+        );
+      }
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
     }

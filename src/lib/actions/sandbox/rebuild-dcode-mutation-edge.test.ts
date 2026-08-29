@@ -12,6 +12,15 @@ import {
   installRebuildFlowTestHooks,
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
 
+function expectPinnedDcodeAgentOptions() {
+  return expect.objectContaining({
+    agentDefinition: expect.objectContaining({
+      name: "langchain-deepagents-code",
+      packageRoot: expect.stringContaining("/harnesses/objects/sha256/"),
+    }),
+  });
+}
+
 describe("rebuildSandbox DCode flow: mutation edge", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
 
@@ -90,7 +99,11 @@ describe("rebuildSandbox DCode flow: mutation edge", () => {
     expect(harness.disposePreparedDcodeRebuildImageSpy).toHaveBeenCalledWith(
       harness.preparedDcodeBuildContext,
     );
-    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith("alpha", [mcpEntry]);
+    expect(harness.restoreMcpBridgesAfterRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      [mcpEntry],
+      expectPinnedDcodeAgentOptions(),
+    );
   });
   it("rolls back managed MCP mutation when DCode inputs drift during MCP preparation (#6195)", async () => {
     const detached = { server: "search", providerName: "mcp-search" };
@@ -112,11 +125,15 @@ describe("rebuildSandbox DCode flow: mutation edge", () => {
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).rejects.toThrow("the prepared DCode replacement inputs changed before deletion");
 
-    expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith("alpha");
+    expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      expectPinnedDcodeAgentOptions(),
+    );
     expect(harness.reattachMcpProvidersAfterRebuildAbortSpy).toHaveBeenCalledWith(
       "alpha",
       [detached],
       [scrubbed],
+      expectPinnedDcodeAgentOptions(),
     );
     expectNoSandboxDelete(harness.runOpenshellSpy);
     expect(harness.onboardSpy).not.toHaveBeenCalled();

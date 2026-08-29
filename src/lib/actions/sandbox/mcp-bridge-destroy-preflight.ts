@@ -101,9 +101,10 @@ export async function discardSafeIncompleteMcpAdds(
   return getSandboxOrThrow(sandboxName);
 }
 
-export function assertMcpDestroySnapshotCurrent(
+export function assertMcpBridgeSnapshotCurrent(
   sandboxName: string,
   entries: readonly McpBridgeEntry[],
+  changedMessage: string,
 ): SandboxEntry {
   const sandbox = getSandboxOrThrow(sandboxName);
   const current = bridgeState(sandbox);
@@ -114,11 +115,20 @@ export function assertMcpDestroySnapshotCurrent(
       (entry) => !current[entry.server] || !mcpBridgeEntriesEqual(current[entry.server], entry),
     )
   ) {
-    throw new McpBridgeError(
-      `MCP bridge definitions changed while sandbox '${sandboxName}' was being destroyed. Cleanup state was preserved; re-run destroy to reconcile the current definitions.`,
-    );
+    throw new McpBridgeError(changedMessage);
   }
   return sandbox;
+}
+
+export function assertMcpDestroySnapshotCurrent(
+  sandboxName: string,
+  entries: readonly McpBridgeEntry[],
+): SandboxEntry {
+  return assertMcpBridgeSnapshotCurrent(
+    sandboxName,
+    entries,
+    `MCP bridge definitions changed while sandbox '${sandboxName}' was being destroyed. Cleanup state was preserved; re-run destroy to reconcile the current definitions.`,
+  );
 }
 
 export function inspectExactMcpDestroyProvider(

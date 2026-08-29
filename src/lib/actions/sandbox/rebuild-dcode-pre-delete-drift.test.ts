@@ -147,11 +147,10 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).rejects.toThrow("the recorded sandbox target changed during preflight");
 
-    expect(harness.preflightDcodeRouteSpy).toHaveBeenCalledTimes(2);
-    expect(harness.prepareManagedDcodeRebuildImageSpy).toHaveBeenCalledOnce();
-    expect(harness.disposePreparedDcodeRebuildImageSpy).toHaveBeenCalledWith(
-      harness.preparedDcodeBuildContext,
-    );
+    expect(harness.preflightDcodeRouteSpy).toHaveBeenCalledOnce();
+    expect(harness.ensureAgentBaseImageSpy).not.toHaveBeenCalled();
+    expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
+    expect(harness.disposePreparedDcodeRebuildImageSpy).not.toHaveBeenCalled();
     expectNoDcodeMutation(harness);
   });
   it("disposes the prepared DCode image when the final route recheck fails (#6195)", async () => {

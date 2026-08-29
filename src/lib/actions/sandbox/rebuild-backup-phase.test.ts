@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as sandboxState from "../../state/sandbox";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import {
   normalizeRebuildObservabilityPolicyPresets,
   normalizeRebuildTargetPolicyPresets,
@@ -11,6 +12,17 @@ import {
   type RebuildBackupPhaseInput,
   runRebuildBackupPhase,
 } from "./rebuild-backup-phase";
+
+function withSelectedBackupAuthority(
+  input: Omit<RebuildBackupPhaseInput, "agentAuthority" | "backupRegistryEntry">,
+): RebuildBackupPhaseInput {
+  const recordedAgent = input.sandboxEntry.agent ?? null;
+  return {
+    ...input,
+    backupRegistryEntry: input.sandboxEntry,
+    agentAuthority: makeRebuildAgentAuthority(recordedAgent),
+  };
+}
 
 describe("rebuild web-search policy normalization", () => {
   afterEach(() => {
@@ -66,28 +78,30 @@ describe("rebuild web-search policy normalization", () => {
   });
 
   it("keeps a finalized custom-only built-in selection empty instead of resetting it", () => {
-    const result = runRebuildBackupPhase({
-      sandboxName: "alpha",
-      sandboxEntry: {
-        name: "alpha",
-        agent: "openclaw",
-        policies: ["tavily"],
-        customPolicies: [{ name: "tavily", content: "allow: []" }],
-        policyPresetsFinalized: true,
-      },
-      staleRecovery: false,
-      preparedRecoveryManifest: {
-        policyPresets: ["tavily"],
-        customPolicies: [{ name: "tavily", content: "allow: []" }],
-      } as never,
-      messagingPlan: null,
-      webSearchConfig: null,
-      log: vi.fn(),
-      bail: (message): never => {
-        throw new Error(message);
-      },
-      relockShieldsIfNeeded: () => true,
-    });
+    const result = runRebuildBackupPhase(
+      withSelectedBackupAuthority({
+        sandboxName: "alpha",
+        sandboxEntry: {
+          name: "alpha",
+          agent: "openclaw",
+          policies: ["tavily"],
+          customPolicies: [{ name: "tavily", content: "allow: []" }],
+          policyPresetsFinalized: true,
+        },
+        staleRecovery: false,
+        preparedRecoveryManifest: {
+          policyPresets: ["tavily"],
+          customPolicies: [{ name: "tavily", content: "allow: []" }],
+        } as never,
+        messagingPlan: null,
+        webSearchConfig: null,
+        log: vi.fn(),
+        bail: (message): never => {
+          throw new Error(message);
+        },
+        relockShieldsIfNeeded: () => true,
+      }),
+    );
 
     expect(result?.policyPresets).toEqual([]);
     expect(result?.sessionPolicyPresets).toEqual([]);
@@ -101,50 +115,52 @@ describe("rebuild web-search policy normalization", () => {
       customPolicies: [customDiscordPolicy],
     } as never;
 
-    const result = runRebuildBackupPhase({
-      sandboxName: "alpha",
-      sandboxEntry: {
-        name: "alpha",
-        agent: "hermes",
-        policies: ["discord"],
-        customPolicies: [customDiscordPolicy],
-        policyPresetsFinalized: true,
-      },
-      staleRecovery: false,
-      preparedRecoveryManifest,
-      messagingPlan: {
-        schemaVersion: 1,
+    const result = runRebuildBackupPhase(
+      withSelectedBackupAuthority({
         sandboxName: "alpha",
-        agent: "hermes",
-        workflow: "rebuild",
-        channels: [
-          {
-            channelId: "slack",
-            displayName: "Slack",
-            authMode: "token-paste",
-            active: true,
-            selected: true,
-            configured: true,
-            disabled: false,
-            inputs: [],
-            hooks: [],
-          },
-        ],
-        disabledChannels: [],
-        credentialBindings: [],
-        networkPolicy: { presets: [], entries: [] },
-        agentRender: [],
-        buildSteps: [],
-        stateUpdates: [],
-        healthChecks: [],
-      },
-      webSearchConfig: null,
-      log: vi.fn(),
-      bail: (message): never => {
-        throw new Error(message);
-      },
-      relockShieldsIfNeeded: () => true,
-    });
+        sandboxEntry: {
+          name: "alpha",
+          agent: "hermes",
+          policies: ["discord"],
+          customPolicies: [customDiscordPolicy],
+          policyPresetsFinalized: true,
+        },
+        staleRecovery: false,
+        preparedRecoveryManifest,
+        messagingPlan: {
+          schemaVersion: 1,
+          sandboxName: "alpha",
+          agent: "hermes",
+          workflow: "rebuild",
+          channels: [
+            {
+              channelId: "slack",
+              displayName: "Slack",
+              authMode: "token-paste",
+              active: true,
+              selected: true,
+              configured: true,
+              disabled: false,
+              inputs: [],
+              hooks: [],
+            },
+          ],
+          disabledChannels: [],
+          credentialBindings: [],
+          networkPolicy: { presets: [], entries: [] },
+          agentRender: [],
+          buildSteps: [],
+          stateUpdates: [],
+          healthChecks: [],
+        },
+        webSearchConfig: null,
+        log: vi.fn(),
+        bail: (message): never => {
+          throw new Error(message);
+        },
+        relockShieldsIfNeeded: () => true,
+      }),
+    );
 
     expect(result?.policyPresets).toEqual(["slack"]);
     expect(result?.backupManifest).toBe(preparedRecoveryManifest);
@@ -162,20 +178,22 @@ describe("rebuild web-search policy normalization", () => {
       failedFiles: ["openclaw.json"],
     });
 
-    const result = runRebuildBackupPhase({
-      sandboxName: "alpha",
-      sandboxEntry: { name: "alpha", agent: "openclaw", policies: [] },
-      staleRecovery: false,
-      preparedRecoveryManifest: null,
-      messagingPlan: null,
-      webSearchConfig: null,
-      force: true,
-      log: vi.fn(),
-      bail: (message): never => {
-        throw new Error(message);
-      },
-      relockShieldsIfNeeded: () => true,
-    });
+    const result = runRebuildBackupPhase(
+      withSelectedBackupAuthority({
+        sandboxName: "alpha",
+        sandboxEntry: { name: "alpha", agent: "openclaw", policies: [] },
+        staleRecovery: false,
+        preparedRecoveryManifest: null,
+        messagingPlan: null,
+        webSearchConfig: null,
+        force: true,
+        log: vi.fn(),
+        bail: (message): never => {
+          throw new Error(message);
+        },
+        relockShieldsIfNeeded: () => true,
+      }),
+    );
 
     expect(result?.backupManifest).toBeNull();
     expect(result?.backupWasForceSkipped).toBe(true);
@@ -277,7 +295,7 @@ describe("custom OpenClaw plugin provenance rebuild guard (#6108)", () => {
   } as never;
 
   function customOpenClawInput(overrides: Record<string, unknown> = {}): RebuildBackupPhaseInput {
-    return {
+    const input = {
       sandboxName: "custom-openclaw",
       sandboxEntry: {
         name: "custom-openclaw",
@@ -294,7 +312,8 @@ describe("custom OpenClaw plugin provenance rebuild guard (#6108)", () => {
       },
       relockShieldsIfNeeded: vi.fn(() => true),
       ...overrides,
-    } as RebuildBackupPhaseInput;
+    } as Omit<RebuildBackupPhaseInput, "agentAuthority" | "backupRegistryEntry">;
+    return withSelectedBackupAuthority(input);
   }
 
   it("blocks a live custom image with missing registry provenance before backup", () => {

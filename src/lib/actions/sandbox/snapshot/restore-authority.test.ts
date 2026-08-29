@@ -817,6 +817,8 @@ describe("managed rebuild restore authority", () => {
     );
     const restore = vi.fn(
       (_name: string, _path: string, options: RecreatedSandboxRestoreOptions): RestoreResult => {
+        expect(options.agentDefinition).toBe(selectedDefinition);
+        expect(resolveAgentDefinition).not.toHaveBeenCalled();
         try {
           options.validateBeforeMutation?.();
           return {

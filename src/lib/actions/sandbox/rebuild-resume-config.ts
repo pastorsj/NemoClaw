@@ -9,8 +9,6 @@
 // env or global session. Extracted from rebuild.ts so the trust-boundary logic
 // is auditable on its own (PRA-5).
 
-import { isDeepStrictEqual } from "node:util";
-
 import { CLI_NAME } from "../../cli/branding";
 import { RD as _RD, D, R } from "../../cli/terminal-style";
 import { normalizeInferenceSelection } from "../../inference/selection";
@@ -20,6 +18,7 @@ import type { RegistryInferenceRoute } from "../../onboard/rebuild-route-handoff
 import * as onboardSession from "../../state/onboard-session";
 import type { AmbientRecreateEnvAssessment } from "./rebuild-env-isolation";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
+import { checkPinnedAgentAuthority } from "./rebuild/authority";
 import {
   assessRebuildAmbientEnv,
   assessRebuildInferencePreflight,
@@ -72,18 +71,7 @@ function requireMatchingRebuildAgentAuthority(
   agentAuthority: ResolvedSandboxAgent,
   bail: (msg: string, code?: number) => never,
 ): void {
-  const recordedAgent = typeof sb.agent === "string" ? sb.agent : null;
-  const expectedEffectiveAgentId = recordedAgent ?? "openclaw";
-  const packageRoot = agentAuthority.definition.packageRoot;
-  if (
-    agentAuthority.recordedAgent !== recordedAgent ||
-    agentAuthority.effectiveAgentId !== expectedEffectiveAgentId ||
-    agentAuthority.definition.name !== agentAuthority.effectiveAgentId ||
-    typeof packageRoot !== "string" ||
-    packageRoot.length === 0 ||
-    !isDeepStrictEqual(agentAuthority.harnessPackage, sb.harnessPackage ?? null) ||
-    !isDeepStrictEqual(agentAuthority.harnessPackageMigration, sb.harnessPackageMigration ?? null)
-  ) {
+  if (checkPinnedAgentAuthority(sb, agentAuthority) !== null) {
     bail("Pinned rebuild agent authority does not match the sandbox registry entry");
   }
 }

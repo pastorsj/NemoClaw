@@ -9,6 +9,7 @@ import {
   OPENSHELL_OPERATION_TIMEOUT_MS,
   OPENSHELL_PROBE_TIMEOUT_MS,
 } from "../../adapters/openshell/timeouts";
+import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
 import { DASHBOARD_PORT, HERMES_OPENAI_API_PORT } from "../../core/ports";
 import { getActiveMessagingHostForward } from "../../messaging/host-forward";
@@ -53,6 +54,7 @@ export type {
 type SandboxPortAgent = {
   forwardPort?: unknown;
   forward_ports?: unknown;
+  healthProbe?: { url?: string } | null;
   runtime?: { kind?: unknown };
 } | null;
 
@@ -64,6 +66,7 @@ type SandboxPortDeps = {
 type SandboxForwardRecoveryOptions = {
   afterSuccess?: () => boolean;
   beforeStart?: () => boolean;
+  getSessionAgent?: (sandboxName?: string) => SandboxPortAgent;
   isWsl?: boolean;
 };
 
@@ -122,15 +125,23 @@ export function resolveSandboxDashboardPort(
  * sandbox's own port so the probe reaches its relay rather than reporting the
  * default port as unreachable.
  */
-export function resolveSandboxHealthProbeUrl(sandboxName: string): string {
-  const agent = agentRuntime.getSessionAgent(sandboxName);
+export function resolveSandboxHealthProbeUrl(
+  sandboxName: string,
+  deps: SandboxPortDeps = {},
+): string {
+  const getSessionAgent = deps.getSessionAgent ?? agentRuntime.getSessionAgent;
+  const agent = getSessionAgent(sandboxName);
   if (agent && agentRuntime.hasGatewayRuntime(agent)) {
+    const healthProbeUrl =
+      typeof agent.healthProbe?.url === "string" && agent.healthProbe.url.length > 0
+        ? agent.healthProbe.url
+        : `http://127.0.0.1:${DASHBOARD_PORT}/health`;
     return retargetHermesApiPortInUrl(
-      agentRuntime.getHealthProbeUrl(agent),
+      healthProbeUrl,
       resolveSandboxHermesApiPort(registry.getSandbox(sandboxName) ?? {}),
     );
   }
-  return `http://127.0.0.1:${resolveSandboxDashboardPort(sandboxName)}/health`;
+  return `http://127.0.0.1:${resolveSandboxDashboardPort(sandboxName, deps)}/health`;
 }
 
 /**
@@ -186,7 +197,9 @@ export function ensureSandboxPortForward(
   sandboxName: string,
   options: SandboxForwardRecoveryOptions = {},
 ): boolean {
-  const port = resolveSandboxDashboardPort(sandboxName);
+  const port = resolveSandboxDashboardPort(sandboxName, {
+    getSessionAgent: options.getSessionAgent,
+  });
   const remoteBindRequested = isRemoteDashboardBindRequested(process.env.NEMOCLAW_DASHBOARD_BIND);
   const allInterfaceBindRequired = remoteBindRequested || isWsl({ isWsl: options.isWsl });
   if (
@@ -226,14 +239,14 @@ export function ensureSandboxPortForward(
  */
 export function isSandboxForwardHealthy(
   sandboxName: string,
-  options: { isWsl?: boolean } = {},
+  options: { getSessionAgent?: (sandboxName?: string) => SandboxPortAgent; isWsl?: boolean } = {},
 ): SandboxForwardHealth {
   const allInterfaceBindRequired =
     isRemoteDashboardBindRequested(process.env.NEMOCLAW_DASHBOARD_BIND) ||
     isWsl({ isWsl: options.isWsl });
   return isSandboxPortForwardHealthy(
     sandboxName,
-    resolveSandboxDashboardPort(sandboxName),
+    resolveSandboxDashboardPort(sandboxName, { getSessionAgent: options.getSessionAgent }),
     allInterfaceBindRequired ? "0.0.0.0" : "127.0.0.1",
   );
 }
@@ -463,8 +476,9 @@ function resolveDeclaredAgentForwardPorts(
 export function ensureDeclaredAgentForwardPortsHealthy(
   sandboxName: string,
   primaryPort: number,
+  options: { agentDefinition?: AgentDefinition } = {},
 ): boolean | null {
-  const agent = agentRuntime.getSessionAgent(sandboxName);
+  const agent = options.agentDefinition ?? agentRuntime.getSessionAgent(sandboxName);
   if (!agent) return null;
   const hermesDashboard = getHermesDashboardRecoveryConfig(sandboxName);
   const sandbox = registry.getSandbox(sandboxName);
@@ -561,9 +575,11 @@ export function resolveSandboxLaunchForwardPorts(sandboxName: string): number[] 
 export function recoverDeclaredAgentForwardPorts(
   sandboxName: string,
   recoveryPort: number,
-  { quiet }: { quiet: boolean },
+  { quiet, agentDefinition }: { quiet: boolean; agentDefinition?: AgentDefinition },
 ): boolean | null {
-  const recovered = ensureDeclaredAgentForwardPortsHealthy(sandboxName, recoveryPort);
+  const recovered = ensureDeclaredAgentForwardPortsHealthy(sandboxName, recoveryPort, {
+    agentDefinition,
+  });
   if (!quiet && recovered === false) {
     console.error("  One or more agent-declared port forwards could not be re-established.");
   }

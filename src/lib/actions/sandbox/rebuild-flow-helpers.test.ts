@@ -14,15 +14,39 @@ import * as gatewayRuntime from "../../gateway-runtime-action";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import * as sandboxState from "../../state/sandbox";
 import * as userManagedFilesProbe from "../../state/user-managed-files-probe";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import * as snapshotBackup from "./snapshot/backup-authority";
 import {
-  backupSandboxStateForRebuild,
+  backupSandboxStateForRebuild as backupSandboxStateForRebuildWithAuthority,
   disposeRebuildAgentBaseImagePreflight,
   ensureRebuildAgentBaseImage,
   ensureRebuildTargetGatewaySelected,
   pinRebuildAgentBaseImageForRecreate,
   warnUnpreservedUserManagedFiles,
 } from "./rebuild-flow-helpers";
+
+const SELECTED_BACKUP_AGENT = makeRebuildAgentAuthority("langchain-deepagents-code");
+
+function backupSandboxStateForRebuild(
+  sandboxName: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[0],
+  sandboxEntry: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[1],
+  staleRecovery: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[3],
+  log: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[4],
+  relockShieldsIfNeeded: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[5],
+  bail: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[6],
+  options?: Parameters<typeof backupSandboxStateForRebuildWithAuthority>[7],
+) {
+  return backupSandboxStateForRebuildWithAuthority(
+    sandboxName,
+    sandboxEntry,
+    SELECTED_BACKUP_AGENT,
+    staleRecovery,
+    log,
+    relockShieldsIfNeeded,
+    bail,
+    options,
+  );
+}
 
 function makeBackupResult(): ReturnType<typeof sandboxState.backupSandboxState> {
   return {
@@ -647,6 +671,32 @@ describe("backupSandboxStateForRebuild with --force", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("passes the selected agent authority instead of asking backup to select one", () => {
+    const entry = makeSandboxEntry();
+    backupSpy.mockReturnValue(makeBackupResult());
+
+    expect(
+      backupSandboxStateForRebuild(
+        "alpha",
+        entry,
+        false,
+        () => undefined,
+        () => true,
+        makeBail(),
+      ),
+    ).toBeTruthy();
+
+    expect(backupSpy).toHaveBeenCalledWith(
+      "alpha",
+      {
+        agentDefinition: SELECTED_BACKUP_AGENT.definition,
+        harnessPackage: SELECTED_BACKUP_AGENT.harnessPackage,
+        registryEntry: entry,
+      },
+      { getSandbox: expect.any(Function) },
+    );
   });
 
   it("returns null (skip) when backup fails completely and force is set", () => {

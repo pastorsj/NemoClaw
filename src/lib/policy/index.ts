@@ -128,6 +128,7 @@ type MergePresetNamesOptions = {
 
 type SandboxPresetLoadOptions = {
   includeMessagingCredentialBindings?: boolean;
+  agentDefinition?: AgentDefinition;
 };
 
 type SetupPolicyPresetSupportOptions = {
@@ -352,12 +353,24 @@ function loadAgentPresetContent(
   sandboxName: string,
   presetName: string,
   builtinPresetContent: string,
+  pinnedAgentDefinition?: AgentDefinition,
 ): string | null {
+  let sandboxAgent: string | null = null;
   try {
     const sandbox = registry.getSandbox(sandboxName);
-    if (!sandbox?.agent) return null;
+    sandboxAgent = sandbox?.agent ?? null;
+  } catch {
+    return null;
+  }
+  if (!sandboxAgent) return null;
+  if (pinnedAgentDefinition && pinnedAgentDefinition.name !== sandboxAgent) {
+    throw new Error(
+      `Pinned agent definition '${pinnedAgentDefinition.name}' does not match sandbox '${sandboxName}' agent '${sandboxAgent}'`,
+    );
+  }
 
-    const agent = loadAgent(sandbox.agent);
+  try {
+    const agent = pinnedAgentDefinition ?? loadAgent(sandboxAgent);
     if (!agent?.policyAdditionsPath || !fs.existsSync(agent.policyAdditionsPath)) return null;
 
     const agentPolicies = parseNetworkPolicies(fs.readFileSync(agent.policyAdditionsPath, "utf-8"));
@@ -431,7 +444,12 @@ function loadPresetForSandbox(
   const builtinPresetContent = loadCentralPreset(presetName);
   if (!builtinPresetContent) return null;
   const resolvedPresetContent =
-    loadAgentPresetContent(sandboxName, presetName, builtinPresetContent) || builtinPresetContent;
+    loadAgentPresetContent(
+      sandboxName,
+      presetName,
+      builtinPresetContent,
+      options.agentDefinition,
+    ) || builtinPresetContent;
   return presetName === "outlook" &&
     sandboxAgent !== "hermes" &&
     configuredMessagingChannels.includes("teams")
@@ -2198,9 +2216,12 @@ function readCurrentSandboxPolicy(sandboxName: string, gatewayName?: string): st
 
 /** Resolve and validate the reviewed baseline from an already resolved agent definition. */
 function resolveAgentDefinitionBaselinePolicy(
-  agent: Pick<AgentDefinition, "name" | "policyAdditionsPath">,
+  agent: Pick<AgentDefinition, "name" | "packageRoot" | "policyAdditionsPath">,
 ): { agent: string; policyPath: string; content: string } | null {
-  const policyPath = requireAgentPolicyAdditionsPath(agent);
+  const policyPath =
+    agent.name === "openclaw"
+      ? path.join(agent.packageRoot, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml")
+      : requireAgentPolicyAdditionsPath(agent);
   let content: string;
   try {
     content = fs.readFileSync(policyPath, "utf-8");
@@ -3268,19 +3289,25 @@ function applyPresetContent(
  * central preset directory, then delegates to `applyPresetContent`. Returns
  * `false` if the named preset does not exist.
  */
+type ApplyPresetOptions = Record<string, unknown> & {
+  agentDefinition?: AgentDefinition;
+};
+
 function applyPreset(
   sandboxName: string,
   presetName: string,
-  options: Record<string, unknown> = {},
+  options: ApplyPresetOptions = {},
 ): boolean {
+  const { agentDefinition, ...contentOptions } = options;
   const presetContent = loadPresetForSandbox(sandboxName, presetName, {
     includeMessagingCredentialBindings: options.includeMessagingCredentialBindings === true,
+    agentDefinition,
   });
   if (!presetContent) {
     console.error(`  Cannot load preset: ${presetName}`);
     return false;
   }
-  return applyPresetContent(sandboxName, presetName, presetContent, options);
+  return applyPresetContent(sandboxName, presetName, presetContent, contentOptions);
 }
 
 /**

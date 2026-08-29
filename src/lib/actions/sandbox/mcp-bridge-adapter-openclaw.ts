@@ -33,7 +33,8 @@ function mcporterArgs(root: string, ...args: string[]): string[] {
 }
 
 /** Resolve the Mcporter project root owned by an MCP bridge entry's agent. */
-function mcporterRootForEntry(entry: McpBridgeEntry): string {
+function mcporterRootForEntry(entry: McpBridgeEntry, explicitRoot?: string): string {
+  if (explicitRoot) return explicitRoot;
   return entry.agent
     ? openClawMcporterRoot(getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR))
     : OPENCLAW_MCPORTER_ROOT;
@@ -130,8 +131,9 @@ export function buildOpenClawMcporterRemoveCommand(
 export function inspectOpenClawAdapterRegistration(
   sandboxName: string,
   entry: McpBridgeEntry,
+  projectRoot?: string,
 ): AdapterRegistrationInspection {
-  const root = mcporterRootForEntry(entry);
+  const root = mcporterRootForEntry(entry, projectRoot);
   return inspectAdapterRegistrationCommand(
     sandboxName,
     entry,
@@ -145,9 +147,10 @@ export function registerOpenClawAdapter(
   envValues: Record<string, string> = {},
   replaceExisting = false,
   credentialRevision?: McpAttachedCredentialRevision,
+  projectRoot?: string,
 ): void {
   ensureMcporter(sandboxName);
-  const root = mcporterRootForEntry(entry);
+  const root = mcporterRootForEntry(entry, projectRoot);
   const result = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterRegisterCommand(entry, replaceExisting, root, credentialRevision),
@@ -189,8 +192,9 @@ export function unregisterOpenClawAdapter(
   sandboxName: string,
   entry: McpBridgeEntry,
   options: AdapterMutationOptions = {},
+  projectRoot?: string,
 ): void {
-  const root = mcporterRootForEntry(entry);
+  const root = mcporterRootForEntry(entry, projectRoot);
   const result = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterRemoveCommand(entry, options.force === true, root),

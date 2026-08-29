@@ -205,6 +205,7 @@ describe("runRebuildRecreatePhase handoff", () => {
     vi.spyOn(rebuildOnboardDependencies, "onboard").mockImplementation(async (options) => {
       observedAtOnboard.push(onboardSession.loadSession()?.observabilityEnabled === true);
       expect(options.observabilityEnabled).toBe(true);
+      expect(options.authoritativeRebuildAgentAuthority).toBe(resumeConfig.agentAuthority);
     });
     const input = makeInput({
       onCreated: vi.fn(() => {

@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 import {
   configureDcodeSession,
@@ -12,6 +15,7 @@ import {
   installRebuildFlowTestHooks,
   snapshotEnv,
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
+import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { resolveRebuildDurableConfig } from "./rebuild-durable-config";
 
 describe("rebuildSandbox DCode flow: preflight", () => {
@@ -28,25 +32,28 @@ describe("rebuildSandbox DCode flow: preflight", () => {
       "thread-opt-in",
       "recorded dcodeAutoApprovalMode value must be disabled or thread-opt-in",
     ],
-  ] as const)("resolves durable DCode mode: %s (#6478)", (_label, recorded, requested, expected, error) => {
-    const config = resolveRebuildDurableConfig(
-      "alpha",
-      {
-        name: "alpha",
-        agent: "langchain-deepagents-code",
-        nemoclawVersion: "0.1.0",
-        ...(recorded !== undefined ? { dcodeAutoApprovalMode: recorded as never } : {}),
-      },
-      null,
-      undefined,
-      undefined,
-      false,
-      requested,
-    );
+  ] as const)(
+    "resolves durable DCode mode: %s (#6478)",
+    (_label, recorded, requested, expected, error) => {
+      const config = resolveRebuildDurableConfig(
+        "alpha",
+        {
+          name: "alpha",
+          agent: "langchain-deepagents-code",
+          nemoclawVersion: "0.1.0",
+          ...(recorded !== undefined ? { dcodeAutoApprovalMode: recorded as never } : {}),
+        },
+        null,
+        undefined,
+        undefined,
+        false,
+        requested,
+      );
 
-    expect(config.dcodeAutoApprovalMode).toBe(expected);
-    expect(config.dcodeAutoApprovalModeError).toBe(error);
-  });
+      expect(config.dcodeAutoApprovalMode).toBe(expected);
+      expect(config.dcodeAutoApprovalModeError).toBe(error);
+    },
+  );
 
   it("rejects a DCode auto-approval override for unsupported agents before mutation (#6478)", async () => {
     const harness = createRebuildFlowHarness({
@@ -205,6 +212,72 @@ describe("rebuildSandbox DCode flow: preflight", () => {
       restoreEnv();
     }
   });
+  it("rejects DCode package object drift before image preparation", async () => {
+    const harnessPackage = installRebuildHarnessPackage("langchain-deepagents-code");
+    expect(harnessPackage).not.toBeNull();
+    const packagePayload = path.join(
+      process.env.HOME!,
+      ".nemoclaw",
+      "harnesses",
+      "objects",
+      "sha256",
+      harnessPackage!.contentDigest,
+      "runtime",
+      "payload.txt",
+    );
+    const harness = createRebuildFlowHarness({
+      agentName: "langchain-deepagents-code",
+      sandboxEntry: makeDcodeSandboxEntry(),
+      harnessPackage,
+      preflightMessagingConflicts: () => {
+        fs.appendFileSync(packagePayload, "changed after authority selection\n");
+      },
+    });
+    configureDcodeSession(harness);
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).rejects.toThrow("The pinned DCode package object could not be revalidated");
+
+    expect(harness.ensureAgentBaseImageSpy).not.toHaveBeenCalled();
+    expect(harness.prepareManagedDcodeRebuildImageSpy).not.toHaveBeenCalled();
+    expectNoDcodeMutation(harness);
+  });
+  it("disposes the prepared DCode image when its package object drifts during preparation", async () => {
+    const harnessPackage = installRebuildHarnessPackage("langchain-deepagents-code");
+    expect(harnessPackage).not.toBeNull();
+    const packagePayload = path.join(
+      process.env.HOME!,
+      ".nemoclaw",
+      "harnesses",
+      "objects",
+      "sha256",
+      harnessPackage!.contentDigest,
+      "runtime",
+      "payload.txt",
+    );
+    const harness = createRebuildFlowHarness({
+      agentName: "langchain-deepagents-code",
+      sandboxEntry: makeDcodeSandboxEntry(),
+      harnessPackage,
+    });
+    configureDcodeSession(harness);
+    harness.prepareManagedDcodeRebuildImageSpy.mockImplementation(async () => {
+      fs.appendFileSync(packagePayload, "changed during image preparation\n");
+      return { ok: true, prepared: harness.preparedDcodeBuildContext };
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).rejects.toThrow("The pinned DCode package object could not be revalidated");
+
+    expect(harness.prepareManagedDcodeRebuildImageSpy).toHaveBeenCalledOnce();
+    expect(harness.disposePreparedDcodeRebuildImageSpy).toHaveBeenCalledExactlyOnceWith(
+      harness.preparedDcodeBuildContext,
+    );
+    expect(harness.preparedDcodeBuildContext.cleanupBuildCtx).toHaveBeenCalledOnce();
+    expectNoDcodeMutation(harness);
+  });
   it("rejects a DCode replacement-image failure before any rebuild mutation (#6195)", async () => {
     const harness = createRebuildFlowHarness({
       agentName: "langchain-deepagents-code",
@@ -269,6 +342,21 @@ describe("rebuildSandbox DCode flow: preflight", () => {
     ).resolves.toBeUndefined();
 
     expect(harness.prepareManagedDcodeRebuildImageSpy).toHaveBeenCalledOnce();
+    const backupOptions = harness.backupSandboxStateSpy.mock.calls[0]?.[1] as
+      | { agentDefinition?: unknown }
+      | undefined;
+    const preparedImageOptions = harness.prepareManagedDcodeRebuildImageSpy.mock.calls[0]?.[0] as
+      | { agent?: unknown }
+      | undefined;
+    const baseImageAgent = harness.ensureAgentBaseImageSpy.mock.calls[0]?.[0];
+    expect(baseImageAgent).toMatchObject({
+      name: "langchain-deepagents-code",
+      packageRoot: expect.stringContaining(
+        path.join(".nemoclaw", "harnesses", "objects", "sha256"),
+      ),
+    });
+    expect(preparedImageOptions?.agent).toBe(baseImageAgent);
+    expect(backupOptions?.agentDefinition).toStrictEqual(baseImageAgent);
     expect(harness.onboardSpy).toHaveBeenCalledWith(
       expect.objectContaining({ fromDockerfile: null }),
     );

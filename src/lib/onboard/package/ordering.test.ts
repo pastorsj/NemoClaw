@@ -19,6 +19,7 @@ import {
   reconcileLegacyHarnessMigration,
   type LegacyHarnessMigrationDependencies,
 } from "../../state/harness-migration";
+import { deriveCheckpointFromSession } from "../../state/onboard-checkpoint-migrate";
 import { createSession, type Session } from "../../state/onboard-session";
 import type { SandboxRegistry } from "../../state/registry/types";
 import {
@@ -30,7 +31,7 @@ import {
 } from "./boundary";
 import { selectOnboardHarnessPackage } from "../package-selection";
 import { prepareOnboardSession, type OnboardSessionBootstrapDeps } from "../session-bootstrap";
-import { resolveSandboxAgent } from "../sandbox-agent";
+import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../sandbox-agent";
 
 const SOURCE_REVISION = "e".repeat(40);
 const MIGRATED_AT = "2026-08-28T12:34:56.789Z";
@@ -478,6 +479,159 @@ describe("onboarding harness package ordering", () => {
       });
     },
   );
+
+  it("rejects authoritative candidate definition drift before runtime effects", async () => {
+    const pinnedDefinition = {
+      ...loadAgent("openclaw"),
+      name: "pi",
+      expectedVersion: "pinned-version",
+    };
+    const currentDefinition = {
+      ...pinnedDefinition,
+      expectedVersion: "changed-version",
+    };
+    const pinnedAuthority: ResolvedSandboxAgent = Object.freeze({
+      recordedAgent: "pi",
+      effectiveAgentId: "pi",
+      definition: pinnedDefinition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+    const resolveCandidate = vi.fn(() => pinnedDefinition);
+    const resolveCurrent = vi.fn((): ResolvedSandboxAgent =>
+      Object.freeze({
+        ...pinnedAuthority,
+        definition: currentDefinition,
+      }),
+    );
+    const operation = await prepareOnboardHarnessOperation(
+      operationInput({
+        authoritativeRebuildAgentAuthority: pinnedAuthority,
+        resume: true,
+      }),
+      boundaryDependencies(() => legacySession("pi"), {
+        resolveQualifiedAgent: resolveCandidate,
+        resolveSandboxAgent: resolveCurrent,
+      }),
+    );
+
+    expect(() => operation.beforeRuntimeEffects()).toThrow(
+      "Authoritative rebuild agent authority changed before runtime effects",
+    );
+    expect(resolveCandidate).toHaveBeenCalledOnce();
+    expect(resolveCurrent).toHaveBeenCalledOnce();
+    expect(() => operation.requireBoundAuthority()).toThrow("was not bound");
+  });
+
+  it("rejects authoritative package drift before checkpoint authority CAS", async () => {
+    const pinned = fixture.install("openclaw");
+    let session: Session | null = createSession({
+      agent: null,
+      harnessPackage: pinned.identity,
+      harnessPackageMigration: null,
+    });
+    session = {
+      ...session,
+      checkpoint: {
+        ...deriveCheckpointFromSession(session),
+        harnessPackage: null,
+      },
+    };
+    const pinnedAuthority = resolveSandboxAgent(
+      { agent: null, harnessPackage: pinned.identity },
+      { storeRoot: fixture.storeRoot, env: {} },
+    );
+    const driftedAuthority: ResolvedSandboxAgent = Object.freeze({
+      ...pinnedAuthority,
+      definition: {
+        ...pinnedAuthority.definition,
+        expectedVersion: "changed-version",
+      },
+    });
+    const resolveCurrent = vi
+      .fn<OnboardHarnessPackageBoundaryDependencies["resolveSandboxAgent"]>()
+      .mockReturnValueOnce(pinnedAuthority)
+      .mockReturnValueOnce(driftedAuthority);
+    const compareAndSwapSession = vi.fn(() => "updated" as const);
+    const operation = await prepareOnboardHarnessOperation(
+      operationInput({
+        authoritativeRebuildAgentAuthority: pinnedAuthority,
+        resume: true,
+      }),
+      boundaryDependencies(() => session, {
+        compareAndSwapSession,
+        resolveSandboxAgent: resolveCurrent,
+      }),
+    );
+
+    expect(() => operation.beforeRuntimeEffects()).toThrow(
+      "Authoritative rebuild agent authority changed before runtime effects",
+    );
+    expect(compareAndSwapSession).not.toHaveBeenCalled();
+    expect(resolveCurrent).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects authoritative legacy migration drift before reconciliation", async () => {
+    const pinned = fixture.install("openclaw");
+    const pinnedAuthority = resolveSandboxAgent(
+      { agent: null, harnessPackage: pinned.identity },
+      { storeRoot: fixture.storeRoot, env: {} },
+    );
+    const reconcileLegacyMigration = vi.fn();
+    const operation = await prepareOnboardHarnessOperation(
+      operationInput({
+        authoritativeRebuildAgentAuthority: pinnedAuthority,
+        resume: true,
+      }),
+      boundaryDependencies(() => legacySession(null), {
+        reconcileLegacyMigration,
+      }),
+    );
+
+    expect(() => operation.beforeRuntimeEffects()).toThrow(
+      "Authoritative rebuild agent authority changed before runtime effects",
+    );
+    expect(reconcileLegacyMigration).not.toHaveBeenCalled();
+  });
+
+  it("keeps the outer candidate definition after current authority is re-proved", async () => {
+    const pinnedDefinition = {
+      ...loadAgent("openclaw"),
+      name: "pi",
+      expectedVersion: "pinned-version",
+    };
+    const pinnedAuthority: ResolvedSandboxAgent = Object.freeze({
+      recordedAgent: "pi",
+      effectiveAgentId: "pi",
+      definition: pinnedDefinition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+    const resolveCandidate = vi.fn(() => ({ ...pinnedDefinition }));
+    const resolveCurrent = vi.fn((): ResolvedSandboxAgent =>
+      Object.freeze({
+        ...pinnedAuthority,
+        definition: { ...pinnedDefinition },
+      }),
+    );
+    const operation = await prepareOnboardHarnessOperation(
+      operationInput({
+        authoritativeRebuildAgentAuthority: pinnedAuthority,
+        resume: true,
+      }),
+      boundaryDependencies(() => legacySession("pi"), {
+        resolveQualifiedAgent: resolveCandidate,
+        resolveSandboxAgent: resolveCurrent,
+      }),
+    );
+
+    operation.beforeRuntimeEffects();
+
+    expect(operation.requireBoundAuthority().effectiveDefinition).toBe(pinnedDefinition);
+    expect(operation.requireBoundAuthority().selectedAgent).toBe(pinnedDefinition);
+    expect(resolveCandidate).toHaveBeenCalledOnce();
+    expect(resolveCurrent).toHaveBeenCalledOnce();
+  });
 
   it("rejects candidate qualification lost during portable recovery", async () => {
     const session = legacySession("pi");

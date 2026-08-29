@@ -66,6 +66,11 @@ function freezeAgentDefinitionTree<T>(value: T, seen = new WeakSet<object>()): T
   return Object.freeze(value);
 }
 
+/** Detach one parsed definition from its source data and freeze its complete value tree. */
+export function createImmutableAgentDefinition(definition: AgentDefinition): AgentDefinition {
+  return freezeAgentDefinitionTree(structuredClone(definition));
+}
+
 export { agentAliasSummary } from "./aliases";
 export { requireCandidateQualificationEnabled } from "./candidate";
 
@@ -136,14 +141,12 @@ export function loadAgentFresh(
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`Agent '${name}' not found: ${manifestPath}`);
   }
-  return freezeAgentDefinitionTree(
-    structuredClone(
-      buildAgentDefinition({
-        manifest: loadManifestRecord(manifestPath),
-        manifestPath,
-        packageRoot: ROOT,
-      }),
-    ),
+  return createImmutableAgentDefinition(
+    buildAgentDefinition({
+      manifest: loadManifestRecord(manifestPath),
+      manifestPath,
+      packageRoot: ROOT,
+    }),
   );
 }
 

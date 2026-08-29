@@ -1,12 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentDefinition } from "../../agent/defs";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 
 const mocks = vi.hoisted(() => ({
   assertMcpDestroyNotPending: vi.fn(),
+  assertMcpAdapterConfigMutationsAllowed: vi.fn(),
+  assertMcpAdapterTeardownRuntimeCapabilities: vi.fn(),
   bridgeState: vi.fn(),
   discardSafeIncompleteMcpAdds: vi.fn(),
   ensureSandboxGatewaySelected: vi.fn(),
@@ -15,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getSandboxOrThrow: vi.fn(),
   inspectMcpProvider: vi.fn(),
   observeMcpCredentialRevision: vi.fn(),
+  preflightMcpEntryTargets: vi.fn(),
   removeGeneratedPolicy: vi.fn(),
   registerAgentAdapterAtCurrentCredentialRevision: vi.fn(),
   restoreExistingMcpBridgeRuntime: vi.fn(),
@@ -42,7 +48,7 @@ vi.mock("./mcp-bridge-provider", () => ({
   assertNoRegisteredProviderCredentialCollisions: vi.fn(),
   detachProvider: vi.fn(),
   inspectMcpProvider: mocks.inspectMcpProvider,
-  preflightMcpEntryTargets: vi.fn(),
+  preflightMcpEntryTargets: mocks.preflightMcpEntryTargets,
   waitForDetachedMcpCredential: vi.fn(),
 }));
 
@@ -63,8 +69,8 @@ vi.mock("./mcp-bridge-restart", () => ({
 }));
 
 vi.mock("./mcp-bridge-runtime-capabilities", () => ({
-  assertMcpAdapterConfigMutationsAllowed: vi.fn(),
-  assertMcpAdapterTeardownRuntimeCapabilities: vi.fn(),
+  assertMcpAdapterConfigMutationsAllowed: mocks.assertMcpAdapterConfigMutationsAllowed,
+  assertMcpAdapterTeardownRuntimeCapabilities: mocks.assertMcpAdapterTeardownRuntimeCapabilities,
 }));
 
 vi.mock("./mcp-bridge-state", () => ({
@@ -85,7 +91,10 @@ vi.mock("./mcp-bridge-validation", () => ({
 
 import { prepareMcpBridgesForDestroy } from "./mcp-bridge-destroy";
 import { prepareMcpBridgesForRebuild } from "./mcp-bridge-rebuild";
-import { scrubManagedMcpAdapterOrThrow } from "./mcp-bridge-adapter-teardown";
+import {
+  rollbackScrubbedMcpAdapters,
+  scrubManagedMcpAdapterOrThrow,
+} from "./mcp-bridge-adapter-teardown";
 
 const sandbox = { agent: "hermes" } as SandboxEntry;
 const entry: McpBridgeEntry = {
@@ -100,13 +109,22 @@ const entry: McpBridgeEntry = {
   addedAt: new Date(0).toISOString(),
 };
 
+function requireSetupValue<T>(value: T | undefined, message: string): T {
+  assert(value !== undefined, message);
+  return value;
+}
+
 describe("MCP adapter teardown rollback", () => {
   beforeEach(() => {
     mocks.bridgeState.mockReset().mockReturnValue({ github: entry });
     mocks.discardSafeIncompleteMcpAdds.mockReset().mockResolvedValue(sandbox);
     mocks.ensureSandboxGatewaySelected.mockReset().mockResolvedValue(undefined);
-    mocks.getBridgeAdapter.mockReset().mockReturnValue("hermes-config");
-    mocks.getSandboxAgent.mockReset().mockReturnValue("hermes");
+    mocks.getBridgeAdapter.mockReset().mockImplementation((agent: AgentDefinition) => {
+      return requireSetupValue(agent.mcpCapability.adapter, "pinned agent has no MCP adapter");
+    });
+    mocks.getSandboxAgent.mockReset().mockImplementation((_sandbox, agent?: AgentDefinition) => {
+      return requireSetupValue(agent, "ambient agent definition lookup attempted");
+    });
     mocks.getSandboxOrThrow.mockReset().mockReturnValue(sandbox);
     mocks.inspectMcpProvider.mockReset().mockReturnValue({ exists: false });
     mocks.observeMcpCredentialRevision.mockReset().mockReturnValue("v12");
@@ -116,6 +134,9 @@ describe("MCP adapter teardown rollback", () => {
     mocks.registerAgentAdapterAtCurrentCredentialRevision.mockReset();
     mocks.restoreExistingMcpBridgeRuntime.mockReset();
     mocks.unregisterAgentAdapter.mockReset().mockReturnValue("removed");
+    mocks.assertMcpAdapterConfigMutationsAllowed.mockReset();
+    mocks.assertMcpAdapterTeardownRuntimeCapabilities.mockReset();
+    mocks.preflightMcpEntryTargets.mockReset().mockResolvedValue(new Map());
   });
 
   it.each([
@@ -165,5 +186,71 @@ describe("MCP adapter teardown rollback", () => {
     expect(mocks.inspectMcpProvider).not.toHaveBeenCalled();
     expect(mocks.unregisterAgentAdapter).not.toHaveBeenCalled();
     expect(mocks.registerAgentAdapterAtCurrentCredentialRevision).not.toHaveBeenCalled();
+  });
+
+  it("rejects a pinned definition without an MCP adapter before rebuild cleanup", async () => {
+    const agentDefinition = {
+      name: "hermes",
+      configPaths: { dir: "/sandbox/.installed-hermes" },
+      mcpCapability: { support: "bridge" },
+    } as AgentDefinition;
+
+    await expect(prepareMcpBridgesForRebuild("alpha", { agentDefinition })).rejects.toThrow(
+      "pinned agent has no MCP adapter",
+    );
+
+    expect(mocks.getSandboxAgent).toHaveBeenCalledWith(sandbox, agentDefinition);
+    expect(mocks.assertMcpAdapterConfigMutationsAllowed).not.toHaveBeenCalled();
+    expect(mocks.discardSafeIncompleteMcpAdds).not.toHaveBeenCalled();
+    expect(mocks.ensureSandboxGatewaySelected).not.toHaveBeenCalled();
+    expect(mocks.preflightMcpEntryTargets).not.toHaveBeenCalled();
+    expect(mocks.removeGeneratedPolicy).not.toHaveBeenCalled();
+    expect(mocks.unregisterAgentAdapter).not.toHaveBeenCalled();
+    expect(mocks.registerAgentAdapterAtCurrentCredentialRevision).not.toHaveBeenCalled();
+  });
+
+  it("passes one pinned OpenClaw definition through adapter scrub and rollback", () => {
+    const agentDefinition = {
+      name: "openclaw",
+      configPaths: { dir: "/sandbox/.installed-openclaw" },
+      mcpCapability: { support: "bridge", adapter: "mcporter" },
+    } as AgentDefinition;
+    const openClawSandbox = { name: "alpha", agent: "openclaw" } as SandboxEntry;
+    const openClawEntry = {
+      ...entry,
+      agent: "openclaw",
+      adapter: "mcporter" as const,
+    };
+    mocks.observeMcpCredentialRevision
+      .mockReset()
+      .mockReturnValueOnce("v12")
+      .mockReturnValue("v13");
+
+    const scrubbed = scrubManagedMcpAdapterOrThrow(
+      "alpha",
+      openClawSandbox,
+      openClawEntry,
+      agentDefinition,
+    );
+    expect(
+      rollbackScrubbedMcpAdapters("alpha", openClawSandbox, [scrubbed], agentDefinition),
+    ).toEqual([]);
+
+    expect(mocks.unregisterAgentAdapter).toHaveBeenCalledWith(
+      "alpha",
+      "mcporter",
+      openClawEntry,
+      { envValues: {}, teardown: true },
+      agentDefinition,
+    );
+    expect(mocks.registerAgentAdapterAtCurrentCredentialRevision).toHaveBeenCalledWith(
+      "alpha",
+      "mcporter",
+      expect.objectContaining({ server: "github" }),
+      {},
+      "v13",
+      { replaceExisting: true, teardownRollback: true },
+      agentDefinition,
+    );
   });
 });

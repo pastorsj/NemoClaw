@@ -1,14 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isDeepStrictEqual } from "node:util";
-
-import { loadAgent } from "../../agent/defs";
-import {
-  harnessPackageIdentitiesEqual,
-  inspectHarnessPackageState,
-  type HarnessPackageIdentity,
-  type HarnessPackageMigration,
+import type {
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
 } from "../../harness/package-identity";
 import {
   type InferenceEndpointSource,
@@ -35,53 +30,17 @@ import type {
   RebuildRouteHandoff,
 } from "../../onboard/rebuild-route-handoff";
 import { normalizeSandboxGpuMode } from "../../onboard/sandbox-gpu-mode";
-import {
-  normalizeSandboxAgentName,
-  resolveSandboxAgent,
-} from "../../onboard/sandbox-agent";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { ManagedWorkloadRebuildHandoff } from "../../onboard/workload/rebuild";
 import { getTier } from "../../policy/tiers";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
 import type { PreservedEnvFile } from "../../state/preserved-env";
 import { type ToolDisclosure, toolDisclosureOrDefault } from "../../tool-disclosure";
-
-export interface RebuildPackageAuthority {
-  readonly harnessPackage: HarnessPackageIdentity | null;
-  readonly harnessPackageMigration: HarnessPackageMigration | null;
-}
-
-export function rebuildPackageIdentityMatches(
-  left: HarnessPackageIdentity | null,
-  right: HarnessPackageIdentity | null,
-): boolean {
-  return left === null
-    ? right === null
-    : right !== null && harnessPackageIdentitiesEqual(left, right);
-}
-
-export function rebuildPackageAuthorityMatches(
-  owner: {
-    readonly harnessPackage?: HarnessPackageIdentity | null;
-    readonly harnessPackageMigration?: HarnessPackageMigration | null;
-  },
-  expected: RebuildPackageAuthority,
-): boolean {
-  const inspected = inspectHarnessPackageState(
-    owner.harnessPackage,
-    owner.harnessPackageMigration,
-  );
-  if (inspected.status === "invalid") return false;
-  if (inspected.status === "absent") {
-    return expected.harnessPackage === null && expected.harnessPackageMigration === null;
-  }
-  return (
-    rebuildPackageIdentityMatches(inspected.harnessPackage, expected.harnessPackage) &&
-    isDeepStrictEqual(inspected.harnessPackageMigration, expected.harnessPackageMigration)
-  );
-}
+import { checkPinnedAgentAuthority } from "./rebuild/authority";
 
 export type RebuildGpuOptOutEntry = {
+  agent?: string | null;
   sandboxGpuMode?: string | null;
   sandboxGpuEnabled?: boolean;
   sandboxGpuDevice?: string | null;
@@ -170,6 +129,8 @@ export type RebuildRecreateOnboardOpts = {
   targetGatewayName: string;
   targetGatewayPort: number;
   onboardLockAlreadyHeld: true;
+  /** Internal outer-rebuild agent authority consumed before inner runtime effects. */
+  authoritativeRebuildAgentAuthority?: ResolvedSandboxAgent;
   /** Target fingerprint of the replacement journal opened before deletion. */
   recreateJournalTargetIntentFingerprint?: string;
   /** Exact source package authority retained across the outer rebuild. */
@@ -205,45 +166,40 @@ export type RebuildRecreateOnboardOpts = {
 
 export function buildRebuildRecreateOnboardOpts(args: {
   sb: RebuildGpuOptOutEntry | null | undefined;
-  rebuildAgent: string | null | undefined;
+  agentAuthority: ResolvedSandboxAgent;
   storedFromDockerfile: string | null;
   preparedDcodeRebuild?: PreparedDcodeRebuildHandoff;
   autoYes: boolean;
   baseImageResolutionHint?: SandboxBaseImageResolutionMetadata | null;
   usageNoticeAccepted: true;
 }): RebuildRecreateOnboardOpts {
-  if (args.sb?.observabilityEnabled === true && !isDcodeAgent(args.rebuildAgent)) {
+  const rebuildAgent = args.agentAuthority.recordedAgent;
+  const effectiveAgentId = args.agentAuthority.effectiveAgentId;
+  const authorityIssue = checkPinnedAgentAuthority(args.sb ?? {}, args.agentAuthority);
+  if (authorityIssue === "recorded-agent") {
+    throw new Error("Pinned rebuild agent authority does not match its recorded agent.");
+  }
+  if (authorityIssue === "invalid-package") {
+    throw new Error("Recorded harness package authority is invalid.");
+  }
+  if (authorityIssue === "standard-package-required") {
+    throw new Error(
+      `Recorded agent '${effectiveAgentId}' requires legacy package migration before use.`,
+    );
+  }
+  if (authorityIssue === "package-mismatch") {
+    throw new Error("Pinned rebuild package authority does not match the sandbox registry entry.");
+  }
+  if (args.sb?.observabilityEnabled === true && !isDcodeAgent(rebuildAgent)) {
     throw new Error(
       "Recorded observability state is valid only for agent 'langchain-deepagents-code'.",
     );
   }
   const gpuOverrides = getRebuildSandboxGpuOverrides(args.sb);
-  const packageState = inspectHarnessPackageState(
-    args.sb?.harnessPackage,
-    args.sb?.harnessPackageMigration,
-  );
-  if (packageState.status === "invalid") {
-    throw new Error("Recorded harness package authority is invalid.");
-  }
-  if (packageState.status === "absent") {
-    // The shared sandbox authority boundary owns qualified-agent admission.
-    // It rejects ordinary harnesses without package authority while keeping
-    // separately qualified candidates on their repository-owned null identity.
-    resolveSandboxAgent({ agent: args.rebuildAgent });
-  }
-  if (
-    packageState.status === "valid" &&
-    packageState.harnessPackage.id !== normalizeSandboxAgentName(args.rebuildAgent)
-  ) {
-    throw new Error("Recorded harness package authority does not match its agent.");
-  }
-  const packageAuthority =
-    packageState.status === "valid"
-      ? {
-          harnessPackage: packageState.harnessPackage,
-          harnessPackageMigration: packageState.harnessPackageMigration,
-        }
-      : { harnessPackage: null, harnessPackageMigration: null };
+  const packageAuthority = {
+    harnessPackage: args.agentAuthority.harnessPackage,
+    harnessPackageMigration: args.agentAuthority.harnessPackageMigration,
+  };
   const hostMounts = normalizePersistedSandboxHostMounts(args.sb?.hostMounts);
   const rawPolicyTier = args.sb?.policyTier?.trim().toLowerCase() || null;
   if (rawPolicyTier && !getTier(rawPolicyTier)) {
@@ -262,9 +218,7 @@ export function buildRebuildRecreateOnboardOpts(args: {
   ) {
     throw new Error(`Invalid persisted dashboard port '${String(dashboardPort)}'.`);
   }
-  const managesDashboard = shouldManageDashboardForAgent(
-    loadAgent(args.rebuildAgent || "openclaw"),
-  );
+  const managesDashboard = shouldManageDashboardForAgent(args.agentAuthority.definition);
   if (managesDashboard && (!dashboardPort || dashboardPort < 1)) {
     throw new Error(
       "Cannot recreate a dashboard-managed sandbox without its persisted dashboard port.",
@@ -277,7 +231,7 @@ export function buildRebuildRecreateOnboardOpts(args: {
     authoritativeResumeConfig: true,
     endpointSource: normalizeInferenceEndpointSource(args.sb?.endpointSource),
     acceptThirdPartySoftware: args.usageNoticeAccepted,
-    agent: args.rebuildAgent,
+    agent: rebuildAgent,
     recreateProvider: args.sb?.provider ?? null,
     recreateModel: args.sb?.model ?? null,
     recreatePreferredInferenceApi: args.sb?.preferredInferenceApi ?? null,

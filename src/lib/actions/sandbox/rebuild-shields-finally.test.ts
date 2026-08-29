@@ -22,6 +22,14 @@ const gatewayAuthority = {
   requiredCapabilities: [],
 } as const;
 
+const pinnedAgentAuthority = {
+  recordedAgent: null,
+  effectiveAgentId: "openclaw",
+  definition: { name: "openclaw", packageRoot: "/installed/openclaw" },
+  harnessPackage: null,
+  harnessPackageMigration: null,
+} as const;
+
 vi.mock("./rebuild-recreate-journal", () => ({
   assertCurrentRebuildPackageAuthority: () => ({ name: "alpha" }),
   fingerprintLegacyRebuildRecreateTargetIntent: () => "legacy-intent-1",
@@ -63,7 +71,11 @@ describe("rebuild shields relock guard", () => {
     rebuildWindow.relocked = false;
     phaseMocks.runPreflight.mockResolvedValue({
       sandboxEntry: { name: "alpha", customPolicies: [] },
-      targetConfig: { durableConfig: { webSearchConfig: null } },
+      targetConfig: {
+        agentAuthority: pinnedAgentAuthority,
+        agentDefinition: pinnedAgentAuthority.definition,
+        durableConfig: { webSearchConfig: null },
+      },
       recreateOptions: {
         observabilityEnabled: false,
         targetGatewayName: "nemoclaw",
@@ -146,7 +158,11 @@ describe("rebuild shields relock guard", () => {
           targetLiveDigest: "b".repeat(64),
         },
       },
-      targetConfig: { durableConfig: { webSearchConfig: null } },
+      targetConfig: {
+        agentAuthority: pinnedAgentAuthority,
+        agentDefinition: pinnedAgentAuthority.definition,
+        durableConfig: { webSearchConfig: null },
+      },
       recreateOptions: {
         observabilityEnabled: false,
         targetGatewayName: "nemoclaw",

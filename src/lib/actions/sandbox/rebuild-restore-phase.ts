@@ -3,6 +3,7 @@
 
 import { CLI_NAME } from "../../cli/branding";
 import { G, R, YW } from "../../cli/terminal-style";
+import type { AgentDefinition } from "../../agent/definition-types";
 import {
   OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET,
   OBSERVABILITY_POLICY_BINDING,
@@ -20,7 +21,7 @@ import * as snapshotRestore from "./snapshot/restore-authority";
 
 export interface RebuildRestorePhaseInput {
   sandboxName: string;
-  targetAgentType: string;
+  agentDefinition: AgentDefinition;
   targetImageIsCustom: boolean;
   backupManifest: RebuildBackupManifest;
   policyPresets: string[];
@@ -182,7 +183,7 @@ function reconcileFinalManagedObservability(
 export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): RebuildRestorePhaseResult {
   const {
     sandboxName,
-    targetAgentType,
+    agentDefinition,
     targetImageIsCustom,
     backupManifest,
     policyPresets,
@@ -199,7 +200,8 @@ export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): Rebuild
       sandboxName,
       backupManifest,
       {
-        targetAgentType,
+        targetAgentType: agentDefinition.name,
+        agentDefinition,
         ...(targetImageIsCustom ? { allowCustomImageWholeStateFileRestore: true } : {}),
       },
       snapshotRestore.createManagedRestoreAuthorityDependencies(
@@ -211,12 +213,12 @@ export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): Rebuild
     );
     restoreSucceeded = restore.success;
     if (
-      targetAgentType === "hermes" &&
+      agentDefinition.name === "hermes" &&
       restore.restoredDirs.some(
         (directory) => directory === "dashboard-home" || directory === "profiles",
       )
     ) {
-      const dashboardTarget = sandboxConfig.resolveAgentConfig(sandboxName);
+      const dashboardTarget = sandboxConfig.resolveAgentConfig(sandboxName, agentDefinition);
       const dashboardSeed =
         dashboardTarget.agentName === "hermes"
           ? sandboxConfig.restoreHermesDashboardConfig(sandboxName, dashboardTarget)
@@ -264,7 +266,7 @@ export function runRebuildRestorePhase(input: RebuildRestorePhaseInput): Rebuild
     for (const presetName of builtinPolicyPresets) {
       try {
         log(`Applying preset: ${presetName}`);
-        const applied = policies.applyPreset(sandboxName, presetName);
+        const applied = policies.applyPreset(sandboxName, presetName, { agentDefinition });
         if (applied) {
           restoredBuiltinPresets.push(presetName);
         } else {

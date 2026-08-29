@@ -21,7 +21,6 @@ import * as sandboxVersion from "../../sandbox/version";
 import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
-import * as sandboxState from "../../state/sandbox";
 import * as sandboxSession from "../../state/sandbox-session";
 import * as destroy from "./destroy";
 import { rebuildSandbox } from "./rebuild";
@@ -31,6 +30,7 @@ import * as rebuildRoutePreflight from "./rebuild-preflight-guards";
 import * as rebuildShields from "./rebuild-shields";
 import * as rebuildUsageNotice from "./rebuild-usage-notice";
 import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
+import * as snapshotBackup from "./snapshot/backup-authority";
 
 function cloneSession(session: Session): Session {
   return JSON.parse(JSON.stringify(session));
@@ -148,9 +148,9 @@ describe("rebuild resume snapshot repair", () => {
         recoverySucceeded: false,
       }),
       vi.spyOn(resolve, "resolveOpenshell").mockReturnValue(null),
-      vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
-        name: "langchain-deepagents-code",
-      } as never),
+      vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
+        throw new Error("Rebuild reloaded an ambient agent definition after authority selection");
+      }),
       vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue(null),
       vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("OpenClaw"),
       vi.spyOn(onboardSession, "loadSession").mockImplementation(loadSession),
@@ -209,7 +209,7 @@ describe("rebuild resume snapshot repair", () => {
         wasLocked: false,
       }),
       vi.spyOn(rebuildShields, "relockRebuildShieldsWindow").mockReturnValue(true),
-      vi.spyOn(sandboxState, "backupSandboxState").mockReturnValue({
+      vi.spyOn(snapshotBackup, "backupSandboxStateWithManagedAuthority").mockReturnValue({
         success: true,
         backedUpDirs: [],
         backedUpFiles: [],

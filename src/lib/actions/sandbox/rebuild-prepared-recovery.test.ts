@@ -276,6 +276,51 @@ describe("prepared rebuild recovery", () => {
     expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["pre-delete", 1],
+    ["delete edge", 2],
+  ] as const)(
+    "rejects same-name definition root drift at the %s recovery fence",
+    async (_edge, driftAfterValidationCount) => {
+      const harnessPackage = installRebuildHarnessPackage("openclaw");
+      expect(harnessPackage).not.toBeNull();
+      const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
+      let validationCount = 0;
+      const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
+      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+        const authority = resolveExact(...args);
+        return validationCount === driftAfterValidationCount
+          ? {
+              ...authority,
+              definition: {
+                ...authority.definition,
+                packageRoot: `${authority.definition.packageRoot}/changed`,
+              },
+            }
+          : authority;
+      });
+      const harness = createPreparedRecoveryHarness({
+        harnessPackage,
+        preDeleteLatestManifest: recoveryManifest,
+        recoveryManifestValidation: (manifest) => {
+          validationCount++;
+          return { ok: true as const, manifest };
+        },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], {
+          throwOnError: true,
+          recoveryManifest,
+        }),
+      ).rejects.toThrow("resolved agent authority does not match the owning sandbox");
+
+      expect(validationCount).toBe(driftAfterValidationCount);
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+    },
+  );
+
   it("ignores active-pointer advancement for an exact prepared recovery", async () => {
     const harnessPackage = installRebuildHarnessPackage("openclaw");
     expect(harnessPackage).not.toBeNull();

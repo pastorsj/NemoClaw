@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
-import { loadAgent, loadAgentFresh } from "../agent/defs";
+import { createImmutableAgentDefinition, loadAgent, loadAgentFresh } from "../agent/defs";
 import { isCandidateAgent } from "../agent/candidate";
 import { buildAgentDefinition } from "../agent/definition-loader";
 import { getVersion } from "../core/version";
@@ -90,7 +90,7 @@ export function getEffectiveSandboxAgent(
 export function getAgentInferenceProviderOptions(
   agent: AgentDefinition | null | undefined,
 ): string[] {
-  const effectiveAgent = agent?.name ? loadAgent(agent.name) : getEffectiveSandboxAgent(agent);
+  const effectiveAgent = agent ?? loadAgent("openclaw");
   return Array.isArray(effectiveAgent.inferenceProviderOptions)
     ? effectiveAgent.inferenceProviderOptions
     : [];
@@ -224,11 +224,13 @@ export function resolveSandboxAgent(
   const installed = resolvePinnedHarnessPackage(packageState.harnessPackage, {
     ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
   });
-  const definition = buildAgentDefinition({
-    manifest: installed.packageManifest.manifest,
-    manifestPath: installed.packageManifest.manifestPath,
-    packageRoot: installed.packageRoot,
-  });
+  const definition = createImmutableAgentDefinition(
+    buildAgentDefinition({
+      manifest: installed.packageManifest.manifest,
+      manifestPath: installed.packageManifest.manifestPath,
+      packageRoot: installed.packageRoot,
+    }),
+  );
   if (definition.name !== effectiveAgentId || definition.packageRoot !== installed.packageRoot) {
     throw sandboxAgentAuthorityError("the installed definition does not match its package receipt");
   }

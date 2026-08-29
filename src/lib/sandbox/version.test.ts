@@ -63,6 +63,7 @@ vi.mock("child_process", async (importOriginal) => {
 import { spawnSync } from "child_process";
 import { captureSandboxSshConfigCommand } from "../adapters/openshell/client.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
+import type { AgentDefinition } from "../agent/defs.js";
 
 // state/registry captures the registry path at module scope, so HOME must be
 // redirected before it loads. Static ESM imports are hoisted above this
@@ -183,6 +184,44 @@ describe("checkAgentVersion", () => {
     // Should have cached the version in registry
     const updated = registry.getSandbox("test-sb");
     expect(updated?.agentVersion).toBe("2026.5.27");
+  });
+
+  it("uses package-pinned version metadata instead of the repository definition", () => {
+    registry.registerSandbox({ name: "hermes-sb", agent: "hermes" });
+    vi.mocked(captureSandboxSshConfigCommand).mockReturnValue({
+      status: 0,
+      output: "Host openshell-hermes-sb\n  HostName 127.0.0.1\n",
+    });
+    vi.mocked(spawnSync).mockReturnValue({
+      status: 0,
+      stdout: "Installed Hermes 9.8.7\n",
+      stderr: "",
+      pid: 1234,
+      output: [],
+      signal: null,
+    });
+    const installedDefinition = {
+      name: "hermes",
+      displayName: "Installed Hermes",
+      versionCommand: "installed-hermes --version",
+      expectedVersion: "9.8.7",
+      versionScheme: "semver",
+    } as AgentDefinition;
+
+    const result = checkAgentVersion("hermes-sb", {
+      forceProbe: true,
+      agentDefinition: installedDefinition,
+    });
+
+    expect(result).toMatchObject({
+      sandboxVersion: "9.8.7",
+      expectedVersion: "9.8.7",
+      detectionMethod: "ssh-exec",
+      isStale: false,
+    });
+    const sshArgs = vi.mocked(spawnSync).mock.calls[0]?.[1] as string[];
+    expect(sshArgs).toContain("installed-hermes --version");
+    expect(sshArgs).not.toContain("hermes --version");
   });
 
   it("probes the sandbox's own recorded gateway, not OpenShell's ambient selection (#7429)", () => {

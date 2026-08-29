@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { loadAgent } from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
 import { MessagingSetupApplier } from "../../messaging/applier/setup-applier";
 import { createBuiltInChannelManifestRegistry } from "../../messaging/channels/built-ins";
 import { createBuiltInRenderTemplateResolver } from "../../messaging/channels/template-resolver";
@@ -18,10 +18,9 @@ import type { SandboxEntry } from "../../state/registry";
 export async function stageMessagingManifestPlanForRebuild(
   sandboxName: string,
   sandboxEntry: SandboxEntry,
-  rebuildAgent: string | null,
+  agent: AgentDefinition,
   log: (message: string) => void,
 ): Promise<SandboxMessagingPlan | null> {
-  const agent = loadAgent(rebuildAgent || "openclaw");
   const manifestRegistry = createBuiltInChannelManifestRegistry();
   const manifests = manifestRegistry.list();
   const agentId = tryGetMessagingAgentId(agent, manifests);

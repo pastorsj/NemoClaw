@@ -451,6 +451,8 @@ vi.mock("../../adapters/docker", () => ({
 }));
 
 vi.mock("../../agent/defs", () => ({
+  createImmutableAgentDefinition: (definition: AgentDefinition) =>
+    Object.freeze(structuredClone(definition)),
   loadAgent: loadAgentMock,
   loadAgentFresh: loadAgentMock,
 }));

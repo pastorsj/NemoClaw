@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CLI_NAME } from "../../cli/branding";
+import type { AgentDefinition } from "../../agent/defs";
 import { isDirectSandboxFallbackUnavailableError } from "../../sandbox/privileged-exec";
 import type { GatewayRestartResult } from "./gateway-restart";
 import {
@@ -99,13 +100,14 @@ type GatewayRecoveryObservation = {
 };
 
 interface HermesPostRestoreGatewayDeps {
+  agentDefinition?: AgentDefinition;
   checkAndRecoverSandboxProcesses?: (
     sandboxName: string,
-    options: { quiet: boolean },
+    options: { quiet: boolean; agentDefinition?: AgentDefinition },
   ) => GatewayRecoveryObservation;
   restartSandboxGateway?: (
     sandboxName: string,
-    options: { quiet: boolean },
+    options: { quiet: boolean; agentDefinition?: AgentDefinition },
   ) => GatewayRestartResult;
   observeHermesCronReplacement?: (
     sandboxName: string,
@@ -169,7 +171,10 @@ export function restartHermesGatewayAfterStateRestore(
 ): HermesPostRestoreGatewayRestartState {
   if (agentName !== "hermes") return "not-applicable";
   const restart = deps.restartSandboxGateway ?? restartSandboxGateway;
-  const result = restart(sandboxName, { quiet: true });
+  const result = restart(sandboxName, {
+    quiet: true,
+    ...(deps.agentDefinition ? { agentDefinition: deps.agentDefinition } : {}),
+  });
   if (result.ok) return "restarted";
   const mcpRestoreCanSupersede =
     result.failureLayer === "MCP reconciliation refusal" &&
@@ -220,8 +225,7 @@ function verifyHermesGatewayAfterStateRestoreImpl(
 ): HermesPostRestoreGatewayVerification {
   if (agentName !== "hermes") return { state: "not-applicable" };
   const restarted = restartState === "restarted";
-  const checkAndRecover =
-    deps.checkAndRecoverSandboxProcesses ?? checkAndRecoverSandboxProcesses;
+  const checkAndRecover = deps.checkAndRecoverSandboxProcesses ?? checkAndRecoverSandboxProcesses;
   const observeReplacement = deps.observeHermesCronReplacement ?? observeHermesCronReplacement;
   const maxAttempts = originalIdentity
     ? HERMES_GATEWAY_RECHECK_ATTEMPTS + 1
@@ -237,7 +241,10 @@ function verifyHermesGatewayAfterStateRestoreImpl(
         // later iteration must observe it both before and after health.
       }
     }
-    const observation: GatewayRecoveryObservation = checkAndRecover(sandboxName, { quiet: true });
+    const observation: GatewayRecoveryObservation = checkAndRecover(sandboxName, {
+      quiet: true,
+      ...(deps.agentDefinition ? { agentDefinition: deps.agentDefinition } : {}),
+    });
     if (
       observation.forwardRecoveryFailed === true ||
       observation.secretBoundaryRefused === true ||

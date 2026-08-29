@@ -51,6 +51,7 @@ type SelectedOnboardHarness = Exclude<
 >;
 
 interface PreparedPackageContext {
+  readonly authoritativeRebuildAgentAuthority: ResolvedSandboxAgent | null;
   readonly environment: NodeJS.ProcessEnv;
   readonly storeRoot: string;
 }
@@ -72,7 +73,7 @@ export type PreparedOnboardHarnessPackage =
       readonly kind: "legacy-resume";
       readonly migration: PreparedLegacyHarnessMigration;
     } & PreparedPackageContext)
-  | { readonly kind: "deferred-resume" };
+  | ({ readonly kind: "deferred-resume" } & PreparedPackageContext);
 
 export interface BoundOnboardHarnessPackage {
   readonly effectiveDefinition: AgentDefinition | null;
@@ -83,6 +84,7 @@ export interface BoundOnboardHarnessPackage {
 
 export interface OnboardHarnessPackageBoundaryInput {
   readonly agentFlag: string | null;
+  readonly authoritativeRebuildAgentAuthority?: ResolvedSandboxAgent;
   readonly canPrompt: boolean;
   readonly environment: NodeJS.ProcessEnv;
   readonly log: (message?: string) => void;
@@ -117,6 +119,7 @@ export interface OnboardHarnessPackageBoundary {
 
 export interface PrepareOnboardHarnessOperationInput {
   readonly agentFlag: string | null;
+  readonly authoritativeRebuildAgentAuthority?: ResolvedSandboxAgent;
   readonly canPrompt: boolean;
   readonly environment?: NodeJS.ProcessEnv;
   readonly log?: (message?: string) => void;
@@ -188,7 +191,11 @@ function packageContext(
   input: OnboardHarnessPackageBoundaryInput,
   deps: OnboardHarnessPackageBoundaryDependencies,
 ): PreparedPackageContext {
-  return { environment: input.environment, storeRoot: deps.getStoreRoot() };
+  return {
+    authoritativeRebuildAgentAuthority: input.authoritativeRebuildAgentAuthority ?? null,
+    environment: input.environment,
+    storeRoot: deps.getStoreRoot(),
+  };
 }
 
 function requireUnchangedPackageOwner(expected: Session, current: Session | null): Session {
@@ -276,13 +283,69 @@ function packageEntry(session: Session): {
   };
 }
 
-function boundResolvedAgent(resolved: ResolvedSandboxAgent): BoundOnboardHarnessPackage {
+function bindResolvedAgentAuthority(
+  resolved: ResolvedSandboxAgent,
+  authoritativeRebuildAgentAuthority: ResolvedSandboxAgent | null,
+  freshHarnessBinding: FreshOnboardHarnessBinding | null = null,
+): BoundOnboardHarnessPackage {
+  assertPinnedRebuildAuthority(resolved, authoritativeRebuildAgentAuthority);
+  const selected = authoritativeRebuildAgentAuthority ?? resolved;
   return {
-    effectiveDefinition: resolved.definition,
-    freshHarnessBinding: null,
-    selectedAgent: resolved.recordedAgent === null ? null : resolved.definition,
+    effectiveDefinition: selected.definition,
+    freshHarnessBinding,
+    selectedAgent: selected.recordedAgent === null ? null : selected.definition,
     selectionIsAuthoritative: true,
   };
+}
+
+function assertPinnedRebuildAuthority(
+  resolved: ResolvedSandboxAgent,
+  authoritativeRebuildAgentAuthority: ResolvedSandboxAgent | null,
+): void {
+  if (
+    authoritativeRebuildAgentAuthority !== null &&
+    !isDeepStrictEqual(resolved, authoritativeRebuildAgentAuthority)
+  ) {
+    throw new Error("Authoritative rebuild agent authority changed before runtime effects");
+  }
+}
+
+function qualifiedAgentAuthority(
+  recordedAgent: string,
+  definition: AgentDefinition,
+): ResolvedSandboxAgent {
+  return Object.freeze({
+    recordedAgent,
+    effectiveAgentId: recordedAgent,
+    definition,
+    harnessPackage: null,
+    harnessPackageMigration: null,
+  });
+}
+
+function resolveCurrentQualifiedAuthority(
+  recordedAgent: string,
+  prepared: PreparedPackageContext,
+  deps: OnboardHarnessPackageBoundaryDependencies,
+  failureMessage: string,
+): ResolvedSandboxAgent {
+  if (prepared.authoritativeRebuildAgentAuthority !== null) {
+    try {
+      const resolved = deps.resolveSandboxAgent(
+        { agent: recordedAgent },
+        { storeRoot: prepared.storeRoot, env: prepared.environment },
+      );
+      if (resolved.recordedAgent !== recordedAgent || resolved.harnessPackage !== null) {
+        throw new Error(failureMessage);
+      }
+      return resolved;
+    } catch {
+      throw new Error(failureMessage);
+    }
+  }
+  const definition = deps.resolveQualifiedAgent(recordedAgent, prepared.environment);
+  if (!definition || definition.name !== recordedAgent) throw new Error(failureMessage);
+  return qualifiedAgentAuthority(recordedAgent, definition);
 }
 
 function bindFreshSelection(
@@ -291,17 +354,18 @@ function bindFreshSelection(
 ): BoundOnboardHarnessPackage {
   const selection = prepared.selection;
   if (selection.kind === "qualified-agent") {
-    const definition = deps.resolveQualifiedAgent(selection.recordedAgent, prepared.environment);
-    if (!definition || definition.name !== selection.recordedAgent) {
-      throw new Error("Selected qualified harness authority did not survive portable recovery");
-    }
+    const resolved = resolveCurrentQualifiedAuthority(
+      selection.recordedAgent,
+      prepared,
+      deps,
+      "Selected qualified harness authority did not survive portable recovery",
+    );
     deps.assertWriterLockOwned();
-    return {
-      effectiveDefinition: definition,
-      freshHarnessBinding: selection,
-      selectedAgent: definition,
-      selectionIsAuthoritative: true,
-    };
+    return bindResolvedAgentAuthority(
+      resolved,
+      prepared.authoritativeRebuildAgentAuthority,
+      selection,
+    );
   }
 
   const resolved = deps.resolveSandboxAgent(
@@ -318,12 +382,11 @@ function bindFreshSelection(
     throw new Error("Selected harness package changed during post-recovery resolution");
   }
   deps.assertWriterLockOwned();
-  return {
-    effectiveDefinition: resolved.definition,
-    freshHarnessBinding: selection,
-    selectedAgent: resolved.recordedAgent === null ? null : resolved.definition,
-    selectionIsAuthoritative: true,
-  };
+  return bindResolvedAgentAuthority(
+    resolved,
+    prepared.authoritativeRebuildAgentAuthority,
+    selection,
+  );
 }
 
 async function prepareBoundary(
@@ -348,7 +411,7 @@ async function prepareBoundary(
   }
 
   const session = deps.loadSession();
-  if (!session || session.resumable === false) return { kind: "deferred-resume" };
+  if (!session || session.resumable === false) return { kind: "deferred-resume", ...context };
   const packageState = inspectHarnessPackageState(
     session.harnessPackage,
     session.harnessPackageMigration,
@@ -422,34 +485,66 @@ function bindBoundary(
   }
   if (prepared.kind === "package-resume") {
     const unchanged = requireUnchangedPackageOwner(prepared.ownerSnapshot, deps.loadSession());
+    const resolvedBeforeMutation = prepared.authoritativeRebuildAgentAuthority
+      ? deps.resolveSandboxAgent(packageEntry(unchanged), {
+          storeRoot: prepared.storeRoot,
+          env: prepared.environment,
+        })
+      : null;
+    if (resolvedBeforeMutation) {
+      assertPinnedRebuildAuthority(
+        resolvedBeforeMutation,
+        prepared.authoritativeRebuildAgentAuthority,
+      );
+    }
     const owner = reconcileCheckpointAuthority(unchanged, unchanged.harnessPackage, deps);
     assertOwningRegistryAuthority(owner, deps);
-    const resolved = deps.resolveSandboxAgent(packageEntry(owner), {
-      storeRoot: prepared.storeRoot,
-      env: prepared.environment,
-    });
+    const resolved =
+      resolvedBeforeMutation ??
+      deps.resolveSandboxAgent(packageEntry(owner), {
+        storeRoot: prepared.storeRoot,
+        env: prepared.environment,
+      });
     deps.assertWriterLockOwned();
-    return boundResolvedAgent(resolved);
+    return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
   }
   if (prepared.kind === "qualified-resume") {
     const unchanged = requireUnchangedQualifiedOwner(prepared.ownerSnapshot, deps.loadSession());
+    const resolvedBeforeMutation =
+      prepared.authoritativeRebuildAgentAuthority !== null && unchanged.agent
+        ? resolveCurrentQualifiedAuthority(
+            unchanged.agent,
+            prepared,
+            deps,
+            "Qualified harness authority did not survive portable recovery",
+          )
+        : null;
+    if (resolvedBeforeMutation) {
+      assertPinnedRebuildAuthority(
+        resolvedBeforeMutation,
+        prepared.authoritativeRebuildAgentAuthority,
+      );
+    }
     const owner = reconcileCheckpointAuthority(unchanged, null, deps);
     assertOwningRegistryAuthority(owner, deps);
-    const definition = owner.agent
-      ? deps.resolveQualifiedAgent(owner.agent, prepared.environment)
-      : null;
-    if (!definition || definition.name !== owner.agent) {
+    if (!owner.agent) {
       throw new Error("Qualified harness authority did not survive portable recovery");
     }
+    const resolved =
+      resolvedBeforeMutation ??
+      resolveCurrentQualifiedAuthority(
+        owner.agent,
+        prepared,
+        deps,
+        "Qualified harness authority did not survive portable recovery",
+      );
     deps.assertWriterLockOwned();
-    return {
-      effectiveDefinition: definition,
-      freshHarnessBinding: null,
-      selectedAgent: definition,
-      selectionIsAuthoritative: true,
-    };
+    return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
   }
   if (prepared.kind === "deferred-resume") {
+    if (prepared.authoritativeRebuildAgentAuthority !== null) {
+      throw new Error("Authoritative rebuild agent authority is missing before runtime effects");
+    }
     return {
       effectiveDefinition: null,
       freshHarnessBinding: null,
@@ -459,6 +554,20 @@ function bindBoundary(
   }
   if (prepared.migration.owner.kind !== "session") {
     throw new Error("Onboarding legacy migration requires a session owner");
+  }
+  if (prepared.authoritativeRebuildAgentAuthority !== null) {
+    const resolvedBeforeMutation = deps.resolveSandboxAgent(
+      {
+        agent: prepared.migration.owner.session.agent,
+        harnessPackage: prepared.migration.harnessPackage,
+        harnessPackageMigration: prepared.migration.harnessPackageMigration,
+      },
+      { storeRoot: prepared.storeRoot, env: prepared.environment },
+    );
+    assertPinnedRebuildAuthority(
+      resolvedBeforeMutation,
+      prepared.authoritativeRebuildAgentAuthority,
+    );
   }
   const migrated = deps.reconcileLegacyMigration(prepared.migration);
   const resolved = deps.resolveSandboxAgent(
@@ -470,7 +579,7 @@ function bindBoundary(
     { storeRoot: prepared.storeRoot, env: prepared.environment },
   );
   deps.assertWriterLockOwned();
-  return boundResolvedAgent(resolved);
+  return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
 }
 
 /** Build the writer-locked harness package boundary used by one onboarding command. */
@@ -505,6 +614,7 @@ export async function prepareOnboardHarnessOperation(
   });
   const prepared = await boundary.prepare({
     agentFlag: input.agentFlag,
+    authoritativeRebuildAgentAuthority: input.authoritativeRebuildAgentAuthority,
     canPrompt: input.canPrompt,
     environment: input.environment ?? process.env,
     log: input.log ?? ((message = "") => console.log(message)),

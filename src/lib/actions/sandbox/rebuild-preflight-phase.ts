@@ -236,7 +236,6 @@ export async function runRebuildPreflightPhase(
     );
     return null;
   }
-  const agentName = agentAuthority.definition.displayName;
   const versionCheck = await runRebuildGatewayIntentPreflight({
     checkGatewaySchema: () =>
       isDcodeRebuildAgent(rebuildAgent) ||
@@ -244,7 +243,7 @@ export async function runRebuildPreflightPhase(
     confirmIntent: () =>
       confirmRebuildIntent(
         sandboxName,
-        agentName,
+        agentAuthority.definition,
         skipConfirm,
         activeSessionCount,
         bail,

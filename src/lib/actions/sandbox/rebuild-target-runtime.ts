@@ -287,6 +287,7 @@ export async function preflightAuthoritativeOnboardRuntime(
     const gatewayAuthority = await rebuildOnboardDependencies.preflightAuthoritativeRebuildTarget({
       ...recreateOptions,
       ...options,
+      agentDefinition: resumeConfig.agentAuthority.definition,
       model: resumeConfig.model,
       provider: resumeConfig.provider,
       sandboxName,

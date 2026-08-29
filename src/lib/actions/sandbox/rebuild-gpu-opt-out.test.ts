@@ -1,21 +1,72 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../harness/package-identity";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
-
-vi.mock("../../onboard/sandbox-agent", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../onboard/sandbox-agent")>()),
-  // This suite owns GPU/recreate option projection. Package qualification has
-  // focused coverage in rebuild-authority.test.ts.
-  resolveSandboxAgent: vi.fn(() => ({ harnessPackage: null, harnessPackageMigration: null })),
-}));
 
 import {
   buildRebuildRecreateOnboardOpts,
   getRebuildSandboxGpuOverrides,
   rebuildShouldOptOutGpu,
 } from "./rebuild-gpu-opt-out";
+
+function packageIdentity(id: string): HarnessPackageIdentity {
+  return {
+    kind: "agent-runtime" as const,
+    id,
+    packageVersion: "1.0.0",
+    contractVersion: 1,
+    contentDigest: "a".repeat(64),
+  };
+}
+
+function pinnedDefinition(name: string): AgentDefinition {
+  const terminal = name === "langchain-deepagents-code";
+  return {
+    name,
+    packageRoot: `/pinned/${name}`,
+    runtime: { kind: terminal ? "terminal" : "service" },
+    forward_ports: terminal ? [] : [18_789],
+  } as AgentDefinition;
+}
+
+const OPENCLAW_PACKAGE = packageIdentity("openclaw");
+const HERMES_PACKAGE = packageIdentity("hermes");
+const DCODE_PACKAGE = packageIdentity("langchain-deepagents-code");
+const OPENCLAW_DEFINITION = pinnedDefinition("openclaw");
+const HERMES_DEFINITION = pinnedDefinition("hermes");
+const DCODE_DEFINITION = pinnedDefinition("langchain-deepagents-code");
+
+function pinnedAuthority(
+  recordedAgent: string | null,
+  definition: AgentDefinition,
+  harnessPackage: HarnessPackageIdentity,
+): ResolvedSandboxAgent {
+  return {
+    recordedAgent,
+    effectiveAgentId: definition.name,
+    definition,
+    harnessPackage,
+    harnessPackageMigration: null,
+  };
+}
+
+const OPENCLAW_AUTHORITY = pinnedAuthority(null, OPENCLAW_DEFINITION, OPENCLAW_PACKAGE);
+const HERMES_AUTHORITY = pinnedAuthority("hermes", HERMES_DEFINITION, HERMES_PACKAGE);
+const DCODE_AUTHORITY = pinnedAuthority(
+  "langchain-deepagents-code",
+  DCODE_DEFINITION,
+  DCODE_PACKAGE,
+);
+const OPENCLAW_MIGRATION = {
+  schemaVersion: 1,
+  source: "legacy-current-bundle",
+  legacyAgent: null,
+  migratedAt: "2026-08-28T05:00:00.000Z",
+} as const;
 
 describe("rebuildShouldOptOutGpu", () => {
   it("returns false when the registry entry is null", () => {
@@ -155,12 +206,16 @@ describe("getRebuildSandboxGpuOverrides", () => {
 
 describe("buildRebuildRecreateOnboardOpts", () => {
   const baseArgs = {
-    rebuildAgent: "openclaw",
+    agentAuthority: OPENCLAW_AUTHORITY,
     storedFromDockerfile: null,
     autoYes: true,
     usageNoticeAccepted: true as const,
   };
-  const dashboard = { dashboardPort: 18789 };
+  const dashboard = {
+    agent: null,
+    harnessPackage: OPENCLAW_PACKAGE,
+    dashboardPort: 18789,
+  };
 
   it("forwards noGpu:true when the recorded sandboxGpuMode is the explicit opt-out '0'", () => {
     const opts = buildRebuildRecreateOnboardOpts({
@@ -173,7 +228,7 @@ describe("buildRebuildRecreateOnboardOpts", () => {
       nonInteractive: true,
       recreateSandbox: true,
       authoritativeResumeConfig: true,
-      agent: "openclaw",
+      agent: null,
       fromDockerfile: null,
       sandboxGpu: "disable",
       sandboxGpuDevice: null,
@@ -187,11 +242,13 @@ describe("buildRebuildRecreateOnboardOpts", () => {
   it("carries recorded DCode auto-approval into authoritative recreation (#6478)", () => {
     const opts = buildRebuildRecreateOnboardOpts({
       sb: {
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
         dashboardPort: 0,
         gatewayName: "nemoclaw",
         dcodeAutoApprovalMode: "thread-opt-in",
       },
-      rebuildAgent: "langchain-deepagents-code",
+      agentAuthority: DCODE_AUTHORITY,
       storedFromDockerfile: null,
       autoYes: true,
       usageNoticeAccepted: true,
@@ -249,8 +306,13 @@ describe("buildRebuildRecreateOnboardOpts", () => {
   it("carries durable observability intent into inner onboard", () => {
     const enabled = buildRebuildRecreateOnboardOpts({
       ...baseArgs,
-      rebuildAgent: "langchain-deepagents-code",
-      sb: { ...dashboard, observabilityEnabled: true },
+      agentAuthority: DCODE_AUTHORITY,
+      sb: {
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
+        dashboardPort: 0,
+        observabilityEnabled: true,
+      },
     });
     const legacy = buildRebuildRecreateOnboardOpts({ ...baseArgs, sb: dashboard });
 
@@ -261,8 +323,11 @@ describe("buildRebuildRecreateOnboardOpts", () => {
   it("carries the authoritative restricted tier with observability into inner onboard", () => {
     const opts = buildRebuildRecreateOnboardOpts({
       ...baseArgs,
-      rebuildAgent: "langchain-deepagents-code",
+      agentAuthority: DCODE_AUTHORITY,
       sb: {
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
+        dashboardPort: 0,
         observabilityEnabled: true,
         policyTier: "restricted",
       },
@@ -282,17 +347,26 @@ describe("buildRebuildRecreateOnboardOpts", () => {
   });
 
   it.each([
-    "openclaw",
-    "hermes",
-  ])("rejects malformed %s observability state before recreate onboarding", (rebuildAgent) => {
-    expect(() =>
-      buildRebuildRecreateOnboardOpts({
-        ...baseArgs,
-        rebuildAgent,
-        sb: { ...dashboard, observabilityEnabled: true },
-      }),
-    ).toThrow("Recorded observability state is valid only for agent 'langchain-deepagents-code'.");
-  });
+    ["openclaw", OPENCLAW_AUTHORITY, dashboard],
+    [
+      "hermes",
+      HERMES_AUTHORITY,
+      { agent: "hermes", harnessPackage: HERMES_PACKAGE, dashboardPort: 18_789 },
+    ],
+  ] as const)(
+    "rejects malformed %s observability state before recreate onboarding",
+    (_agentName, agentAuthority, entry) => {
+      expect(() =>
+        buildRebuildRecreateOnboardOpts({
+          ...baseArgs,
+          agentAuthority,
+          sb: { ...entry, observabilityEnabled: true },
+        }),
+      ).toThrow(
+        "Recorded observability state is valid only for agent 'langchain-deepagents-code'.",
+      );
+    },
+  );
 
   it("forwards noGpu:true for legacy entries with gpuEnabled:false and no sandboxGpuMode", () => {
     const opts = buildRebuildRecreateOnboardOpts({
@@ -328,15 +402,63 @@ describe("buildRebuildRecreateOnboardOpts", () => {
   });
 
   it("fails closed when a dashboard-managed sandbox has no durable port", () => {
-    expect(() => buildRebuildRecreateOnboardOpts({ ...baseArgs, sb: null })).toThrow(
-      "without its persisted dashboard port",
-    );
+    expect(() =>
+      buildRebuildRecreateOnboardOpts({
+        ...baseArgs,
+        sb: { agent: null, harnessPackage: OPENCLAW_PACKAGE },
+      }),
+    ).toThrow("without its persisted dashboard port");
+  });
+
+  it("uses the pinned DCode definition without requiring a dashboard port", () => {
+    const opts = buildRebuildRecreateOnboardOpts({
+      ...baseArgs,
+      agentAuthority: DCODE_AUTHORITY,
+      sb: {
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
+      },
+    });
+
+    expect(opts.controlUiPort).toBeNull();
+  });
+
+  it("rejects package or migration authority that differs from the registry entry", () => {
+    expect(() =>
+      buildRebuildRecreateOnboardOpts({
+        ...baseArgs,
+        agentAuthority: {
+          ...OPENCLAW_AUTHORITY,
+          harnessPackage: { ...OPENCLAW_PACKAGE, packageVersion: "1.0.1" },
+        },
+        sb: dashboard,
+      }),
+    ).toThrow("Pinned rebuild package authority does not match the sandbox registry entry.");
+
+    expect(() =>
+      buildRebuildRecreateOnboardOpts({
+        ...baseArgs,
+        agentAuthority: {
+          ...OPENCLAW_AUTHORITY,
+          harnessPackageMigration: {
+            ...OPENCLAW_MIGRATION,
+            migratedAt: "2026-08-29T05:00:00.000Z",
+          },
+        },
+        sb: { ...dashboard, harnessPackageMigration: OPENCLAW_MIGRATION },
+      }),
+    ).toThrow("Pinned rebuild package authority does not match the sandbox registry entry.");
   });
 
   it("preserves storedFromDockerfile and autoYes regardless of GPU opt-out", () => {
     const opts = buildRebuildRecreateOnboardOpts({
-      sb: { ...dashboard, sandboxGpuMode: "0" },
-      rebuildAgent: "hermes",
+      sb: {
+        agent: "hermes",
+        harnessPackage: HERMES_PACKAGE,
+        dashboardPort: 18_789,
+        sandboxGpuMode: "0",
+      },
+      agentAuthority: HERMES_AUTHORITY,
       storedFromDockerfile: "/sandbox/.openclaw/Dockerfile.custom",
       autoYes: false,
       usageNoticeAccepted: true,
@@ -371,8 +493,12 @@ describe("buildRebuildRecreateOnboardOpts", () => {
     };
     const opts = buildRebuildRecreateOnboardOpts({
       ...baseArgs,
-      sb: { sandboxGpuMode: "0" },
-      rebuildAgent: "langchain-deepagents-code",
+      sb: {
+        agent: "langchain-deepagents-code",
+        harnessPackage: DCODE_PACKAGE,
+        sandboxGpuMode: "0",
+      },
+      agentAuthority: DCODE_AUTHORITY,
       preparedDcodeRebuild,
     });
 

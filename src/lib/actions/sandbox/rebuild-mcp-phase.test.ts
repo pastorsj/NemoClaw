@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   prepareAbsent: vi.fn(),
   prepareExecUnavailable: vi.fn(),
   prepareLive: vi.fn(),
+  restore: vi.fn(),
 }));
 
 vi.mock("./mcp-bridge", () => ({
@@ -16,7 +17,7 @@ vi.mock("./mcp-bridge", () => ({
   prepareMcpBridgesForExecUnavailableRebuild: mocks.prepareExecUnavailable,
   prepareMcpBridgesForRebuild: mocks.prepareLive,
   reattachMcpProvidersAfterRebuildAbort: vi.fn(),
-  restoreMcpBridgesAfterRebuild: vi.fn(),
+  restoreMcpBridgesAfterRebuild: mocks.restore,
 }));
 
 vi.mock("./process-recovery", () => ({
@@ -24,7 +25,11 @@ vi.mock("./process-recovery", () => ({
   executeSandboxExecCommand: mocks.executeSandboxExecCommand,
 }));
 
-import { prepareMcpForRebuild, printMcpRebuildRetryCommand } from "./rebuild-mcp-phase";
+import {
+  prepareMcpForRebuild,
+  printMcpRebuildRetryCommand,
+  restoreMcpAfterRebuild,
+} from "./rebuild-mcp-phase";
 
 const emptyPreparation = {
   entries: [],
@@ -45,6 +50,34 @@ describe("forced rebuild MCP preparation", () => {
     mocks.prepareAbsent.mockResolvedValue(emptyPreparation);
     mocks.prepareExecUnavailable.mockResolvedValue(emptyPreparation);
     mocks.prepareLive.mockResolvedValue(emptyPreparation);
+    mocks.restore.mockResolvedValue(undefined);
+  });
+
+  it("passes one pinned definition through live preparation and restoration", async () => {
+    const agentDefinition = { name: "hermes" } as never;
+    const relock = vi.fn(() => true);
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    await prepareMcpForRebuild("alpha", false, false, relock, bail, agentDefinition);
+    await restoreMcpAfterRebuild("alpha", [{} as never], agentDefinition);
+
+    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha", { agentDefinition });
+    expect(mocks.restore).toHaveBeenCalledWith("alpha", [{}], { agentDefinition });
+  });
+
+  it("passes the pinned definition through force-only host recovery", async () => {
+    const agentDefinition = { name: "hermes" } as never;
+    mocks.executeSandboxExecCommand.mockReturnValue(null);
+    const relock = vi.fn(() => true);
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    await prepareMcpForRebuild("alpha", false, true, relock, bail, agentDefinition);
+
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { agentDefinition });
   });
 
   it("uses host-side recovery when OpenShell exec fails even while SSH is healthy (#7062)", async () => {
@@ -112,28 +145,29 @@ describe("forced rebuild MCP preparation", () => {
     expect(relock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    1, 64, 126, 127, 255,
-  ])("routes every nonzero exec result (%i) through explicit force recovery (#7062)", async (status) => {
-    mocks.executeSandboxExecCommand.mockReturnValue({
-      status,
-      stdout: "",
-      stderr: "exec failed",
-    });
-    const relock = vi.fn(() => true);
-    const bail = vi.fn((message: string): never => {
-      throw new Error(message);
-    });
+  it.each([1, 64, 126, 127, 255])(
+    "routes every nonzero exec result (%i) through explicit force recovery (#7062)",
+    async (status) => {
+      mocks.executeSandboxExecCommand.mockReturnValue({
+        status,
+        stdout: "",
+        stderr: "exec failed",
+      });
+      const relock = vi.fn(() => true);
+      const bail = vi.fn((message: string): never => {
+        throw new Error(message);
+      });
 
-    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
-      emptyPreparation,
-    );
+      await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+        emptyPreparation,
+      );
 
-    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
-    expect(mocks.prepareLive).not.toHaveBeenCalled();
-    expect(mocks.prepareAbsent).not.toHaveBeenCalled();
-    expect(relock).not.toHaveBeenCalled();
-  });
+      expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+      expect(mocks.prepareLive).not.toHaveBeenCalled();
+      expect(mocks.prepareAbsent).not.toHaveBeenCalled();
+      expect(relock).not.toHaveBeenCalled();
+    },
+  );
 
   it("does not mask a live-path safety failure after a successful exec probe (#7062)", async () => {
     mocks.prepareLive.mockRejectedValue(new Error("generated policy drifted"));
@@ -277,21 +311,21 @@ describe("MCP rebuild retry guidance", () => {
     expect(command).not.toContain("--no-observability");
   });
 
-  it.each([
-    "disabled",
-    "thread-opt-in",
-  ] as const)("preserves an explicit DCode auto-approval=%s override", (mode) => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it.each(["disabled", "thread-opt-in"] as const)(
+    "preserves an explicit DCode auto-approval=%s override",
+    (mode) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    printMcpRebuildRetryCommand("alpha", [{} as never], "progressive", undefined, {
-      mode,
-      requestedExplicitly: true,
-    });
+      printMcpRebuildRetryCommand("alpha", [{} as never], "progressive", undefined, {
+        mode,
+        requestedExplicitly: true,
+      });
 
-    expect(error.mock.calls.flat().join("\n")).toContain(
-      `nemoclaw alpha rebuild --yes --tool-disclosure progressive --dcode-auto-approval ${mode}`,
-    );
-  });
+      expect(error.mock.calls.flat().join("\n")).toContain(
+        `nemoclaw alpha rebuild --yes --tool-disclosure progressive --dcode-auto-approval ${mode}`,
+      );
+    },
+  );
 
   it("keeps inherited DCode auto-approval state implicit on retry", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);

@@ -13,6 +13,16 @@ import {
   snapshotEnv,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
 
+function expectPinnedOpenClawOptions() {
+  return expect.objectContaining({
+    agentDefinition: expect.objectContaining({
+      name: "openclaw",
+      expectedVersion: "0.2.0",
+      packageRoot: expect.stringContaining("/harnesses/objects/sha256/"),
+    }),
+  });
+}
+
 describe("rebuildSandbox flow: target credentials", () => {
   installRebuildFlowTestHooks();
   it("aborts before backup/delete when durable Brave credential validation fails", async () => {
@@ -107,8 +117,16 @@ describe("rebuildSandbox flow: target credentials", () => {
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    expect(harness.applyPresetSpy).toHaveBeenCalledWith("alpha", "tavily");
-    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith("alpha", "brave");
+    expect(harness.applyPresetSpy).toHaveBeenCalledWith(
+      "alpha",
+      "tavily",
+      expectPinnedOpenClawOptions(),
+    );
+    expect(harness.applyPresetSpy).not.toHaveBeenCalledWith(
+      "alpha",
+      "brave",
+      expectPinnedOpenClawOptions(),
+    );
     expect(harness.session.webSearchConfig).toEqual({
       fetchEnabled: true,
       provider: "tavily",

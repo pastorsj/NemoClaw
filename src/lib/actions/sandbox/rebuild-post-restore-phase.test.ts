@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as agentDefs from "../../agent/defs";
-import * as agentRuntime from "../../agent/runtime";
+import * as sandboxAgent from "../../onboard/sandbox-agent";
 import * as shields from "../../shields";
+import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import * as messagingHostForward from "./messaging-host-forward-lifecycle";
 import * as processRecovery from "./process-recovery";
 import * as rebuildConfigHash from "./rebuild-config-hash";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import * as rebuildHermesPostRestore from "./rebuild-hermes-post-restore";
 import * as rebuildMcp from "./rebuild-mcp-phase";
 import * as rebuildMessaging from "./rebuild-messaging-phase";
@@ -16,21 +17,39 @@ import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
 import * as sessionModels from "./reconcile-session-models";
 
 describe("rebuild post-restore phase", () => {
-  let agentName: "openclaw" | "hermes";
+  let agentName: "openclaw" | "hermes" | "pi";
   let order: string[];
+
+  function currentAgentAuthority() {
+    return makeRebuildAgentAuthority(agentName === "openclaw" ? null : agentName);
+  }
+
+  function currentRegistryEntry() {
+    const authority = currentAgentAuthority();
+    return {
+      name: "alpha",
+      agent: authority.recordedAgent,
+      harnessPackage: authority.harnessPackage,
+      harnessPackageMigration: authority.harnessPackageMigration,
+    } as never;
+  }
+
+  function currentOnboardSession() {
+    const authority = currentAgentAuthority();
+    return {
+      sandboxName: "alpha",
+      agent: authority.recordedAgent,
+      harnessPackage: authority.harnessPackage,
+      harnessPackageMigration: authority.harnessPackageMigration,
+    } as never;
+  }
 
   beforeEach(() => {
     agentName = "openclaw";
     order = [];
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(agentRuntime, "getSessionAgent").mockImplementation(() =>
-      agentName === "openclaw" ? null : ({ name: agentName } as never),
-    );
-    vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("test agent");
-    vi.spyOn(agentDefs, "loadAgent").mockImplementation(
-      () => ({ name: agentName, expectedVersion: null }) as never,
-    );
+    vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation(() => currentAgentAuthority());
     vi.spyOn(processRecovery, "executeSandboxExecCommand").mockImplementation(() => {
       order.push("doctor");
       return { status: 0, stdout: "", stderr: "" };
@@ -88,11 +107,12 @@ describe("rebuild post-restore phase", () => {
       rebuildHermesPostRestore,
       "isHermesCronRestoreDrainMarkerRollbackFailure",
     ).mockReturnValue(false);
-    vi.spyOn(registry, "getSandbox").mockImplementation(
-      () => ({ agent: agentName === "openclaw" ? null : agentName }) as never,
-    );
+    vi.spyOn(registry, "getSandbox").mockImplementation(() => currentRegistryEntry());
+    vi.spyOn(onboardSession, "loadSession").mockImplementation(() => currentOnboardSession());
     vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-    vi.spyOn(registry, "updateSandbox").mockReturnValue(true);
+    vi.spyOn(registry, "updateSandboxIfCurrent").mockImplementation(
+      (expected, updates) => ({ ...expected, ...updates }) as never,
+    );
     vi.spyOn(messagingHostForward, "ensureMessagingHostForwardAfterRebuild").mockImplementation(
       () => {
         order.push("host-forward");
@@ -108,7 +128,7 @@ describe("rebuild post-restore phase", () => {
   function input() {
     return {
       sandboxName: "alpha",
-      targetAgentName: agentName,
+      agentAuthority: currentAgentAuthority(),
       sandboxEntry: {} as never,
       messagingPlan: null,
       backupManifest: null,
@@ -149,6 +169,372 @@ describe("rebuild post-restore phase", () => {
       300_000,
       { allowLocalDockerFallback: false },
     );
+  });
+
+  it("binds Hermes restart, verification, and MCP restore to rebuild authority", async () => {
+    agentName = "hermes";
+    const args = input();
+
+    await runRebuildPostRestorePhase(args);
+
+    const agentDefinition = args.agentAuthority.definition;
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).toHaveBeenCalledWith(
+      "alpha",
+      "hermes",
+      { agentDefinition },
+    );
+    expect(rebuildMcp.restoreMcpAfterRebuild).toHaveBeenCalledWith("alpha", [], agentDefinition);
+    expect(rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore).toHaveBeenCalledWith(
+      "alpha",
+      "hermes",
+      "restarted",
+      { agentDefinition },
+    );
+  });
+
+  it("stops every harness-owned repair when the recreated Session authority drifts", async () => {
+    const args = input();
+    vi.mocked(onboardSession.loadSession).mockReturnValue({
+      sandboxName: "alpha",
+      agent: args.agentAuthority.recordedAgent,
+      harnessPackage: {
+        ...args.agentAuthority.harnessPackage!,
+        contentDigest: "b".repeat(64),
+      },
+      harnessPackageMigration: args.agentAuthority.harnessPackageMigration,
+    } as never);
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(sandboxAgent.resolveSandboxAgent).not.toHaveBeenCalled();
+    expect(processRecovery.executeSandboxExecCommand).not.toHaveBeenCalled();
+    expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
+    expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
+    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(
+      rebuildConfigHash.refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
+    ).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops later mutations when Session authority drifts during OpenClaw doctor", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(processRecovery.executeSandboxExecCommand).mockImplementation(() => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return { status: 0, stdout: "", stderr: "" };
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
+    expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
+    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops messaging replay when Session authority drifts during session-model reconciliation", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).mockImplementation(
+      () => {
+        currentSession = {
+          ...currentSession,
+          harnessPackage: {
+            ...args.agentAuthority.harnessPackage!,
+            contentDigest: "b".repeat(64),
+          },
+        } as never;
+      },
+    );
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
+    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("preserves Hermes cron recovery when recreated package receipt verification fails", async () => {
+    agentName = "hermes";
+    vi.mocked(sandboxAgent.resolveSandboxAgent).mockImplementation(() => {
+      throw new Error("package object no longer matches its receipt");
+    });
+    const args = {
+      ...input(),
+      backupManifest: { backupPath: "/tmp/alpha-backup" } as never,
+      hermesCronRestoreIdentity: {
+        pid: 41,
+        start_time: 902,
+        drain_token: "restore-token",
+      },
+    };
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+    const output = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(output).toContain("Hermes cron dispatch remains drained");
+    expect(output).toContain("Backup is preserved at: /tmp/alpha-backup");
+    expect(output).toContain("nemoclaw alpha recover");
+  });
+
+  it("rejects malformed present package authority instead of treating it as candidate absence", async () => {
+    agentName = "pi";
+    const malformedCandidateSession = onboardSession.normalizeSession({
+      ...onboardSession.createSession({ agent: "pi", sandboxName: "alpha" }),
+      harnessPackage: { id: "pi" },
+      harnessPackageMigration: null,
+    } as never);
+    expect(malformedCandidateSession).not.toBeNull();
+    expect(onboardSession.hasInvalidSessionHarnessPackage(malformedCandidateSession)).toBe(true);
+    vi.mocked(onboardSession.loadSession).mockReturnValue(malformedCandidateSession);
+    const args = input();
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(sandboxAgent.resolveSandboxAgent).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops later mutations when Session authority drifts during awaited messaging replay", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).mockImplementation(
+      async () => {
+        currentSession = {
+          ...currentSession,
+          harnessPackage: {
+            ...args.agentAuthority.harnessPackage!,
+            contentDigest: "b".repeat(64),
+          },
+        } as never;
+      },
+    );
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops gateway restart when Session authority drifts during permission repair", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(shields.repairMutableConfigPerms).mockImplementation(() => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return {
+        applied: false,
+        reason: "not needed",
+        skipReason: "not-needed",
+      } as never;
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(shields.repairMutableConfigPerms).toHaveBeenCalledOnce();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("keeps Hermes cron recovery ahead of finalization when authority drifts during MCP restore", async () => {
+    agentName = "hermes";
+    const args = {
+      ...input(),
+      backupManifest: { backupPath: "/tmp/alpha-backup" } as never,
+      hermesCronRestoreIdentity: {
+        pid: 41,
+        start_time: 902,
+        drain_token: "restore-token",
+      },
+    };
+    let currentEntry: NonNullable<ReturnType<typeof registry.getSandbox>> = currentRegistryEntry();
+    vi.mocked(registry.getSandbox).mockImplementation(() => currentEntry);
+    vi.mocked(rebuildMcp.restoreMcpAfterRebuild).mockImplementation(async () => {
+      currentEntry = {
+        ...currentEntry,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return true;
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(
+      rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestoreForCronGate,
+    ).not.toHaveBeenCalled();
+    expect(
+      rebuildHermesPostRestore.completeHermesCronRestoreAfterGatewayReplacement,
+    ).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    const output = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(output).toContain("Hermes cron dispatch remains drained");
+    expect(output).toContain("Backup is preserved at: /tmp/alpha-backup");
+    expect(output).toContain("nemoclaw alpha recover");
+  });
+
+  it("stops hash verification when Session authority drifts during config hash refresh", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(
+      rebuildConfigHash.refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
+    ).mockImplementation(() => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return true;
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops MCP restoration when registry authority drifts during Hermes restart", async () => {
+    agentName = "hermes";
+    const args = input();
+    let currentEntry: NonNullable<ReturnType<typeof registry.getSandbox>> = currentRegistryEntry();
+    vi.mocked(registry.getSandbox).mockImplementation(() => currentEntry);
+    vi.mocked(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).mockImplementation(
+      () => {
+        currentEntry = {
+          ...currentEntry,
+          harnessPackage: {
+            ...args.agentAuthority.harnessPackage!,
+            contentDigest: "b".repeat(64),
+          },
+        } as never;
+        return "restarted";
+      },
+    );
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("keeps Hermes cron drained when Session authority drifts before gate release", async () => {
+    agentName = "hermes";
+    const args = {
+      ...input(),
+      backupManifest: { backupPath: "/tmp/alpha-backup" } as never,
+      hermesCronRestoreIdentity: {
+        pid: 41,
+        start_time: 902,
+        drain_token: "restore-token",
+      },
+    };
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(
+      rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestoreForCronGate,
+    ).mockImplementation(() => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return {
+        state: "healthy",
+        replacementIdentity: { pid: 77, start_time: 903, drain_token: "restore-token" },
+      };
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(
+      rebuildHermesPostRestore.completeHermesCronRestoreAfterGatewayReplacement,
+    ).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+    const output = vi.mocked(console.error).mock.calls.flat().join("\n");
+    expect(output).toContain("Hermes cron dispatch remains drained");
+    expect(output).toContain("Backup is preserved at: /tmp/alpha-backup");
+    expect(output).toContain("nemoclaw alpha recover");
   });
 
   it("does not record a final hash without trusted doctor completion (#9946)", async () => {
@@ -198,17 +584,11 @@ describe("rebuild post-restore phase", () => {
 
     await runRebuildPostRestorePhase(args);
 
-    expect(
-      sessionModels.reconcileStalePinnedSessionModelsAfterRebuild,
-    ).not.toHaveBeenCalled();
+    expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
     expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
     expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
-    expect(
-      rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore,
-    ).not.toHaveBeenCalled();
-    expect(
-      rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore,
-    ).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
+    expect(rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
     expect(
       rebuildConfigHash.refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
@@ -672,9 +1052,9 @@ describe("rebuild post-restore phase", () => {
 
   it("reconciles the registry, relocks shields, then verifies host forwarding in that order (#8283)", async () => {
     const observed: string[] = [];
-    vi.mocked(registry.updateSandbox).mockImplementation(() => {
+    vi.mocked(registry.updateSandboxIfCurrent).mockImplementation((expected, updates) => {
       observed.push("registry");
-      return true;
+      return { ...expected, ...updates } as never;
     });
     vi.mocked(messagingHostForward.ensureMessagingHostForwardAfterRebuild).mockImplementation(
       () => {
@@ -692,6 +1072,110 @@ describe("rebuild post-restore phase", () => {
 
     expect(observed).toEqual(["registry", "relock", "forward"]);
     expect(args.bail).not.toHaveBeenCalled();
+  });
+
+  it("stops finalization when the verified registry row loses the conditional update race", async () => {
+    vi.mocked(registry.updateSandboxIfCurrent).mockReturnValue(false);
+    const args = input();
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(registry.updateSandboxIfCurrent).toHaveBeenCalledOnce();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops finalization when Session authority drifts during registry publication", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(registry.updateSandboxIfCurrent).mockImplementation((expected, updates) => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return { ...expected, ...updates } as never;
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(registry.updateSandboxIfCurrent).toHaveBeenCalledOnce();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain(
+      "rebuilt successfully",
+    );
+  });
+
+  it("stops host forwarding when Session authority drifts during shields relock", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    args.relockShieldsIfNeeded = vi.fn(() => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return true;
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(registry.updateSandboxIfCurrent).toHaveBeenCalledOnce();
+    expect(args.relockShieldsIfNeeded).toHaveBeenCalledWith(true);
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).toHaveBeenCalledOnce();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain(
+      "rebuilt successfully",
+    );
+  });
+
+  it("does not report success when Session authority drifts during final host forwarding", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(messagingHostForward.ensureMessagingHostForwardAfterRebuild).mockImplementation(
+      () => {
+        currentSession = {
+          ...currentSession,
+          harnessPackage: {
+            ...args.agentAuthority.harnessPackage!,
+            contentDigest: "b".repeat(64),
+          },
+        } as never;
+        return true;
+      },
+    );
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(args.relockShieldsIfNeeded).toHaveBeenCalledWith(true);
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).toHaveBeenCalledOnce();
+    expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).toHaveBeenCalledOnce();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain(
+      "rebuilt successfully",
+    );
   });
 
   it("leaves host forwarding unattempted when the shields relock fails (#8283)", async () => {
