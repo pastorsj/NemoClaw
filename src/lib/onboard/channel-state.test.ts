@@ -40,10 +40,15 @@ function sessionWithPlan(
 }
 
 describe("onboard channel state helpers", () => {
-  it("prefers the staged env messaging plan for default callers", () => {
+  it("prefers the staged env messaging plan when no durable authority exists", () => {
     MessagingSetupApplier.writePlanToEnv(sessionWithPlan("alpha", ["slack"]).messagingPlan!);
     try {
-      expect(resolveDisabledChannels("alpha")).toEqual(["slack"]);
+      expect(
+        resolveDisabledChannels("alpha", {
+          loadSession: () => null,
+          getRegistryMessagingAuthority: () => ({ authoritative: false, plan: null }),
+        }),
+      ).toEqual(["slack"]);
     } finally {
       MessagingSetupApplier.clearPlanEnv();
     }
