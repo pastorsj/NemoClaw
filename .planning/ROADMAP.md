@@ -90,7 +90,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    no-messaging Linux/Brev development journey. Neither development run replaces exact staging
    Launchable release evidence.
 
-**Plans:** 17/23 plans executed
+**Plans:** 18/23 plans executed
 
 - [x] `02-01` — Obtain the accepted product-scope decision.
 - [x] `02-02` — Define and validate the agent package envelope and hostile package tree.
@@ -110,7 +110,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 - [x] `02-16` — Carry identity through recreate and checkpoint recovery.
 - [x] `02-17` — Publish exact final registration and bind recovery-only retained state.
 - [x] `02-18` — Reconcile legacy owners before installer backup and OpenShell changes.
-- [ ] `02-19` — Persist rebuild-manifest identity and bind snapshot, backup, restore, and clone.
+- [x] `02-19` — Persist rebuild-manifest identity and bind snapshot, backup, restore, and clone.
 - [ ] `02-20` — Bind prepared rebuild recovery and target context to exact identity.
 - [ ] `02-21` — Carry one pinned definition through downstream rebuild consumers.
 - [ ] `02-22` — Extend the existing typed E2E fixture with exact package installation and assertions.
