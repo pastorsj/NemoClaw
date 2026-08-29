@@ -4,11 +4,13 @@
 import { describe, expect, it } from "vitest";
 
 import { createSession, MACHINE_SNAPSHOT_VERSION, type Session } from "../../state/onboard-session";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import type { RebuildResumeConfig } from "./rebuild-resume-config";
 import { rewindSessionForRebuildResume } from "./rebuild-resume-session";
 
 function createResumeConfig(overrides: Partial<RebuildResumeConfig> = {}): RebuildResumeConfig {
   return {
+    agentAuthority: makeRebuildAgentAuthority(),
     agent: null,
     provider: "compatible-endpoint",
     model: "nvidia/nemotron-3",

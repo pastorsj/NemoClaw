@@ -3,7 +3,7 @@
 
 import { dockerRmi } from "../../adapters/docker/image";
 import { printOpenShellStateRpcIssue } from "../../adapters/openshell/gateway-drift";
-import { loadAgent } from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
 import {
   bindLocalAgentBaseImageHandoffToResolution,
   bindLocalAgentBaseImageToPinnedProvenance,
@@ -273,12 +273,14 @@ export function openRebuildShieldsWindowForState(
 }
 
 export function ensureRebuildAgentBaseImage(
-  rebuildAgent: string | null,
+  agentDefinition: AgentDefinition,
   bail: (msg: string, code?: number) => never,
   options: RebuildAgentBaseImageOptions = {},
 ): RebuildAgentBaseImagePreflight {
-  if (!rebuildAgent) return { ok: true, imageRef: null, overrideEnvVar: null };
-  const agentDef = loadAgent(rebuildAgent);
+  if (agentDefinition.name === "openclaw") {
+    return { ok: true, imageRef: null, overrideEnvVar: null };
+  }
+  const agentDef = agentDefinition;
   const overrideEnvVar = getAgentSandboxBaseImageEnvVar(agentDef.name);
   const explicitOverride = process.env[overrideEnvVar]?.trim();
   const hasExplicitOverride = Boolean(explicitOverride);

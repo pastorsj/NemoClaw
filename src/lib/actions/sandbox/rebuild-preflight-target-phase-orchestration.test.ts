@@ -2,6 +2,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
+
+const OPENCLAW_AGENT_AUTHORITY = Object.freeze({
+  recordedAgent: null,
+  effectiveAgentId: "openclaw",
+  definition: Object.freeze({
+    name: "openclaw",
+    packageRoot: "/verified/harnesses/openclaw",
+  }) as ResolvedSandboxAgent["definition"],
+  harnessPackage: Object.freeze({
+    kind: "agent-runtime",
+    id: "openclaw",
+    packageVersion: "1.0.0",
+    contractVersion: 1,
+    contentDigest: "a".repeat(64),
+  }),
+  harnessPackageMigration: null,
+}) satisfies ResolvedSandboxAgent;
 
 const mocks = vi.hoisted(() => ({
   bail: vi.fn(),
@@ -101,7 +119,7 @@ describe("prepareRebuildTargetPreflights", () => {
         endpointUrl: "http://host.openshell.internal:8000/v1",
         endpointSource,
       } as never,
-      rebuildAgent: "openclaw",
+      agentAuthority: OPENCLAW_AGENT_AUTHORITY,
       autoYes: true,
       log: vi.fn(),
       bail: mocks.bail as never,
@@ -173,7 +191,7 @@ describe("prepareRebuildTargetPreflights", () => {
           openshellDriver: "docker",
           workload: { kind: "managed-image" },
         } as never,
-        rebuildAgent: "openclaw",
+        agentAuthority: OPENCLAW_AGENT_AUTHORITY,
         autoYes: true,
         log: vi.fn(),
         bail: mocks.bail as never,
@@ -185,6 +203,7 @@ describe("prepareRebuildTargetPreflights", () => {
   it("passes exact legacy N1x intent into authoritative readiness (#9292)", async () => {
     const readinessOptions = await prepareN1xTarget("onboard");
 
+    expect(mocks.prepareRebuildTargetConfig.mock.calls[0]?.[2]).toBe(OPENCLAW_AGENT_AUTHORITY);
     expect(readinessOptions).toEqual(
       expect.objectContaining({ allowDeferredN1xManagedVllm: true }),
     );

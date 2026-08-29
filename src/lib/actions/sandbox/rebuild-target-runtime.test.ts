@@ -52,6 +52,7 @@ vi.mock("./rebuild-credential-preflight", () => ({
 }));
 
 import * as rebuildImagePreflight from "./rebuild-custom-image-preflight";
+import { loadAgent } from "../../agent/defs";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import type { RebuildResumeConfig } from "./rebuild-resume-config";
@@ -62,7 +63,16 @@ import {
 } from "./rebuild-target-runtime";
 
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+const OPENCLAW_DEFINITION = loadAgent("openclaw");
+const OPENCLAW_AUTHORITY = {
+  recordedAgent: null,
+  effectiveAgentId: "openclaw",
+  definition: OPENCLAW_DEFINITION,
+  harnessPackage: null,
+  harnessPackageMigration: null,
+};
 const TARGET = {
+  agentAuthority: OPENCLAW_AUTHORITY,
   resumeConfig: {
     provider: "ollama-local",
     model: "test-model",
@@ -73,7 +83,7 @@ const TARGET = {
   hermesToolGateways: [],
   credentialEnv: null,
   fromDockerfile: null,
-  agentDefinition: null,
+  agentDefinition: OPENCLAW_DEFINITION,
 } as unknown as RebuildTargetConfig;
 const ENTRY = { mcp: null } as unknown as RebuildSandboxEntry;
 const RECREATE_OPTIONS = {
@@ -111,43 +121,43 @@ describe("preflightRebuildTargetRuntime GPU route", () => {
     { control: "auto", selectedRoute: "native" },
     { control: "fallback", selectedRoute: "native" },
     { control: "1", selectedRoute: "compatibility" },
-  ] as const)("passes the $selectedRoute rebuild GPU route into network preflight (#6110)", async ({
-    control,
-    selectedRoute,
-  }) => {
-    vi.stubEnv("NEMOCLAW_DOCKER_GPU_PATCH", control);
-    const log = vi.fn();
-    const bail = vi.fn((message: string): never => {
-      throw new Error(message);
-    });
+  ] as const)(
+    "passes the $selectedRoute rebuild GPU route into network preflight (#6110)",
+    async ({ control, selectedRoute }) => {
+      vi.stubEnv("NEMOCLAW_DOCKER_GPU_PATCH", control);
+      const log = vi.fn();
+      const bail = vi.fn((message: string): never => {
+        throw new Error(message);
+      });
 
-    await expect(
-      preflightRebuildTargetRuntime(TARGET, ENTRY, RECREATE_OPTIONS, log, bail, {
-        skipImagePreflight: true,
-      }),
-    ).resolves.toEqual({
-      ok: true,
-      preparedImage: null,
-      requiresGatewayProviderReconfigure: false,
-    });
+      await expect(
+        preflightRebuildTargetRuntime(TARGET, ENTRY, RECREATE_OPTIONS, log, bail, {
+          skipImagePreflight: true,
+        }),
+      ).resolves.toEqual({
+        ok: true,
+        preparedImage: null,
+        requiresGatewayProviderReconfigure: false,
+      });
 
-    expect(mocks.enforceDockerGpuPatchPreserveNetwork).toHaveBeenCalledOnce();
-    expect(mocks.enforceDockerGpuPatchPreserveNetwork).toHaveBeenCalledWith(
-      "ollama-local",
-      expect.objectContaining({
-        sandboxGpuEnabled: true,
-        hostGpuPlatform: "linux",
-        sandboxGpuDevice: null,
-      }),
-      {
-        dockerDriverGateway: true,
-        selectedRoute,
-        gatewayPort: 8080,
-        log,
-      },
-    );
-    expect(bail).not.toHaveBeenCalled();
-  });
+      expect(mocks.enforceDockerGpuPatchPreserveNetwork).toHaveBeenCalledOnce();
+      expect(mocks.enforceDockerGpuPatchPreserveNetwork).toHaveBeenCalledWith(
+        "ollama-local",
+        expect.objectContaining({
+          sandboxGpuEnabled: true,
+          hostGpuPlatform: "linux",
+          sandboxGpuDevice: null,
+        }),
+        {
+          dockerDriverGateway: true,
+          selectedRoute,
+          gatewayPort: 8080,
+          log,
+        },
+      );
+      expect(bail).not.toHaveBeenCalled();
+    },
+  );
 
   it("passes the immutable base provenance into replacement image preflight (#7144)", async () => {
     const metadata = {
@@ -238,7 +248,7 @@ describe("preflightRebuildTargetRuntime web search credential", () => {
   const GATEWAY_BINDING_METADATA = {
     name: "my-assistant-brave-search",
     type: "brave",
-    credentialKeys: ["BRAVE_API_KEY"],
+    credentialKeys: ["BRAVE_API_KEY", "BRAVE_API_KEY_A"],
     configKeys: [],
   };
 
@@ -352,10 +362,20 @@ describe("preflightRebuildTargetRuntime web search credential", () => {
   });
 
   it("keeps the validation path for non-OpenClaw agents that never reuse the binding", async () => {
+    const hermesDefinition = {
+      name: "hermes",
+      webSearch: { supported: true, providers: ["tavily"] },
+    };
     const hermesTarget = {
       ...WEB_SEARCH_TARGET,
       durableConfig: { webSearchConfig: { fetchEnabled: true, provider: "tavily" } },
-      agentDefinition: { name: "hermes", webSearch: { supported: true, providers: ["tavily"] } },
+      agentAuthority: {
+        ...OPENCLAW_AUTHORITY,
+        recordedAgent: "hermes",
+        effectiveAgentId: "hermes",
+        definition: hermesDefinition,
+      },
+      agentDefinition: hermesDefinition,
     } as unknown as RebuildTargetConfig;
     mocks.ensureValidatedWebSearchCredential.mockResolvedValue("gateway-side-key");
 

@@ -9,9 +9,12 @@
 // env or global session. Extracted from rebuild.ts so the trust-boundary logic
 // is auditable on its own (PRA-5).
 
+import { isDeepStrictEqual } from "node:util";
+
 import { CLI_NAME } from "../../cli/branding";
 import { RD as _RD, D, R } from "../../cli/terminal-style";
 import { normalizeInferenceSelection } from "../../inference/selection";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { ReasoningEffort } from "../../onboard/reasoning-mode";
 import type { RegistryInferenceRoute } from "../../onboard/rebuild-route-handoff";
 import * as onboardSession from "../../state/onboard-session";
@@ -41,6 +44,8 @@ const hermesProviderAuth = require("../../hermes-provider-auth") as {
  * from ambient selection env.
  */
 export interface RebuildResumeConfig {
+  /** Exact agent definition and package authority selected before rebuild preflight. */
+  readonly agentAuthority: ResolvedSandboxAgent;
   readonly agent: string | null;
   readonly provider: string;
   readonly model: string;
@@ -60,6 +65,27 @@ export interface RebuildResumeConfig {
   /** Durable pre-delete route used only for credential-safe provider recovery. */
   readonly registryInferenceRoute: RegistryInferenceRoute | null;
   readonly ambient: AmbientRecreateEnvAssessment;
+}
+
+function requireMatchingRebuildAgentAuthority(
+  sb: RebuildSandboxEntry,
+  agentAuthority: ResolvedSandboxAgent,
+  bail: (msg: string, code?: number) => never,
+): void {
+  const recordedAgent = typeof sb.agent === "string" ? sb.agent : null;
+  const expectedEffectiveAgentId = recordedAgent ?? "openclaw";
+  const packageRoot = agentAuthority.definition.packageRoot;
+  if (
+    agentAuthority.recordedAgent !== recordedAgent ||
+    agentAuthority.effectiveAgentId !== expectedEffectiveAgentId ||
+    agentAuthority.definition.name !== agentAuthority.effectiveAgentId ||
+    typeof packageRoot !== "string" ||
+    packageRoot.length === 0 ||
+    !isDeepStrictEqual(agentAuthority.harnessPackage, sb.harnessPackage ?? null) ||
+    !isDeepStrictEqual(agentAuthority.harnessPackageMigration, sb.harnessPackageMigration ?? null)
+  ) {
+    bail("Pinned rebuild agent authority does not match the sandbox registry entry");
+  }
 }
 
 /**
@@ -87,10 +113,12 @@ export interface RebuildResumeConfig {
 export function prepareRebuildResumeConfig(
   sandboxName: string,
   sb: RebuildSandboxEntry,
-  rebuildAgent: string | null,
+  agentAuthority: ResolvedSandboxAgent,
   log: (msg: string) => void,
   bail: (msg: string, code?: number) => never,
 ): RebuildResumeConfig | null {
+  requireMatchingRebuildAgentAuthority(sb, agentAuthority, bail);
+  const rebuildAgent = agentAuthority.recordedAgent;
   const ambient = assessRebuildAmbientEnv(sandboxName, rebuildAgent, log);
 
   const session = onboardSession.loadSession();
@@ -105,9 +133,9 @@ export function prepareRebuildResumeConfig(
   );
   const sessionSelectionMatchesRegistry = Boolean(
     matchingSessionSelection &&
-      (!registrySelection.provider ||
-        matchingSessionSelection.provider === registrySelection.provider) &&
-      (!registrySelection.model || matchingSessionSelection.model === registrySelection.model),
+    (!registrySelection.provider ||
+      matchingSessionSelection.provider === registrySelection.provider) &&
+    (!registrySelection.model || matchingSessionSelection.model === registrySelection.model),
   );
   const legacySelection = sessionSelectionMatchesRegistry ? matchingSessionSelection : null;
   const trustedSelection = normalizeInferenceSelection({
@@ -232,6 +260,7 @@ export function prepareRebuildResumeConfig(
   }
 
   return {
+    agentAuthority,
     agent: rebuildAgent,
     provider: trustedSelection.provider,
     model: trustedSelection.model,

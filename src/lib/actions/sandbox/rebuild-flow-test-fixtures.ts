@@ -1,6 +1,36 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentDefinition } from "../../agent/defs";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
+
+export function makeRebuildAgentAuthority(
+  recordedAgent: string | null = null,
+): ResolvedSandboxAgent {
+  const effectiveAgentId = recordedAgent ?? "openclaw";
+  const usesRepositoryAuthority = effectiveAgentId === "pi" || effectiveAgentId === "nemocua";
+  return Object.freeze({
+    recordedAgent,
+    effectiveAgentId,
+    definition: Object.freeze({
+      name: effectiveAgentId,
+      packageRoot: usesRepositoryAuthority
+        ? "/test/repository"
+        : `/test/harnesses/${effectiveAgentId}`,
+    }) as AgentDefinition,
+    harnessPackage: usesRepositoryAuthority
+      ? null
+      : Object.freeze({
+          kind: "agent-runtime" as const,
+          id: effectiveAgentId,
+          packageVersion: "1.0.0",
+          contractVersion: 1 as const,
+          contentDigest: "a".repeat(64),
+        }),
+    harnessPackageMigration: null,
+  });
+}
+
 export function makeActiveTeamsMessagingPlan() {
   return {
     schemaVersion: 1,

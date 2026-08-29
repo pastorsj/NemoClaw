@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ import {
   originalSandboxName,
   snapshotEnv,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
+import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { fingerprintBuildContext } from "../../adapters/fs/build-context-fingerprint";
 import { createBuildContextVerifier } from "./rebuild-prepared-image-context";
 
@@ -82,6 +84,60 @@ const retainedContextMetadataMutations: RetainedContextMutation[] = [
 
 describe("rebuildSandbox flow: target image", () => {
   installRebuildFlowTestHooks();
+
+  it.each([
+    {
+      label: "absent",
+      harnessPackage: null,
+      expected: "requires legacy package migration",
+    },
+    {
+      label: "malformed",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "openclaw",
+        packageVersion: "1.0.0",
+        contractVersion: 1,
+        contentDigest: "not-a-digest",
+      } as never,
+      expected: "recorded harness package identity is malformed",
+    },
+  ])(
+    "rejects $label standard harness authority before gateway or image mutation",
+    async ({ harnessPackage, expected }) => {
+      const harness = createRebuildFlowHarness({ harnessPackage });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+      ).rejects.toThrow(expected);
+
+      expect(harness.ensureTargetGatewaySpy).not.toHaveBeenCalled();
+      expect(harness.ensureRebuildAgentBaseImageSpy).not.toHaveBeenCalled();
+      expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+    },
+  );
+
+  it("rejects a missing pinned harness object before gateway or image mutation", async () => {
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    assert.ok(harnessPackage, "OpenClaw package fixture was not installed");
+    const harness = createRebuildFlowHarness({ harnessPackage });
+    const storeRoot = path.join(process.env.HOME!, ".nemoclaw", "harnesses");
+    fs.rmSync(path.join(storeRoot, "objects", "sha256", harnessPackage.contentDigest), {
+      recursive: true,
+      force: true,
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).rejects.toThrow("Harness package store integrity validation failed");
+
+    expect(harness.ensureTargetGatewaySpy).not.toHaveBeenCalled();
+    expect(harness.ensureRebuildAgentBaseImageSpy).not.toHaveBeenCalled();
+    expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+  });
+
   it.runIf(process.platform !== "win32" && process.getuid?.() !== 0)(
     "aborts before backup/delete when the durable custom Dockerfile is unreadable",
     async () => {

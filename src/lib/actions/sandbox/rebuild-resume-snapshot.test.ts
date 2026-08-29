@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import {
+  installRebuildFlowTestHooks,
+  installRebuildHarnessPackage,
+} from "../../../../test/helpers/rebuild-flow-harness";
 
 import * as gatewayDrift from "../../adapters/openshell/gateway-drift";
 import * as resolve from "../../adapters/openshell/resolve";
@@ -26,24 +30,21 @@ import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
 import * as rebuildRoutePreflight from "./rebuild-preflight-guards";
 import * as rebuildShields from "./rebuild-shields";
 import * as rebuildUsageNotice from "./rebuild-usage-notice";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 
 function cloneSession(session: Session): Session {
   return JSON.parse(JSON.stringify(session));
 }
 
-const OPENCLAW_PACKAGE = {
-  kind: "agent-runtime",
-  id: "openclaw",
-  packageVersion: "0.1.0",
-  contractVersion: 1,
-  contentDigest: "a".repeat(64),
-} as const;
-
 describe("rebuild resume snapshot repair", () => {
+  installRebuildFlowTestHooks();
+
   let spies: MockInstance[];
   let errorSpy: MockInstance;
   let logSpy: MockInstance;
   let session: Session;
+  let openclawAgent: ReturnType<typeof makeRebuildAgentAuthority>;
+  let openclawPackage: NonNullable<ReturnType<typeof installRebuildHarnessPackage>>;
   const originalSandboxName = process.env.NEMOCLAW_SANDBOX_NAME;
   const observed = {
     handoffOptions: null as Record<string, unknown> | null,
@@ -67,12 +68,17 @@ describe("rebuild resume snapshot repair", () => {
     observed.repairedMachineState = null;
     observed.sandboxEnvInsideOnboard = null;
 
+    openclawAgent = makeRebuildAgentAuthority();
+    const installedPackage = installRebuildHarnessPackage(openclawAgent.effectiveAgentId);
+    expect(installedPackage).not.toBeNull();
+    openclawPackage = installedPackage!;
+
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     session = onboardSession.createSession({
-      agent: null,
-      harnessPackage: OPENCLAW_PACKAGE,
+      agent: openclawAgent.recordedAgent,
+      harnessPackage: openclawPackage,
       harnessPackageMigration: null,
       sandboxName: "alpha",
       provider: "ollama-local",
@@ -161,8 +167,8 @@ describe("rebuild resume snapshot repair", () => {
         provider: "ollama-local",
         model: "nvidia/nemotron",
         policies: [],
-        agent: null,
-        harnessPackage: OPENCLAW_PACKAGE,
+        agent: openclawAgent.recordedAgent,
+        harnessPackage: openclawPackage,
         harnessPackageMigration: null,
         nimContainer: null,
         nemoclawVersion: "0.1.0",
@@ -227,8 +233,8 @@ describe("rebuild resume snapshot repair", () => {
       vi.spyOn(destroy, "removeSandboxRegistryEntryWithReceipt").mockReturnValue({
         entry: {
           name: "alpha",
-          agent: null,
-          harnessPackage: OPENCLAW_PACKAGE,
+          agent: openclawAgent.recordedAgent,
+          harnessPackage: openclawPackage,
         } as never,
         wasDefault: true,
         fallbackDefault: null,

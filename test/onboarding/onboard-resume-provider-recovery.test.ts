@@ -6,6 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeRebuildAgentAuthority } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
 
 type ProviderRecoveryInternals = {
   providerNameToOptionKey: (
@@ -235,6 +236,7 @@ describe("rebuild resume session normalization", () => {
       rebuildsHermesSandbox: false,
       rebuildHermesToolGateways: ["stale-gateway"],
       resumeConfig: {
+        agentAuthority: makeRebuildAgentAuthority(),
         agent: null,
         provider: "compatible-endpoint",
         model: "nvidia/nemotron-3",

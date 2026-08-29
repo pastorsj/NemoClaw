@@ -119,6 +119,7 @@ export {
   hasAuthoritativeOpenClawImagePluginProvenance,
   inspectRebuildManifestHarnessPackage,
   readSandboxStateBackupManifest,
+  snapshotManifestAuthority,
   validateSnapshotBackupContent,
 } from "./snapshot/manifest.js";
 export type {

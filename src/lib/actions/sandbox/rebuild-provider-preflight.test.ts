@@ -10,6 +10,7 @@ import {
   classifyRebuildGatewayProviderRegistration,
   shouldVerifyRebuildGatewayProvider,
 } from "./rebuild-provider-preflight";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import type { RebuildResumeConfig } from "./rebuild-resume-config";
 
 const exactGatewayProvider: GatewayProviderMetadata = {
@@ -21,6 +22,7 @@ const exactGatewayProvider: GatewayProviderMetadata = {
 
 function config(overrides: Partial<RebuildResumeConfig> = {}): RebuildResumeConfig {
   return {
+    agentAuthority: makeRebuildAgentAuthority(),
     agent: null,
     provider: "compatible-endpoint",
     model: "nvidia/model",

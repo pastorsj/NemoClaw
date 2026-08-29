@@ -11,6 +11,7 @@ import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-
 import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import type { RebuildDurableConfig } from "./rebuild-durable-config";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
 import type { RebuildRecreateJournal } from "./rebuild-recreate-journal";
@@ -44,6 +45,7 @@ const durableConfig: RebuildDurableConfig = {
 };
 
 const compatibleResumeConfig: RebuildResumeConfig = {
+  agentAuthority: makeRebuildAgentAuthority("openclaw"),
   agent: "openclaw",
   provider: "compatible-endpoint",
   model: "mock/deepseek-compatible",

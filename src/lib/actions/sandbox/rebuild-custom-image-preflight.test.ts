@@ -7,6 +7,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import { fingerprintBuildContext } from "../../adapters/fs/build-context-fingerprint";
+import { loadAgent, type AgentDefinition } from "../../agent/defs";
 import { ROOT } from "../../runner";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import {
@@ -23,14 +24,16 @@ import {
 
 type SuccessfulPreflight = Extract<RebuildImagePreflightResult, { ok: true }>;
 
+const OPENCLAW_DEFINITION = loadAgent("openclaw");
+
 function successful(result: RebuildImagePreflightResult): SuccessfulPreflight {
   expect(result.ok).toBe(true);
   return result as SuccessfulPreflight;
 }
 
-function input(fromDockerfile: string | null) {
+function input(fromDockerfile: string | null, agent: AgentDefinition = OPENCLAW_DEFINITION) {
   return {
-    agent: null,
+    agent,
     fromDockerfile,
     model: "model",
     provider: "ollama-local",
@@ -83,6 +86,67 @@ function hermesMessagingPlan() {
 }
 
 describe("preflightRebuildImage", () => {
+  it.each([
+    ["OpenClaw", "openclaw", null],
+    ["Hermes", "hermes", "hermes"],
+    ["qualified candidate", "pi", "pi"],
+  ] as const)(
+    "uses the pinned %s definition for build-context and patch roots",
+    async (_label, agentName, expectedPatchAgentName) => {
+      const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pinned-openclaw-"));
+      const stagedDockerfile = path.join(buildCtx, "Dockerfile");
+      fs.writeFileSync(stagedDockerfile, "FROM scratch\n");
+      const pinnedRoot = `/installed/pinned-${agentName}`;
+      const pinnedDefinition = Object.freeze({
+        ...OPENCLAW_DEFINITION,
+        name: agentName,
+        packageRoot: pinnedRoot,
+      }) as AgentDefinition;
+      const stageBuildContext = vi.fn(() => ({
+        buildCtx,
+        stagedDockerfile,
+        cleanupBuildCtx: () => {
+          fs.rmSync(buildCtx, { recursive: true, force: true });
+          return true;
+        },
+        origin: "generated" as const,
+      }));
+      const prepareDockerfilePatch = vi.fn(async () => ({
+        buildId: "pinned-openclaw",
+        dashboardRemoteBindPrepared: false,
+        resolvedBaseImage: null,
+      }));
+      try {
+        const result = successful(
+          await preflightRebuildImage(input(null, pinnedDefinition), {
+            stageBuildContext,
+            prepareDockerfilePatch,
+            buildImage: vi.fn(() => ({ status: 0 }) as never),
+            removeImage: vi.fn(() => ({ status: 0 }) as never),
+          }),
+        );
+
+        expect(pinnedRoot).not.toBe(ROOT);
+        expect(stageBuildContext).toHaveBeenCalledWith(
+          expect.objectContaining({ root: pinnedRoot, agent: pinnedDefinition }),
+        );
+        expect(prepareDockerfilePatch).toHaveBeenCalledWith(
+          expect.objectContaining({
+            rootDir: pinnedRoot,
+            agent: expectedPatchAgentName === null ? null : pinnedDefinition,
+          }),
+        );
+        expect(result.prepared.rebuildTarget).toEqual({
+          agentName: expectedPatchAgentName,
+          fromDockerfile: null,
+        });
+        expect(disposePreparedBuildContext(result.prepared)).toBe(true);
+      } finally {
+        fs.rmSync(buildCtx, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("carries verified base provenance into the retained managed context (#7144)", async () => {
     const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-managed-provenance-"));
     const stagedDockerfile = path.join(buildCtx, "Dockerfile");
@@ -168,7 +232,7 @@ describe("preflightRebuildImage", () => {
       );
 
       expect(stageBuildContext).toHaveBeenCalledWith(
-        expect.objectContaining({ root: ROOT, agent: null }),
+        expect.objectContaining({ root: ROOT, agent: OPENCLAW_DEFINITION }),
       );
       expect(buildImage).toHaveBeenCalledOnce();
       expect(cleanupBuildCtx).not.toHaveBeenCalled();
@@ -389,10 +453,7 @@ describe("preflightRebuildImage", () => {
         ].join("\n"),
         { mode: 0o700 },
       );
-      vi.stubEnv(
-        "PATH",
-        `${executableRoot}${path.delimiter}${String(process.env.PATH ?? "")}`,
-      );
+      vi.stubEnv("PATH", `${executableRoot}${path.delimiter}${String(process.env.PATH ?? "")}`);
 
       try {
         const result = successful(

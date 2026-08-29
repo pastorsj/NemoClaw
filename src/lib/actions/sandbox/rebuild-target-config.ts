@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { loadAgent } from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
 import { webSearchProviderForConfig } from "../../inference/web-search";
 import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import type { ToolDisclosure } from "../../tool-disclosure";
@@ -25,6 +26,8 @@ const hermesProviderAuth = require("../../hermes-provider-auth") as {
 };
 
 export type RebuildTargetConfig = {
+  agentAuthority: ResolvedSandboxAgent;
+  agentDefinition: AgentDefinition;
   resumeConfig: RebuildResumeConfig;
   sessionSnapshot: Session | null;
   sessionMatchesSandbox: boolean;
@@ -33,7 +36,6 @@ export type RebuildTargetConfig = {
   hasHermesToolGateways: boolean;
   credentialEnv: string | null;
   fromDockerfile: string | null;
-  agentDefinition: ReturnType<typeof loadAgent> | null;
 };
 
 function stringListOrNull(value: unknown): string[] | null {
@@ -119,15 +121,23 @@ function validateRebuildDurableConfig(
 export function prepareRebuildTargetConfig(
   sandboxName: string,
   sb: RebuildSandboxEntry,
-  rebuildAgent: string | null,
+  agentAuthority: ResolvedSandboxAgent,
   log: (message: string) => void,
   bail: RebuildBail,
   requestedToolDisclosure?: ToolDisclosure,
   allowLegacyManagedImageRecovery = false,
   requestedDcodeAutoApprovalMode?: DcodeAutoApprovalMode,
 ): RebuildTargetConfig | null {
-  const resumeConfig = prepareRebuildResumeConfig(sandboxName, sb, rebuildAgent, log, bail);
+  const resumeConfig = prepareRebuildResumeConfig(sandboxName, sb, agentAuthority, log, bail);
   if (!resumeConfig) return null;
+  if (
+    resumeConfig.agentAuthority !== agentAuthority ||
+    resumeConfig.agentAuthority.definition !== agentAuthority.definition
+  ) {
+    bail("Pinned rebuild agent authority changed during target configuration");
+    return null;
+  }
+  const rebuildAgent = agentAuthority.recordedAgent;
   const sessionSnapshot = onboardSession.loadSession();
   const sessionMatchesSandbox = sessionSnapshot?.sandboxName === sandboxName;
   const durableConfig = resolveRebuildDurableConfig(
@@ -184,6 +194,8 @@ export function prepareRebuildTargetConfig(
       : resumeConfig.credentialEnv;
 
   return {
+    agentAuthority,
+    agentDefinition: agentAuthority.definition,
     resumeConfig,
     sessionSnapshot,
     sessionMatchesSandbox,
@@ -192,6 +204,5 @@ export function prepareRebuildTargetConfig(
     hasHermesToolGateways: hermesGateways.recorded,
     credentialEnv,
     fromDockerfile: dockerfile.path,
-    agentDefinition: rebuildAgent && rebuildAgent !== "openclaw" ? loadAgent(rebuildAgent) : null,
   };
 }

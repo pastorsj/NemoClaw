@@ -53,6 +53,7 @@ import {
 import {
   type RebuildSandboxExecutionOptions,
   revalidatePreparedRecoveryBeforeDelete,
+  validatePreparedRecoveryAtDeleteEdge,
 } from "./rebuild-prepared-recovery";
 import { inspectRebuildGatewayProviderRegistration } from "./rebuild-provider-preflight";
 import {
@@ -100,30 +101,31 @@ export async function rebuildSandbox(
       sessionFile: onboardSession.SESSION_FILE,
       stateDir: path.dirname(onboardSession.SESSION_FILE),
     },
-    () => withMcpLifecycleLock(sandboxName, async () => {
-    assertSandboxRebuildCommandAvailable(sandboxName);
-    const scopedEnvKeys = [
-      BRAVE_API_KEY_ENV,
-      TAVILY_API_KEY_ENV,
-      MESSAGING_SETUP_APPLIER_ENV_KEY,
-      "OPENSHELL_GATEWAY",
-      DOCKER_GPU_PATCH_NETWORK_ENV,
-      ...REBUILD_HERMES_DASHBOARD_ENV_KEYS,
-      ...MESSAGING_CHANNEL_CONFIG_ENV_KEYS,
-    ];
-    const savedEnv = scopedEnvKeys.map((key) => [key, process.env[key]] as const);
-    try {
-      await rebuildSandboxUnlocked(sandboxName, options, opts);
-    } finally {
-      for (const key of scopedEnvKeys) delete process.env[key];
-      Object.assign(
-        process.env,
-        Object.fromEntries(
-          savedEnv.filter((entry): entry is [string, string] => entry[1] !== undefined),
-        ),
-      );
-    }
-    }),
+    () =>
+      withMcpLifecycleLock(sandboxName, async () => {
+        assertSandboxRebuildCommandAvailable(sandboxName);
+        const scopedEnvKeys = [
+          BRAVE_API_KEY_ENV,
+          TAVILY_API_KEY_ENV,
+          MESSAGING_SETUP_APPLIER_ENV_KEY,
+          "OPENSHELL_GATEWAY",
+          DOCKER_GPU_PATCH_NETWORK_ENV,
+          ...REBUILD_HERMES_DASHBOARD_ENV_KEYS,
+          ...MESSAGING_CHANNEL_CONFIG_ENV_KEYS,
+        ];
+        const savedEnv = scopedEnvKeys.map((key) => [key, process.env[key]] as const);
+        try {
+          await rebuildSandboxUnlocked(sandboxName, options, opts);
+        } finally {
+          for (const key of scopedEnvKeys) delete process.env[key];
+          Object.assign(
+            process.env,
+            Object.fromEntries(
+              savedEnv.filter((entry): entry is [string, string] => entry[1] !== undefined),
+            ),
+          );
+        }
+      }),
     { loadRegistry, withLifecycleLock: withMcpLifecycleLock },
   );
 }
@@ -426,11 +428,24 @@ async function rebuildSandboxUnlocked(
             recreateOptions.targetGatewayPort,
           );
         },
-        validateAtDeleteEdge: () =>
-          revalidateManagedWorkloadRebuildBeforeDelete(
+        validateAtDeleteEdge: () => {
+          const deleteEdgeRecovery = validatePreparedRecoveryAtDeleteEdge(
             sandboxName,
-            recreateOptions.managedWorkloadRebuild,
-          ) ?? revalidateRebuildRouteBeforeDelete(routePreflightReceipt),
+            sandboxEntry,
+            recoveryManifest,
+            recoveryRegistrySnapshot,
+            opts.allowLegacyManagedImageRecovery === true,
+          );
+          if (!deleteEdgeRecovery.ok) return deleteEdgeRecovery;
+          recoveryManifest = deleteEdgeRecovery.manifest;
+          recoveryRegistrySnapshot = deleteEdgeRecovery.registrySnapshot;
+          return (
+            revalidateManagedWorkloadRebuildBeforeDelete(
+              sandboxName,
+              recreateOptions.managedWorkloadRebuild,
+            ) ?? revalidateRebuildRouteBeforeDelete(routePreflightReceipt)
+          );
+        },
         onDeleted: () => {
           sandboxStillExists = false;
         },

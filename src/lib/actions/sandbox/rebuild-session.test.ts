@@ -14,6 +14,7 @@ import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import type { RebuildDurableConfig } from "./rebuild-durable-config";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
 import type { RebuildRecreateJournal } from "./rebuild-recreate-journal";
@@ -60,6 +61,7 @@ const durableConfig: RebuildDurableConfig = {
 };
 
 const resumeConfig: RebuildResumeConfig = {
+  agentAuthority: makeRebuildAgentAuthority("hermes"),
   agent: "hermes",
   provider: "nvidia",
   model: "model-a",

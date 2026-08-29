@@ -55,7 +55,7 @@ function canReuseGatewayWebSearchCredential(
   provider: WebSearchProvider,
   log: RebuildLog,
 ): boolean {
-  if (target.agentDefinition) return false;
+  if (target.agentAuthority.effectiveAgentId !== "openclaw") return false;
   const credentialEnv = webSearchEnvFor(provider);
   if (getCredential(credentialEnv)) return false;
   const providerName = `${sb.name}-${provider}-search`;

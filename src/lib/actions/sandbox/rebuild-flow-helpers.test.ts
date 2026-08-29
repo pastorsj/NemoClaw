@@ -142,9 +142,11 @@ describe("rebuild agent base image preflight", () => {
   });
 
   function mockBaseImagePreflight(imageRef: string) {
-    const loadAgent = vi
-      .spyOn(agentDefs, "loadAgent")
-      .mockReturnValue({ name: "hermes", displayName: "Hermes Agent" } as never);
+    const agent = {
+      name: "hermes",
+      displayName: "Hermes Agent",
+      packageRoot: "/installed/hermes",
+    } as agentDefs.AgentDefinition;
     const ensureAgentBaseImage = vi
       .spyOn(agentOnboard, "ensureAgentBaseImage")
       .mockReturnValue({ imageTag: imageRef, built: true });
@@ -159,7 +161,7 @@ describe("rebuild agent base image preflight", () => {
       .mockReturnValue(null);
     const dockerRmi = vi.spyOn(dockerImage, "dockerRmi").mockReturnValue({ status: 0 } as never);
     return {
-      loadAgent,
+      agent,
       ensureAgentBaseImage,
       bindLocalAgentBaseImageToPinnedProvenance,
       bindLocalAgentBaseImageHandoffToResolution,
@@ -174,14 +176,14 @@ describe("rebuild agent base image preflight", () => {
       ref: imageRef,
       provenance: `${"b".repeat(64)}.${"c".repeat(64)}`,
     };
-    const { ensureAgentBaseImage } = mockBaseImagePreflight(imageRef);
+    const { agent, ensureAgentBaseImage } = mockBaseImagePreflight(imageRef);
     ensureAgentBaseImage.mockReturnValue({
       imageTag: imageRef,
       built: true,
       trustedLocalOverride,
     });
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail());
+    const result = ensureRebuildAgentBaseImage(agent, makeBail());
 
     expect(ensureAgentBaseImage).toHaveBeenCalledWith(expect.objectContaining({ name: "hermes" }), {
       forceBaseImageRebuild: true,
@@ -203,7 +205,6 @@ describe("rebuild agent base image preflight", () => {
     let buildContext = root;
     vi.stubEnv("NEMOCLAW_CUA_ENABLED", "1");
     vi.stubEnv(cuaOverrideEnvVar, mutableRef);
-    vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agent);
     vi.spyOn(agentOnboard, "ensureAgentBaseImage").mockReturnValue({
       imageTag: mutableRef,
       built: false,
@@ -214,7 +215,7 @@ describe("rebuild agent base image preflight", () => {
     const dockerRmi = vi.spyOn(dockerImage, "dockerRmi").mockReturnValue({ status: 0 } as never);
 
     try {
-      const preflight = ensureRebuildAgentBaseImage("nemocua", makeBail());
+      const preflight = ensureRebuildAgentBaseImage(agent, makeBail());
       expect(preflight).toMatchObject({
         ok: true,
         imageRef: pinnedRef,
@@ -255,7 +256,6 @@ describe("rebuild agent base image preflight", () => {
     const agent = agentDefs.loadAgent("nemocua", { NEMOCLAW_CUA_ENABLED: "1" });
     vi.stubEnv("NEMOCLAW_CUA_ENABLED", "1");
     vi.stubEnv(cuaOverrideEnvVar, digestRef);
-    vi.spyOn(agentDefs, "loadAgent").mockReturnValue(agent);
     vi.spyOn(agentOnboard, "ensureAgentBaseImage").mockReturnValue({
       imageTag: digestRef,
       built: false,
@@ -264,7 +264,7 @@ describe("rebuild agent base image preflight", () => {
     const dockerRmi = vi.spyOn(dockerImage, "dockerRmi");
 
     try {
-      const preflight = ensureRebuildAgentBaseImage("nemocua", makeBail());
+      const preflight = ensureRebuildAgentBaseImage(agent, makeBail());
 
       expect(preflight).toEqual({
         ok: true,
@@ -283,11 +283,11 @@ describe("rebuild agent base image preflight", () => {
     process.env[overrideEnvVar] = "nemoclaw-hermes-sandbox-base-local:caller";
     const mutableRef = "nemoclaw-hermes-sandbox-base-local:resolved";
     const rebuildRef = `nemoclaw-hermes-sandbox-base-local:rebuild-343338-${"b".repeat(16)}-image-${"a".repeat(64)}`;
-    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi } =
+    const { agent, ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi } =
       mockBaseImagePreflight(mutableRef);
     pinAgentSandboxBaseImageRef.mockReturnValue(rebuildRef);
 
-    expect(() => ensureRebuildAgentBaseImage("hermes", makeBail())).toThrow(
+    expect(() => ensureRebuildAgentBaseImage(agent, makeBail())).toThrow(
       "could not be bound to its rebuild handoff",
     );
 
@@ -309,7 +309,7 @@ describe("rebuild agent base image preflight", () => {
     const remoteRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
     const resolutionMetadata = { key: "verified-remote" } as never;
     process.env[overrideEnvVar] = callerAlias;
-    const { ensureAgentBaseImage, bindLocalAgentBaseImageToPinnedProvenance } =
+    const { agent, ensureAgentBaseImage, bindLocalAgentBaseImageToPinnedProvenance } =
       mockBaseImagePreflight(remoteRef);
     bindLocalAgentBaseImageToPinnedProvenance.mockReturnValue(resolutionMetadata);
     const restoreTrust = vi.fn();
@@ -325,7 +325,7 @@ describe("rebuild agent base image preflight", () => {
       return { imageTag: remoteRef, built: false, resolutionMetadata };
     });
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail());
+    const result = ensureRebuildAgentBaseImage(agent, makeBail());
 
     expect(bindLocalAgentBaseImageToPinnedProvenance).toHaveBeenCalledWith(
       expect.objectContaining({ name: "hermes" }),
@@ -343,9 +343,9 @@ describe("rebuild agent base image preflight", () => {
 
   it("retains a resolved platform digest for the immutable remote handoff (#7144)", () => {
     const platformRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
-    const { pinAgentSandboxBaseImageRef } = mockBaseImagePreflight(platformRef);
+    const { agent, pinAgentSandboxBaseImageRef } = mockBaseImagePreflight(platformRef);
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), {
+    const result = ensureRebuildAgentBaseImage(agent, makeBail(), {
       resolutionHint: { key: "stale-base" } as never,
     });
 
@@ -386,7 +386,7 @@ describe("rebuild agent base image preflight", () => {
     });
 
     try {
-      const result = ensureRebuildAgentBaseImage("hermes", makeBail(), {
+      const result = ensureRebuildAgentBaseImage(mocks.agent, makeBail(), {
         resolutionHint: resolutionMetadata,
       });
 
@@ -403,9 +403,7 @@ describe("rebuild agent base image preflight", () => {
         trustedLocalOverride: { ref: rebuildRef, provenance },
       });
     } finally {
-      Object.values(mocks).forEach((mock) => {
-        mock.mockRestore();
-      });
+      vi.restoreAllMocks();
     }
   });
 
@@ -432,6 +430,7 @@ describe("rebuild agent base image preflight", () => {
       provenance: `${"e".repeat(64)}.${"f".repeat(64)}`,
     };
     const {
+      agent,
       bindLocalAgentBaseImageHandoffToResolution,
       ensureAgentBaseImage,
       pinAgentSandboxBaseImageRef,
@@ -450,7 +449,7 @@ describe("rebuild agent base image preflight", () => {
       });
     pinAgentSandboxBaseImageRef.mockReturnValue(canonicalRef);
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), {
+    const result = ensureRebuildAgentBaseImage(agent, makeBail(), {
       resolutionHint: persistedHint,
     });
 
@@ -476,6 +475,7 @@ describe("rebuild agent base image preflight", () => {
     } as SandboxBaseImageResolutionMetadata;
     const provenance = `${"e".repeat(64)}.${"f".repeat(64)}`;
     const {
+      agent,
       bindLocalAgentBaseImageHandoffToResolution,
       ensureAgentBaseImage,
       pinAgentSandboxBaseImageRef,
@@ -492,7 +492,7 @@ describe("rebuild agent base image preflight", () => {
       provenance,
     });
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), {
+    const result = ensureRebuildAgentBaseImage(agent, makeBail(), {
       resolutionHint: resolutionMetadata,
     });
 

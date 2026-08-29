@@ -14,6 +14,7 @@ import {
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
 import { registry } from "../../../../test/helpers/rebuild-flow-harness";
 import { revalidateDcodeReplacementAtMutationEdge } from "./rebuild-dcode-preflight";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 
 describe("rebuildSandbox DCode flow: pre-delete drift", () => {
   installRebuildFlowTestHooks({ acceptThirdPartySoftware: true });
@@ -33,6 +34,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
           gatewayPort: 8080,
         },
         resumeConfig: {
+          agentAuthority: makeRebuildAgentAuthority("langchain-deepagents-code"),
           agent: "langchain-deepagents-code",
           provider: "compatible-endpoint",
           model: "nvidia/nemotron-3-super-120b-a12b",
@@ -85,6 +87,7 @@ describe("rebuildSandbox DCode flow: pre-delete drift", () => {
           gatewayPort: 8080,
         },
         resumeConfig: {
+          agentAuthority: makeRebuildAgentAuthority("langchain-deepagents-code"),
           agent: "langchain-deepagents-code",
           provider: "compatible-endpoint",
           model: "nvidia/nemotron-3-super-120b-a12b",

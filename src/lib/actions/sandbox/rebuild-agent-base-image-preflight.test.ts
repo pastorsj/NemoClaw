@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type RebuildFlowHelpersModule = typeof import("./rebuild-flow-helpers");
-type AgentDefsModule = typeof import("../../agent/defs");
+type AgentDefinition = import("../../agent/defs").AgentDefinition;
 type AgentOnboardModule = typeof import("../../agent/onboard");
 type DockerImageModule = typeof import("../../adapters/docker/image");
 type SandboxBaseImageResolutionMetadata =
@@ -14,7 +14,6 @@ type SandboxBaseImageResolutionMetadata =
 
 const requireDist = createRequire(import.meta.url);
 const rebuildFlowHelpersPath = "./rebuild-flow-helpers.js";
-const agentDefsPath = "../../agent/defs.js";
 const agentOnboardPath = "../../agent/onboard.js";
 const dockerImagePath = "../../adapters/docker/image.js";
 const overrideEnvVar = "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF";
@@ -35,10 +34,6 @@ function loadRebuildFlowHelpers(): RebuildFlowHelpersModule {
 // still reload this entry module after installing dependency spies.
 loadRebuildFlowHelpers();
 delete require.cache[requireDist.resolve(rebuildFlowHelpersPath)];
-
-function loadAgentDefs(): AgentDefsModule {
-  return requireDist(agentDefsPath);
-}
 
 function loadAgentOnboard(): AgentOnboardModule {
   return requireDist(agentOnboardPath);
@@ -68,10 +63,11 @@ describe("ensureRebuildAgentBaseImage", () => {
   });
 
   function setup() {
-    const agent = { name: "hermes", displayName: "Hermes" } as ReturnType<
-      AgentDefsModule["loadAgent"]
-    >;
-    vi.spyOn(loadAgentDefs(), "loadAgent").mockReturnValue(agent);
+    const agent = {
+      name: "hermes",
+      displayName: "Hermes",
+      packageRoot: "/installed/hermes",
+    } as AgentDefinition;
     const ensureAgentBaseImage = vi
       .spyOn(loadAgentOnboard(), "ensureAgentBaseImage")
       .mockImplementation((_agent, options = {}) =>
@@ -118,7 +114,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     const { agent, ensureAgentBaseImage } = setup();
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
 
-    expect(ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint })).toEqual({
+    expect(ensureRebuildAgentBaseImage(agent, makeBail(), { resolutionHint: hint })).toEqual({
       ok: true,
       imageRef: cachedRemoteRef,
       overrideEnvVar,
@@ -133,7 +129,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     const { agent, ensureAgentBaseImage } = setup();
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
 
-    expect(ensureRebuildAgentBaseImage("hermes", makeBail())).toEqual({
+    expect(ensureRebuildAgentBaseImage(agent, makeBail())).toEqual({
       ok: true,
       imageRef: rebuiltLocalRef,
       overrideEnvVar,
@@ -145,7 +141,7 @@ describe("ensureRebuildAgentBaseImage", () => {
   });
 
   it("carries the current local-build proof into the recreate preflight", () => {
-    const { ensureAgentBaseImage } = setup();
+    const { agent, ensureAgentBaseImage } = setup();
     const trustedLocalOverride = {
       ref: `nemoclaw-hermes-sandbox-base-local:image-${"a".repeat(64)}`,
       provenance: `${"b".repeat(64)}.${"c".repeat(64)}`,
@@ -157,7 +153,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     });
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
 
-    expect(ensureRebuildAgentBaseImage("hermes", makeBail())).toEqual({
+    expect(ensureRebuildAgentBaseImage(agent, makeBail())).toEqual({
       ok: true,
       imageRef: trustedLocalOverride.ref,
       overrideEnvVar,
@@ -166,14 +162,14 @@ describe("ensureRebuildAgentBaseImage", () => {
   });
 
   it("reports a forced Hermes base-image failure before rebuild can continue", () => {
-    const { ensureAgentBaseImage } = setup();
+    const { agent, ensureAgentBaseImage } = setup();
     ensureAgentBaseImage.mockImplementation(() => {
       throw new Error("Failed to build Hermes Agent base image (exit 23)");
     });
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
 
-    expect(() => ensureRebuildAgentBaseImage("hermes", makeBail())).toThrow(
+    expect(() => ensureRebuildAgentBaseImage(agent, makeBail())).toThrow(
       "Failed to build Hermes Agent base image (exit 23)",
     );
 
@@ -189,7 +185,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
 
     expect(
-      ensureRebuildAgentBaseImage("hermes", makeBail(), {
+      ensureRebuildAgentBaseImage(agent, makeBail(), {
         resolutionHint: hint,
         forceBaseImageRefresh: true,
       }),
@@ -206,7 +202,7 @@ describe("ensureRebuildAgentBaseImage", () => {
   });
 
   it("preserves resolved provenance with the immutable remote recreate handoff (#7144)", () => {
-    const { ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi } = setup();
+    const { agent, ensureAgentBaseImage, pinAgentSandboxBaseImageRef, dockerRmi } = setup();
     const platformRef = `ghcr.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:${"a".repeat(64)}`;
     const resolutionMetadata = {
       key: "current-base",
@@ -221,7 +217,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
     const exitListenersBefore = process.listenerCount("exit");
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint });
+    const result = ensureRebuildAgentBaseImage(agent, makeBail(), { resolutionHint: hint });
 
     expect(result).toEqual({
       ok: true,
@@ -259,7 +255,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     bindLocalAgentBaseImageToPinnedProvenance.mockReturnValue(resolutionMetadata);
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail());
+    const result = ensureRebuildAgentBaseImage(agent, makeBail());
 
     expect(result).toEqual({
       ok: true,
@@ -288,6 +284,7 @@ describe("ensureRebuildAgentBaseImage", () => {
 
   it("retains exit cleanup until a failed temporary removal succeeds (#7144)", () => {
     const {
+      agent,
       ensureAgentBaseImage,
       bindLocalAgentBaseImageHandoffToResolution,
       pinAgentSandboxBaseImageRef,
@@ -319,7 +316,7 @@ describe("ensureRebuildAgentBaseImage", () => {
     const { ensureRebuildAgentBaseImage } = loadRebuildFlowHelpers();
     const exitListenersBefore = process.listenerCount("exit");
 
-    const result = ensureRebuildAgentBaseImage("hermes", makeBail(), { resolutionHint: hint });
+    const result = ensureRebuildAgentBaseImage(agent, makeBail(), { resolutionHint: hint });
 
     expect(process.listenerCount("exit")).toBe(exitListenersBefore + 1);
     expect(result.disposeImageRef?.()).toBe(false);

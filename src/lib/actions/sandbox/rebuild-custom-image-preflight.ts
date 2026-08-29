@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { dockerBuild, dockerRmi } from "../../adapters/docker";
 import { fingerprintBuildContext } from "../../adapters/fs/build-context-fingerprint";
-import { loadAgent, type AgentDefinition } from "../../agent/defs";
+import type { AgentDefinition } from "../../agent/defs";
 import { createAgentSandbox } from "../../agent/onboard";
 import type { WebSearchConfig } from "../../inference/web-search";
 import type { SandboxMessagingPlan } from "../../messaging";
@@ -38,7 +38,8 @@ import {
 } from "./rebuild-prepared-image-context";
 
 type PreflightInput = {
-  agent: AgentDefinition | null;
+  /** Exact definition resolved from the sandbox's pinned package authority. */
+  agent: AgentDefinition;
   fromDockerfile: string | null;
   model: string;
   provider: string | null;
@@ -168,8 +169,11 @@ export async function preflightRebuildImage(
   const previousReasoning = process.env.NEMOCLAW_REASONING;
   const previousReasoningEffort = process.env[REASONING_EFFORT_ENV];
   try {
-    const effectiveAgent = input.agent ?? loadAgent("openclaw");
-    const openClawPackageRoot = loadAgent("openclaw").packageRoot;
+    const effectiveAgent = input.agent;
+    // The Dockerfile patcher still represents OpenClaw with its established
+    // null sentinel. Keep that behavior while sourcing every path from the
+    // already pinned definition instead of reloading repository state.
+    const patchAgent = effectiveAgent.name === "openclaw" ? null : effectiveAgent;
     if (input.provider === "compatible-endpoint") {
       process.env.NEMOCLAW_REASONING = input.compatibleEndpointReasoning ?? "false";
       applyReasoningEffortEnv(input.compatibleEndpointReasoningEffort);
@@ -191,8 +195,8 @@ export async function preflightRebuildImage(
     });
     cleanup = createIdempotentBuildContextCleanup(staged.cleanupBuildCtx);
     const { buildId, dashboardRemoteBindPrepared } = await preparePatch({
-      agent: input.agent,
-      rootDir: openClawPackageRoot,
+      agent: patchAgent,
+      rootDir: effectiveAgent.packageRoot,
       fromDockerfile: input.fromDockerfile,
       sandboxBaseImage: OPENCLAW_SANDBOX_BASE_IMAGE,
       sandboxBaseTag: SANDBOX_BASE_TAG,
@@ -237,7 +241,7 @@ export async function preflightRebuildImage(
         contextFingerprint,
         verifyBuildCtx: createBuildContextVerifier(staged.buildCtx, contextFingerprint),
         rebuildTarget: {
-          agentName: input.agent?.name ?? null,
+          agentName: effectiveAgent.name === "openclaw" ? null : effectiveAgent.name,
           fromDockerfile: input.fromDockerfile ? path.resolve(input.fromDockerfile) : null,
         },
       },

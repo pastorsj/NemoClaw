@@ -6,6 +6,7 @@ import { CLI_NAME } from "../../cli/branding";
 import type { SandboxMessagingPlan } from "../../messaging";
 import { isSandboxBaseImageRefreshRequested } from "../../onboard/base-image-resolution-flow";
 import type { DcodeAutoApprovalMode } from "../../onboard/dcode-auto-approval";
+import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   createRebuildProviderReconfigureHandoff,
   mintProviderRecoveryReceipt,
@@ -147,7 +148,7 @@ export function stageRebuildBaseImageResolutionHandoff(
 export async function prepareRebuildTargetPreflights(args: {
   sandboxName: string;
   sandboxEntry: RebuildSandboxEntry;
-  rebuildAgent: string | null;
+  agentAuthority: ResolvedSandboxAgent;
   autoYes: boolean;
   requestedToolDisclosure?: ToolDisclosure;
   requestedDcodeAutoApprovalMode?: DcodeAutoApprovalMode;
@@ -160,7 +161,7 @@ export async function prepareRebuildTargetPreflights(args: {
   const {
     sandboxName,
     sandboxEntry,
-    rebuildAgent,
+    agentAuthority,
     autoYes,
     requestedToolDisclosure,
     requestedDcodeAutoApprovalMode,
@@ -170,13 +171,14 @@ export async function prepareRebuildTargetPreflights(args: {
     log,
     bail,
   } = args;
+  const rebuildAgent = agentAuthority.recordedAgent;
   hydrateMessagingConfigForRebuild(sandboxName, log);
   pinRebuildTargetGatewayForReadiness(sandboxName, sandboxEntry, log);
 
   const targetConfig = prepareRebuildTargetConfig(
     sandboxName,
     sandboxEntry,
-    rebuildAgent,
+    agentAuthority,
     log,
     bail,
     requestedToolDisclosure,
@@ -307,7 +309,7 @@ export async function prepareRebuildTargetPreflights(args: {
   const baseImagePreflight =
     rebuildsDcodeSandbox || rebuildsManagedWorkload
       ? { ok: true, imageRef: null, overrideEnvVar: null }
-      : ensureRebuildAgentBaseImage(rebuildAgent, bail, {
+      : ensureRebuildAgentBaseImage(targetConfig.agentDefinition, bail, {
           resolutionHint: baseImageResolutionHint,
           forceBaseImageRefresh,
         });

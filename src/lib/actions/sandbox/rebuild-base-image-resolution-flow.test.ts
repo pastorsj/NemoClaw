@@ -52,8 +52,12 @@ describe("rebuildSandbox base-image resolution flow", () => {
         harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
       ).resolves.toBeUndefined();
 
+      const backupOptions = harness.backupSandboxStateSpy.mock.calls[0]?.[1] as
+        | { agentDefinition?: unknown }
+        | undefined;
+      expect(backupOptions?.agentDefinition).toBeDefined();
       expect(harness.ensureRebuildAgentBaseImageSpy).toHaveBeenCalledWith(
-        "hermes",
+        backupOptions?.agentDefinition,
         expect.any(Function),
         {
           resolutionHint,

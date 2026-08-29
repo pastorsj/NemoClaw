@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const requireDist = createRequire(import.meta.url);
 const onboardSession = requireDist("../../state/onboard-session.js");
-const { prepareRebuildResumeConfig } = requireDist("./rebuild-resume-config.js");
+const { prepareRebuildResumeConfig: preparePinnedRebuildResumeConfig } = requireDist(
+  "./rebuild-resume-config.js",
+);
 
 const noopLog = () => undefined;
 const throwingBail = (message: string): never => {
@@ -21,6 +23,29 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
   endpointUrl: "https://registry.example.test/v1",
   ...overrides,
 });
+
+function prepareRebuildResumeConfig(
+  sandboxName: string,
+  sandboxEntry: Record<string, unknown>,
+  _recordedAgent: null,
+  log: (message: string) => void,
+  bail: (message: string, code?: number) => never,
+) {
+  const authority = Object.freeze({
+    recordedAgent: null,
+    effectiveAgentId: "openclaw",
+    definition: Object.freeze({ name: "openclaw", packageRoot: "/installed/openclaw" }),
+    harnessPackage: null,
+    harnessPackageMigration: null,
+  });
+  return preparePinnedRebuildResumeConfig(
+    sandboxName,
+    { ...sandboxEntry, agent: null },
+    authority,
+    log,
+    bail,
+  );
+}
 
 afterEach(() => {
   vi.restoreAllMocks();

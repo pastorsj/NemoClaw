@@ -6,11 +6,12 @@ import type { SandboxMessagingPlan } from "../../messaging";
 import { hydrateCredentialEnv } from "../../onboard/credential-env";
 import { DCODE_AUTO_APPROVAL_FEATURE } from "../../onboard/dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "../../onboard/managed-sandbox-feature";
+import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   type HermesCronRestorePlan,
   validateHermesCronRestoreBackup,
 } from "../../state/rebuild/hermes-cron-restore-backup";
-import type { RebuildManifest } from "../../state/sandbox";
+import { inspectRebuildManifestHarnessPackage, type RebuildManifest } from "../../state/sandbox";
 import { assertMcpDestroyNotPending } from "./mcp-bridge-state";
 import {
   preflightRebuildCredentials,
@@ -35,7 +36,6 @@ import {
   confirmRebuildIntent,
   countActiveSandboxSessionsForRebuild,
   createRebuildCommandContext,
-  getRebuildAgentDisplayName,
   type RebuildVersionCheck,
 } from "./rebuild-preflight-confirmation";
 import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
@@ -63,6 +63,7 @@ export { finalizePreparedRebuildImageMessagingPlan } from "./rebuild-custom-imag
 
 export interface RebuildPreflightPhaseResult {
   sandboxEntry: RebuildSandboxEntry;
+  agentAuthority: ResolvedSandboxAgent;
   rebuildAgent: string | null;
   versionCheck: RebuildVersionCheck;
   targetConfig: RebuildTargetConfig;
@@ -158,18 +159,51 @@ export async function runRebuildPreflightPhase(
     return null;
   }
   const confirmedEntrySnapshot = JSON.stringify(sandboxEntry);
-  const allowLegacyManagedImageRecovery =
-    opts.recoveryManifest !== undefined && opts.allowLegacyManagedImageRecovery === true;
-  const recoveryManifest = validatePreparedRecoveryManifest(
-    sandboxName,
-    sandboxEntry,
-    opts.recoveryManifest,
-    allowLegacyManagedImageRecovery,
-    bail,
-  );
   if (!isSingleAgentRebuildSupported(sandboxEntry, bail)) return null;
 
-  const rebuildAgent = sandboxEntry.agent || null;
+  const allowLegacyManagedImageRecovery =
+    opts.recoveryManifest !== undefined && opts.allowLegacyManagedImageRecovery === true;
+  const hasLegacyRecoveryManifest =
+    opts.recoveryManifest !== undefined &&
+    inspectRebuildManifestHarnessPackage(opts.recoveryManifest).status === "legacy";
+  // Schema v1 has no manifest package identity. Let its explicit migrated-owner
+  // validator report missing or mismatched provenance before constructing the
+  // package-bound target authority used by the remaining rebuild flow.
+  let recoveryManifest = hasLegacyRecoveryManifest
+    ? validatePreparedRecoveryManifest(
+        sandboxName,
+        sandboxEntry,
+        opts.recoveryManifest,
+        allowLegacyManagedImageRecovery,
+        bail,
+      )
+    : null;
+  let agentAuthority: ResolvedSandboxAgent;
+  try {
+    // Resolve package-managed definitions from the registry's exact receipt and
+    // object before any gateway, image, or target work. Qualified candidates
+    // pass through the same boundary with their explicit null package identity.
+    agentAuthority = resolveSandboxAgent(sandboxEntry);
+  } catch (error) {
+    printRebuildPreflightFailure(
+      "the recorded sandbox agent authority could not be resolved.",
+      "Repair or reinstall the recorded harness package before rebuilding.",
+      error instanceof Error ? error.message : String(error),
+      bail,
+    );
+    return null;
+  }
+  if (!hasLegacyRecoveryManifest) {
+    recoveryManifest = validatePreparedRecoveryManifest(
+      sandboxName,
+      sandboxEntry,
+      opts.recoveryManifest,
+      allowLegacyManagedImageRecovery,
+      bail,
+      agentAuthority,
+    );
+  }
+  const rebuildAgent = agentAuthority.recordedAgent;
   const dcodeAutoApprovalIssue = managedSandboxFeatureIssue(DCODE_AUTO_APPROVAL_FEATURE, {
     agent: rebuildAgent,
     requested: requestedDcodeAutoApprovalMode,
@@ -202,7 +236,7 @@ export async function runRebuildPreflightPhase(
     );
     return null;
   }
-  const agentName = getRebuildAgentDisplayName(sandboxName);
+  const agentName = agentAuthority.definition.displayName;
   const versionCheck = await runRebuildGatewayIntentPreflight({
     checkGatewaySchema: () =>
       isDcodeRebuildAgent(rebuildAgent) ||
@@ -254,7 +288,7 @@ export async function runRebuildPreflightPhase(
       const preparedTarget = await prepareRebuildTargetPreflights({
         sandboxName,
         sandboxEntry: expectedSandboxEntry,
-        rebuildAgent,
+        agentAuthority,
         // Reaching this point means either --yes was supplied or confirmation
         // succeeded, matching the previous `skipConfirm || confirmed` contract.
         autoYes: true,
@@ -318,6 +352,7 @@ export async function runRebuildPreflightPhase(
       retainBaseImagePreflight = true;
       return {
         sandboxEntry: expectedSandboxEntry,
+        agentAuthority,
         rebuildAgent,
         versionCheck,
         ...preparedTarget,

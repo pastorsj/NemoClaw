@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-assertions";
+import { restoreEnv } from "../../../../test/helpers/env-test-helpers";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
@@ -12,9 +14,11 @@ import {
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
 import {
   installRebuildHarnessPackage,
+  registryPersistence,
   sandboxAgent,
   sandboxState,
 } from "../../../../test/helpers/rebuild-flow-harness";
+import { createHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 
 const LEGACY_OPENCLAW_MIGRATION = {
   schemaVersion: 1 as const,
@@ -33,6 +37,22 @@ function createPreparedRecoveryHarness(overrides: RebuildFlowOverrides = {}) {
       ...(overrides.sandboxEntry ?? {}),
     },
   });
+}
+
+function schemaV2RecoveryManifest(
+  harnessPackage: NonNullable<ReturnType<typeof installRebuildHarnessPackage>>,
+) {
+  return {
+    ...makePreparedRecoveryManifest(),
+    version: 2,
+    harnessPackage,
+    backupComplete: true,
+  };
+}
+
+function harnessStoreRoot(): string {
+  assert.ok(process.env.HOME, "rebuild test HOME is required");
+  return path.join(process.env.HOME, ".nemoclaw", "harnesses");
 }
 
 describe("prepared rebuild recovery", () => {
@@ -76,6 +96,12 @@ describe("prepared rebuild recovery", () => {
     );
     expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
       2,
+      "alpha",
+      null,
+      recoveryManifest,
+    );
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
+      3,
       "alpha",
       null,
       recoveryManifest,
@@ -141,12 +167,7 @@ describe("prepared rebuild recovery", () => {
   it("keeps the complete package owner at both schema v2 recovery fences", async () => {
     const harnessPackage = installRebuildHarnessPackage("openclaw");
     expect(harnessPackage).not.toBeNull();
-    const recoveryManifest = {
-      ...makePreparedRecoveryManifest(),
-      version: 2,
-      harnessPackage,
-      backupComplete: true,
-    };
+    const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
     const harness = createPreparedRecoveryHarness({
       harnessPackage,
       preDeleteLatestManifest: recoveryManifest,
@@ -175,6 +196,244 @@ describe("prepared rebuild recovery", () => {
       expectedOwner,
       recoveryManifest,
     );
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
+      3,
+      "alpha",
+      expectedOwner,
+      recoveryManifest,
+    );
+  });
+
+  it.each(["object", "receipt"] as const)(
+    "rejects %s drift observed only at the delete edge",
+    async (authorityKind) => {
+      const harnessPackage = installRebuildHarnessPackage("openclaw");
+      expect(harnessPackage).not.toBeNull();
+      const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
+      let validationCount = 0;
+      const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
+      const rejectDrift = (..._args: unknown[]) => {
+        throw new Error(`retained harness package ${authorityKind} failed integrity validation`);
+      };
+      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) =>
+        (validationCount === 2 ? rejectDrift : resolveExact)(...args),
+      );
+      const harness = createPreparedRecoveryHarness({
+        harnessPackage,
+        preDeleteLatestManifest: recoveryManifest,
+        recoveryManifestValidation: (manifest) => {
+          validationCount++;
+          return { ok: true as const, manifest };
+        },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], {
+          throwOnError: true,
+          recoveryManifest,
+        }),
+      ).rejects.toThrow("prepared recovery agent authority could not be resolved");
+
+      expect(validationCount).toBe(2);
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a definition mismatch observed only at the delete edge", async () => {
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    expect(harnessPackage).not.toBeNull();
+    const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
+    let validationCount = 0;
+    const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
+    vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+      const authority = resolveExact(...args);
+      return validationCount === 2
+        ? {
+            ...authority,
+            definition: { ...authority.definition, name: "hermes" },
+          }
+        : authority;
+    });
+    const harness = createPreparedRecoveryHarness({
+      harnessPackage,
+      preDeleteLatestManifest: recoveryManifest,
+      recoveryManifestValidation: (manifest) => {
+        validationCount++;
+        return { ok: true as const, manifest };
+      },
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], {
+        throwOnError: true,
+        recoveryManifest,
+      }),
+    ).rejects.toThrow("resolved agent authority does not match the owning sandbox");
+
+    expect(validationCount).toBe(2);
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+    expect(harness.onboardSpy).not.toHaveBeenCalled();
+  });
+
+  it("ignores active-pointer advancement for an exact prepared recovery", async () => {
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    expect(harnessPackage).not.toBeNull();
+    const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
+    const packageFixture = createHarnessPackageFixture({ storeRoot: harnessStoreRoot() });
+    let validationCount = 0;
+    const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
+    const resolvedAuthorities: Array<ReturnType<typeof resolveExact>> = [];
+    const resolutionValidationCounts: number[] = [];
+    vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+      const authority = resolveExact(...args);
+      resolvedAuthorities.push(authority);
+      resolutionValidationCounts.push(validationCount);
+      return authority;
+    });
+    const advancedPackages: Array<ReturnType<typeof packageFixture.advanceActivePointer>> = [];
+    const validationActions = new Map<number, () => void>([
+      [
+        1,
+        () => {
+          advancedPackages.push(packageFixture.advanceActivePointer("openclaw"));
+        },
+      ],
+    ]);
+    const harness = createPreparedRecoveryHarness({
+      harnessPackage,
+      preDeleteLatestManifest: recoveryManifest,
+      recoveryManifestValidation: (manifest) => {
+        validationActions.get(++validationCount)?.();
+        return { ok: true as const, manifest };
+      },
+    });
+
+    try {
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], {
+          throwOnError: true,
+          recoveryManifest,
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      packageFixture.cleanup();
+    }
+
+    expect(validationCount).toBe(3);
+    const advancedPackage = advancedPackages[0];
+    assert.ok(advancedPackage, "prepared recovery test must advance the active package");
+    expect(advancedPackage.identity).not.toEqual(harnessPackage);
+    expect(resolutionValidationCounts).toContain(0);
+    expect(resolutionValidationCounts).toContain(1);
+    expect(resolvedAuthorities.map((authority) => authority.harnessPackage)).toEqual(
+      Array.from({ length: resolvedAuthorities.length }, () => harnessPackage),
+    );
+    expect(
+      new Set(resolvedAuthorities.map((authority) => authority.definition.packageRoot)),
+    ).toEqual(new Set([resolvedAuthorities[0]!.definition.packageRoot]));
+    expect(resolvedAuthorities[0]!.definition.packageRoot).not.toBe(advancedPackage.packageRoot);
+    expect(harness.restoreSandboxStateSpy).toHaveBeenCalledWith(
+      "alpha",
+      recoveryManifest.backupPath,
+      expect.objectContaining({ targetAgentType: "openclaw" }),
+    );
+  });
+
+  it("rejects candidate gate loss observed only at the delete edge", async () => {
+    const priorCuaEnabled = process.env.NEMOCLAW_CUA_ENABLED;
+    process.env.NEMOCLAW_CUA_ENABLED = "1";
+    const recoveryManifest = {
+      ...makePreparedRecoveryManifest(),
+      version: 2,
+      agentType: "nemocua",
+      harnessPackage: null,
+      backupComplete: true,
+    };
+    const validationActions = new Map<number, () => void>([
+      [
+        2,
+        () => {
+          delete process.env.NEMOCLAW_CUA_ENABLED;
+        },
+      ],
+    ]);
+    let validationCount = 0;
+    const harness = createPreparedRecoveryHarness({
+      harnessPackage: null,
+      sandboxEntry: {
+        agent: "nemocua",
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      },
+      preDeleteLatestManifest: recoveryManifest,
+      recoveryManifestValidation: (manifest) => {
+        validationActions.get(++validationCount)?.();
+        return { ok: true as const, manifest };
+      },
+    });
+
+    try {
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], {
+          throwOnError: true,
+          recoveryManifest,
+        }),
+      ).rejects.toThrow("prepared recovery agent authority could not be resolved");
+    } finally {
+      restoreEnv("NEMOCLAW_CUA_ENABLED", priorCuaEnabled);
+    }
+
+    expect(validationCount).toBe(2);
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+    expect(harness.onboardSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects registry drift introduced after the pre-delete recovery check", async () => {
+    const harnessPackage = installRebuildHarnessPackage("openclaw");
+    expect(harnessPackage).not.toBeNull();
+    const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
+    let validationCount = 0;
+    let driftAfterPreparedCheck = false;
+    const harness = createPreparedRecoveryHarness({
+      harnessPackage,
+      preDeleteLatestManifest: recoveryManifest,
+      recoveryManifestValidation: (manifest) => {
+        driftAfterPreparedCheck = ++validationCount >= 2;
+        return { ok: true as const, manifest };
+      },
+    });
+    const readRegistry = registryPersistence.load.getMockImplementation() as
+      | (() => { sandboxes: Record<string, Record<string, unknown>> })
+      | undefined;
+    assert.ok(readRegistry, "rebuild registry fixture must expose its read implementation");
+    const observedRegistryReads: Array<{ drift: boolean; model: unknown }> = [];
+    registryPersistence.load.mockImplementation(() => {
+      const snapshot = structuredClone(readRegistry());
+      const currentEntry = snapshot.sandboxes.alpha;
+      assert.ok(currentEntry, "prepared recovery registry fixture must retain alpha");
+      currentEntry.model = driftAfterPreparedCheck ? "delete-edge-drift" : currentEntry.model;
+      observedRegistryReads.push({
+        drift: driftAfterPreparedCheck,
+        model: currentEntry.model,
+      });
+      return snapshot;
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], {
+        throwOnError: true,
+        recoveryManifest,
+      }),
+    ).rejects.toThrow("Recovery registry configuration changed during preflight");
+
+    expect(validationCount).toBe(2);
+    expect(observedRegistryReads).toContainEqual({
+      drift: true,
+      model: "delete-edge-drift",
+    });
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+    expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
 
   it("does not defer route validation for an ordinary rebuild (#6114)", async () => {
@@ -368,6 +627,26 @@ describe("prepared rebuild recovery", () => {
       harness.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
         recoveryManifest: makePreparedRecoveryManifest(),
+      }),
+    ).rejects.toThrow("Recovery backup identity changed during preflight");
+
+    expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+  });
+
+  it("rejects same-path prepared-manifest substitution before deleting the sandbox", async () => {
+    const recoveryManifest = makePreparedRecoveryManifest();
+    const harness = createPreparedRecoveryHarness({
+      preDeleteLatestManifest: {
+        ...recoveryManifest,
+        agentVersion: "substituted-version",
+      },
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], {
+        throwOnError: true,
+        recoveryManifest,
       }),
     ).rejects.toThrow("Recovery backup identity changed during preflight");
 
