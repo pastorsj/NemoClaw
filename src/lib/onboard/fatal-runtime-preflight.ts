@@ -545,7 +545,6 @@ export function runFatalOnboardRuntimePreflight(
   const assess = context.assessHost ?? assessHost;
   const detect = context.detectGpu ?? detectGpu;
   const now = context.now ?? (() => new Date());
-  let observedAt = now().toISOString();
   let host = assess();
   let gpu = detect({ proveArm64WslDockerDesktopGpu: null });
   let sandboxGpuConfig = resolveSandboxGpuConfig(gpu, {
@@ -561,7 +560,6 @@ export function runFatalOnboardRuntimePreflight(
     allowStorageRemediation: context.allowStorageRemediation,
     allowDeferredN1xManagedVllm: options.allowDeferredN1xManagedVllm,
     exitProcess,
-    observedAt,
     now,
   });
   let result = { gpu, host, readinessReport, sandboxGpuConfig };

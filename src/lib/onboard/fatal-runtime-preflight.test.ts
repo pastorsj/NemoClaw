@@ -492,6 +492,39 @@ describe("runFatalOnboardRuntimePreflight", () => {
     expect(gpu).toHaveBeenCalledOnce();
   });
 
+  it("stamps initial host readiness after slow host and GPU probes (#9310)", () => {
+    let currentTime = Date.parse("2026-08-07T12:00:00.000Z");
+    const exitProcess = vi.fn((_code: number): never => {
+      throw new Error("fresh host facts were rejected");
+    });
+
+    const result = runFatalOnboardRuntimePreflight(
+      {},
+      {
+        nonInteractive: true,
+        deferEffectfulChecks: true,
+        now: () => new Date(currentTime),
+        assessHost: () => {
+          currentTime += 20_000;
+          return hostWithRuntime("docker");
+        },
+        detectGpu: () => {
+          currentTime += 20_000;
+          return null;
+        },
+        exitProcess,
+      },
+    );
+
+    expect(exitProcess).not.toHaveBeenCalled();
+    expect(result.readinessReport.provenance.observedAt).toBe(
+      "2026-08-07T12:00:40.000Z",
+    );
+    expect(result.readinessReport.evidence).not.toContainEqual(
+      expect.objectContaining({ id: "host.probe.stale" }),
+    );
+  });
+
   it("disables the container-backed WSL GPU prover during host admission", () => {
     const detect = vi.fn((_deps?: DetectGpuDeps): GpuDetection | null => null);
 
