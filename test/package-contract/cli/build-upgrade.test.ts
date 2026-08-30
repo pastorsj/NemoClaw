@@ -23,6 +23,26 @@ const PREVIOUS_COMMAND_SOURCE_MAP = "dist/commands/deploy.js.map";
 const PREVIOUS_ACTION_ARTIFACT = "dist/lib/actions/deploy.js";
 const PREVIOUS_ACTION_DECLARATION_MAP = "dist/lib/actions/deploy.d.ts.map";
 const PREVIOUS_IMPLEMENTATION_ARTIFACT = "dist/lib/deploy/index.js";
+const HARNESS_BUILD_MARKER = "dist/harnesses/.fixture-build-complete";
+
+function writeHarnessBuildFixture(fixtureRoot: string): void {
+  const scriptsRoot = path.join(fixtureRoot, "scripts");
+  mkdirSync(scriptsRoot);
+  writeFileSync(
+    path.join(scriptsRoot, "build-harnesses.mts"),
+    `import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+const fixtureRoot = realpathSync(path.resolve(import.meta.dirname, ".."));
+if (realpathSync(process.cwd()) !== fixtureRoot) {
+  throw new Error("Harness build fixture must run from its temporary source checkout");
+}
+const markerPath = path.join(fixtureRoot, ${JSON.stringify(HARNESS_BUILD_MARKER)});
+mkdirSync(path.dirname(markerPath), { recursive: true });
+writeFileSync(markerPath, "fixture harness build completed\\n");
+`,
+  );
+}
 
 describe("CLI source-checkout upgrade build", () => {
   it("prunes compiled deploy artifacts before the normal build (#10572)", () => {
@@ -37,6 +57,9 @@ describe("CLI source-checkout upgrade build", () => {
         path.join(fixtureRoot, "tsconfig.src.json"),
       );
       writeFileSync(path.join(fixtureRoot, ".source-revision"), `${"a".repeat(40)}\n`);
+      // The harness builder has its own artifact contract tests. This fixture keeps the normal
+      // build command intact and proves its final step runs without copying every harness source.
+      writeHarnessBuildFixture(fixtureRoot);
 
       symlinkSync(path.join(REPOSITORY_ROOT, "bin"), path.join(fixtureRoot, "bin"), "junction");
       symlinkSync(
@@ -121,6 +144,7 @@ describe("CLI source-checkout upgrade build", () => {
         timeout: 120_000,
       });
       expect(build.status, `${build.stdout}\n${build.stderr}`).toBe(0);
+      expect(existsSync(path.join(fixtureRoot, HARNESS_BUILD_MARKER))).toBe(true);
 
       expect(existsSync(previousCommandPath), PREVIOUS_COMMAND_ARTIFACT).toBe(false);
       expect(existsSync(previousCommandDeclarationPath), PREVIOUS_COMMAND_DECLARATION).toBe(false);
