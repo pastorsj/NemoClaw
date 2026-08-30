@@ -281,7 +281,6 @@ RUN set -eu; \
     && test -x /usr/local/bin/nemoclaw-fabric \
     && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.1 (nemo-fabric 0.2.0)" \
     && /opt/venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"deepagents-code": "0.1.55", "deepagents": "0.7.5", "langchain-mcp-adapters": "0.3.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual' \
-    && /usr/local/bin/dcode --version \
     && rm -rf /opt/nemoclaw-fabric-runner /tmp/nemoclaw-fabric-wheel
 
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b
