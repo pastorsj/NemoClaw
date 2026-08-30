@@ -33,6 +33,14 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       flags: "[id]",
     },
   ],
+  "harness:validate": [
+    {
+      group: "Getting Started",
+      order: 1.65,
+      description: "Validate one built agent runtime package without changing it",
+      flags: "<artifact-directory> [--json]",
+    },
+  ],
   ...SANDBOX_SESSIONS_DISPLAY_LAYOUT,
   "backup-all": [
     {

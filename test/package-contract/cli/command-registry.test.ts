@@ -133,7 +133,7 @@ describe("command-registry", () => {
       expect(COMMANDS.filter((command) => command.commandId === "harness")).toEqual([]);
     });
 
-    it.each(["harness:list", "harness:install"])(
+    it.each(["harness:list", "harness:install", "harness:validate"])(
       "%s publishes one public display row",
       (commandId) => {
         expect(COMMANDS.filter((command) => command.commandId === commandId)).toHaveLength(1);

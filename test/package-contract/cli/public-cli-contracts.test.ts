@@ -26,6 +26,73 @@ type HarnessPackageIdentity = {
   contentDigest: string;
 };
 
+type HarnessPackageValidationReport = {
+  schemaVersion: number;
+  valid: boolean;
+  identity: HarnessPackageIdentity;
+  displayName: string;
+  manifest: string;
+  runtimeKind: string;
+  entryCount: number;
+  totalBytes: number;
+};
+
+function writeArtifactFile(
+  artifactDirectory: string,
+  relativePath: string,
+  contents: string,
+): void {
+  const target = path.join(artifactDirectory, ...relativePath.split("/"));
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(target, contents, { mode: 0o600 });
+  fs.chmodSync(target, 0o600);
+}
+
+function createBuiltHarnessArtifact(fixtureRoot: string): string {
+  const artifactDirectory = path.join(fixtureRoot, "built-harness");
+  fs.mkdirSync(artifactDirectory, { mode: 0o700 });
+  fs.chmodSync(artifactDirectory, 0o700);
+  writeArtifactFile(
+    artifactDirectory,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "example-runtime",
+      displayName: "Example Runtime",
+      packageVersion: "1.2.3",
+      contractVersion: 1,
+      manifest: "agents/example-runtime/manifest.yaml",
+    })}\n`,
+  );
+  writeArtifactFile(
+    artifactDirectory,
+    "agents/example-runtime/manifest.yaml",
+    "name: example-runtime\nruntime:\n  kind: terminal\n  headless_command: example-runtime run\n",
+  );
+  writeArtifactFile(artifactDirectory, "runtime/payload.txt", "first payload\n");
+  return artifactDirectory;
+}
+
+function artifactSnapshot(artifactDirectory: string): string[] {
+  const snapshot: string[] = [];
+  const visit = (directory: string, relativeDirectory: string): void => {
+    for (const name of fs.readdirSync(directory).sort()) {
+      const absolutePath = path.join(directory, name);
+      const relativePath = relativeDirectory ? `${relativeDirectory}/${name}` : name;
+      const stats = fs.lstatSync(absolutePath);
+      snapshot.push(
+        stats.isDirectory()
+          ? `${relativePath}/:${String(stats.mode & 0o777)}`
+          : `${relativePath}:${String(stats.mode & 0o777)}:${fs.readFileSync(absolutePath).toString("base64")}`,
+      );
+      stats.isDirectory() ? visit(absolutePath, relativePath) : undefined;
+    }
+  };
+  visit(artifactDirectory, "");
+  return snapshot;
+}
+
 function createCliParityFixture(): CliParityFixture {
   const fixtureParent = path.join(REPO_ROOT, "node_modules/.cache/nemoclaw-docs-cli-parity");
   fs.mkdirSync(fixtureParent, { recursive: true, mode: 0o700 });
@@ -216,6 +283,69 @@ describe("public compiled CLI contracts", () => {
         };
         expect(receipt.identity).toEqual(reviewedOpenClaw.identity);
         expect(installedInventory.installed[0]?.identity).toEqual(receipt.identity);
+      } finally {
+        fs.rmSync(fixture.root, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it(
+    "validates a changed built agent runtime without installing or executing it",
+    { timeout: 30_000 },
+    () => {
+      const fixture = createCliParityFixture();
+      const artifactDirectory = createBuiltHarnessArtifact(fixture.root);
+      const before = artifactSnapshot(artifactDirectory);
+
+      try {
+        const first = runInstalledCli(fixture, [
+          "harness",
+          "validate",
+          artifactDirectory,
+          "--json",
+        ]);
+        expect(first.error).toBeUndefined();
+        expect(first.signal).toBeNull();
+        expect(first.status, first.stderr).toBe(0);
+        const firstReport = JSON.parse(first.stdout) as HarnessPackageValidationReport;
+        expect(firstReport).toMatchObject({
+          schemaVersion: 1,
+          valid: true,
+          identity: {
+            kind: "agent-runtime",
+            id: "example-runtime",
+            packageVersion: "1.2.3",
+            contractVersion: 1,
+            contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          },
+          displayName: "Example Runtime",
+          manifest: "agents/example-runtime/manifest.yaml",
+          runtimeKind: "terminal",
+        });
+        expect(first.stdout).not.toContain(artifactDirectory);
+        expect(artifactSnapshot(artifactDirectory)).toEqual(before);
+        expect(fs.existsSync(path.join(fixture.root, ".nemoclaw", "harnesses"))).toBe(false);
+
+        writeArtifactFile(artifactDirectory, "runtime/payload.txt", "second payload\n");
+        const changed = runInstalledCli(fixture, [
+          "harness",
+          "validate",
+          artifactDirectory,
+          "--json",
+        ]);
+        expect(changed.status, changed.stderr).toBe(0);
+        const changedReport = JSON.parse(changed.stdout) as HarnessPackageValidationReport;
+        expect(changedReport.identity.contentDigest).not.toBe(firstReport.identity.contentDigest);
+
+        writeArtifactFile(
+          artifactDirectory,
+          "agents/example-runtime/manifest.yaml",
+          "name: example-runtime\nruntime:\n  kind: terminal\n",
+        );
+        const malformed = runInstalledCli(fixture, ["harness", "validate", artifactDirectory]);
+        expect(malformed.status).not.toBe(0);
+        expect(malformed.stderr).toContain("must define interactive_command or headless_command");
+        expect(fs.existsSync(path.join(fixture.root, ".nemoclaw", "harnesses"))).toBe(false);
       } finally {
         fs.rmSync(fixture.root, { force: true, recursive: true });
       }

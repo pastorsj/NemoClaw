@@ -40,12 +40,9 @@ describe("harness inventory oclif commands", () => {
     vi.restoreAllMocks();
   });
 
-  it("prints only the focused harness topic usage", async () => {
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
-
-    await HarnessCommand.run([], rootDir);
-
-    expect(log).toHaveBeenCalledWith("Usage: nemoclaw harness list");
+  it("publishes the focused harness topic actions", () => {
+    expect(HarnessCommand.summary).toBe("Manage and validate agent runtime packages");
+    expect(HarnessCommand.usage).toEqual(["harness <install|list|validate>"]);
   });
 
   it("prints the empty installed state and reviewed available package", async () => {

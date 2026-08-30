@@ -287,6 +287,24 @@ Installing the same exact package again is safe and keeps that identity active.
 The install command does not accept a filesystem path, URL, remote package source, or catalog-refresh option.
 It installs only the reviewed artifacts carried by the installed NemoClaw build, and it does not run package lifecycle scripts or package tests.
 
+### `nemoclaw harness validate <artifact-directory>`
+
+Inspect one built agent runtime package as static data.
+This experimental development command checks the package tree, metadata envelope, agent manifest, data-only agent definition, content digest, and final filesystem authority.
+
+```bash
+nemoclaw harness validate ./dist/nemoclaw-example
+nemoclaw harness validate ./dist/nemoclaw-example --json
+```
+
+Pass the built artifact directory, not its source repository.
+The validator rejects source-only content such as tests, `.git`, and `node_modules`.
+It does not install the package, import or run package code, run package tests or lifecycle scripts, or add the package to `nemoclaw harness list`.
+
+Use `--json` for the schema-versioned validation report, including the package identity and content digest, manifest path, runtime kind, entry count, and total bytes.
+A successful result establishes static artifact conformance only.
+It does not qualify an image build, OpenShell startup, inference request, or agent turn.
+
 ### `$$nemoclaw agents list`
 
 List the installed agent runtimes that can be selected with `$$nemoclaw onboard --agent <name>`.
