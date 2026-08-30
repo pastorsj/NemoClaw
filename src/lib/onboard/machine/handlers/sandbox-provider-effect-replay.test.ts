@@ -70,7 +70,7 @@ describe("handleSandboxState provider effect replay", () => {
     });
     const createSandbox = vi.fn(async (...args: unknown[]) => {
       events.push("sandbox-create");
-      const createIntent = args.at(-1) as {
+      const createIntent = args.at(-2) as {
         deferSandboxEffectsUntilPolicyVerification?: boolean;
       };
       expect(createIntent.deferSandboxEffectsUntilPolicyVerification).toBeUndefined();

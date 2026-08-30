@@ -969,7 +969,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
 
     expect(calls.skipped).not.toHaveBeenCalledWith("sandbox", "my-assistant");
     expect(calls.createSandbox).toHaveBeenCalledTimes(1);
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ recreate: true });
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ recreate: true });
   });
 
   it.each([
@@ -994,7 +994,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
     });
 
     expect(calls.createSandbox).toHaveBeenCalledOnce();
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toEqual(
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toEqual(
       expect.objectContaining({ recreate: true }),
     );
     expect(calls.error).not.toHaveBeenCalled();
@@ -1129,7 +1129,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
     });
 
     expect(resumedRun.calls.createSandbox).toHaveBeenCalledOnce();
-    expect(resumedRun.calls.createSandbox.mock.calls[0]?.at(-1)).toEqual(
+    expect(resumedRun.calls.createSandbox.mock.calls[0]?.at(-2)).toEqual(
       expect.objectContaining({ recreate: true }),
     );
     expect(resumedRun.calls.error).not.toHaveBeenCalled();

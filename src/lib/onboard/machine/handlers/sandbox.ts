@@ -387,7 +387,9 @@ export interface SandboxStateOptions<
       hermesAuthMethod: HermesAuthMethod | null,
       inferenceRouteReservationAuthority: InferenceRouteReservationAuthority | null,
       createIntent: CompleteSandboxCreateIntent,
-      runVerifiedSandboxCreateEffects?: import("../../types").VerifiedSandboxCreateEffects,
+      runVerifiedSandboxCreateEffects:
+        | import("../../types").VerifiedSandboxCreateEffects
+        | undefined,
     ): Promise<string>;
     finalizeSandboxRouteReservation(
       sandboxName: string,
@@ -2458,24 +2460,22 @@ class SandboxStateFlow<
                   }
                 : null,
               effectiveCreateIntent,
-              ...(activateVerifiedCredentialProviders
-                ? [
-                    async (
-                      verifiedContext: import("../../types").VerifiedSandboxCreateEffectsContext,
-                    ) => {
-                      if (this.options.fresh) {
-                        this.deps.stopStaleDashboardListenersForSandbox(
-                          this.deps.listRegistrySandboxes().sandboxes,
-                          requestedSandboxName,
-                        );
-                      }
-                      state = await activateVerifiedCredentialProviders(
-                        state,
-                        verifiedContext.revalidatePolicyRequirements,
+              activateVerifiedCredentialProviders
+                ? async (
+                    verifiedContext: import("../../types").VerifiedSandboxCreateEffectsContext,
+                  ) => {
+                    if (this.options.fresh) {
+                      this.deps.stopStaleDashboardListenersForSandbox(
+                        this.deps.listRegistrySandboxes().sandboxes,
+                        requestedSandboxName,
                       );
-                    },
-                  ]
-                : []),
+                    }
+                    state = await activateVerifiedCredentialProviders(
+                      state,
+                      verifiedContext.revalidatePolicyRequirements,
+                    );
+                  }
+                : undefined,
             ),
         );
       } catch (error) {

@@ -33,7 +33,7 @@ describe("handleSandboxState baseline exclusions", () => {
     expect(calls.resolveCreateIntent).toHaveBeenCalledWith(
       expect.objectContaining({ baselineExclusions: [exclusion] }),
     );
-    const createIntent = calls.createSandbox.mock.calls[0]?.at(-1) as unknown as {
+    const createIntent = calls.createSandbox.mock.calls[0]?.at(-2) as unknown as {
       resolved?: { policy?: { options?: { baselineExclusions?: unknown[] } } };
     };
     expect(createIntent.resolved?.policy?.options?.baselineExclusions).toEqual([exclusion]);

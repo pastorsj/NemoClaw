@@ -86,6 +86,7 @@ describe("handleSandboxState resume recreation", () => {
         },
       },
       expect.objectContaining({ compatibleEndpointReasoning: "true", recreate: true }),
+      undefined,
     );
   });
 

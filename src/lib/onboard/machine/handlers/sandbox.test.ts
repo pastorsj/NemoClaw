@@ -54,9 +54,7 @@ describe("handleSandboxState", () => {
       configureWebSearch: vi.fn(async () => ({ fetchEnabled: true as const })),
     });
     calls.setupMessaging.mockResolvedValue(["telegram"]);
-
     const result = await handleSandboxState({ ...baseOptions(deps), fresh: true });
-
     expect(calls.startStep).toHaveBeenCalledWith("sandbox", {
       sandboxName: "my-assistant",
       provider: "provider",
@@ -88,6 +86,7 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
+      undefined,
     );
     expect(calls.finalizeRouteReservation).not.toHaveBeenCalled();
     expect(calls.updateSandbox).toHaveBeenCalledWith(
@@ -134,7 +133,7 @@ describe("handleSandboxState", () => {
       hostLocalInferenceRouteOnly: true,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ endpointSource: null });
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ endpointSource: null });
     expect(calls.preflightPolicyRequirements).toHaveBeenCalledWith(
       expect.objectContaining({ hostLocalInferenceRouteOnly: true }),
     );
@@ -229,7 +228,6 @@ describe("handleSandboxState", () => {
     expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[5]).toBeNull();
     expect(result.webSearchConfig).toBeNull();
   });
-
   it("carries an authoritative rebuild tier in the sandbox create intent", async () => {
     const { deps, calls } = createDeps();
 
@@ -240,7 +238,7 @@ describe("handleSandboxState", () => {
       authoritativePolicyTier: "restricted",
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       policyTier: "restricted",
     });
   });
@@ -258,7 +256,7 @@ describe("handleSandboxState", () => {
     expect(calls.resolveCreateIntent).toHaveBeenCalledWith(
       expect.objectContaining({ policyTier: null }),
     );
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toHaveProperty("policyTier", null);
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toHaveProperty("policyTier", null);
   });
 
   it("rejects observability for a selected non-DCode agent", async () => {
@@ -293,7 +291,7 @@ describe("handleSandboxState", () => {
       sandboxName: "saved",
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       observabilityEnabled: true,
     });
     expect(session.observabilityEnabled).toBe(true);
@@ -370,7 +368,7 @@ describe("handleSandboxState", () => {
       requestedObservabilityEnabled: false,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       observabilityEnabled: false,
       observabilityRequestedExplicitly: true,
     });
@@ -428,7 +426,7 @@ describe("handleSandboxState", () => {
         requestedObservabilityEnabled: requested,
       });
 
-      expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
         recreate: true,
         observabilityEnabled: requested,
       });
@@ -467,7 +465,7 @@ describe("handleSandboxState", () => {
         sandboxName: "saved",
       });
 
-      expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
         recreate: true,
         observabilityEnabled: requested,
       });
@@ -525,7 +523,7 @@ describe("handleSandboxState", () => {
       requestedObservabilityEnabled: false,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       recreate: true,
       observabilityEnabled: false,
     });
@@ -568,6 +566,7 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
+      undefined,
     );
     expect(result.hermesToolGateways).toEqual(["nous-audio"]);
     expect(calls.note).toHaveBeenCalledWith(
@@ -861,6 +860,7 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
+      undefined,
     );
   });
 
@@ -1035,6 +1035,7 @@ describe("handleSandboxState", () => {
           targetIntentFingerprint: expect.any(String),
         }),
       }),
+      undefined,
     );
     expect(result.webSearchConfigChanged).toBe(true);
   });
@@ -1168,6 +1169,7 @@ describe("handleSandboxState", () => {
           targetIntentFingerprint: expect.any(String),
         }),
       }),
+      undefined,
     );
     expect(result.webSearchConfig).toBeNull();
   });

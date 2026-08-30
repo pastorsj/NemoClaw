@@ -190,7 +190,7 @@ it("preserves the hashed target fingerprint of a package-migrated v1 handler jou
 
   expect(resolveSandboxCreateIntent).toHaveBeenCalledOnce();
   expect(legacyTargetIntentFingerprint).toMatch(/^[a-f0-9]{64}$/u);
-  expect(journal.completeCreate.mock.calls[0]?.at(-1)).toMatchObject({
+  expect(journal.completeCreate.mock.calls[0]?.at(-2)).toMatchObject({
     recreateTransaction: {
       targetIntentFingerprint: legacyTargetIntentFingerprint,
     },

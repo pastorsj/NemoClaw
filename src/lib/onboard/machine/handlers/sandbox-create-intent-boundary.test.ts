@@ -91,7 +91,7 @@ describe("sandbox create intent machine boundary", () => {
         sandboxName: "same-sandbox",
         selectedMessagingChannels: ["telegram"],
       });
-      const createIntent = calls.createSandbox.mock.calls[0]?.at(-1) as unknown as {
+      const createIntent = calls.createSandbox.mock.calls[0]?.at(-2) as unknown as {
         resolved: unknown;
       };
       expect(createIntent).toMatchObject({
@@ -182,7 +182,7 @@ describe("sandbox create intent machine boundary", () => {
       sandboxName: "saved",
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       rebuildPolicyPresets: ["github"],
       resolved: {
         policy: { options: { additionalPresets: ["github"] } },
@@ -211,7 +211,7 @@ describe("sandbox create intent machine boundary", () => {
         sandboxName: "saved",
       });
 
-      const createIntent = calls.createSandbox.mock.calls[0]?.at(-1);
+      const createIntent = calls.createSandbox.mock.calls[0]?.at(-2);
       expect(createIntent).not.toHaveProperty("rebuildPolicyPresets");
       expect(createIntent).toMatchObject({
         resolved: { policy: { options: { additionalPresets: [] } } },
@@ -232,7 +232,7 @@ describe("sandbox create intent machine boundary", () => {
     });
 
     expect(calls.recordSkip).not.toHaveBeenCalled();
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ recreate: true });
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ recreate: true });
   });
 
   it("checkpoints a known sandbox name before an interrupted web-search prompt (#6743)", async () => {
