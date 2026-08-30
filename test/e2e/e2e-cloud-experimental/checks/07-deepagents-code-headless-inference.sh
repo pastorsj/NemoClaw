@@ -634,38 +634,11 @@ if completion["response_bytes"] != len(data["response"].encode("utf-8")):
   return 1
 }
 
-classify_fabric_headless_output() {
-  local fabric_exit="$1"
-  local fabric_output="$2"
-  local expected_response="${3:-PONG}"
-  local required_tool="${4:-}"
+is_fabric_success_envelope() {
+  local expected_response="$1"
+  local required_tool="$2"
 
-  if [ "$fabric_exit" = "124" ]; then
-    printf '%s\n' "timeout"
-    return 1
-  fi
-
-  if printf '%s' "$fabric_output" | is_local_execution_failure; then
-    printf '%s\n' "local-execution-failure"
-    return 1
-  fi
-
-  if printf '%s' "$fabric_output" | is_inference_connection_failure; then
-    printf '%s\n' "inference-connection-failure"
-    return 1
-  fi
-
-  if printf '%s' "$fabric_output" | is_actionable_inference_error; then
-    printf '%s\n' "actionable-inference-error"
-    return 1
-  fi
-
-  if [ "$fabric_exit" != "0" ]; then
-    printf '%s\n' "nonzero-exit"
-    return 1
-  fi
-
-  if printf '%s' "$fabric_output" | python3 -c '
+  python3 -c '
 import json
 import sys
 
@@ -718,13 +691,52 @@ if not isinstance(usage, dict):
 total_tokens = usage.get("total_tokens")
 if not isinstance(total_tokens, int) or isinstance(total_tokens, bool) or total_tokens <= 0:
     raise SystemExit(1)
-' "$expected_response" "$required_tool"; then
+' "$expected_response" "$required_tool"
+}
+
+classify_fabric_headless_output() {
+  local fabric_exit="$1"
+  local fabric_output="$2"
+  local expected_response="${3:-PONG}"
+  local required_tool="${4:-}"
+
+  if [ "$fabric_exit" = "124" ]; then
+    printf '%s\n' "timeout"
+    return 1
+  fi
+
+  # A normalized Fabric success document contains diagnostic fields such as
+  # `error: null`, `environment_provider`, and `model_provider`. Validate the
+  # document before applying broad free-text failure classifiers so those field
+  # names cannot turn a successful invocation into an actionable error.
+  if [ "$fabric_exit" = "0" ] \
+    && printf '%s' "$fabric_output" | is_fabric_success_envelope "$expected_response" "$required_tool"; then
     if [ -n "$required_tool" ]; then
       printf '%s\n' "fabric-json-${required_tool}"
     else
       printf '%s\n' "fabric-json-pong"
     fi
     return 0
+  fi
+
+  if printf '%s' "$fabric_output" | is_local_execution_failure; then
+    printf '%s\n' "local-execution-failure"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | is_inference_connection_failure; then
+    printf '%s\n' "inference-connection-failure"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | is_actionable_inference_error; then
+    printf '%s\n' "actionable-inference-error"
+    return 1
+  fi
+
+  if [ "$fabric_exit" != "0" ]; then
+    printf '%s\n' "nonzero-exit"
+    return 1
   fi
 
   printf '%s\n' "invalid-fabric-json-envelope"

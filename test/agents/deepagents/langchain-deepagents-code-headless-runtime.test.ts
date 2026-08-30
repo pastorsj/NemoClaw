@@ -234,6 +234,27 @@ describe("LangChain Deep Agents Code headless runtime contracts", () => {
       });
 
     expect(classify("0", envelope())).toBe("pass:fabric-json-pong");
+    expect(
+      classify(
+        "0",
+        JSON.stringify({
+          error: null,
+          metadata: { environment_provider: "local" },
+          status: "succeeded",
+          harness: "nvidia.fabric.langchain.deepagents",
+          adapter_kind: "python",
+          output: {
+            response: "PONG",
+            messages: [
+              {
+                response_metadata: { model_provider: "openai" },
+              },
+            ],
+          },
+          usage: { total_tokens: 11 },
+        }),
+      ),
+    ).toBe("pass:fabric-json-pong");
     expect(classify("124", "still waiting")).toBe("fail:timeout");
     expect(classify("1", envelope())).toBe("fail:nonzero-exit");
     expect(classify("1", "openai.APIConnectionError")).toBe("fail:inference-connection-failure");
