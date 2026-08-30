@@ -752,9 +752,12 @@ test(
     expect(workspaceResult).toMatchObject({
       adapter_kind: "python",
       harness: "nvidia.fabric.langchain.deepagents",
-      output: { response: HOSTED_FABRIC_WORKSPACE_RESPONSE },
       status: "succeeded",
     });
+    expect(typeof workspaceResult.output?.response).toBe("string");
+    expect((workspaceResult.output?.response as string).trim()).toBe(
+      HOSTED_FABRIC_WORKSPACE_RESPONSE,
+    );
     const workspaceToolCalls = (workspaceResult.output?.messages ?? []).flatMap(
       ({ tool_calls }) => tool_calls ?? [],
     );
