@@ -18,6 +18,7 @@ import {
   parseNemoClawPolicyCreationReceipt,
   type NemoClawPolicyCreationReceipt,
 } from "../../policy/merge";
+import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../../sandbox-name-contract";
 
 export { parseNemoClawPolicyCreationReceipt } from "../../policy/merge";
 
@@ -26,8 +27,6 @@ const LEGACY_RECORD_SCHEMA_VERSION = 1;
 const RECORD_SCHEMA_VERSION = 2;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/u;
 const SAFE_EVIDENCE_PATTERN = /^[A-Za-z0-9._:@/-]{1,256}$/u;
-const NAME_MAX_LENGTH = 63;
-const NAME_VALID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/u;
 const LEGACY_RECORD_FIELDS = new Set([
   "schemaVersion",
   "recordId",
@@ -433,13 +432,13 @@ function validGatewayPort(value: unknown): value is number {
 
 function parseEvidence(value: unknown): RetainedSandboxResourceEvidence | null {
   if (!isObjectRecord(value)) return null;
-  const parse = (candidate: unknown): string[] | null =>
+  const parseValues = (candidate: unknown): string[] | null =>
     Array.isArray(candidate) && candidate.every(validSafeEvidence)
       ? [...new Set(candidate)].sort()
       : null;
-  const sharedInferenceProviders = parse(value.sharedInferenceProviders);
-  const sandboxScopedProviders = parse(value.sandboxScopedProviders);
-  const credentialEnvironmentVariables = parse(value.credentialEnvironmentVariables);
+  const sharedInferenceProviders = parseValues(value.sharedInferenceProviders);
+  const sandboxScopedProviders = parseValues(value.sandboxScopedProviders);
+  const credentialEnvironmentVariables = parseValues(value.credentialEnvironmentVariables);
   return sharedInferenceProviders && sandboxScopedProviders && credentialEnvironmentVariables
     ? { sharedInferenceProviders, sandboxScopedProviders, credentialEnvironmentVariables }
     : null;
@@ -817,4 +816,43 @@ export function reconcileRetainedRecoveryPackage(
     throw new Error("Retained sandbox package binding did not survive durable readback.");
   }
   return { status: "upgraded", record: reread };
+}
+
+function retainedSandboxRecoveryAuthorityMatchesState(
+  state: RetainedSandboxRecoveryState,
+  expected: RetainedSandboxRecoveryRecord,
+): boolean {
+  const recorded = state.unresolved.find(
+    (candidate) => candidate.recordId === expected.recordId,
+  );
+  if (!recorded) return false;
+  if (!isDeepStrictEqual(recorded, expected)) {
+    throw new Error("Retained sandbox recovery authority changed before cleanup completed.");
+  }
+  return true;
+}
+
+/** Confirm that the exact cleanup authority is still present and unchanged. */
+export function retainedSandboxRecoveryAuthorityIsCurrent(
+  filePath: string,
+  expected: RetainedSandboxRecoveryRecord,
+): boolean {
+  return retainedSandboxRecoveryAuthorityMatchesState(loadState(filePath), expected);
+}
+
+/** Retire only the unchanged record whose external resources were verified absent. */
+export function resolveRetainedSandboxRecovery(
+  filePath: string,
+  expected: RetainedSandboxRecoveryRecord,
+): boolean {
+  const current = loadState(filePath);
+  if (!retainedSandboxRecoveryAuthorityMatchesState(current, expected)) return false;
+  writeStateFile(filePath, {
+    ...current,
+    unresolved: current.unresolved.filter((candidate) => candidate.recordId !== expected.recordId),
+  });
+  if (loadState(filePath).unresolved.some((candidate) => candidate.recordId === expected.recordId)) {
+    throw new Error("Retained sandbox recovery record remained after verified cleanup.");
+  }
+  return true;
 }

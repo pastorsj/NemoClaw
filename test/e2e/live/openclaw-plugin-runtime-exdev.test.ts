@@ -47,6 +47,7 @@ import {
   DELEGATED_CAPABILITY_COMMENT_PREFIX,
   registerTrustedPluginFixtureImageCleanup,
   trustedExdevImageRef,
+  withEnabledLocalBaseImageBuild,
 } from "./openclaw-plugin-runtime-exdev-trusted-prebuild.ts";
 import {
   createOpenShellDriverConfigTestWrapper,
@@ -56,10 +57,9 @@ import {
   withOpenShellDriverConfigWrapperEnv,
 } from "./openshell-driver-config-test-wrapper.ts";
 
-// Keep this contract as a focused live test: build a deterministic custom plugin
 // on top of the complete managed runtime, prove it survives restart/recreation, then
 // run the in-sandbox Node replacement probe that guards #3513/#3127's EXDEV
-// cross-device runtime-deps failure mode. No registry or ledger is required.
+// cross-device runtime-deps failure mode.
 
 const WEATHER_FIXTURE_DIR = path.join(REPO_ROOT, "test/e2e/fixtures/plugins/weather");
 const WEATHER_FIXTURE_PACKAGE_PATH = path.join(WEATHER_FIXTURE_DIR, "package.json");
@@ -1311,11 +1311,13 @@ test(
     });
 
     progress.phase("build and onboard plugin v1");
-    const baseImageResolution = pullAndResolveBaseImageDigest({
-      rootDir: REPO_ROOT,
-      forceRefresh: true,
-      requireOpenshellSandboxAbi: true,
-    });
+    const baseImageResolution = withEnabledLocalBaseImageBuild(() =>
+      pullAndResolveBaseImageDigest({
+        rootDir: REPO_ROOT,
+        forceRefresh: true,
+        requireOpenshellSandboxAbi: true,
+      }),
+    );
     assert(
       baseImageResolution,
       "current CLI must resolve an OpenShell-compatible sandbox base image",

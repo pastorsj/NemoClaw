@@ -497,11 +497,6 @@ if (scenario.mode === "stale-recovery-admission") {
         harnessPackage: null,
         createAttemptNonce: "c".repeat(62),
         policyCreationReceipt: null,
-        resources: {
-          sharedInferenceProviders: [],
-          sandboxScopedProviders: [],
-          credentialEnvironmentVariables: [],
-        },
         reason: "retained_after_sandbox_creation_failure",
       });
       return [];

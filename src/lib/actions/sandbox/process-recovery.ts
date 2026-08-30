@@ -40,6 +40,7 @@ import {
   ensureSandboxPortForward,
   HermesPortableForwardRecoveryError,
   isSandboxForwardHealthy,
+  prepareHermesPortableLaunchForwards,
   recoverDeclaredAgentForwardPorts,
   recoverHermesPortableLaunchForwards,
   recoverMessagingHostForward,
@@ -49,6 +50,7 @@ import {
   type HermesPortableForwardRecoveryFailure,
   type HermesPortableForwardRecoveryInput,
   type HermesPortableForwardRecoveryResult,
+  type PreparedHermesPortableForwardRecovery,
 } from "./forward-recovery";
 import {
   classifyGatewayRestartFailure,
@@ -86,11 +88,16 @@ export {
   classifySandboxForwardHealth,
 } from "./forward-health";
 export { resolveSandboxDashboardPort, resolveSandboxLaunchForwardPorts } from "./forward-recovery";
-export { HermesPortableForwardRecoveryError, recoverHermesPortableLaunchForwards };
+export {
+  HermesPortableForwardRecoveryError,
+  prepareHermesPortableLaunchForwards,
+  recoverHermesPortableLaunchForwards,
+};
 export type {
   HermesPortableForwardRecoveryFailure,
   HermesPortableForwardRecoveryInput,
   HermesPortableForwardRecoveryResult,
+  PreparedHermesPortableForwardRecovery,
 };
 export type {
   GatewayRestartDeps,

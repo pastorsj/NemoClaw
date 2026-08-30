@@ -43,12 +43,14 @@ import {
 } from "./hermes-dashboard-recovery";
 export {
   HermesPortableForwardRecoveryError,
+  prepareHermesPortableLaunchForwards,
   recoverHermesPortableLaunchForwards,
 } from "./probe/hermes-portable-forward-recovery";
 export type {
   HermesPortableForwardRecoveryFailure,
   HermesPortableForwardRecoveryInput,
   HermesPortableForwardRecoveryResult,
+  PreparedHermesPortableForwardRecovery,
 } from "./probe/hermes-portable-forward-recovery";
 
 type SandboxPortAgent = {
