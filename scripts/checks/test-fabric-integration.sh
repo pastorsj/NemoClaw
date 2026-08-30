@@ -73,9 +73,10 @@ fi
   --no-deps \
   "${runner_wheel}"
 "${venv_python}" -I - <<'PY'
-from importlib.metadata import requires, version
+from importlib.metadata import metadata, requires, version
 
-assert version("nemoclaw-fabric") == "0.1.1"
+assert version("nemoclaw-fabric") == "0.1.2"
+assert metadata("nemoclaw-fabric")["Requires-Python"] == "<3.14,>=3.13"
 declared = [item.replace(" ", "") for item in (requires("nemoclaw-fabric") or [])]
 runtime = [item for item in declared if ";extra==" not in item]
 optional = sorted(item for item in declared if ";extra==" in item)

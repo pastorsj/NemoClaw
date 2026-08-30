@@ -9,6 +9,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from nemoclaw_fabric.config import FabricConfigLoadError
 from nemoclaw_fabric.config import load_fabric_config
@@ -47,6 +48,74 @@ class FabricConfigLoadingTests(unittest.TestCase):
         self.assertEqual(loaded.config.harness.settings, {"adapter_owned": True})
         self.assertEqual(loaded.base_dir, self.base_dir.resolve())
         self.assertEqual(loaded.path, self.config_path.resolve())
+
+    def test_accepts_credential_free_uri_and_email_values(self) -> None:
+        values = (
+            "https://example.invalid/v1",
+            "postgresql://example.invalid/database",
+            "https://example.invalid/v1?contact=alice@example.com",
+            "https://example.invalid/v1/alice%40example.com",
+            "https://example.invalid/v1?contact=alice%40example.com",
+            "alice@example.com",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                loaded = load_fabric_config(
+                    self.write_config(
+                        {
+                            "metadata": {"name": "credential-free-uri"},
+                            "harness": {
+                                "adapter_id": "third.party.harness",
+                                "settings": {"endpoint": value},
+                            },
+                            "runtime": {"timeout_seconds": 30},
+                        }
+                    )
+                )
+
+                self.assertEqual(loaded.config.harness.settings["endpoint"], value)
+
+    def test_rejects_uri_authority_userinfo_before_native_config_parsing(self) -> None:
+        credential_uris = (
+            "https://alice@example.invalid/v1",
+            "https://alice:ordinary-password@example.invalid/v1",
+            "https://:ordinary-password@example.invalid/v1",
+            "https://alice:%70assword@example.invalid/v1",
+            "https://alice%40corp:pass@example.invalid/v1",
+            "https://alice:pass%40example.invalid/v1",
+            "HTTPS://alice:pass@example.invalid/v1",
+            "postgresql://alice:pass@example.invalid/database",
+            "//alice:pass@example.invalid/v1",
+            "https://alice:pass@example.invalid:notaport/v1",
+            "https://alice:pass@[example.invalid/v1",
+        )
+        for credential_uri in credential_uris:
+            with self.subTest(credential_uri=credential_uri):
+                with (
+                    patch(
+                        "nemoclaw_fabric.config.FabricConfig.from_mapping"
+                    ) as from_mapping,
+                    self.assertRaisesRegex(
+                        FabricConfigLoadError,
+                        r"harness\.settings\.endpoint must not contain URI authority userinfo",
+                    ) as caught,
+                ):
+                    load_fabric_config(
+                        self.write_config(
+                            {
+                                "metadata": {"name": "credential-bearing-uri"},
+                                "harness": {
+                                    "adapter_id": "third.party.harness",
+                                    "settings": {"endpoint": credential_uri},
+                                },
+                                "runtime": {"timeout_seconds": 30},
+                            }
+                        )
+                    )
+
+                from_mapping.assert_not_called()
+                self.assertNotIn(credential_uri, str(caught.exception))
+                self.assertNotIn("ordinary-password", str(caught.exception))
 
     def test_accepts_workflow_selection_without_a_harness(self) -> None:
         loaded = load_fabric_config(
@@ -413,6 +482,16 @@ class FabricConfigLoadingTests(unittest.TestCase):
                 self.assertNotIn(credential_value, str(caught.exception))
 
     def test_rejects_every_value_shape_under_sensitive_adapter_fields(self) -> None:
+        sensitive_field_names = (
+            "auth",
+            "authorization",
+            "credentials",
+            "keys",
+            "passphrases",
+            "passwords",
+            "secrets",
+            "tokens",
+        )
         credential_values = (
             ["Bearer sk-proj-list-secret"],
             {"value": "Bearer sk-proj-object-secret"},
@@ -420,27 +499,33 @@ class FabricConfigLoadingTests(unittest.TestCase):
             True,
             None,
         )
-        for credential_value in credential_values:
-            with self.subTest(credential_value=credential_value):
-                with self.assertRaisesRegex(
-                    FabricConfigLoadError,
-                    r"harness\.settings\.authorization must use "
-                    r"environment-variable-name indirection",
-                ) as caught:
-                    load_fabric_config(
-                        self.write_config(
-                            {
-                                "metadata": {"name": "literal-extension-secret-shape"},
-                                "harness": {
-                                    "adapter_id": "third.party.harness",
-                                    "settings": {"authorization": credential_value},
-                                },
-                                "runtime": {"timeout_seconds": 30},
-                            }
+        for field_name in sensitive_field_names:
+            for credential_value in credential_values:
+                with self.subTest(
+                    field_name=field_name,
+                    credential_value=credential_value,
+                ):
+                    expected_path = rf"harness\.settings\.{field_name} must use "
+                    with self.assertRaisesRegex(
+                        FabricConfigLoadError,
+                        expected_path + r"environment-variable-name indirection",
+                    ) as caught:
+                        load_fabric_config(
+                            self.write_config(
+                                {
+                                    "metadata": {
+                                        "name": "literal-extension-secret-shape"
+                                    },
+                                    "harness": {
+                                        "adapter_id": "third.party.harness",
+                                        "settings": {field_name: credential_value},
+                                    },
+                                    "runtime": {"timeout_seconds": 30},
+                                }
+                            )
                         )
-                    )
 
-                self.assertNotIn(str(credential_value), str(caught.exception))
+                    self.assertNotIn(str(credential_value), str(caught.exception))
 
     def test_rejects_malformed_explicit_credential_environment_names(self) -> None:
         with self.assertRaisesRegex(

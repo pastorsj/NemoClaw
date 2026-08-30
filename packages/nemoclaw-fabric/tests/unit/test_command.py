@@ -156,7 +156,7 @@ class FabricCommandTests(unittest.TestCase):
 
         self.assertEqual(exit_code, EXIT_SUCCESS)
         self.assertEqual(stderr, "")
-        self.assertIn("nemoclaw-fabric 0.1.1", stdout)
+        self.assertIn("nemoclaw-fabric 0.1.2", stdout)
         self.assertIn("nemo-fabric 0.2.0", stdout)
         self.assertEqual(stdout.strip(), version_text())
 
@@ -612,6 +612,132 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertNotIn(secret, stdout)
                 self.assertIn("<redacted>", stdout)
 
+    def test_success_output_redacts_values_under_nested_credential_keys(self) -> None:
+        response = {
+            "summary": "visible answer",
+            "publicKey": "visible public material",
+            "api_key_env": "SERVICE_API_KEY",
+            "nested": {
+                "clientSecret": {"unstructured": "ordinary object value"},
+                "accessToken": 42,
+                "auth": "ordinary auth value",
+                "credentials": "ordinary credentials value",
+                "keys": "ordinary keys value",
+                "passphrases": "ordinary passphrases value",
+                "passwords": "ordinary passwords value",
+                "secrets": "ordinary secrets value",
+                "tokens": "ordinary tokens value",
+                "password": False,
+                "authorization": ["ordinary list value"],
+                "api_key": None,
+                "count": 3,
+            },
+        }
+        for output_arguments in ((), ("--json",)):
+            with self.subTest(arguments=output_arguments):
+                exit_code, stdout, stderr, _selected = self.invoke(
+                    self.run_arguments("-m", "prompt", *output_arguments),
+                    client=StubFabricClient(
+                        result=StubResult(
+                            "succeeded",
+                            output={"response": response},
+                        )
+                    ),
+                )
+
+                self.assertEqual(exit_code, EXIT_SUCCESS)
+                self.assertEqual(stderr, "")
+                rendered = json.loads(stdout)
+                selected = (
+                    rendered["output"]["response"]
+                    if output_arguments
+                    else rendered
+                )
+                self.assertEqual(selected["summary"], "visible answer")
+                self.assertEqual(selected["publicKey"], "visible public material")
+                self.assertEqual(selected["api_key_env"], "SERVICE_API_KEY")
+                self.assertEqual(selected["nested"]["count"], 3)
+                for credential_field in (
+                    "clientSecret",
+                    "accessToken",
+                    "auth",
+                    "credentials",
+                    "keys",
+                    "passphrases",
+                    "passwords",
+                    "secrets",
+                    "tokens",
+                    "password",
+                    "authorization",
+                    "api_key",
+                ):
+                    self.assertEqual(
+                        selected["nested"][credential_field],
+                        "<redacted>",
+                    )
+                self.assertNotIn("ordinary object value", stdout)
+                self.assertNotIn("ordinary list value", stdout)
+
+    def test_free_text_redacts_uri_userinfo_and_preserves_credential_free_urls(
+        self,
+    ) -> None:
+        credential_uris = (
+            "https://alice@example.invalid/v1",
+            "https://:ordinary-password@example.invalid/v1",
+            "https://alice:%70assword@example.invalid/v1",
+            "https://alice%40corp:pass@example.invalid/v1",
+            "HTTPS://alice:pass@example.invalid/v1",
+            "postgresql://alice:pass@example.invalid/database",
+            "//alice:pass@example.invalid/v1",
+            "https://alice:pass@example.invalid:notaport/v1",
+        )
+        for credential_uri in credential_uris:
+            for output_arguments in ((), ("--json",)):
+                with self.subTest(
+                    credential_uri=credential_uri,
+                    arguments=output_arguments,
+                ):
+                    error = SimpleNamespace(
+                        stage="invoke",
+                        code="adapter_failed",
+                        message=f"request to {credential_uri} failed",
+                    )
+                    exit_code, stdout, stderr, _selected = self.invoke(
+                        self.run_arguments("-m", "safe prompt", *output_arguments),
+                        client=StubFabricClient(
+                            result=StubResult(
+                                "failed",
+                                output={"diagnostic": credential_uri},
+                                error=error,
+                            )
+                        ),
+                    )
+                    combined_output = f"{stdout}\n{stderr}"
+
+                    self.assertEqual(exit_code, EXIT_FAILURE)
+                    self.assertNotIn(credential_uri, combined_output)
+                    self.assertNotIn("alice", combined_output)
+                    self.assertNotIn("ordinary-password", combined_output)
+                    self.assertIn("<redacted>@example.invalid", combined_output)
+
+        credential_free_url = "https://example.invalid/v1?contact=alice@example.com"
+        for output_arguments in ((), ("--json",)):
+            with self.subTest(credential_free_arguments=output_arguments):
+                exit_code, stdout, stderr, _selected = self.invoke(
+                    self.run_arguments("-m", "safe prompt", *output_arguments),
+                    client=StubFabricClient(
+                        result=StubResult(
+                            "succeeded",
+                            output={"response": f"reachable {credential_free_url}"},
+                        )
+                    ),
+                )
+
+                self.assertEqual(exit_code, EXIT_SUCCESS)
+                self.assertEqual(stderr, "")
+                self.assertIn(credential_free_url, stdout)
+                self.assertNotIn("<redacted>", stdout)
+
     def test_plain_output_handles_each_adapter_result_shape(self) -> None:
         secret = "result-fallback-secret"
         cases = (
@@ -808,6 +934,49 @@ class FabricCommandTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["error"]["stage"], "config")
         self.assertEqual(payload["error"]["code"], "invalid_config")
+
+    def test_uri_userinfo_fails_before_client_creation_without_diagnostic_leak(self) -> None:
+        credential = "ordinary-url-password"
+        self.config_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"name": "uri-userinfo-credential"},
+                    "harness": {
+                        "adapter_id": "test.command.adapter",
+                        "settings": {
+                            "endpoint": f"https://alice:{credential}@example.invalid/v1"
+                        },
+                    },
+                    "runtime": {"timeout_seconds": 30},
+                }
+            ),
+            encoding="utf-8",
+        )
+        factory_calls: list[None] = []
+
+        def create_client() -> StubFabricClient:
+            factory_calls.append(None)
+            return StubFabricClient()
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        exit_code = run_cli(
+            self.doctor_arguments("--json"),
+            stdin=io.StringIO(),
+            stdout=stdout,
+            stderr=stderr,
+            environment={},
+            client_factory=create_client,
+        )
+
+        self.assertEqual(exit_code, EXIT_USAGE)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertEqual(factory_calls, [])
+        self.assertNotIn(credential, stdout.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["error"]["stage"], "config")
+        self.assertEqual(payload["error"]["code"], "invalid_config")
+        self.assertIn("URI authority userinfo", payload["error"]["message"])
 
     def test_sensitive_adapter_value_shapes_fail_before_client_creation(self) -> None:
         credential_values = (

@@ -7,10 +7,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nemoclaw-fabric"
-version = "0.1.1"
+version = "0.1.2"
 description = "Generic NeMo Fabric headless runner for NemoClaw agent packages"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.13,<3.14"
 license = "Apache-2.0"
 dependencies = ["nemo-fabric == 0.2.0"]
 

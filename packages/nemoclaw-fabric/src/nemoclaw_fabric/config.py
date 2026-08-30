@@ -14,6 +14,9 @@ from typing import Any
 
 from nemo_fabric import FabricConfig
 
+from nemoclaw_fabric.output import field_name_looks_like_credential
+from nemoclaw_fabric.output import normalize_field_name
+from nemoclaw_fabric.output import uri_authority_has_userinfo
 from nemoclaw_fabric.output import value_looks_like_secret
 
 
@@ -32,38 +35,6 @@ _CREDENTIAL_ENVIRONMENT_FIELDS = frozenset(
 )
 _CREDENTIAL_ENVIRONMENT_MAPPING_FIELDS = frozenset({"header_env"})
 _ENVIRONMENT_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_CREDENTIAL_FIELD_NAMES = frozenset(
-    {
-        "apikey",
-        "api_key",
-        "credential",
-        "pass",
-        "passwd",
-        "passphrase",
-        "password",
-        "resolved_key",
-        "resolvedkey",
-        "secret",
-        "token",
-    }
-)
-_CREDENTIAL_FIELD_NAME = re.compile(
-    r"^(?:(?:personal_?)?access|refresh|client|bearer|oauth|auth|api|private|public|"
-    r"signing|session|bot|app|resolved)_?"
-    r"(?:tokens?|keys?|secrets?|passwords?|passphrases?|credentials?)$",
-    re.IGNORECASE,
-)
-_ENVIRONMENT_CREDENTIAL_FIELD_NAME = re.compile(
-    r"^(?:[A-Z0-9]+_)*(?:TOKEN|KEY|SECRET|PASSWORD|PASSWD|PASS|PASSPHRASE|CREDENTIAL)S?$"
-)
-_HEADER_CREDENTIAL_FIELD_NAME = re.compile(
-    r"-(?:key|token|secret|password|passphrase|credential|auth)s?$",
-    re.IGNORECASE,
-)
-_CREDENTIAL_HEADER_NAMES = frozenset(
-    {"authorization", "cookie", "proxy-authorization", "set-cookie"}
-)
-_PUBLIC_KEY_FIELD_NAME = re.compile(r"(?:^|_)public_keys?$")
 _GENERIC_ENVIRONMENT_REFERENCE_FIELD = re.compile(
     r"(?:_env|_env_var|_(?:access_?key|api_?key|credential|pass(?:word|wd)?|secret|token)_var)$",
     re.IGNORECASE,
@@ -85,33 +56,8 @@ class LoadedFabricConfig:
     invocation_unavailable_reason: str | None
 
 
-def _normalized_field_name(field_name: str) -> str:
-    """Normalize snake, kebab, dotted, and camel-case field names."""
-
-    normalized = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", field_name)
-    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", normalized)
-    return re.sub(r"[^A-Za-z0-9]+", "_", normalized).strip("_").lower()
-
-
-def _is_credential_field_name(field_name: str) -> bool:
-    """Recognize credential-bearing extension fields without adapter knowledge."""
-
-    normalized = _normalized_field_name(field_name)
-    if _PUBLIC_KEY_FIELD_NAME.search(normalized):
-        return False
-    return bool(
-        normalized in _CREDENTIAL_FIELD_NAMES
-        or _CREDENTIAL_FIELD_NAME.fullmatch(normalized)
-        or normalized in {"authorization", "cookie", "proxy_authorization", "set_cookie"}
-        or normalized.endswith(("_pass", "_passwd"))
-        or _ENVIRONMENT_CREDENTIAL_FIELD_NAME.fullmatch(field_name)
-        or _HEADER_CREDENTIAL_FIELD_NAME.search(field_name)
-        or field_name.lower() in _CREDENTIAL_HEADER_NAMES
-    )
-
-
 def _is_credential_reference_field(field_name: str) -> bool:
-    normalized = _normalized_field_name(field_name)
+    normalized = normalize_field_name(field_name)
     return bool(
         normalized in _CREDENTIAL_ENVIRONMENT_FIELDS
         or normalized in _CREDENTIAL_ENVIRONMENT_MAPPING_FIELDS
@@ -137,7 +83,7 @@ def _credential_environment_names(value: Any) -> tuple[str, ...]:
         if isinstance(candidate, Mapping):
             for key, item in candidate.items():
                 key_text = str(key)
-                normalized_key = _normalized_field_name(key_text)
+                normalized_key = normalize_field_name(key_text)
                 field_path = ".".join((*path, key_text))
                 if normalized_key in _CREDENTIAL_ENVIRONMENT_MAPPING_FIELDS:
                     if not isinstance(item, Mapping):
@@ -207,10 +153,10 @@ def _reject_literal_credentials(
     if isinstance(value, Mapping):
         for key, item in value.items():
             key_text = str(key)
-            normalized_key = _normalized_field_name(key_text)
+            normalized_key = normalize_field_name(key_text)
             field_path = ".".join((*path, key_text))
             is_reference = _is_credential_reference_field(key_text)
-            if _is_credential_field_name(key_text) and not is_reference:
+            if field_name_looks_like_credential(key_text) and not is_reference:
                 raise FabricConfigLoadError(
                     f"{field_path} must use environment-variable-name indirection for credentials"
                 )
@@ -219,7 +165,7 @@ def _reject_literal_credentials(
                     environment_name_text = str(environment_name)
                     if (
                         environment_name_text in credential_environment_names
-                        or _is_credential_field_name(environment_name_text)
+                        or field_name_looks_like_credential(environment_name_text)
                     ):
                         raise FabricConfigLoadError(
                             f"{field_path}.{environment_name} must not contain a literal credential"
@@ -234,9 +180,14 @@ def _reject_literal_credentials(
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         for item in value:
             _reject_literal_credentials(item, credential_environment_names, path)
-    elif isinstance(value, str) and value_looks_like_secret(value):
+    elif isinstance(value, str):
         field_path = ".".join(path) or "config"
-        raise FabricConfigLoadError(f"{field_path} must not contain a literal credential")
+        if uri_authority_has_userinfo(value):
+            raise FabricConfigLoadError(
+                f"{field_path} must not contain URI authority userinfo"
+            )
+        if value_looks_like_secret(value):
+            raise FabricConfigLoadError(f"{field_path} must not contain a literal credential")
 
 
 def _validation_summary(error: Exception) -> str:

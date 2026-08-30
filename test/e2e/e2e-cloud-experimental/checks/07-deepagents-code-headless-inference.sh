@@ -12,7 +12,9 @@
 # connection, DNS, timeout, and ambiguous failures are not acceptable. The
 # public host `agent` command must select the registered agent manifest's
 # `nemoclaw-fabric` command, enter the same OpenShell sandbox, and return a
-# normalized JSON PONG from the released Deep Agents adapter. No real credentials may
+# normalized JSON PONG from the released Deep Agents adapter. A second host
+# `agent` turn must use only `write_file` to create one confined workspace
+# artifact. The check verifies its bytes and removes it. No real credentials may
 # appear in config.toml, fabric.json, .env, .mcp.json,
 # /tmp/nemoclaw-proxy-env.sh, artifacts, or output.
 # The sandbox entrypoint, direct managed launcher, and both login/interactive
@@ -36,6 +38,9 @@ PREFIX="07-deepagents-code-headless-inference"
 HEADLESS_TIMEOUT="${DEEPAGENTS_HEADLESS_TIMEOUT:-120}"
 FABRIC_CONFIG_PATH="/sandbox/.deepagents/fabric.json"
 FABRIC_REDACTION_SENTINEL="sk-proj-nemoclaw-fabric-redaction-0123456789"
+FABRIC_WORKSPACE_CONTENT="NEMOCLAW_FABRIC_WORKSPACE_OK"
+FABRIC_WORKSPACE_RESPONSE="WORKSPACE_WRITE_OK"
+FABRIC_WORKSPACE_PROMPT="Use the write_file tool exactly once to create /fabric-workspace-proof.txt. Write exactly this UTF-8 content with no line break: ${FABRIC_WORKSPACE_CONTENT} Do not use execute, shell, or another tool. After write_file succeeds, reply with exactly ${FABRIC_WORKSPACE_RESPONSE}."
 
 ok() { printf '%s\n' "${PREFIX}: OK ($*)"; }
 info() { printf '%s\n' "${PREFIX}: $*"; }
@@ -86,12 +91,62 @@ nemoclaw_fabric_agent() {
     "$SANDBOX_NAME" agent "$@" 2>&1
 }
 
+sandbox_fabric_python() {
+  openshell sandbox exec --name "$SANDBOX_NAME" -- \
+    /opt/nemoclaw-fabric-venv/bin/python3 -I -c "$1" 2>&1
+}
+
+sandbox_fabric_workspace_absent() {
+  sandbox_fabric_python 'from pathlib import Path; path = Path("/sandbox/fabric-workspace-proof.txt"); raise SystemExit(1) if path.exists() or path.is_symlink() else print("NEMOCLAW_FABRIC_WORKSPACE_ABSENT")'
+}
+
+sandbox_fabric_workspace_proof() {
+  local proof_script
+  proof_script="$(
+    cat <<'PY'
+import hashlib
+import json
+from pathlib import Path
+
+path = Path("/sandbox/fabric-workspace-proof.txt")
+expected = b"NEMOCLAW_FABRIC_WORKSPACE_OK"
+if path.is_symlink() or not path.is_file():
+    raise SystemExit(1)
+content = path.read_bytes()
+if content != expected:
+    raise SystemExit(1)
+print(json.dumps({
+    "bytes": len(content),
+    "path": str(path),
+    "sha256": hashlib.sha256(content).hexdigest(),
+}, separators=(",", ":"), sort_keys=True))
+PY
+  )"
+  sandbox_fabric_python "$proof_script"
+}
+
+sandbox_fabric_workspace_cleanup() {
+  local cleanup_script
+  cleanup_script="$(
+    cat <<'PY'
+from pathlib import Path
+
+path = Path("/sandbox/fabric-workspace-proof.txt")
+path.unlink(missing_ok=True)
+if path.exists() or path.is_symlink():
+    raise SystemExit(1)
+print("NEMOCLAW_FABRIC_WORKSPACE_CLEAN")
+PY
+  )"
+  sandbox_fabric_python "$cleanup_script"
+}
+
 sandbox_fabric_version_contract() {
   local contract_command
   contract_command="$(
     cat <<'CONTRACT'
 set -euo pipefail
-[ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.1 (nemo-fabric 0.2.0)" ]
+[ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" ]
 /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected else 1)'
 printf '%s\n' NEMOCLAW_FABRIC_VERSION_OK
 CONTRACT
@@ -576,6 +631,8 @@ if completion["response_bytes"] != len(data["response"].encode("utf-8")):
 classify_fabric_headless_output() {
   local fabric_exit="$1"
   local fabric_output="$2"
+  local expected_response="${3:-PONG}"
+  local required_tool="${4:-}"
 
   if [ "$fabric_exit" = "124" ]; then
     printf '%s\n' "timeout"
@@ -606,6 +663,9 @@ classify_fabric_headless_output() {
 import json
 import sys
 
+expected_response = sys.argv[1]
+required_tool = sys.argv[2]
+
 try:
     result = json.load(sys.stdin)
 except json.JSONDecodeError:
@@ -622,16 +682,42 @@ output = result.get("output")
 if not isinstance(output, dict):
     raise SystemExit(1)
 response = output.get("response")
-if not isinstance(response, str) or response.strip() != "PONG":
+if not isinstance(response, str) or response.strip() != expected_response:
     raise SystemExit(1)
+if required_tool:
+    messages = output.get("messages")
+    if not isinstance(messages, list):
+        raise SystemExit(1)
+    tool_names = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        calls = message.get("tool_calls", [])
+        if isinstance(calls, list):
+            for call in calls:
+                if not isinstance(call, dict):
+                    raise SystemExit(1)
+                name = call.get("name")
+                if not isinstance(name, str):
+                    function = call.get("function")
+                    name = function.get("name") if isinstance(function, dict) else None
+                if not isinstance(name, str):
+                    raise SystemExit(1)
+                tool_names.append(name)
+    if tool_names != [required_tool]:
+        raise SystemExit(1)
 usage = result.get("usage")
 if not isinstance(usage, dict):
     raise SystemExit(1)
 total_tokens = usage.get("total_tokens")
 if not isinstance(total_tokens, int) or isinstance(total_tokens, bool) or total_tokens <= 0:
     raise SystemExit(1)
-'; then
-    printf '%s\n' "fabric-json-pong"
+' "$expected_response" "$required_tool"; then
+    if [ -n "$required_tool" ]; then
+      printf '%s\n' "fabric-json-${required_tool}"
+    else
+      printf '%s\n' "fabric-json-pong"
+    fi
     return 0
   fi
 
@@ -888,7 +974,46 @@ DCODE_EXIT:${direct_exit}"
     fail_test "Fabric left a runner or adapter process after the host turn"
   fi
 
-  # 10. A config error must keep the runner's JSON contract and redact the
+  # 10. A second public host turn must use one write_file call. Its virtual
+  # absolute path maps to the configured /sandbox workspace, not the host.
+  if workspace_before_output="$(sandbox_fabric_workspace_absent)"; then
+    pass "Fabric workspace proof is absent before the host tool turn"
+  else
+    fail_test "Fabric workspace proof existed before the host tool turn"
+    workspace_reset_output="$(sandbox_fabric_workspace_cleanup || true)"
+    if ! printf '%s\n' "$workspace_reset_output" | grep -Fxq NEMOCLAW_FABRIC_WORKSPACE_CLEAN; then
+      fail_test "Fabric workspace proof could not be reset before the host tool turn"
+    fi
+  fi
+  if fabric_workspace_output="$(nemoclaw_fabric_agent -m "$FABRIC_WORKSPACE_PROMPT" --json)"; then
+    fabric_workspace_exit=0
+  else
+    fabric_workspace_exit=$?
+  fi
+  if fabric_workspace_classification="$(classify_fabric_headless_output "$fabric_workspace_exit" "$fabric_workspace_output" "$FABRIC_WORKSPACE_RESPONSE" write_file)"; then
+    pass "host agent command used one write_file call and returned ${fabric_workspace_classification} (exit ${fabric_workspace_exit})"
+  else
+    fail_test "host agent command did not return a Fabric workspace success envelope (${fabric_workspace_classification}, exit ${fabric_workspace_exit})"
+  fi
+  if fabric_workspace_proof_output="$(sandbox_fabric_workspace_proof)"; then
+    pass "Fabric write_file created the confined workspace artifact with the expected bytes"
+  else
+    fail_test "Fabric write_file did not create the expected confined workspace artifact"
+  fi
+  fabric_workspace_cleanup_output="$(sandbox_fabric_workspace_cleanup || true)"
+  if printf '%s\n' "$fabric_workspace_cleanup_output" | grep -Fxq NEMOCLAW_FABRIC_WORKSPACE_CLEAN; then
+    pass "Fabric workspace proof was removed after verification"
+  else
+    fail_test "Fabric workspace proof remained after cleanup"
+  fi
+  fabric_workspace_processes_after="$(sandbox_fabric_processes || true)"
+  if [ -z "$(printf '%s' "$fabric_workspace_processes_after" | tr -d '[:space:]')" ]; then
+    pass "Fabric stopped its runner and adapter processes after the workspace turn"
+  else
+    fail_test "Fabric left a runner or adapter process after the workspace turn"
+  fi
+
+  # 11. A config error must keep the runner's JSON contract and redact the
   # credential-shaped path before the host command returns it.
   missing_fabric_config="${FABRIC_CONFIG_PATH%.json}-${FABRIC_REDACTION_SENTINEL}.json"
   if fabric_redaction_output="$(nemoclaw_fabric_agent --config "$missing_fabric_config" -m "redaction contract probe" --json)"; then
@@ -902,7 +1027,7 @@ DCODE_EXIT:${direct_exit}"
     fail_test "host Fabric config failure did not preserve its redacted JSON contract (${fabric_redaction_classification}, exit ${fabric_redaction_exit})"
   fi
 
-  # 11. The user-facing bare-connect readiness path must route every observed
+  # 12. The user-facing bare-connect readiness path must route every observed
   # sandbox exec to the same sandbox used by the preceding lifecycle evidence.
   connect_output=""
   if connect_output="$(nemoclaw_connect_probe)"; then
@@ -919,7 +1044,7 @@ DCODE_EXIT:${direct_exit}"
     fi
   fi
 
-  # 12. Untrusted evidence from the image-installed helper must fail closed
+  # 13. Untrusted evidence from the image-installed helper must fail closed
   # before the user-facing connect path can invoke interactive session attach.
   fail_closed_connect_output="$(dcode_connect_fail_closed_contract || true)"
   fail_closed_connect_exit="$(printf '%s\n' "$fail_closed_connect_output" | sed -n 's/^NEMOCLAW_DCODE_UNTRUSTED_CONNECT_EXIT:\([0-9][0-9]*\)$/\1/p' | tail -n1)"
@@ -934,7 +1059,7 @@ DCODE_EXIT:${direct_exit}"
     fail_test "connect did not fail closed before session attach for untrusted image-backed route evidence"
   fi
 
-  # 13. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
+  # 14. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
   leak_scan="$(sandbox_secret_scan || true)"
   combined="${config_output}
 ${openrouter_identity_output}
@@ -954,6 +1079,12 @@ ${fabric_version_output}
 ${fabric_config_output}
 ${fabric_processes_before}
 ${fabric_headless_output}
+${workspace_before_output}
+${workspace_reset_output:-}
+${fabric_workspace_output}
+${fabric_workspace_proof_output}
+${fabric_workspace_cleanup_output}
+${fabric_workspace_processes_after}
 ${fabric_processes_after}
 ${fabric_redaction_output}
 ${connect_output}

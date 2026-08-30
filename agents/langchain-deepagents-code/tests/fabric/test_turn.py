@@ -362,6 +362,26 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "succeeded")
         self.assertEqual(result["output"]["response"], final_response)
+        messages = result["output"]["messages"]
+        tool_calls = [
+            call
+            for message in messages
+            for call in message.get("tool_calls", [])
+        ]
+        self.assertEqual(
+            tool_calls,
+            [
+                {
+                    "args": {
+                        "content": file_content,
+                        "file_path": virtual_file_path,
+                    },
+                    "id": "call-fabric-write-file",
+                    "name": "write_file",
+                    "type": "tool_call",
+                }
+            ],
+        )
         self.assertEqual(expected_file.read_text(encoding="utf-8"), file_content)
         self.assertEqual(
             [path for path in self.base_dir.rglob(expected_file.name)],

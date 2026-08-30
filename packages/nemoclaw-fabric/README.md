@@ -37,7 +37,8 @@ variable names in
 `environment.metadata.nemoclaw.credential_environment_names`. Entries must be
 unique environment variable names. Literal credentials in sensitive
 `environment.env`, header, model, or adapter settings are rejected before
-Fabric starts.
+Fabric starts. URI authority userinfo is rejected in every configuration
+string, independent of scheme or adapter.
 
 An agent package can reject an unsafe composition by setting
 `environment.metadata.nemoclaw.invocation_unavailable_reason`. The runner
@@ -58,10 +59,12 @@ inner Fabric timeout is 90 seconds.
 
 Plain failures go to standard error. For a syntactically valid `doctor` or
 `run` invocation, `--json` emits one redacted object on standard output,
-including failures. Argument-parser syntax errors retain argparse's standard
-error output and exit code `2`; they are not normalized as JSON.
-Credential-shaped environment values, common token forms, and prompts embedded
-in exception diagnostics are redacted.
+including failures. Argument-parser syntax errors are rendered as redacted
+`invalid_arguments` errors on standard error and exit with `2`; they are not
+normalized as JSON.
+Credential-shaped environment values, values under credential-shaped result
+keys, common token forms, and prompts embedded in exception diagnostics are
+redacted.
 
 From the repository root, run the complete isolated test lane:
 

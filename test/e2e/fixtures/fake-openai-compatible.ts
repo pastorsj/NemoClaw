@@ -25,6 +25,8 @@ export interface FakeOpenAiCompatibleRequest {
   readonly forbiddenMarkerMatches?: number;
   /** Presence only; the configured non-secret canary is never persisted. */
   readonly requestCanaryPresent?: boolean;
+  /** The deterministic workspace-write exchange phase, without prompt or file contents. */
+  readonly workspaceWritePhase?: "request" | "result";
 }
 
 export interface FakeOpenAiCompatibleServer {
@@ -40,6 +42,13 @@ export interface FakeOpenAiCompatibleUsage {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
+}
+
+export interface FakeOpenAiCompatibleWorkspaceWrite {
+  readonly prompt: string;
+  readonly filePath: string;
+  readonly content: string;
+  readonly finalResponse: string;
 }
 
 export interface FakeOpenAiCompatibleServerOptions {
@@ -59,6 +68,7 @@ export interface FakeOpenAiCompatibleServerOptions {
   readonly requireAuth?: boolean;
   readonly requireAuthModels?: boolean;
   readonly responseText?: string;
+  readonly workspaceWrite?: FakeOpenAiCompatibleWorkspaceWrite;
 }
 
 function readPort(portFile: string): number | null {
@@ -204,6 +214,7 @@ export async function startFakeOpenAiCompatibleServer(
           NEMOCLAW_FAKE_OPENAI_REQUIRE_AUTH: options.requireAuth ? "1" : "0",
           NEMOCLAW_FAKE_OPENAI_REQUIRE_AUTH_MODELS: options.requireAuthModels ? "1" : "0",
           NEMOCLAW_FAKE_OPENAI_RESPONSE_TEXT: options.responseText ?? options.chatContent ?? "ok",
+          NEMOCLAW_FAKE_OPENAI_WORKSPACE_WRITE: JSON.stringify(options.workspaceWrite ?? null),
         },
         stdio: "ignore",
       },

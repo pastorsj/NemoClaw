@@ -52,8 +52,30 @@ const chatUsage = (() => {
   return null;
 })();
 const responseText = process.env.NEMOCLAW_FAKE_OPENAI_RESPONSE_TEXT || chatContent;
-const launchReplyFromPrompt =
-  process.env.NEMOCLAW_FAKE_OPENAI_LAUNCH_REPLY_FROM_PROMPT === "1";
+const launchReplyFromPrompt = process.env.NEMOCLAW_FAKE_OPENAI_LAUNCH_REPLY_FROM_PROMPT === "1";
+const workspaceWrite = (() => {
+  try {
+    const parsed = JSON.parse(process.env.NEMOCLAW_FAKE_OPENAI_WORKSPACE_WRITE || "null");
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof parsed.prompt === "string" &&
+      typeof parsed.filePath === "string" &&
+      typeof parsed.content === "string" &&
+      typeof parsed.finalResponse === "string"
+    ) {
+      return {
+        prompt: parsed.prompt,
+        filePath: parsed.filePath,
+        content: parsed.content,
+        finalResponse: parsed.finalResponse,
+      };
+    }
+  } catch {
+    // Invalid optional fixture configuration leaves workspace writes disabled.
+  }
+  return null;
+})();
 const requestCanaryMarker = process.env.NEMOCLAW_FAKE_OPENAI_REQUEST_CANARY_MARKER || "";
 const forbiddenMarkers = (() => {
   try {
@@ -202,6 +224,60 @@ function requestedLaunchReply(payload: JsonObject): string | null {
   return match ? `NEMOCLAW_${match[1]}_${match[2]}_OK` : null;
 }
 
+const WORKSPACE_WRITE_TOOL_CALL_ID = "call-nemoclaw-workspace-write";
+
+function workspaceWritePhase(payload: JsonObject): "request" | "result" | null {
+  if (!workspaceWrite || latestUserPrompt(payload) !== workspaceWrite.prompt) return null;
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  return messages.some(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      (entry as JsonObject).role === "tool" &&
+      (entry as JsonObject).tool_call_id === WORKSPACE_WRITE_TOOL_CALL_ID,
+  )
+    ? "result"
+    : "request";
+}
+
+function sendWorkspaceWriteResponse(res: ServerResponse, phase: "request" | "result"): void {
+  if (!workspaceWrite) throw new Error("workspace write fixture is unavailable");
+  const message =
+    phase === "request"
+      ? {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: WORKSPACE_WRITE_TOOL_CALL_ID,
+              type: "function",
+              function: {
+                name: "write_file",
+                arguments: JSON.stringify({
+                  file_path: workspaceWrite.filePath,
+                  content: workspaceWrite.content,
+                }),
+              },
+            },
+          ],
+        }
+      : { role: "assistant", content: workspaceWrite.finalResponse };
+  sendJson(res, 200, {
+    id: "chatcmpl-fake-openai-compatible-workspace",
+    object: "chat.completion",
+    created: 0,
+    model,
+    choices: [
+      {
+        index: 0,
+        message,
+        finish_reason: phase === "request" ? "tool_calls" : "stop",
+      },
+    ],
+    ...(chatUsage ? { usage: chatUsage } : {}),
+  });
+}
+
 const server = createServer(async (req, res) => {
   const path = requestPath(req);
 
@@ -233,6 +309,7 @@ const server = createServer(async (req, res) => {
   const raw = await readBody(req);
   const payload = parseJsonBody(raw);
   const auth = isAuthOk(req) ? "ok" : "missing";
+  const requestedWorkspaceWritePhase = workspaceWritePhase(payload);
   recordRequest({
     method: req.method || "GET",
     path,
@@ -245,6 +322,7 @@ const server = createServer(async (req, res) => {
     stream: Boolean(payload.stream),
     forbiddenMarkerMatches: forbiddenMarkerMatches(req, raw),
     requestCanaryPresent: requestCanaryPresent(req, raw),
+    ...(requestedWorkspaceWritePhase ? { workspaceWritePhase: requestedWorkspaceWritePhase } : {}),
   });
 
   if (req.method === "POST" && ["/v1/chat/completions", "/chat/completions"].includes(path)) {
@@ -253,6 +331,16 @@ const server = createServer(async (req, res) => {
     );
     if (!isAuthOk(req)) {
       sendJson(res, 401, { error: { message: "missing bearer credential" } });
+      return;
+    }
+    if (requestedWorkspaceWritePhase) {
+      if (payload.stream) {
+        sendJson(res, 400, {
+          error: { message: "workspace write fixture requires non-streaming chat" },
+        });
+        return;
+      }
+      sendWorkspaceWriteResponse(res, requestedWorkspaceWritePhase);
       return;
     }
     const content = requestedLaunchReply(payload) ?? chatContent;

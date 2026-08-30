@@ -171,6 +171,95 @@ describe("E2E inference adapter", () => {
     }
   });
 
+  it("returns one deterministic workspace write exchange without retaining its contents", async () => {
+    const prompt = "Write the fixture workspace proof.";
+    const workspaceWrite = {
+      content: "NEMOCLAW_WORKSPACE_FIXTURE_OK",
+      filePath: "/workspace-proof.txt",
+      finalResponse: "WORKSPACE_WRITE_OK",
+      prompt,
+    };
+    const fake = await startFakeOpenAiCompatibleServer({
+      progress: NOOP_PROGRESS,
+      workspaceWrite,
+    });
+    try {
+      const first = await fetch(`${fake.baseUrl}/chat/completions`, {
+        body: JSON.stringify({
+          messages: [{ role: "user", content: prompt }],
+          model: "fixture-model",
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      expect(first.status).toBe(200);
+      const firstPayload = (await first.json()) as {
+        choices: Array<{
+          message: {
+            tool_calls: Array<{
+              function: { arguments: string; name: string };
+              id: string;
+              type: string;
+            }>;
+          };
+        }>;
+      };
+      expect(firstPayload).toMatchObject({
+        choices: [
+          {
+            message: {
+              tool_calls: [
+                {
+                  function: {
+                    name: "write_file",
+                    arguments: expect.any(String),
+                  },
+                  id: "call-nemoclaw-workspace-write",
+                  type: "function",
+                },
+              ],
+            },
+          },
+        ],
+      });
+      expect(
+        JSON.parse(firstPayload.choices[0]!.message.tool_calls[0]!.function.arguments),
+      ).toEqual({
+        content: workspaceWrite.content,
+        file_path: workspaceWrite.filePath,
+      });
+
+      const second = await fetch(`${fake.baseUrl}/chat/completions`, {
+        body: JSON.stringify({
+          messages: [
+            { role: "user", content: prompt },
+            firstPayload.choices[0]?.message,
+            {
+              role: "tool",
+              content: "File written successfully",
+              tool_call_id: "call-nemoclaw-workspace-write",
+            },
+          ],
+          model: "fixture-model",
+        }),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+      expect(second.status).toBe(200);
+      await expect(second.json()).resolves.toMatchObject({
+        choices: [{ message: { content: workspaceWrite.finalResponse } }],
+      });
+      expect(
+        fake
+          .requests()
+          .map(({ workspaceWritePhase }) => workspaceWritePhase)
+          .filter(Boolean),
+      ).toEqual(["request", "result"]);
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("defaults to hermetic mock mode with a fake compatible endpoint", async () => {
     const ambientCompatibleKey = "ambient-compatible-key-must-not-be-reused";
     const adapter = await createAdapter({ env: { COMPATIBLE_API_KEY: ambientCompatibleKey } });

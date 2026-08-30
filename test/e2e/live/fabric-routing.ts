@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import path from "node:path";
 
 import { parseHarnessPackageIdentity } from "../../../src/lib/harness/package-identity";
@@ -32,6 +33,36 @@ interface FabricLiveEnvironment {
   readonly commandEnv: NodeJS.ProcessEnv;
   readonly gatewayName: string;
 }
+
+const FABRIC_WORKSPACE_FILE = "/sandbox/fabric-workspace-proof.txt";
+const FABRIC_WORKSPACE_VIRTUAL_FILE = "/fabric-workspace-proof.txt";
+const FABRIC_WORKSPACE_CONTENT = "NEMOCLAW_FABRIC_WORKSPACE_OK";
+const FABRIC_WORKSPACE_RESPONSE = "WORKSPACE_WRITE_OK";
+const FABRIC_WORKSPACE_PROMPT = [
+  `Use the write_file tool exactly once to create ${FABRIC_WORKSPACE_VIRTUAL_FILE}.`,
+  `Write exactly this UTF-8 content with no line break: ${FABRIC_WORKSPACE_CONTENT}`,
+  "Do not use execute, shell, or another tool.",
+  `After write_file succeeds, reply with exactly ${FABRIC_WORKSPACE_RESPONSE}.`,
+].join(" ");
+
+const FABRIC_WORKSPACE_INSPECT_SCRIPT = [
+  "import hashlib, json",
+  "from pathlib import Path",
+  `path = Path(${JSON.stringify(FABRIC_WORKSPACE_FILE)})`,
+  `expected = ${JSON.stringify(FABRIC_WORKSPACE_CONTENT)}.encode("utf-8")`,
+  "if path.is_symlink() or not path.is_file(): raise SystemExit(1)",
+  "data = path.read_bytes()",
+  "if data != expected: raise SystemExit(1)",
+  'print(json.dumps({"bytes": len(data), "path": str(path), "sha256": hashlib.sha256(data).hexdigest()}, separators=(",", ":"), sort_keys=True))',
+].join("\n");
+
+const FABRIC_WORKSPACE_REMOVE_SCRIPT = [
+  "from pathlib import Path",
+  `path = Path(${JSON.stringify(FABRIC_WORKSPACE_FILE)})`,
+  "path.unlink(missing_ok=True)",
+  "if path.exists() or path.is_symlink(): raise SystemExit(1)",
+  'print("NEMOCLAW_FABRIC_WORKSPACE_CLEAN")',
+].join("\n");
 
 function fabricLiveEnvironment(base: NodeJS.ProcessEnv = process.env): FabricLiveEnvironment {
   const gatewayPort = base.NEMOCLAW_GATEWAY_PORT?.trim();
@@ -130,6 +161,12 @@ export async function runFabricCompatibleEndpointJourney({
     requestCanaryMarker: apiKey,
     requireAuth: true,
     requireAuthModels: true,
+    workspaceWrite: {
+      content: FABRIC_WORKSPACE_CONTENT,
+      filePath: FABRIC_WORKSPACE_VIRTUAL_FILE,
+      finalResponse: FABRIC_WORKSPACE_RESPONSE,
+      prompt: FABRIC_WORKSPACE_PROMPT,
+    },
   });
   cleanup.add("close inference-routing compatible endpoint", async () => {
     try {
@@ -147,8 +184,9 @@ export async function runFabricCompatibleEndpointJourney({
       "sandbox inference.local routes chat to compatible endpoint",
       "dcode returns the compatible endpoint response through the rewritten gateway route",
       "the public agent command runs the released Fabric Deep Agents adapter",
+      "the public agent command uses write_file for one confined workspace artifact and removes it",
       "Fabric failures redact credential-shaped config paths and leave no process",
-      "the exact compatible endpoint credential is not retained in sandbox files",
+      "the exact compatible endpoint credential is absent from reviewed configuration and artifact surfaces",
     ],
     endpointUrl: fake.baseUrl,
     model,
@@ -251,7 +289,7 @@ export async function runFabricCompatibleEndpointJourney({
       "--",
       "bash",
       "-c",
-      'set -euo pipefail; [ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.1 (nemo-fabric 0.2.0)" ]; /opt/nemoclaw-fabric-venv/bin/python3 -I -c \'from importlib.metadata import version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected else 1)\'; printf "%s\\n" NEMOCLAW_FABRIC_IDENTITY_OK',
+      'set -euo pipefail; [ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" ]; /opt/nemoclaw-fabric-venv/bin/python3 -I -c \'from importlib.metadata import metadata, version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0", "nemoclaw-fabric": "0.1.2"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected and metadata("nemoclaw-fabric")["Requires-Python"] == "<3.14,>=3.13" else 1)\'; printf "%s\\n" NEMOCLAW_FABRIC_IDENTITY_OK',
     ],
     {
       artifactName: "tc-inf-09-fabric-identity",
@@ -311,6 +349,161 @@ export async function runFabricCompatibleEndpointJourney({
       requestCanaryPresent: true,
     }),
   );
+
+  progress.phase("write and remove a workspace artifact through the public agent command");
+  cleanup.add(`remove Fabric workspace proof from ${sandboxName}`, async () => {
+    const result = await runNemoclawCli(
+      [
+        sandboxName,
+        "exec",
+        "--",
+        "/opt/nemoclaw-fabric-venv/bin/python3",
+        "-I",
+        "-c",
+        FABRIC_WORKSPACE_REMOVE_SCRIPT,
+      ],
+      {
+        artifactName: "tc-inf-09-fabric-workspace-fallback-cleanup",
+        artifacts,
+        env: commandEnv,
+        progress,
+        redactionValues: [apiKey],
+        timeoutMs: 30_000,
+      },
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(`Fabric workspace cleanup failed: ${redactedResultText(result)}`);
+    }
+  });
+  const workspaceAbsent = await runNemoclawCli(
+    [
+      sandboxName,
+      "exec",
+      "--",
+      "/opt/nemoclaw-fabric-venv/bin/python3",
+      "-I",
+      "-c",
+      `from pathlib import Path; path = Path(${JSON.stringify(FABRIC_WORKSPACE_FILE)}); raise SystemExit(1 if path.exists() or path.is_symlink() else 0)`,
+    ],
+    {
+      artifactName: "tc-inf-09-fabric-workspace-before",
+      artifacts,
+      env: commandEnv,
+      progress,
+      redactionValues: [apiKey],
+      timeoutMs: 30_000,
+    },
+  );
+  expect(workspaceAbsent.exitCode, redactedResultText(workspaceAbsent)).toBe(0);
+
+  const workspaceRequestOffset = fake.requests().length;
+  const workspaceTurn = await runNemoclawCli(
+    [sandboxName, "agent", "-m", FABRIC_WORKSPACE_PROMPT, "--json"],
+    {
+      artifactName: "tc-inf-09-fabric-workspace-write",
+      artifacts,
+      env: commandEnv,
+      progress,
+      redactionValues: [apiKey],
+      timeoutMs: 3 * 60_000,
+    },
+  );
+  const workspaceTurnText = redactedResultText(workspaceTurn);
+  expect(
+    workspaceTurn.timedOut,
+    `TC-INF-09 Fabric workspace turn timed out\n${workspaceTurnText}`,
+  ).toBe(false);
+  expect(
+    workspaceTurn.exitCode,
+    `TC-INF-09 Fabric workspace turn failed\n${workspaceTurnText}`,
+  ).toBe(0);
+  expect(workspaceTurn.stdout.includes(apiKey) || workspaceTurn.stderr.includes(apiKey)).toBe(
+    false,
+  );
+  const workspaceResult = JSON.parse(workspaceTurn.stdout.trim()) as {
+    adapter_kind?: unknown;
+    harness?: unknown;
+    output?: {
+      messages?: Array<{
+        role?: unknown;
+        tool_calls?: Array<{ args?: unknown; id?: unknown; name?: unknown }>;
+      }>;
+      response?: unknown;
+    };
+    status?: unknown;
+  };
+  expect(workspaceResult).toMatchObject({
+    adapter_kind: "python",
+    harness: "nvidia.fabric.langchain.deepagents",
+    output: { response: FABRIC_WORKSPACE_RESPONSE },
+    status: "succeeded",
+  });
+  const workspaceMessages = workspaceResult.output?.messages ?? [];
+  const workspaceToolCalls = workspaceMessages.flatMap(({ tool_calls }) => tool_calls ?? []);
+  expect(workspaceToolCalls).toEqual([
+    expect.objectContaining({
+      args: {
+        content: FABRIC_WORKSPACE_CONTENT,
+        file_path: FABRIC_WORKSPACE_VIRTUAL_FILE,
+      },
+      name: "write_file",
+    }),
+  ]);
+  expect(
+    fake
+      .requests()
+      .slice(workspaceRequestOffset)
+      .map(({ workspaceWritePhase }) => workspaceWritePhase)
+      .filter(Boolean),
+  ).toEqual(["request", "result"]);
+
+  const workspaceProof = await runNemoclawCli(
+    [
+      sandboxName,
+      "exec",
+      "--",
+      "/opt/nemoclaw-fabric-venv/bin/python3",
+      "-I",
+      "-c",
+      FABRIC_WORKSPACE_INSPECT_SCRIPT,
+    ],
+    {
+      artifactName: "tc-inf-09-fabric-workspace-proof",
+      artifacts,
+      env: commandEnv,
+      progress,
+      redactionValues: [apiKey],
+      timeoutMs: 30_000,
+    },
+  );
+  expect(workspaceProof.exitCode, redactedResultText(workspaceProof)).toBe(0);
+  expect(JSON.parse(workspaceProof.stdout.trim())).toEqual({
+    bytes: Buffer.byteLength(FABRIC_WORKSPACE_CONTENT),
+    path: FABRIC_WORKSPACE_FILE,
+    sha256: createHash("sha256").update(FABRIC_WORKSPACE_CONTENT).digest("hex"),
+  });
+
+  const workspaceCleanup = await runNemoclawCli(
+    [
+      sandboxName,
+      "exec",
+      "--",
+      "/opt/nemoclaw-fabric-venv/bin/python3",
+      "-I",
+      "-c",
+      FABRIC_WORKSPACE_REMOVE_SCRIPT,
+    ],
+    {
+      artifactName: "tc-inf-09-fabric-workspace-cleanup",
+      artifacts,
+      env: commandEnv,
+      progress,
+      redactionValues: [apiKey],
+      timeoutMs: 30_000,
+    },
+  );
+  expect(workspaceCleanup.exitCode, redactedResultText(workspaceCleanup)).toBe(0);
+  expect(workspaceCleanup.stdout.trim()).toBe("NEMOCLAW_FABRIC_WORKSPACE_CLEAN");
 
   progress.phase("verify Fabric failure redaction and process cleanup");
   const redactionSentinel = "sk-proj-tc-inf-09-redaction-0123456789";

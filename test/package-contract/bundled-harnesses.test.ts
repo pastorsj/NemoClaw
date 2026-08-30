@@ -235,7 +235,7 @@ describe("bundled harness package artifacts", () => {
         id: "langchain-deepagents-code",
         manifest: "agents/langchain-deepagents-code/manifest.yaml",
         manifestName: "langchain-deepagents-code",
-        packageVersion: "0.1.3",
+        packageVersion: "0.1.4",
         dockerfile: "agents/langchain-deepagents-code/Dockerfile",
         baseDockerfile: "agents/langchain-deepagents-code/Dockerfile.base",
         legacyDockerfile: null,
