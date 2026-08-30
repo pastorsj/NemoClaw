@@ -25,6 +25,10 @@ import {
 } from "../live/cloud-experimental-checks.ts";
 
 const cloudChecksDir = path.join(process.cwd(), "test/e2e/e2e-cloud-experimental/checks");
+const dcodeHeadlessCheck = path.join(
+  cloudChecksDir,
+  "07-deepagents-code-headless-inference.sh",
+);
 const dcodeTavilyCheck = path.join(cloudChecksDir, "09-deepagents-code-tavily-opt-in.sh");
 const dcodeApprovalCheck = path.join(cloudChecksDir, "12-deepagents-code-thread-auto-approval.sh");
 const dcodeApprovalMainEntrypoint = `if [[ "\${BASH_SOURCE[0]}" == "$0" ]]; then
@@ -95,6 +99,9 @@ describe("P0-E cloud-experimental parity guardrails", () => {
     expect(script).toContain("config get --format yaml");
     expect(script).toContain("config set --key models.default");
     expect(script).toContain("sha256sum /sandbox/.deepagents/config.toml");
+    expect(script).toContain(
+      'FABRIC_ROUND_TRIP_MODEL="nvidia/nvidia/nemotron-3-super-v3"',
+    );
     expect(script).toContain("config is baked into the sandbox image at build time");
     expect(script).toContain("re-onboard with the new selection");
     expect(script).toContain(
@@ -752,6 +759,45 @@ assert_status_mode disabled
     expect(env[DCODE_BASE_IMAGE_ENV]).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.RANDOM_RUNNER_SECRET).toBeUndefined();
+  });
+
+  it("compares Fabric config with the live DCode model after re-onboarding", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-model-"));
+    const argvLog = path.join(tempDir, "openshell-argv");
+    const fakeOpenShell = path.join(tempDir, "openshell");
+    fs.writeFileSync(
+      fakeOpenShell,
+      '#!/bin/bash\nset -euo pipefail\nprintf \'%s\\0\' "$@" >"$OPENSHELL_ARGV_LOG"\n',
+      { mode: 0o755 },
+    );
+
+    try {
+      const result = spawnSync(
+        "bash",
+        ["-c", 'source "$1"; sandbox_fabric_config_contract', "bash", dcodeHeadlessCheck],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            OPENSHELL_ARGV_LOG: argvLog,
+            PATH: `${tempDir}:${DEFAULT_TEST_PATH}`,
+          },
+        },
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      const argv = fs.readFileSync(argvLog, "utf8").split("\0").filter(Boolean);
+      const loginShellIndex = argv.lastIndexOf("bash");
+      expect(loginShellIndex).toBeGreaterThan(-1);
+      expect(argv[loginShellIndex + 1]).toBe("-lc");
+      const loginCommand = argv[loginShellIndex + 2] ?? "";
+      expect(loginCommand).toContain('Path("/sandbox/.deepagents/config.toml")');
+      expect(loginCommand).toContain("dcode_model.startswith(\"openai:\")");
+      expect(loginCommand).toContain("f\"openai:{model.get('model')}\" == dcode_model");
+      expect(loginCommand).not.toContain("nvidia/nemotron-3-super-120b-a12b");
+    } finally {
+      fs.rmSync(tempDir, { force: true, recursive: true });
+    }
   });
 
   it("forwards the immutable base reference only for the fresh Deep Agents Code re-onboard", () => {

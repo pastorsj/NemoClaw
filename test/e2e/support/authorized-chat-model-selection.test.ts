@@ -90,7 +90,7 @@ describe("authorized alternate chat model selection", () => {
   );
 
   it("requires and validates the model selected for the Fabric round trip", async () => {
-    const requiredModel = "nvidia/nemotron-3-super-120b-a12b";
+    const requiredModel = "nvidia/nvidia/nemotron-3-super-v3";
     const probeModel = vi.fn().mockResolvedValue({ ok: true });
 
     await expect(
@@ -129,7 +129,7 @@ describe("authorized alternate chat model selection", () => {
           ids: [currentModel, "nvidia/nemotron-3-ultra-550b-a55b"],
         }),
         probeModel,
-        requiredModel: "nvidia/nemotron-3-super-120b-a12b",
+        requiredModel: "nvidia/nvidia/nemotron-3-super-v3",
       }),
     ).rejects.toThrow("the endpoint did not list the required alternate model");
     expect(probeModel).not.toHaveBeenCalled();

@@ -163,6 +163,7 @@ set -euo pipefail
 import json
 import os
 import stat
+import tomllib
 from pathlib import Path
 
 
@@ -177,6 +178,11 @@ config_path = Path("/sandbox/.deepagents/fabric.json")
 require(config_path.is_file() and not config_path.is_symlink(), "file")
 require(stat.S_IMODE(config_path.stat().st_mode) == 0o600, "mode")
 config = json.loads(config_path.read_text(encoding="utf-8"))
+dcode_config_path = Path("/sandbox/.deepagents/config.toml")
+require(dcode_config_path.is_file() and not dcode_config_path.is_symlink(), "dcode-file")
+dcode_config = tomllib.loads(dcode_config_path.read_text(encoding="utf-8"))
+dcode_model = dcode_config.get("models", {}).get("default")
+require(isinstance(dcode_model, str) and dcode_model.startswith("openai:"), "dcode-model")
 require(config.get("schema_version") == "fabric.agent/v1alpha1", "schema")
 require(
     config.get("harness")
@@ -197,7 +203,7 @@ require(
 )
 model = config.get("models", {}).get("default", {})
 require(model.get("provider") == "openai-compatible", "provider")
-require(model.get("model") == "nvidia/nemotron-3-super-120b-a12b", "model")
+require(f"openai:{model.get('model')}" == dcode_model, "model")
 require(model.get("base_url") == "https://inference.local/v1", "route")
 require(model.get("api_key_env") == "DEEPAGENTS_CODE_OPENAI_API_KEY", "credential-name")
 credential = os.environ.get("DEEPAGENTS_CODE_OPENAI_API_KEY", "")
