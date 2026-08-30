@@ -8,6 +8,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { directDockerfileCopySources } from "../../scripts/lib/dockerfile-copy-sources.mts";
+import { buildAgentDefinition } from "../../dist/lib/agent/definition-loader";
 import { listBundledHarnessSources } from "../../dist/lib/harness/bundled-source";
 import { parseHarnessPackageManifest } from "../../dist/lib/harness/package-manifest";
 import { validateHarnessPackageTree } from "../../dist/lib/harness/package-tree";
@@ -37,6 +38,10 @@ function artifactRoot(id: string, outputRoot = BUNDLED_ROOT): string {
 
 function artifactPackPrefix(id: string): string {
   return `dist/harnesses/nemoclaw-${id}`;
+}
+
+function relativePackageAsset(packageRoot: string, assetPath: string | null): string | null {
+  return assetPath ? path.relative(packageRoot, assetPath) : null;
 }
 
 function packageTreeSnapshots(outputRoot: string): Readonly<Record<string, unknown>> {
@@ -155,15 +160,50 @@ describe("bundled harness package artifacts", () => {
     );
     const envelopeSummaries = EXPECTED_IDS.map((id) => {
       const parsed = parseHarnessPackageManifest(artifactRoot(id));
+      const definition = buildAgentDefinition({
+        manifest: parsed.manifest,
+        manifestPath: parsed.manifestPath,
+        packageRoot: parsed.packageRoot,
+      });
       return {
         keys: Object.keys(parsed.envelope).sort(),
         id: parsed.envelope.id,
         manifest: parsed.envelope.manifest,
         manifestName: parsed.manifest.name,
+        packageVersion: parsed.envelope.packageVersion,
+        dockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfilePath),
+        baseDockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfileBasePath),
+        legacyDockerfile: relativePackageAsset(
+          parsed.packageRoot,
+          definition.legacyPaths?.dockerfile ?? null,
+        ),
+        legacyBaseDockerfile: relativePackageAsset(
+          parsed.packageRoot,
+          definition.legacyPaths?.dockerfileBase ?? null,
+        ),
       };
     });
-    expect(envelopeSummaries).toEqual(
-      EXPECTED_IDS.map((id) => ({
+    expect(envelopeSummaries).toEqual([
+      {
+        keys: [
+          "contractVersion",
+          "displayName",
+          "id",
+          "kind",
+          "manifest",
+          "packageVersion",
+          "schemaVersion",
+        ],
+        id: "openclaw",
+        manifest: "agents/openclaw/manifest.yaml",
+        manifestName: "openclaw",
+        packageVersion: "0.1.1",
+        dockerfile: "agents/openclaw/Dockerfile",
+        baseDockerfile: null,
+        legacyDockerfile: "Dockerfile",
+        legacyBaseDockerfile: "Dockerfile.base",
+      },
+      ...(["hermes", "langchain-deepagents-code"] as const).map((id) => ({
         keys: [
           "contractVersion",
           "displayName",
@@ -176,8 +216,13 @@ describe("bundled harness package artifacts", () => {
         id,
         manifest: `agents/${id}/manifest.yaml`,
         manifestName: id,
+        packageVersion: "0.1.0",
+        dockerfile: `agents/${id}/Dockerfile`,
+        baseDockerfile: `agents/${id}/Dockerfile.base`,
+        legacyDockerfile: null,
+        legacyBaseDockerfile: null,
       })),
-    );
+    ]);
     expect(EXPECTED_IDS.map((id) => fs.statSync(artifactRoot(id)).mode & 0o777)).toEqual(
       EXPECTED_IDS.map(() => 0o555),
     );

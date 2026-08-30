@@ -2347,7 +2347,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
             workload: preparedSandboxWorkload,
             legacy: {
               preparedBuildContext,
-              agent,
+              buildAgent: effectiveAgent,
               packageRoot,
               fromDockerfile,
               createAgentSandbox: (selectedAgent) =>

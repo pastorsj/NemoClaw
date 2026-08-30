@@ -133,17 +133,38 @@ describe("reviewed bundled harness sources", () => {
     ]);
   });
 
-  it.each(SOURCES)("uses canonical one-to-one $id destinations", (source) => {
+  it.each(SOURCES)("uses canonical $id destinations with only reviewed aliases", (source) => {
     const destinations = source.mappings.map(({ destinationPath }) =>
       destinationPath.normalize("NFKC").toLowerCase(),
     );
+    const aliases = source.mappings.filter(
+      ({ sourcePath, destinationPath }) => sourcePath !== destinationPath,
+    );
+    expect(aliases).toEqual(
+      source.id === "openclaw"
+        ? [
+            {
+              sourcePath: "Dockerfile",
+              destinationPath: "agents/openclaw/Dockerfile",
+              sourceType: "file",
+              role: "legacy-layout",
+            },
+          ]
+        : [],
+    );
     expect(
-      source.mappings.every(({ sourcePath, destinationPath }) => sourcePath === destinationPath),
+      source.mappings.every(
+        ({ sourcePath, destinationPath }) =>
+          sourcePath === path.posix.normalize(sourcePath) &&
+          destinationPath === path.posix.normalize(destinationPath),
+      ),
     ).toBe(true);
     expect(
-      source.mappings.every(({ sourcePath }) => sourcePath === path.posix.normalize(sourcePath)),
-    ).toBe(true);
-    expect(source.mappings.some(({ sourcePath }) => path.posix.isAbsolute(sourcePath))).toBe(false);
+      source.mappings.some(
+        ({ sourcePath, destinationPath }) =>
+          path.posix.isAbsolute(sourcePath) || path.posix.isAbsolute(destinationPath),
+      ),
+    ).toBe(false);
     expect(new Set(destinations).size).toBe(destinations.length);
   });
 });

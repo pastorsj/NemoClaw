@@ -43,6 +43,16 @@ describe("onboard helpers", () => {
       const credentialsPath = JSON.stringify(
         path.join(repoRoot, "src", "lib", "credentials", "store.ts"),
       );
+      const managedWorkloadPath = JSON.stringify(
+        path.join(
+          repoRoot,
+          "src",
+          "lib",
+          "onboard",
+          "managed-workload",
+          "onboard-orchestration.ts",
+        ),
+      );
 
       fs.mkdirSync(fakeBin, { recursive: true });
       writeOkOpenshell(fakeBin, { readySandboxGet: true });
@@ -54,6 +64,7 @@ const _n = (c) => (Array.isArray(c) ? c.join(" ") : String(c)).replace(/'/g, "")
 const registry = require(${registryPath});
 const preflight = require(${preflightPath});
 const credentials = require(${credentialsPath});
+const managedWorkload = require(${managedWorkloadPath});
 const childProcess = require("node:child_process");
 const { EventEmitter } = require("node:events");
 
@@ -96,6 +107,16 @@ const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry,
 });
 preflight.checkPortAvailable = async () => ({ ok: true });
 credentials.prompt = async () => "";
+const prepareOnboardSandboxWorkloadLaunch = managedWorkload.prepareOnboardSandboxWorkloadLaunch;
+let packageBinding = null;
+managedWorkload.prepareOnboardSandboxWorkloadLaunch = async (...args) => {
+  const input = args[0];
+  packageBinding = {
+    recordedAgentIsNull: input.launchInput.agent === null,
+    buildAgentIsInstalled: input.legacy.buildAgent === createFixture.agentDefinition,
+  };
+  return prepareOnboardSandboxWorkloadLaunch(...args);
+};
 
 childProcess.spawn = (...args) => {
   const child = new EventEmitter();
@@ -115,11 +136,14 @@ const { createSandbox } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
-  const sandboxName = await createSandbox(...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
+  const createArgs = fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
     [null, "gpt-5.4", "nvidia-prod", null, null, null, null, null, null, null, null, null, []],
     createFixture,
-  ));
-  console.log(JSON.stringify({ sandboxName, commands, registerCalls, updateCalls, defaultCalls }));
+  );
+  createArgs[8] = null;
+  createArgs[18] = createFixture.agentDefinition;
+  const sandboxName = await createSandbox(...createArgs);
+  console.log(JSON.stringify({ sandboxName, commands, registerCalls, updateCalls, defaultCalls, packageBinding }));
 })().catch((error) => {
   console.error(error);
   process.exit(1);
@@ -148,6 +172,10 @@ const { createSandbox } = require(${onboardPath});
       assert.ok(payloadLine, `expected JSON payload in stdout:\n${result.stdout}`);
       const payload = JSON.parse(payloadLine);
       assert.equal(payload.sandboxName, "my-assistant");
+      assert.deepEqual(payload.packageBinding, {
+        recordedAgentIsNull: true,
+        buildAgentIsInstalled: true,
+      });
       // createSandbox no longer marks the sandbox default — that is deferred to the
       // finalization step so a cancel at policy presets can't leave an unconfigured
       // sandbox as default (#4614).

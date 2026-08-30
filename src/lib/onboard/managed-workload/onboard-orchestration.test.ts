@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterAll, describe, expect, it, vi } from "vitest";
 
+import type { AgentDefinition } from "../../agent/defs";
 import { createHermesStateVolumeDockerHarness } from "../__test-helpers__/hermes-state-volume";
 
 const preparationState = vi.hoisted(() => ({
@@ -348,6 +349,11 @@ describe("managed workload onboard orchestration", () => {
       "langchain-deepagents-code",
       "Dockerfile",
     );
+    const buildAgent = {
+      name: "langchain-deepagents-code",
+      displayName: "LangChain Deep Agents Code",
+      dockerfilePath: trustedDockerfile,
+    } as AgentDefinition;
     let staged = false;
     const resolvePatchInput = vi.fn(() => {
       expect(staged).toBe(true);
@@ -400,13 +406,10 @@ describe("managed workload onboard orchestration", () => {
       },
       legacy: {
         preparedBuildContext: null,
-        agent: {
-          name: "langchain-deepagents-code",
-          displayName: "LangChain Deep Agents Code",
-          dockerfilePath: trustedDockerfile,
-        },
+        buildAgent,
         fromDockerfile: trustedDockerfile,
-        createAgentSandbox: () => {
+        createAgentSandbox: (selectedAgent: AgentDefinition) => {
+          expect(selectedAgent).toBe(buildAgent);
           staged = true;
           return {
             buildCtx: "/tmp/nemoclaw-staged-context",

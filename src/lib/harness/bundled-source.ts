@@ -59,6 +59,14 @@ function sourceFile(
   return Object.freeze({ sourcePath, destinationPath: sourcePath, sourceType: "file", role });
 }
 
+function sourceFileAt(
+  sourcePath: string,
+  destinationPath: string,
+  role: BundledHarnessSourceRole,
+): BundledHarnessSourceMapping {
+  return Object.freeze({ sourcePath, destinationPath, sourceType: "file", role });
+}
+
 function sourceTree(
   sourcePath: string,
   role: BundledHarnessSourceRole = "temporary-shared",
@@ -127,10 +135,22 @@ const STANDARD_SOURCES: readonly BundledHarnessSourceDeclaration[] = Object.free
       {
         id: "openclaw",
         displayName: "OpenClaw",
-        packageVersion: "0.1.0",
+        packageVersion: "0.1.1",
         manifestPath: "agents/openclaw/manifest.yaml",
         mappings: [
-          sourceTree("agents/openclaw", "harness-owned"),
+          ...sourceFiles(
+            [
+              "agents/openclaw/manifest.yaml",
+              "agents/openclaw/policy-permissive.yaml",
+              "agents/openclaw/state-lock-plan.json",
+            ],
+            "harness-owned",
+          ),
+          sourceTree("agents/openclaw/managed-image-messaging-runtime", "harness-owned"),
+          sourceTree("agents/openclaw/mcporter-runtime", "harness-owned"),
+          sourceTree("agents/openclaw/openclaw-runtime", "harness-owned"),
+          sourceTree("agents/openclaw/wechat-runtime", "harness-owned"),
+          sourceFileAt("Dockerfile", "agents/openclaw/Dockerfile", "legacy-layout"),
           sourceFile("Dockerfile", "legacy-layout"),
           sourceFile("Dockerfile.base", "legacy-layout"),
           sourceTree("nemoclaw", "legacy-layout"),

@@ -346,7 +346,7 @@ export interface PrepareOnboardSandboxWorkloadLaunchInput {
   readonly workload: PreparedSandboxWorkloadSource;
   readonly legacy: {
     readonly preparedBuildContext: PreparedSandboxBuildContext | null;
-    readonly agent: AgentDefinition | null;
+    readonly buildAgent: AgentDefinition;
     readonly packageRoot: string;
     readonly fromDockerfile: string | null;
     readonly createAgentSandbox: (
@@ -421,7 +421,7 @@ export async function prepareOnboardSandboxWorkloadLaunch(
       ? resolveSandboxBuildContext(
           {
             preparedBuildContext: input.legacy.preparedBuildContext,
-            agent: input.legacy.agent,
+            agent: input.legacy.buildAgent,
             packageRoot: input.legacy.packageRoot,
             fromDockerfile: input.legacy.fromDockerfile,
           },

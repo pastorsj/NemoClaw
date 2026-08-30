@@ -206,7 +206,7 @@ describe("harness package catalogue", () => {
       identity: { packageVersion: "0.0.9" },
       matchesAvailableIdentity: false,
     });
-    expect(selected.identity.packageVersion).toBe("0.1.0");
+    expect(selected.identity.packageVersion).toBe("0.1.1");
     expect(selected.identity).not.toEqual(
       installed?.state === "installed" ? installed.identity : null,
     );
