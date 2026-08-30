@@ -58,6 +58,89 @@ describe("package-managed Docker-driver gateway env service", () => {
     }
   });
 
+  it("writes the resolved Docker context endpoint when DOCKER_HOST is unset", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
+    const dockerHost = `unix://${path.join(tempHome, ".colima", "default", "docker.sock")}`;
+    const envFile = path.join(tempHome, ".config", "openshell", "gateway.env");
+
+    try {
+      await expect(
+        startPackageManagedDockerDriverGatewayWithEnvOverride({
+          clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+          env: homeEnv(tempHome),
+          exitOnFailure: false,
+          gatewayEnv: {
+            DOCKER_HOST: dockerHost,
+            OPENSHELL_BIND_ADDRESS: "127.0.0.1",
+            OPENSHELL_GATEWAY_CONFIG: writeSafeGatewayAuthConfig(tempHome),
+            OPENSHELL_SERVER_PORT: "8080",
+          },
+          gatewayName: "nemoclaw",
+          hasOpenShellGatewayUserService: () => true,
+          isDockerDriverGatewayReady: async () => true,
+          registerDockerDriverGatewayEndpoint: () => true,
+          runCaptureOpenshell: (args) =>
+            args[0] === "status"
+              ? "Gateway: nemoclaw\nConnected"
+              : "Gateway: nemoclaw\nGateway endpoint: https://127.0.0.1:8080/",
+          skipSandboxBridgeReachability: false,
+          startOpenShellGatewayUserService: (opts) => {
+            opts?.prepareServiceEnv?.();
+            return { attempted: true, started: true };
+          },
+          verifySandboxBridgeGatewayReachableOrExit: async () => undefined,
+        }),
+      ).resolves.toBe(true);
+
+      expect(fs.readFileSync(envFile, "utf-8")).toContain(`DOCKER_HOST='${dockerHost}'\n`);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps explicit DOCKER_HOST precedence over the resolved context endpoint", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-env-"));
+    const explicitDockerHost = "unix:///tmp/explicit-docker.sock";
+    const contextDockerHost = "unix:///tmp/context-docker.sock";
+    const envFile = path.join(tempHome, ".config", "openshell", "gateway.env");
+
+    try {
+      await expect(
+        startPackageManagedDockerDriverGatewayWithEnvOverride({
+          clearDockerDriverGatewayRuntimeFiles: vi.fn(),
+          env: { ...homeEnv(tempHome), DOCKER_HOST: explicitDockerHost },
+          exitOnFailure: false,
+          gatewayEnv: {
+            DOCKER_HOST: contextDockerHost,
+            OPENSHELL_BIND_ADDRESS: "127.0.0.1",
+            OPENSHELL_GATEWAY_CONFIG: writeSafeGatewayAuthConfig(tempHome),
+            OPENSHELL_SERVER_PORT: "8080",
+          },
+          gatewayName: "nemoclaw",
+          hasOpenShellGatewayUserService: () => true,
+          isDockerDriverGatewayReady: async () => true,
+          registerDockerDriverGatewayEndpoint: () => true,
+          runCaptureOpenshell: (args) =>
+            args[0] === "status"
+              ? "Gateway: nemoclaw\nConnected"
+              : "Gateway: nemoclaw\nGateway endpoint: https://127.0.0.1:8080/",
+          skipSandboxBridgeReachability: false,
+          startOpenShellGatewayUserService: (opts) => {
+            opts?.prepareServiceEnv?.();
+            return { attempted: true, started: true };
+          },
+          verifySandboxBridgeGatewayReachableOrExit: async () => undefined,
+        }),
+      ).resolves.toBe(true);
+
+      const serviceEnv = fs.readFileSync(envFile, "utf-8");
+      expect(serviceEnv).toContain(`DOCKER_HOST='${explicitDockerHost}'\n`);
+      expect(serviceEnv).not.toContain(contextDockerHost);
+    } finally {
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["a TCP Docker endpoint", "tcp://attacker.example:2375"],
     ["an SSH Docker endpoint", "ssh://docker.example"],

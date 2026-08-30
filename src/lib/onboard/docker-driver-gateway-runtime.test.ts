@@ -27,7 +27,11 @@ function makeHelpers(overrides: Partial<DockerDriverGatewayRuntimeDeps> = {}): {
     typeof vi.fn<(args: string[], opts?: { ignoreError?: boolean }) => string>
   >;
 } {
-  const runCapture = vi.fn(() => "");
+  const runCapture = vi.fn((args: string[]) =>
+    args[0] === "docker" && args[1] === "context"
+      ? JSON.stringify("unix:///var/run/docker.sock")
+      : "",
+  );
   const deps: DockerDriverGatewayRuntimeDeps = {
     gatewayPort: 18080,
     getCachedOpenshellBinary: () => null,
@@ -125,6 +129,99 @@ describe("docker-driver gateway runtime helpers", () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("passes the active local Docker context endpoint to the gateway", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-context-"));
+    const dockerHost = "unix:///Users/test/.colima/default/docker.sock";
+    try {
+      withEnv(
+        {
+          DOCKER_HOST: undefined,
+          NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
+        },
+        () => {
+          const runCapture = vi.fn((args: string[]) =>
+            args[0] === "docker" ? JSON.stringify(dockerHost) : "",
+          );
+          const { helpers } = makeHelpers({ runCapture });
+
+          expect(helpers.getDockerDriverGatewayEnv(null, "darwin").DOCKER_HOST).toBe(dockerHost);
+          expect(runCapture).toHaveBeenCalledWith(
+            ["docker", "context", "inspect", "--format", "{{json .Endpoints.docker.Host}}"],
+            { ignoreError: true },
+          );
+        },
+      );
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses an explicit local Docker host without inspecting the active context", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-context-"));
+    try {
+      withEnv(
+        {
+          DOCKER_HOST: "  unix:///tmp/explicit-docker.sock  ",
+          NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
+        },
+        () => {
+          const runCapture = vi.fn(() => {
+            throw new Error("the active context must not be inspected");
+          });
+          const { helpers } = makeHelpers({ runCapture });
+
+          expect(helpers.getDockerDriverGatewayEnv(null, "darwin").DOCKER_HOST).toBe(
+            "unix:///tmp/explicit-docker.sock",
+          );
+          expect(runCapture).not.toHaveBeenCalled();
+        },
+      );
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["an SSH endpoint", JSON.stringify("ssh://docker.example.test")],
+    ["a TCP endpoint", JSON.stringify("tcp://docker.example.test:2376")],
+    ["a relative Unix socket", JSON.stringify("unix://relative/docker.sock")],
+    ["a Unix socket with a single quote", JSON.stringify("unix:///tmp/docker's.sock")],
+    ["an empty endpoint", JSON.stringify("")],
+    ["unreadable context output", "not-json"],
+  ])("rejects %s from the active Docker context", (_case, inspection) => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-gateway-context-"));
+    try {
+      withEnv(
+        {
+          DOCKER_HOST: undefined,
+          NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
+        },
+        () => {
+          const { helpers } = makeHelpers({ runCapture: vi.fn(() => inspection) });
+
+          expect(() => helpers.getDockerDriverGatewayEnv(null, "darwin")).toThrow(
+            /active Docker context endpoint|absolute local unix:\/\/ socket/,
+          );
+          expect(fs.readdirSync(stateDir)).toEqual([]);
+        },
+      );
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an explicit remote Docker host without inspecting the active context", () => {
+    const runCapture = vi.fn();
+    withEnv({ DOCKER_HOST: "ssh://docker.example.test" }, () => {
+      const { helpers } = makeHelpers({ runCapture });
+
+      expect(() => helpers.getDockerDriverGatewayEnv(null, "darwin")).toThrow(
+        "DOCKER_HOST must be a safe absolute local unix:// socket",
+      );
+      expect(runCapture).not.toHaveBeenCalled();
+    });
   });
 
   it.each([
@@ -341,7 +438,7 @@ describe("docker-driver gateway runtime helpers", () => {
     try {
       withEnv(
         {
-          DOCKER_HOST: "unix:///tmp/docker.sock",
+          DOCKER_HOST: undefined,
           NEMOCLAW_OPENSHELL_GATEWAY_STATE_DIR: stateDir,
         },
         () => {
@@ -356,7 +453,11 @@ describe("docker-driver gateway runtime helpers", () => {
             ],
           ]);
           const { helpers, runCapture } = makeHelpers({
-            runCapture: vi.fn((args) => processOutput.get(args.join(" ")) ?? ""),
+            runCapture: vi.fn((args) =>
+              args[0] === "docker"
+                ? JSON.stringify("unix:///tmp/context-docker.sock")
+                : (processOutput.get(args.join(" ")) ?? ""),
+            ),
           });
           const desiredEnv = helpers.getDockerDriverGatewayEnv(null, "darwin");
           writeDockerDriverGatewayRuntimeMarkerForStateDir(stateDir, {
@@ -364,7 +465,7 @@ describe("docker-driver gateway runtime helpers", () => {
             desiredEnv,
             endpoint: desiredEnv.OPENSHELL_GRPC_ENDPOINT,
             gatewayBin,
-            dockerHost: process.env.DOCKER_HOST,
+            dockerHost: desiredEnv.DOCKER_HOST,
             platform: "darwin",
             arch: process.arch,
           });

@@ -50,6 +50,8 @@ const OPENSHELL_SUPERVISOR_MANIFEST_DIGESTS: Readonly<Record<string, string>> = 
   "0.0.106": "sha256:722f44669722961b7f432b0b81de25b91a58f34a61d6403bef967acaf2b3af01",
 };
 
+const DOCKER_CONTEXT_HOST_FORMAT = "{{json .Endpoints.docker.Host}}";
+
 /** Resolve the canonical gateway name without bypassing the binding owner. */
 export function resolveDockerDriverGatewayName(gatewayPort: number): string {
   return gatewayBinding.resolveGatewayName(gatewayPort);
@@ -69,6 +71,41 @@ type RunCaptureEx = (args: readonly string[]) => {
   timedOut: boolean;
 };
 type DockerDriverGatewayEnvModule = typeof import("./docker-driver-gateway-env");
+
+function resolveGatewayDockerHost(env: NodeJS.ProcessEnv, runCapture: RunCapture): string {
+  const explicitDockerHost = env.DOCKER_HOST;
+  if (explicitDockerHost?.trim()) {
+    if (!isSupportedGatewayDockerHost(explicitDockerHost)) {
+      throw new Error(
+        "OpenShell gateway DOCKER_HOST must be a safe absolute local unix:// socket.",
+      );
+    }
+    return explicitDockerHost.trim();
+  }
+
+  const inspection = runCapture(
+    ["docker", "context", "inspect", "--format", DOCKER_CONTEXT_HOST_FORMAT],
+    { ignoreError: true },
+  ).trim();
+  let contextDockerHost: unknown;
+  try {
+    contextDockerHost = JSON.parse(inspection);
+  } catch {
+    throw new Error(
+      "NemoClaw could not resolve the active Docker context endpoint for the OpenShell gateway.",
+    );
+  }
+  if (
+    typeof contextDockerHost !== "string" ||
+    !contextDockerHost.trim() ||
+    !isSupportedGatewayDockerHost(contextDockerHost)
+  ) {
+    throw new Error(
+      "The active Docker context must use a safe absolute local unix:// socket for the OpenShell gateway.",
+    );
+  }
+  return contextDockerHost.trim();
+}
 
 // Source boundary: OpenShell does not currently expose an authoritative local
 // host-gateway identity/drift endpoint for the Docker-driver runtime NemoClaw
@@ -248,8 +285,9 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
     platform: NodeJS.Platform = process.platform,
   ): Record<string, string> {
     const dockerHost = process.env.DOCKER_HOST;
+    const portable = isPortableExperimentalProfile();
     let podmanSocketPath: string | undefined;
-    if (isPortableExperimentalProfile()) {
+    if (portable) {
       const candidate = dockerHost?.trim();
       if (!candidate || !isSupportedGatewayDockerHost(dockerHost)) {
         throw new Error(
@@ -258,6 +296,9 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
       }
       podmanSocketPath = candidate.slice("unix://".length);
     }
+    const resolvedDockerHost = portable
+      ? undefined
+      : resolveGatewayDockerHost(process.env, deps.runCapture);
     const gatewayEnv = dockerDriverGatewayEnv.buildDockerDriverGatewayEnv({
       platform,
       gatewayPort: currentGatewayPort(),
@@ -268,6 +309,7 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
       resolveSandboxBin: resolveOpenShellSandboxBinary,
       enableBindMounts: deps.enableBindMounts?.() === true,
     });
+    if (resolvedDockerHost) gatewayEnv.DOCKER_HOST = resolvedDockerHost;
     if (gatewayEnv.OPENSHELL_LOCAL_TLS_DIR) {
       process.env.OPENSHELL_LOCAL_TLS_DIR = gatewayEnv.OPENSHELL_LOCAL_TLS_DIR;
     }
@@ -403,7 +445,7 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
             desiredEnv,
             endpoint: dockerDriverGatewayEnv.getDockerDriverGatewayEndpoint(currentGatewayPort()),
             gatewayBin,
-            dockerHost: process.env.DOCKER_HOST || null,
+            dockerHost: desiredEnv.DOCKER_HOST || process.env.DOCKER_HOST || null,
             platform,
             arch: process.arch,
           },

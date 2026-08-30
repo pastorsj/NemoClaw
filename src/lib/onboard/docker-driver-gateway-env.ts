@@ -416,8 +416,10 @@ export function startPackageManagedDockerDriverGatewayWithEnvOverride(
     prepareOpenShellGatewayUserServiceEnv: () => {
       try {
         const serviceGatewayEnv = { ...gatewayEnv };
+        const dockerHost =
+          normalizePackageServiceDockerHost(env.DOCKER_HOST) ??
+          normalizePackageServiceDockerHost(gatewayEnv.DOCKER_HOST);
         delete serviceGatewayEnv.DOCKER_HOST;
-        const dockerHost = normalizePackageServiceDockerHost(env.DOCKER_HOST);
         if (dockerHost) serviceGatewayEnv.DOCKER_HOST = dockerHost;
         writeDockerGatewayDebEnvOverrideFile(() => serviceGatewayEnv, {
           env,
