@@ -1013,6 +1013,7 @@ test("TC-INF-09 Deep Agents Code uses a local compatible endpoint through infere
   meta: {
     e2ePhases: [
       "confirm compatible-endpoint prerequisites",
+      "install and verify the Deep Agents Code harness package",
       "start the local compatible endpoint",
       "onboard Deep Agents Code to the endpoint",
       "inspect the compatible provider route",

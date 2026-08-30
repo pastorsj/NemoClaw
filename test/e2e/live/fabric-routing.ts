@@ -55,6 +55,41 @@ export async function runFabricCompatibleEndpointJourney({
   const apiKey = "sk-compatible-TEST-NOT-A-REAL-VALUE";
   const { commandEnv, gatewayName } = fabricLiveEnvironment();
   await requireLivePrerequisites(host, skip);
+
+  progress.phase("install and verify the Deep Agents Code harness package");
+  const installation = await runNemoclawCli(["harness", "install", "langchain-deepagents-code"], {
+    artifactName: "tc-inf-09-harness-install",
+    artifacts,
+    env: commandEnv,
+    progress,
+    timeoutMs: 60_000,
+  });
+  expect(installation.exitCode, redactedResultText(installation)).toBe(0);
+  const inventoryResult = await runNemoclawCli(["harness", "list", "--json"], {
+    artifactName: "tc-inf-09-harness-list",
+    artifacts,
+    env: commandEnv,
+    progress,
+    timeoutMs: 30_000,
+  });
+  expect(inventoryResult.exitCode, redactedResultText(inventoryResult)).toBe(0);
+  const inventory = JSON.parse(inventoryResult.stdout) as {
+    available?: Array<{
+      identity?: { id?: unknown };
+      installationState?: unknown;
+    }>;
+    installed?: Array<{ health?: unknown; id?: unknown; identity?: unknown }>;
+  };
+  const installedPackage = inventory.installed?.find(
+    ({ id }) => id === "langchain-deepagents-code",
+  );
+  const availablePackage = inventory.available?.find(
+    ({ identity }) => identity?.id === "langchain-deepagents-code",
+  );
+  expect(installedPackage).toMatchObject({ health: "healthy" });
+  expect(availablePackage).toMatchObject({ installationState: "active" });
+  expect(installedPackage?.identity).toEqual(availablePackage?.identity);
+
   const sandboxName = inferenceSandboxName("e2e-compat");
   cleanup.add(`best-effort inference-routing compatible-endpoint cleanup for ${sandboxName}`, () =>
     cleanupSandbox(host, sandbox, sandboxName, { env: commandEnv }),
@@ -89,6 +124,7 @@ export async function runFabricCompatibleEndpointJourney({
   await artifacts.target.declare({
     id: "inference-routing-compatible-endpoint",
     contract: [
+      "the reviewed Deep Agents Code harness package installs and becomes the active exact identity",
       "Deep Agents Code custom OpenAI-compatible endpoint onboards",
       "sandbox inference.local routes chat to compatible endpoint",
       "dcode returns the compatible endpoint response through the rewritten gateway route",
