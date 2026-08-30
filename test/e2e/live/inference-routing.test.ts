@@ -1024,8 +1024,15 @@ test("TC-INF-09 Deep Agents Code uses a local compatible endpoint through infere
       "verify compatible credential custody",
     ],
   },
-}, async (context) => {
-  await runFabricCompatibleEndpointJourney(context);
+}, async ({ artifacts, cleanup, host, progress, sandbox, skip }) => {
+  await runFabricCompatibleEndpointJourney({
+    artifacts,
+    cleanup,
+    host,
+    progress,
+    sandbox,
+    skip,
+  });
 });
 
 test("TC-INF-11 DNS-backed HTTPS custom endpoint routes through the local pinning adapter (#6141)", {
