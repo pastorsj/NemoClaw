@@ -21,6 +21,7 @@ import type { SandboxMessagingPlan } from "../../messaging/manifest";
 import type { BackupResult } from "../../state/sandbox";
 import type { RetainedSandboxRecoveryContext, Session } from "../../state/onboard-session";
 import type { SandboxEntry } from "../../state/registry";
+import { isRouteOnlySandboxReservation } from "../../state/registry/route-reservation";
 import type {
   PendingSandboxPolicyVerification,
   QualifiedPendingSandboxCreateReservation,
@@ -138,7 +139,7 @@ export function prepareSourceBackupAuthority(
     readonly resolveSandboxAgent: SandboxCreateOrchestrationRuntime["sandboxAgent"]["resolveSandboxAgent"];
   },
 ): PreRecreateBackupAuthority | null {
-  if (!sourceEntry) return null;
+  if (!sourceEntry || isRouteOnlySandboxReservation(sourceEntry)) return null;
   const selectedEntry = structuredClone(sourceEntry);
   const selectedAgent = dependencies.resolveSandboxAgent(selectedEntry);
   return {
@@ -1963,7 +1964,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     let pendingStateRestoreBackupPath: string | null = null,
       preparedSandboxWorkload!: Awaited<ReturnType<typeof ensurePreparedSandboxWorkload>>,
       hermesStateVolumeLifecycle!: ReturnType<typeof prepareHermesStateVolumeLifecycle>;
-    if (!liveExists && existingEntry)
+    if (!liveExists && existingEntry && !isRouteOnlySandboxReservation(existingEntry))
       ({ runtime: recreateRuntime, backupPath: pendingStateRestoreBackupPath } =
         recreateProtection.selectJournalBoundPreUpgradeBackup({
           runtime: recreateRuntime,

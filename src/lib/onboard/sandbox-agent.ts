@@ -217,7 +217,9 @@ export function resolveSandboxAgent(
     throw sandboxAgentAuthorityError("the recorded harness package identity is malformed");
   }
   if (packageState.harnessPackage.id !== effectiveAgentId) {
-    throw sandboxAgentAuthorityError("the recorded agent does not match its harness package");
+    throw sandboxAgentAuthorityError(
+      `recorded agent '${effectiveAgentId}' does not match harness package '${packageState.harnessPackage.id}'`,
+    );
   }
 
   const installed = resolvePinnedHarnessPackage(packageState.harnessPackage, {

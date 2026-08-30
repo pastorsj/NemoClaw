@@ -147,6 +147,54 @@ describe("selected agent package authority", () => {
     expect(resolveSandboxAgent).toHaveBeenCalledTimes(2);
   });
 
+  it("does not treat a fresh route reservation as a source sandbox", () => {
+    const resolveSandboxAgent = vi.fn();
+    const reservation: SandboxEntry = {
+      name: "alpha",
+      pendingRouteReservation: true,
+      reservationSessionId: "session-alpha",
+      provider: "compatible-endpoint",
+      model: "test-model",
+      gatewayName: "nemoclaw",
+      harnessPackage: SOURCE_PACKAGE,
+    };
+
+    expect(
+      prepareSourceBackupAuthority("alpha", reservation, {
+        getSandbox: vi.fn(),
+        resolveSandboxAgent: resolveSandboxAgent as never,
+      }),
+    ).toBeNull();
+    expect(resolveSandboxAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps backup authority for a route reservation over a registered sandbox", () => {
+    const resolveSandboxAgent = vi.fn(() => ({
+      recordedAgent: "hermes",
+      effectiveAgentId: "hermes",
+      definition: SOURCE_DEFINITION,
+      harnessPackage: SOURCE_PACKAGE,
+      harnessPackageMigration: null,
+    }));
+    const registeredReservation: SandboxEntry = {
+      ...SOURCE_ENTRY,
+      pendingRouteReservation: true,
+      reservationSessionId: "session-alpha",
+      createdAt: "2026-08-30T00:00:00.000Z",
+    };
+
+    const authority = prepareSourceBackupAuthority("alpha", registeredReservation, {
+      getSandbox: () => structuredClone(registeredReservation),
+      resolveSandboxAgent: resolveSandboxAgent as never,
+    });
+
+    expect(authority).toMatchObject({
+      agentDefinition: SOURCE_DEFINITION,
+      harnessPackage: SOURCE_PACKAGE,
+    });
+    expect(resolveSandboxAgent).toHaveBeenCalledOnce();
+  });
+
   it("rejects source registry or package-object drift before backup publication", () => {
     let currentEntry = structuredClone(SOURCE_ENTRY) as SandboxEntry;
     const changedDefinition = {
