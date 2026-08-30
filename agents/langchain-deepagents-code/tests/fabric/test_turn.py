@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 from nemoclaw_fabric.command import EXIT_FAILURE
 from nemoclaw_fabric.command import EXIT_SUCCESS
+from nemoclaw_fabric.command import EXIT_USAGE
 from nemoclaw_fabric.command import run_cli
 
 
@@ -154,16 +155,24 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
             },
         }
 
-    def _generate_test_config(self, credential_name: str) -> Path:
+    def _generate_test_config(
+        self,
+        credential_name: str,
+        *,
+        model: str = "fixture-model",
+        reasoning_effort: str | None = None,
+    ) -> Path:
         endpoint = f"http://127.0.0.1:{self.server.server_port}/v1"
         generator_environment = {
             "HOME": str(self.home),
             "PATH": os.environ.get("PATH", ""),
             "NEMOCLAW_INFERENCE_BASE_URL": endpoint,
             "NEMOCLAW_INFERENCE_PROVIDER_ID": "fabric-fixture",
-            "NEMOCLAW_MODEL": "fixture-model",
+            "NEMOCLAW_MODEL": model,
             "NEMOCLAW_UPSTREAM_PROVIDER": "compatible-endpoint",
         }
+        if reasoning_effort is not None:
+            generator_environment["NEMOCLAW_REASONING_EFFORT"] = reasoning_effort
         subprocess.run(
             [
                 "node",
@@ -185,7 +194,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
             payload["harness"]["adapter_id"],
             "nvidia.fabric.langchain.deepagents",
         )
-        self.assertEqual(payload["models"]["default"]["model"], "fixture-model")
+        self.assertEqual(payload["models"]["default"]["model"], model)
         self.assertEqual(payload["models"]["default"]["base_url"], endpoint)
         self.assertEqual(
             payload["models"]["default"]["api_key_env"],
@@ -200,6 +209,67 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
         config_path.write_text(json.dumps(payload), encoding="utf-8")
         config_path.chmod(0o600)
         return config_path
+
+    def test_generated_unsupported_model_options_stop_before_fabric_client_creation(
+        self,
+    ) -> None:
+        cases = (
+            (
+                "nemotron-ultra",
+                "nvidia/nemotron-3-ultra-550b-a55b",
+                None,
+                "managed Nemotron Ultra force_nonempty_content option",
+            ),
+            (
+                "reasoning-effort",
+                "fixture-model",
+                "high",
+                "NEMOCLAW_REASONING_EFFORT=high",
+            ),
+        )
+        for case_name, model, reasoning_effort, expected_reason in cases:
+            with self.subTest(case=case_name):
+                config_path = self._generate_test_config(
+                    "FABRIC_UNAVAILABLE_FIXTURE_CRED",
+                    model=model,
+                    reasoning_effort=reasoning_effort,
+                )
+                client_factory_calls = 0
+
+                def create_client() -> Any:
+                    nonlocal client_factory_calls
+                    client_factory_calls += 1
+                    raise AssertionError("Fabric client creation must not be reached")
+
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                exit_code = run_cli(
+                    [
+                        "run",
+                        "--config",
+                        str(config_path),
+                        "-m",
+                        "This prompt must not reach Fabric.",
+                        "--json",
+                    ],
+                    stdin=io.StringIO(),
+                    stdout=stdout,
+                    stderr=stderr,
+                    client_factory=create_client,
+                )
+
+                self.assertEqual(exit_code, EXIT_USAGE, stderr.getvalue())
+                self.assertEqual(stderr.getvalue(), "")
+                result = json.loads(stdout.getvalue())
+                self.assertEqual(result["status"], "failed")
+                self.assertEqual(result["error"]["stage"], "config")
+                self.assertEqual(
+                    result["error"]["code"],
+                    "unsupported_configuration",
+                )
+                self.assertIn(expected_reason, result["error"]["message"])
+                self.assertEqual(client_factory_calls, 0)
+                self.assertEqual(self.server.request_count, 0)  # type: ignore[attr-defined]
 
     def test_package_config_completes_one_turn_with_the_released_adapter(self) -> None:
         credential_name = "FABRIC_FIXTURE_CRED"

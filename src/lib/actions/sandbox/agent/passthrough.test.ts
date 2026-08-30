@@ -503,12 +503,29 @@ describe("runAgentPassthrough", () => {
     });
   });
 
-  it("dispatches a bare Deep Agents Code invocation to its headless command", async () => {
+  it("dispatches Deep Agents Code through the bounded Fabric command in its manifest", async () => {
+    const actualAgentDefinitions =
+      await vi.importActual<typeof import("../../../agent/defs")>("../../../agent/defs");
     getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
-    await runAgentPassthrough("dcode-help");
-    expect(execMock).toHaveBeenCalledWith("dcode-help", ["nemoclaw-fabric", "run"], {
-      tty: false,
-    });
+    loadAgentMock.mockImplementationOnce(actualAgentDefinitions.loadAgent);
+
+    await runAgentPassthrough("dcode-fabric", { extraArgs: ["Reply with PONG"] });
+
+    expect(execMock).toHaveBeenCalledWith(
+      "dcode-fabric",
+      [
+        "timeout",
+        "--signal=TERM",
+        "--kill-after=10s",
+        "120s",
+        "nemoclaw-fabric",
+        "run",
+        "--config",
+        "/sandbox/.deepagents/fabric.json",
+        "Reply with PONG",
+      ],
+      { tty: false },
+    );
   });
 
   it("propagates a headless terminal command failure from the sandbox exec path", async () => {

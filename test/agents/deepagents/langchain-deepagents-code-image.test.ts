@@ -42,6 +42,8 @@ function containsTokenShapedSecret(value: string): boolean {
 }
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
+const FABRIC_EXECUTABLE_PATH = "/usr/local/bin/nemoclaw-fabric";
+const FABRIC_INTERPRETER_PATH = "/opt/nemoclaw-fabric-venv/bin/python3*";
 const tuiStartupCheckPath = path.join(
   repoRoot,
   "test",
@@ -636,7 +638,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     );
   });
 
-  it("keeps optional service egress out of the default policy and requires Landlock", () => {
+  it("grants Fabric only managed inference, GitHub, and PyPI egress and requires Landlock", () => {
     const basePolicyPath = path.join(
       repoRoot,
       "agents",
@@ -661,13 +663,29 @@ describe("LangChain Deep Agents Code image contracts", () => {
       const defaultHosts = Object.values(defaultPolicy.network_policies ?? {}).flatMap((entry) =>
         (entry.endpoints ?? []).map((endpoint) => endpoint.host),
       );
-      expect(defaultHosts).not.toEqual(
-        expect.arrayContaining(["api.tavily.com", "api.smith.langchain.com", "supabase.co"]),
-      );
+      expect(Object.keys(defaultPolicy.network_policies ?? {}).sort()).toEqual([
+        "github",
+        "managed_inference",
+        "pypi",
+      ]);
+      expect(defaultHosts.sort()).toEqual([
+        "api.github.com",
+        "files.pythonhosted.org",
+        "github.com",
+        "inference.local",
+        "pypi.org",
+        "raw.githubusercontent.com",
+      ]);
       expect(defaultPolicy.filesystem_policy?.read_only).toEqual(
-        expect.arrayContaining(["/usr", "/opt/venv", "/etc"]),
+        expect.arrayContaining(["/usr", "/opt/venv", "/opt/nemoclaw-fabric-venv", "/etc"]),
       );
       expect(defaultPolicy.landlock).toMatchObject({ compatibility: "strict" });
+
+      for (const policyName of ["managed_inference", "github", "pypi"]) {
+        expect(policyBinaryPaths(defaultPolicy, policyName)).toEqual(
+          expect.arrayContaining([FABRIC_EXECUTABLE_PATH, FABRIC_INTERPRETER_PATH]),
+        );
+      }
 
       const githubBinaries = policyBinaryPaths(defaultPolicy, "github");
       expect(githubBinaries).toEqual(
@@ -703,7 +721,11 @@ describe("LangChain Deep Agents Code image contracts", () => {
       expect(
         tavilyPolicy.network_policies?.tavily?.endpoints?.map((endpoint) => endpoint.host),
       ).toContain("api.tavily.com");
-      expect(policyBinaryPaths(tavilyPolicy, "tavily")).toContain("/opt/venv/bin/python3*");
+      const tavilyBinaries = policyBinaryPaths(tavilyPolicy, "tavily");
+      expect(tavilyBinaries).toContain("/opt/venv/bin/python3*");
+      expect(tavilyBinaries).not.toEqual(
+        expect.arrayContaining([FABRIC_EXECUTABLE_PATH, FABRIC_INTERPRETER_PATH]),
+      );
     } finally {
       defaultPrepared.cleanup?.();
       tavilyPrepared.cleanup?.();

@@ -436,6 +436,29 @@ class FabricConfigLoadingTests(unittest.TestCase):
                 )
             )
 
+    def test_rejects_non_positive_or_non_finite_runtime_timeouts(self) -> None:
+        invalid_timeouts = {
+            "zero": 0,
+            "negative": -1,
+            "not-a-number": float("nan"),
+            "infinity": float("inf"),
+        }
+        for case, timeout_seconds in invalid_timeouts.items():
+            with self.subTest(case=case):
+                with self.assertRaisesRegex(
+                    FabricConfigLoadError,
+                    r"runtime\.timeout_seconds",
+                ):
+                    load_fabric_config(
+                        self.write_config(
+                            {
+                                "metadata": {"name": "invalid-timeout"},
+                                "harness": {"adapter_id": "third.party.harness"},
+                                "runtime": {"timeout_seconds": timeout_seconds},
+                            }
+                        )
+                    )
+
     def test_rejects_malformed_json_with_location(self) -> None:
         self.config_path.write_text('{"metadata":', encoding="utf-8")
 
