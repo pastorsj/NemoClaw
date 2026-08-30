@@ -185,6 +185,63 @@ describe("agent base image provisioning", () => {
     }
   });
 
+  it("makes private installed package bytes readable to Docker image users", () => {
+    const packageRoot = fs.realpathSync(tmpDir());
+    const agentDir = path.join(packageRoot, "agents", "pi");
+    const scriptDir = path.join(packageRoot, "scripts", "lib");
+    fs.mkdirSync(agentDir, { recursive: true });
+    fs.mkdirSync(scriptDir, { recursive: true });
+    const dockerfilePath = path.join(agentDir, "Dockerfile");
+    const scriptPath = path.join(scriptDir, "openclaw-npm-remediation.mts");
+    fs.writeFileSync(dockerfilePath, "FROM scratch\nCOPY scripts/ /scripts/\n", { mode: 0o600 });
+    fs.writeFileSync(scriptPath, "export const packageHelper = true;\n", { mode: 0o711 });
+    fs.chmodSync(path.join(packageRoot, "scripts"), 0o711);
+    fs.chmodSync(scriptDir, 0o711);
+    fs.chmodSync(scriptPath, 0o711);
+    let buildContext: string | null = null;
+    const previousUmask = process.umask(0o077);
+    try {
+      withMockedDocker(({ createAgentSandbox }) => {
+        const result = createAgentSandbox(
+          makeAgent({
+            name: "pi",
+            displayName: "Pi",
+            packageRoot,
+            agentDir,
+            manifestPath: path.join(agentDir, "manifest.yaml"),
+            dockerfilePath,
+            dockerfileBasePath: null,
+          }),
+        );
+        buildContext = result.buildCtx;
+        expect((fs.statSync(result.buildCtx).mode & 0o777).toString(8)).toBe("700");
+        expect((fs.statSync(path.join(result.buildCtx, "scripts")).mode & 0o777).toString(8)).toBe(
+          "755",
+        );
+        expect(
+          (fs.statSync(path.join(result.buildCtx, "scripts", "lib")).mode & 0o777).toString(8),
+        ).toBe("755");
+        expect(
+          (
+            fs.statSync(
+              path.join(result.buildCtx, "scripts", "lib", "openclaw-npm-remediation.mts"),
+            ).mode & 0o777
+          ).toString(8),
+        ).toBe("755");
+        expect((fs.statSync(result.stagedDockerfile).mode & 0o777).toString(8)).toBe("644");
+        expect((fs.statSync(scriptDir).mode & 0o777).toString(8)).toBe("711");
+        expect((fs.statSync(scriptPath).mode & 0o777).toString(8)).toBe("711");
+      });
+    } finally {
+      process.umask(previousUmask);
+      fs.rmSync(buildContext ?? path.join(packageRoot, ".missing-build-context"), {
+        recursive: true,
+        force: true,
+      });
+      fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a caller-supplied context that does not match package authority", () => {
     const otherRoot = fs.realpathSync(tmpDir());
     try {

@@ -17,7 +17,10 @@ import {
 import { CUA_SANDBOX_IMAGE_ENV, requireCuaSandboxImageRef } from "../cua/feature";
 import { encodeCorporateCaArg, resolveCorporateCa } from "../onboard/corporate-ca";
 import { createCustomBuildContextFilter } from "../onboard/custom-build-context";
-import { SANDBOX_BUILD_CONTEXT_PREFIX } from "../sandbox/build-context";
+import {
+  normalizeReadModesForDockerCopy,
+  SANDBOX_BUILD_CONTEXT_PREFIX,
+} from "../sandbox/build-context";
 import {
   buildLocalBaseTag,
   createSandboxBaseImageBuildProvenance,
@@ -88,6 +91,16 @@ export interface EnsureAgentBaseImageOptions {
 export interface CreateAgentSandboxOptions extends EnsureAgentBaseImageOptions {
   /** @deprecated The selected definition owns its build-context root. */
   rootDir?: string;
+}
+
+function normalizeAgentBuildContextModes(buildCtx: string): void {
+  // Installed package objects are private on the host. Docker preserves those
+  // modes when it copies package bytes into an image, where later build steps
+  // may run as the sandbox user. Make only the staged payload readable while
+  // keeping the temporary build-context root private to this host user.
+  for (const entry of fs.readdirSync(buildCtx)) {
+    normalizeReadModesForDockerCopy(path.join(buildCtx, entry));
+  }
 }
 
 function requireAgentPackageRoot(agent: AgentDefinition): string {
@@ -817,6 +830,7 @@ export function createAgentSandbox(
         dockerfile.replace(/^ARG BASE_IMAGE(?:=.*)?$/m, `ARG BASE_IMAGE=${baseImageRef}`),
       );
     }
+    normalizeAgentBuildContextModes(buildCtx);
   } catch (error) {
     try {
       fs.rmSync(buildCtx, { recursive: true, force: true });
