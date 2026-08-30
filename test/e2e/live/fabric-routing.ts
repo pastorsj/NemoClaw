@@ -24,6 +24,25 @@ type FabricCompatibleEndpointContext = Pick<
   skip(note?: string): void;
 };
 
+interface FabricLiveEnvironment {
+  readonly commandEnv: NodeJS.ProcessEnv;
+  readonly gatewayName: string;
+}
+
+function fabricLiveEnvironment(base: NodeJS.ProcessEnv = process.env): FabricLiveEnvironment {
+  const gatewayPort = base.NEMOCLAW_GATEWAY_PORT?.trim();
+  const gatewayName =
+    gatewayPort && gatewayPort !== "8080" ? `nemoclaw-${gatewayPort}` : "nemoclaw";
+  const commandEnv = {
+    ...buildAvailabilityProbeEnv(base),
+    ...(gatewayPort ? { NEMOCLAW_GATEWAY_PORT: gatewayPort, OPENSHELL_GATEWAY: gatewayName } : {}),
+    ...(base.NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD === "1"
+      ? { NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1" }
+      : {}),
+  };
+  return { commandEnv, gatewayName };
+}
+
 export async function runFabricCompatibleEndpointJourney({
   artifacts,
   cleanup,
@@ -34,15 +53,16 @@ export async function runFabricCompatibleEndpointJourney({
 }: FabricCompatibleEndpointContext): Promise<void> {
   const model = "nemoclaw-e2e-compatible";
   const apiKey = "sk-compatible-TEST-NOT-A-REAL-VALUE";
+  const { commandEnv, gatewayName } = fabricLiveEnvironment();
   await requireLivePrerequisites(host, skip);
   const sandboxName = inferenceSandboxName("e2e-compat");
   cleanup.add(`best-effort inference-routing compatible-endpoint cleanup for ${sandboxName}`, () =>
-    cleanupSandbox(host, sandbox, sandboxName),
+    cleanupSandbox(host, sandbox, sandboxName, { env: commandEnv }),
   );
   cleanup.add(`strict inference-routing compatible-endpoint cleanup for ${sandboxName}`, () =>
-    cleanupSandbox(host, sandbox, sandboxName, { strict: true }),
+    cleanupSandbox(host, sandbox, sandboxName, { env: commandEnv, strict: true }),
   );
-  await cleanupSandbox(host, sandbox, sandboxName);
+  await cleanupSandbox(host, sandbox, sandboxName, { env: commandEnv });
 
   progress.phase("start the local compatible endpoint");
   const fake = await startFakeOpenAiCompatibleServer({
@@ -91,6 +111,8 @@ export async function runFabricCompatibleEndpointJourney({
       NEMOCLAW_MODEL: model,
       NEMOCLAW_PREFERRED_API: "openai-completions",
       NEMOCLAW_PROVIDER: "custom",
+      NEMOCLAW_SANDBOX_GPU: "0",
+      ...commandEnv,
     },
     [apiKey],
     "tc-inf-09-onboard-compatible-endpoint",
@@ -101,10 +123,10 @@ export async function runFabricCompatibleEndpointJourney({
 
   progress.phase("inspect the compatible provider route");
   const provider = await sandbox.openshell(
-    ["provider", "get", "-g", "nemoclaw", "compatible-endpoint"],
+    ["provider", "get", "-g", gatewayName, "compatible-endpoint"],
     {
       artifactName: "tc-inf-09-provider-get-compatible-endpoint",
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       timeoutMs: 30_000,
     },
   );
@@ -128,6 +150,7 @@ export async function runFabricCompatibleEndpointJourney({
     model,
     [apiKey],
     "compatible-endpoint-inference-local-chat",
+    commandEnv,
   );
   expect(fake.requests().slice(sandboxRequestOffset)).toContainEqual(
     expect.objectContaining({
@@ -146,7 +169,7 @@ export async function runFabricCompatibleEndpointJourney({
     {
       artifactName: "tc-inf-09-dcode-compatible-endpoint",
       artifacts,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       progress,
       redactionValues: [apiKey],
       timeoutMs: 3 * 60_000,
@@ -179,7 +202,7 @@ export async function runFabricCompatibleEndpointJourney({
     {
       artifactName: "tc-inf-09-fabric-identity",
       artifacts,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       progress,
       redactionValues: [apiKey],
       timeoutMs: 30_000,
@@ -195,7 +218,7 @@ export async function runFabricCompatibleEndpointJourney({
     {
       artifactName: "tc-inf-09-fabric-compatible-endpoint",
       artifacts,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       progress,
       redactionValues: [apiKey],
       timeoutMs: 3 * 60_000,
@@ -243,7 +266,7 @@ export async function runFabricCompatibleEndpointJourney({
     {
       artifactName: "tc-inf-09-fabric-redacted-config-failure",
       artifacts,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       progress,
       redactionValues: [apiKey],
       timeoutMs: 30_000,
@@ -272,7 +295,7 @@ export async function runFabricCompatibleEndpointJourney({
     {
       artifactName: "tc-inf-09-fabric-process-cleanup",
       artifacts,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       progress,
       redactionValues: [apiKey],
       timeoutMs: 30_000,
@@ -295,7 +318,7 @@ export async function runFabricCompatibleEndpointJourney({
       artifactName: "tc-inf-09-fabric-credential-snapshot",
       artifactOutputMode: "metadata-only",
       artifacts,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       progress,
       redactionValues: [apiKey],
       timeoutMs: 30_000,

@@ -165,6 +165,7 @@ async function requireLivePrerequisites(host: HostCliClient, skip: SkipFn): Prom
 }
 
 interface CleanupSandboxOptions {
+  readonly env?: NodeJS.ProcessEnv;
   readonly strict?: boolean;
 }
 
@@ -205,18 +206,19 @@ async function cleanupSandbox(
   sandboxName: string,
   options: CleanupSandboxOptions = {},
 ): Promise<void> {
+  const commandEnv = options.env ?? buildAvailabilityProbeEnv();
   if (!options.strict) {
     await optionalCleanupStep("nemoclaw destroy", () =>
       host.command(process.execPath, [CLI_ENTRYPOINT, sandboxName, "destroy", "--yes"], {
         artifactName: `cleanup-nemoclaw-destroy-${sandboxName}`,
-        env: buildAvailabilityProbeEnv(),
+        env: commandEnv,
         timeoutMs: 120_000,
       }),
     );
     await optionalCleanupStep("openshell sandbox delete", () =>
       sandbox.openshell(["sandbox", "delete", sandboxName], {
         artifactName: `cleanup-openshell-sandbox-delete-${sandboxName}`,
-        env: buildAvailabilityProbeEnv(),
+        env: commandEnv,
         timeoutMs: 60_000,
       }),
     );
@@ -231,7 +233,7 @@ async function cleanupSandbox(
       [CLI_ENTRYPOINT, sandboxName, "destroy", "--yes"],
       {
         artifactName: `cleanup-nemoclaw-destroy-${sandboxName}`,
-        env: buildAvailabilityProbeEnv(),
+        env: commandEnv,
         timeoutMs: 120_000,
       },
     );
@@ -245,7 +247,7 @@ async function cleanupSandbox(
   try {
     const deletion = await sandbox.openshell(["sandbox", "delete", sandboxName], {
       artifactName: `cleanup-openshell-sandbox-delete-${sandboxName}`,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       timeoutMs: 60_000,
     });
     cleanupEvidence.push(probeSummary("openshell sandbox delete", deletion));
@@ -259,7 +261,7 @@ async function cleanupSandbox(
 
   const status = await sandbox.status(sandboxName, {
     artifactName: `cleanup-openshell-sandbox-status-${sandboxName}`,
-    env: buildAvailabilityProbeEnv(),
+    env: commandEnv,
     timeoutMs: 30_000,
   });
   cleanupEvidence.push(probeSummary("openshell sandbox status", status));
@@ -387,6 +389,7 @@ async function expectOpenAiChatThroughSandbox(
   model: string,
   redactionValues: readonly string[],
   artifactName: string,
+  commandEnv: NodeJS.ProcessEnv = buildAvailabilityProbeEnv(),
 ): Promise<void> {
   const payload = JSON.stringify({
     model,
@@ -408,7 +411,7 @@ async function expectOpenAiChatThroughSandbox(
     ],
     {
       artifactName,
-      env: buildAvailabilityProbeEnv(),
+      env: commandEnv,
       redactionValues: [...redactionValues],
       timeoutMs: 90_000,
     },
