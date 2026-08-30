@@ -49,6 +49,10 @@ class PromptSourceError(ValueError):
     """The run command did not receive one non-empty prompt source."""
 
 
+class CommandArgumentError(ValueError):
+    """The command line did not match the public command grammar."""
+
+
 class FabricInvocationUnavailableError(RuntimeError):
     """Package data marks this Fabric invocation configuration unavailable."""
 
@@ -61,10 +65,17 @@ class CommandInterrupted(RuntimeError):
         self.signal_number = signal_number
 
 
+class RedactingArgumentParser(argparse.ArgumentParser):
+    """Raise parser errors so the command can redact their argument values."""
+
+    def error(self, message: str) -> None:
+        raise CommandArgumentError(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the complete public command grammar."""
 
-    parser = argparse.ArgumentParser(
+    parser = RedactingArgumentParser(
         prog="nemoclaw-fabric",
         description="Run a package-selected NeMo Fabric adapter.",
     )
@@ -234,6 +245,8 @@ def _write_command_error(
     hidden_values = (*secret_values, *((prompt,) if prompt else ()))
     if isinstance(error, PromptSourceError):
         stage, code, exit_code = "input", "invalid_prompt", EXIT_USAGE
+    elif isinstance(error, CommandArgumentError):
+        stage, code, exit_code = "input", "invalid_arguments", EXIT_USAGE
     elif isinstance(error, FabricInvocationUnavailableError):
         stage, code, exit_code = "config", "unsupported_configuration", EXIT_USAGE
     elif isinstance(error, FabricConfigLoadError):
@@ -281,13 +294,22 @@ def run_cli(
     process_environment = environment if environment is not None else os.environ
     secret_values = collect_secret_values(process_environment)
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    try:
+        args = parser.parse_args(list(argv) if argv is not None else None)
+        if args.command is None and not args.version:
+            parser.error("a command is required")
+    except CommandArgumentError as error:
+        return _write_command_error(
+            error=error,
+            json_output=False,
+            stdout=output_stream,
+            stderr=error_stream,
+            secret_values=secret_values,
+        )
 
     if args.version:
         _write_line(output_stream, version_text())
         return EXIT_SUCCESS
-    if args.command is None:
-        parser.error("a command is required")
 
     prompt: str | None = None
     try:

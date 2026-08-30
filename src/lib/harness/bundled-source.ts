@@ -193,7 +193,7 @@ const STANDARD_SOURCES: readonly BundledHarnessSourceDeclaration[] = Object.free
       {
         id: "langchain-deepagents-code",
         displayName: "LangChain Deep Agents Code",
-        packageVersion: "0.1.1",
+        packageVersion: "0.1.2",
         manifestPath: "agents/langchain-deepagents-code/manifest.yaml",
         mappings: [
           sourceTree("agents/langchain-deepagents-code", "harness-owned"),

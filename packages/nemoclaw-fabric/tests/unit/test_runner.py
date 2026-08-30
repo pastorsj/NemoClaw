@@ -34,6 +34,14 @@ class EnvironmentCapturingClient:
         return SimpleNamespace(status="pass", checks=[])
 
 
+class DoctorRaisingClient(EnvironmentCapturingClient):
+    """Capture the runner environment, then fail the Fabric preflight."""
+
+    async def doctor(self, config: Any, *, base_dir: Path) -> Any:
+        await super().doctor(config, base_dir=base_dir)
+        raise RuntimeError("doctor failed")
+
+
 class FabricRunnerEnvironmentTests(unittest.TestCase):
     """Keep adapter discovery on the runner graph and restore caller state."""
 
@@ -96,6 +104,49 @@ class FabricRunnerEnvironmentTests(unittest.TestCase):
 
         self.assertEqual(client.path, f"{runner_bin}{os.pathsep}{ambient_bin}")
         self.assertNotIn(str(real_bin), client.path or "")
+
+    def test_doctor_exception_restores_present_and_absent_caller_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            base_dir = Path(temporary_directory)
+            cases = {
+                "variables-present": {
+                    "VIRTUAL_ENV": str(base_dir / "caller-venv"),
+                    "PATH": str(base_dir / "caller-bin"),
+                    "PYTHONHOME": str(base_dir / "caller-python-home"),
+                    "UNCHANGED": "caller-value",
+                },
+                "variables-absent": {
+                    "UNCHANGED": "caller-value",
+                },
+            }
+
+            for case_name, caller_environment in cases.items():
+                with self.subTest(case_name=case_name):
+                    client = DoctorRaisingClient()
+                    with patch.dict(os.environ, caller_environment, clear=True):
+                        environment_before_doctor = dict(os.environ)
+
+                        with self.assertRaisesRegex(RuntimeError, "doctor failed"):
+                            asyncio.run(
+                                check_fabric_requirements(
+                                    client,
+                                    object(),
+                                    base_dir=base_dir,
+                                )
+                            )
+
+                        self.assertEqual(dict(os.environ), environment_before_doctor)
+
+                    runner_bin = str(Path(sys.executable).parent)
+                    expected_caller_path = caller_environment.get("PATH")
+                    expected_runner_path = (
+                        f"{runner_bin}{os.pathsep}{expected_caller_path}"
+                        if expected_caller_path
+                        else runner_bin
+                    )
+                    self.assertEqual(client.virtual_env, str(Path(sys.prefix).resolve()))
+                    self.assertEqual(client.path, expected_runner_path)
+                    self.assertIsNone(client.python_home)
 
 
 if __name__ == "__main__":

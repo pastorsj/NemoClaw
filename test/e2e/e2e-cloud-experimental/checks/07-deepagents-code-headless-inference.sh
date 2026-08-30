@@ -91,7 +91,7 @@ sandbox_fabric_version_contract() {
   contract_command="$(
     cat <<'CONTRACT'
 set -euo pipefail
-[ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.0 (nemo-fabric 0.2.0)" ]
+[ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.1 (nemo-fabric 0.2.0)" ]
 /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected else 1)'
 printf '%s\n' NEMOCLAW_FABRIC_VERSION_OK
 CONTRACT

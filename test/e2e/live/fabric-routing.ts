@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import path from "node:path";
+
+import { parseHarnessPackageIdentity } from "../../../src/lib/harness/package-identity";
+import { resolvePinnedHarnessPackage } from "../../../src/lib/harness/package-store";
 import { ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS } from "../../../tools/e2e/onboard-timeout-contract.mts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText } from "../fixtures/clients/command.ts";
@@ -53,7 +57,8 @@ export async function runFabricCompatibleEndpointJourney({
 }: FabricCompatibleEndpointContext): Promise<void> {
   const model = "nemoclaw-e2e-compatible";
   const apiKey = "sk-compatible-TEST-NOT-A-REAL-VALUE";
-  const { commandEnv, gatewayName } = fabricLiveEnvironment();
+  const { commandEnv: initialCommandEnv, gatewayName } = fabricLiveEnvironment();
+  let commandEnv = initialCommandEnv;
   await requireLivePrerequisites(host, skip);
 
   progress.phase("install and verify the Deep Agents Code harness package");
@@ -86,9 +91,22 @@ export async function runFabricCompatibleEndpointJourney({
   const availablePackage = inventory.available?.find(
     ({ identity }) => identity?.id === "langchain-deepagents-code",
   );
+  if (!installedPackage || !availablePackage) {
+    throw new Error("Deep Agents Code was not present in both installed and available inventory");
+  }
   expect(installedPackage).toMatchObject({ health: "healthy" });
   expect(availablePackage).toMatchObject({ installationState: "active" });
-  expect(installedPackage?.identity).toEqual(availablePackage?.identity);
+  const installedIdentity = parseHarnessPackageIdentity(installedPackage.identity);
+  const availableIdentity = parseHarnessPackageIdentity(availablePackage.identity);
+  expect(installedIdentity).toEqual(availableIdentity);
+  const pinnedPackage = resolvePinnedHarnessPackage(installedIdentity);
+  commandEnv = {
+    ...commandEnv,
+    NEMOCLAW_FROM_DOCKERFILE: path.join(
+      path.dirname(pinnedPackage.packageManifest.manifestPath),
+      "Dockerfile",
+    ),
+  };
 
   const sandboxName = inferenceSandboxName("e2e-compat");
   cleanup.add(`best-effort inference-routing compatible-endpoint cleanup for ${sandboxName}`, () =>
@@ -233,7 +251,7 @@ export async function runFabricCompatibleEndpointJourney({
       "--",
       "bash",
       "-c",
-      'set -euo pipefail; [ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.0 (nemo-fabric 0.2.0)" ]; /opt/nemoclaw-fabric-venv/bin/python3 -I -c \'from importlib.metadata import version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected else 1)\'; printf "%s\\n" NEMOCLAW_FABRIC_IDENTITY_OK',
+      'set -euo pipefail; [ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.1 (nemo-fabric 0.2.0)" ]; /opt/nemoclaw-fabric-venv/bin/python3 -I -c \'from importlib.metadata import version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected else 1)\'; printf "%s\\n" NEMOCLAW_FABRIC_IDENTITY_OK',
     ],
     {
       artifactName: "tc-inf-09-fabric-identity",

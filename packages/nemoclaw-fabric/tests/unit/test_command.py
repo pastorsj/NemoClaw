@@ -9,7 +9,6 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stderr
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -157,7 +156,7 @@ class FabricCommandTests(unittest.TestCase):
 
         self.assertEqual(exit_code, EXIT_SUCCESS)
         self.assertEqual(stderr, "")
-        self.assertIn("nemoclaw-fabric 0.1.0", stdout)
+        self.assertIn("nemoclaw-fabric 0.1.1", stdout)
         self.assertIn("nemo-fabric 0.2.0", stdout)
         self.assertEqual(stdout.strip(), version_text())
 
@@ -233,31 +232,36 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertEqual(payload["error"]["stage"], "input")
                 self.assertEqual(payload["error"]["code"], "invalid_prompt")
 
-    def test_argparse_syntax_errors_remain_standard_stderr_errors(self) -> None:
-        stdout = io.StringIO()
-        command_stderr = io.StringIO()
-        parser_stderr = io.StringIO()
-        factory_calls: list[None] = []
+    def test_argparse_syntax_errors_use_redacted_usage_diagnostics(self) -> None:
+        credential_arguments = (
+            "--unknown-option=sk-1234567890abcdefghij",
+            "--clientSecret=ordinary-secret-value",
+        )
+        for credential_argument in credential_arguments:
+            with self.subTest(credential_argument=credential_argument.split("=", 1)[0]):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                factory_calls: list[None] = []
 
-        def create_client() -> StubFabricClient:
-            factory_calls.append(None)
-            return StubFabricClient()
+                def create_client() -> StubFabricClient:
+                    factory_calls.append(None)
+                    return StubFabricClient()
 
-        with redirect_stderr(parser_stderr), self.assertRaises(SystemExit) as raised:
-            run_cli(
-                self.run_arguments("-m", "prompt", "--json", "--unknown-option"),
-                stdin=io.StringIO(),
-                stdout=stdout,
-                stderr=command_stderr,
-                environment={},
-                client_factory=create_client,
-            )
+                exit_code = run_cli(
+                    self.run_arguments("-m", "prompt", "--json", credential_argument),
+                    stdin=io.StringIO(),
+                    stdout=stdout,
+                    stderr=stderr,
+                    environment={},
+                    client_factory=create_client,
+                )
 
-        self.assertEqual(raised.exception.code, EXIT_USAGE)
-        self.assertEqual(stdout.getvalue(), "")
-        self.assertEqual(command_stderr.getvalue(), "")
-        self.assertIn("unrecognized arguments: --unknown-option", parser_stderr.getvalue())
-        self.assertEqual(factory_calls, [])
+                self.assertEqual(exit_code, EXIT_USAGE)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertNotIn(credential_argument.split("=", 1)[1], stderr.getvalue())
+                self.assertIn("input failed [invalid_arguments]", stderr.getvalue())
+                self.assertIn("<redacted>", stderr.getvalue())
+                self.assertEqual(factory_calls, [])
 
     def test_doctor_pass_and_warn_are_successful(self) -> None:
         for status in ("pass", "warn"):
@@ -608,6 +612,37 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertNotIn(secret, stdout)
                 self.assertIn("<redacted>", stdout)
 
+    def test_plain_output_handles_each_adapter_result_shape(self) -> None:
+        secret = "result-fallback-secret"
+        cases = (
+            ("string output", f"answer {secret}", "answer <redacted>\n"),
+            (
+                "non-string response",
+                {"response": {"answer": secret}, "ignored": "metadata"},
+                '{"answer":"<redacted>"}\n',
+            ),
+            (
+                "missing response",
+                {"answer": secret, "count": 1},
+                '{"answer":"<redacted>","count":1}\n',
+            ),
+            ("no output", None, "null\n"),
+        )
+        for case_name, output, expected in cases:
+            with self.subTest(case_name=case_name):
+                exit_code, stdout, stderr, _selected = self.invoke(
+                    self.run_arguments("-m", "prompt"),
+                    client=StubFabricClient(
+                        result=StubResult("succeeded", output=output),
+                    ),
+                    environment={"SERVICE_TOKEN": secret},
+                )
+
+                self.assertEqual(exit_code, EXIT_SUCCESS)
+                self.assertEqual(stderr, "")
+                self.assertEqual(stdout, expected)
+                self.assertNotIn(secret, stdout)
+
     def test_config_declared_credential_is_redacted_without_name_heuristics(self) -> None:
         credential_name = "MY_CRED"
         credential = "ordinary-looking-credential-value"
@@ -837,12 +872,27 @@ class FabricCommandTests(unittest.TestCase):
             "github_pat_12345678901234567890",
             "sk-proj-1234567890abcdef",
             "sk-ant-1234567890abcdef",
+            "sk-1234567890abcdefghij",
             "hf_1234567890abcdef",
             "glpat-1234567890abcdef",
             "gsk_1234567890abcdef",
             "pypi-1234567890abcdef",
             "tvly-1234567890abcdef",
             "xoxb-12345678-abcdef",
+            "xapp-12345678-abcdef",
+            "AKIA1234567890ABCDEF",
+            "ASIA1234567890ABCDEF",
+            "bot12345678:" + "a" * 35,
+            "12345678:" + "a" * 35,
+            "A" * 24 + "." + "B" * 6 + "." + "C" * 27,
+            "eyJabcde.ab.abcdefghij",
+            "lsv2_sk_1234567890",
+            "KEY=ordinary-secret-value",
+            "-----BEGIN "
+            "PRIVATE KEY-----\nprivate-material\n-----END "
+            "PRIVATE KEY-----",
+            "MODEL_API_KEY=ordinary-secret-value",
+            "clientSecret=ordinary-secret-value",
         )
         for credential in credential_forms:
             for output_arguments in ((), ("--json",)):

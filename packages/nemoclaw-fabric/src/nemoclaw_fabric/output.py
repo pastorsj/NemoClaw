@@ -23,9 +23,43 @@ _CREDENTIAL_PATTERNS = (
         r"\b(?:nvapi-|nvcf-|gh[pousr]_|sk-proj-|sk-ant-|hf_|glpat-|gsk_|"
         r"pypi-|tvly-)[A-Za-z0-9_-]{8,}"
     ),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(r"\bxox(?:b|p|a|s|r)-[A-Za-z0-9-]{8,}"),
+    re.compile(r"\b(?:xox[bpas]|xapp)-[A-Za-z0-9-]{8,}"),
+    re.compile(r"\bA(?:K|S)IA[A-Z0-9]{16}\b"),
+    re.compile(r"\b(?:bot)?\d{8,10}:[A-Za-z0-9_-]{35}\b"),
+    re.compile(
+        r"\b[A-Za-z0-9]{24}\.[A-Za-z0-9_-]{6}\.[A-Za-z0-9_-]{27,}\b"
+    ),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{10,}\b"),
+    re.compile(r"\blsv2_(?:pt|sk)_[A-Za-z0-9]{10,}(?:_[A-Za-z0-9]+)*\b"),
+    re.compile(
+        r"-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----[\s\S]*?"
+        r"-----END (?:[A-Z0-9]+ )?PRIVATE KEY-----"
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9])(?:[A-Za-z0-9]{1,128}_"
+        r"(?:KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD|PASSWD|PASS)|"
+        r"(?:X[-_])?API[-_]?KEY|KEY|TOKEN|SECRET|CREDENTIAL|PASSWORD|PASSWD|PASS)"
+        r"[\"']?(?:[ \t]{0,32}[=:][ \t]{0,32}|[ \t]{1,32})"
+        r"[\"']?[^\s'\"]{10,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9])(?:[A-Za-z0-9]{1,128}(?:Token|Secret|Credential)|"
+        r"[A-Za-z0-9]{0,128}(?:Access|Refresh|Client|Bearer|Auth|API|Api|Private|"
+        r"Signing|Session|Bot|App|Resolved)Key|"
+        r"[A-Za-z0-9]{1,128}(?:Password|Passwd|Pass|Passphrase))"
+        r"[\"']?(?:[ \t]{0,32}[=:][ \t]{0,32}|[ \t]{1,32})"
+        r"[\"']?[^\s'\"]{10,}"
+    ),
 )
+
+
+def value_looks_like_secret(value: str) -> bool:
+    """Return whether text contains a supported credential shape."""
+
+    return any(pattern.search(value) for pattern in _CREDENTIAL_PATTERNS)
 
 
 def collect_secret_values(

@@ -333,6 +333,85 @@ class FabricConfigLoadingTests(unittest.TestCase):
                 )
             )
 
+    def test_rejects_camel_case_credential_fields_in_adapter_extensions(self) -> None:
+        credential_fields = ("clientSecret", "accessToken", "privateKey")
+        for credential_field in credential_fields:
+            with self.subTest(credential_field=credential_field):
+                with self.assertRaisesRegex(
+                    FabricConfigLoadError,
+                    rf"harness\.settings\.{credential_field} must use "
+                    r"environment-variable-name indirection",
+                ) as caught:
+                    load_fabric_config(
+                        self.write_config(
+                            {
+                                "metadata": {"name": "camel-case-extension-secret"},
+                                "harness": {
+                                    "adapter_id": "third.party.harness",
+                                    "settings": {
+                                        credential_field: "ordinary-literal-value"
+                                    },
+                                },
+                                "runtime": {"timeout_seconds": 30},
+                            }
+                        )
+                    )
+
+                self.assertNotIn("ordinary-literal-value", str(caught.exception))
+
+    def test_collects_camel_case_credential_environment_references(self) -> None:
+        loaded = load_fabric_config(
+            self.write_config(
+                {
+                    "metadata": {"name": "camel-case-extension-reference"},
+                    "harness": {
+                        "adapter_id": "third.party.harness",
+                        "settings": {"clientSecretEnv": "ADAPTER_CLIENT_SECRET"},
+                    },
+                    "runtime": {"timeout_seconds": 30},
+                }
+            )
+        )
+
+        self.assertEqual(
+            loaded.credential_environment_names,
+            ("ADAPTER_CLIENT_SECRET",),
+        )
+
+    def test_rejects_credential_shaped_values_under_neutral_adapter_fields(self) -> None:
+        credential_values = (
+            "sk-1234567890abcdefghij",
+            "AKIA1234567890ABCDEF",
+            "bot12345678:" + "a" * 35,
+            "A" * 24 + "." + "B" * 6 + "." + "C" * 27,
+            "eyJabcde.ab.abcdefghij",
+            "lsv2_sk_1234567890",
+            "KEY=ordinary-secret-value",
+            "-----BEGIN "
+            "PRIVATE KEY-----\nprivate-material\n-----END "
+            "PRIVATE KEY-----",
+        )
+        for credential_value in credential_values:
+            with self.subTest(credential_value=credential_value[:16]):
+                with self.assertRaisesRegex(
+                    FabricConfigLoadError,
+                    r"harness\.settings\.description must not contain a literal credential",
+                ) as caught:
+                    load_fabric_config(
+                        self.write_config(
+                            {
+                                "metadata": {"name": "neutral-extension-secret"},
+                                "harness": {
+                                    "adapter_id": "third.party.harness",
+                                    "settings": {"description": credential_value},
+                                },
+                                "runtime": {"timeout_seconds": 30},
+                            }
+                        )
+                    )
+
+                self.assertNotIn(credential_value, str(caught.exception))
+
     def test_rejects_every_value_shape_under_sensitive_adapter_fields(self) -> None:
         credential_values = (
             ["Bearer sk-proj-list-secret"],

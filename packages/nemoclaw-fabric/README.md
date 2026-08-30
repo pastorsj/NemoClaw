@@ -22,10 +22,13 @@ nemoclaw-fabric run --config /etc/nemoclaw/fabric.json -m "Review the workspace"
 `--json` to print the normalized Fabric report or result as one JSON object.
 
 The configuration file is the integration boundary. It is validated as a
-native `FabricConfig`, and its `harness.adapter_id` or `workflow.target_id`
-selects the adapter. The runner has no adapter registry or adapter-specific
-branches. Relative paths are resolved from the configuration file's directory.
-Every config must set a positive, finite `runtime.timeout_seconds` value.
+native `FabricConfig`. This experimental qualification covers configurations
+selected by `harness.adapter_id` only. Configurations using
+`workflow.target_id` are parsed and validated, but workflow execution has not
+been qualified through this runner. The runner has no adapter registry or
+adapter-specific branches. Relative paths are resolved from the configuration
+file's directory. Every config must set a positive, finite
+`runtime.timeout_seconds` value.
 
 Use environment-variable-name indirection for credentials. The runner detects
 Fabric's credential fields and adapter extension fields ending in names such
