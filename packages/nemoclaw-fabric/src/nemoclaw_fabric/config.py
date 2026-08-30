@@ -152,9 +152,7 @@ def _reject_literal_credentials(
                 or key_text in _CREDENTIAL_ENVIRONMENT_MAPPING_FIELDS
                 or bool(_GENERIC_ENVIRONMENT_REFERENCE_FIELD.search(key_text))
             )
-            if isinstance(item, str) and _SENSITIVE_FIELD_NAME.search(
-                key_text.replace("-", "_")
-            ) and not is_reference:
+            if _SENSITIVE_FIELD_NAME.search(key_text.replace("-", "_")) and not is_reference:
                 raise FabricConfigLoadError(
                     f"{field_path} must use environment-variable-name indirection for credentials"
                 )

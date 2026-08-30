@@ -333,6 +333,36 @@ class FabricConfigLoadingTests(unittest.TestCase):
                 )
             )
 
+    def test_rejects_every_value_shape_under_sensitive_adapter_fields(self) -> None:
+        credential_values = (
+            ["Bearer sk-proj-list-secret"],
+            {"value": "Bearer sk-proj-object-secret"},
+            123456789,
+            True,
+            None,
+        )
+        for credential_value in credential_values:
+            with self.subTest(credential_value=credential_value):
+                with self.assertRaisesRegex(
+                    FabricConfigLoadError,
+                    r"harness\.settings\.authorization must use "
+                    r"environment-variable-name indirection",
+                ) as caught:
+                    load_fabric_config(
+                        self.write_config(
+                            {
+                                "metadata": {"name": "literal-extension-secret-shape"},
+                                "harness": {
+                                    "adapter_id": "third.party.harness",
+                                    "settings": {"authorization": credential_value},
+                                },
+                                "runtime": {"timeout_seconds": 30},
+                            }
+                        )
+                    )
+
+                self.assertNotIn(str(credential_value), str(caught.exception))
+
     def test_rejects_malformed_explicit_credential_environment_names(self) -> None:
         with self.assertRaisesRegex(
             FabricConfigLoadError,

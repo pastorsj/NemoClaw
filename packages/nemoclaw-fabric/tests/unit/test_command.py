@@ -774,6 +774,57 @@ class FabricCommandTests(unittest.TestCase):
         self.assertEqual(payload["error"]["stage"], "config")
         self.assertEqual(payload["error"]["code"], "invalid_config")
 
+    def test_sensitive_adapter_value_shapes_fail_before_client_creation(self) -> None:
+        credential_values = (
+            ["Bearer sk-proj-list-secret"],
+            {"value": "Bearer sk-proj-object-secret"},
+            123456789,
+            True,
+            None,
+        )
+        for credential_value in credential_values:
+            with self.subTest(credential_value=credential_value):
+                self.config_path.write_text(
+                    json.dumps(
+                        {
+                            "metadata": {"name": "literal-adapter-credential-shape"},
+                            "harness": {
+                                "adapter_id": "test.command.adapter",
+                                "settings": {"authorization": credential_value},
+                            },
+                            "runtime": {"timeout_seconds": 30},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                factory_calls: list[None] = []
+
+                def create_client() -> StubFabricClient:
+                    factory_calls.append(None)
+                    return StubFabricClient()
+
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                exit_code = run_cli(
+                    self.doctor_arguments("--json"),
+                    stdin=io.StringIO(),
+                    stdout=stdout,
+                    stderr=stderr,
+                    environment={},
+                    client_factory=create_client,
+                )
+
+                self.assertEqual(exit_code, EXIT_USAGE)
+                self.assertEqual(stderr.getvalue(), "")
+                self.assertEqual(factory_calls, [])
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(payload["error"]["stage"], "config")
+                self.assertEqual(payload["error"]["code"], "invalid_config")
+                self.assertIn(
+                    "harness.settings.authorization",
+                    payload["error"]["message"],
+                )
+
     def test_common_credential_forms_are_redacted_in_plain_and_json_diagnostics(
         self,
     ) -> None:
