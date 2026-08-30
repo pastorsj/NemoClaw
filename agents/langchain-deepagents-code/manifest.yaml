@@ -23,10 +23,13 @@ version_scheme: semver
 runtime:
   kind: terminal
   interactive_command: "dcode"
-  headless_command: "dcode -n"
+  headless_command: "timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.deepagents/fabric.json"
   smoke_commands:
     - "dcode --version"
     - "test -s /sandbox/.deepagents/config.toml && echo NEMOCLAW_DEEPAGENTS_CONFIG_OK"
+    - "test -s /sandbox/.deepagents/fabric.json && echo NEMOCLAW_FABRIC_CONFIG_OK"
+    - "nemoclaw-fabric --version"
+    - "timeout --version"
     - 'empty_prompt=; output="$(timeout 10 dcode -n "$empty_prompt" 2>&1)"; status=$?; [ "$status" -eq 2 ] && [ "$output" = "NemoClaw: empty non-interactive prompt for -n; provide prompt text." ] && echo NEMOCLAW_DCODE_EMPTY_PROMPT_OK'
 
 # ── Configuration ───────────────────────────────────────────────

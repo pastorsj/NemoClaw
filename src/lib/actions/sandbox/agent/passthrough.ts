@@ -357,10 +357,7 @@ function splitManifestCommand(command: string): TerminalCommandResult {
 }
 
 function getTerminalPassthroughCommand(agent: AgentDefinition): TerminalCommandResult {
-  const command =
-    agent.name === "nemocua"
-      ? (agent.runtime?.headless_command ?? "")
-      : (agent.runtime?.interactive_command ?? agent.runtime?.headless_command ?? "");
+  const command = agent.runtime?.headless_command ?? agent.runtime?.interactive_command ?? "";
   return splitManifestCommand(command);
 }
 

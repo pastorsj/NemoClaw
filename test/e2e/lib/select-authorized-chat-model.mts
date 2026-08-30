@@ -47,6 +47,7 @@ interface AuthorizedChatModelOptions {
   fetchModels?: FetchModels;
   maxCandidates?: number;
   probeModel?: ProbeModel;
+  requiredModel?: string;
 }
 
 function fail(message: string): never {
@@ -88,10 +89,12 @@ export async function selectAuthorizedChatModel({
   fetchModels = fetchOpenAiLikeModels,
   maxCandidates = MAX_CANDIDATES,
   probeModel = probeOpenAiLikeEndpointOptimized,
+  requiredModel,
 }: AuthorizedChatModelOptions): Promise<string> {
   if (!apiKey) fail("COMPATIBLE_API_KEY is required");
   if (!currentModel) fail("the current model is required");
   if (!endpoint) fail("the endpoint is required");
+  if (requiredModel !== undefined && !requiredModel.trim()) fail("the required model is empty");
   assertCredentialSafeEndpoint(endpoint);
   if (!Number.isInteger(maxCandidates) || maxCandidates < 1 || maxCandidates > MAX_CANDIDATES) {
     fail(`maxCandidates must be an integer from 1 to ${MAX_CANDIDATES}`);
@@ -99,8 +102,19 @@ export async function selectAuthorizedChatModel({
 
   const catalog = fetchModels(endpoint, apiKey);
   if (!catalog.ok) fail(`authenticated model discovery failed: ${catalog.message}`);
-  const candidates = orderedChatCandidates(catalog.ids, currentModel).slice(0, maxCandidates);
-  if (candidates.length === 0) fail("the endpoint listed no alternate chat model");
+  const candidates =
+    requiredModel === undefined
+      ? orderedChatCandidates(catalog.ids, currentModel).slice(0, maxCandidates)
+      : catalog.ids.includes(requiredModel) && requiredModel !== currentModel
+        ? [requiredModel]
+        : [];
+  if (candidates.length === 0) {
+    fail(
+      requiredModel === undefined
+        ? "the endpoint listed no alternate chat model"
+        : "the endpoint did not list the required alternate model",
+    );
+  }
 
   for (const model of candidates) {
     const result = await probeModel(endpoint, model, apiKey, {
@@ -125,6 +139,7 @@ async function main() {
     apiKey: process.env.COMPATIBLE_API_KEY,
     currentModel: value("--current-model"),
     endpoint: value("--endpoint"),
+    requiredModel: value("--required-model"),
   });
   process.stdout.write(`${selected}\n`);
 }

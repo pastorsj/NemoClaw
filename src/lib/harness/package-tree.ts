@@ -245,6 +245,7 @@ function isAuthoringPath(relativePath: string): boolean {
   const first = relativePath.split("/", 1)[0];
   return (
     AUTHORING_ROOT_NAMES.has(first) ||
+    first.toLowerCase().endsWith(".egg-info") ||
     AUTHORING_ROOT_NAMES.has(relativePath) ||
     AUTHORING_PLUGIN_NAMES.has(relativePath) ||
     /^plugin\/test_[^/]+\.py$/u.test(relativePath) ||

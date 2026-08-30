@@ -89,6 +89,52 @@ describe("authorized alternate chat model selection", () => {
     },
   );
 
+  it("requires and validates the model selected for the Fabric round trip", async () => {
+    const requiredModel = "nvidia/nemotron-3-super-120b-a12b";
+    const probeModel = vi.fn().mockResolvedValue({ ok: true });
+
+    await expect(
+      selectAuthorizedChatModel({
+        apiKey: "test-key",
+        currentModel,
+        endpoint,
+        fetchModels: () => ({
+          ok: true,
+          ids: [
+            currentModel,
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            requiredModel,
+          ],
+        }),
+        probeModel,
+        requiredModel,
+      }),
+    ).resolves.toBe(requiredModel);
+    expect(probeModel).toHaveBeenCalledOnce();
+    expect(probeModel).toHaveBeenCalledWith(endpoint, requiredModel, "test-key", {
+      skipResponsesProbe: true,
+    });
+  });
+
+  it("stops before probing when the Fabric round-trip model is absent", async () => {
+    const probeModel = vi.fn();
+
+    await expect(
+      selectAuthorizedChatModel({
+        apiKey: "test-key",
+        currentModel,
+        endpoint,
+        fetchModels: () => ({
+          ok: true,
+          ids: [currentModel, "nvidia/nemotron-3-ultra-550b-a55b"],
+        }),
+        probeModel,
+        requiredModel: "nvidia/nemotron-3-super-120b-a12b",
+      }),
+    ).rejects.toThrow("the endpoint did not list the required alternate model");
+    expect(probeModel).not.toHaveBeenCalled();
+  });
+
   it("rejects bearer credential transport to a non-loopback HTTP endpoint", async () => {
     const fetchModels = vi.fn();
 

@@ -342,6 +342,7 @@ RUN chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && chmod 444 /etc/bash.bashrc
 
 COPY agents/langchain-deepagents-code/requirements.lock /tmp/deepagents-code-requirements.lock
+COPY agents/langchain-deepagents-code/fabric-requirements.lock /tmp/nemoclaw-fabric-requirements.lock
 
 RUN python3 -m venv --copies "$VIRTUAL_ENV" \
     && "$VIRTUAL_ENV/bin/pip3" install --no-cache-dir --require-hashes \
@@ -353,6 +354,20 @@ RUN python3 -m venv --copies "$VIRTUAL_ENV" \
     && ln -sf "$VIRTUAL_ENV/bin/deepagents-code" /usr/local/bin/deepagents-code \
     && rm -f /tmp/deepagents-code-requirements.lock \
     && /usr/local/bin/dcode --version
+
+# The released Fabric 0.2.0 Deep Agents adapter and DCode 0.1.55 require
+# incompatible Deep Agents graphs. Keep Fabric's exact released graph in a
+# second hash-locked venv so the native /opt/venv DCode installation remains
+# unchanged. The public runner is installed into this venv by the final image.
+RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-fabric-requirements.lock \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c \
+        "from importlib.metadata import version; expected = {'deepagents': '0.6.12', 'langchain-mcp-adapters': '0.2.2', 'nemo-fabric': '0.2.0', 'nemo-fabric-adapter-contract': '0.2.0', 'nemo-fabric-adapters-common': '0.2.0', 'nemo-fabric-adapters-deepagents': '0.2.0', 'nemo-fabric-runtime': '0.2.0'}; actual = {name: version(name) for name in expected}; assert actual == expected, actual" \
+    && test -x /opt/nemoclaw-fabric-venv/bin/python3 \
+    && test -x /opt/venv/bin/dcode \
+    && rm -f /tmp/nemoclaw-fabric-requirements.lock
 
 ENV HOME=/sandbox \
     PATH="/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \

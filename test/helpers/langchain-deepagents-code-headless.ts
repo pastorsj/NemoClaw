@@ -45,6 +45,8 @@ type HeadlessCheckOperation =
   | "classify-output"
   | "contains-secret"
   | "entrypoint-rlimits"
+  | "fabric-classify-output"
+  | "fabric-redaction-output"
   | "managed-placeholder"
   | "managed-route"
   | "positive-integer";
@@ -54,6 +56,9 @@ type HeadlessCheckEnvironment = Partial<
     | "CONFIG"
     | "DCODE_EXIT"
     | "DEEPAGENTS_HEADLESS_TIMEOUT"
+    | "FABRIC_EXIT"
+    | "FABRIC_OUTPUT"
+    | "FABRIC_REDACTION_SENTINEL"
     | "HEADLESS_OUTPUT"
     | "PROC_ROOT"
     | "TOKEN",
@@ -72,6 +77,20 @@ case "$1" in
     ;;
   classify-output)
     if classification="$(classify_headless_output "$DCODE_EXIT" "$HEADLESS_OUTPUT")"; then
+      printf "pass:%s" "$classification"
+    else
+      printf "fail:%s" "$classification"
+    fi
+    ;;
+  fabric-classify-output)
+    if classification="$(classify_fabric_headless_output "$FABRIC_EXIT" "$FABRIC_OUTPUT")"; then
+      printf "pass:%s" "$classification"
+    else
+      printf "fail:%s" "$classification"
+    fi
+    ;;
+  fabric-redaction-output)
+    if classification="$(classify_fabric_redaction_output "$FABRIC_EXIT" "$FABRIC_OUTPUT" "$FABRIC_REDACTION_SENTINEL")"; then
       printf "pass:%s" "$classification"
     else
       printf "fail:%s" "$classification"
@@ -147,6 +166,9 @@ export function runHeadlessCheckHelper(
       CONFIG: env.CONFIG ?? "",
       DCODE_EXIT: env.DCODE_EXIT ?? "",
       DEEPAGENTS_HEADLESS_TIMEOUT: env.DEEPAGENTS_HEADLESS_TIMEOUT ?? "",
+      FABRIC_EXIT: env.FABRIC_EXIT ?? "",
+      FABRIC_OUTPUT: env.FABRIC_OUTPUT ?? "",
+      FABRIC_REDACTION_SENTINEL: env.FABRIC_REDACTION_SENTINEL ?? "",
       HEADLESS_OUTPUT: env.HEADLESS_OUTPUT ?? "",
       PATH: "/usr/bin:/bin",
       PROC_ROOT: env.PROC_ROOT ?? "",

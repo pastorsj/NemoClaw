@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools == 82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemoclaw-fabric"
+version = "0.1.0"
+description = "Generic NeMo Fabric headless runner for NemoClaw agent packages"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+  "nemo-fabric == 0.2.0",
+]
+
+[project.optional-dependencies]
+test = [
+  "nemo-fabric-adapter-contract == 0.2.0",
+  "nemo-fabric-adapters-common == 0.2.0",
+]
+
+[project.scripts]
+nemoclaw-fabric = "nemoclaw_fabric.command:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

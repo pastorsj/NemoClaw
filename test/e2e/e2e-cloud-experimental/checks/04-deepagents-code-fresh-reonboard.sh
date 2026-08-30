@@ -17,6 +17,7 @@ CLI="${NEMOCLAW_CLI_BIN:-${REPO}/bin/nemoclaw.js}"
 PREFIX="04-deepagents-code-fresh-reonboard"
 HOSTED_ENDPOINT="${NEMOCLAW_ENDPOINT_URL:-https://inference-api.nvidia.com/v1}"
 MODEL_SELECTOR="${REPO}/test/e2e/lib/select-authorized-chat-model.mts"
+FABRIC_ROUND_TRIP_MODEL="nvidia/nemotron-3-super-120b-a12b"
 CREDENTIAL_CANARY="nemoclaw-dcode-config-get-canary"
 MANAGED_LOGIN_PROFILE="/sandbox/.bash_profile"
 HOSTILE_LOGIN_FALLBACK="/sandbox/.bash_login"
@@ -257,10 +258,12 @@ pass "root-owned DCode login profile excludes sandbox startup code from managed 
 model_b="$(
   npx --no-install tsx "$MODEL_SELECTOR" \
     --endpoint "$HOSTED_ENDPOINT" \
-    --current-model "$model_a"
+    --current-model "$model_a" \
+    --required-model "$FABRIC_ROUND_TRIP_MODEL"
 )" || fail "could not select an authorized alternate chat model"
 [ "$model_a" != "$model_b" ] || fail "model A and model B must differ"
-pass "authenticated endpoint validation selected model B"
+[ "$model_b" = "$FABRIC_ROUND_TRIP_MODEL" ] || fail "model B must be the Fabric round-trip model"
+pass "authenticated endpoint validation selected the Fabric round-trip model"
 
 seed_source="$(seed_config_source)"
 seed_output="$(
@@ -317,7 +320,7 @@ if ! reonboard_output="$(
     NEMOCLAW_COMPAT_MODEL="$model_b" \
     NEMOCLAW_E2E_USE_HOSTED_INFERENCE=1 \
     NEMOCLAW_ENDPOINT_URL="$HOSTED_ENDPOINT" \
-    NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF="$NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF" \
+    NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF="${NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF:-}" \
     NEMOCLAW_MODEL="$model_b" \
     NEMOCLAW_NON_INTERACTIVE=1 \
     NEMOCLAW_PREFERRED_API=openai-completions \

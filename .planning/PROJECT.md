@@ -75,9 +75,12 @@ Operating system and hardware are observed platform facts and qualification prof
 packages. A privileged host preparer is a separate candidate component only when it contains real,
 independently owned host mutation, such as DGX Station preparation.
 
-NeMo Fabric is not one of the three composition axes. Its candidate first role is package
-validation inside an already-created OpenShell sandbox; the pilot decides whether it earns any
-ongoing NemoClaw capability.
+NeMo Fabric is not one of the three composition axes. Its first experiment is a generic
+sandbox-local headless invocation layer. Agent runtime packages select released Fabric adapters
+through data, while NemoClaw retains package, policy, credential, OpenShell, state, and lifecycle
+authority. The released Fabric Deep Agents adapter is exercised beside LangChain Deep Agents Code,
+but its different dependency graph and model settings do not establish native DCode parity. Pi can
+use the same runner after its Fabric adapter has a reproducible public release.
 
 ## NemoClaw's Role
 

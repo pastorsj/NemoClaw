@@ -40,8 +40,8 @@ its own rollback point. This is intentionally smaller than the preserved 57-plan
   adapters, starting with one backend and removing substrate assumptions through existing surfaces.
 - [ ] **Phase 6: Platform and Host Boundaries** — Consolidate declarative platform profiles and
   isolate only justified privileged host preparation.
-- [ ] **Phase 7: NeMo Fabric Pilot** — Evaluate Fabric inside one OpenShell sandbox as a bounded
-  agent-execution validation lane without changing onboarding or always-on lifecycle behavior.
+- [ ] **Phase 7: NeMo Fabric Pilot** — Evaluate a shared sandbox-local invocation runner without
+  changing onboarding or always-on lifecycle behavior.
 - [ ] **Phase 8: Qualification and Repository Handoff** — Prove compatibility edges, exact selected
   artifacts, updates, rollback, named platform journeys, and unchanged external package trees.
 
@@ -215,19 +215,21 @@ ownership.
 
 ### Phase 7: NeMo Fabric Pilot
 
-**Goal:** Determine whether Fabric provides useful normalized agent invocation and evaluation inside
-NemoClaw sandboxes without making it a control-plane dependency.
+**Goal:** Evaluate Fabric as a generic invocation layer inside NemoClaw sandboxes without making it
+a control-plane dependency or claiming native agent parity.
 
 **Implementation order:**
 
 1. Pin exact Fabric, adapter, contract, fixture, Python, OS, architecture, and capability identities.
-2. Run deterministic discovery, plan, doctor, start, two ordered invokes, failure, malformed result,
-   transport, isolation, and stop contract tests outside a live sandbox.
-3. Use the SDK inside one existing Linux sandbox only for installation, policy and egress, synthetic
-   canary-secret custody, isolation, and cleanup evidence.
-4. Compare artifacts and events with NemoClaw package qualification needs.
-5. Qualify a real adapter only after exact agent dependency alignment.
-6. Decide whether Fabric remains test-only, leaves NemoClaw, or earns an optional agent capability.
+2. Keep one generic runner and package-owned adapter configuration; native interactive commands stay
+   agent-specific.
+3. Run deterministic discovery, plan, doctor, start, ordered invoke, failure, malformed result,
+   signal, isolation, and stop tests outside a live sandbox.
+4. Exercise one released Deep Agents round trip through a fake endpoint, then one Mac and one Brev
+   composition on a model that needs no unsupported request options.
+5. Keep native DCode qualification separate until the released adapter matches its dependencies and
+   model settings.
+6. Add Pi through the same contract only after its Fabric adapter has a public release.
 
 ### Phase 8: Qualification and Repository Handoff
 

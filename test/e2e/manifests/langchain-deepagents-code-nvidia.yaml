@@ -24,7 +24,7 @@ spec:
     features:
       terminalRuntime: true
       interactiveCommand: dcode
-      headlessCommand: dcode -n
+      headlessCommand: timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.deepagents/fabric.json
       observability: true
       remoteDeepAgentsSandboxes: false
       mcpAutoLoad: false

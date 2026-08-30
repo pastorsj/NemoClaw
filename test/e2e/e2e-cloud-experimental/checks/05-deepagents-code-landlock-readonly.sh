@@ -93,6 +93,13 @@ else
   fail_test "/opt/venv is writable under the Deep Agents Code policy: $OUT"
 fi
 
+OUT=$(sandbox_exec "touch /opt/nemoclaw-fabric-venv/fabric-landlock-test 2>&1 || echo BLOCKED" || true)
+if echo "$OUT" | grep -qi "BLOCKED\|Permission denied\|Read-only\|EACCES"; then
+  pass "/opt/nemoclaw-fabric-venv is Landlock read-only"
+else
+  fail_test "/opt/nemoclaw-fabric-venv is writable under the Deep Agents Code policy: $OUT"
+fi
+
 OUT=$(sandbox_exec "touch /etc/deepagents-landlock-test 2>&1 || echo BLOCKED" || true)
 if echo "$OUT" | grep -qi "BLOCKED\|Permission denied\|Read-only\|EACCES"; then
   pass "/etc is Landlock read-only for Deep Agents Code"
@@ -122,7 +129,7 @@ else
   fail_test "/tmp is NOT writable under Landlock: $OUT"
 fi
 
-sandbox_exec "rm -f /sandbox/.deepagents/deepagents-landlock-test /usr/deepagents-landlock-test /opt/venv/deepagents-landlock-test /etc/deepagents-landlock-test /tmp/deepagents-landlock-test 2>/dev/null || true" || true
+sandbox_exec "rm -f /sandbox/.deepagents/deepagents-landlock-test /usr/deepagents-landlock-test /opt/venv/deepagents-landlock-test /opt/nemoclaw-fabric-venv/fabric-landlock-test /etc/deepagents-landlock-test /tmp/deepagents-landlock-test 2>/dev/null || true" || true
 
 printf '%s\n' "${PREFIX}: $PASSED passed, $FAILED failed"
 [ "$FAILED" -eq 0 ] || exit 1

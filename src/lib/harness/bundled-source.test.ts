@@ -102,11 +102,15 @@ describe("reviewed bundled harness sources", () => {
         (runtimePath) => !source.mappings.some((mapping) => mappingCovers(mapping, runtimePath)),
       ),
     ).toEqual([]);
-    expect(source.mappings.map(({ sourcePath }) => sourcePath)).not.toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/^(?:docs|test|packages|agents\/(?:pi|nemocua))(?:\/|$)/u),
-      ]),
-    );
+    const unrelatedMappings = source.mappings
+      .map(({ sourcePath }) => sourcePath)
+      .filter(
+        (sourcePath) =>
+          /^(?:docs|test|agents\/(?:pi|nemocua))(?:\/|$)/u.test(sourcePath) ||
+          (sourcePath.startsWith("packages/") &&
+            !sourcePath.startsWith("packages/nemoclaw-fabric/")),
+      );
+    expect(unrelatedMappings).toEqual([]);
   });
 
   it("labels the disclosed shared blueprint dependency for Phase 3 removal", () => {

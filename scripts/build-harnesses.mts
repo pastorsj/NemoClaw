@@ -155,6 +155,7 @@ function isOmittedAuthoringPath(relativePath: string, type: "directory" | "file"
   if (type === "directory") {
     return (
       OMITTED_DIRECTORY_NAMES.has(normalizedName) ||
+      normalizedName.endsWith(".egg-info") ||
       (normalizedName.endsWith("-cache") && normalizedName !== "npm-cache-seed")
     );
   }

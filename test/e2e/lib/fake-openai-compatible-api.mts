@@ -27,6 +27,30 @@ const requireAuth = process.env.NEMOCLAW_FAKE_OPENAI_REQUIRE_AUTH === "1";
 // readiness probe hits /v1/models unauthenticated, keep working. See #6177.
 const requireAuthModels = process.env.NEMOCLAW_FAKE_OPENAI_REQUIRE_AUTH_MODELS === "1";
 const chatContent = process.env.NEMOCLAW_FAKE_OPENAI_CHAT_CONTENT || "ok";
+const chatUsage = (() => {
+  try {
+    const parsed = JSON.parse(process.env.NEMOCLAW_FAKE_OPENAI_CHAT_USAGE || "null");
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Number.isInteger(parsed.inputTokens) &&
+      parsed.inputTokens >= 0 &&
+      Number.isInteger(parsed.outputTokens) &&
+      parsed.outputTokens >= 0 &&
+      Number.isInteger(parsed.totalTokens) &&
+      parsed.totalTokens === parsed.inputTokens + parsed.outputTokens
+    ) {
+      return {
+        prompt_tokens: parsed.inputTokens,
+        completion_tokens: parsed.outputTokens,
+        total_tokens: parsed.totalTokens,
+      };
+    }
+  } catch {
+    // Invalid optional fixture configuration leaves usage absent.
+  }
+  return null;
+})();
 const responseText = process.env.NEMOCLAW_FAKE_OPENAI_RESPONSE_TEXT || chatContent;
 const launchReplyFromPrompt =
   process.env.NEMOCLAW_FAKE_OPENAI_LAUNCH_REPLY_FROM_PROMPT === "1";
@@ -83,7 +107,17 @@ function sendChatSse(res: ServerResponse, content: string): void {
     model,
     choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
   });
-  const body = `data: ${chunk}\n\ndata: ${doneChunk}\n\ndata: [DONE]\n\n`;
+  const usageChunk = chatUsage
+    ? `data: ${JSON.stringify({
+        id: "chatcmpl-fake-openai-compatible",
+        object: "chat.completion.chunk",
+        created: 0,
+        model,
+        choices: [],
+        usage: chatUsage,
+      })}\n\n`
+    : "";
+  const body = `data: ${chunk}\n\ndata: ${doneChunk}\n\n${usageChunk}data: [DONE]\n\n`;
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Content-Length": Buffer.byteLength(body),
@@ -238,6 +272,7 @@ const server = createServer(async (req, res) => {
           finish_reason: "stop",
         },
       ],
+      ...(chatUsage ? { usage: chatUsage } : {}),
     });
     return;
   }

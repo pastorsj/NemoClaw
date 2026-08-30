@@ -37,7 +37,9 @@ describe("terminal agent runtime helpers", () => {
     const deepAgentsCode = loadAgent("langchain-deepagents-code");
 
     expect(getTerminalCommand(deepAgentsCode, "interactive")).toBe("dcode");
-    expect(getTerminalCommand(deepAgentsCode, "headless")).toBe("dcode -n");
+    expect(getTerminalCommand(deepAgentsCode, "headless")).toBe(
+      "timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.deepagents/fabric.json",
+    );
   });
 });
 

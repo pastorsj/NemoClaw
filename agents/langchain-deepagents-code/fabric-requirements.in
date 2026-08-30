@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# NeMo Fabric 0.2.0's released Deep Agents adapter requires an older Deep
+# Agents graph than Deep Agents Code 0.1.55. Keep that released, declared
+# graph isolated from the native DCode environment under /opt/venv.
+nemo-fabric[deepagents]==0.2.0

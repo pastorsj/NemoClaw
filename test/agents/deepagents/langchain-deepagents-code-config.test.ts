@@ -68,6 +68,100 @@ function runGenerator(env: Record<string, string | undefined>): string {
 }
 
 describe("LangChain Deep Agents Code config generator", () => {
+  it("projects the managed NVIDIA route into the released Fabric adapter contract", () => {
+    const credentialSentinel = "sk-test-fabric-projection-must-not-be-written";
+    const result = runGeneratorProcess({
+      DEEPAGENTS_CODE_OPENAI_API_KEY: credentialSentinel,
+    });
+
+    expect(result.status).toBe(0);
+    const fabricPath = path.join(result.home, ".deepagents", "fabric.json");
+    const fabricText = fs.readFileSync(fabricPath, "utf8");
+    expect(JSON.parse(fabricText)).toEqual({
+      schema_version: "fabric.agent/v1alpha1",
+      metadata: {
+        name: "nemoclaw-langchain-deepagents-code",
+        description: "NemoClaw-managed LangChain Deep Agents Code headless runtime",
+      },
+      harness: {
+        adapter_id: "nvidia.fabric.langchain.deepagents",
+        resolution: "preinstalled",
+      },
+      runtime: {
+        input_schema: "chat",
+        output_schema: "message",
+        artifacts: "/sandbox/.deepagents/fabric-artifacts",
+        timeout_seconds: 90,
+      },
+      environment: {
+        provider: "local",
+        workspace: "/sandbox",
+        artifacts: "/sandbox/.deepagents/fabric-artifacts",
+        ownership: "caller_owned",
+        control_location: "in_env_control",
+      },
+      models: {
+        default: {
+          provider: "nvidia",
+          model: "nvidia/nemotron-3-super-120b-a12b",
+          api_key_env: "DEEPAGENTS_CODE_OPENAI_API_KEY",
+          base_url: "https://inference.local/v1",
+        },
+      },
+    });
+    expect(fabricText).not.toContain(credentialSentinel);
+    expect(fs.statSync(fabricPath).mode & 0o777).toBe(0o600);
+  });
+
+  it.each([
+    {
+      label: "Nemotron Ultra",
+      environment: { NEMOCLAW_MODEL: "nvidia/nemotron-3-ultra-550b-a55b" },
+      expectedReason: "managed Nemotron Ultra force_nonempty_content option",
+    },
+    {
+      label: "explicit reasoning effort",
+      environment: { NEMOCLAW_REASONING_EFFORT: "high" },
+      expectedReason: "NEMOCLAW_REASONING_EFFORT=high",
+    },
+  ])(
+    "marks Fabric invocation unavailable for $label instead of dropping native model options",
+    ({ environment, expectedReason }) => {
+      const result = runGeneratorProcess(environment);
+
+      expect(result.status).toBe(0);
+      const fabric = JSON.parse(
+        fs.readFileSync(path.join(result.home, ".deepagents", "fabric.json"), "utf8"),
+      ) as {
+        environment: {
+          metadata: { nemoclaw: { invocation_unavailable_reason: string } };
+        };
+      };
+      const reason = fabric.environment.metadata.nemoclaw.invocation_unavailable_reason;
+      expect(reason).toContain(expectedReason);
+      expect(reason).toContain("Use native dcode -n");
+    },
+  );
+
+  it("projects non-NVIDIA routes through Fabric's OpenAI-compatible provider", () => {
+    const result = runGeneratorProcess({
+      NEMOCLAW_MODEL: "openai:gpt-oss-120b",
+      NEMOCLAW_UPSTREAM_PROVIDER: "compatible-endpoint",
+      NEMOCLAW_UPSTREAM_ENDPOINT_URL: "https://example.test/v1",
+    });
+
+    expect(result.status).toBe(0);
+    const fabric = JSON.parse(
+      fs.readFileSync(path.join(result.home, ".deepagents", "fabric.json"), "utf8"),
+    ) as { models: { default: Record<string, string> } };
+    expect(fabric.models.default).toEqual({
+      provider: "openai-compatible",
+      model: "gpt-oss-120b",
+      api_key_env: "DEEPAGENTS_CODE_OPENAI_API_KEY",
+      base_url: "https://inference.local/v1",
+    });
+  });
+
   it("routes managed inference through OpenAI-compatible chat completions", () => {
     const config = runGenerator({});
 
@@ -195,30 +289,29 @@ describe("LangChain Deep Agents Code config generator", () => {
     expect(fs.existsSync(path.join(result.home, ".deepagents", "config.toml"))).toBe(false);
   });
 
-  it.each([
-    "nvidia/nemotron-3-ultra-550b-a55b",
-    "nvidia/nvidia/nemotron-3-ultra",
-  ])("adds the required coding-agent request options for %s", (model) => {
-    const config = runGenerator({ NEMOCLAW_MODEL: model });
+  it.each(["nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nvidia/nemotron-3-ultra"])(
+    "adds the required coding-agent request options for %s",
+    (model) => {
+      const config = runGenerator({ NEMOCLAW_MODEL: model });
 
-    expect(config).toContain(`[models.providers.openai.params."${model}"]`);
-    expect(config).toContain(
-      "extra_body = { chat_template_kwargs = { force_nonempty_content = true } }",
-    );
-  });
+      expect(config).toContain(`[models.providers.openai.params."${model}"]`);
+      expect(config).toContain(
+        "extra_body = { chat_template_kwargs = { force_nonempty_content = true } }",
+      );
+    },
+  );
 
-  it.each([
-    "low",
-    "medium",
-    "high",
-  ])("records the onboarding reasoning effort as a managed request parameter: %s (#7938)", (effort) => {
-    const config = runGenerator({ NEMOCLAW_REASONING_EFFORT: effort });
+  it.each(["low", "medium", "high"])(
+    "records the onboarding reasoning effort as a managed request parameter: %s (#7938)",
+    (effort) => {
+      const config = runGenerator({ NEMOCLAW_REASONING_EFFORT: effort });
 
-    expect(config).toContain(
-      '[models.providers.openai.params."nvidia/nemotron-3-super-120b-a12b"]',
-    );
-    expect(config).toContain(`extra_body = { reasoning_effort = "${effort}" }`);
-  });
+      expect(config).toContain(
+        '[models.providers.openai.params."nvidia/nemotron-3-super-120b-a12b"]',
+      );
+      expect(config).toContain(`extra_body = { reasoning_effort = "${effort}" }`);
+    },
+  );
 
   it("keeps both managed request parameters for an Ultra model with a reasoning effort (#7938)", () => {
     const config = runGenerator({

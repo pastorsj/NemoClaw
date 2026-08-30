@@ -181,7 +181,9 @@ describe("CLI sandbox status text output", () => {
     expect(r.code).toBe(0);
     expect(r.out).toContain("Harness:  LangChain Deep Agents Code (terminal)");
     expect(r.out).toContain("Interactive: dcode");
-    expect(r.out).toContain('Headless: dcode -n "<prompt>"');
+    expect(r.out).toContain(
+      'Headless: timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.deepagents/fabric.json "<prompt>"',
+    );
     expect(r.out).toContain("LangChain Deep Agents Code runtime: terminal");
     expect(r.out).not.toContain("Harness:  OpenClaw (gateway)");
     expect(r.out).not.toContain("OpenClaw: running");

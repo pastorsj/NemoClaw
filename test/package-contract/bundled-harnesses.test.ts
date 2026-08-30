@@ -294,7 +294,7 @@ describe("bundled harness package artifacts", () => {
     expect(payloadFiles).not.toEqual(
       expect.arrayContaining([
         expect.stringMatching(
-          /(?:^|\/)(?:\.git|\.cache|\.mypy_cache|\.npm|\.pytest_cache|\.tox|__pycache__|coverage|dist|node_modules|tests|(?!(?:npm-cache-seed)(?:\/|$))[^/]*-cache)(?:\/|$)/u,
+          /(?:^|\/)(?:\.git|\.cache|\.mypy_cache|\.npm|\.pytest_cache|\.tox|__pycache__|coverage|dist|node_modules|tests|[^/]+\.egg-info|(?!(?:npm-cache-seed)(?:\/|$))[^/]*-cache)(?:\/|$)/u,
         ),
         expect.stringMatching(
           /(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.netrc|credentials\.json)(?:$|\/)/u,

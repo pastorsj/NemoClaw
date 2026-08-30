@@ -2,10 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Plans 02-05 through 02-22 established harness CLI, pinned definitions, package-bound
-  onboarding and recovery authority, installer reconciliation, snapshot mutation authority, and
-  package-aware typed E2E fixtures
-last_updated: "2026-08-29T21:29:00.000Z"
+status: Phase 2 foundation is reconciled with current origin/main; Phase 3 Fabric invocation
+  evaluation is active with one released Deep Agents round trip
+last_updated: "2026-08-30T02:38:32.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
@@ -43,8 +42,8 @@ Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `b6ee5c8caf2824a945ca3ed3b7ed3e92088982af`
-- Local upstream merge: `dae21f605455c7d73153b843ee882c88909e0635`
+- Exact base: `origin/main` at `78f0c9b7db15b22d83024bcda510ae0cebefb118`
+- Local upstream merge: `34ceb565734785bebb0229150fbde0bd5faf8a8f`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
 - Pushes: none
@@ -54,8 +53,8 @@ changed 1,806. A trial direct merge produced 2,189 unresolved paths, including 1
 `test/` and 213 under `packages/`. Phase 2 was then rebased and re-audited through the exact base
 above. The migration strategy remains semantic capability-slice replay onto current main.
 
-The physical `packages/` directories in this checkout are ignored build leftovers from the
-preserved branch. Current `HEAD` tracks no source under `packages/`.
+`packages/nemoclaw-fabric` is the first source package added during this replay. Other physical
+`packages/` directories remain ignored build leftovers from the preserved branch.
 
 After Plan 02-03, the branch merged the three newer `origin/main` commits through
 `d63f7b037dbec3d34dba73ed75f09a330d36b36f`. The merge had no conflicts. Package-store,
@@ -135,10 +134,10 @@ tree.
 
 ## Next Execution
 
-Complete Plan 02-23 with deterministic checks and bounded no-messaging Mac and Brev development
-qualification. Keep arbitrary installed host code, remote package discovery, product activation,
-and support claims outside this work. An upstream contribution still requires its own accepted
-NVIDIA/NemoClaw product decision.
+Execute `.planning/phases/NCC-03-fabric-headless/03-01-PLAN.md`. Keep arbitrary installed host code,
+remote package discovery, product activation, and support claims outside this work. Complete the
+remaining Phase 2 no-messaging qualification as part of the combined Mac and Brev evidence. An
+upstream contribution still requires its own accepted NVIDIA/NemoClaw product decision.
 
 ## Preserved Local State
 

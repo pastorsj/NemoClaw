@@ -304,13 +304,15 @@ describe("harness package tree", () => {
     expect(readdirSpy).not.toHaveBeenCalled();
   });
 
-  it.each(["tests/unit.test.ts", "plugin/src/runtime.test.ts", "package-lock.json"])(
-    "rejects authoring path %s",
-    (relativePath) => {
-      const fixture = createTree({ [relativePath]: { contents: "authoring" } });
-      expect(() => validateHarnessPackageTree(fixture.sourceRoot)).toThrow(/authoring content/);
-    },
-  );
+  it.each([
+    "tests/unit.test.ts",
+    "plugin/src/runtime.test.ts",
+    "package-lock.json",
+    "nemoclaw_fabric.egg-info/METADATA",
+  ])("rejects authoring path %s", (relativePath) => {
+    const fixture = createTree({ [relativePath]: { contents: "authoring" } });
+    expect(() => validateHarnessPackageTree(fixture.sourceRoot)).toThrow(/authoring content/);
+  });
 
   it.each([".env", ".ssh/id_ed25519", "service-account-prod.json"])(
     "rejects credential path %s",

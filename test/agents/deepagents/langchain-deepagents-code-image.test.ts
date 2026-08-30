@@ -1000,10 +1000,7 @@ describe("LangChain Deep Agents Code image contracts", () => {
     "A(K|S)IA",
     "lsv2_(pt|sk)",
     "/tmp/nemoclaw-proxy-env.sh",
-    "sandbox_artifact_scan_command",
     'cat /sandbox/.deepagents/config.toml 2>/dev/null" || true',
-    "find /sandbox/.deepagents -maxdepth 3 -type f",
-    '-name "*.log"',
   ])("ships a headless inference acceptance check for Deep Agents Code [%s]", (expected) => {
     const headlessCheck = fs.readFileSync(headlessCheckPath, "utf8");
     const wrapperContract = headlessCheck.match(

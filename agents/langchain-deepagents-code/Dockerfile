@@ -69,6 +69,7 @@ FROM ${BASE_IMAGE}
 
 # The supplied base may end as a non-root runtime user. Reset the build user
 # explicitly before installing the root-owned managed-startup handoff.
+# hadolint ignore=DL3066
 USER root
 
 ARG NEMOCLAW_CORPORATE_CA_B64
@@ -201,6 +202,8 @@ COPY agents/langchain-deepagents-code/dcode-wrapper.sh /usr/local/lib/nemoclaw/d
 COPY agents/langchain-deepagents-code/dcode-launcher.sh /usr/local/lib/nemoclaw/dcode-launcher.sh
 COPY agents/langchain-deepagents-code/dcode-login-profile.sh /usr/local/lib/nemoclaw/dcode-login-profile.sh
 COPY agents/langchain-deepagents-code/dcode-session-supervisor.py /usr/local/lib/nemoclaw/dcode-session-supervisor.py
+COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
+COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
 COPY agents/langchain-deepagents-code/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
@@ -252,6 +255,34 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/dcode \
     && install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/dcode.real \
     && install -m 0755 /usr/local/lib/nemoclaw/dcode-launcher.sh /usr/local/bin/deepagents-code
+
+# Build the first-party generic runner with the reviewed DCode build environment,
+# then install it without dependencies into Fabric's isolated, already-complete
+# graph. This preserves /opt/venv and gives the sandbox one root-owned command.
+RUN set -eu; \
+    python3 -I -c 'import tomllib; from pathlib import Path; document = tomllib.loads(Path("/opt/nemoclaw-fabric-runner/pyproject.toml").read_text(encoding="utf-8")); project = document["project"]; assert project["name"] == "nemoclaw-fabric"; assert project["version"] == "0.1.0"; assert project["dependencies"] == ["nemo-fabric == 0.2.0"]; assert document["build-system"]["requires"] == ["setuptools == 82.0.1"]' \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; assert version("nemo-fabric") == "0.2.0"' \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && install -d -o root -g root -m 0755 /tmp/nemoclaw-fabric-wheel \
+    && /opt/venv/bin/python3 -I -c 'from importlib.metadata import version; assert version("setuptools") == "82.0.1"' \
+    && /opt/venv/bin/pip3 wheel --no-index --no-deps --no-build-isolation \
+        --wheel-dir /tmp/nemoclaw-fabric-wheel /opt/nemoclaw-fabric-runner \
+    && set -- /tmp/nemoclaw-fabric-wheel/nemoclaw_fabric-0.1.0-*.whl \
+    && test "$#" -eq 1 \
+    && test -f "$1" \
+    && runner_wheel="$1" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps "$runner_wheel" \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import requires, version; expected = {"nemoclaw-fabric": "0.1.0", "nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; assert [item.replace(" ", "") for item in (requires("nemoclaw-fabric") or [])] == ["nemo-fabric==0.2.0"]' \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test "$(stat -c '%u:%g:%a' /usr/local/bin/nemoclaw-fabric)" = "0:0:777" \
+    && test -x /usr/local/bin/nemoclaw-fabric \
+    && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.0 (nemo-fabric 0.2.0)" \
+    && /opt/venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"deepagents-code": "0.1.55", "deepagents": "0.7.5", "langchain-mcp-adapters": "0.3.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual' \
+    && /usr/local/bin/dcode --version \
+    && rm -rf /opt/nemoclaw-fabric-runner /tmp/nemoclaw-fabric-wheel
 
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b
 ARG NEMOCLAW_INFERENCE_PROVIDER_ID=inference
@@ -319,6 +350,8 @@ RUN install -d -m 0755 /usr/local/share/nemoclaw \
     && env -i /usr/local/bin/dcode.real --version \
     && env -i /usr/local/bin/deepagents-code --version
 
+# The managed-inference marker is not an upstream credential.
+# hadolint ignore=DL3064
 ENV HOME=/sandbox \
     VIRTUAL_ENV=/opt/venv \
     PATH="/usr/local/bin:/opt/venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
@@ -352,13 +385,17 @@ ENV HOME=/sandbox \
 
 WORKDIR /sandbox
 RUN test "$(id -u sandbox):$(id -g sandbox):$(pwd)" = "999:999:/sandbox"
+# hadolint ignore=DL3066
 USER sandbox
 
 RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
     && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/ \
     && node --experimental-strip-types /opt/nemoclaw-deepagents-code/generate-config.ts \
-    && chmod 660 /sandbox/.deepagents/config.toml
+    && chmod 660 /sandbox/.deepagents/config.toml \
+    && test -s /sandbox/.deepagents/fabric.json \
+    && test "$(stat -c '%u:%g:%a' /sandbox/.deepagents/fabric.json)" = "999:999:600"
 
+# hadolint ignore=DL3066
 USER root
 RUN chown root:sandbox /sandbox \
     && chmod 1775 /sandbox \

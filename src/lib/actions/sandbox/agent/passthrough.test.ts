@@ -30,13 +30,28 @@ const listAgentsMock = vi.hoisted(() =>
   vi.fn(() => ["custom-terminal", "hermes", "langchain-deepagents-code", "openclaw"]),
 );
 const loadAgentMock = vi.hoisted(() =>
-  vi.fn((name: string) => ({
-    name,
-    runtime:
-      name === "langchain-deepagents-code"
-        ? { kind: "terminal", interactive_command: "dcode", headless_command: "dcode -n" }
-        : undefined,
-  })),
+  vi.fn(
+    (
+      name: string,
+    ): {
+      name: string;
+      runtime?: {
+        kind: string;
+        interactive_command?: string;
+        headless_command?: string;
+      };
+    } => ({
+      name,
+      runtime:
+        name === "langchain-deepagents-code"
+          ? {
+              kind: "terminal",
+              interactive_command: "dcode",
+              headless_command: "nemoclaw-fabric run",
+            }
+          : undefined,
+    }),
+  ),
 );
 const isTerminalAgentMock = vi.hoisted(() =>
   vi.fn((agent: { runtime?: { kind?: string } }) => agent.runtime?.kind === "terminal"),
@@ -175,6 +190,33 @@ describe("runAgentPassthrough", () => {
     expect(execMock).toHaveBeenCalledWith(
       "alpha",
       ["python3", "/app/run_with_harness.py", "start", "--task-id", "demo"],
+      { tty: false },
+    );
+  });
+
+  it("dispatches Pi through its manifest headless command", async () => {
+    getSandboxMock.mockReturnValueOnce({ agent: "pi" });
+    listAgentsMock.mockReturnValueOnce([
+      "custom-terminal",
+      "hermes",
+      "langchain-deepagents-code",
+      "openclaw",
+      "pi",
+    ]);
+    loadAgentMock.mockReturnValueOnce({
+      name: "pi",
+      runtime: {
+        kind: "terminal",
+        interactive_command: "pi",
+        headless_command: "pi --no-approve --print",
+      },
+    });
+
+    await runAgentPassthrough("pi-sandbox", { extraArgs: ["Reply with PONG"] });
+
+    expect(execMock).toHaveBeenCalledWith(
+      "pi-sandbox",
+      ["pi", "--no-approve", "--print", "Reply with PONG"],
       { tty: false },
     );
   });
@@ -452,27 +494,47 @@ describe("runAgentPassthrough", () => {
     expect(execMock).not.toHaveBeenCalled();
   });
 
-  it("dispatches Deep Agents Code help to dcode instead of local wrapper help (#5790)", async () => {
+  it("dispatches Deep Agents Code help to its headless command instead of local wrapper help", async () => {
     getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
     await runAgentPassthrough("dcode-help", { extraArgs: ["--help"] });
     expect(ensureLiveMock).toHaveBeenCalledWith("dcode-help", { allowNonReadyPhase: true });
-    expect(execMock).toHaveBeenCalledWith("dcode-help", ["dcode", "--help"], { tty: false });
+    expect(execMock).toHaveBeenCalledWith("dcode-help", ["nemoclaw-fabric", "run", "--help"], {
+      tty: false,
+    });
   });
 
-  it("dispatches bare Deep Agents Code invocations to dcode so upstream owns exit code (#5790)", async () => {
+  it("dispatches a bare Deep Agents Code invocation to its headless command", async () => {
     getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
     await runAgentPassthrough("dcode-help");
-    expect(execMock).toHaveBeenCalledWith("dcode-help", ["dcode"], { tty: false });
+    expect(execMock).toHaveBeenCalledWith("dcode-help", ["nemoclaw-fabric", "run"], {
+      tty: false,
+    });
   });
 
-  it("propagates bare Deep Agents Code non-zero exits from the sandbox exec path (#5790)", async () => {
+  it("propagates a headless terminal command failure from the sandbox exec path", async () => {
     getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
     execMock.mockRejectedValueOnce(new Error("__exit:42"));
 
     await expect(runAgentPassthrough("dcode-fail")).rejects.toThrow("__exit:42");
 
     expect(ensureLiveMock).toHaveBeenCalledWith("dcode-fail", { allowNonReadyPhase: true });
-    expect(execMock).toHaveBeenCalledWith("dcode-fail", ["dcode"], { tty: false });
+    expect(execMock).toHaveBeenCalledWith("dcode-fail", ["nemoclaw-fabric", "run"], {
+      tty: false,
+    });
+  });
+
+  it("falls back to the interactive command when a terminal agent has no headless command", async () => {
+    getSandboxMock.mockReturnValueOnce({ agent: "custom-terminal" });
+    loadAgentMock.mockReturnValueOnce({
+      name: "custom-terminal",
+      runtime: { kind: "terminal", interactive_command: "custom-agent" },
+    });
+
+    await runAgentPassthrough("custom", { extraArgs: ["--status"] });
+
+    expect(execMock).toHaveBeenCalledWith("custom", ["custom-agent", "--status"], {
+      tty: false,
+    });
   });
 
   it("treats a clean registry miss as OpenClaw (preserves bootstrap and recovery paths)", async () => {
@@ -561,8 +623,8 @@ describe("runAgentPassthrough", () => {
       name: "custom-terminal",
       runtime: {
         kind: "terminal",
-        interactive_command: 'tool --profile "Deep Agents"',
-        headless_command: "tool -n",
+        interactive_command: "tool",
+        headless_command: 'tool --profile "Deep Agents"',
       },
     });
     const { writes, exit, proc } = makeProcMock();

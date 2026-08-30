@@ -140,9 +140,9 @@ while NemoClaw safely composes exact versions without taking ownership away from
 
 ### NeMo Fabric
 
-- [ ] **FABRIC-01**: A NeMo Fabric pilot does not replace the agent, runtime-provider, serving,
-  platform, OpenShell, or NemoClaw lifecycle contract. If retained after the pilot, Fabric can be
-  only an optional sandbox-local agent capability.
+- [ ] **FABRIC-01**: A NeMo Fabric experiment does not replace the agent, runtime-provider, serving,
+  platform, OpenShell, or NemoClaw lifecycle contract. Fabric remains an optional sandbox-local
+  invocation candidate until a later accepted product decision.
 - [ ] **FABRIC-02**: Deterministic tests pin Fabric and adapter versions and digests, adapter contract,
   fixture identity, Python, OS, architecture, and capabilities, then prove discovery, planning,
   doctor, ordered invocation, partial start, malformed results, transport failures, isolation, and
@@ -151,8 +151,9 @@ while NemoClaw safely composes exact versions without taking ownership away from
   exact installation, policy and egress, synthetic canary-secret custody across every output and
   persisted surface, sandbox isolation, and cleanup.
 - [ ] **FABRIC-03**: A real agent adapter enters qualification only when its agent semantics and exact
-  dependency versions match the NemoClaw package. The supported path uses the Fabric SDK, not the
-  experimentation CLI.
+  dependency versions match the NemoClaw package. The implementation uses the Fabric SDK, not the
+  experimentation CLI. Fabric 0.2 Deep Agents remains evaluation evidence because it does not match
+  native DCode dependencies or model settings. Pi waits for a public adapter release.
 
 ### Testing and release
 
@@ -189,7 +190,8 @@ while NemoClaw safely composes exact versions without taking ownership away from
 - Runtime-provider activation from an untrusted third-party package.
 - Separate messaging-channel packages before agent-native rendering is open and proven.
 - General observability packages before two independent consumers prove a contract.
-- Product execution through NeMo Fabric before the validation pilot and exact adapter qualification.
+- Product activation or support through NeMo Fabric before exact adapter qualification and an
+  accepted product decision.
 - Pi, NemoCUA, Podman, MXC, or a DGX Station host preparer as supported surfaces without their own
   accepted product and qualification decisions.
 

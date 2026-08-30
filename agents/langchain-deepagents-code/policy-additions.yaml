@@ -14,6 +14,7 @@ filesystem_policy:
   read_only:
     - /usr
     - /opt/venv
+    - /opt/nemoclaw-fabric-venv
     - /lib
     - /proc
     - /dev/urandom
@@ -57,8 +58,11 @@ network_policies:
           - allow: { method: GET, path: "/v1/models/**" }
     binaries:
       - { path: /usr/local/bin/dcode }
+      - { path: /usr/local/bin/nemoclaw-fabric }
       - { path: /opt/venv/bin/python3* }
       - { path: /opt/venv/lib/python3.13/** }
+      - { path: /opt/nemoclaw-fabric-venv/bin/python3* }
+      - { path: /opt/nemoclaw-fabric-venv/lib/python3.13/** }
 
   github:
     name: github
@@ -83,11 +87,13 @@ network_policies:
     binaries:
       - { path: /usr/bin/git }
       - { path: /usr/local/bin/dcode }
+      - { path: /usr/local/bin/nemoclaw-fabric }
       # OpenShell observes Python module traffic from dcode as the Python
       # interpreter, not only as the /usr/local/bin/dcode shell wrapper. Keep
       # this broad Python boundary limited to approved GitHub hosts; optional
       # Tavily, LangSmith, MCP, and arbitrary hosts are intentionally absent.
       - { path: /opt/venv/bin/python3* }
+      - { path: /opt/nemoclaw-fabric-venv/bin/python3* }
 
   pypi:
     name: pypi
@@ -112,5 +118,7 @@ network_policies:
       # must be added explicitly by policy.
       - { path: /sandbox/**/bin/pip3 }
       - { path: /opt/venv/bin/python3* }
+      - { path: /opt/nemoclaw-fabric-venv/bin/python3* }
       - { path: /sandbox/**/bin/python3* }
       - { path: /usr/local/bin/dcode }
+      - { path: /usr/local/bin/nemoclaw-fabric }

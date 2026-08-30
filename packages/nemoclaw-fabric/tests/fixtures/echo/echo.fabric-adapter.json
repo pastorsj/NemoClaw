@@ -1,0 +1,58 @@
+{
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "test.nemoclaw.echo",
+  "adapter_kind": "python",
+  "runner": {
+    "module": "echo_adapter",
+    "cwd": ".",
+    "env": {
+      "PYTHONPATH": "src"
+    }
+  },
+  "settings_schema": {
+    "type": "object",
+    "properties": {
+      "mode": {
+        "type": "string",
+        "enum": [
+          "success",
+          "fail",
+          "malformed",
+          "crash",
+          "block",
+          "delay",
+          "start_error",
+          "stop_error"
+        ]
+      },
+      "delay_seconds": {
+        "type": "number",
+        "minimum": 0
+      },
+      "event_marker": {
+        "type": "string"
+      },
+      "pid_marker": {
+        "type": "string"
+      },
+      "secret_env": {
+        "type": "string"
+      }
+    },
+    "additionalProperties": false
+  },
+  "requirements": {
+    "binaries": [
+      "python3"
+    ]
+  },
+  "config": {
+    "accepts": []
+  },
+  "capabilities": {
+    "service": false,
+    "streaming": false,
+    "updates": false,
+    "cancellation": false
+  }
+}

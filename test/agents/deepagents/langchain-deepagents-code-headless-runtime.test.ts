@@ -217,6 +217,68 @@ describe("LangChain Deep Agents Code headless runtime contracts", () => {
     expect(classify("1", "something happened\nDCODE_EXIT:1")).toBe("fail:nonzero-exit");
   });
 
+  it("accepts only NeMo Fabric JSON from the released Deep Agents adapter containing PONG", () => {
+    const classify = (exitCode: string, output: string) =>
+      runHeadlessCheckHelper("fabric-classify-output", {
+        FABRIC_EXIT: exitCode,
+        FABRIC_OUTPUT: output,
+      });
+    const envelope = (overrides: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        status: "succeeded",
+        harness: "nvidia.fabric.langchain.deepagents",
+        adapter_kind: "python",
+        output: { response: "PONG" },
+        usage: { total_tokens: 11 },
+        ...overrides,
+      });
+
+    expect(classify("0", envelope())).toBe("pass:fabric-json-pong");
+    expect(classify("124", "still waiting")).toBe("fail:timeout");
+    expect(classify("1", envelope())).toBe("fail:nonzero-exit");
+    expect(classify("1", "openai.APIConnectionError")).toBe("fail:inference-connection-failure");
+    expect(classify("0", envelope({ harness: "another.adapter" }))).toBe(
+      "fail:invalid-fabric-json-envelope",
+    );
+    expect(classify("0", envelope({ adapter_kind: "subprocess" }))).toBe(
+      "fail:invalid-fabric-json-envelope",
+    );
+    expect(classify("0", envelope({ output: { response: "PONG because it works" } }))).toBe(
+      "fail:invalid-fabric-json-envelope",
+    );
+    expect(classify("0", envelope({ usage: { total_tokens: 0 } }))).toBe(
+      "fail:invalid-fabric-json-envelope",
+    );
+    expect(classify("0", `progress\n${envelope()}`)).toBe("fail:invalid-fabric-json-envelope");
+  });
+
+  it("requires Fabric config failures to redact credential-shaped paths", () => {
+    const sentinel = "sk-proj-nemoclaw-fabric-redaction-0123456789";
+    const classify = (exitCode: string, output: string) =>
+      runHeadlessCheckHelper("fabric-redaction-output", {
+        FABRIC_EXIT: exitCode,
+        FABRIC_OUTPUT: output,
+        FABRIC_REDACTION_SENTINEL: sentinel,
+      });
+    const envelope = (message: string, stage = "config", code = "invalid_config") =>
+      JSON.stringify({
+        status: "failed",
+        error: { stage, code, message, retryable: false },
+      });
+
+    expect(classify("2", envelope("could not read /sandbox/.deepagents/<redacted>.json"))).toBe(
+      "pass:config-error-redacted",
+    );
+    expect(classify("2", envelope(`could not read ${sentinel}`))).toBe("fail:secret-leak");
+    expect(classify("1", envelope("could not read <redacted>"))).toBe("fail:unexpected-exit");
+    expect(classify("2", envelope("could not read missing.json"))).toBe(
+      "fail:redaction-marker-missing",
+    );
+    expect(classify("2", envelope("could not read <redacted>", "invoke"))).toBe(
+      "fail:invalid-error-envelope",
+    );
+  });
+
   it("accepts only the normalized login-shell proxy contract (#6191)", () => {
     const validate = (proxyUrl: string, noProxy: string, lowerProxy = proxyUrl) => {
       const loginHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-login-"));

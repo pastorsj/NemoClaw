@@ -323,6 +323,11 @@ expect_blocked \
 expect_blocked "arbitrary Python" "LangSmith" "https://api.smith.langchain.com/"
 expect_blocked "arbitrary Python" "MCP hosts" "https://modelcontextprotocol.io/"
 expect_blocked "arbitrary Python" "unapproved hosts" "https://example.com/"
+expect_blocked \
+  "Fabric adapter Python" \
+  "unapproved hosts" \
+  "https://example.com/" \
+  "/opt/nemoclaw-fabric-venv/bin/python3"
 
 # Exercise the actual Deep Agents fetch_url transport. Unlike urllib, upstream
 # fetch_url disables ambient proxies to pin direct DNS results; the managed

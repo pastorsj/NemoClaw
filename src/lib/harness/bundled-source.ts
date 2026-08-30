@@ -197,6 +197,10 @@ const STANDARD_SOURCES: readonly BundledHarnessSourceDeclaration[] = Object.free
         manifestPath: "agents/langchain-deepagents-code/manifest.yaml",
         mappings: [
           sourceTree("agents/langchain-deepagents-code", "harness-owned"),
+          sourceFile("packages/nemoclaw-fabric/README.md"),
+          sourceFile("packages/nemoclaw-fabric/build-requirements.lock"),
+          sourceFile("packages/nemoclaw-fabric/pyproject.toml"),
+          sourceTree("packages/nemoclaw-fabric/src"),
           sourceTree("nemoclaw-blueprint"),
           sourceTree("tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle"),
           sourceFile("src/lib/inference/managed-dcode/identity.ts"),

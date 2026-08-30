@@ -9,18 +9,21 @@
 # placeholder OpenAI-compatible key NemoClaw writes into config.toml. The login
 # shell path must reject an empty prompt with exit 2, then return a versioned
 # JSON success envelope containing PONG with exit 0 for a real prompt; provider,
-# connection, DNS, timeout, and ambiguous failures are not acceptable. No real
-# provider/proxy credentials may appear in
-# config.toml, .env, .mcp.json, /tmp/nemoclaw-proxy-env.sh, or output.
+# connection, DNS, timeout, and ambiguous failures are not acceptable. The
+# public host `agent` command must select the registered agent manifest's
+# `nemoclaw-fabric` command, enter the same OpenShell sandbox, and return a
+# normalized JSON PONG from the released Deep Agents adapter. No real credentials may
+# appear in config.toml, fabric.json, .env, .mcp.json,
+# /tmp/nemoclaw-proxy-env.sh, artifacts, or output.
 # The sandbox entrypoint, direct managed launcher, and both login/interactive
 # shell paths must keep the documented nproc=512 and nofile=65536 contract.
 # Direct DNS/hosts resolution is intentionally not required: OpenShell's managed
 # proxy routes inference.local when the request follows the normalized path.
 # Keep these phases in one ordered acceptance check: the absent-DNS observation
-# must describe the same sandbox used by login, direct-exec, and connect, and the
-# final credential scan must cover every captured output. A second connect run
-# sends untrusted evidence through the image-installed route-probe helper and
-# must stop before session attach. Per-phase diagnostics retain failure
+# must describe the same sandbox used by login, direct-exec, host agent, and
+# connect. The final credential scan must cover every captured output. A second
+# connect run sends untrusted evidence through the image-installed route-probe
+# helper and must stop before session attach. Per-phase diagnostics retain failure
 # attribution without splitting that shared evidence boundary.
 # This check is the typed target's risk-plan activation marker. The same target's
 # ordered thread-auto-approval check verifies that two named rebuilds converge and
@@ -31,6 +34,8 @@ set -euo pipefail
 SANDBOX_NAME="${SANDBOX_NAME:-${NEMOCLAW_SANDBOX_NAME:-e2e-cloud-onboard}}"
 PREFIX="07-deepagents-code-headless-inference"
 HEADLESS_TIMEOUT="${DEEPAGENTS_HEADLESS_TIMEOUT:-120}"
+FABRIC_CONFIG_PATH="/sandbox/.deepagents/fabric.json"
+FABRIC_REDACTION_SENTINEL="sk-proj-nemoclaw-fabric-redaction-0123456789"
 
 ok() { printf '%s\n' "${PREFIX}: OK ($*)"; }
 info() { printf '%s\n' "${PREFIX}: $*"; }
@@ -73,6 +78,81 @@ sandbox_direct_rlimit_exec() {
 
 sandbox_direct_dcode() {
   openshell sandbox exec --name "$SANDBOX_NAME" --timeout "$HEADLESS_TIMEOUT" -- dcode "$@" 2>&1
+}
+
+nemoclaw_fabric_agent() {
+  timeout --signal=TERM --kill-after=15s "$HEADLESS_TIMEOUT" \
+    "${NEMOCLAW_CLI_BIN:-${REPO:-.}/bin/nemoclaw.js}" \
+    "$SANDBOX_NAME" agent "$@" 2>&1
+}
+
+sandbox_fabric_version_contract() {
+  local contract_command
+  contract_command="$(
+    cat <<'CONTRACT'
+set -euo pipefail
+[ "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.0 (nemo-fabric 0.2.0)" ]
+/opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0"}; actual = {name: version(name) for name in expected}; raise SystemExit(0 if actual == expected else 1)'
+printf '%s\n' NEMOCLAW_FABRIC_VERSION_OK
+CONTRACT
+  )"
+  sandbox_login_exec "$contract_command"
+}
+
+sandbox_fabric_config_contract() {
+  local contract_command
+  contract_command="$(
+    cat <<'CONTRACT'
+set -euo pipefail
+/opt/nemoclaw-fabric-venv/bin/python3 -I - <<'PY'
+import json
+import os
+import stat
+from pathlib import Path
+
+
+def require(condition: bool, reason: str) -> None:
+    if condition:
+        return
+    print(f"NEMOCLAW_FABRIC_CONFIG_FAIL:{reason}")
+    raise SystemExit(1)
+
+
+config_path = Path("/sandbox/.deepagents/fabric.json")
+require(config_path.is_file() and not config_path.is_symlink(), "file")
+require(stat.S_IMODE(config_path.stat().st_mode) == 0o600, "mode")
+config = json.loads(config_path.read_text(encoding="utf-8"))
+require(config.get("schema_version") == "fabric.agent/v1alpha1", "schema")
+require(
+    config.get("harness")
+    == {
+        "adapter_id": "nvidia.fabric.langchain.deepagents",
+        "resolution": "preinstalled",
+    },
+    "adapter",
+)
+require(config.get("runtime", {}).get("input_schema") == "chat", "input-schema")
+require(config.get("runtime", {}).get("output_schema") == "message", "output-schema")
+require(config.get("runtime", {}).get("timeout_seconds") == 90, "timeout")
+require(config.get("environment", {}).get("workspace") == "/sandbox", "workspace")
+require(
+    "invocation_unavailable_reason"
+    not in config.get("environment", {}).get("metadata", {}).get("nemoclaw", {}),
+    "availability",
+)
+model = config.get("models", {}).get("default", {})
+require(model.get("provider") == "openai-compatible", "provider")
+require(model.get("model") == "nvidia/nemotron-3-super-120b-a12b", "model")
+require(model.get("base_url") == "https://inference.local/v1", "route")
+require(model.get("api_key_env") == "DEEPAGENTS_CODE_OPENAI_API_KEY", "credential-name")
+credential = os.environ.get("DEEPAGENTS_CODE_OPENAI_API_KEY", "")
+require(bool(credential), "credential-environment")
+require(credential not in json.dumps(config, sort_keys=True), "credential-value")
+print("NEMOCLAW_FABRIC_CONFIG_OK")
+PY
+CONTRACT
+  )"
+  sandbox_login_exec "$contract_command"
 }
 
 sandbox_dcode_wrapper_contract() {
@@ -300,17 +380,52 @@ rlimit_shell_contract_command() {
   printf '%s' 'set -euo pipefail; contract_fail() { printf "%s\n" "NEMOCLAW_DCODE_SHELL_RLIMIT_FAIL:$1"; exit 1; }; nproc_soft="$(ulimit -Su)"; nproc_hard="$(ulimit -Hu)"; nofile_soft="$(ulimit -Sn)"; nofile_hard="$(ulimit -Hn)"; for value in "$nproc_soft" "$nproc_hard" "$nofile_soft" "$nofile_hard"; do case "$value" in "" | *[!0-9]*) contract_fail nonnumeric ;; esac; done; [ "$nproc_soft" = 512 ] && [ "$nproc_hard" = 512 ] || contract_fail nproc; [ "$nofile_soft" = 65536 ] && [ "$nofile_hard" = 65536 ] || contract_fail nofile; set +e; ulimit -Su 513 >/dev/null 2>&1; raise_nproc="$?"; ulimit -Sn 65537 >/dev/null 2>&1; raise_nofile="$?"; set -e; [ "$raise_nproc" -ne 0 ] || contract_fail raise-nproc; [ "$raise_nofile" -ne 0 ] || contract_fail raise-nofile; printf "%s\n" NEMOCLAW_DCODE_SHELL_RLIMIT_OK'
 }
 
-sandbox_artifact_scan_command() {
-  cat <<'SCAN'
-for path in /sandbox/.deepagents/config.toml /sandbox/.deepagents/.env /sandbox/.deepagents/.mcp.json /sandbox/.deepagents/.nemoclaw-mcp.json /tmp/nemoclaw-proxy-env.sh; do
-  if [ -e "$path" ]; then
-    cat "$path" 2>/dev/null || true
+sandbox_secret_scan() {
+  local quoted_pattern
+  local scan_command
+  local quoted_scan_command
+  printf -v quoted_pattern '%q' "$SECRET_PATTERN"
+  scan_command="$(
+    cat <<SCAN
+set -euo pipefail
+pattern=${quoted_pattern}
+scanned=0
+scan_file() {
+  artifact="\$1"
+  [ -r "\$artifact" ] || { printf '%s\\n' NEMOCLAW_SECRET_SCAN_UNREADABLE; exit 1; }
+  scanned=\$((scanned + 1))
+  [ "\$scanned" -le 100 ] || { printf '%s\\n' NEMOCLAW_SECRET_SCAN_FILE_LIMIT; exit 1; }
+  artifact_bytes="\$(wc -c <"\$artifact")"
+  [ "\$artifact_bytes" -le 1048576 ] || { printf '%s\\n' NEMOCLAW_SECRET_SCAN_SIZE_LIMIT; exit 1; }
+  if grep -Eaq -- "\$pattern" "\$artifact"; then
+    printf '%s\\n' NEMOCLAW_SECRET_FILE_FOUND
+    exit 1
   fi
+}
+for artifact in \
+  /sandbox/.deepagents/config.toml \
+  /sandbox/.deepagents/fabric.json \
+  /sandbox/.deepagents/.env \
+  /sandbox/.deepagents/.mcp.json \
+  /sandbox/.deepagents/.nemoclaw-mcp.json \
+  /tmp/nemoclaw-proxy-env.sh; do
+  [ ! -e "\$artifact" ] || scan_file "\$artifact"
 done
-while IFS= read -r -d "" artifact; do
-  cat "$artifact" 2>/dev/null || true
-done < <(find /sandbox/.deepagents -maxdepth 3 -type f \( -name "*.log" -o -name "*.json" -o -name "*.toml" -o -name ".env" \) -print0 2>/dev/null)
+while IFS= read -r -d '' artifact; do
+  scan_file "\$artifact"
+done < <(find /sandbox/.deepagents/fabric-artifacts -xdev -maxdepth 3 -type f -print0 2>/dev/null || true)
+printf '%s\\n' NEMOCLAW_SECRET_FILES_CLEAN
 SCAN
+  )"
+  printf -v quoted_scan_command '%q' "$scan_command"
+  sandbox_exec "timeout --signal=TERM --kill-after=2s 10s bash -c ${quoted_scan_command}"
+}
+
+sandbox_fabric_processes() {
+  # Match the interpreter argv instead of a broad process name. The probe
+  # command itself therefore cannot match the selected process set.
+  # shellcheck disable=SC2016
+  sandbox_exec 'for command_line in /proc/[0-9]*/cmdline; do [ -r "$command_line" ] || continue; argv0="$(tr "\000" "\n" <"$command_line" 2>/dev/null | sed -n "1p")"; case "$argv0" in /opt/nemoclaw-fabric-venv/bin/python* | /usr/local/bin/nemoclaw-fabric) printf "%s\n" "$argv0" ;; esac; done'
 }
 
 # Secret-shaped patterns that must never appear in managed config or output.
@@ -455,6 +570,116 @@ if completion["response_bytes"] != len(data["response"].encode("utf-8")):
   fi
 
   printf '%s\n' "invalid-json-envelope"
+  return 1
+}
+
+classify_fabric_headless_output() {
+  local fabric_exit="$1"
+  local fabric_output="$2"
+
+  if [ "$fabric_exit" = "124" ]; then
+    printf '%s\n' "timeout"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | is_local_execution_failure; then
+    printf '%s\n' "local-execution-failure"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | is_inference_connection_failure; then
+    printf '%s\n' "inference-connection-failure"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | is_actionable_inference_error; then
+    printf '%s\n' "actionable-inference-error"
+    return 1
+  fi
+
+  if [ "$fabric_exit" != "0" ]; then
+    printf '%s\n' "nonzero-exit"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | python3 -c '
+import json
+import sys
+
+try:
+    result = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(1)
+if not isinstance(result, dict):
+    raise SystemExit(1)
+if result.get("status") != "succeeded":
+    raise SystemExit(1)
+if result.get("harness") != "nvidia.fabric.langchain.deepagents":
+    raise SystemExit(1)
+if result.get("adapter_kind") != "python":
+    raise SystemExit(1)
+output = result.get("output")
+if not isinstance(output, dict):
+    raise SystemExit(1)
+response = output.get("response")
+if not isinstance(response, str) or response.strip() != "PONG":
+    raise SystemExit(1)
+usage = result.get("usage")
+if not isinstance(usage, dict):
+    raise SystemExit(1)
+total_tokens = usage.get("total_tokens")
+if not isinstance(total_tokens, int) or isinstance(total_tokens, bool) or total_tokens <= 0:
+    raise SystemExit(1)
+'; then
+    printf '%s\n' "fabric-json-pong"
+    return 0
+  fi
+
+  printf '%s\n' "invalid-fabric-json-envelope"
+  return 1
+}
+
+classify_fabric_redaction_output() {
+  local fabric_exit="$1"
+  local fabric_output="$2"
+  local sentinel="$3"
+
+  if printf '%s' "$fabric_output" | grep -Fq "$sentinel"; then
+    printf '%s\n' "secret-leak"
+    return 1
+  fi
+
+  if [ "$fabric_exit" != "2" ]; then
+    printf '%s\n' "unexpected-exit"
+    return 1
+  fi
+
+  if ! printf '%s' "$fabric_output" | grep -Fq '<redacted>'; then
+    printf '%s\n' "redaction-marker-missing"
+    return 1
+  fi
+
+  if printf '%s' "$fabric_output" | python3 -c '
+import json
+import sys
+
+try:
+    result = json.load(sys.stdin)
+except json.JSONDecodeError:
+    raise SystemExit(1)
+if not isinstance(result, dict) or result.get("status") != "failed":
+    raise SystemExit(1)
+error = result.get("error")
+if not isinstance(error, dict):
+    raise SystemExit(1)
+if error.get("stage") != "config" or error.get("code") != "invalid_config":
+    raise SystemExit(1)
+'; then
+    printf '%s\n' "config-error-redacted"
+    return 0
+  fi
+
+  printf '%s\n' "invalid-error-envelope"
   return 1
 }
 
@@ -620,7 +845,64 @@ DCODE_EXIT:${direct_exit}"
     fail_test "direct-exec dcode -n --json did not return a success envelope with PONG (${direct_classification}, exit ${direct_exit})"
   fi
 
-  # 7. The user-facing bare-connect readiness path must route every observed
+  # 7. The built image contains the released Fabric runner and Deep Agents adapter.
+  fabric_version_output="$(sandbox_fabric_version_contract || true)"
+  if printf '%s\n' "$fabric_version_output" | grep -Fxq "NEMOCLAW_FABRIC_VERSION_OK"; then
+    pass "Fabric runner and released Deep Agents adapter report their pinned versions"
+  else
+    fail_test "Fabric runner or released Deep Agents adapter does not report its pinned version"
+  fi
+
+  # 8. The package-owned Fabric config selects the released adapter and managed route
+  # without retaining the credential value.
+  fabric_config_output="$(sandbox_fabric_config_contract || true)"
+  if printf '%s\n' "$fabric_config_output" | grep -Fxq "NEMOCLAW_FABRIC_CONFIG_OK"; then
+    pass "Fabric config selects the released Deep Agents adapter and managed inference route"
+  else
+    fabric_config_reason="$(printf '%s\n' "$fabric_config_output" | sed -n 's/^NEMOCLAW_FABRIC_CONFIG_FAIL:\([a-z-]*\)$/\1/p' | tail -n1)"
+    fail_test "Fabric config does not satisfy the package contract (${fabric_config_reason:-unknown contract mismatch})"
+  fi
+
+  # 9. The public host command resolves the registered manifest, crosses the
+  # OpenShell boundary, and uses Fabric's released adapter for one real turn.
+  fabric_processes_before="$(sandbox_fabric_processes || true)"
+  if [ -z "$(printf '%s' "$fabric_processes_before" | tr -d '[:space:]')" ]; then
+    pass "no Fabric runner or adapter process exists before the host turn"
+  else
+    fail_test "a Fabric runner or adapter process existed before the host turn"
+  fi
+  if fabric_headless_output="$(nemoclaw_fabric_agent -m "Reply with exactly one word: PONG" --json)"; then
+    fabric_exit=0
+  else
+    fabric_exit=$?
+  fi
+  if fabric_classification="$(classify_fabric_headless_output "$fabric_exit" "$fabric_headless_output")"; then
+    pass "host agent command reached the registered Fabric adapter and returned ${fabric_classification} (exit ${fabric_exit})"
+  else
+    fail_test "host agent command did not return a Fabric success envelope with PONG (${fabric_classification}, exit ${fabric_exit})"
+  fi
+  fabric_processes_after="$(sandbox_fabric_processes || true)"
+  if [ -z "$(printf '%s' "$fabric_processes_after" | tr -d '[:space:]')" ]; then
+    pass "Fabric stopped its runner and adapter processes after the host turn"
+  else
+    fail_test "Fabric left a runner or adapter process after the host turn"
+  fi
+
+  # 10. A config error must keep the runner's JSON contract and redact the
+  # credential-shaped path before the host command returns it.
+  missing_fabric_config="${FABRIC_CONFIG_PATH%.json}-${FABRIC_REDACTION_SENTINEL}.json"
+  if fabric_redaction_output="$(nemoclaw_fabric_agent --config "$missing_fabric_config" -m "redaction contract probe" --json)"; then
+    fabric_redaction_exit=0
+  else
+    fabric_redaction_exit=$?
+  fi
+  if fabric_redaction_classification="$(classify_fabric_redaction_output "$fabric_redaction_exit" "$fabric_redaction_output" "$FABRIC_REDACTION_SENTINEL")"; then
+    pass "host Fabric config failure returned ${fabric_redaction_classification} (exit ${fabric_redaction_exit})"
+  else
+    fail_test "host Fabric config failure did not preserve its redacted JSON contract (${fabric_redaction_classification}, exit ${fabric_redaction_exit})"
+  fi
+
+  # 11. The user-facing bare-connect readiness path must route every observed
   # sandbox exec to the same sandbox used by the preceding lifecycle evidence.
   connect_output=""
   if connect_output="$(nemoclaw_connect_probe)"; then
@@ -637,7 +919,7 @@ DCODE_EXIT:${direct_exit}"
     fi
   fi
 
-  # 8. Untrusted evidence from the image-installed helper must fail closed
+  # 12. Untrusted evidence from the image-installed helper must fail closed
   # before the user-facing connect path can invoke interactive session attach.
   fail_closed_connect_output="$(dcode_connect_fail_closed_contract || true)"
   fail_closed_connect_exit="$(printf '%s\n' "$fail_closed_connect_output" | sed -n 's/^NEMOCLAW_DCODE_UNTRUSTED_CONNECT_EXIT:\([0-9][0-9]*\)$/\1/p' | tail -n1)"
@@ -652,8 +934,8 @@ DCODE_EXIT:${direct_exit}"
     fail_test "connect did not fail closed before session attach for untrusted image-backed route evidence"
   fi
 
-  # 9. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
-  leak_scan="$(sandbox_exec "$(sandbox_artifact_scan_command)" || true)"
+  # 13. No real secrets in managed config, runtime env files, artifacts, logs, or captured output.
+  leak_scan="$(sandbox_secret_scan || true)"
   combined="${config_output}
 ${openrouter_identity_output}
 ${leak_scan}
@@ -668,12 +950,20 @@ ${proxy_contract_output}
 ${route_output}
 ${headless_output}
 ${direct_headless_output}
+${fabric_version_output}
+${fabric_config_output}
+${fabric_processes_before}
+${fabric_headless_output}
+${fabric_processes_after}
+${fabric_redaction_output}
 ${connect_output}
 ${fail_closed_connect_output}"
-  if printf '%s' "$combined" | contains_secret; then
+  if ! printf '%s\n' "$leak_scan" | grep -Fxq NEMOCLAW_SECRET_FILES_CLEAN; then
+    fail_test "sandbox workspace or agent state failed the bounded credential scan"
+  elif printf '%s' "$combined" | contains_secret; then
     fail_test "secret-shaped value found in config/env/output (redacted from log)"
   else
-    pass "no real provider/proxy credentials in config, runtime env, or output"
+    pass "no credential-shaped value in sandbox files, runtime state, or captured output"
   fi
 
   printf '%s\n' "${PREFIX}: $PASSED passed, $FAILED failed"

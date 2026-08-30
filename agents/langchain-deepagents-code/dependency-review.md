@@ -3,8 +3,8 @@
 
 # LangChain Deep Agents Code Dependency Review
 
-This file records the reviewed dependency baseline for the Deep Agents Code sandbox base image.
-Update it whenever `requirements.lock` changes.
+This file records the reviewed dependency baselines for the Deep Agents Code sandbox base image.
+Update it whenever either managed lock changes.
 
 - Lockfile: `agents/langchain-deepagents-code/requirements.lock`
 - Lockfile SHA-256: `203eeeb3786c736423be60ce2b315ad6f817d4adf0c13de184bf5deee4c793ad`
@@ -31,6 +31,49 @@ NemoClaw launcher and exact-version package-patch boundaries.
 The image build runs `pip3 check` and asserts all eight installed package versions, including Deep Agents Code itself, before publishing.
 The complete point-in-time audit now reports only two duplicate database records for `setuptools==82.0.1`; that record is outside the Critical/High remediation scope.
 This review does not claim the complete lock is vulnerability-free.
+
+## Isolated NeMo Fabric Headless Graph
+
+The released `nemo-fabric==0.2.0` Deep Agents extra cannot share DCode's
+`/opt/venv`. The released adapter requires
+`langchain-mcp-adapters>=0.1,<0.3.0`, while
+`deepagents-code==0.1.55` requires `langchain-mcp-adapters>=0.3.0,<1.0.0`.
+The adapter's supported harness extra also requires
+`deepagents>=0.6.12,<0.7.0`, while DCode pins `deepagents==0.7.5`. Resolving
+either the bare adapter beside DCode or `nemo-fabric[deepagents]==0.2.0`
+beside DCode fails. Bypassing those requirements would create an unsupported
+version pairing, so the image uses a separate `/opt/nemoclaw-fabric-venv` and
+leaves native DCode unchanged.
+
+- Lockfile: `agents/langchain-deepagents-code/fabric-requirements.lock`
+- Lockfile SHA-256: `b561be9731f82af8e67a891440970f6ad7ad4aa1a9b5e34d8ed6b8fff524c0c9`
+- Generate command: `uv pip compile agents/langchain-deepagents-code/fabric-requirements.in --generate-hashes --python-version 3.13 --python-platform x86_64-manylinux_2_28 --prerelease disallow --exclude-newer 2026-08-29T00:00:00Z -o agents/langchain-deepagents-code/fabric-requirements.lock`
+- Audit command: `uv tool run --python 3.13 pip-audit -r agents/langchain-deepagents-code/fabric-requirements.lock --progress-spinner off --disable-pip`
+- Audit date: August 29, 2026
+- Complete-lock audit result: `No known vulnerabilities found`
+- Released Fabric packages: `nemo-fabric==0.2.0`,
+  `nemo-fabric-runtime==0.2.0`,
+  `nemo-fabric-adapter-contract==0.2.0`,
+  `nemo-fabric-adapters-common==0.2.0`, and
+  `nemo-fabric-adapters-deepagents==0.2.0`
+- Adapter-compatible graph: `deepagents==0.6.12`,
+  `langchain==1.3.18`, and `langchain-mcp-adapters==0.2.2`
+
+The base image installs this lock with `--require-hashes`, runs `pip check`,
+and probes every released Fabric package plus the key adapter-compatibility
+versions. The final image proves the first-party `nemoclaw-fabric` runner
+declares only `nemo-fabric==0.2.0`, proves that dependency is already present,
+builds the runner offline, and only then installs it with `--no-deps`. It runs
+`pip check` and exact version probes again before exposing the root-owned
+`/usr/local/bin/nemoclaw-fabric` symlink. The generic runner temporarily
+normalizes `VIRTUAL_ENV` and `PATH` to its own interpreter for discovery and
+adapter subprocesses, then restores the caller environment. No source checkout,
+adapter-specific Python override, or unreviewed version pairing enters the image.
+
+Remove the second environment only when released DCode and Fabric adapter
+graphs resolve together, both native `dcode` and Fabric headless contract tests
+pass from the single graph, and the combined hash lock passes `pip check` and
+the complete audit.
 
 ## Progressive MCP Tool Catalog Compatibility
 

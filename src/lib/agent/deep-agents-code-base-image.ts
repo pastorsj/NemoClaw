@@ -10,6 +10,16 @@ import type { AgentDefinition } from "./defs";
 
 const DEEPAGENTS_CODE_DISTRIBUTION = "deepagents-code";
 const DEEPAGENTS_CODE_DOS2UNIX_PROBE_OK = "nemoclaw-dcode-dos2unix-ok";
+const DEEPAGENTS_CODE_FABRIC_PROBE_OK = "nemoclaw-dcode-fabric-runtime-ok";
+const DEEPAGENTS_CODE_FABRIC_DISTRIBUTIONS = {
+  deepagents: "0.6.12",
+  "langchain-mcp-adapters": "0.2.2",
+  "nemo-fabric": "0.2.0",
+  "nemo-fabric-adapter-contract": "0.2.0",
+  "nemo-fabric-adapters-common": "0.2.0",
+  "nemo-fabric-adapters-deepagents": "0.2.0",
+  "nemo-fabric-runtime": "0.2.0",
+} as const;
 const DEEPAGENTS_CODE_BASE_IMAGE_PROBE_GUARDS = [
   "--network",
   "none",
@@ -90,6 +100,32 @@ export function deepAgentsCodeBaseImageHasDos2Unix(imageRef: string): boolean {
   return output.trim() === DEEPAGENTS_CODE_DOS2UNIX_PROBE_OK;
 }
 
+/**
+ * Reject a base image that predates, omits, or changes the released Fabric
+ * Deep Agents runtime. DCode and Fabric intentionally use isolated Python
+ * environments, so this probes the Fabric environment directly.
+ */
+export function deepAgentsCodeBaseImageHasFabricRuntime(imageRef: string): boolean {
+  const expectedDistributions = JSON.stringify(DEEPAGENTS_CODE_FABRIC_DISTRIBUTIONS);
+  const output = dockerCapture(
+    [
+      "run",
+      "--rm",
+      ...DEEPAGENTS_CODE_BASE_IMAGE_PROBE_GUARDS,
+      "--user",
+      "999:999",
+      "--entrypoint",
+      "/opt/nemoclaw-fabric-venv/bin/python3",
+      imageRef,
+      "-I",
+      "-c",
+      `import importlib.metadata as metadata; import sys; expected = ${expectedDistributions}; actual = {name: metadata.version(name) for name in expected}; actual == expected or sys.exit(1); print("${DEEPAGENTS_CODE_FABRIC_PROBE_OK}")`,
+    ],
+    { ignoreError: true, timeout: 20_000 },
+  );
+  return output.trim() === DEEPAGENTS_CODE_FABRIC_PROBE_OK;
+}
+
 export function createDeepAgentsCodeBaseImageResolutionOptions(
   agent: AgentDefinition,
   dockerfilePath: string,
@@ -106,13 +142,20 @@ export function createDeepAgentsCodeBaseImageResolutionOptions(
   return {
     // Retain the resolver's pre-existing global inputs alongside these agent
     // inputs. Per-agent cache-policy isolation is a separate cross-agent change.
-    inputPaths: [path.join(agentRoot, "manifest.yaml"), path.join(agentRoot, "requirements.lock")],
+    inputPaths: [
+      path.join(agentRoot, "manifest.yaml"),
+      path.join(agentRoot, "requirements.lock"),
+      path.join(agentRoot, "fabric-requirements.lock"),
+    ],
     validateImage: (imageRef) =>
       deepAgentsCodeBaseImageMatchesVersion(imageRef, expectedVersion) &&
       deepAgentsCodeBaseImageHasDos2Unix(imageRef) &&
+      deepAgentsCodeBaseImageHasFabricRuntime(imageRef) &&
       sandboxBaseImageHasSecurityInventory(imageRef),
     validationDescription:
-      `${DEEPAGENTS_CODE_DISTRIBUTION}==${expectedVersion}, dos2unix, and ` +
+      `${DEEPAGENTS_CODE_DISTRIBUTION}==${expectedVersion}, dos2unix, Fabric ` +
+      `${DEEPAGENTS_CODE_FABRIC_DISTRIBUTIONS["nemo-fabric"]} ` +
+      "Deep Agents runtime, and " +
       "the immutable security package inventory",
   };
 }

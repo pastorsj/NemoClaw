@@ -139,6 +139,38 @@ afterEach(async () => {
 });
 
 describe("E2E inference adapter", () => {
+  it("returns configured token usage from the compatible chat fixture", async () => {
+    const apiKey = "fixture-usage-key";
+    const fake = await startFakeOpenAiCompatibleServer({
+      apiKey,
+      chatContent: "PONG",
+      chatUsage: { inputTokens: 7, outputTokens: 4, totalTokens: 11 },
+      progress: NOOP_PROGRESS,
+      requireAuth: true,
+    });
+    try {
+      const response = await fetch(`${fake.baseUrl}/chat/completions`, {
+        body: JSON.stringify({
+          messages: [{ role: "user", content: "Reply PONG" }],
+          model: "fixture-model",
+        }),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        choices: [{ message: { content: "PONG" } }],
+        usage: { completion_tokens: 4, prompt_tokens: 7, total_tokens: 11 },
+      });
+    } finally {
+      await fake.close();
+    }
+  });
+
   it("defaults to hermetic mock mode with a fake compatible endpoint", async () => {
     const ambientCompatibleKey = "ambient-compatible-key-must-not-be-reused";
     const adapter = await createAdapter({ env: { COMPATIBLE_API_KEY: ambientCompatibleKey } });

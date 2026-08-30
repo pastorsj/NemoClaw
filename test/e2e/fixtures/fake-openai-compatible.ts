@@ -36,9 +36,16 @@ export interface FakeOpenAiCompatibleServer {
   close(): Promise<void>;
 }
 
+export interface FakeOpenAiCompatibleUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+}
+
 export interface FakeOpenAiCompatibleServerOptions {
   readonly apiKey?: string;
   readonly chatContent?: string;
+  readonly chatUsage?: FakeOpenAiCompatibleUsage;
   readonly forbiddenMarkers?: readonly string[];
   readonly launchReplyFromPrompt?: boolean;
   /** Non-secret marker expected in a request under test. */
@@ -181,6 +188,7 @@ export async function startFakeOpenAiCompatibleServer(
           HOME: process.env.HOME ?? "",
           NEMOCLAW_FAKE_OPENAI_API_KEY: options.apiKey ?? "",
           NEMOCLAW_FAKE_OPENAI_CHAT_CONTENT: options.chatContent ?? "ok",
+          NEMOCLAW_FAKE_OPENAI_CHAT_USAGE: JSON.stringify(options.chatUsage ?? null),
           NEMOCLAW_FAKE_OPENAI_ENVIRONMENT_FILE: environmentFile,
           NEMOCLAW_FAKE_OPENAI_FORBIDDEN_MARKERS: JSON.stringify(options.forbiddenMarkers ?? []),
           NEMOCLAW_FAKE_OPENAI_HOST: host,
