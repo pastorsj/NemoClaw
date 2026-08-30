@@ -133,11 +133,13 @@ const shieldsMock = vi.hoisted(() => {
     verified: true,
     errors: [],
   }));
+  const recoverCompletedAutoRestoreBeforeCommandMock = vi.fn(() => false);
   const shieldsUpMock = vi.fn();
   let isShieldsDownExport: unknown = isShieldsDownMock;
   return {
     isShieldsDownMock,
     repairMutableConfigPermsMock,
+    recoverCompletedAutoRestoreBeforeCommandMock,
     shieldsUpMock,
     getIsShieldsDownExport: () => isShieldsDownExport,
     setIsShieldsDownExport: (value: unknown) => {
@@ -523,6 +525,8 @@ vi.mock("../../shields", () => ({
     return shieldsMock.getIsShieldsDownExport();
   },
   repairMutableConfigPerms: shieldsMock.repairMutableConfigPermsMock,
+  recoverCompletedAutoRestoreBeforeCommand:
+    shieldsMock.recoverCompletedAutoRestoreBeforeCommandMock,
   shieldsUp: shieldsMock.shieldsUpMock,
 }));
 
@@ -628,6 +632,7 @@ export function resetSnapshotRestoreMocks(): void {
   });
   shieldsMock.setIsShieldsDownExport(shieldsMock.isShieldsDownMock);
   shieldsMock.isShieldsDownMock.mockReturnValue(true);
+  shieldsMock.recoverCompletedAutoRestoreBeforeCommandMock.mockReturnValue(false);
   shieldsMock.shieldsUpMock.mockImplementation(() => lifecycleMock.events.push("harden"));
   lifecycleMock.events.length = 0;
   lifecycleMock.readTimerMarkerMock.mockReturnValue(null);
