@@ -18,6 +18,10 @@ import {
   requireHostedInferenceConfig,
   stagePortableHostedInferenceDescriptor,
 } from "../fixtures/hosted-inference.ts";
+import {
+  buildHostedFabricCommandEnvironment,
+  providerSmokeSelected,
+} from "../live/inference-routing-helpers.ts";
 import { startTestProgress } from "../fixtures/progress.ts";
 import type {
   ShellProbeResult,
@@ -33,6 +37,73 @@ const COMPAT_HELPER = path.join(
   "lib",
   "ci-compatible-inference.sh",
 );
+
+describe("hosted Fabric provider smoke selection", () => {
+  it.each(["fabric", " FABRIC ", "all", "true", "1"])(
+    "selects the Fabric smoke for explicit value %s",
+    (value) => {
+      expect(providerSmokeSelected("fabric", value)).toBe(true);
+    },
+  );
+
+  it.each([undefined, "", "openai", "anthropic", "false", "0"])(
+    "does not select the Fabric smoke for value %s",
+    (value) => {
+      expect(providerSmokeSelected("fabric", value)).toBe(false);
+    },
+  );
+
+  it("builds an isolated local-source environment without a DCode base override", () => {
+    const result = buildHostedFabricCommandEnvironment({
+      HOME: "/tmp/nemoclaw-home",
+      PATH: "/usr/bin",
+      NEMOCLAW_GATEWAY_PORT: "18089",
+      NEMOCLAW_REASONING_EFFORT: "high",
+      NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+    });
+
+    expect(result.gatewayName).toBe("nemoclaw-18089");
+    expect(result.env).toMatchObject({
+      NEMOCLAW_GATEWAY_PORT: "18089",
+      NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+      OPENSHELL_GATEWAY: "nemoclaw-18089",
+    });
+    expect(result.env).not.toHaveProperty("NEMOCLAW_REASONING_EFFORT");
+    expect(result.env).not.toHaveProperty(
+      "NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF",
+    );
+  });
+
+  it.each([
+    ["local build is absent", { NEMOCLAW_GATEWAY_PORT: "18089" }],
+    [
+      "a DCode base override is set",
+      {
+        NEMOCLAW_GATEWAY_PORT: "18089",
+        NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+        NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF:
+          "ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base@sha256:test",
+      },
+    ],
+    ["the gateway port is absent", { NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1" }],
+    [
+      "the gateway port is the shared default",
+      { NEMOCLAW_GATEWAY_PORT: "8080", NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1" },
+    ],
+    [
+      "the gateway port is outside the TCP range",
+      { NEMOCLAW_GATEWAY_PORT: "65536", NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1" },
+    ],
+  ])("rejects hosted Fabric source qualification when %s", (_label, environment) => {
+    expect(() =>
+      buildHostedFabricCommandEnvironment({
+        HOME: "/tmp/nemoclaw-home",
+        PATH: "/usr/bin",
+        ...environment,
+      }),
+    ).toThrow(/Hosted Fabric source qualification/u);
+  });
+});
 
 function readPrivateFileSnapshot(filePath: string): { contents: string; metadata: fs.Stats } {
   const descriptor = fs.openSync(

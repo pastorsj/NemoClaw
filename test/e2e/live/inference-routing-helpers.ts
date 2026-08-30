@@ -43,13 +43,63 @@ const CREDENTIAL_CLASSIFICATION_PATTERN =
 const TRANSPORT_CLASSIFICATION_PATTERN =
   /unreachable|timeout|connect|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN|No route to host|transport|network|endpoint|dns/i;
 
-function shouldRunProviderSmoke(provider: "openai" | "anthropic"): boolean {
+export type ProviderSmokeSelection = "anthropic" | "fabric" | "openai";
+
+const DCODE_BASE_IMAGE_OVERRIDE = "NEMOCLAW_LANGCHAIN_DEEPAGENTS_CODE_SANDBOX_BASE_IMAGE_REF";
+
+export interface HostedFabricCommandEnvironment {
+  readonly env: NodeJS.ProcessEnv;
+  readonly gatewayName: string;
+}
+
+export function providerSmokeSelected(
+  provider: ProviderSmokeSelection,
+  requestedValue: string | undefined = process.env.NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE,
+): boolean {
   // The former shell script auto-ran these smokes when provider secrets were
   // present. This live migration requires an explicit opt-in so PR-safe jobs
   // cannot spend third-party quota accidentally; any future secret-backed lane
   // must set NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE=all or a provider name.
-  const requested = process.env.NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE?.trim().toLowerCase();
+  const requested = requestedValue?.trim().toLowerCase();
   return requested === "1" || requested === "true" || requested === "all" || requested === provider;
+}
+
+export function buildHostedFabricCommandEnvironment(
+  base: NodeJS.ProcessEnv = process.env,
+): HostedFabricCommandEnvironment {
+  if (base.NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD?.trim() !== "1") {
+    throw new Error(
+      "Hosted Fabric source qualification requires NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD=1",
+    );
+  }
+  if (base[DCODE_BASE_IMAGE_OVERRIDE]?.trim()) {
+    throw new Error(
+      `Hosted Fabric source qualification requires ${DCODE_BASE_IMAGE_OVERRIDE} to be unset`,
+    );
+  }
+  const gatewayPort = base.NEMOCLAW_GATEWAY_PORT?.trim() ?? "";
+  const parsedGatewayPort = Number(gatewayPort);
+  if (
+    !/^[0-9]+$/u.test(gatewayPort) ||
+    !Number.isSafeInteger(parsedGatewayPort) ||
+    parsedGatewayPort < 1 ||
+    parsedGatewayPort > 65_535 ||
+    parsedGatewayPort === 8080
+  ) {
+    throw new Error(
+      "Hosted Fabric source qualification requires an isolated non-default NEMOCLAW_GATEWAY_PORT",
+    );
+  }
+  const gatewayName = `nemoclaw-${gatewayPort}`;
+  return {
+    env: {
+      ...buildAvailabilityProbeEnv(base),
+      NEMOCLAW_GATEWAY_PORT: gatewayPort,
+      NEMOCLAW_SANDBOX_BASE_LOCAL_BUILD: "1",
+      OPENSHELL_GATEWAY: gatewayName,
+    },
+    gatewayName,
+  };
 }
 
 type SkipFn = (note?: string) => void;
@@ -459,9 +509,10 @@ async function expectAnthropicMessageThroughSandbox(
   );
 }
 
-export function requireProviderSmokeSelected(provider: "openai" | "anthropic", skip: SkipFn): void {
-  if (!shouldRunProviderSmoke(provider)) {
-    const label = provider === "openai" ? "OpenAI" : "Anthropic";
+export function requireProviderSmokeSelected(provider: ProviderSmokeSelection, skip: SkipFn): void {
+  if (!providerSmokeSelected(provider)) {
+    const label =
+      provider === "openai" ? "OpenAI" : provider === "anthropic" ? "Anthropic" : "Fabric";
     skipLive(
       skip,
       `set NEMOCLAW_INFERENCE_ROUTING_PROVIDER_SMOKE=${provider} or all to run ${label} smoke`,

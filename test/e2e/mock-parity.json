@@ -122,6 +122,7 @@
     },
     {
       "live": "test/e2e/live/inference-routing.test.ts",
+      "liveSources": ["test/e2e/live/inference-routing-helpers.ts"],
       "fast": [
         "nemoclaw/src/blueprint/runner-identity.test.ts",
         "nemoclaw/src/blueprint/runtime-identity.test.ts",
