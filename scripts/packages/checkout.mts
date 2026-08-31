@@ -9,6 +9,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
+import { makeManagedOutputWritable } from "../build-harnesses.mts";
+
 const HARNESS_ID = /^[a-z][a-z0-9-]{0,62}$/u;
 const EXACT_COMMIT_SHA = /^[a-f0-9]{40}$/u;
 const RECEIPT_DIGEST = /^[a-f0-9]{64}$/u;
@@ -79,6 +81,32 @@ interface CredentialFreeEnvironmentOptions {
   readonly npmCache: string;
   readonly toolDirectory: string;
   readonly excludedPathRoots?: readonly string[];
+}
+
+/** Restore write access only within the generated agent runtime artifact tree. */
+export function prepareCheckoutRootRemoval(rehearsalRoot: string): void {
+  const pathSegments = ["nemoclaw", "dist", "harnesses"] as const;
+  let current = rehearsalRoot;
+  for (const segment of pathSegments) {
+    let metadata: fs.Stats;
+    try {
+      metadata = fs.lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) return;
+    current = path.join(current, segment);
+  }
+  let metadata: fs.Stats;
+  try {
+    metadata = fs.lstatSync(current);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) return;
+  makeManagedOutputWritable(current);
 }
 
 function assertRegularDirectory(directory: string, label: string): void {
@@ -680,6 +708,7 @@ export function runPackageCheckoutRehearsal(
     }
     return runComposedRehearsal(options, rehearsalRoot, home, env, runCommand);
   } finally {
+    prepareCheckoutRootRemoval(rehearsalRoot);
     fs.rmSync(rehearsalRoot, { recursive: true, force: true });
   }
 }

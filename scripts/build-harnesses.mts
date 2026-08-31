@@ -401,7 +401,7 @@ function ensureDirectory(destination: string): void {
   fs.chmodSync(destination, 0o755);
 }
 
-function makeManagedOutputWritable(outputRoot: string): void {
+export function makeManagedOutputWritable(outputRoot: string): void {
   if (!fs.existsSync(outputRoot)) return;
   const stat = fs.lstatSync(outputRoot);
   if (stat.isSymbolicLink() || !stat.isDirectory()) return;

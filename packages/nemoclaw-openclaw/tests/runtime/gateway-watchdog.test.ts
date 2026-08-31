@@ -301,6 +301,7 @@ describe("gateway serving watchdog (#4710, #7377)", () => {
     const { result, fakeAlive, tmpDir } = runWatchdog({
       curlPlan: [0, 7, 7, 7, 0, 7, 7, 7, 0],
       expectKill: false,
+      settleProbes: 9,
     });
     try {
       expect(result.status, `script failed: ${result.stderr}`).toBe(0);
