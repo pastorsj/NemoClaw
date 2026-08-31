@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   resolveHarnessPackageInstallSelection,
   type AvailableHarnessPackageRecord,
-} from "../harness/package-catalog";
+} from "../agent-runtime/package/catalog";
 import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
@@ -15,21 +15,21 @@ import {
   parseHarnessPackageMigration,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import {
   installHarnessPackage,
   type InstallHarnessPackageOptions,
   type ReviewedHarnessPackageInstallSource,
-} from "../harness/package-install";
+} from "../agent-runtime/package/install";
 import {
   parseBundledHarnessPackageSourceIdentity,
   type BundledHarnessPackageSourceIdentity,
-} from "../harness/package-receipt";
+} from "../agent-runtime/package/receipt";
 import {
   resolvePinnedHarnessPackage,
   type HarnessPackageStoreOptions,
   type InstalledHarnessPackage,
-} from "../harness/package-store";
+} from "../agent-runtime/package/store";
 import {
   assertOnboardLockOwned,
   compareAndSwapSession,

@@ -58,7 +58,7 @@ function createFreshOnboardingRuntime(
   const prepared = {
     source: {
       kind: "legacy-dockerfile",
-      dockerfilePath: "agents/openclaw/Dockerfile",
+      dockerfilePath: "packages/nemoclaw-openclaw/Dockerfile",
       reason: "contract-unavailable",
     },
     release: "v0.0.0",
@@ -76,7 +76,7 @@ function createFreshOnboardingRuntime(
       stockManagedRuntime: options.stockManagedRuntime ?? false,
       tempManagedRuntimeCatalog: null,
       agentName: "openclaw",
-      legacyDockerfilePath: "agents/openclaw/Dockerfile",
+      legacyDockerfilePath: "packages/nemoclaw-openclaw/Dockerfile",
       customDockerfilePath: null,
       rootDir: releaseRoot,
       model: "model",
@@ -213,7 +213,7 @@ describe("managed workload onboard orchestration", () => {
   });
 
   it("selects only the shipped Hermes Dockerfile fallback without profile or prebuild work", async () => {
-    const expectedDockerfilePath = "/workspace/agents/hermes/Dockerfile";
+    const expectedDockerfilePath = "/workspace/packages/nemoclaw-hermes/Dockerfile";
     const ensurePreparedProfile = vi.fn(() => null);
     const prepared = {
       source: {
@@ -345,8 +345,8 @@ describe("managed workload onboard orchestration", () => {
     const resolutionMetadata = { key: "published-dcode-base" };
     const trustedDockerfile = path.join(
       process.cwd(),
-      "agents",
-      "langchain-deepagents-code",
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
       "Dockerfile",
     );
     const buildAgent = {
@@ -398,7 +398,7 @@ describe("managed workload onboard orchestration", () => {
       workload: {
         source: {
           kind: "legacy-dockerfile",
-          dockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+          dockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
           reason: "runtime-unsupported",
         },
         release: "v0.0.0",

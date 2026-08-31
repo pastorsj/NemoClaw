@@ -3,18 +3,10 @@
 
 import type { AgentMcpAdapter } from "../../agent/defs";
 
+export { McpBridgeError } from "./mcp-bridge/error";
+export type { McpBridgeErrorReasonCode } from "./mcp-bridge/error";
+
 export const MCP_BRIDGE_POLICY_SOURCE = "generated:nemoclaw-mcp-bridge";
-export type McpBridgeErrorReasonCode = "rejected" | "unresolved";
-export class McpBridgeError extends Error {
-  constructor(
-    message: string,
-    readonly exitCode = 1,
-    readonly reasonCode?: McpBridgeErrorReasonCode,
-  ) {
-    super(message);
-    this.name = "McpBridgeError";
-  }
-}
 
 export interface ParsedEnvReference {
   name: string;
@@ -95,5 +87,5 @@ export interface McpBridgeStatus {
 }
 
 export function isAgentMcpAdapter(value: unknown): value is AgentMcpAdapter {
-  return value === "mcporter" || value === "hermes-config" || value === "deepagents-config";
+  return typeof value === "string" && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value);
 }

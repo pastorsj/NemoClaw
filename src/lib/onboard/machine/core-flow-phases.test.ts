@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as credentialStore from "../../credentials/store";
 import {
@@ -9,12 +9,7 @@ import {
   normalizeInferenceSelection,
 } from "../../inference/selection";
 import { createSession, type Session, type SessionUpdates } from "../../state/onboard-session";
-import {
-  getSandbox,
-  isPendingReservationForSession,
-  removeSandbox,
-  reserveSandboxInferenceRoute,
-} from "../../state/registry";
+import * as registry from "../../state/registry";
 import { classifySandboxInferenceRouteReservation } from "../../state/registry/route-reservation";
 import type { InferenceRouteReservationAuthority } from "../types";
 import {
@@ -43,6 +38,14 @@ import {
 } from "../../../../test/helpers/core-flow";
 
 describe("core onboard flow phases", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("carries provider selection output into sandbox setup", async () => {
     const updateSandboxRegistry = vi.fn();

@@ -31,3 +31,16 @@ export function extractShellFunctionFromSource(src: string, name: string): strin
   }
   throw new Error(`Expected closing brace for ${name} in shell source`);
 }
+
+export function extractShellSourceBetween(
+  src: string,
+  startMarker: string,
+  endMarker: string,
+): string {
+  const start = src.indexOf(startMarker);
+  const end = src.indexOf(endMarker, start);
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error(`Expected shell source between ${startMarker} and ${endMarker}`);
+  }
+  return src.slice(start, end);
+}

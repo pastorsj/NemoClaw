@@ -1375,7 +1375,7 @@ runOpenShellGatewayUpgrade(
       "utf8",
     );
     const hermesDockerfile = fs.readFileSync(
-      path.join(REPO_ROOT, "agents/hermes/Dockerfile"),
+      path.join(REPO_ROOT, "packages/nemoclaw-hermes/Dockerfile"),
       "utf8",
     );
 

@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSession, type Session } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
+import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
 import {
   baseOptions,
@@ -58,6 +59,15 @@ function dcodeOptions(
 }
 
 describe("handleSandboxState live DCode selection", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("carries durable observability intent in the sandbox create intent", async () => {
     const session = createSession({
       observabilityEnabled: true,
@@ -374,11 +384,9 @@ describe("handleSandboxState live DCode selection", () => {
       reservationSessionId: session.sessionId,
     };
     const getDcodeSelectionDrift = vi.fn(() => ({ changed: false, unknown: false }));
-    const updateSandboxRegistry = vi.fn(
-      (_name: string, updates: Record<string, unknown>) => {
-        Object.assign(registryEntry, updates);
-      },
-    );
+    const updateSandboxRegistry = vi.fn((_name: string, updates: Record<string, unknown>) => {
+      Object.assign(registryEntry, updates);
+    });
     const finalizeSandboxRouteReservation = vi.fn((name: string, sessionId: string) => {
       expect(name).toBe(registryEntry.name);
       expect(sessionId).toBe(registryEntry.reservationSessionId);

@@ -20,6 +20,8 @@ import path from "node:path";
 import ts from "typescript";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { execTimeout } from "../helpers/timeouts";
+
 import {
   collectCreateRequireInventory,
   containsCreateRequireIdentifier,
@@ -166,7 +168,7 @@ function runFixtureGit(repoRoot: string, args: readonly string[]): string {
   const result = spawnSync("git", [...args], {
     cwd: repoRoot,
     encoding: "utf8",
-    timeout: 5_000,
+    timeout: execTimeout(),
   });
   expect(result.status, result.stderr).toBe(0);
   return result.stdout.trim();

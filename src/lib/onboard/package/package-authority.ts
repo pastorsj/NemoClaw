@@ -9,7 +9,7 @@ import {
   type HarnessPackageAuthority,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import { normalizeSandboxAgentName } from "../sandbox-agent";
 import type {
   resolveSandboxAgent,

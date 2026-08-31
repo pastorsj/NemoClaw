@@ -14,7 +14,25 @@ vi.mock("node:child_process", async (importOriginal) => {
   return { ...actual, spawn: vi.fn() };
 });
 
-import { buildOpenshellExecArgs, execSandbox, wrapExecCommandWithRuntimeEnv } from "./exec";
+import {
+  buildOpenshellExecArgs,
+  execSandbox,
+  type ExecSandboxDeps,
+  wrapExecCommandWithRuntimeEnv,
+} from "./exec";
+
+const NON_PERSISTENT_EXEC_DEPS = {
+  selectGateway: () => ({ outcome: "unregistered" as const, gatewayName: null }),
+  cleanupDeps: {
+    getSandbox: () => null,
+    inspectMutableConfigPerms: () => {
+      throw new Error("cleanup should be skipped for an unregistered sandbox");
+    },
+    repairMutableConfigPerms: () => {
+      throw new Error("cleanup should be skipped for an unregistered sandbox");
+    },
+  },
+} satisfies Pick<ExecSandboxDeps, "selectGateway" | "cleanupDeps">;
 
 function expectedExecArgs(sandboxName: string, command: readonly string[]): string[] {
   return buildOpenshellExecArgs(sandboxName, wrapExecCommandWithRuntimeEnv(command));
@@ -58,7 +76,16 @@ describe("execSandbox multi-line argv", () => {
     const run = vi.fn((_binary: string, _args: readonly string[]) => ({ status: 0 }));
 
     await expect(
-      execSandbox("multiline-test", command, {}, { run, resolveBinary: () => "openshell" }),
+      execSandbox(
+        "multiline-test",
+        command,
+        {},
+        {
+          ...NON_PERSISTENT_EXEC_DEPS,
+          run,
+          resolveBinary: () => "openshell",
+        },
+      ),
     ).rejects.toThrow("exit:0");
 
     expect(run).toHaveBeenCalledOnce();
@@ -153,7 +180,12 @@ describe("execSandbox multi-line argv", () => {
         "multiline-test",
         ["pwd"],
         { workdir: "/no/such/dir" },
-        { run, resolveBinary: () => "openshell", probeWorkdir },
+        {
+          ...NON_PERSISTENT_EXEC_DEPS,
+          run,
+          resolveBinary: () => "openshell",
+          probeWorkdir,
+        },
       ),
     ).rejects.toThrow("exit:1");
 
@@ -190,7 +222,15 @@ describe("execSandbox multi-line argv", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      execSandbox("multiline-test", ["bash"], { stdin }, { resolveBinary: () => "openshell" }),
+      execSandbox(
+        "multiline-test",
+        ["bash"],
+        { stdin },
+        {
+          ...NON_PERSISTENT_EXEC_DEPS,
+          resolveBinary: () => "openshell",
+        },
+      ),
     ).rejects.toThrow("exit:0");
 
     expect(spawn).toHaveBeenCalledWith("openshell", expectedExecArgs("multiline-test", ["bash"]), {

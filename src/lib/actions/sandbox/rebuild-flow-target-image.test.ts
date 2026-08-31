@@ -97,7 +97,6 @@ describe("rebuildSandbox flow: target image", () => {
         kind: "agent-runtime",
         id: "openclaw",
         packageVersion: "1.0.0",
-        contractVersion: 1,
         contentDigest: "not-a-digest",
       } as never,
       expected: "recorded harness package identity is malformed",

@@ -148,8 +148,12 @@ function deriveDependencyPins(rootDir: string = REPO_ROOT): {
 } {
   const failures: string[] = [];
   const blueprintSource = readText(rootDir, "nemoclaw-blueprint/blueprint.yaml", failures);
-  const dockerfileBase = readText(rootDir, "Dockerfile.base", failures);
-  const hermesDockerfileBase = readText(rootDir, "agents/hermes/Dockerfile.base", failures);
+  const dockerfileBase = readText(
+    rootDir,
+    "packages/nemoclaw-openclaw/Dockerfile.base",
+    failures,
+  );
+  const hermesDockerfileBase = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile.base", failures);
   if (failures.length > 0) return { failures, pins: null };
 
   const blueprint = parseMapping(
@@ -208,7 +212,7 @@ function deriveDependencyPins(rootDir: string = REPO_ROOT): {
       expectedVersion: extractArg(
         hermesDockerfileBase,
         "HERMES_SEMVER",
-        "agents/hermes/Dockerfile.base HERMES_SEMVER",
+        "packages/nemoclaw-hermes/Dockerfile.base HERMES_SEMVER",
         failures,
       ),
     },
@@ -582,16 +586,28 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "src/lib/onboard/docker-driver-gateway-service.ts",
     failures,
   );
-  const openclawManifestSource = readText(rootDir, "agents/openclaw/manifest.yaml", failures);
-  const hermesManifestSource = readText(rootDir, "agents/hermes/manifest.yaml", failures);
-  const dockerfile = readText(rootDir, "Dockerfile", failures);
-  const hermesDockerfile = readText(rootDir, "agents/hermes/Dockerfile", failures);
-  const hermesMcpConfigTransaction = readText(
+  const openclawManifestSource = readText(
     rootDir,
-    "agents/hermes/mcp-config-transaction.py",
+    "packages/nemoclaw-openclaw/manifest.yaml",
     failures,
   );
-  const updateHermesAgent = readText(rootDir, "scripts/update-hermes-agent.sh", failures);
+  const hermesManifestSource = readText(
+    rootDir,
+    "packages/nemoclaw-hermes/manifest.yaml",
+    failures,
+  );
+  const dockerfile = readText(rootDir, "packages/nemoclaw-openclaw/Dockerfile", failures);
+  const hermesDockerfile = readText(rootDir, "packages/nemoclaw-hermes/Dockerfile", failures);
+  const hermesMcpConfigTransaction = readText(
+    rootDir,
+    "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
+    failures,
+  );
+  const updateHermesAgent = readText(
+    rootDir,
+    "packages/nemoclaw-hermes/checks/update-agent.sh",
+    failures,
+  );
   const credentialBoundarySource = readText(
     rootDir,
     `src/lib/actions/sandbox/openshell-child-visible-credentials.v${pins.openshell.maxVersion}.json`,
@@ -602,7 +618,11 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "src/lib/actions/sandbox/mcp-bridge-validation.ts",
     failures,
   );
-  const packageJsonSource = readText(rootDir, "nemoclaw/package.json", failures);
+  const packageJsonSource = readText(
+    rootDir,
+    "packages/nemoclaw-openclaw/plugin/package.json",
+    failures,
+  );
   const openshellVersion = readText(rootDir, "src/lib/onboard/openshell-version.ts", failures);
   const openshellInstall = readText(rootDir, "src/lib/onboard/openshell-install.ts", failures);
   const supervisorManifestDigests = readText(
@@ -619,13 +639,13 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
 
   const openclawManifest = parseMapping(
     openclawManifestSource,
-    "agents/openclaw/manifest.yaml",
+    "packages/nemoclaw-openclaw/manifest.yaml",
     "YAML",
     failures,
   );
   const hermesManifest = parseMapping(
     hermesManifestSource,
-    "agents/hermes/manifest.yaml",
+    "packages/nemoclaw-hermes/manifest.yaml",
     "YAML",
     failures,
   );
@@ -641,7 +661,12 @@ export function verifyDependencyPins(rootDir: string = REPO_ROOT): string[] {
     "YAML",
     failures,
   );
-  const packageJson = parseMapping(packageJsonSource, "nemoclaw/package.json", "JSON", failures);
+  const packageJson = parseMapping(
+    packageJsonSource,
+    "packages/nemoclaw-openclaw/plugin/package.json",
+    "JSON",
+    failures,
+  );
   if (!openclawManifest || !hermesManifest || !credentialBoundary || !e2eWorkflow || !packageJson)
     return failures;
 

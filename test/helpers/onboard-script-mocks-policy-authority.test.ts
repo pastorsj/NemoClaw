@@ -26,13 +26,7 @@ const exactCreateQuery = [
   "--limit",
   "2",
 ] as const;
-const exactCreateCommand = [
-  "openshell",
-  "sandbox",
-  "create",
-  "--label",
-  selector,
-] as const;
+const exactCreateCommand = ["openshell", "sandbox", "create", "--label", selector] as const;
 
 afterEach(() => {
   vi.restoreAllMocks();

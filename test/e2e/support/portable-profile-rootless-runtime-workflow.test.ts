@@ -56,7 +56,7 @@ describe("portable profile rootless runtime workflow", () => {
     expect(job?.["runs-on"]).toBe("ubuntu-26.04");
     expect(workflow.on.pull_request.paths).toEqual(
       expect.arrayContaining([
-        "agents/hermes/Dockerfile",
+        "packages/nemoclaw-hermes/Dockerfile",
         "src/lib/onboard/experimental/hermes-portable-build-context.ts",
       ]),
     );

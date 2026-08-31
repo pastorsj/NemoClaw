@@ -53,7 +53,6 @@ const DCODE_HARNESS_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "langchain-deepagents-code",
   packageVersion: "0.1.0",
-  contractVersion: 1 as const,
   contentDigest: "d".repeat(64),
 };
 
@@ -865,7 +864,6 @@ describe("created OpenClaw sandbox finalization", () => {
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "1.2.3",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   };
   const pluginInstalls = [

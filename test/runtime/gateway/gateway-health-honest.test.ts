@@ -88,6 +88,7 @@ exit 0
         encoding: "utf8",
         env: {
           ...process.env,
+          DOCKER_HOST: "unix:///var/run/docker.sock",
           HOME: root,
           PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
           NEMOCLAW_GATEWAY_PORT: "18080",

@@ -8,7 +8,7 @@ import {
   harnessPackageIdentitiesEqual,
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import type { WebSearchConfig } from "../inference/web-search";
 import {
   getActiveChannelIdsFromPlan,

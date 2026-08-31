@@ -2978,7 +2978,7 @@ export function validateE2eWorkflow(workflowValue: unknown): string[] {
   }
   if (
     stringValue(dcodeProfileImportGate?.run).trim() !==
-    "bash scripts/check-dcode-profile-import-gate.sh"
+    "bash packages/nemoclaw-langchain-deepagents-code/checks/profile-gate.sh"
   ) {
     errors.push("live DCode profile import gate must run the reviewed negative-build script");
   }

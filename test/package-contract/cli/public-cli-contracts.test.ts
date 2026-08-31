@@ -22,7 +22,6 @@ type HarnessPackageIdentity = {
   kind: string;
   id: string;
   packageVersion: string;
-  contractVersion: number;
   contentDigest: string;
 };
 
@@ -61,7 +60,6 @@ function createBuiltHarnessArtifact(fixtureRoot: string): string {
       id: "example-runtime",
       displayName: "Example Runtime",
       packageVersion: "1.2.3",
-      contractVersion: 1,
       manifest: "agents/example-runtime/manifest.yaml",
     })}\n`,
   );
@@ -315,7 +313,6 @@ describe("public compiled CLI contracts", () => {
             kind: "agent-runtime",
             id: "example-runtime",
             packageVersion: "1.2.3",
-            contractVersion: 1,
             contentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
           },
           displayName: "Example Runtime",

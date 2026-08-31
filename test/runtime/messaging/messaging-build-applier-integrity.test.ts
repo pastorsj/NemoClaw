@@ -16,9 +16,9 @@ import {
 import { testTimeout } from "../../helpers/timeouts";
 import { withLegacyMessagingPlanEnvDirect } from "../../messaging-plan-test-helper";
 
-vi.mock("../../../scripts/lib/openclaw-npm-remediation.mts", async (importOriginal) => {
+vi.mock("../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts", async (importOriginal) => {
   const original =
-    await importOriginal<typeof import("../../../scripts/lib/openclaw-npm-remediation.mts")>();
+    await importOriginal<typeof import("../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts")>();
   return {
     ...original,
     remediateReviewedOpenClawPluginArchive: ({ archivePath }: { archivePath: string }) => ({
@@ -84,14 +84,14 @@ function thrownMessage(run: () => void): string {
 describe("messaging-build-applier.mts: plugin archive integrity", () => {
   it("loads the real build applier from the Hermes image module boundary", () => {
     const dockerfile = fs.readFileSync(
-      path.join(REPO_ROOT, "agents", "hermes", "Dockerfile"),
+      path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "Dockerfile"),
       "utf8",
     );
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-applier-boundary-"));
     const messagingRoot = path.join(root, "src", "lib", "messaging");
     try {
       [...dockerfile.matchAll(
-        /^COPY (src\/lib\/messaging\/|scripts\/lib\/(?:openclaw-npm-remediation|reviewed-npm-archive)\.mts) (\/\S+)$/gm,
+        /^COPY (src\/lib\/messaging\/|packages\/nemoclaw-openclaw\/compat\/npm-remediation\.mts|scripts\/lib\/reviewed-npm-archive\.mts) (\/\S+)$/gm,
       )].forEach((copy) => {
         const source = copy[1] ?? "";
         const destination = copy[2] ?? "";

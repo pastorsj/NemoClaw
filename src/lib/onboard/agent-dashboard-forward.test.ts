@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PolicyAuthorityRefusalError } from "../adapters/openshell/policy-authority";
+import * as registry from "../state/registry";
 import { ensureAgentDashboardForward } from "./agent-dashboard-forward";
 
 describe("ensureAgentDashboardForward", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "hm", hermesApiPort: 8642 });
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     delete process.env.CHAT_UI_URL;
+    delete process.env.NEMOCLAW_HERMES_API_PORT;
   });
 
   it("preserves additional host-forward ports during dashboard refresh", async () => {

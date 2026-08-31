@@ -102,19 +102,19 @@ function fixture() {
 }
 
 function installFixture(
-  reviewedLocation: "root" | "nemoclaw",
+  reviewedLocation: "root" | "plugin",
   packageIdentity: ReviewedSourceRegistryPackage = reviewed,
 ) {
   const source = fixture();
-  const nestedRoot = join(source.root, "nemoclaw");
-  mkdirSync(nestedRoot);
+  const pluginRoot = join(source.root, "packages/nemoclaw-openclaw/plugin");
+  mkdirSync(pluginRoot, { recursive: true });
   writeFileSync(
     source.lockfilePath,
     JSON.stringify(reviewedLocation === "root" ? reviewedLock(packageIdentity) : publicLock()),
   );
   writeFileSync(
-    join(nestedRoot, "package-lock.json"),
-    JSON.stringify(reviewedLocation === "nemoclaw" ? reviewedLock(packageIdentity) : publicLock()),
+    join(pluginRoot, "npm-shrinkwrap.json"),
+    JSON.stringify(reviewedLocation === "plugin" ? reviewedLock(packageIdentity) : publicLock()),
   );
   return source;
 }
@@ -228,7 +228,7 @@ describe("trusted OpenShell SDK archive preparation", () => {
   });
 
   it("requires the reviewed archive when the plugin lock uses the SDK", async () => {
-    const source = installFixture("nemoclaw");
+    const source = installFixture("plugin");
     const stage = cacheStageMock();
     rmSync(source.artifactDirectory, { force: true, recursive: true });
 
@@ -257,7 +257,7 @@ describe("trusted OpenShell SDK archive preparation", () => {
   });
 
   it("passes the verified archive from the plugin lock to npm cache preparation", async () => {
-    const source = installFixture("nemoclaw");
+    const source = installFixture("plugin");
     const stage = cacheStageMock();
 
     await prepareCiNpmInstallWithReviewedConfig(

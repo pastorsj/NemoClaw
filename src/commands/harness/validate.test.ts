@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PUBLIC_DISPLAY_ENTRIES } from "../../lib/cli/public-display-defaults";
-import type { HarnessPackageValidationReport } from "../../lib/harness/package-validation";
+import type { HarnessPackageValidationReport } from "../../lib/agent-runtime/package/validation";
 import HarnessValidateCommand, { harnessValidateCommandDependencies } from "./validate";
 
 const rootDir = process.cwd();
@@ -16,7 +16,6 @@ const REPORT: HarnessPackageValidationReport = {
     kind: "agent-runtime",
     id: "example-runtime",
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: DIGEST,
   },
   displayName: "Example Runtime",
@@ -45,7 +44,7 @@ describe("harness validate oclif command", () => {
       expect(validate).toHaveBeenCalledOnce();
       expect(validate).toHaveBeenCalledWith("./built-package");
       expect(log).toHaveBeenCalledWith(
-        `Validated built agent runtime package 'example-runtime' (1.2.3, contract 1, sha256:${DIGEST}) without installing it.`,
+        `Validated built agent runtime package 'example-runtime' (1.2.3, sha256:${DIGEST}) without installing it.`,
       );
     },
   );

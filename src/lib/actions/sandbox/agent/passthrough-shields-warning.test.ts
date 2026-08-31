@@ -13,13 +13,17 @@ const ensureLiveMock = vi.hoisted(() =>
   vi.fn(async () => ({ state: "present", phase: "Ready", output: "Phase: Ready" })),
 );
 const getSandboxMock = vi.hoisted(() => vi.fn(() => ({ agent: "openclaw" })));
-const listAgentsMock = vi.hoisted(() => vi.fn(() => ["langchain-deepagents-code", "openclaw"]));
+const listAgentsMock = vi.hoisted(() => vi.fn(() => ["terminal-fixture", "openclaw"]));
 const loadAgentMock = vi.hoisted(() =>
   vi.fn((name: string) => ({
     name,
     runtime:
-      name === "langchain-deepagents-code"
-        ? { kind: "terminal", interactive_command: "dcode", headless_command: "dcode -n" }
+      name === "terminal-fixture"
+        ? {
+            kind: "terminal",
+            interactive_command: "terminal-agent",
+            headless_command: "terminal-agent --headless",
+          }
         : undefined,
   })),
 );
@@ -209,7 +213,7 @@ describe("runAgentPassthrough shields-relock warning", () => {
   });
 
   it("does not consult OpenClaw relock history for terminal-runtime passthroughs (#5922)", async () => {
-    getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
+    getSandboxMock.mockReturnValueOnce({ agent: "terminal-fixture" });
     const getRecentShieldsAutoRestore = vi.fn((): ShieldsAutoRestoreReadResult => ({
       kind: "event",
       event: { timestamp: new Date().toISOString(), timeoutSeconds: 20 },
@@ -222,7 +226,9 @@ describe("runAgentPassthrough shields-relock warning", () => {
       { process: proc, getRecentShieldsAutoRestore },
     );
 
-    expect(execMock).toHaveBeenCalledWith("alpha", ["dcode", "--help"], { tty: false });
+    expect(execMock).toHaveBeenCalledWith("alpha", ["terminal-agent", "--headless", "--help"], {
+      tty: false,
+    });
     expect(getRecentShieldsAutoRestore).not.toHaveBeenCalled();
     expect(writes.join("")).not.toMatch(/[Ss]hields auto-relocked/);
   });

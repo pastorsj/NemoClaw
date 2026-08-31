@@ -94,12 +94,12 @@ npm_target_libc="glibc"
 [[ "$source_root" == /* && "$source_root" != *$'\n'* && -d "$source_root" && ! -L "$source_root" ]] || usage
 source_root="$(cd -- "$source_root" && pwd -P)"
 seed_helper="$source_root/scripts/checks/materialize-locked-npm-cache-seed.mts"
-source_lockfile="$source_root/nemoclaw/package-lock.json"
+source_lockfile="$source_root/packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json"
 source_seed_dir="$source_root/tools/mcp-tool-discovery-runtime/npm-cache-seed"
 source_mcp_lockfile="$source_root/tools/mcp-tool-discovery-runtime/package-lock.json"
 source_mcp_seed_dir="$source_root/tools/mcp-tool-discovery-runtime/mcp-runtime-npm-cache-seed"
-source_messaging_lockfile="$source_root/agents/openclaw/managed-image-messaging-runtime/package-lock.json"
-source_messaging_seed_dir="$source_root/agents/openclaw/managed-image-messaging-runtime/npm-cache-seed"
+source_messaging_lockfile="$source_root/packages/nemoclaw-openclaw/runtime/messaging/npm-shrinkwrap.json"
+source_messaging_seed_dir="$source_root/packages/nemoclaw-openclaw/runtime/messaging/npm-cache-seed"
 [[ -f "$seed_helper" && ! -L "$seed_helper" ]] || usage
 [[ -f "$source_lockfile" && ! -L "$source_lockfile" ]] || usage
 [[ -d "$source_seed_dir" && ! -L "$source_seed_dir" ]] || usage
@@ -475,11 +475,11 @@ build_agent \
   "$openclaw_base"
 build_agent \
   hermes \
-  agents/hermes/Dockerfile \
+  packages/nemoclaw-hermes/Dockerfile \
   "$hermes_base"
 build_agent \
   langchain-deepagents-code \
-  agents/langchain-deepagents-code/Dockerfile \
+  packages/nemoclaw-langchain-deepagents-code/Dockerfile \
   "$dcode_base"
 
 if [[ -n "$cache_to" ]]; then

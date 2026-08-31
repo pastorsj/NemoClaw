@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSearchConfig } from "../inference/web-search";
-import type { HarnessPackageIdentity } from "../harness/package-types";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import type { OnboardMachineState } from "../onboard/machine/types";
 
 export const CHECKPOINT_SCHEMA_VERSION = 5 as const;

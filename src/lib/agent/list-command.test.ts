@@ -4,11 +4,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type {
-  HarnessAvailableInventoryRow,
-  HarnessInstalledInventoryRow,
-  HarnessInventoryView,
-} from "../harness/package-list";
-import type { HarnessPackageIdentity } from "../harness/package-types";
+  AvailableHarnessPackageRecord,
+  DamagedInstalledHarnessPackageRecord,
+  HarnessPackageInventory,
+  HealthyInstalledHarnessPackageRecord,
+} from "../agent-runtime/package/catalog";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
   listAgentRuntimeEntries,
   printAgentRuntimeList,
@@ -21,48 +22,82 @@ function packageIdentity(id: string, digestCharacter = "a"): HarnessPackageIdent
     kind: "agent-runtime",
     id,
     packageVersion: "0.1.0",
-    contractVersion: 1,
     contentDigest: digestCharacter.repeat(64),
   };
 }
 
-function healthyPackage(id: string, displayName = id): HarnessInstalledInventoryRow {
-  return { id, displayName, health: "healthy", identity: packageIdentity(id) };
-}
+const PACKAGE_DESCRIPTIONS: Readonly<Record<string, string>> = Object.freeze({
+  openclaw: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)",
+  hermes: "Self-improving AI agent with learning loop (Nous Research)",
+  "langchain-deepagents-code": "Terminal coding agent built on the Deep Agents SDK",
+});
 
-function damagedPackage(id: string, displayName = id): HarnessInstalledInventoryRow {
-  return { id, displayName, health: "damaged", identity: null };
-}
-
-function availablePackage(id: string, displayName = id): HarnessAvailableInventoryRow {
+function healthyPackage(id: string, displayName = id): HealthyInstalledHarnessPackageRecord {
   return {
+    state: "installed",
+    id,
     displayName,
+    description: PACKAGE_DESCRIPTIONS[id] ?? `${displayName} package`,
+    aliases: [],
+    aliasSummary: null,
+    isDefaultOnboardingChoice: id === "openclaw",
+    defaultSandboxName: id,
+    identity: packageIdentity(id),
+    packageRoot: `/store/${id}`,
+    matchesAvailableIdentity: true,
+  };
+}
+
+function damagedPackage(id: string, displayName = id): DamagedInstalledHarnessPackageRecord {
+  return {
+    state: "damaged",
+    id,
+    displayName,
+    description: PACKAGE_DESCRIPTIONS[id] ?? null,
+    aliases: [],
+    aliasSummary: null,
+    isDefaultOnboardingChoice: id === "openclaw",
+    defaultSandboxName: id,
+    reason: "installed-package-integrity-failed",
+  };
+}
+
+function availablePackage(id: string, displayName = id): AvailableHarnessPackageRecord {
+  return {
+    state: "available",
+    id,
+    displayName,
+    description: PACKAGE_DESCRIPTIONS[id] ?? null,
+    aliases: [],
+    aliasSummary: null,
+    isDefaultOnboardingChoice: id === "openclaw",
+    defaultSandboxName: id,
     identity: packageIdentity(id, "b"),
-    installationState: "not-installed",
+    packageRoot: `/bundle/${id}`,
   };
 }
 
 function harnessInventory(
-  installed: readonly HarnessInstalledInventoryRow[] = [],
-  available: readonly HarnessAvailableInventoryRow[] = [],
-): HarnessInventoryView {
-  return { schemaVersion: 1, installed, available };
+  installed: HarnessPackageInventory["installed"] = [],
+  available: HarnessPackageInventory["available"] = [],
+): HarnessPackageInventory {
+  return { installed, available };
 }
 
-function inventoryDependencies(view: HarnessInventoryView): {
+function inventoryDependencies(view: HarnessPackageInventory): {
   dependencies: AgentRuntimeListDependencies;
-  createHarnessInventoryView: ReturnType<typeof vi.fn>;
+  listHarnessPackageInventory: ReturnType<typeof vi.fn>;
 } {
-  const createHarnessInventoryView = vi.fn(() => view);
+  const listHarnessPackageInventory = vi.fn(() => view);
   return {
-    dependencies: { createHarnessInventoryView },
-    createHarnessInventoryView,
+    dependencies: { listHarnessPackageInventory },
+    listHarnessPackageInventory,
   };
 }
 
 describe("agent runtime list command support", () => {
   it("reports no agent runtimes when reviewed packages are available but not installed", () => {
-    const { dependencies, createHarnessInventoryView } = inventoryDependencies(
+    const { dependencies, listHarnessPackageInventory } = inventoryDependencies(
       harnessInventory([], [availablePackage("openclaw", "OpenClaw")]),
     );
 
@@ -70,7 +105,7 @@ describe("agent runtime list command support", () => {
 
     expect(entries).toEqual([]);
     expect(renderAgentRuntimeList(entries)).toBe("No agent runtimes are installed.");
-    expect(createHarnessInventoryView).toHaveBeenCalledOnce();
+    expect(listHarnessPackageInventory).toHaveBeenCalledOnce();
   });
 
   it("projects one healthy installed package with its canonical description", () => {
@@ -115,7 +150,7 @@ describe("agent runtime list command support", () => {
     expect(listAgentRuntimeEntries(dependencies)).toEqual([]);
   });
 
-  it("excludes candidate, unsupported, and alias rows from the compatibility view", () => {
+  it("lists every healthy installed package that implements the contract", () => {
     const { dependencies } = inventoryDependencies(
       harnessInventory([
         healthyPackage("pi", "Pi"),
@@ -126,17 +161,18 @@ describe("agent runtime list command support", () => {
       ]),
     );
 
-    expect(listAgentRuntimeEntries(dependencies)).toEqual([
-      {
-        name: "openclaw",
-        description: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)",
-      },
+    expect(listAgentRuntimeEntries(dependencies).map(({ name }) => name)).toEqual([
+      "openclaw",
+      "deepagents",
+      "future-harness",
+      "nemocua",
+      "pi",
     ]);
   });
 
   it("prints one installed-only projection through the supplied logger", () => {
     const log = vi.fn();
-    const { dependencies, createHarnessInventoryView } = inventoryDependencies(
+    const { dependencies, listHarnessPackageInventory } = inventoryDependencies(
       harnessInventory([healthyPackage("openclaw", "OpenClaw")]),
     );
 
@@ -146,6 +182,6 @@ describe("agent runtime list command support", () => {
     expect(log).toHaveBeenCalledWith(
       "openclaw  Gateway-based AI agent with plugin ecosystem (openclaw.ai)",
     );
-    expect(createHarnessInventoryView).toHaveBeenCalledOnce();
+    expect(listHarnessPackageInventory).toHaveBeenCalledOnce();
   });
 });

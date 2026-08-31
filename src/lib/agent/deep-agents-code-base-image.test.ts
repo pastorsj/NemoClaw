@@ -48,7 +48,7 @@ describe("Deep Agents Code base image compatibility", () => {
         displayName: "LangChain Deep Agents Code",
         expectedVersion: "9.8.7",
       }),
-      "/test/root/agents/langchain-deepagents-code/Dockerfile.base",
+      "/test/root/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     );
     mocks.dockerCapture
       .mockReturnValueOnce("9.8.7")
@@ -58,9 +58,9 @@ describe("Deep Agents Code base image compatibility", () => {
 
     expect(options).toMatchObject({
       inputPaths: [
-        "/test/root/agents/langchain-deepagents-code/manifest.yaml",
-        "/test/root/agents/langchain-deepagents-code/requirements.lock",
-        "/test/root/agents/langchain-deepagents-code/fabric-requirements.lock",
+        "/test/root/packages/nemoclaw-langchain-deepagents-code/manifest.yaml",
+        "/test/root/packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock",
+        "/test/root/packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock",
       ],
       validationDescription:
         "deepagents-code==9.8.7, dos2unix, Fabric 0.2.0 Deep Agents runtime, and the immutable security package inventory",
@@ -70,15 +70,17 @@ describe("Deep Agents Code base image compatibility", () => {
 
   it("changes the base resolution key when only the Fabric dependency lock changes", () => {
     const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-fabric-lock-"));
-    const agentRoot = path.join(rootDir, "agents", "langchain-deepagents-code");
+    const agentRoot = path.join(rootDir, "packages", "nemoclaw-langchain-deepagents-code");
     const dockerfilePath = path.join(agentRoot, "Dockerfile.base");
-    const fabricLockPath = path.join(agentRoot, "fabric-requirements.lock");
+    const runtimeLockPath = path.join(agentRoot, "runtime", "requirements.lock");
+    const fabricLockPath = path.join(agentRoot, "fabric", "requirements.lock");
 
     try {
-      fs.mkdirSync(agentRoot, { recursive: true });
+      fs.mkdirSync(path.dirname(runtimeLockPath), { recursive: true });
+      fs.mkdirSync(path.dirname(fabricLockPath), { recursive: true });
       fs.writeFileSync(dockerfilePath, "FROM ubuntu:24.04\n");
       fs.writeFileSync(path.join(agentRoot, "manifest.yaml"), "expected_version: 9.8.7\n");
-      fs.writeFileSync(path.join(agentRoot, "requirements.lock"), "deepagents-code==9.8.7\n");
+      fs.writeFileSync(runtimeLockPath, "deepagents-code==9.8.7\n");
       fs.writeFileSync(fabricLockPath, "nvidia-nat==0.2.0\n");
 
       const agentOptions = createDeepAgentsCodeBaseImageResolutionOptions(
@@ -115,7 +117,7 @@ describe("Deep Agents Code base image compatibility", () => {
         displayName: "LangChain Deep Agents Code",
         expectedVersion: "0.1.34",
       }),
-      "/test/root/agents/langchain-deepagents-code/Dockerfile.base",
+      "/test/root/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     );
     mocks.dockerCapture.mockReturnValueOnce("0.1.34").mockReturnValueOnce("");
 
@@ -151,7 +153,7 @@ describe("Deep Agents Code base image compatibility", () => {
         displayName: "LangChain Deep Agents Code",
         expectedVersion: "0.1.55",
       }),
-      "/test/root/agents/langchain-deepagents-code/Dockerfile.base",
+      "/test/root/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     );
     mocks.dockerCapture
       .mockReturnValueOnce("0.1.55")
@@ -192,7 +194,7 @@ describe("Deep Agents Code base image compatibility", () => {
         displayName: "LangChain Deep Agents Code",
         expectedVersion: "0.1.55",
       }),
-      "/test/root/agents/langchain-deepagents-code/Dockerfile.base",
+      "/test/root/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     );
     mocks.dockerCapture
       .mockReturnValueOnce("0.1.55")

@@ -5,7 +5,7 @@ import {
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import {
   checkpointGatewayAuthority,
   gatewayOwnerFromCheckpoint,

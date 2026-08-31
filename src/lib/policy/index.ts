@@ -591,7 +591,7 @@ function extractPresetEntries(presetContent: string | null | undefined): string 
 // NemoClaw admits as policy YAML.
 // whyNotSourceFix: NemoClaw supports CLI releases whose process output is the
 // only available boundary, including versionless network_policies bodies.
-// regressionTest: nemoclaw/src/shared/openshell-policy-boundary.test.ts and
+// regressionTest: src/lib/shared/openshell-policy-boundary.test.ts and
 // test/runtime/policy/policy-mutation-read-failure.test.ts.
 // removalCondition: remove this fail-soft adapter when every caller consumes a
 // typed OpenShell policy API.

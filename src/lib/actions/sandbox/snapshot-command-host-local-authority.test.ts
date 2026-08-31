@@ -19,7 +19,6 @@ const HARNESS_PACKAGE = vi.hoisted(() => ({
   kind: "agent-runtime" as const,
   id: "openclaw",
   packageVersion: "1.0.0-test",
-  contractVersion: 1 as const,
   contentDigest: "b".repeat(64),
 }));
 
@@ -97,14 +96,16 @@ vi.mock("../../adapters/openshell/runtime", () => ({
   runOpenshell: vi.fn(() => ({ status: 0, output: "" })),
 }));
 
-vi.mock("../../agent/definition-loader", () => ({
+vi.mock("../../agent-runtime/manifest-loader", () => ({
   buildAgentDefinition: vi.fn(({ packageRoot }) => ({
     name: "openclaw",
     packageRoot,
+    agentAliases: [],
+    agentAliasSummary: null,
   })),
 }));
 
-vi.mock("../../harness/package-store", () => ({
+vi.mock("../../agent-runtime/package/store", () => ({
   resolvePinnedHarnessPackage: vi.fn(() => {
     const packageRoot = `/state/harnesses/objects/${HARNESS_PACKAGE.contentDigest}`;
     return {

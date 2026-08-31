@@ -74,7 +74,7 @@
         "src/lib/agent/pi-lifecycle.test.ts",
         "src/lib/onboard/pi-candidate-rebuild.test.ts",
         "test/e2e/support/pi-agent-qualification-events.test.ts",
-        "test/agents/openclaw/runtime/pi-candidate-runtime-artifacts.test.ts"
+        "test/platform/images/pi-candidate.test.ts"
       ]
     },
     {
@@ -124,10 +124,10 @@
       "live": "test/e2e/live/inference-routing.test.ts",
       "liveSources": ["test/e2e/live/inference-routing-helpers.ts"],
       "fast": [
-        "nemoclaw/src/blueprint/runner-identity.test.ts",
-        "nemoclaw/src/blueprint/runtime-identity.test.ts",
+        "packages/nemoclaw-openclaw/plugin/src/blueprint/runner-identity.test.ts",
+        "packages/nemoclaw-openclaw/plugin/src/blueprint/runtime-identity.test.ts",
         "src/lib/onboard/inference-providers/compatible-endpoint-gateway-route.test.ts",
-        "test/onboarding/blueprint-runtime-identity-lifecycle.test.ts",
+        "packages/nemoclaw-openclaw/tests/integration/runtime-identity.test.ts",
         "test/e2e/support/hosted-inference.test.ts",
         "test/e2e/support/onboard-timeout-contract.test.ts",
         "test/onboarding/onboard-inference-gateway-scope.test.ts"
@@ -203,7 +203,7 @@
         "src/lib/onboard/docker-startup-command-patch.test.ts",
         "src/lib/sandbox/privileged-exec.test.ts",
         "test/inference/managed/managed-gateway-control.test.ts",
-        "test/agents/openclaw/runtime/nemoclaw-start-guard-recovery.test.ts",
+        "packages/nemoclaw-openclaw/tests/runtime/guard-recovery.test.ts",
         "test/e2e/support/gateway-guard-legacy-keepalive-fixture.test.ts",
         "test/e2e/support/managed-image-cohort-contract.test.ts",
         "test/e2e/support/managed-image-receipt.test.ts",

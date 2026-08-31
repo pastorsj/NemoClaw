@@ -3,7 +3,7 @@
 
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import {
@@ -23,8 +23,9 @@ import { encodeManagedStartupProfile } from "./managed-startup/profile";
 const requireDist = createRequire(import.meta.url);
 const onboardSession = requireDist("../state/onboard-session.js");
 const harnessPackageStore = requireDist(
-  "../harness/package-store.js",
-) as typeof import("../harness/package-store");
+  "../agent-runtime/package/store.js",
+) as typeof import("../agent-runtime/package/store");
+const sandboxRegistry = requireDist("../state/registry.js") as typeof import("../state/registry");
 const {
   assertBaselineExclusionsMatchCreateIntent,
   baselineExclusionsForCreate,
@@ -48,7 +49,6 @@ const OPENCLAW_PACKAGE_IDENTITY = {
   kind: "agent-runtime" as const,
   id: "openclaw",
   packageVersion: "1.0.0",
-  contractVersion: 1 as const,
   contentDigest: "c".repeat(64),
 };
 const OPENCLAW_PACKAGE_MIGRATION = {
@@ -240,14 +240,18 @@ describe("buildCreatedSandboxRegistryEntry", () => {
   it("rejects a managed receipt for a different agent before registry mutation (#9356)", () => {
     const workload = managedWorkloadReceipt("hermes");
     const registerSandbox = vi.fn();
-
-    expect(() =>
-      registerCreatedSandbox({
-        ...createdRegistryEntryInput({ imageTag: workload.reference, workload }),
-        registerSandbox,
-      }),
-    ).toThrow(/agent identity does not match its managed workload receipt/u);
-    expect(registerSandbox).not.toHaveBeenCalled();
+    const getSandbox = vi.spyOn(sandboxRegistry, "getSandbox").mockReturnValue(null);
+    try {
+      expect(() =>
+        registerCreatedSandbox({
+          ...createdRegistryEntryInput({ imageTag: workload.reference, workload }),
+          registerSandbox,
+        }),
+      ).toThrow(/agent identity does not match its managed workload receipt/u);
+      expect(registerSandbox).not.toHaveBeenCalled();
+    } finally {
+      getSandbox.mockRestore();
+    }
   });
 
   it("copies matching session profile provenance into the durable registry (#8246)", () => {
@@ -736,6 +740,14 @@ describe("registerCreatedSandbox", () => {
     runtimeDir: "/run/user/1001",
     socketPath: "/run/user/1001/podman/podman.sock",
   };
+
+  beforeEach(() => {
+    vi.spyOn(sandboxRegistry, "getSandbox").mockReturnValue(null);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it("publishes only after every final package authority matches", () => {
     const fixture = verifiedPackageCreateFixture();

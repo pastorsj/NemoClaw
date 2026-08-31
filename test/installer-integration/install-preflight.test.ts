@@ -27,6 +27,7 @@ import {
   TEST_SYSTEM_PATH,
   writeExecutable,
 } from "../helpers/installer-sourced-env";
+import { writeDockerOkStub, writeOpenShellOkStub } from "./preflight-stubs";
 
 const INSTALLER = path.join(import.meta.dirname, "../..", "install.sh");
 const CURL_PIPE_INSTALLER = path.join(import.meta.dirname, "../..", "install.sh");
@@ -151,9 +152,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0
@@ -212,9 +213,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0
@@ -397,7 +398,13 @@ exit 89
     writeSourceCheckoutNpmStub(fakeBin, { commandLog: true, rewriteRootLockfile: true });
 
     writeSourceCheckoutPackages(tmp);
-    const payloadLockPath = path.join(tmp, "nemoclaw", "package-lock.json");
+    const payloadLockPath = path.join(
+      tmp,
+      "packages",
+      "nemoclaw-openclaw",
+      "plugin",
+      "npm-shrinkwrap.json",
+    );
     fs.writeFileSync(payloadLockPath, "payload lock sentinel\n");
     fs.mkdirSync(path.join(tmp, "nemoclaw-blueprint", "router", "llm-router"), {
       recursive: true,
@@ -463,6 +470,12 @@ exit 89
         path.join(tmp, "scripts", "install-openshell.sh"),
         `#!/usr/bin/env bash
 printf 'install-openshell.sh invoked\\n' >> "$INSTALL_OPENSHELL_LOG"
+local_bin="\${XDG_BIN_HOME:-$HOME/.local/bin}"
+mkdir -p "$local_bin"
+for binary in openshell openshell-gateway; do
+  printf '%s\\n' '#!/usr/bin/env bash' 'if [ "$1" = "--version" ]; then echo "openshell 0.0.106"; fi' 'exit 0' > "$local_bin/$binary"
+  chmod +x "$local_bin/$binary"
+done
 exit 0
 `,
       );
@@ -945,9 +958,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0
@@ -1021,9 +1034,9 @@ if [ "\${1:-}" = "-C" ]; then
 fi
 if [ "$1" = "init" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw" "$target/scripts"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin" "$target/scripts"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   cat > "$target/scripts/install-openshell.sh" <<'EOS'
 #!/usr/bin/env bash
 exit 0
@@ -1123,9 +1136,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0
@@ -1350,9 +1363,10 @@ exit 0`,
         2,
       ),
     );
-    fs.mkdirSync(path.join(tmp, "nemoclaw"), { recursive: true });
+    const pluginRoot = path.join(tmp, "packages", "nemoclaw-openclaw", "plugin");
+    fs.mkdirSync(pluginRoot, { recursive: true });
     fs.writeFileSync(
-      path.join(tmp, "nemoclaw", "package.json"),
+      path.join(pluginRoot, "package.json"),
       JSON.stringify({ name: "nemoclaw-plugin", version: "0.1.0" }, null, 2),
     );
 
@@ -1411,9 +1425,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.5.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0`,
@@ -2320,9 +2334,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.5.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0`,
@@ -2367,9 +2381,9 @@ if [ "\${1:-}" = "-c" ]; then
 fi
 if [ "$1" = "clone" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin"
   echo '{"name":"nemoclaw","version":"0.2.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.2.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.2.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   exit 0
 fi
 exit 0`,
@@ -2552,9 +2566,9 @@ if [ "\${1:-}" = "-C" ]; then
 fi
 if [ "$1" = "init" ]; then
   target="\${@: -1}"
-  mkdir -p "$target/nemoclaw" "$target/bin/lib" "$target/scripts"
+  mkdir -p "$target/packages/nemoclaw-openclaw/plugin" "$target/bin/lib" "$target/scripts"
   echo '{"name":"nemoclaw","version":"0.5.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
-  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/nemoclaw/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.5.0"}' > "$target/packages/nemoclaw-openclaw/plugin/package.json"
   cat > "$target/bin/lib/usage-notice.js" <<'EOS'
 #!/usr/bin/env node
 process.exit(0)
@@ -2953,35 +2967,3 @@ sys.exit(exit_code)
     expect(phases).toBe("");
   });
 });
-
-/** docker stub whose `info` always succeeds, so ensure_docker passes. */
-function writeDockerOkStub(fakeBin: string) {
-  writeExecutable(
-    path.join(fakeBin, "docker"),
-    `#!/usr/bin/env bash
-if [ "$1" = "info" ]; then
-  echo '{"ServerVersion":"29.3.1","Name":"Docker Desktop","OperatingSystem":"Ubuntu 24.04","CgroupVersion":"2"}'
-  exit 0
-fi
-exit 0
-`,
-  );
-  writeExecutable(
-    path.join(fakeBin, "systemctl"),
-    `#!/usr/bin/env bash
-if [ "$1" = "is-active" ] && [ "$2" = "docker" ]; then echo "active"; exit 0; fi
-exit 0
-`,
-  );
-}
-
-function writeOpenShellOkStub(fakeBin: string, version = "0.0.72") {
-  writeExecutable(
-    path.join(fakeBin, "openshell"),
-    `#!/usr/bin/env bash
-if [ "$1" = "--version" ] || [ "$1" = "version" ]; then echo "openshell ${version}"; exit 0; fi
-# request-body-credential-rewrite websocket-credential-rewrite allow_all_known_mcp_methods
-exit 0
-`,
-  );
-}

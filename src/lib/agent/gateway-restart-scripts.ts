@@ -7,7 +7,8 @@
 
 import { DASHBOARD_PORT } from "../core/ports";
 import { shellQuote } from "../runner";
-import { type AgentDefinition, isTerminalAgent } from "./defs";
+import type { AgentDefinition } from "./defs";
+import { isTerminalAgent } from "../agent-runtime/runtime/manifest";
 import { GATEWAY_RESTART_MARKERS as MARKERS } from "./gateway-restart-markers";
 import {
   buildGatewayGuardRecoveryLines,

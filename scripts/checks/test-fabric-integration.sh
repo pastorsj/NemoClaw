@@ -6,7 +6,7 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python_command="${PYTHON_313:-python3.13}"
-fabric_lock="${repository_root}/agents/langchain-deepagents-code/fabric-requirements.lock"
+fabric_lock="${repository_root}/packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock"
 runner_source="${repository_root}/packages/nemoclaw-fabric"
 runner_build_lock="${runner_source}/build-requirements.lock"
 
@@ -99,5 +99,5 @@ env -u PYTHONHOME -u PYTHONPATH \
 env -u PYTHONHOME -u PYTHONPATH \
   PYTHONDONTWRITEBYTECODE=1 VIRTUAL_ENV="${venv_dir}" PATH="${venv_dir}/bin:${PATH}" \
   "${venv_python}" -m unittest discover \
-  -s agents/langchain-deepagents-code/tests/fabric -p 'test_*.py' -v
+  -s packages/nemoclaw-langchain-deepagents-code/tests/fabric -p 'test_*.py' -v
 "${venv_python}" -m pip check

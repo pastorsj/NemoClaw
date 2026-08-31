@@ -18,7 +18,7 @@ import { REPOSITORY_ROOT } from "../../core/repository-root";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
 import type { CheckpointSandboxRecreateTransactionV2 } from "../../state/onboard-checkpoint-types";
@@ -40,7 +40,6 @@ const PACKAGE: HarnessPackageIdentity = {
   kind: "agent-runtime",
   id: "hermes",
   packageVersion: "2.0.0",
-  contractVersion: 1,
   contentDigest: "a".repeat(64),
 };
 

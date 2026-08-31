@@ -7,7 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serializedLlamaCppHostLocalInferenceReceipt } from "../../../../test/helpers/host-local-inference-receipt";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
-import type { HarnessPackageIdentity } from "../../harness/package-identity";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
 import { createSandboxHostLocalInferenceProvenance } from "../../state/registry/host-local-inference";
 import {
   type DcodeProbeState,
@@ -22,7 +22,6 @@ function harnessPackage(agent: string, digestCharacter: string): HarnessPackageI
     kind: "agent-runtime",
     id: agent,
     packageVersion: "1.0.0-test",
-    contractVersion: 1,
     contentDigest: digestCharacter.repeat(64),
   };
 }

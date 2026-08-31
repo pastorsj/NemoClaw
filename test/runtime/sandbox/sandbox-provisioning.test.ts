@@ -24,12 +24,12 @@ const ROOT = path.resolve(import.meta.dirname, "../../..");
 const DOCKERFILE = path.join(ROOT, "Dockerfile");
 const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
 const DOCKERFILE_SANDBOX = path.join(ROOT, "test", "Dockerfile.sandbox");
-const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
-const HERMES_DOCKERFILE_BASE = path.join(ROOT, "agents", "hermes", "Dockerfile.base");
+const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
+const HERMES_DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base");
 const DEEPAGENTS_DOCKERFILE_BASE = path.join(
   ROOT,
-  "agents",
-  "langchain-deepagents-code",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
   "Dockerfile.base",
 );
 

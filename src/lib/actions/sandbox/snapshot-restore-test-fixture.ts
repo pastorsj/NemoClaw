@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import { vi } from "vitest";
 import { resolveTestAgentBaselinePolicy } from "../../../../test/support/snapshot-policy-test-fixture";
 import type { AgentDefinition } from "../../agent/defs";
-import type { HarnessPackageIdentity } from "../../harness/package-identity";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
 import type {
   SandboxEntry,
   SandboxHostLocalInferenceProvenance,
@@ -206,7 +206,6 @@ function installedHarnessPackage(identity: HarnessPackageIdentity) {
         id: identity.id,
         displayName: identity.id,
         packageVersion: identity.packageVersion,
-        contractVersion: 1 as const,
         manifest: "manifest.yaml",
       },
       manifest: { name: identity.id },
@@ -459,11 +458,11 @@ vi.mock("../../agent/defs", () => ({
   loadAgentFresh: loadAgentMock,
 }));
 
-vi.mock("../../agent/definition-loader", () => ({
+vi.mock("../../agent-runtime/manifest-loader", () => ({
   buildAgentDefinition: buildAgentDefinitionMock,
 }));
 
-vi.mock("../../harness/package-store", () => ({
+vi.mock("../../agent-runtime/package/store", () => ({
   resolvePinnedHarnessPackage: resolvePinnedHarnessPackageMock,
 }));
 

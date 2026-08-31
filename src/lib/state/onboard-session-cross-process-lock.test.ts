@@ -198,7 +198,9 @@ describe("cross-process onboard lock", () => {
           })();
     });
     try {
-      expect(() => session.clearSession()).toThrow(/state directory changed|session state changed/u);
+      expect(() => session.clearSession()).toThrow(
+        /state directory changed|session state changed/u,
+      );
     } finally {
       unlinkSpy.mockRestore();
     }
@@ -355,6 +357,11 @@ describe("cross-process onboard lock", () => {
           harnessPackage: null,
           createAttemptNonce: "c".repeat(62),
           policyCreationReceipt: null,
+          resources: {
+            sharedInferenceProviders: [],
+            sandboxScopedProviders: [],
+            credentialEnvironmentVariables: [],
+          },
           reason: "retained_after_sandbox_creation_failure",
         });
         process.stdout.write(JSON.stringify({ ok: true, recordId: recorded.recordId }));
@@ -400,7 +407,6 @@ describe("cross-process onboard lock", () => {
       kind: "agent-runtime",
       id: "openclaw",
       packageVersion: "1.2.3",
-      contractVersion: 1,
       contentDigest: "c".repeat(64),
     } as const;
     const policyCreationReceipt = {

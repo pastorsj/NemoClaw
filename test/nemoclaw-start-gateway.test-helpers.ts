@@ -3,7 +3,7 @@
 
 // Shell-harness helpers shared by the gateway-health and gateway serving
 // watchdog suites. Both drive real functions lifted out of
-// scripts/nemoclaw-start.sh, so the extraction primitives live here rather
+// packages/nemoclaw-openclaw/start.sh, so the extraction primitives live here rather
 // than being duplicated once the watchdog suite was split into its own file
 // to stay inside ci/test-file-size-budget.json.
 
@@ -12,7 +12,13 @@ import * as path from "node:path";
 
 import { expect } from "vitest";
 
-export const START_SCRIPT = path.join(import.meta.dirname, "..", "scripts", "nemoclaw-start.sh");
+export const START_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 export const GATEWAY_SUPERVISOR = path.join(
   import.meta.dirname,
   "..",
@@ -35,11 +41,11 @@ export function readFileIfPresent(filePath: string): string | null {
 export function extractShellFunction(src: string, name: string): string {
   const header = `${name}() {`;
   const start = src.indexOf(header);
-  expect(start, `Expected ${name} in scripts/nemoclaw-start.sh`).not.toBe(-1);
+  expect(start, `Expected ${name} in packages/nemoclaw-openclaw/start.sh`).not.toBe(-1);
   const bodyStart = start + header.length;
   const body = src.slice(bodyStart);
   const closing = body.match(/^}$/m);
-  expect(closing, `Expected closing brace for ${name} in scripts/nemoclaw-start.sh`).not.toBeNull();
+  expect(closing, `Expected closing brace for ${name} in packages/nemoclaw-openclaw/start.sh`).not.toBeNull();
   return `${name}() {${body.slice(0, closing?.index ?? 0)}\n}`;
 }
 
@@ -53,8 +59,8 @@ export function extractGatewayLogAppendFunction(src: string, gatewayLog: string)
 export function safeTmpHelpers(src: string): string {
   const start = src.indexOf("_nemoclaw_safe_replace_tmp_file() {");
   const end = src.indexOf("_START_LOG=", Math.max(start, 0));
-  expect(start, "Expected safe temp helpers in scripts/nemoclaw-start.sh").not.toBe(-1);
-  expect(end, "Expected safe temp helpers in scripts/nemoclaw-start.sh").toBeGreaterThan(start);
+  expect(start, "Expected safe temp helpers in packages/nemoclaw-openclaw/start.sh").not.toBe(-1);
+  expect(end, "Expected safe temp helpers in packages/nemoclaw-openclaw/start.sh").toBeGreaterThan(start);
   return src.slice(start, end);
 }
 

@@ -8,7 +8,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { loadAgent } from "../../agent/defs";
-import type { AgentDefinition } from "../../agent/definition-types";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import {
   assertCurrentHermesPortableStoredStartupContract,
   assertCurrentHermesPortableStartupContract,

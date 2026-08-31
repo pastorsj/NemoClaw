@@ -21,6 +21,7 @@ import YAML from "yaml";
 
 import {
   AGENTS_DIR,
+  AGENT_RUNTIME_PACKAGES_DIR,
   getAgentChoices,
   listAgents,
   loadAgent,
@@ -57,16 +58,34 @@ afterEach(() => {
 });
 
 describe("agent definitions", () => {
-  it("loads repository definitions through the repository package root", () => {
+  it("loads a packaged definition through its package root", () => {
     const definition = loadAgent("openclaw");
+    const packageRoot = path.join(AGENT_RUNTIME_PACKAGES_DIR, "nemoclaw-openclaw");
 
-    expect(definition.packageRoot).toBe(path.dirname(AGENTS_DIR));
-    expect(definition.manifestPath).toBe(path.join(AGENTS_DIR, "openclaw", "manifest.yaml"));
+    expect(definition.packageRoot).toBe(packageRoot);
+    expect(definition.manifestPath).toBe(path.join(packageRoot, "manifest.yaml"));
     expect(Object.getOwnPropertyDescriptor(definition, "packageRoot")).toMatchObject({
       configurable: false,
-      value: path.dirname(AGENTS_DIR),
+      value: packageRoot,
       writable: false,
     });
+  });
+
+  it.each([
+    [
+      "openclaw",
+      [
+        "/usr/local/bin/mcporter",
+        "/usr/bin/mcporter",
+        "/usr/local/bin/openclaw",
+        "/usr/local/bin/node",
+        "/usr/bin/node",
+      ],
+    ],
+    ["hermes", ["/usr/local/bin/hermes", "/usr/bin/python3*", "/opt/hermes/.venv/bin/python*"]],
+    ["langchain-deepagents-code", ["/usr/local/bin/dcode", "/opt/venv/bin/python3*"]],
+  ])("loads manifest-declared MCP policy binaries for %s", (agentName, expectedPaths) => {
+    expect(loadAgent(agentName).mcpCapability.policy_binaries).toEqual(expectedPaths);
   });
 
   it("exposes NemoCUA only behind the exact experimental feature flag (#9649)", () => {
@@ -247,12 +266,12 @@ describe("agent definitions", () => {
     const policyPath = path.join(AGENTS_DIR, agentName, "policy-additions.yaml");
 
     expect(() => requireAgentPolicyAdditionsPath(agent)).toThrow(
-      "Refusing to substitute the OpenClaw baseline",
+      "Refusing to substitute another runtime's baseline",
     );
 
     fs.mkdirSync(policyPath);
     expect(() => requireAgentPolicyAdditionsPath(agent)).toThrow(
-      "Refusing to substitute the OpenClaw baseline",
+      "Refusing to substitute another runtime's baseline",
     );
     fs.rmSync(policyPath, { recursive: true });
     fs.writeFileSync(policyPath, "version: 1\nnetwork_policies: {}\n");
@@ -500,7 +519,7 @@ describe("agent definitions", () => {
         "display_name: Broken MCP",
         "mcp:",
         "  support: bridge",
-        "  adapter: unsupported-adapter",
+        "  adapter: Unsupported Adapter",
       ].join("\n"),
     );
 
@@ -517,6 +536,69 @@ describe("agent definitions", () => {
     );
 
     expect(() => loadAgent(agentName)).toThrow(/mcp\.adapter/);
+  });
+
+  it("requires policy binaries when MCP bridge support is declared", () => {
+    const agentName = `missing-mcp-policy-binaries-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Missing MCP Policy Binaries",
+        "mcp:",
+        "  support: bridge",
+        "  adapter: example-adapter",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/mcp\.policy_binaries.*required/);
+  });
+
+  it.each([
+    ["empty array", "  policy_binaries: []", /non-empty array/],
+    ["non-string entry", "  policy_binaries:\n    - 42", /must be a string/],
+    ["relative path", "  policy_binaries:\n    - usr\/bin\/tool", /canonical absolute/],
+    ["parent traversal", "  policy_binaries:\n    - \/usr\/..\/bin\/tool", /canonical absolute/],
+    ["mid-path wildcard", "  policy_binaries:\n    - \/usr\/bin\/py\*thon", /canonical absolute/],
+    [
+      "duplicate path",
+      "  policy_binaries:\n    - /usr/bin/tool\n    - /usr/bin/tool",
+      /duplicates/,
+    ],
+  ])("rejects invalid MCP policy binaries: %s", (_label, declaration, expectedError) => {
+    const agentName = `invalid-mcp-policy-binaries-${String(Date.now())}-${String(
+      Math.random(),
+    ).slice(2)}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Invalid MCP Policy Binaries",
+        "mcp:",
+        "  support: bridge",
+        "  adapter: example-adapter",
+        declaration,
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(expectedError);
+  });
+
+  it("rejects policy binaries when MCP bridge support is disabled", () => {
+    const agentName = `disabled-mcp-policy-binaries-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Disabled MCP Policy Binaries",
+        "mcp:",
+        "  support: disabled",
+        "  policy_binaries:",
+        "    - /usr/bin/tool",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/mcp\.policy_binaries.*only valid/);
   });
 
   it("loads terminal runtime manifests without OpenClaw gateway defaults", () => {

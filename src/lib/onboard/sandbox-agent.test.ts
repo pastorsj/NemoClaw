@@ -18,11 +18,12 @@ import {
   candidateQualificationEnvironment,
 } from "../agent/candidate-test-fixture";
 import * as agentDefs from "../agent/defs";
-import { installHarnessPackage } from "../harness/package-install";
-import { HarnessPackageStoreIntegrityError } from "../harness/package-store";
-import type { HarnessPackageMigration } from "../harness/package-identity";
+import { installHarnessPackage } from "../agent-runtime/package/install";
+import { HarnessPackageStoreIntegrityError } from "../agent-runtime/package/store";
+import type { HarnessPackageMigration } from "../agent-runtime/package/identity";
 import {
   createPromptValidatedSandboxName,
+  getDefaultSandboxNameForAgent,
   getAgentInferenceProviderOptions,
   resolveLegacyBackupRecoveryOwner,
   resolveSandboxAgent,
@@ -63,12 +64,11 @@ function writeOpenClawPackage(
       id: "openclaw",
       displayName,
       packageVersion,
-      contractVersion: 1,
-      manifest: "agents/openclaw/manifest.yaml",
+      manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     })}\n`,
   );
   writeFixtureFile(
-    "agents/openclaw/manifest.yaml",
+    "packages/nemoclaw-openclaw/manifest.yaml",
     [
       "name: openclaw",
       `display_name: ${displayName}`,
@@ -110,6 +110,12 @@ afterEach(() => {
 });
 
 describe("sandbox agent authority", () => {
+  it("uses the package manifest sandbox name without an agent id branch", () => {
+    expect(getDefaultSandboxNameForAgent({ defaultSandboxName: "future-sandbox" } as never)).toBe(
+      "future-sandbox",
+    );
+  });
+
   it("preserves the OpenClaw null sentinel while returning its exact package definition", () => {
     const installed = installOpenClawPackage();
     const migration: HarnessPackageMigration = {

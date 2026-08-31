@@ -228,7 +228,7 @@ const { createSandbox } = require(${onboardPath});
     const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
     const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
     const hermesPolicyPath = JSON.stringify(
-      path.join(repoRoot, "agents", "hermes", "policy-additions.yaml"),
+      path.join(repoRoot, "packages", "nemoclaw-hermes", "policy-additions.yaml"),
     );
     const registryPath = JSON.stringify(path.join(repoRoot, "src", "lib", "state", "registry.ts"));
     const preflightPath = JSON.stringify(
@@ -373,7 +373,8 @@ const { createSandbox } = require(${onboardPath});
   const agent = {
     name: "hermes",
     displayName: "Hermes Agent",
-    dockerfilePath: ${JSON.stringify(path.join(repoRoot, "agents", "hermes", "Dockerfile"))},
+    packageRoot: ${JSON.stringify(path.join(repoRoot, "packages", "nemoclaw-hermes"))},
+    dockerfilePath: ${JSON.stringify(path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"))},
     forwardPort: 18789,
     forward_ports: [18789, 8642],
     healthProbe: { url: "http://127.0.0.1:8642/health", port: 8642, timeout_seconds: 90 },
@@ -431,7 +432,7 @@ const { createSandbox } = require(${onboardPath});
     assert.equal(payload.baseResolutionCalls[0]?.imageName, "ghcr.io/nvidia/nemoclaw/sandbox-base");
     assert.equal(
       payload.baseResolutionCalls[0]?.dockerfilePath,
-      path.join(repoRoot, "Dockerfile.base"),
+      path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
     );
     const createCommand = payload.commands.find((entry) =>
       entry.command.includes("sandbox create"),

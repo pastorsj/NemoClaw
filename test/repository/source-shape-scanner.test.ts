@@ -24,6 +24,18 @@ function detectedCaseNames(source: string): string[] {
 }
 
 describe("source-shape scanner", () => {
+  it.each([
+    "packages/nemoclaw-hermes/node_modules",
+    "packages/nemoclaw-langchain-deepagents-code/node_modules",
+    "packages/nemoclaw-openclaw/node_modules",
+    "packages/nemoclaw-openclaw/plugin/dist",
+    "packages/nemoclaw-openclaw/plugin/node_modules",
+  ])("skips generated or dependency path %s", (skippedPath) => {
+    const repoRoot = path.resolve(".");
+
+    expect(isSourceShapePathSkipped(path.join(repoRoot, skippedPath))).toBe(true);
+  });
+
   it("skips the local nested worktree checkout container", () => {
     const repoRoot = path.resolve(".");
 

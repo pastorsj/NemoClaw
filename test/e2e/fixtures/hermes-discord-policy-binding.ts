@@ -12,8 +12,8 @@ import YAML from "yaml";
 // handling intercepts the file before tsx's transform runs, producing
 // "Cannot use import statement outside a module". Every other consumer in
 // this repo already imports the compiled .cjs for the same reason.
-// sourceOfTruth: nemoclaw/src/shared/openshell-policy-boundary.cts
-import * as policyBoundaryModule from "../../../nemoclaw/dist/shared/openshell-policy-boundary.cjs";
+// sourceOfTruth: src/lib/shared/openshell-policy-boundary.cts
+import * as policyBoundaryModule from "../../../dist/lib/shared/openshell-policy-boundary.cjs";
 
 const policyBoundary = (
   "default" in policyBoundaryModule ? policyBoundaryModule.default : policyBoundaryModule

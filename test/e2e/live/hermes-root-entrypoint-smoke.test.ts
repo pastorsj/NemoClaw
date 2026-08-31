@@ -43,7 +43,7 @@ async function buildImageIfNeeded(
     return;
   }
 
-  await probe.expect(["build", "-f", "agents/hermes/Dockerfile.base", "-t", baseImage, "."], {
+  await probe.expect(["build", "-f", "packages/nemoclaw-hermes/Dockerfile.base", "-t", baseImage, "."], {
     artifactName: "build-hermes-base-image",
     timeoutMs: BUILD_TIMEOUT_MS,
   });
@@ -51,7 +51,7 @@ async function buildImageIfNeeded(
     [
       "build",
       "-f",
-      "agents/hermes/Dockerfile",
+      "packages/nemoclaw-hermes/Dockerfile",
       "--build-arg",
       `BASE_IMAGE=${baseImage}`,
       "-t",

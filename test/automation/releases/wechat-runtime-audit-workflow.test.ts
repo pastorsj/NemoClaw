@@ -21,11 +21,11 @@ function runAuditValidation(
   mutate: (fixture: { readonly targetRoot: string; readonly runtimeDir: string }) => void,
 ) {
   const targetRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-wechat-audit-test-"));
-  const runtimeDir = path.join(targetRoot, "agents", "openclaw", "wechat-runtime");
+  const runtimeDir = path.join(targetRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat");
   fs.mkdirSync(runtimeDir, { recursive: true });
-  for (const filename of ["package.json", "package-lock.json"]) {
+  for (const filename of ["package.json", "npm-shrinkwrap.json"]) {
     fs.copyFileSync(
-      path.join(repoRoot, "agents", "openclaw", "wechat-runtime", filename),
+      path.join(repoRoot, "packages", "nemoclaw-openclaw", "runtime", "wechat", filename),
       path.join(runtimeDir, filename),
     );
   }
@@ -85,7 +85,14 @@ function installFakeAuditNpm(
   const npm = path.join(binDir, "npm");
   const packageLock = JSON.parse(
     fs.readFileSync(
-      path.join(targetRoot, "agents", "openclaw", "wechat-runtime", "package-lock.json"),
+      path.join(
+        targetRoot,
+        "packages",
+        "nemoclaw-openclaw",
+        "runtime",
+        "wechat",
+        "npm-shrinkwrap.json",
+      ),
       "utf8",
     ),
   );
@@ -156,7 +163,7 @@ describe("WeChat runtime audit and install-cache gates (#5896)", () => {
 
   it("rejects an off-origin transitive package archive", () => {
     const result = runAuditValidation(({ targetRoot, runtimeDir }) => {
-      const lockPath = path.join(runtimeDir, "package-lock.json");
+      const lockPath = path.join(runtimeDir, "npm-shrinkwrap.json");
       const lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
       lock.packages["node_modules/qrcode-terminal"].resolved =
         "https://registry.example.test/qrcode-terminal-0.12.0.tgz";

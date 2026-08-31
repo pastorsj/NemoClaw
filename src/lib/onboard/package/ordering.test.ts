@@ -11,9 +11,9 @@ import {
   type HarnessPackageFixture,
 } from "../../../../test/helpers/harness-packages";
 import { loadAgent } from "../../agent/defs";
-import { installHarnessPackage } from "../../harness/package-install";
-import { resolvePinnedHarnessPackage } from "../../harness/package-store";
-import type { HarnessPackageMigration } from "../../harness/package-identity";
+import { installHarnessPackage } from "../../agent-runtime/package/install";
+import { resolvePinnedHarnessPackage } from "../../agent-runtime/package/store";
+import type { HarnessPackageMigration } from "../../agent-runtime/package/identity";
 import {
   prepareLegacyHarnessMigration,
   reconcileLegacyHarnessMigration,
@@ -227,7 +227,7 @@ describe("onboarding harness package ordering", () => {
       "runtime",
     ]);
     expect(session).toMatchObject({
-      agent: null,
+      agent: "openclaw",
       harnessPackage: installed.identity,
       harnessPackageMigration: null,
     });
@@ -263,7 +263,7 @@ describe("onboarding harness package ordering", () => {
     expect(events).toEqual(["selection", "recovery", "bind", "runtime"]);
     expect(prepared.harnessAuthority.freshHarnessBinding).toMatchObject({
       kind: "package",
-      recordedAgent: null,
+      recordedAgent: "openclaw",
     });
   });
 

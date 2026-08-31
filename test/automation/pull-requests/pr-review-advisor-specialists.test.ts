@@ -48,7 +48,9 @@ const context: InvestigateTurnContext = {
 
 describe("PR review advisor specialist prompts", () => {
   it("writes readable diff evidence in the prepared advisor context", async () => {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "specialist-context-"));
+    const directory = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "specialist-context-")),
+    );
     onTestFinished(() => fs.rmSync(directory, { recursive: true, force: true }));
     const expected = path.join(directory, "diff.patch");
 

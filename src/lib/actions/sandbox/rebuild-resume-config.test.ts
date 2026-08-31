@@ -28,7 +28,6 @@ function makePackageIdentity(agentId: string) {
     kind: "agent-runtime" as const,
     id: agentId,
     packageVersion: "1.0.0",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   });
 }
@@ -240,7 +239,6 @@ describe("prepareRebuildResumeConfig", () => {
       kind: "agent-runtime",
       id: "hermes",
       packageVersion: "2.0.0",
-      contractVersion: 1,
       contentDigest: "a".repeat(64),
     });
     const harnessPackageMigration = Object.freeze({

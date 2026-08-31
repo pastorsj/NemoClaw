@@ -37,7 +37,7 @@ export const PR_E2E_MANUAL_CONTROLLER_JOB_IDS = [
 const PR_E2E_MANUAL_CONTROLLER_JOB_ID_SET = new Set<string>(PR_E2E_MANUAL_CONTROLLER_JOB_IDS);
 const DEEPAGENTS_HEADLESS_INFERENCE_CHECK =
   "test/e2e/e2e-cloud-experimental/checks/07-deepagents-code-headless-inference.sh";
-const DEEPAGENTS_CODE_RUNTIME_ROOT = "agents/langchain-deepagents-code/";
+const DEEPAGENTS_CODE_RUNTIME_ROOT = "packages/nemoclaw-langchain-deepagents-code/";
 const JOURNALED_RECREATE_RESUME_RUNTIME_FILES = new Set([
   "src/lib/onboard/machine/handlers/sandbox-resume.ts",
   "src/lib/onboard/machine/handlers/sandbox.ts",
@@ -76,14 +76,14 @@ const MANAGED_STARTUP_E2E_JOB_IDS = [
 ] as const;
 const HERMES_CLI_ADAPTER_E2E_JOB_IDS = ["channels-stop-start", "mcp-bridge"] as const;
 const HERMES_CLI_ADAPTER_RUNTIME_FILES = new Set([
-  "agents/hermes/hermes-cli-adapter-v1.json",
-  "agents/hermes/hermes-wrapper.py",
-  "agents/hermes/validate-cli-adapter.py",
+  "packages/nemoclaw-hermes/runtime/cli-adapter.json",
+  "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+  "packages/nemoclaw-hermes/checks/cli-adapter.py",
 ]);
 const HERMES_CRON_RESTORE_E2E_JOB_IDS = ["rebuild-hermes"] as const;
 const HERMES_CRON_RESTORE_RUNTIME_FILES = new Set([
-  "agents/hermes/cron-restore-control.py",
-  "agents/hermes/patch-cron-restore-drain.py",
+  "packages/nemoclaw-hermes/runtime/cron-control.py",
+  "packages/nemoclaw-hermes/compat/cron-drain.py",
   "src/lib/actions/sandbox/rebuild-hermes-post-restore.ts",
   "src/lib/actions/sandbox/runtime/hermes-cron-restore-recovery.ts",
 ]);
@@ -97,12 +97,12 @@ const HERMES_MANAGED_POLICY_E2E_JOB_IDS = [
   "security-posture",
 ] as const;
 const HERMES_MANAGED_POLICY_FILES = new Set([
-  "agents/hermes/hermes-wrapper.py",
-  "agents/hermes/image-build-probes.py",
-  "agents/hermes/managed_policy.py",
-  "agents/hermes/patch-profile-policy-defaults.py",
-  "agents/hermes/seed-dashboard-config.py",
-  "agents/hermes/start.sh",
+  "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
+  "packages/nemoclaw-hermes/checks/image-probes.py",
+  "packages/nemoclaw-hermes/runtime/managed_policy.py",
+  "packages/nemoclaw-hermes/compat/profile-policy.py",
+  "packages/nemoclaw-hermes/runtime/dashboard-config.py",
+  "packages/nemoclaw-hermes/start.sh",
   "src/lib/hermes-managed-route.ts",
 ]);
 const MANAGED_IMAGE_PROTECTED_RUNTIME_ACTIVATION =
@@ -149,7 +149,6 @@ const MANAGED_IMAGE_MULTIARCH_CHILD_CREDENTIALS =
   /^src\/lib\/actions\/sandbox\/openshell-child-visible-credentials[.]v[^/]+[.]json$/u;
 const MANAGED_IMAGE_MULTIARCH_INPUT_PREFIXES = [
   "agents/",
-  "nemoclaw/",
   "nemoclaw-blueprint/",
   "scripts/",
   "src/lib/actions/sandbox/mcp-bridge-",
@@ -157,6 +156,17 @@ const MANAGED_IMAGE_MULTIARCH_INPUT_PREFIXES = [
   "src/lib/onboard/managed-startup/",
   "tools/mcp-tool-discovery-runtime/",
 ] as const;
+const MANAGED_IMAGE_PACKAGE_SOURCE =
+  /^packages\/nemoclaw-(?:openclaw|hermes|langchain-deepagents-code)\//u;
+
+function isManagedImagePackageSource(file: string): boolean {
+  if (!MANAGED_IMAGE_PACKAGE_SOURCE.test(file)) return false;
+  if (file.includes("/tests/")) return false;
+  if (/\.(?:md|mdx)$/u.test(file)) return false;
+  if (/\.test\.[^/]+$/u.test(file)) return false;
+  if (/\/(?:vitest(?:\.[^/]+)?\.ts|tsconfig\.test\.json)$/u.test(file)) return false;
+  return true;
+}
 
 export type RiskTier = 0 | 1 | 2 | 3;
 export type RiskFamilyId =
@@ -243,7 +253,7 @@ const E2E_CONTROL_PLANE_FILES = new Set([
 // Keep the explicit floor until a machine-readable security-owner catalog replaces it.
 const PRIVATE_NETWORK_BOUNDARY_FILES = new Set([
   "nemoclaw-blueprint/private-networks.yaml",
-  "nemoclaw/src/blueprint/private-networks.ts",
+  "packages/nemoclaw-openclaw/plugin/src/blueprint/private-networks.ts",
 ]);
 const POLICY_SECURITY_FILE = /^src\/lib\/(?:policy|shields)\//;
 // Ordinary tests do not raise the runtime floor. These files either define a live
@@ -336,7 +346,7 @@ export function focusedPrE2eJobsForChangedFiles(
   const hermesManagedPolicyFiles = stableUnique(
     changedFiles.filter(
       (file) =>
-        (file.startsWith("agents/hermes/config/") || HERMES_MANAGED_POLICY_FILES.has(file)) &&
+        (file.startsWith("packages/nemoclaw-hermes/config/") || HERMES_MANAGED_POLICY_FILES.has(file)) &&
         isRuntimeRelevant(file),
     ),
   );
@@ -518,7 +528,7 @@ export const RISK_RULES: readonly RiskRule[] = [
       POLICY_SECURITY_FILE.test(file) ||
       PRIVATE_NETWORK_BOUNDARY_FILES.has(file) ||
       CREDENTIAL_SECURITY_FILE.test(file) ||
-      file.startsWith("nemoclaw/src/blueprint/ssrf"),
+      file.startsWith("packages/nemoclaw-openclaw/plugin/src/blueprint/ssrf"),
   },
   {
     id: "e2e-control-plane",
@@ -557,6 +567,7 @@ export const RISK_RULES: readonly RiskRule[] = [
     matches: (file) =>
       MANAGED_IMAGE_MULTIARCH_INPUTS.has(file) ||
       MANAGED_IMAGE_MULTIARCH_CHILD_CREDENTIALS.test(file) ||
+      isManagedImagePackageSource(file) ||
       MANAGED_IMAGE_MULTIARCH_INPUT_PREFIXES.some((prefix) => file.startsWith(prefix)),
   },
   {
@@ -615,9 +626,9 @@ export const RISK_RULES: readonly RiskRule[] = [
       "blueprint state agrees with the runtime observed by both supported agents",
     ],
     matches: (file) =>
-      file.startsWith("nemoclaw/src/blueprint/") ||
+      file.startsWith("packages/nemoclaw-openclaw/plugin/src/blueprint/") ||
       file === "nemoclaw-blueprint/blueprint.yaml" ||
-      file.startsWith("agents/hermes/"),
+      file.startsWith("packages/nemoclaw-hermes/"),
   },
 ] as const;
 

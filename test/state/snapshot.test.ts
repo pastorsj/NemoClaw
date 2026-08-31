@@ -163,7 +163,6 @@ function testHarnessPackage(agentId: string) {
     kind: "agent-runtime" as const,
     id: agentId,
     packageVersion: "1.2.3",
-    contractVersion: 1 as const,
     contentDigest: createHash("sha256").update(`snapshot-test:${agentId}`).digest("hex"),
   };
 }
@@ -429,7 +428,6 @@ describe("sandbox directory backup semantics", () => {
       kind: "agent-runtime",
       id: "openclaw",
       packageVersion: "1.2.3",
-      contractVersion: 1,
       contentDigest: "a".repeat(64),
     };
     writeOpenClawRegistry("alpha", { harnessPackage });
@@ -465,7 +463,6 @@ describe("sandbox directory backup semantics", () => {
         kind: "agent-runtime",
         id: "openclaw",
         packageVersion: "1.2.3",
-        contractVersion: 1,
         contentDigest: "invalid",
       },
     });

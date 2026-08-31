@@ -10,12 +10,10 @@ if [ -n "$candidate_npmrc" ]; then
   exit 1
 fi
 
-for shrinkwrap in npm-shrinkwrap.json nemoclaw/npm-shrinkwrap.json; do
-  if [ -e "$shrinkwrap" ]; then
-    echo "Candidate npm shrinkwrap files are not allowed during trusted dependency installation." >&2
-    exit 1
-  fi
-done
+if [ -e npm-shrinkwrap.json ]; then
+  echo "Candidate npm shrinkwrap files are not allowed during trusted dependency installation." >&2
+  exit 1
+fi
 
 event_name="${GITHUB_EVENT_NAME:-local}"
 package_mode="registry"
@@ -57,4 +55,4 @@ if [ "$package_mode" = "registry" ] && [ -n "${NODE_AUTH_TOKEN:-}" ]; then
 fi
 
 npm ci --ignore-scripts --prefer-offline --cache "$npm_cache"
-npm --prefix nemoclaw ci --ignore-scripts --prefer-offline --cache "$npm_cache"
+npm --prefix packages/nemoclaw-openclaw/plugin ci --ignore-scripts --prefer-offline --cache "$npm_cache"

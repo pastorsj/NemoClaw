@@ -472,8 +472,8 @@ describe("fast-project transitive import boundary", () => {
         "src/lib/dist/example.test.ts",
         "src/lib/.claude/example.test.ts",
         "src/.claude/example.test.ts",
-        "nemoclaw/src/blueprint/example.test.ts",
-        "nemoclaw/src/.claude/example.test.ts",
+        "packages/nemoclaw-openclaw/plugin/src/blueprint/example.test.ts",
+        "packages/nemoclaw-openclaw/plugin/src/.claude/example.test.ts",
         "test/e2e/support/example.test.ts",
         "test/example.test.ts",
         "test/e2e/live/example.test.ts",
@@ -729,8 +729,8 @@ describe("Vitest project membership boundary", () => {
       "test/integration.test.js",
       "test/component.test.tsx",
       "test/.venv/environment.test.ts",
-      "nemoclaw/src/plugin.spec.cts",
-      "nemoclaw/src/coverage/generated.spec.ts",
+      "packages/nemoclaw-openclaw/plugin/src/plugin.spec.cts",
+      "packages/nemoclaw-openclaw/plugin/src/coverage/generated.spec.ts",
     ];
     const excluded = ["src/helper.ts", "test/node_modules/dependency.spec.ts"];
 
@@ -753,7 +753,7 @@ describe("Vitest project membership boundary", () => {
     Array.from(
       new Map<string, string | undefined>([
         ["src/example.spec.ts", "cli"],
-        ["nemoclaw/src/example.test.js", "plugin"],
+        ["packages/nemoclaw-openclaw/plugin/src/example.test.js", "plugin"],
         ["test/repository/coverage-ratchet.test.ts", "integration"],
         ["test/repository/vitest-coverage-thresholds.test.ts", "integration"],
         ["test/example.test.js", "integration"],
@@ -781,7 +781,7 @@ describe("Vitest project membership boundary", () => {
     const candidates = new Set([
       "src/missing.test.ts",
       "test/overlap.test.ts",
-      "nemoclaw/src/wrong.test.ts",
+      "packages/nemoclaw-openclaw/plugin/src/wrong.test.ts",
       "test/e2e/unsupported.test.ts",
       "test\\good.test.ts",
     ]);
@@ -791,14 +791,14 @@ describe("Vitest project membership boundary", () => {
         "[integration] test\\good.test.ts",
         "[integration] test/overlap.test.ts",
         "[cli] test/overlap.test.ts",
-        "[cli] nemoclaw/src/wrong.test.ts",
+        "[cli] packages/nemoclaw-openclaw/plugin/src/wrong.test.ts",
         "[integration] src/helper.ts",
       ].join("\n"),
     );
 
     expect(findProjectMembershipMismatches(candidates, listing.projectsByFile)).toEqual([
       {
-        file: "nemoclaw/src/wrong.test.ts",
+        file: "packages/nemoclaw-openclaw/plugin/src/wrong.test.ts",
         expected: new Set(["plugin"]),
         actual: new Set(["cli"]),
         reason: "wrong-project",

@@ -48,7 +48,7 @@ nemoclaw onboard --agents ./agents.yaml --name my-assistant
 ```
 
 NemoClaw reads the manifest on the host and sets `NEMOCLAW_EXTRA_AGENTS_JSON` for the Dockerfile patcher.
-The build-time validator in `scripts/generate-openclaw-config.mts` is the single source of truth for structured errors.
+The build-time validator in `packages/nemoclaw-openclaw/config/generate-config.mts` is the single source of truth for structured errors.
 A malformed manifest fails the image build with a clear error message.
 
 ## Define the Manifest

@@ -78,7 +78,7 @@ export const MUTATION_READS: readonly AuditedPolicyReadFile[] = [
     ],
   },
   {
-    relativePath: "nemoclaw/src/blueprint/runner.ts",
+    relativePath: "packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts",
     expectedReads: [
       unclassifiedBase("actionApply"),
       unclassifiedFull("inspectBlueprintPolicyAuthority"),
@@ -669,7 +669,7 @@ function productionTypeScriptFiles(directory: string): string[] {
 }
 
 export function discoverPolicyReadSites(repoRoot: string): DiscoveredPolicyReadSite[] {
-  return ["src", "nemoclaw/src"]
+  return ["src", "packages/nemoclaw-openclaw/plugin/src"]
     .flatMap((sourceRoot) => productionTypeScriptFiles(path.join(repoRoot, sourceRoot)))
     .flatMap((sourcePath) => {
       const source = readFileSync(sourcePath, "utf8");

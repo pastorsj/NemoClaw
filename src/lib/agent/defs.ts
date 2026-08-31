@@ -9,19 +9,28 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isCuaEnabled, requireCuaEnabled } from "../cua/feature";
-import { ROOT } from "../runner";
 import {
+  createAgentAliasMap,
   formatAgentAliasSuffix,
   resolveAgentNameAlias as resolveKnownAgentNameAlias,
+  type AgentAliasTarget,
 } from "./aliases";
 import {
   isCandidateAgent,
   isCandidateAgentSelectable,
   requireCandidateAgentSelectable,
 } from "./candidate";
-import type { AgentChoice, AgentDefinition } from "./definition-types";
-import { buildAgentDefinition } from "./definition-loader";
-import { loadManifestRecord } from "./manifest-readers";
+import type { AgentChoice, AgentDefinition } from "../agent-runtime/manifest-types";
+import { buildAgentDefinition } from "../agent-runtime/manifest-loader";
+import { loadManifestRecord } from "../agent-runtime/manifest-readers";
+import {
+  AGENT_MANIFESTS_DIR,
+  AGENT_REPOSITORY_ROOT,
+  AGENT_RUNTIME_PACKAGES_DIR,
+  findAgentManifestLocation,
+  listAgentRuntimePackageLocations,
+  readAgentAliasTargets,
+} from "./manifest-inventory";
 
 export type {
   AgentChoice,
@@ -50,12 +59,13 @@ export type {
   StateFileRestoreOwnership,
   StateFileUserKey,
   StateFileUserKeyType,
-} from "./definition-types";
-export type { AgentRuntime, AgentRuntimeKind } from "./runtime-manifest";
-export { getAgentRuntimeKind, isTerminalAgent } from "./runtime-manifest";
-export type { AgentWebAuth, AgentWebAuthMethod } from "./web-auth";
+} from "../agent-runtime/manifest-types";
+export type { AgentRuntime, AgentRuntimeKind } from "../agent-runtime/runtime/manifest";
+export { getAgentRuntimeKind, isTerminalAgent } from "../agent-runtime/runtime/manifest";
+export type { AgentWebAuth, AgentWebAuthMethod } from "../agent-runtime/web-auth";
 
-export const AGENTS_DIR = path.join(ROOT, "agents");
+export const AGENTS_DIR = AGENT_MANIFESTS_DIR;
+export { AGENT_RUNTIME_PACKAGES_DIR };
 
 const _cache = new Map<string, AgentDefinition>();
 
@@ -71,14 +81,29 @@ export function createImmutableAgentDefinition(definition: AgentDefinition): Age
   return freezeAgentDefinitionTree(structuredClone(definition));
 }
 
-export { agentAliasSummary } from "./aliases";
 export { requireCandidateQualificationEnabled } from "./candidate";
+
+export function getAgentAliasTargets(
+  availableAgents: readonly string[] = listAgents(),
+): readonly AgentAliasTarget[] {
+  return readAgentAliasTargets(availableAgents);
+}
+
+export function agentAliasSummary(availableAgents: readonly string[] = listAgents()): string {
+  const targets = getAgentAliasTargets(availableAgents);
+  return targets
+    .filter(({ aliases }) => aliases.length > 0)
+    .map(({ name, aliases, aliasSummary }) => aliasSummary ?? `${aliases.join("/")} → ${name}`)
+    .filter(Boolean)
+    .join("; ");
+}
 
 export function resolveAgentNameAlias(
   value: string | null | undefined,
   availableAgents: readonly string[] = listAgents(),
 ): string | null {
-  return resolveKnownAgentNameAlias(value, availableAgents);
+  const targets = getAgentAliasTargets(availableAgents);
+  return resolveKnownAgentNameAlias(value, availableAgents, createAgentAliasMap(targets));
 }
 
 function unknownAgentMessage(
@@ -88,7 +113,7 @@ function unknownAgentMessage(
 ): string {
   const choices = available.join(", ");
   const suffix = context ? ` ${context}` : "";
-  return `Unknown agent '${value}'${suffix}. Available: ${choices}${formatAgentAliasSuffix(available)}`;
+  return `Unknown agent '${value}'${suffix}. Available: ${choices}${formatAgentAliasSuffix(available, getAgentAliasTargets(available))}`;
 }
 
 /**
@@ -96,7 +121,7 @@ function unknownAgentMessage(
  * a manifest.yaml file.
  */
 export function listAgents(env: NodeJS.ProcessEnv = process.env): string[] {
-  const agents = fs.existsSync(AGENTS_DIR)
+  const qualifiedAgents = fs.existsSync(AGENTS_DIR)
     ? fs
         .readdirSync(AGENTS_DIR, { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
@@ -107,7 +132,8 @@ export function listAgents(env: NodeJS.ProcessEnv = process.env): string[] {
         .filter((entry) => fs.existsSync(path.join(AGENTS_DIR, entry.name, "manifest.yaml")))
         .map((entry) => entry.name)
     : [];
-  return [...new Set(agents)].sort();
+  const packageAgents = listAgentRuntimePackageLocations().map(({ name }) => name);
+  return [...new Set([...packageAgents, ...qualifiedAgents])].sort();
 }
 
 /** Resolve a non-OpenClaw agent's required, readable baseline policy. */
@@ -121,7 +147,7 @@ export function requireAgentPolicyAdditionsPath(
     return policyPath;
   } catch {
     throw new Error(
-      `Agent '${agent.name}' baseline policy is unavailable; a readable policy-additions.yaml is required. Refusing to substitute the OpenClaw baseline.`,
+      `Agent '${agent.name}' baseline policy is unavailable; a readable policy-additions.yaml is required. Refusing to substitute another runtime's baseline.`,
     );
   }
 }
@@ -137,7 +163,9 @@ export function loadAgentFresh(
 ): AgentDefinition {
   if (name === "nemocua") requireCuaEnabled(env);
   requireCandidateAgentSelectable(name, env);
-  const manifestPath = path.join(AGENTS_DIR, name, "manifest.yaml");
+  const packaged = findAgentManifestLocation(name);
+  const packageRoot = packaged?.packageRoot ?? AGENT_REPOSITORY_ROOT;
+  const manifestPath = packaged?.manifestPath ?? path.join(AGENTS_DIR, name, "manifest.yaml");
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`Agent '${name}' not found: ${manifestPath}`);
   }
@@ -145,7 +173,7 @@ export function loadAgentFresh(
     buildAgentDefinition({
       manifest: loadManifestRecord(manifestPath),
       manifestPath,
-      packageRoot: ROOT,
+      packageRoot,
     }),
   );
 }
@@ -156,8 +184,9 @@ export function loadAgentFresh(
 export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): AgentDefinition {
   if (name === "nemocua") requireCuaEnabled(env);
   requireCandidateAgentSelectable(name, env);
-  const manifestPath = path.join(AGENTS_DIR, name, "manifest.yaml");
-  const cacheKey = `${ROOT}\0${manifestPath}`;
+  const packaged = findAgentManifestLocation(name);
+  const manifestPath = packaged?.manifestPath ?? path.join(AGENTS_DIR, name, "manifest.yaml");
+  const cacheKey = `${packaged?.packageRoot ?? AGENT_REPOSITORY_ROOT}\0${manifestPath}`;
   const cached = _cache.get(cacheKey);
   if (cached) return cached;
   const agent = loadAgentFresh(name, env);
@@ -167,7 +196,7 @@ export function loadAgent(name: string, env: NodeJS.ProcessEnv = process.env): A
 
 /**
  * Get agent choices for interactive prompt (name, display_name, description).
- * OpenClaw is listed first as the default.
+ * The manifest-declared onboarding default is listed first.
  */
 export function getAgentChoices(): AgentChoice[] {
   // Build the menu defensively: a single malformed non-default manifest must
@@ -191,8 +220,10 @@ export function getAgentChoices(): AgentChoice[] {
   });
 
   agents.sort((left, right) => {
-    if (left.name === "openclaw") return -1;
-    if (right.name === "openclaw") return 1;
+    const leftDefault = loadAgent(left.name).isDefaultOnboardingChoice;
+    const rightDefault = loadAgent(right.name).isDefaultOnboardingChoice;
+    if (leftDefault) return -1;
+    if (rightDefault) return 1;
     return left.name.localeCompare(right.name);
   });
 
@@ -201,7 +232,7 @@ export function getAgentChoices(): AgentChoice[] {
 
 /**
  * Resolve the effective agent from CLI flags, env vars, or session state.
- * Priority: explicit flag > env var > session > default ("openclaw").
+ * Priority: explicit flag > env var > session > manifest-declared default.
  */
 export function resolveAgentName({
   agentFlag = null,
@@ -237,13 +268,28 @@ export function resolveAgentName({
       // would silently change the agent a resumed session was created with and
       // strand its agent-scoped state.
       requireCandidateAgentSelectable(session.agent);
+      const fallback = defaultAgentName(available);
       console.error(
-        `  Warning: session references unknown agent '${session.agent}', falling back to openclaw.`,
+        `  Warning: session references unknown agent '${session.agent}', falling back to ${fallback}.`,
       );
-      return "openclaw";
+      return fallback;
     }
     return resolved;
   }
 
-  return "openclaw";
+  return defaultAgentName(listAgents());
+}
+
+function defaultAgentName(availableAgents: readonly string[]): string {
+  const declaredDefaults = availableAgents.filter((name) => {
+    try {
+      return loadAgent(name).isDefaultOnboardingChoice;
+    } catch {
+      return false;
+    }
+  });
+  if (declaredDefaults.length === 1) return declaredDefaults[0]!;
+  const first = availableAgents[0];
+  if (first) return first;
+  throw new Error("No agent runtime packages are available");
 }

@@ -21,7 +21,6 @@ const HARNESS_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "openclaw",
   packageVersion: "1.2.3",
-  contractVersion: 1 as const,
   contentDigest: "e".repeat(64),
 };
 const HARNESS_PACKAGE_MIGRATION = {
@@ -106,7 +105,6 @@ describe("sandbox inference route reservation security", () => {
   it.each([
     ["id", { harnessPackage: { ...HARNESS_PACKAGE, id: "hermes" } }],
     ["package version", { harnessPackage: { ...HARNESS_PACKAGE, packageVersion: "1.2.4" } }],
-    ["contract version", { harnessPackage: { ...HARNESS_PACKAGE, contractVersion: 2 } }],
     ["content digest", { harnessPackage: { ...HARNESS_PACKAGE, contentDigest: "f".repeat(64) } }],
     ["migration", { harnessPackageMigration: HARNESS_PACKAGE_MIGRATION }],
   ])("rejects %s drift on an exact route retry without changing the row", async (_field, drift) => {

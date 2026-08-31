@@ -10,11 +10,11 @@ import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
-} from "../../../harness/package-identity";
+} from "../../../agent-runtime/package/identity";
 import {
   resolvePinnedHarnessPackage,
   type InstalledHarnessPackage,
-} from "../../../harness/package-store";
+} from "../../../agent-runtime/package/store";
 import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../../onboard/sandbox-agent";
 import type { RuntimeProviderBundle } from "../../../onboard/runtime-provider/contract";
 import { CURRENT_RUNTIME_PROVIDER_BUNDLES } from "../../../onboard/runtime-provider/current";

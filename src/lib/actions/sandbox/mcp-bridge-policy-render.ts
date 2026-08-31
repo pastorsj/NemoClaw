@@ -3,7 +3,7 @@
 
 import YAML from "yaml";
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import { listAgents, loadAgent, type AgentMcpAdapter } from "../../agent/defs";
 import {
   type McpBridgeTargetValidation,
   parseMcpUrlWithValidatedTarget,
@@ -57,29 +57,26 @@ function endpointPath(url: URL): string {
   return url.pathname || "/";
 }
 
-function binariesForAdapter(adapter: AgentMcpAdapter): Array<{ path: string }> {
-  switch (adapter) {
-    case "mcporter":
-      return [
-        { path: "/usr/local/bin/mcporter" },
-        { path: "/usr/bin/mcporter" },
-        { path: "/usr/local/bin/openclaw" },
-        // npm entrypoints are #!/usr/bin/env node scripts. OpenShell binds
-        // policy to /proc/<pid>/exe and ancestors, not spoofable argv paths.
-        { path: "/usr/local/bin/node" },
-        { path: "/usr/bin/node" },
-      ];
-    case "hermes-config":
-      return [
-        { path: "/usr/local/bin/hermes" },
-        // Hermes is a Python console script; /proc/<pid>/exe resolves the venv
-        // interpreter to the system Python binary after the wrapper execs it.
-        { path: "/usr/bin/python3*" },
-        { path: "/opt/hermes/.venv/bin/python*" },
-      ];
-    case "deepagents-config":
-      return [{ path: "/usr/local/bin/dcode" }, { path: "/opt/venv/bin/python3*" }];
+function resolveMcpPolicyBinaryPaths(adapter: AgentMcpAdapter): readonly string[] {
+  const matchingAgents = listAgents()
+    .map((name) => loadAgent(name))
+    .filter(
+      (agent) =>
+        agent.mcpCapability.support === "bridge" && agent.mcpCapability.adapter === adapter,
+    );
+
+  if (matchingAgents.length === 0) {
+    throw new Error(`No installed agent manifest declares MCP adapter '${adapter}'.`);
   }
+  if (matchingAgents.length > 1) {
+    throw new Error(`Multiple installed agent manifests declare MCP adapter '${adapter}'.`);
+  }
+
+  const policyBinaries = matchingAgents[0]?.mcpCapability.policy_binaries;
+  if (!policyBinaries?.length) {
+    throw new Error(`MCP adapter '${adapter}' has no manifest-declared policy binaries.`);
+  }
+  return policyBinaries;
 }
 
 function renderMcpBridgePolicyYaml(
@@ -119,7 +116,7 @@ function renderMcpBridgePolicyYaml(
             rules: MCP_BRIDGE_ALLOWED_METHODS.map((method) => ({ allow: { method } })),
           },
         ],
-        binaries: binariesForAdapter(adapter),
+        binaries: resolveMcpPolicyBinaryPaths(adapter).map((path) => ({ path })),
       },
     },
   });

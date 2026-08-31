@@ -5,9 +5,10 @@ import { createHash } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDefinition } from "../../agent/definition-types";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import * as policies from "../../policy";
 import * as sandboxConfig from "../../sandbox/config";
+import * as registry from "../../state/registry";
 import * as sandboxState from "../../state/sandbox";
 import { MCP_BRIDGE_POLICY_SOURCE } from "./mcp-bridge-contracts";
 import {
@@ -674,6 +675,7 @@ describe("rebuild policy restore fidelity", () => {
   });
 
   it("retains the force-skipped backup warning in the successful final summary", () => {
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
     const writeLine = vi.fn();
 
     printSuccessfulRebuildSummary(

@@ -156,7 +156,7 @@ const {
 type MutableConfigPermsInspection = import("./mutable-config-perms").MutableConfigPermsInspection;
 type MutableConfigRepairResult = import("./mutable-config-perms").MutableConfigRepairResult;
 type MutableConfigPostureMode = import("./mutable-config-perms").MutableConfigPostureMode;
-type AgentStateLockPlan = import("../agent/definition-types").AgentStateLockPlan;
+type AgentStateLockPlan = import("../agent-runtime/manifest-types").AgentStateLockPlan;
 type ManagedMcpPolicyOmission = import("./permissive-runtime").ManagedMcpPolicyOmission;
 type TimerMarker = import("./timer-control").TimerMarker;
 type PolicyMutationAuthority = ReturnType<typeof inspectPolicyMutationAuthority>;

@@ -47,13 +47,53 @@ function parseChangedFiles(source: string): PullRequestFile[] {
   return files;
 }
 
-function readGitFile(ref: string, file: string): string | null {
-  const result = spawnSync("git", ["show", `${ref}:${file}`], {
+function readGitFiles(
+  ref: string,
+  paths: readonly string[],
+): ReadonlyMap<string, string | null> {
+  const uniquePaths = [...new Set(paths)];
+  if (uniquePaths.length === 0) return new Map();
+
+  // One batch process keeps this guardrail fast even when a refactor changes
+  // hundreds of tests. NUL framing also preserves every valid Git path.
+  const input = Buffer.from(`${uniquePaths.map((file) => `${ref}:${file}`).join("\0")}\0`);
+  const result = spawnSync("git", ["cat-file", "--batch", "-Z"], {
     cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
+    input,
+    maxBuffer: 128 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "pipe"],
   });
-  return result.status === 0 ? result.stdout : null;
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `git cat-file --batch failed with status ${result.status ?? "unknown"}: ${String(result.stderr)}`,
+    );
+  }
+
+  const output = Buffer.isBuffer(result.stdout) ? result.stdout : Buffer.from(result.stdout);
+  const files = new Map<string, string | null>();
+  let offset = 0;
+  for (const file of uniquePaths) {
+    const headerEnd = output.indexOf(0, offset);
+    if (headerEnd < 0) throw new Error(`git cat-file omitted the header for ${file}`);
+    const header = output.subarray(offset, headerEnd).toString("utf8");
+    offset = headerEnd + 1;
+    if (header.endsWith(" missing")) {
+      files.set(file, null);
+      continue;
+    }
+
+    const match = /^[0-9a-f]+ blob ([0-9]+)$/.exec(header);
+    if (!match) throw new Error(`git cat-file returned an invalid header for ${file}`);
+    const size = Number(match[1]);
+    const contentEnd = offset + size;
+    if (contentEnd >= output.length || output[contentEnd] !== 0) {
+      throw new Error(`git cat-file returned an invalid payload for ${file}`);
+    }
+    files.set(file, output.subarray(offset, contentEnd).toString("utf8"));
+    offset = contentEnd + 1;
+  }
+  return files;
 }
 
 function readWorktreeFile(file: string): string | null {
@@ -134,7 +174,7 @@ function loadLocalDiff(): GrowthGuardrailDiff {
   return {
     files,
     async readBase(paths) {
-      return readFiles(paths, (file) => readGitFile(comparisonBase, file));
+      return readGitFiles(comparisonBase, paths);
     },
     async readHead(paths) {
       return readFiles(paths, readWorktreeFile);
@@ -184,10 +224,10 @@ function loadPullRequestDiff(): GrowthGuardrailDiff {
   return {
     files: parseChangedFiles(changed),
     async readBase(paths) {
-      return readFiles(paths, (file) => readGitFile(baseSha, file));
+      return readGitFiles(baseSha, paths);
     },
     async readHead(paths) {
-      return readFiles(paths, (file) => readGitFile(headSha, file));
+      return readGitFiles(headSha, paths);
     },
   };
 }

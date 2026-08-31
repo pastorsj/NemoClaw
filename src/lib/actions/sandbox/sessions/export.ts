@@ -323,7 +323,7 @@ async function exportSandboxSessionsUnlocked(
 //         the in-sandbox staging file. The cleanup result is captured and
 //         surfaced as a warning when non-zero so a sensitive session JSONL
 //         is never left behind in the sandbox without telling the user.
-//       * Hermes side (upstream `hermes` CLI staged under `agents/hermes/`):
+//       * Hermes side (upstream `hermes` CLI staged under `packages/nemoclaw-hermes/`):
 //         owns the SQLite session store and the `hermes sessions export
 //         <path>` contract that emits a single JSONL stream. NemoClaw never
 //         reads or rewrites that store and only invokes the upstream CLI;
@@ -661,7 +661,7 @@ function readSessionIndex(sandboxName: string, agent: string): SessionIndexEntry
   const parsed = parseSessionIndex(result.output);
   if (parsed === null) {
     throw new Error(
-      `Could not parse \`openclaw sessions list --agent ${agent} --json\` output as a session index. Check the OpenClaw version pinned in agents/openclaw/manifest.yaml.`,
+      `Could not parse \`openclaw sessions list --agent ${agent} --json\` output as a session index. Check the OpenClaw version pinned in packages/nemoclaw-openclaw/manifest.yaml.`,
     );
   }
   return parsed;

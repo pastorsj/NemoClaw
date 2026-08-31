@@ -232,7 +232,10 @@ describe("preflightRebuildImage", () => {
       );
 
       expect(stageBuildContext).toHaveBeenCalledWith(
-        expect.objectContaining({ root: ROOT, agent: OPENCLAW_DEFINITION }),
+        expect.objectContaining({
+          root: OPENCLAW_DEFINITION.packageRoot,
+          agent: OPENCLAW_DEFINITION,
+        }),
       );
       expect(buildImage).toHaveBeenCalledOnce();
       expect(cleanupBuildCtx).not.toHaveBeenCalled();

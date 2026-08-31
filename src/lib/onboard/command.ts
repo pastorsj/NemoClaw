@@ -4,7 +4,13 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { formatAgentAliasSuffix, resolveAgentNameAlias } from "../agent/aliases";
+import {
+  createAgentAliasMap,
+  formatAgentAliasSuffix,
+  resolveAgentNameAlias,
+  type AgentAliasTarget,
+} from "../agent/aliases";
+import { readAgentAliasTargets } from "../agent/manifest-inventory";
 import { withCredentialOverrides } from "../credentials/scoped-overrides";
 import { loadServingCatalog } from "../inference/serving/catalog-loader";
 import { NEMOCLAW_SERVING_PRESET_ENV } from "../inference/serving/managed-cluster-discovery";
@@ -28,7 +34,7 @@ import {
   TOOL_DISCLOSURE_ENV,
   type ToolDisclosure,
 } from "../tool-disclosure";
-import { applyAgentsManifestEnv } from "./agents-manifest";
+import { applyAgentsManifestEnv, resolveAgentsManifestPath } from "./agents-manifest";
 import type { OnboardFlags } from "./command-support";
 import {
   type ExperimentalOnboardProfile,
@@ -50,7 +56,6 @@ import {
 import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";
 import { parseReadOnlyHostMounts, requireReadOnlyHostMountRuntimeSupport } from "./host-mount";
 import { DCODE_OBSERVABILITY_FEATURE } from "./observability-policy-presets";
-import { isOpenclawAgent } from "./openclaw-otel-policy-presets";
 import { NOTICE_ACCEPT_ENV, NOTICE_ACCEPT_FLAG_NAME } from "./usage-notice";
 import {
   OnboardResumeIntentError,
@@ -100,6 +105,7 @@ export interface ResolveOnboardOptionsDeps {
   arch?: NodeJS.Architecture;
   runtimeProviders?: import("./runtime-provider/access").RuntimeProviderBundleRegistry;
   listAgents?: () => string[];
+  listAgentAliasTargets?: () => readonly AgentAliasTarget[];
   listServingProfiles?: () => ServingProfileListEntry[];
   loadServingCatalog?: () => CompiledServingCatalog;
   loadSession?: () => {
@@ -152,11 +158,12 @@ function failUnknownAgent(
   value: string,
   fromEnv: boolean,
   knownAgents: readonly string[],
+  aliasTargets: readonly AgentAliasTarget[],
 ): never {
   const source = fromEnv ? " (from NEMOCLAW_AGENT)" : "";
   return fail(
     deps,
-    `  Unknown agent '${value}'${source}. Available: ${knownAgents.join(", ")}${formatAgentAliasSuffix(knownAgents)}`,
+    `  Unknown agent '${value}'${source}. Available: ${knownAgents.join(", ")}${formatAgentAliasSuffix(knownAgents, aliasTargets)}`,
   );
 }
 
@@ -169,9 +176,13 @@ function resolveAgent(
   if (candidate === "") return null;
 
   const knownAgents = deps.listAgents?.() ?? [];
+  const aliasTargets =
+    deps.listAgentAliasTargets?.() ?? readAgentAliasTargets(knownAgents, deps.env);
   const resolved =
-    knownAgents.length === 0 ? candidate : resolveAgentNameAlias(candidate, knownAgents);
-  if (!resolved) failUnknownAgent(deps, candidate, fromEnv, knownAgents);
+    knownAgents.length === 0
+      ? candidate
+      : resolveAgentNameAlias(candidate, knownAgents, createAgentAliasMap(aliasTargets));
+  if (!resolved) failUnknownAgent(deps, candidate, fromEnv, knownAgents, aliasTargets);
 
   // The env path leaves canonicalization to downstream resolution (returns
   // null); the flag path returns the canonical name as before.
@@ -183,14 +194,11 @@ function resolveAgentsManifest(
   agent: string | null,
   deps: ResolveOnboardOptionsDeps,
 ): string | null {
-  if (requestedManifest === undefined) return null;
-  if (!isOpenclawAgent(agent)) {
-    fail(
-      deps,
-      `  --agents is OpenClaw-specific and cannot be used with --agent ${agent}; the declarative manifest only drives OpenClaw secondary agents.`,
-    );
+  try {
+    return resolveAgentsManifestPath(requestedManifest, agent);
+  } catch (error) {
+    fail(deps, `  ${error instanceof Error ? error.message : String(error)}`);
   }
-  return resolveFileOption("--agents", requestedManifest, deps, false);
 }
 
 function resolveSandboxGpu(flags: OnboardFlags): "enable" | "disable" | null {

@@ -75,7 +75,6 @@ describe("onboard session package persistence", () => {
       kind: "agent-runtime" as const,
       id: "openclaw",
       packageVersion: "1.2.3",
-      contractVersion: 1 as const,
       contentDigest: "a".repeat(64),
     };
     const saved = session.saveSession(session.createSession({ harnessPackage }));
@@ -112,7 +111,6 @@ describe("onboard session package persistence", () => {
       kind: "agent-runtime",
       id: "openclaw",
       packageVersion: "1.2.3",
-      contractVersion: 1,
       contentDigest: "c".repeat(64),
     } as const;
     const harnessPackageMigration = {
@@ -150,7 +148,6 @@ describe("onboard session package persistence", () => {
         kind: "agent-runtime" as const,
         id: "openclaw",
         packageVersion: "1.2.3",
-        contractVersion: 1 as const,
         contentDigest: "d".repeat(64),
       },
     ],

@@ -295,7 +295,7 @@ resolver_try_candidates reject first second`);
     const bin = fakeDocker('printf "%s\\0" "$@" >> "$DOCKER_LOG"');
     const log = path.join(bin, "docker.log");
 
-    const result = run("resolver_build_local agents/hermes/Dockerfile.base local:test", {
+    const result = run("resolver_build_local packages/nemoclaw-hermes/Dockerfile.base local:test", {
       DOCKER_LOG: log,
       PATH: `${bin}:${process.env.PATH}`,
     });
@@ -304,7 +304,7 @@ resolver_try_candidates reject first second`);
     expect(readFileSync(log, "utf8").split("\0")).toEqual([
       "build",
       "-f",
-      "agents/hermes/Dockerfile.base",
+      "packages/nemoclaw-hermes/Dockerfile.base",
       "-t",
       "local:test",
       ".",

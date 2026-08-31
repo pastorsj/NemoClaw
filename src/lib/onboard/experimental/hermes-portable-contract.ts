@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual, TextDecoder } from "node:util";
 
-import type { AgentDefinition, ManifestRecord } from "../../agent/definition-types";
+import type { AgentDefinition, ManifestRecord } from "../../agent-runtime/manifest-types";
 import {
   parseManifestRecord,
   readBoolean,
@@ -17,10 +17,10 @@ import {
   readStateLockPlanInImage,
   readString,
   readUserManagedFiles,
-} from "../../agent/manifest-readers";
-import { readAgentRuntime } from "../../agent/runtime-manifest";
-import { buildStateLockPlan, readStateDirectories } from "../../agent/state-directory-contract";
-import { readWebAuth } from "../../agent/web-auth";
+} from "../../agent-runtime/manifest-readers";
+import { readAgentRuntime } from "../../agent-runtime/runtime/manifest";
+import { buildStateLockPlan, readStateDirectories } from "../../agent-runtime/state/directories";
+import { readWebAuth } from "../../agent-runtime/web-auth";
 import {
   buildCurrentHermesPortableRuntimeEnvArgs,
   currentHermesPortableAgentDefinition,

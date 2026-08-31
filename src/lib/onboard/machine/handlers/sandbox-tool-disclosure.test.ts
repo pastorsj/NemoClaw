@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSession, type Session } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
 import {
   baseOptions,
@@ -27,6 +28,15 @@ const registeredEntry = (name: string, overrides: Record<string, unknown> = {}) 
 });
 
 describe("handleSandboxState tool disclosure", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("fails closed without claiming an unregistered live sandbox as a managed migration", async () => {
     const session = createSession({ sandboxName: "saved", toolDisclosure: "progressive" });
     session.steps.sandbox.status = "complete";

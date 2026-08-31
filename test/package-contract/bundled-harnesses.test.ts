@@ -7,11 +7,11 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { listBundledAgentRuntimeSources } from "../../scripts/build-harnesses.mts";
 import { directDockerfileCopySources } from "../../scripts/lib/dockerfile-copy-sources.mts";
-import { buildAgentDefinition } from "../../dist/lib/agent/definition-loader";
-import { listBundledHarnessSources } from "../../dist/lib/harness/bundled-source";
-import { parseHarnessPackageManifest } from "../../dist/lib/harness/package-manifest";
-import { validateHarnessPackageTree } from "../../dist/lib/harness/package-tree";
+import { buildAgentDefinition } from "../../dist/lib/agent-runtime/manifest-loader.js";
+import { parseHarnessPackageManifest } from "../../dist/lib/agent-runtime/package/manifest.js";
+import { validateHarnessPackageTree } from "../../dist/lib/agent-runtime/package/tree.js";
 
 const REPOSITORY_ROOT = path.join(import.meta.dirname, "..", "..");
 const BUNDLED_ROOT = path.join(REPOSITORY_ROOT, "dist", "harnesses");
@@ -22,11 +22,11 @@ materializeBundledHarnesses(process.argv[1] ?? "");
 `;
 const EXPECTED_IDS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 const DOCKERFILES = {
-  openclaw: ["Dockerfile", "Dockerfile.base"],
-  hermes: ["agents/hermes/Dockerfile", "agents/hermes/Dockerfile.base"],
+  openclaw: ["packages/nemoclaw-openclaw/Dockerfile", "packages/nemoclaw-openclaw/Dockerfile.base"],
+  hermes: ["packages/nemoclaw-hermes/Dockerfile", "packages/nemoclaw-hermes/Dockerfile.base"],
   "langchain-deepagents-code": [
-    "agents/langchain-deepagents-code/Dockerfile",
-    "agents/langchain-deepagents-code/Dockerfile.base",
+    "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
+    "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
   ],
 } as const;
 
@@ -154,7 +154,9 @@ function missingPackedAssets(
 }
 
 describe("bundled harness package artifacts", () => {
-  it("builds only the accepted standard catalogue with valid closed envelopes", () => {
+  it("discovers each declared in-tree package and builds a valid closed envelope", () => {
+    const sources = listBundledAgentRuntimeSources();
+    expect(sources.map(({ id }) => id).sort()).toEqual([...EXPECTED_IDS].sort());
     expect(fs.readdirSync(BUNDLED_ROOT).sort()).toEqual(
       EXPECTED_IDS.map((id) => `nemoclaw-${id}`).sort(),
     );
@@ -183,65 +185,23 @@ describe("bundled harness package artifacts", () => {
         ),
       };
     });
-    expect(envelopeSummaries).toEqual([
-      {
-        keys: [
-          "contractVersion",
-          "displayName",
-          "id",
-          "kind",
-          "manifest",
-          "packageVersion",
-          "schemaVersion",
-        ],
-        id: "openclaw",
-        manifest: "agents/openclaw/manifest.yaml",
-        manifestName: "openclaw",
-        packageVersion: "0.1.1",
-        dockerfile: "agents/openclaw/Dockerfile",
-        baseDockerfile: null,
-        legacyDockerfile: "Dockerfile",
-        legacyBaseDockerfile: "Dockerfile.base",
-      },
-      {
-        keys: [
-          "contractVersion",
-          "displayName",
-          "id",
-          "kind",
-          "manifest",
-          "packageVersion",
-          "schemaVersion",
-        ],
-        id: "hermes",
-        manifest: "agents/hermes/manifest.yaml",
-        manifestName: "hermes",
-        packageVersion: "0.1.0",
-        dockerfile: "agents/hermes/Dockerfile",
-        baseDockerfile: "agents/hermes/Dockerfile.base",
-        legacyDockerfile: null,
-        legacyBaseDockerfile: null,
-      },
-      {
-        keys: [
-          "contractVersion",
-          "displayName",
-          "id",
-          "kind",
-          "manifest",
-          "packageVersion",
-          "schemaVersion",
-        ],
-        id: "langchain-deepagents-code",
-        manifest: "agents/langchain-deepagents-code/manifest.yaml",
-        manifestName: "langchain-deepagents-code",
-        packageVersion: "0.1.4",
-        dockerfile: "agents/langchain-deepagents-code/Dockerfile",
-        baseDockerfile: "agents/langchain-deepagents-code/Dockerfile.base",
-        legacyDockerfile: null,
-        legacyBaseDockerfile: null,
-      },
-    ]);
+    expect(envelopeSummaries).toEqual(
+      EXPECTED_IDS.map((id) => {
+        const source = sources.find((candidate) => candidate.id === id)!;
+        const packagePath = `packages/nemoclaw-${id}`;
+        return {
+          keys: ["displayName", "id", "kind", "manifest", "packageVersion", "schemaVersion"],
+          id,
+          manifest: `${packagePath}/manifest.yaml`,
+          manifestName: id,
+          packageVersion: source.packageVersion,
+          dockerfile: `${packagePath}/Dockerfile`,
+          baseDockerfile: `${packagePath}/Dockerfile.base`,
+          legacyDockerfile: null,
+          legacyBaseDockerfile: null,
+        };
+      }),
+    );
     expect(EXPECTED_IDS.map((id) => fs.statSync(artifactRoot(id)).mode & 0o777)).toEqual(
       EXPECTED_IDS.map(() => 0o555),
     );
@@ -283,7 +243,7 @@ describe("bundled harness package artifacts", () => {
 
   it("publishes every accepted artifact and locally referenced build asset", () => {
     const packed = packedFileList();
-    const missingArtifacts = listBundledHarnessSources().flatMap((source) => {
+    const missingArtifacts = listBundledAgentRuntimeSources().flatMap((source) => {
       const required = [
         `${artifactPackPrefix(source.id)}/nemoclaw-package.json`,
         `${artifactPackPrefix(source.id)}/${source.manifestPath}`,

@@ -4,7 +4,7 @@
 import { Args } from "@oclif/core";
 
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
-import { validateHarnessPackage } from "../../lib/harness/package-validation";
+import { validateHarnessPackage } from "../../lib/agent-runtime/package/validation";
 
 export const harnessValidateCommandDependencies = {
   validateHarnessPackage,
@@ -39,7 +39,7 @@ export default class HarnessValidateCommand extends NemoClawCommand {
     );
     if (this.jsonEnabled()) return report;
     this.log(
-      `Validated built agent runtime package '${report.identity.id}' (${report.identity.packageVersion}, contract ${String(report.identity.contractVersion)}, sha256:${report.identity.contentDigest}) without installing it.`,
+      `Validated built agent runtime package '${report.identity.id}' (${report.identity.packageVersion}, sha256:${report.identity.contentDigest}) without installing it.`,
     );
   }
 }

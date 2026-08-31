@@ -16,14 +16,14 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import { isCandidateAgent } from "../../agent/candidate.js";
-import type { AgentDefinition, AgentStateFile } from "../../agent/definition-types.js";
+import type { AgentDefinition, AgentStateFile } from "../../agent-runtime/manifest-types.js";
 import { isObjectRecord } from "../../core/json-types.js";
 import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
-} from "../../harness/package-identity.js";
+} from "../../agent-runtime/package/identity.js";
 import {
   hasCompleteOpenClawImagePluginProvenance,
   type OpenClawImagePluginInstall,

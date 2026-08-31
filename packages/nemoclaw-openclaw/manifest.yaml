@@ -1,0 +1,154 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Agent manifest for OpenClaw.
+# Declares the integration contract between NemoClaw and the sandboxed agent.
+# This documents the current default agent and owns its image, startup, and
+# baseline policy artifacts.
+
+name: openclaw
+display_name: "OpenClaw"
+description: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)"
+aliases:
+  - nemoclaw
+  - nemo-claw
+alias_summary: ""
+onboarding:
+  default: true
+  sandbox_name: my-assistant
+version_constraint: ">=2026.3.11"
+language: nodejs
+license: Apache-2.0
+homepage: "https://openclaw.ai"
+
+# ── Binary & process ────────────────────────────────────────────
+install_method: npm # npm install -g openclaw@<version>
+binary_path: /usr/local/bin/openclaw
+version_command: "openclaw --version"
+expected_version: "2026.7.1"
+version_scheme: calendar
+gateway_command: "openclaw gateway run"
+# Interactive entry point a user types inside the sandbox. OpenClaw stays a
+# gateway agent (runtime.kind defaults to gateway); this only records the
+# command so NemoClaw stops hardcoding it.
+runtime:
+  interactive_command: "openclaw tui"
+
+# ── Health probe ────────────────────────────────────────────────
+health_probe:
+  url: "http://127.0.0.1:18789/health"
+  port: 18789
+  timeout_seconds: 30
+
+# ── Dashboard / UI ──────────────────────────────────────────────
+forward_ports:
+  - 18789
+
+# ── Configuration ───────────────────────────────────────────────
+config:
+  dir: /sandbox/.openclaw
+  config_file: openclaw.json
+  format: json
+
+# ── State directories ──────────────────────────────────────────
+state_lock_plan_in_image: true
+state_dirs:
+  - path: agents
+    shields: read-only
+    writable_subpaths:
+      - "*/sessions"
+  - path: extensions
+    shields: read-only
+  # Legacy layouts can still contain this pre-extensions directory. Preserve
+  # its existing Shields posture without newly treating it as portable state.
+  - path: plugins
+    backup: false
+    shields: read-only
+  # OpenClaw may create profile-scoped runtime state. Preserve its existing
+  # Shields boundary without newly treating profile data as portable state.
+  - path: profiles
+    backup: false
+    shields: read-only
+  - path: workspace
+    shields: read-only
+  # Multi-agent OpenClaw deployments create workspace-<agent> siblings.
+  - prefix: workspace-
+    shields: read-only
+  - path: skills
+    shields: read-only
+  - path: hooks
+    shields: read-only
+  # Machine-local gateway auth state is wiped on destroy but never captured.
+  # Sanitization removes the identity key and paired-device tokens, so a
+  # restored copy cannot authenticate (#6852).
+  - path: identity
+    backup: false
+    shields: confidential
+  - path: devices
+    backup: false
+    shields: read-only
+  - path: canvas
+    shields: read-only
+  - path: cron
+    shields: read-only
+  - path: memory
+    shields: read-only
+  - path: telegram
+    shields: read-only
+  - path: wechat
+    shields: read-only
+  - path: whatsapp
+    shields: read-only
+  - path: credentials
+    shields: confidential
+
+# ── Top-level durable state files ───────────────────────────────
+# openclaw.json holds the core OpenClaw settings the state dirs above do not
+# cover: model/provider config, MCP servers, custom agents, and channel
+# account blocks. Without this entry `nemoclaw backup-all` snapshotted the
+# data directories but dropped these settings, so they were lost on rebuild
+# (issue #5027). Backed up with the default copy strategy; the local backup is
+# credential-sanitized (gateway section dropped, secret-bearing fields scrubbed)
+# while OpenShell `resolve:env` placeholders and the `unused` provider sentinel
+# are preserved so the restored config keeps routing through proxy-injected
+# credentials.
+state_files:
+  - path: openclaw.json
+    restore:
+      merge: openclaw-config
+user_managed_files:
+  - .env
+  - .mcp.json
+
+# ── Authentication ──────────────────────────────────────────────
+device_pairing: true
+web_auth_method: device_pairing
+
+# ── Inference ───────────────────────────────────────────────────
+inference:
+  provider_type: gateway_managed
+  proxy_support: explicit # configured in openclaw.json providers block
+
+# ── MCP server support ───────────────────────────────────────────
+mcp:
+  support: bridge
+  adapter: mcporter
+  policy_binaries:
+    - /usr/local/bin/mcporter
+    - /usr/bin/mcporter
+    - /usr/local/bin/openclaw
+    # npm entrypoints use env to launch Node; OpenShell authorizes the real process binary.
+    - /usr/local/bin/node
+    - /usr/bin/node
+
+# ── Phone-home hosts ───────────────────────────────────────────
+phone_home_hosts:
+  - openclaw.ai
+  - docs.openclaw.ai
+  - clawhub.ai
+
+# ── Package registry ───────────────────────────────────────────
+package_registry:
+  hosts:
+    - registry.npmjs.org
+  binary: /usr/local/bin/npm

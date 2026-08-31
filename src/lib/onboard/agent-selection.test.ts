@@ -8,7 +8,7 @@ import { resolveAgent } from "../agent/onboard";
 import { createSelectOnboardAgent, resolveQualifiedOnboardAgent } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 
-// Exercises the real agent registry (agents/openclaw + agents/hermes) so the
+// Exercises the real agent registry (packages/nemoclaw-openclaw + packages/nemoclaw-hermes) so the
 // red->green transition reflects genuine wizard behavior rather than a mock.
 function makeSelectOnboardAgent(reply: string) {
   const prompt = vi.fn(async (_question: string) => reply);

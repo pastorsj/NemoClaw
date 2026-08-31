@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import path from "node:path";
-import type { AgentDefinition, AgentStateLockPlan } from "../agent/definition-types";
+import type { AgentDefinition, AgentStateLockPlan } from "../agent-runtime/manifest-types";
 import type { SandboxEntry } from "../state/registry/types";
 
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;

@@ -1,41 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export const AGENT_ALIASES: Readonly<Record<string, string>> = Object.freeze({
-  nemoclaw: "openclaw",
-  "nemo-claw": "openclaw",
-  nemohermes: "hermes",
-  "nemo-hermes": "hermes",
-  "nemo-deepagents": "langchain-deepagents-code",
-  "nemo-deepagent": "langchain-deepagents-code",
-  nemodeepagents: "langchain-deepagents-code",
-  nemodeepagent: "langchain-deepagents-code",
-  dcode: "langchain-deepagents-code",
-  deepagent: "langchain-deepagents-code",
-  deepagents: "langchain-deepagents-code",
-  "deep-agent": "langchain-deepagents-code",
-  "deep-agents": "langchain-deepagents-code",
-  deepagentcode: "langchain-deepagents-code",
-  deepagentscode: "langchain-deepagents-code",
-  "deepagent-code": "langchain-deepagents-code",
-  "deepagents-code": "langchain-deepagents-code",
-  "deep-agent-code": "langchain-deepagents-code",
-  "deep-agents-code": "langchain-deepagents-code",
-  langchain: "langchain-deepagents-code",
-  "langchain-code": "langchain-deepagents-code",
-  langchaindeepagent: "langchain-deepagents-code",
-  langchaindeepagents: "langchain-deepagents-code",
-  "langchain-deepagent": "langchain-deepagents-code",
-  "langchain-deepagents": "langchain-deepagents-code",
-  langchaindeepagentcode: "langchain-deepagents-code",
-  langchaindeepagentscode: "langchain-deepagents-code",
-  "langchain-deepagent-code": "langchain-deepagents-code",
-  "langchain-deepagents-code": "langchain-deepagents-code",
-  "langchain-deep-agent": "langchain-deepagents-code",
-  "langchain-deep-agents": "langchain-deepagents-code",
-  "langchain-deep-agent-code": "langchain-deepagents-code",
-  "langchain-deep-agents-code": "langchain-deepagents-code",
-});
+export interface AgentAliasTarget {
+  readonly name: string;
+  readonly aliases: readonly string[];
+  readonly aliasSummary?: string | null;
+}
+
+export type AgentAliasMap = Readonly<Record<string, string>>;
 
 export function normalizeAgentSelector(value: string): string {
   return value
@@ -45,9 +17,30 @@ export function normalizeAgentSelector(value: string): string {
     .replace(/-+/g, "-");
 }
 
+/** Build one collision-free alias map from package-owned manifest declarations. */
+export function createAgentAliasMap(targets: readonly AgentAliasTarget[]): AgentAliasMap {
+  const names = new Set(targets.map(({ name }) => name));
+  const aliases: Record<string, string> = {};
+  for (const target of targets) {
+    for (const declaredAlias of target.aliases) {
+      const alias = normalizeAgentSelector(declaredAlias);
+      if (alias !== declaredAlias || alias === target.name || names.has(alias)) {
+        throw new Error(`Agent alias '${declaredAlias}' conflicts with an agent identifier`);
+      }
+      const existing = aliases[alias];
+      if (existing !== undefined && existing !== target.name) {
+        throw new Error(`Agent alias '${alias}' is declared by more than one agent`);
+      }
+      aliases[alias] = target.name;
+    }
+  }
+  return Object.freeze(aliases);
+}
+
 export function resolveAgentNameAlias(
   value: string | null | undefined,
   availableAgents: readonly string[],
+  aliasMap: AgentAliasMap = {},
 ): string | null {
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed) return null;
@@ -60,22 +53,25 @@ export function resolveAgentNameAlias(
   );
   if (exactNormalized) return exactNormalized;
 
-  const aliasTarget = AGENT_ALIASES[normalized];
+  const aliasTarget = aliasMap[normalized];
   return aliasTarget && availableAgents.includes(aliasTarget) ? aliasTarget : null;
 }
 
-export function agentAliasSummary(availableAgents: readonly string[]): string {
-  const aliases: string[] = [];
-  if (availableAgents.includes("hermes")) aliases.push("nemohermes → hermes");
-  if (availableAgents.includes("langchain-deepagents-code")) {
-    aliases.push(
-      "nemo-deepagents/dcode/deepagents/deepagents-code/langchain → langchain-deepagents-code",
-    );
-  }
-  return aliases.join("; ");
+export function agentAliasSummary(
+  availableAgents: readonly string[],
+  targets: readonly AgentAliasTarget[] = [],
+): string {
+  return targets
+    .filter(({ name, aliases }) => availableAgents.includes(name) && aliases.length > 0)
+    .map(({ name, aliases, aliasSummary }) => aliasSummary ?? `${aliases.join("/")} → ${name}`)
+    .filter((summary) => summary.length > 0)
+    .join("; ");
 }
 
-export function formatAgentAliasSuffix(availableAgents: readonly string[]): string {
-  const summary = agentAliasSummary(availableAgents);
+export function formatAgentAliasSuffix(
+  availableAgents: readonly string[],
+  targets: readonly AgentAliasTarget[] = [],
+): string {
+  const summary = agentAliasSummary(availableAgents, targets);
   return summary ? ` (aliases: ${summary})` : "";
 }

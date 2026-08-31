@@ -5,8 +5,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import { isCandidateAgent } from "../agent/candidate";
 import type { AgentDefinition } from "../agent/defs";
-import type { HarnessPackageAuthority, HarnessPackageIdentity } from "../harness/package-types";
-import * as harnessPackageStore from "../harness/package-store";
+import type { HarnessPackageAuthority, HarnessPackageIdentity } from "../agent-runtime/package/types";
+import * as harnessPackageStore from "../agent-runtime/package/store";
 import type {
   InferenceEndpointSource,
   InferenceSelection,

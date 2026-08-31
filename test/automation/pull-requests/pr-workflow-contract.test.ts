@@ -572,7 +572,7 @@ describe("pull request and main workflow contracts", () => {
   it("allows the package workflow bootstrap without a private registry lock", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "nemoclaw-sdk-package-bootstrap-"));
     try {
-      mkdirSync(join(tempRoot, "nemoclaw"), { recursive: true });
+      mkdirSync(join(tempRoot, "packages/nemoclaw-openclaw/plugin"), { recursive: true });
       const lock = JSON.stringify({
         lockfileVersion: 3,
         packages: {
@@ -582,7 +582,7 @@ describe("pull request and main workflow contracts", () => {
         },
       });
       writeFileSync(join(tempRoot, "package-lock.json"), lock);
-      writeFileSync(join(tempRoot, "nemoclaw/package-lock.json"), lock);
+      writeFileSync(join(tempRoot, "packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json"), lock);
       const outputPath = join(tempRoot, "github-output");
       const locate = requiredWorkflowStep(
         prWorkflow.jobs["openshell-sdk-package"],
@@ -611,13 +611,13 @@ describe("pull request and main workflow contracts", () => {
   it("rejects a private registry lock during the package workflow bootstrap", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "nemoclaw-sdk-package-bootstrap-"));
     try {
-      mkdirSync(join(tempRoot, "nemoclaw"), { recursive: true });
+      mkdirSync(join(tempRoot, "packages/nemoclaw-openclaw/plugin"), { recursive: true });
       writeFileSync(
         join(tempRoot, "package-lock.json"),
         JSON.stringify({ lockfileVersion: 3, packages: {} }),
       );
       writeFileSync(
-        join(tempRoot, "nemoclaw/package-lock.json"),
+        join(tempRoot, "packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json"),
         JSON.stringify({
           lockfileVersion: 3,
           packages: {
@@ -653,12 +653,15 @@ describe("pull request and main workflow contracts", () => {
   it("rejects a malformed lockfile during the package workflow bootstrap", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "nemoclaw-sdk-package-bootstrap-"));
     try {
-      mkdirSync(join(tempRoot, "nemoclaw"), { recursive: true });
+      mkdirSync(join(tempRoot, "packages/nemoclaw-openclaw/plugin"), { recursive: true });
       writeFileSync(
         join(tempRoot, "package-lock.json"),
         JSON.stringify({ lockfileVersion: 3, packages: {} }),
       );
-      writeFileSync(join(tempRoot, "nemoclaw/package-lock.json"), "not JSON");
+      writeFileSync(
+        join(tempRoot, "packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json"),
+        "not JSON",
+      );
       const locate = requiredWorkflowStep(
         prWorkflow.jobs["openshell-sdk-package"],
         "Locate exact base-controlled SDK package run",

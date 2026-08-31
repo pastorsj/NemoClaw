@@ -58,13 +58,21 @@ const os = require("node:os");
 const path = require("node:path");
 const runner = require(${runnerPath});
 const registry = require(${registryPath});
+const scenario = ${JSON.stringify(scenario)};
+const sandboxName = "deepagents-box";
 const fixtureMocks = require(${onboardScriptMocksPath});
+const harnessFixture = scenario === "reuse"
+  ? fixtureMocks.installHarnessRouteFixture({
+      agentName: "langchain-deepagents-code",
+      sandboxName,
+      provider: "nvidia-prod",
+      model: "gpt-5.4",
+    })
+  : fixtureMocks.installOnboardProcessHarnessPackage("langchain-deepagents-code");
 const agentDefs = require(${agentDefsPath});
 const agentOnboard = require(${agentOnboardPath});
 const dockerGpuSandboxCreate = require(${dockerGpuSandboxCreatePath});
 const sandboxCreateStream = require(${sandboxCreateStreamPath});
-const scenario = ${JSON.stringify(scenario)};
-const sandboxName = "deepagents-box";
 const createdSandbox = fixtureMocks.createCreatedSandboxFixture({
   sandboxName,
   lifecycleState: scenario === "reuse" ? "created" : "absent",
@@ -168,6 +176,7 @@ registry.getSandbox = () =>
         name: sandboxName,
         gpuEnabled: false,
         agent: "langchain-deepagents-code",
+        harnessPackage: harnessFixture.harnessPackage,
         dashboardPort: 18789,
         observabilityEnabled: false,
         toolDisclosure: "progressive",
@@ -187,6 +196,10 @@ const createFixture =
   scenario === "create"
     ? fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
         sandboxName,
+        agentName: "langchain-deepagents-code",
+        harnessPackage: harnessFixture.harnessPackage,
+        harnessPackageMigration: harnessFixture.harnessPackageMigration,
+        agentDefinition: harnessFixture.agentDefinition,
         provider: "nvidia-prod",
         model: "gpt-5.4",
         registerSandbox: (entry) => registerCalls.push(entry),
@@ -226,7 +239,7 @@ const agent = agentDefs.loadAgent("langchain-deepagents-code");
   const resultName = await createSandbox(
     ...(createFixture
       ? fixtureMocks.sandboxCreateArgsWithVerifiedReservation(createArgs, createFixture)
-      : createArgs),
+      : fixtureMocks.buildHarnessRouteArguments(createArgs, harnessFixture)),
   );
   console.log(JSON.stringify({ resultName, commands, registerCalls, updateCalls }));
 })().catch((error) => {

@@ -9,9 +9,8 @@ const HELPER = path.join(import.meta.dirname, "../../..", "scripts", "managed-ga
 const BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "../../..",
-  "agents",
-  "hermes",
-  "validate-env-secret-boundary.py",
+  "packages",
+  "nemoclaw-hermes/runtime/env-boundary.py",
 );
 const NONCE = "a".repeat(64);
 

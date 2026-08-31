@@ -89,6 +89,12 @@ const MAX_INSTALLER_INPUT_BYTES = 1024 * 1024;
 // supervisor runtime template. Its prospective digest is repeated only for
 // release records with a supervisor identity, and its trust test constructs
 // the exact follow-up template before the runtime change can land.
+// Resolving and passing the selected local Docker socket changes that same
+// operational template again. Its reviewed digest is likewise repeated for
+// every release record whose supervisor can execute the shared runtime.
+// Routing that context inspection through the shared Docker adapter changes
+// only its execution boundary; the reviewed template digest follows the same
+// release coverage.
 const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
   {
     brevTemplateSha256: ["c0a4ddf25a02a9fe02b2df53a60942ea887610f04d4ce16a121b6e79a5aeff1a"],
@@ -133,6 +139,8 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
       runtimeTemplateSha256: [
         "c1922eaa4f73c1a05aa8bccf50fc40208d7f71db0e6c110dcd09d0372d1aa068",
         "abfc1337284d437e71e47945936af7ef0bc6f28ac2495e12fac41894eb24ce3c",
+        "5222a94f29b314e206e1c096b8a850c23ea80606ba299cbb18f207102878705f",
+        "4cc695f585b64c7e65873bdd1303d4d7751b1927acfb731757fde3c255ff6f57",
       ],
     },
     version: "0.0.72",
@@ -249,6 +257,8 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
       runtimeTemplateSha256: [
         "c1922eaa4f73c1a05aa8bccf50fc40208d7f71db0e6c110dcd09d0372d1aa068",
         "abfc1337284d437e71e47945936af7ef0bc6f28ac2495e12fac41894eb24ce3c",
+        "5222a94f29b314e206e1c096b8a850c23ea80606ba299cbb18f207102878705f",
+        "4cc695f585b64c7e65873bdd1303d4d7751b1927acfb731757fde3c255ff6f57",
       ],
     },
     version: "0.0.99",
@@ -299,6 +309,8 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
       runtimeTemplateSha256: [
         "c1922eaa4f73c1a05aa8bccf50fc40208d7f71db0e6c110dcd09d0372d1aa068",
         "abfc1337284d437e71e47945936af7ef0bc6f28ac2495e12fac41894eb24ce3c",
+        "5222a94f29b314e206e1c096b8a850c23ea80606ba299cbb18f207102878705f",
+        "4cc695f585b64c7e65873bdd1303d4d7751b1927acfb731757fde3c255ff6f57",
       ],
     },
     version: "0.0.101",
@@ -346,6 +358,8 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
       runtimeTemplateSha256: [
         "c1922eaa4f73c1a05aa8bccf50fc40208d7f71db0e6c110dcd09d0372d1aa068",
         "abfc1337284d437e71e47945936af7ef0bc6f28ac2495e12fac41894eb24ce3c",
+        "5222a94f29b314e206e1c096b8a850c23ea80606ba299cbb18f207102878705f",
+        "4cc695f585b64c7e65873bdd1303d4d7751b1927acfb731757fde3c255ff6f57",
       ],
     },
     version: "0.0.103",
@@ -413,6 +427,8 @@ const TRUSTED_OPENSHELL_RELEASES: readonly OpenShellReleaseTrust[] = [
       runtimeTemplateSha256: [
         "c1922eaa4f73c1a05aa8bccf50fc40208d7f71db0e6c110dcd09d0372d1aa068",
         "abfc1337284d437e71e47945936af7ef0bc6f28ac2495e12fac41894eb24ce3c",
+        "5222a94f29b314e206e1c096b8a850c23ea80606ba299cbb18f207102878705f",
+        "4cc695f585b64c7e65873bdd1303d4d7751b1927acfb731757fde3c255ff6f57",
       ],
     },
     version: "0.0.106",

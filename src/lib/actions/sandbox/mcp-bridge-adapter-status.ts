@@ -29,7 +29,7 @@ const DEFAULT_AUTH_HEADER = "Authorization";
 const DEFAULT_AUTH_SCHEME = "Bearer";
 
 function authPlaceholder(
-  entry: Pick<McpBridgeEntry, "env">,
+  entry: { readonly env: readonly string[] },
   credentialRevision?: McpAttachedCredentialRevision,
 ): string | null {
   const envName = entry.env[0];
@@ -39,7 +39,7 @@ function authPlaceholder(
 }
 
 export function authorizationValue(
-  entry: Pick<McpBridgeEntry, "env">,
+  entry: { readonly env: readonly string[] },
   credentialRevision?: McpAttachedCredentialRevision,
 ): string | null {
   const placeholder = authPlaceholder(entry, credentialRevision);
@@ -47,7 +47,7 @@ export function authorizationValue(
 }
 
 export function entryHeaders(
-  entry: Pick<McpBridgeEntry, "env">,
+  entry: { readonly env: readonly string[] },
   credentialRevision?: McpAttachedCredentialRevision,
 ): Record<string, string> {
   const authorization = authorizationValue(entry, credentialRevision);

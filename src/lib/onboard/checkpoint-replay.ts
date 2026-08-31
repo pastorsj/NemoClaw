@@ -8,7 +8,7 @@ import {
   harnessPackageIdentitiesEqual,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import { MESSAGING_CREDENTIAL_PROVIDER_TYPE } from "../messaging/provider-profile";
 import { getActiveChannelIdsFromPlan } from "../messaging/plan-validation";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";

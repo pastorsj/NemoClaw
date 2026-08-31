@@ -24,7 +24,6 @@ const packageFixture = vi.hoisted(() => {
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "1.0.0-test",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   };
   const packageRoot = `/state/harnesses/objects/${identity.contentDigest}`;
@@ -223,7 +222,7 @@ vi.mock("../../inference/nim", () => ({
   stopNimContainer: vi.fn(),
   stopNimContainerByName: vi.fn(),
 }));
-vi.mock("../../agent/definition-loader", () => ({
+vi.mock("../../agent-runtime/manifest-loader", () => ({
   buildAgentDefinition: vi.fn(() => ({
     name: "openclaw",
     packageRoot: packageFixture.packageRoot,
@@ -231,7 +230,7 @@ vi.mock("../../agent/definition-loader", () => ({
     policyAdditionsPath: `${packageFixture.packageRoot}/policy-additions.yaml`,
   })),
 }));
-vi.mock("../../harness/package-store", () => ({
+vi.mock("../../agent-runtime/package/store", () => ({
   resolvePinnedHarnessPackage: vi.fn(() => ({
     state: "installed",
     identity: packageFixture.identity,
@@ -246,7 +245,6 @@ vi.mock("../../harness/package-store", () => ({
         id: "openclaw",
         displayName: "OpenClaw",
         packageVersion: "1.0.0-test",
-        contractVersion: 1,
         manifest: "manifest.yaml",
       },
       manifest: { name: "openclaw" },

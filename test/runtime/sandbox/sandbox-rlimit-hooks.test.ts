@@ -12,11 +12,11 @@ const ROOT = path.resolve(import.meta.dirname, "../../..");
 const DOCKERFILE = path.join(ROOT, "Dockerfile");
 const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
 const PI_DOCKERFILE_BASE = path.join(ROOT, "agents", "pi", "Dockerfile.base");
-const HERMES_DOCKERFILE = path.join(ROOT, "agents", "hermes", "Dockerfile");
+const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 const DCODE_DOCKERFILE_BASE = path.join(
   ROOT,
-  "agents",
-  "langchain-deepagents-code",
+  "packages",
+  "nemoclaw-langchain-deepagents-code",
   "Dockerfile.base",
 );
 const SANDBOX_RLIMITS = path.join(ROOT, "scripts", "lib", "sandbox-rlimits.sh");
@@ -524,7 +524,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       const command = dockerRunCommandBetween(
         dockerfile,
         "# System-wide RLIMIT hooks for Deep Agents Code",
-        "COPY agents/langchain-deepagents-code/requirements.lock",
+        "COPY packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock",
       )
         .replaceAll("/usr/local/lib/nemoclaw/sandbox-rlimits.sh", rlimitLib)
         .replaceAll("/etc/profile.d/nemoclaw-rlimits.sh", rlimitHook)
@@ -641,6 +641,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
     );
     const managedGatewayControl = path.join(localLib, "managed-gateway-control.py");
     const hermesCronRestoreControl = path.join(localLib, "hermes-cron-restore-control.py");
+    const hermesStartupDir = path.join(localLib, "hermes-startup");
     const startBin = path.join(tmp, "nemoclaw-start");
     const managedStartupHold = path.join(tmp, "nemoclaw-managed-startup-hold");
     const managedBootstrap = path.join(tmp, "nemoclaw-managed-bootstrap");
@@ -684,6 +685,16 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       fs.writeFileSync(runtimeStateMutationCapability, "{}\n");
       fs.writeFileSync(managedGatewayControl, "# managed gateway control fixture\n");
       fs.writeFileSync(hermesCronRestoreControl, "# Hermes cron restore control fixture\n");
+      fs.mkdirSync(hermesStartupDir);
+      [
+        "state-gate.sh",
+        "config-setup.sh",
+        "service-control.sh",
+        "runtime-integrity.sh",
+        "gateway-control.sh",
+      ].forEach((scriptName) =>
+        fs.writeFileSync(path.join(hermesStartupDir, scriptName), "# startup module fixture\n"),
+      );
       fs.writeFileSync(startBin, "#!/usr/bin/env bash\n");
       fs.writeFileSync(managedStartupHold, "#!/usr/bin/env bash\n");
       fs.writeFileSync(managedBootstrap, "#!/usr/bin/env bash\n");
@@ -691,7 +702,6 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       fs.writeFileSync(corporateCaRuntime, "# corporate CA runtime fixture\n");
       fs.writeFileSync(entrypointEnvWrapper, "# entrypoint env wrapper fixture\n");
       fs.writeFileSync(bashrc, "# stale hermes bashrc\n");
-      const fixtureOwner = fs.statSync(startBin);
       const replay = dockerRunCommandBetween(
         dockerfile,
         "# Apply runtime modes to the startup script and secret-boundary validator.",
@@ -767,6 +777,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
           "/usr/local/lib/nemoclaw/hermes-cron-restore-control.py",
           hermesCronRestoreControl,
         )
+        .replaceAll("/usr/local/lib/nemoclaw/hermes-startup", hermesStartupDir)
         .replaceAll("/usr/local/lib/nemoclaw/sandbox-rlimits.sh", rlimitLib)
         .replaceAll("/etc/profile.d/nemoclaw-rlimits.sh", profileHook)
         .replaceAll("/etc/profile.d", path.dirname(profileHook))
@@ -782,12 +793,7 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expectSystemRlimitHookEnforcesLimits(profileHook);
       expectSystemRlimitHookEnforcesLimits(bashrc);
       expectSystemRlimitHookIsSilentWhenVerificationFails(bashrc, rlimitLib);
-      const hardenedDir = fs.statSync(preloadDir);
-      const hardenedSafetyNet = fs.statSync(safetyNet);
-      const hardenedCiaoGuard = fs.statSync(ciaoGuard);
-      expect(hardenedDir.mode & 0o777).toBe(0o755);
-      expect(hardenedSafetyNet.mode & 0o777).toBe(0o444);
-      expect(hardenedCiaoGuard.mode & 0o777).toBe(0o444);
+      expect(fs.existsSync(preloadDir)).toBe(false);
       expect(fs.statSync(discordRecoveryPatcher).mode & 0o777).toBe(0o755);
       expect(fs.statSync(profilePolicyPatcher).mode & 0o777).toBe(0o755);
       expect(fs.statSync(langfuseCredentialPatcher).mode & 0o777).toBe(0o444);
@@ -800,13 +806,8 @@ describe("sandbox rlimit system hooks (#2173)", () => {
       expect(fs.statSync(stateLockPlan).mode & 0o777).toBe(0o444);
       expect(fs.statSync(runtimeStateMutationCapability).mode & 0o777).toBe(0o444);
       expect(fs.statSync(hermesCronRestoreControl).mode & 0o777).toBe(0o700);
-      expect(hardenedDir.uid).toBe(fixtureOwner.uid);
-      expect(hardenedDir.gid).toBe(fixtureOwner.gid);
-      expect(hardenedSafetyNet.uid).toBe(fixtureOwner.uid);
-      expect(hardenedSafetyNet.gid).toBe(fixtureOwner.gid);
-      expect(hardenedCiaoGuard.uid).toBe(fixtureOwner.uid);
-      expect(hardenedCiaoGuard.gid).toBe(fixtureOwner.gid);
     } finally {
+      fs.existsSync(hermesStartupDir) && fs.chmodSync(hermesStartupDir, 0o755);
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

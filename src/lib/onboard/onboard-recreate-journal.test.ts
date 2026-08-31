@@ -56,7 +56,6 @@ describe("non-resumed replacement target fingerprint (#7735)", () => {
         kind: "agent-runtime" as const,
         id: "openclaw",
         packageVersion: "1.2.3",
-        contractVersion: 1 as const,
         contentDigest: "a".repeat(64),
       },
     },
@@ -89,7 +88,6 @@ const DRIFTED_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "openclaw",
   packageVersion: "9.9.9",
-  contractVersion: 1 as const,
   contentDigest: "d".repeat(64),
 };
 

@@ -35,7 +35,6 @@ function baseDeps(overrides: ManagedSupervisorRelaunchDeps = {}) {
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "1.2.3",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   };
   const agentDefinition = {
@@ -189,7 +188,6 @@ describe("relaunchManagedSupervisorSession", () => {
       kind: "agent-runtime" as const,
       id: "openclaw",
       packageVersion: "1.2.3",
-      contractVersion: 1 as const,
       contentDigest: "a".repeat(64),
     };
     const agentDefinition = {
@@ -258,7 +256,6 @@ describe("relaunchManagedSupervisorSession", () => {
       kind: "agent-runtime" as const,
       id: "openclaw",
       packageVersion: "1.2.3",
-      contractVersion: 1 as const,
       contentDigest: "a".repeat(64),
     };
     const selectedAgent = {
@@ -300,7 +297,6 @@ describe("relaunchManagedSupervisorSession", () => {
         kind: "agent-runtime" as const,
         id: "openclaw",
         packageVersion: "1.2.3",
-        contractVersion: 1 as const,
         contentDigest: "a".repeat(64),
       },
       dashboardPort: 18789,

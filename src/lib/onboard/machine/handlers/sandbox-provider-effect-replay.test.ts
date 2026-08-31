@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import { hashCredential } from "../../../security/credential-hash";
@@ -12,6 +12,7 @@ import {
 } from "../../../state/onboard-checkpoint-decision";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../../state/onboard-checkpoint-types";
 import { createSession, type Session, type SessionUpdates } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
 import { baseOptions, createDeps, makeMinimalPlan, withEnv } from "./sandbox-test-fixtures";
 
@@ -39,6 +40,15 @@ function createImmutableSessionPersistence(initial: Session) {
 }
 
 describe("handleSandboxState provider effect replay", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("stages credential-bound messaging providers before sandbox creation", async () => {
     const discordToken = "discord-current-token";
     const binding = {

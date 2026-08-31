@@ -17,6 +17,7 @@ import {
 } from "../../src/lib/name-validation.js";
 import { deriveCheckpointFromSession } from "../../src/lib/state/onboard-checkpoint-migrate.js";
 import { createSession } from "../../src/lib/state/onboard-session.js";
+import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
 
 const {
   getDefaultSandboxNameForAgent,
@@ -282,17 +283,24 @@ const hostileName = "bad" + esc + "[31mX" + esc + "[0m";
 
   it("exits nonzero for non-interactive resume when the session has no sandbox name", () => {
     const repoRoot = path.join(import.meta.dirname, "../..");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-null-name-"));
+    const tmpDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-null-name-")),
+    );
 
     try {
       const sessionDir = path.join(tmpDir, ".nemoclaw");
       fs.mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
+      const installedHarness = installHomeHarnessPackageFixture(
+        tmpDir,
+        "langchain-deepagents-code",
+      );
       const session = createSession({
         sessionId: "null-sandbox-name",
         status: "in_progress",
         resumable: true,
         mode: "interactive",
         agent: "langchain-deepagents-code",
+        harnessPackage: installedHarness.identity,
         sandboxName: null,
       });
       session.checkpoint = deriveCheckpointFromSession(session, { profile: "default" });

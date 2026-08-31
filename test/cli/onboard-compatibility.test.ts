@@ -13,6 +13,7 @@ import { runOnboardAction } from "../../src/lib/actions/global";
 import { emitOnboardMachineEvent } from "../../src/lib/onboard/machine/events";
 import { deriveCheckpointFromSession } from "../../src/lib/state/onboard-checkpoint-migrate";
 import { createSession } from "../../src/lib/state/onboard-session";
+import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
 
 import { PARSER_EXIT_CODE, run, runWithEnv } from "./helpers";
 
@@ -100,12 +101,8 @@ describe("CLI onboard compatibility", () => {
     expect(r.out).toContain("--yes");
     expect(r.out).toContain("--sandbox-gpu-device=<value>");
     expect(r.out).toContain("--events=jsonl");
-    expect(r.out).toContain(
-      "Agent runtime to onboard (openclaw, hermes, langchain-deepagents-code;",
-    );
-    expect(r.out).toContain("aliases: nemohermes → hermes;");
-    expect(r.out).toContain("nemo-deepagents/dcode/deepagents/deepagents-code/langchain →");
-    expect(r.out).toContain("langchain-deepagents-code)");
+    expect(r.out).toContain("Agent runtime to onboard");
+    expect(r.out).not.toContain("openclaw, hermes, langchain-deepagents-code");
   });
 
   it("unknown onboard option exits 1", () => {
@@ -291,11 +288,14 @@ describe("CLI onboard compatibility", () => {
     // The env-var ingest pipeline trims and rejects whitespace-only values
     // before populating requestedSandboxName, so the guard sees no recovered
     // name and fires correctly.
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-cli-resume-ws-name-"));
+    const home = fs.mkdtempSync(
+      path.join(fs.realpathSync(os.tmpdir()), "nemoclaw-cli-resume-ws-name-"),
+    );
     const localBin = path.join(home, "bin");
     const nemoclawDir = path.join(home, ".nemoclaw");
     fs.mkdirSync(localBin, { recursive: true });
     fs.mkdirSync(nemoclawDir, { recursive: true, mode: 0o700 });
+    installHomeHarnessPackageFixture(home, "openclaw");
     writeOpenShellVersionStub(localBin);
     writeIncompleteResumeSession(nemoclawDir);
 

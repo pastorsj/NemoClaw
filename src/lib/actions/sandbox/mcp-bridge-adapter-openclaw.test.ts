@@ -29,6 +29,25 @@ const sourceNodeOptions = [process.env.NODE_OPTIONS, `--require=${sourceRequireH
   .filter(Boolean)
   .join(" ");
 
+function spawnWithPrivateHome(script: string) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-adapter-"));
+  try {
+    return spawnSync(process.execPath, ["-e", script], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        HOME: home,
+        NEMOCLAW_TEST_BASE_HOME: home,
+        NEMOCLAW_TEST_STATE_DIR: path.join(home, ".nemoclaw-test-state"),
+        NODE_OPTIONS: sourceNodeOptions,
+      },
+    });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 const baseEntry: McpBridgeEntry = {
   server: "github",
   agent: "openclaw",
@@ -551,11 +570,7 @@ adapter.registerOpenClawAdapter("custom-root-lifecycle", entry);
 adapter.unregisterOpenClawAdapter("custom-root-lifecycle", entry);
 process.stdout.write(JSON.stringify(commands));
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: { ...process.env, NODE_OPTIONS: sourceNodeOptions },
-    });
+    const result = spawnWithPrivateHome(script);
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     const commands = JSON.parse(result.stdout) as string[];
@@ -587,11 +602,7 @@ adapter.registerOpenClawAdapter("pinned-root-lifecycle", entry, {}, false, undef
 adapter.unregisterOpenClawAdapter("pinned-root-lifecycle", entry, {}, root);
 process.stdout.write(JSON.stringify(commands));
 `;
-    const result = spawnSync(process.execPath, ["-e", script], {
-      cwd: process.cwd(),
-      encoding: "utf8",
-      env: { ...process.env, NODE_OPTIONS: sourceNodeOptions },
-    });
+    const result = spawnWithPrivateHome(script);
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     const commands = JSON.parse(result.stdout) as string[];

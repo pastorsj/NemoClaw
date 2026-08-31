@@ -4,7 +4,7 @@
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import {
   type InferenceEndpointSource,
   normalizeInferenceEndpointSource,

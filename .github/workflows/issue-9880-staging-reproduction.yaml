@@ -35,7 +35,7 @@ jobs:
             package.json
             package-lock.json
             vitest.config.ts
-            nemoclaw/vitest.project.ts
+            packages/nemoclaw-openclaw/plugin/vitest.project.ts
             ci/cli-test-timing-hints.json
             tsconfig.json
             tsconfig.src.json

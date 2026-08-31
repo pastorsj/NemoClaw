@@ -16,7 +16,7 @@ import {
   hasGnuBase64Decode,
   hasOpenssl,
   runDockerfileCorporateCaDecode,
-} from "../helpers/corporate-ca-support";
+} from "../helpers/corporate-ca-decode";
 
 // The extracted RUN block uses GNU `base64 --decode` (rejected by BSD/macOS
 // `base64`) and requires the `openssl` CLI to validate the bundle. The sandbox
@@ -48,13 +48,16 @@ J0N7VBg2CdK6jRjKLQOSOPq3ySCicHhVRI8hxIWotif7mK3jj6D8NRalwmlHgNM=
 
 const DOCKERFILES = [
   ["OpenClaw", join(import.meta.dirname, "../../Dockerfile")],
-  ["Hermes", join(import.meta.dirname, "../../agents/hermes/Dockerfile")],
-  ["Deep Agents Code", join(import.meta.dirname, "../../agents/langchain-deepagents-code/Dockerfile")],
+  ["Hermes", join(import.meta.dirname, "../../packages/nemoclaw-hermes/Dockerfile")],
+  [
+    "Deep Agents Code",
+    join(import.meta.dirname, "../../packages/nemoclaw-langchain-deepagents-code/Dockerfile"),
+  ],
 ] as const;
 
 const DEEP_AGENTS_DOCKERFILES = [
-  join(import.meta.dirname, "../../agents/langchain-deepagents-code/Dockerfile"),
-  join(import.meta.dirname, "../../agents/langchain-deepagents-code/Dockerfile.base"),
+  join(import.meta.dirname, "../../packages/nemoclaw-langchain-deepagents-code/Dockerfile"),
+  join(import.meta.dirname, "../../packages/nemoclaw-langchain-deepagents-code/Dockerfile.base"),
 ] as const;
 
 const tmpRoots: string[] = [];

@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { writeManagedGatewayDeclaration } from "../helpers/gateway-management";
 import { runWithEnv, testTimeoutOptions } from "./helpers";
 
 function indexOfArg(log: string, needle: string): number {
@@ -23,6 +24,7 @@ describe("CLI dispatch", () => {
         const localBin = path.join(home, "bin");
         const registryDir = path.join(home, ".nemoclaw");
         const openshellLog = path.join(home, "openshell.log");
+        const gatewayManagement = writeManagedGatewayDeclaration(home);
         fs.mkdirSync(localBin, { recursive: true });
         fs.mkdirSync(registryDir, { recursive: true });
         fs.writeFileSync(
@@ -58,9 +60,15 @@ describe("CLI dispatch", () => {
         fs.writeFileSync(path.join(localBin, "docker"), ["#!/bin/sh", "exit 0"].join("\n"), {
           mode: 0o755,
         });
+        fs.writeFileSync(
+          path.join(localBin, "curl"),
+          ["#!/bin/sh", "printf '%s\\n' '{\"models\":[]}'"].join("\n"),
+          { mode: 0o755 },
+        );
 
         const r = runWithEnv("alpha destroy -y", {
           HOME: home,
+          NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
           PATH: `${localBin}:${process.env.PATH || ""}`,
         });
 

@@ -159,7 +159,9 @@ function completeImportedCache(cacheRoot: string): void {
 }
 
 function completeSourceBoundary(sourceRoot: string): void {
-  mkdirSync(path.join(sourceRoot, "nemoclaw"), { recursive: true });
+  mkdirSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin"), {
+    recursive: true,
+  });
   mkdirSync(path.join(sourceRoot, "scripts", "checks"), { recursive: true });
   mkdirSync(path.join(sourceRoot, "tools", "mcp-tool-discovery-runtime", "npm-cache-seed"), {
     recursive: true,
@@ -171,14 +173,19 @@ function completeSourceBoundary(sourceRoot: string): void {
   mkdirSync(
     path.join(
       sourceRoot,
-      "agents",
-      "openclaw",
-      "managed-image-messaging-runtime",
+      "packages",
+      "nemoclaw-openclaw",
+      "runtime",
+      "messaging",
       "npm-cache-seed",
     ),
     { recursive: true },
   );
-  writeFileSync(path.join(sourceRoot, "nemoclaw", "package-lock.json"), "{}\n", "utf8");
+  writeFileSync(
+    path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin", "npm-shrinkwrap.json"),
+    "{}\n",
+    "utf8",
+  );
   writeFileSync(
     path.join(sourceRoot, "tools", "mcp-tool-discovery-runtime", "package-lock.json"),
     "{}\n",
@@ -187,10 +194,11 @@ function completeSourceBoundary(sourceRoot: string): void {
   writeFileSync(
     path.join(
       sourceRoot,
-      "agents",
-      "openclaw",
-      "managed-image-messaging-runtime",
-      "package-lock.json",
+      "packages",
+      "nemoclaw-openclaw",
+      "runtime",
+      "messaging",
+      "npm-shrinkwrap.json",
     ),
     "{}\n",
     "utf8",
@@ -402,7 +410,7 @@ describe("protected managed-image build-cache boundary", () => {
     });
 
     expect(readFileSync(seedLog, "utf8")).toContain(
-      `materialize-locked-npm-cache-seed.mts export --lockfile ${REPO_ROOT}/nemoclaw/package-lock.json --output ${realpathSync(cacheRoot)}/npm-cache-seed`,
+      `materialize-locked-npm-cache-seed.mts export --lockfile ${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json --output ${realpathSync(cacheRoot)}/npm-cache-seed`,
     );
     expect(existsSync(path.join(cacheRoot, "npm-cache-seed", "manifest.json"))).toBe(true);
     expect(readFileSync(seedLog, "utf8")).toContain(
@@ -412,7 +420,7 @@ describe("protected managed-image build-cache boundary", () => {
       true,
     );
     expect(readFileSync(seedLog, "utf8")).toContain(
-      `materialize-locked-npm-cache-seed.mts export --lockfile ${REPO_ROOT}/agents/openclaw/managed-image-messaging-runtime/package-lock.json --output ${realpathSync(cacheRoot)}/messaging-npm-cache-seed`,
+      `materialize-locked-npm-cache-seed.mts export --lockfile ${REPO_ROOT}/packages/nemoclaw-openclaw/runtime/messaging/npm-shrinkwrap.json --output ${realpathSync(cacheRoot)}/messaging-npm-cache-seed`,
     );
     expect(existsSync(path.join(cacheRoot, "messaging-npm-cache-seed", "manifest.json"))).toBe(
       true,
@@ -501,7 +509,7 @@ describe("protected managed-image build-cache boundary", () => {
     const sourceSeed = path.join(REPO_ROOT, "tools/mcp-tool-discovery-runtime/npm-cache-seed");
     const sourceMessagingSeed = path.join(
       REPO_ROOT,
-      "agents/openclaw/managed-image-messaging-runtime/npm-cache-seed",
+      "packages/nemoclaw-openclaw/runtime/messaging/npm-cache-seed",
     );
     const sourceMcpSeed = path.join(
       REPO_ROOT,
@@ -544,13 +552,13 @@ describe("protected managed-image build-cache boundary", () => {
       "--no-cache",
     );
     expect(readFileSync(seedLog, "utf8")).toContain(
-      `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/nemoclaw/package-lock.json --seed ${realpathSync(cacheRoot)}/npm-cache-seed`,
+      `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json --seed ${realpathSync(cacheRoot)}/npm-cache-seed`,
     );
     expect(readFileSync(seedLog, "utf8")).toContain(
       `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/tools/mcp-tool-discovery-runtime/package-lock.json --seed ${realpathSync(cacheRoot)}/mcp-runtime-npm-cache-seed`,
     );
     expect(readFileSync(seedLog, "utf8")).toContain(
-      `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/agents/openclaw/managed-image-messaging-runtime/package-lock.json --seed ${realpathSync(cacheRoot)}/messaging-npm-cache-seed`,
+      `materialize-locked-npm-cache-seed.mts copy --lockfile ${REPO_ROOT}/packages/nemoclaw-openclaw/runtime/messaging/npm-shrinkwrap.json --seed ${realpathSync(cacheRoot)}/messaging-npm-cache-seed`,
     );
     expect(readdirSync(sourceSeed).sort()).toEqual(originalSeedNames);
     expect(readdirSync(sourceMcpSeed).sort()).toEqual(originalMcpSeedNames);

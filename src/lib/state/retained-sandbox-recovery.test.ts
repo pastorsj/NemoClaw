@@ -36,7 +36,6 @@ const harnessPackage = {
   kind: "agent-runtime",
   id: "openclaw",
   packageVersion: "1.2.3",
-  contractVersion: 1,
   contentDigest: "c".repeat(64),
 } as const;
 
@@ -217,7 +216,6 @@ describe("retained sandbox recovery state", () => {
     const recovery = await import("./onboard-session");
     const reorderedHarnessPackage = {
       contentDigest: harnessPackage.contentDigest,
-      contractVersion: harnessPackage.contractVersion,
       packageVersion: harnessPackage.packageVersion,
       id: harnessPackage.id,
       kind: harnessPackage.kind,

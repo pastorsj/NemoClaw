@@ -3,7 +3,9 @@
 
 import { createRequire } from "node:module";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { writeManagedGatewayDeclaration } from "../../helpers/gateway-management";
 
 const require = createRequire(import.meta.url);
 const REPO_ROOT = path.join(import.meta.dirname, "../../..");
@@ -32,6 +34,7 @@ const PROVIDER_COMMAND_PATH = path.join(
   "openshell",
   "provider-command.js",
 );
+const GATEWAY_MANAGEMENT_PATH = writeManagedGatewayDeclaration(process.env.HOME!);
 type CredentialsCommandClasses = {
   CredentialsCommand: typeof import("../../../src/commands/credentials.js").default;
   CredentialsAddCommand: typeof import("../../../src/commands/credentials/add.js").default;
@@ -163,6 +166,10 @@ afterEach(() => {
   }
   delete require.cache[GLOBAL_ACTIONS_PATH];
   delete require.cache[PROVIDER_COMMAND_PATH];
+});
+
+beforeEach(() => {
+  vi.stubEnv("NEMOCLAW_GATEWAY_MANAGEMENT", GATEWAY_MANAGEMENT_PATH);
 });
 
 describe("credentials oclif commands", () => {

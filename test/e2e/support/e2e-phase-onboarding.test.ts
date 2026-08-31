@@ -40,7 +40,6 @@ function packageIdentity(id: StandardHarnessId): HarnessPackageIdentity {
     kind: "agent-runtime",
     id,
     packageVersion: "1.0.0",
-    contractVersion: 1,
     contentDigest: digestByte.repeat(64),
   };
 }

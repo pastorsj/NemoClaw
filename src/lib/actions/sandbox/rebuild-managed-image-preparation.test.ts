@@ -14,11 +14,12 @@ import {
   expectPreparedImage,
   writeDcodeRebuildDockerfile,
 } from "../../../../test/helpers/rebuild-managed-image-preflight-harness";
-import { ROOT } from "../../runner";
 import {
   disposePreparedDcodeRebuildImage,
   prepareManagedDcodeRebuildImage,
 } from "./rebuild-managed-image-preflight";
+
+const DCODE_DEFINITION = dcodeInput().agent;
 
 describe("managed DCode rebuild image preparation", () => {
   it("prebuilds the recorded DCode replacement and transfers one disposable context (#6195)", async () => {
@@ -36,7 +37,7 @@ describe("managed DCode rebuild image preparation", () => {
       });
       expect(fixture.stageBuildContext).toHaveBeenCalledWith(
         expect.objectContaining({
-          root: ROOT,
+          root: DCODE_DEFINITION.packageRoot,
           agent: expect.objectContaining({ name: "langchain-deepagents-code" }),
           fromDockerfile: null,
         }),

@@ -14,7 +14,7 @@ import {
   type SandboxBaseImageResolutionMetadata,
 } from "../sandbox-base-image";
 import { loadAgent } from "./defs";
-import { loadManifestRecord, readString } from "./manifest-readers";
+import { loadManifestRecord, readString } from "../agent-runtime/manifest-readers";
 
 function makeResolutionMetadata(
   overrides: Partial<SandboxBaseImageResolutionMetadata> = {},
@@ -52,7 +52,12 @@ function makeDifferingImageInspection(
     : "";
 }
 
-const AGENTS_DIR = path.resolve(import.meta.dirname, "../../../agents");
+const LEGACY_AGENTS_DIR = path.resolve(import.meta.dirname, "../../../agents");
+const PACKAGES_DIR = path.resolve(import.meta.dirname, "../../../packages");
+
+function agentPackageDir(agentName: string): string {
+  return path.join(PACKAGES_DIR, `nemoclaw-${agentName}`);
+}
 
 function declaresCorporateCaBuildArg(dockerfilePath: string): boolean {
   return (
@@ -62,7 +67,7 @@ function declaresCorporateCaBuildArg(dockerfilePath: string): boolean {
 }
 
 function readManifestExpectedVersion(agentName: string): string {
-  const manifestPath = path.join(AGENTS_DIR, agentName, "manifest.yaml");
+  const manifestPath = path.join(agentPackageDir(agentName), "manifest.yaml");
   const expectedVersion = readString(loadManifestRecord(manifestPath), "expected_version");
   expect(
     expectedVersion,
@@ -74,10 +79,10 @@ function readManifestExpectedVersion(agentName: string): string {
 // Read the agent names from the checked-in Dockerfiles so a base image that
 // starts consuming the corporate CA cannot ship without the build argument.
 const CORPORATE_CA_BASE_IMAGE_AGENTS = fs
-  .readdirSync(AGENTS_DIR)
-  .filter((agentName) =>
-    declaresCorporateCaBuildArg(path.join(AGENTS_DIR, agentName, "Dockerfile.base")),
-  );
+  .readdirSync(PACKAGES_DIR)
+  .filter((directoryName) => directoryName.startsWith("nemoclaw-"))
+  .map((directoryName) => directoryName.slice("nemoclaw-".length))
+  .filter((agentName) => declaresCorporateCaBuildArg(path.join(agentPackageDir(agentName), "Dockerfile.base")));
 
 expect(
   CORPORATE_CA_BASE_IMAGE_AGENTS,
@@ -261,7 +266,7 @@ describe("agent base image provisioning", () => {
     const pi = makeAgent({
       name: "pi",
       displayName: "Pi",
-      dockerfileBasePath: path.join(AGENTS_DIR, "pi/Dockerfile.base"),
+      dockerfileBasePath: path.join(LEGACY_AGENTS_DIR, "pi/Dockerfile.base"),
     });
     withMockedDocker(({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
       ensureAgentBaseImage(pi);
@@ -324,7 +329,7 @@ describe("agent base image provisioning", () => {
           expect(resolveSandboxBaseImageMock).toHaveBeenCalledWith(
             expect.objectContaining({
               imageName: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
-              dockerfilePath: path.join(AGENTS_DIR, "hermes/Dockerfile.base"),
+              dockerfilePath: path.join(agentPackageDir("hermes"), "Dockerfile.base"),
               envVar: "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF",
               label: "Hermes Agent sandbox base image",
               requireOpenshellSandboxAbi: process.platform === "linux",
@@ -592,19 +597,20 @@ describe("agent base image provisioning", () => {
           name: "langchain-deepagents-code",
           displayName: "LangChain Deep Agents Code",
           expectedVersion: "0.1.55",
-          dockerfileBasePath: path.join(AGENTS_DIR, "langchain-deepagents-code/Dockerfile.base"),
-          dockerfilePath: path.join(AGENTS_DIR, "langchain-deepagents-code/Dockerfile"),
+          dockerfileBasePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile.base"),
+          dockerfilePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile"),
         }),
       );
       expect(resolveSandboxBaseImageMock).toHaveBeenCalledWith(
         expect.objectContaining({
           inputPaths: [
-            path.join(AGENTS_DIR, "langchain-deepagents-code/manifest.yaml"),
-            path.join(AGENTS_DIR, "langchain-deepagents-code/requirements.lock"),
+            path.join(agentPackageDir("langchain-deepagents-code"), "manifest.yaml"),
+            path.join(agentPackageDir("langchain-deepagents-code"), "runtime/requirements.lock"),
+            path.join(agentPackageDir("langchain-deepagents-code"), "fabric/requirements.lock"),
           ],
           validateImage: expect.any(Function),
           validationDescription:
-            "deepagents-code==0.1.55, dos2unix, and the immutable security package inventory",
+            "deepagents-code==0.1.55, dos2unix, Fabric 0.2.0 Deep Agents runtime, and the immutable security package inventory",
         }),
       );
     });
@@ -629,8 +635,8 @@ describe("agent base image provisioning", () => {
             name: agentName,
             displayName: agentName,
             expectedVersion: readManifestExpectedVersion(agentName),
-            dockerfileBasePath: path.join(AGENTS_DIR, agentName, "Dockerfile.base"),
-            dockerfilePath: path.join(AGENTS_DIR, agentName, "Dockerfile"),
+            dockerfileBasePath: path.join(agentPackageDir(agentName), "Dockerfile.base"),
+            dockerfilePath: path.join(agentPackageDir(agentName), "Dockerfile"),
           }),
           { forceBaseImageRebuild: true },
         );
@@ -661,8 +667,8 @@ describe("agent base image provisioning", () => {
           name: "langchain-deepagents-code",
           displayName: "LangChain Deep Agents Code",
           expectedVersion: "0.1.55",
-          dockerfileBasePath: path.join(AGENTS_DIR, "langchain-deepagents-code/Dockerfile.base"),
-          dockerfilePath: path.join(AGENTS_DIR, "langchain-deepagents-code/Dockerfile"),
+          dockerfileBasePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile.base"),
+          dockerfilePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile"),
         }),
         { forceBaseImageRebuild: true },
       );
@@ -684,7 +690,7 @@ describe("agent base image provisioning", () => {
             name: "langchain-deepagents-code",
             displayName: "LangChain Deep Agents Code",
             expectedVersion: null,
-            dockerfileBasePath: path.join(AGENTS_DIR, "langchain-deepagents-code/Dockerfile.base"),
+            dockerfileBasePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile.base"),
           }),
         ),
       ).toThrow(
@@ -725,7 +731,7 @@ describe("agent base image provisioning", () => {
         const provenance = buildOptions.labels?.["com.nvidia.nemoclaw.base-build-provenance"];
         const expectedProvenanceKey = createSandboxBaseImageBuildProvenanceKey({
           imageName: "ghcr.io/nvidia/nemoclaw/hermes-sandbox-base",
-          dockerfilePath: path.join(AGENTS_DIR, "hermes/Dockerfile.base"),
+          dockerfilePath: path.join(agentPackageDir("hermes"), "Dockerfile.base"),
           localTag: "unused-by-build-provenance",
           rootDir: root,
         });
@@ -758,7 +764,7 @@ describe("agent base image provisioning", () => {
         );
         expect(dockerImageInspectMock).not.toHaveBeenCalled();
         expect(dockerBuildMock).toHaveBeenCalledWith(
-          path.join(AGENTS_DIR, "hermes/Dockerfile.base"),
+          path.join(agentPackageDir("hermes"), "Dockerfile.base"),
           expect.stringMatching(/^nemoclaw-hermes-sandbox-base-local:build-\d+-[0-9a-f]{16}$/),
           root,
           {

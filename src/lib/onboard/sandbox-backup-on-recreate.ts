@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
-import type { HarnessPackageIdentity } from "../harness/package-identity";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/identity";
 import type { SandboxEntry } from "../state/registry";
 import { type BackupResult } from "../state/sandbox";
 import * as sandboxState from "../state/sandbox";

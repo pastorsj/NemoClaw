@@ -9,6 +9,19 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const registryMocks = vi.hoisted(() => ({
+  getSandbox: vi.fn<(sandboxName: string) => Record<string, unknown> | null>(),
+  getBaselineExclusions: vi.fn(),
+  getBaselineExclusionTransition: vi.fn(),
+}));
+
+vi.mock("../../state/registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/registry")>()),
+  getSandbox: registryMocks.getSandbox,
+  getBaselineExclusions: registryMocks.getBaselineExclusions,
+  getBaselineExclusionTransition: registryMocks.getBaselineExclusionTransition,
+}));
+
 vi.mock("../../policy", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../policy")>();
   return {
@@ -48,6 +61,13 @@ describe("listSandboxPolicies rendering (#5967)", () => {
       { name: "npm", description: "npm and Yarn registry access", file: "npm.yaml" },
     ]);
     mocked.listCustomPresets.mockReturnValue([]);
+    registryMocks.getSandbox.mockReturnValue({
+      name: "nemoclaw-5967",
+      agent: "openclaw",
+      policyTier: null,
+    });
+    registryMocks.getBaselineExclusions.mockReturnValue([]);
+    registryMocks.getBaselineExclusionTransition.mockReturnValue(null);
   });
 
   afterEach(() => {

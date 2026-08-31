@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseNemoClawPolicyCreationReceipt } from "../../policy/merge";
-import { parseHarnessPackageIdentity } from "../../harness/package-identity";
+import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity";
 import type { PendingSandboxPolicyVerification } from "./types";
 
 const SHA256_DIGEST_PATTERN = /^[a-f0-9]{64}$/;

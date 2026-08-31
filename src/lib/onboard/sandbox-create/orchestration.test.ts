@@ -36,7 +36,6 @@ describe("selected agent package authority", () => {
     kind: "agent-runtime" as const,
     id: "hermes",
     packageVersion: "0.13.0",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   };
   const SOURCE_ENTRY = {

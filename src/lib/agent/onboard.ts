@@ -29,8 +29,8 @@ export {
 import { redact, run } from "../runner";
 import * as registry from "../state/registry";
 import * as baseImage from "./base-image";
-import { describeAgentBinaryFailure, verifyAgentBinaryAvailable } from "./binary-availability";
-import { printOptionalDashboardUi } from "./dashboard-ui";
+import { describeAgentBinaryFailure, verifyAgentBinaryAvailable } from "../agent-runtime/runtime/binary-availability";
+import { printOptionalDashboardUi } from "../agent-runtime/dashboard-ui";
 import {
   type AgentDefinition,
   isTerminalAgent,
@@ -39,12 +39,12 @@ import {
   requireCandidateQualificationEnabled,
   resolveAgentName,
 } from "./defs";
-import { waitForAgentGatewayReady } from "./gateway-readiness";
-import { runAgentSmokeCommands } from "./terminal-smoke";
-import { enforceTerminalAgentVersion } from "./terminal-version-enforcement";
-import { printBearerTokenApiAccess } from "./web-auth-ui";
+import { waitForAgentGatewayReady } from "../agent-runtime/lifecycle/gateway-readiness";
+import { runAgentSmokeCommands } from "../agent-runtime/runtime/terminal-smoke";
+import { enforceTerminalAgentVersion } from "../agent-runtime/runtime/version-enforcement";
+import { printBearerTokenApiAccess } from "../agent-runtime/web-auth-ui";
 
-export { verifyAgentBinaryAvailable } from "./binary-availability";
+export { verifyAgentBinaryAvailable } from "../agent-runtime/runtime/binary-availability";
 
 export interface OnboardContext {
   step: (current: number, total: number, message: string) => void;

@@ -111,6 +111,7 @@ export function inspectAgentAdapterRegistration(
     case "deepagents-config":
       return inspectDeepAgentsAdapterRegistration(sandboxName, entry);
   }
+  throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
 }
 
 /**
@@ -144,6 +145,7 @@ export function assertAgentMcpMutationRuntimeCapability(
     case "mcporter":
       return;
   }
+  throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
 }
 
 /**
@@ -207,6 +209,7 @@ export function registerAgentAdapter(
       );
       return;
   }
+  throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
 }
 
 /** Register one adapter and converge it on the credential revision exposed by fresh execs. */
@@ -309,4 +312,5 @@ export function unregisterAgentAdapter(
     case "deepagents-config":
       return unregisterDeepAgentsAdapter(sandboxName, entry, options);
   }
+  throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
 }

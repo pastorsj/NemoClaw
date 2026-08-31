@@ -7,7 +7,7 @@ import { decisionSelected } from "../state/onboard-checkpoint-decision";
 import {
   harnessPackageIdentitiesEqual,
   type HarnessPackageIdentity,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";

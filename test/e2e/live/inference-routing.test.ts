@@ -214,7 +214,7 @@ const originalLookup = dns.promises.lookup;
 dns.promises.lookup = ((hostname, options) => hostname === "rebinding.example.test"
   ? Promise.resolve([{ address: "93.184.216.34", family: 4 }])
   : originalLookup.call(dns.promises, hostname, options));
-const { main } = await import(${JSON.stringify(path.join(REPO_ROOT, "nemoclaw/src/blueprint/runner.ts"))});
+const { main } = await import(${JSON.stringify(path.join(REPO_ROOT, "packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts"))});
 await main(["apply"]);
 `;
 
@@ -590,7 +590,7 @@ async function runRuntimeIdentityE2EScenario(
   );
 
   const redactionValues = [...oauth.secretValues(), inferenceKey];
-  const runnerPath = path.join(REPO_ROOT, "nemoclaw/src/blueprint/runner.ts");
+  const runnerPath = path.join(REPO_ROOT, "packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts");
   const tsxPath = path.join(REPO_ROOT, "node_modules/tsx/dist/cli.mjs");
   const runnerEnv = {
     ...openshellEnv,

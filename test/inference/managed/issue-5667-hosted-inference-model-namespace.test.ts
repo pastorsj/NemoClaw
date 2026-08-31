@@ -88,7 +88,13 @@ function writeDcodeWrapperFixture(tmpDir: string, home: string): string {
   const wrapperPath = path.join(tmpDir, "dcode-wrapper.sh");
   const wrapper = fs
     .readFileSync(
-      path.join(REPO_ROOT, "agents", "langchain-deepagents-code", "dcode-wrapper.sh"),
+      path.join(
+        REPO_ROOT,
+        "packages",
+        "nemoclaw-langchain-deepagents-code",
+        "runtime",
+        "agent-wrapper.sh",
+      ),
       "utf8",
     )
     .replace("export HOME=/sandbox", `export HOME=${JSON.stringify(home)}`)
@@ -197,6 +203,7 @@ describe("hosted inference default model namespace (#5667)", () => {
       String.raw`
 const runner = require(${runnerPath});
 runner.runCapture = () => "";
+require("node:dns/promises").lookup = async () => [{ address: "93.184.216.34", family: 4 }];
 
 process.env.NEMOCLAW_NON_INTERACTIVE = "1";
 process.env.NEMOCLAW_YES = "1";
@@ -303,7 +310,13 @@ const { setupNim } = require(${onboardPath});
         process.execPath,
         [
           "--experimental-strip-types",
-          path.join(REPO_ROOT, "agents", "langchain-deepagents-code", "generate-config.ts"),
+          path.join(
+            REPO_ROOT,
+            "packages",
+            "nemoclaw-langchain-deepagents-code",
+            "config",
+            "generate-config.ts",
+          ),
         ],
         {
           cwd: REPO_ROOT,

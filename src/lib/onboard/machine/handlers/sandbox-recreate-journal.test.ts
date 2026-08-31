@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { decisionSelected, decisionUnset } from "../../../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../../../state/onboard-checkpoint-migrate";
 import { createSession, type Session } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import type { SandboxEntry } from "../../../state/registry";
 import {
   advanceSandboxRecreateTransaction,
@@ -16,6 +17,15 @@ import {
 } from "../../sandbox-recreate-transaction";
 import { handleSandboxState } from "./sandbox";
 import { baseOptions, bindJournaledRecreate, createDeps } from "./sandbox-test-fixtures";
+
+beforeEach(() => {
+  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 it("journals not-ready repair on the selected non-default gateway (#6492)", async () => {
   const session = createSession({ sandboxName: "saved", agent: "openclaw" });

@@ -30,4 +30,4 @@ jobs:
         run: |
           bash scripts/update-docker-pin.sh --check
           DOCKERFILE=Dockerfile.base bash scripts/update-docker-pin.sh --check
-          DOCKERFILE=agents/hermes/Dockerfile.base bash scripts/update-docker-pin.sh --check
+          DOCKERFILE=packages/nemoclaw-hermes/Dockerfile.base bash scripts/update-docker-pin.sh --check

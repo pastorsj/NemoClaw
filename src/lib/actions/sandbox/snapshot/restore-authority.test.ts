@@ -10,7 +10,7 @@ import { loadAgent, type AgentDefinition } from "../../../agent/defs";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
-} from "../../../harness/package-identity";
+} from "../../../agent-runtime/package/identity";
 import {
   MANAGED_IMAGE_REPOSITORIES,
   type ShippedManagedImageAgent,
@@ -55,7 +55,6 @@ function packageIdentity(agent: string, digest = "d".repeat(64)): HarnessPackage
     kind: "agent-runtime",
     id: agent,
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: digest,
   };
 }

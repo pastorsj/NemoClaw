@@ -6,17 +6,16 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { listBundledHarnessSources } from "../harness/bundled-source";
-import { installHarnessPackage } from "../harness/package-install";
+import { installHarnessPackage } from "../agent-runtime/package/install";
 import type {
   BundledHarnessPackageSourceIdentity,
   HarnessPackageReceipt,
-} from "../harness/package-receipt";
+} from "../agent-runtime/package/receipt";
 import {
   resolvePinnedHarnessPackage,
   type InstalledHarnessPackage,
-} from "../harness/package-store";
-import type { HarnessPackageIdentity } from "../harness/package-types";
+} from "../agent-runtime/package/store";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { decisionSelected } from "./onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "./onboard-checkpoint-migrate";
 import { createSession, type Session } from "./onboard-session";
@@ -40,6 +39,15 @@ const SOURCE_IDENTITY: BundledHarnessPackageSourceIdentity = {
     sourceRevision: "a".repeat(40),
   },
 };
+const REVIEWED_FIXTURES = Object.freeze([
+  { id: "hermes", displayName: "Hermes Agent", packageVersion: "0.1.0" },
+  {
+    id: "langchain-deepagents-code",
+    displayName: "LangChain Deep Agents Code",
+    packageVersion: "0.1.4",
+  },
+  { id: "openclaw", displayName: "OpenClaw", packageVersion: "0.1.1" },
+]);
 
 fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
 
@@ -56,8 +64,9 @@ function writeFile(root: string, relativePath: string, contents: string): void {
 
 function writeReviewedBundle(): void {
   fs.mkdirSync(bundledRoot, { recursive: true, mode: 0o700 });
-  for (const declaration of listBundledHarnessSources()) {
+  for (const declaration of REVIEWED_FIXTURES) {
     const packageRoot = path.join(bundledRoot, `nemoclaw-${declaration.id}`);
+    const manifestPath = `packages/nemoclaw-${declaration.id}/manifest.yaml`;
     fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
     writeFile(
       packageRoot,
@@ -68,13 +77,12 @@ function writeReviewedBundle(): void {
         id: declaration.id,
         displayName: declaration.displayName,
         packageVersion: declaration.packageVersion,
-        contractVersion: 1,
-        manifest: declaration.manifestPath,
+        manifest: manifestPath,
       })}\n`,
     );
     writeFile(
       packageRoot,
-      declaration.manifestPath,
+      manifestPath,
       `name: ${declaration.id}\ndisplay_name: ${JSON.stringify(declaration.displayName)}\ndescription: Reviewed migration fixture\n`,
     );
     writeFile(packageRoot, "runtime/payload.txt", `${declaration.id}\n`);
@@ -367,7 +375,6 @@ describe("legacy harness migration", () => {
       kind: "agent-runtime",
       id: "hermes",
       packageVersion: "9.9.9",
-      contractVersion: 1,
       contentDigest: "d".repeat(64),
     };
     const unrelated: SandboxEntry = {

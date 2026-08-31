@@ -5,13 +5,37 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { buildOnboardFlags, onboardUsage, setAgentRegistryReaderForTest } from "./command-support";
 
+function installedEntry(
+  name: string,
+  options: {
+    readonly aliases?: readonly string[];
+    readonly aliasSummary?: string | null;
+    readonly defaultChoice?: boolean;
+  } = {},
+) {
+  return {
+    name,
+    displayName: name,
+    aliases: options.aliases ?? [],
+    aliasSummary: options.aliasSummary ?? null,
+    isDefaultOnboardingChoice: options.defaultChoice ?? false,
+    defaultSandboxName: name,
+  };
+}
+
 afterEach(() => {
   setAgentRegistryReaderForTest(null);
 });
 
 describe("buildOnboardFlags --agent help (#5779)", () => {
-  it("includes installed agent runtime names in the --agent description when listAgents succeeds", () => {
-    setAgentRegistryReaderForTest(() => ["hermes", "langchain-deepagents-code", "openclaw"]);
+  it("includes healthy installed package names in the --agent description", () => {
+    setAgentRegistryReaderForTest(() => [
+      installedEntry("hermes", { aliases: ["nemohermes"] }),
+      installedEntry("langchain-deepagents-code", {
+        aliases: ["nemo-deepagents", "dcode", "deepagents", "deepagents-code", "langchain"],
+      }),
+      installedEntry("openclaw", { defaultChoice: true }),
+    ]);
 
     const flags = buildOnboardFlags();
 
@@ -20,7 +44,7 @@ describe("buildOnboardFlags --agent help (#5779)", () => {
     );
   });
 
-  it("falls back to the generic --agent description when listAgents throws", () => {
+  it("falls back to the generic --agent description when package inventory fails", () => {
     setAgentRegistryReaderForTest(() => {
       throw new Error("registry unavailable");
     });

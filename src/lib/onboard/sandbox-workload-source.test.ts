@@ -92,7 +92,7 @@ describe("sandbox workload source resolution", () => {
   it("uses the same contract with an MXC-shaped capable driver (#7744)", () => {
     const source = resolveSandboxWorkloadSource({
       agentName: "hermes",
-      legacyDockerfilePath: "agents/hermes/Dockerfile",
+      legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
       runtime: managedRuntime("mxc"),
       catalog: CATALOG,
     });
@@ -134,7 +134,7 @@ describe("sandbox workload source resolution", () => {
   it("preserves the legacy path when the current driver lacks managed-image capabilities (#7744)", () => {
     const source = resolveSandboxWorkloadSource({
       agentName: "langchain-deepagents-code",
-      legacyDockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+      legacyDockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
       runtime: {
         driverName: "kubernetes",
         managedImageSelectionPolicy: "prefer-managed",
@@ -146,7 +146,7 @@ describe("sandbox workload source resolution", () => {
 
     expect(source).toEqual({
       kind: "legacy-dockerfile",
-      dockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+      dockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
       reason: "runtime-unsupported",
     });
   });
@@ -197,7 +197,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "hermes",
-        legacyDockerfilePath: "agents/hermes/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
         runtime: managedRuntime("podman"),
         catalog: {},
         policy: "require-managed",
@@ -209,7 +209,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "langchain-deepagents-code",
-        legacyDockerfilePath: "agents/langchain-deepagents-code/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
         runtime: {
           driverName: "podman",
           managedImageSelectionPolicy: "require-managed",
@@ -239,7 +239,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "hermes",
-        legacyDockerfilePath: "agents/hermes/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
         runtime: managedRuntime("podman"),
         catalog: mutableCatalog,
       }),

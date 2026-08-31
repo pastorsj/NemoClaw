@@ -100,7 +100,7 @@ function validatePackageJob(errors: string[], job: WorkflowJob): void {
     "ci/reviewed-npm-audit.json",
     "scripts/audit-reviewed-npm-graph.mts",
     "scripts/checks/package-openshell-sdk-for-pr.mts",
-    "scripts/lib/openclaw-npm-remediation.mts",
+    "packages/nemoclaw-openclaw/compat/npm-remediation.mts",
     "scripts/lib/reviewed-npm-archive.mts",
     "scripts/lib/reviewed-npm-audit.mts",
   ].sort();

@@ -418,7 +418,9 @@ function filterHermesInactiveMessagingPolicies(
 
 function isHermesPolicyPath(policyPath: string): boolean {
   const normalized = policyPath.split(path.sep).join("/");
-  return /(^|\/)agents\/hermes\/policy-additions\.yaml$/.test(normalized);
+  return /(^|\/)(?:agents\/hermes|packages\/nemoclaw-hermes)\/policy-additions\.yaml$/.test(
+    normalized,
+  );
 }
 
 function resolveInitialSandboxCreatePolicy(

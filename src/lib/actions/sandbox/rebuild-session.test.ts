@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import { decisionSelected } from "../../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../../state/onboard-checkpoint-migrate";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
@@ -25,7 +25,6 @@ const PACKAGE: HarnessPackageIdentity = {
   kind: "agent-runtime",
   id: "hermes",
   packageVersion: "2.0.0",
-  contractVersion: 1,
   contentDigest: "a".repeat(64),
 };
 

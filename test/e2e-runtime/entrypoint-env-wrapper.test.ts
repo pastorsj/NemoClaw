@@ -7,10 +7,25 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
-import { sliceBlock } from "../helpers/corporate-ca-support";
 
-const HELPER = path.join(import.meta.dirname, "..", "..", "scripts", "lib", "entrypoint-env-wrapper.sh");
-const OPENCLAW_START = path.join(import.meta.dirname, "..", "..", "scripts", "nemoclaw-start.sh");
+import { extractShellSourceBetween } from "../helpers/shell-source";
+
+const HELPER = path.join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "scripts",
+  "lib",
+  "entrypoint-env-wrapper.sh",
+);
+const OPENCLAW_START = path.join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "start.sh",
+);
 
 function runNormalizer(argv: readonly string[]) {
   const harness = [
@@ -153,10 +168,10 @@ describe("OCI entrypoint env-wrapper normalization", () => {
       path.join(import.meta.dirname, "..", "..", "scripts", "lib", "entrypoint-env-wrapper.sh"),
       "utf-8",
     );
-    const openClawPortBlock = sliceBlock(
-      OPENCLAW_START,
+    const openClawPortBlock = extractShellSourceBetween(
+      fs.readFileSync(OPENCLAW_START, "utf-8"),
       'NEMOCLAW_CMD=("$@")',
-      "# ── Config integrity check",
+      "# startup-modules begin",
     );
     const snippet = [
       normalizer,

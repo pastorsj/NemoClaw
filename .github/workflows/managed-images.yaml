@@ -38,7 +38,7 @@ on:
       - "agents/**"
       - "ci/npm-audit-exceptions.json"
       - "ci/reviewed-npm-audit.json"
-      - "nemoclaw/**"
+      - "packages/**"
       - "nemoclaw-blueprint/**"
       - "scripts/**"
       - "src/lib/actions/sandbox/openshell-child-visible-credentials.v*.json"
@@ -95,7 +95,7 @@ jobs:
             ci/npm-audit-exceptions.json
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -182,8 +182,8 @@ jobs:
           candidate_root="$GITHUB_WORKSPACE/candidate"
           staging_root="$GITHUB_WORKSPACE/staging-qa-base-source"
           for relative in \
-            agents/langchain-deepagents-code/Dockerfile.base \
-            agents/langchain-deepagents-code/requirements.lock
+            packages/nemoclaw-langchain-deepagents-code/Dockerfile.base \
+            packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock
           do
             source_file="$candidate_root/$relative"
             destination_file="$staging_root/$relative"
@@ -240,7 +240,7 @@ jobs:
           set -euo pipefail
           source_root="$GITHUB_WORKSPACE/staging-qa-base-source"
           docker build --progress=plain \
-            -f "$source_root/agents/langchain-deepagents-code/Dockerfile.base" \
+            -f "$source_root/packages/nemoclaw-langchain-deepagents-code/Dockerfile.base" \
             -t "$STAGING_QA_BASE_IMAGE" \
             "$source_root"
           base_id="$(docker image inspect --format "{{.Id}}" "$STAGING_QA_BASE_IMAGE")"
@@ -261,7 +261,7 @@ jobs:
           set -euo pipefail
           final_reference="${STAGING_QA_FINAL_IMAGE}:${CANDIDATE_SHA}"
           docker build --progress=plain \
-            -f agents/langchain-deepagents-code/Dockerfile \
+            -f packages/nemoclaw-langchain-deepagents-code/Dockerfile \
             --build-arg BASE_IMAGE="$STAGING_QA_BASE_IMAGE" \
             --build-arg NEMOCLAW_MODEL=nvidia/nemotron-3-ultra-550b-a55b \
             --build-arg NEMOCLAW_INFERENCE_PROVIDER_ID=inference \
@@ -401,16 +401,16 @@ jobs:
             repository: ghcr.io/nvidia/nemoclaw/openclaw-sandbox
           - agent: hermes
             display_name: Hermes
-            dockerfile: agents/hermes/Dockerfile
-            base_dockerfile: agents/hermes/Dockerfile.base
+            dockerfile: packages/nemoclaw-hermes/Dockerfile
+            base_dockerfile: packages/nemoclaw-hermes/Dockerfile.base
             base_alias: ghcr.io/nvidia/nemoclaw/hermes-sandbox-base:latest
             base_repository: ghcr.io/nvidia/nemoclaw/hermes-sandbox-base
             image: nemoclaw-managed-pr/hermes
             repository: ghcr.io/nvidia/nemoclaw/hermes-sandbox
           - agent: langchain-deepagents-code
             display_name: Deep Agents Code
-            dockerfile: agents/langchain-deepagents-code/Dockerfile
-            base_dockerfile: agents/langchain-deepagents-code/Dockerfile.base
+            dockerfile: packages/nemoclaw-langchain-deepagents-code/Dockerfile
+            base_dockerfile: packages/nemoclaw-langchain-deepagents-code/Dockerfile.base
             base_alias: ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base:latest
             base_repository: ghcr.io/nvidia/nemoclaw/langchain-deepagents-code-sandbox-base
             image: nemoclaw-managed-pr/langchain-deepagents-code
@@ -465,7 +465,7 @@ jobs:
       - name: Validate Deep Agents PR base build arguments
         if: matrix.agent == 'langchain-deepagents-code'
         shell: bash
-        run: scripts/check-production-build-args.sh -f agents/langchain-deepagents-code/Dockerfile.base
+        run: scripts/check-production-build-args.sh -f packages/nemoclaw-langchain-deepagents-code/Dockerfile.base
 
       - name: Resolve digest-pinned linux/amd64 PR base
         id: base
@@ -1685,7 +1685,7 @@ jobs:
           - agent: hermes
             arch: amd64
             display_name: Hermes
-            dockerfile: agents/hermes/Dockerfile
+            dockerfile: packages/nemoclaw-hermes/Dockerfile
             base_image: nvidia/nemoclaw/hermes-sandbox-base
             image: nvidia/nemoclaw/hermes-sandbox
             platform: linux/amd64
@@ -1695,7 +1695,7 @@ jobs:
           - agent: hermes
             arch: arm64
             display_name: Hermes
-            dockerfile: agents/hermes/Dockerfile
+            dockerfile: packages/nemoclaw-hermes/Dockerfile
             base_image: nvidia/nemoclaw/hermes-sandbox-base
             image: nvidia/nemoclaw/hermes-sandbox
             platform: linux/arm64
@@ -1705,7 +1705,7 @@ jobs:
           - agent: langchain-deepagents-code
             arch: amd64
             display_name: Deep Agents Code
-            dockerfile: agents/langchain-deepagents-code/Dockerfile
+            dockerfile: packages/nemoclaw-langchain-deepagents-code/Dockerfile
             base_image: nvidia/nemoclaw/langchain-deepagents-code-sandbox-base
             image: nvidia/nemoclaw/langchain-deepagents-code-sandbox
             platform: linux/amd64
@@ -1715,7 +1715,7 @@ jobs:
           - agent: langchain-deepagents-code
             arch: arm64
             display_name: Deep Agents Code
-            dockerfile: agents/langchain-deepagents-code/Dockerfile
+            dockerfile: packages/nemoclaw-langchain-deepagents-code/Dockerfile
             base_image: nvidia/nemoclaw/langchain-deepagents-code-sandbox-base
             image: nvidia/nemoclaw/langchain-deepagents-code-sandbox
             platform: linux/arm64

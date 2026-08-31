@@ -622,7 +622,7 @@ export function patchStagedDockerfile(
   // NEMOCLAW_EXTRA_AGENTS_JSON — bake secondary OpenClaw agents into
   // agents.list[] alongside the canonical "main" entry. Pass the raw operator
   // payload through to the build-time validator in
-  // scripts/generate-openclaw-config.mts. The host-side encode does not
+  // packages/nemoclaw-openclaw/config/generate-config.mts. The host-side encode does not
   // parse or shape-check the JSON: that would duplicate validation logic and
   // could silently drop a malformed payload here while the docs/contract
   // promise an image-build failure. Encoding the raw bytes makes the build

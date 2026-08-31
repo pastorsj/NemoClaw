@@ -18,6 +18,10 @@ import {
 } from "./mcp-bridge-adapter-status";
 import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readiness";
 import { McpBridgeError } from "./mcp-bridge-contracts";
+import {
+  buildInstalledMcpRegistrationCommand,
+  requireMcpShellCommand,
+} from "./mcp-bridge/package-command";
 
 export function buildDeepAgentsMcpRegisterCommand(
   entry: McpBridgeEntry,
@@ -136,16 +140,30 @@ export function registerDeepAgentsAdapter(
   teardownRollback = false,
   credentialRevision?: McpAttachedCredentialRevision,
 ): void {
+  const managedEntries = registryOwnedDeepAgentsEntries(sandboxName, entry);
+  const installedCommand = buildInstalledMcpRegistrationCommand(
+    sandboxName,
+    "deepagents-config",
+    entry,
+    {
+      replaceExisting,
+      managedEntries,
+      teardownRollback,
+      credentialRevision,
+    },
+  );
   const stdout = runDeepAgentsAdapterCommand(
     sandboxName,
     entry,
-    buildDeepAgentsMcpRegisterCommand(
-      entry,
-      replaceExisting,
-      registryOwnedDeepAgentsEntries(sandboxName, entry),
-      teardownRollback,
-      credentialRevision,
-    ),
+    installedCommand === null
+      ? buildDeepAgentsMcpRegisterCommand(
+          entry,
+          replaceExisting,
+          managedEntries,
+          teardownRollback,
+          credentialRevision,
+        )
+      : requireMcpShellCommand(installedCommand),
     `Deep Agents Code MCP config registration failed for '${entry.server}'.`,
     { envValues },
   );

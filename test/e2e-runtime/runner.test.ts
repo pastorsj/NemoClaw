@@ -1154,39 +1154,41 @@ describe("regression guards", () => {
 
   describe("OpenClaw runtime hardening", () => {
     const repoRoot = path.join(import.meta.dirname, "..", "..");
+    const openClawPackage = path.join(repoRoot, "packages", "nemoclaw-openclaw");
 
     it("disables jiti filesystem cache in base, runtime, and connect shells", () => {
-      const baseSrc = fs.readFileSync(path.join(repoRoot, "Dockerfile.base"), "utf-8");
-      const runtimeSrc = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf-8");
-      const startSrc = fs.readFileSync(
-        path.join(repoRoot, "scripts", "nemoclaw-start.sh"),
+      const baseSrc = fs.readFileSync(path.join(openClawPackage, "Dockerfile.base"), "utf-8");
+      const runtimeSrc = fs.readFileSync(path.join(openClawPackage, "Dockerfile"), "utf-8");
+      const startupEnvSrc = fs.readFileSync(
+        path.join(openClawPackage, "runtime", "startup-env.sh"),
         "utf-8",
       );
 
       expect(baseSrc).toContain("ENV JITI_FS_CACHE=false");
       expect(runtimeSrc).toContain("ENV JITI_FS_CACHE=false");
-      expect(startSrc).toContain('export JITI_FS_CACHE="false"');
+      expect(startupEnvSrc).toContain('export JITI_FS_CACHE="false"');
     });
 
     it.each([{ scenario: "base image" }, { scenario: "runtime image" }])(
       "disables EC2 metadata credential discovery across image, startup, and shell boundaries [$scenario]",
       ({ scenario }) => {
-        const baseSrc = fs.readFileSync(path.join(repoRoot, "Dockerfile.base"), "utf-8");
-        const runtimeSrc = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf-8");
-        const startSrc = fs.readFileSync(
-          path.join(repoRoot, "scripts", "nemoclaw-start.sh"),
+        const baseSrc = fs.readFileSync(path.join(openClawPackage, "Dockerfile.base"), "utf-8");
+        const runtimeSrc = fs.readFileSync(path.join(openClawPackage, "Dockerfile"), "utf-8");
+        const startSrc = fs.readFileSync(path.join(openClawPackage, "start.sh"), "utf-8");
+        const startupEnvSrc = fs.readFileSync(
+          path.join(openClawPackage, "runtime", "startup-env.sh"),
           "utf-8",
         );
         const hermesBaseSrc = fs.readFileSync(
-          path.join(repoRoot, "agents", "hermes", "Dockerfile.base"),
+          path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile.base"),
           "utf-8",
         );
         const hermesRuntimeSrc = fs.readFileSync(
-          path.join(repoRoot, "agents", "hermes", "Dockerfile"),
+          path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile"),
           "utf-8",
         );
         const hermesStartSrc = fs.readFileSync(
-          path.join(repoRoot, "agents", "hermes", "start.sh"),
+          path.join(repoRoot, "packages", "nemoclaw-hermes", "start.sh"),
           "utf-8",
         );
 
@@ -1211,7 +1213,7 @@ describe("regression guards", () => {
         expect(metadataEnvIndex).toBeLessThan(firstRunIndex);
 
         expect(startSrc).toContain("export AWS_EC2_METADATA_DISABLED=true");
-        expect(startSrc).toContain('export AWS_EC2_METADATA_DISABLED="true"');
+        expect(startupEnvSrc).toContain('export AWS_EC2_METADATA_DISABLED="true"');
         expect(hermesBaseSrc).not.toContain("AWS_EC2_METADATA_DISABLED");
         expect(hermesRuntimeSrc).not.toContain("AWS_EC2_METADATA_DISABLED");
         expect(hermesStartSrc).not.toContain("AWS_EC2_METADATA_DISABLED");

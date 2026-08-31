@@ -4,7 +4,7 @@
 import { clearAutoDetectedCompatibleContextWindow } from "../../../inference/compatible-endpoint-context";
 import { resolveAgentProviderInferenceApi } from "../../../inference/config";
 import type { TrustedPrivateEndpointCapability } from "../../../inference/endpoint-ssrf-preflight";
-import type { HarnessPackageAuthority } from "../../../harness/package-identity";
+import type { HarnessPackageAuthority } from "../../../agent-runtime/package/identity";
 import {
   type CurrentGatewayRouteCompatibilityCheck,
   type CurrentGatewayRouteDiscoveryPreflight,

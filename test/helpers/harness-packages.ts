@@ -4,15 +4,46 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import {
-  listBundledHarnessSources,
-  type BundledHarnessSourceDeclaration,
-} from "../../src/lib/harness/bundled-source";
-import { installHarnessPackage } from "../../src/lib/harness/package-install";
-import type { BundledHarnessPackageSourceIdentity } from "../../src/lib/harness/package-receipt";
-import type { InstalledHarnessPackage } from "../../src/lib/harness/package-store";
+import { installHarnessPackage } from "../../src/lib/agent-runtime/package/install";
+import type { BundledHarnessPackageSourceIdentity } from "../../src/lib/agent-runtime/package/receipt";
+import type { InstalledHarnessPackage } from "../../src/lib/agent-runtime/package/store";
 
-export type HarnessPackageFixtureId = BundledHarnessSourceDeclaration["id"];
+const HARNESS_PACKAGE_FIXTURES = Object.freeze([
+  {
+    id: "hermes",
+    displayName: "Hermes Agent",
+    packageVersion: "0.1.0",
+    aliases: ["nemohermes", "nemo-hermes"],
+    defaultChoice: false,
+  },
+  {
+    id: "langchain-deepagents-code",
+    displayName: "LangChain Deep Agents Code",
+    packageVersion: "0.1.4",
+    aliases: [
+      "nemo-deepagents",
+      "dcode",
+      "deepagent",
+      "deepagents",
+      "deepagents-code",
+      "langchain",
+    ],
+    defaultChoice: false,
+  },
+  {
+    id: "openclaw",
+    displayName: "OpenClaw",
+    packageVersion: "0.1.1",
+    aliases: ["nemoclaw", "nemo-claw"],
+    defaultChoice: true,
+  },
+] as const);
+
+type HarnessPackageFixtureDeclaration = (typeof HARNESS_PACKAGE_FIXTURES)[number] & {
+  readonly manifestPath: string;
+};
+
+export type HarnessPackageFixtureId = (typeof HARNESS_PACKAGE_FIXTURES)[number]["id"];
 
 export interface HarnessPackageFixtureOptions {
   readonly fixtureParent?: string;
@@ -64,7 +95,7 @@ function writePrivateFile(root: string, relativePath: string, contents: string):
 }
 
 function fixtureManifest(
-  declaration: BundledHarnessSourceDeclaration,
+  declaration: HarnessPackageFixtureDeclaration,
   executionSentinel: string,
   agentExpectedVersion?: string,
 ): string {
@@ -76,6 +107,11 @@ function fixtureManifest(
     `name: ${declaration.id}`,
     `display_name: ${JSON.stringify(declaration.displayName)}`,
     `description: ${JSON.stringify(`Reviewed ${declaration.displayName} fixture adapter`)}`,
+    "aliases:",
+    ...declaration.aliases.map((alias) => `  - ${alias}`),
+    "onboarding:",
+    `  default: ${declaration.defaultChoice ? "true" : "false"}`,
+    `  sandbox_name: ${declaration.id === "openclaw" ? "my-assistant" : declaration.id}`,
     `binary_path: ${declaration.id}`,
     ...(agentExpectedVersion ? [`expected_version: ${JSON.stringify(agentExpectedVersion)}`] : []),
     ...terminalRuntime,
@@ -86,7 +122,7 @@ function fixtureManifest(
 
 function writePackageArtifact(input: {
   readonly agentPolicyAdditionsContent?: string;
-  readonly declaration: BundledHarnessSourceDeclaration;
+  readonly declaration: HarnessPackageFixtureDeclaration;
   readonly executionSentinel: string;
   readonly agentExpectedVersion?: string;
   readonly packageRoot: string;
@@ -103,7 +139,6 @@ function writePackageArtifact(input: {
       id: input.declaration.id,
       displayName: input.declaration.displayName,
       packageVersion: input.packageVersion,
-      contractVersion: 1,
       manifest: input.declaration.manifestPath,
     })}\n`,
   );
@@ -163,7 +198,10 @@ export function createHarnessPackageFixture(
   privateDirectory(storeRoot);
   privateDirectory(versionRoot);
 
-  const declarations = listBundledHarnessSources();
+  const declarations = HARNESS_PACKAGE_FIXTURES.map((declaration) => ({
+    ...declaration,
+    manifestPath: `packages/nemoclaw-${declaration.id}/manifest.yaml`,
+  }));
   const declarationById = new Map(declarations.map((declaration) => [declaration.id, declaration]));
   const packageRoots = new Map(
     declarations.map((declaration) => {
@@ -229,4 +267,35 @@ export function createHarnessPackageFixture(
       fs.rmSync(fixtureRoot, { recursive: true, force: true });
     },
   });
+}
+
+/** Install one reviewed package fixture into the default store owned by an isolated HOME. */
+export function installHomeHarnessPackageFixture(
+  home: string,
+  id: HarnessPackageFixtureId,
+): InstalledHarnessPackage {
+  const canonicalHome = fs.realpathSync(home);
+  const agentPolicyAdditionsContent =
+    id === "openclaw"
+      ? fs.readFileSync(
+          path.join(
+            import.meta.dirname,
+            "../..",
+            "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
+          ),
+          "utf8",
+        )
+      : undefined;
+  const fixture = createHarnessPackageFixture({
+    fixtureParent: path.join(canonicalHome, "harness-package-fixtures"),
+    storeRoot: path.join(canonicalHome, ".nemoclaw", "harnesses"),
+    agentPolicyAdditionsContent,
+  });
+  if (id === "openclaw") {
+    const packageRoot = fixture.packageRoots.get(id);
+    if (!packageRoot) throw new Error("OpenClaw fixture package root is unavailable");
+    writePrivateFile(packageRoot, "Dockerfile.base", "FROM scratch\n");
+    writePrivateFile(packageRoot, "packages/nemoclaw-openclaw/Dockerfile", "FROM scratch\n");
+  }
+  return fixture.install(id);
 }

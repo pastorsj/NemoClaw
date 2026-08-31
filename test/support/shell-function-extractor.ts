@@ -10,7 +10,7 @@ export function extractShellFunctionFromSource(src: string, name: string): strin
   const header = `${name}() {`;
   const start = src.indexOf(header);
   if (start === -1) {
-    throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+    throw new Error(`Expected ${name} in packages/nemoclaw-openclaw/start.sh`);
   }
   const bodyStart = start + header.length;
   const lines = src.slice(bodyStart).split(/(?<=\n)/);
@@ -34,5 +34,5 @@ export function extractShellFunctionFromSource(src: string, name: string): strin
     }
     offset += line.length;
   }
-  throw new Error(`Expected closing brace for ${name} in scripts/nemoclaw-start.sh`);
+  throw new Error(`Expected closing brace for ${name} in packages/nemoclaw-openclaw/start.sh`);
 }

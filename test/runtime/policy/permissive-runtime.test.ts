@@ -57,7 +57,10 @@ const HERMES_DISCORD_PERMISSIVE = YAML.stringify({
 });
 
 const HERMES_MESSAGING_PERMISSIVE = fs.readFileSync(
-  path.resolve(import.meta.dirname, "../../../agents/hermes/policy-permissive.yaml"),
+  path.resolve(
+    import.meta.dirname,
+    "../../../packages/nemoclaw-hermes/policies/permissive.yaml",
+  ),
   "utf8",
 );
 

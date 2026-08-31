@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getRegisteredAgent } from "../agent/runtime";
-import type { AgentDefinition } from "../agent/definition-types";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { formatEnvAssignment } from "../core/url-utils";
 import { isValidProxyHost, isValidProxyPort } from "./dockerfile-patch";
 import { appendExtraPlaceholderKeysEnvArg } from "./extra-placeholder-keys";

@@ -13,7 +13,7 @@ import {
 import { redirectInheritedChildStdoutToStderr } from "../../cli/stdout-guard";
 import { buildSubprocessEnv } from "../../subprocess-env";
 import { processTreeBoundedOpenshellInvocation } from "./process-tree-timeout";
-import { classifyManagedGatewayEndpointBinding } from "../../../../nemoclaw/dist/shared/openshell-gateway-endpoint-boundary.cjs";
+import { classifyManagedGatewayEndpointBinding } from "../../shared/openshell-gateway-endpoint-boundary.cjs";
 
 export { classifyManagedGatewayEndpointBinding };
 
@@ -95,7 +95,7 @@ export function stripAnsi(value = ""): string {
 }
 
 export type ManagedGatewayEndpointBinding =
-  import("../../../../nemoclaw/dist/shared/openshell-gateway-endpoint-boundary.cjs").ManagedGatewayEndpointBinding;
+  import("../../shared/openshell-gateway-endpoint-boundary.cjs").ManagedGatewayEndpointBinding;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

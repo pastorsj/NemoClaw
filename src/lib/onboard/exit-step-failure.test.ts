@@ -260,7 +260,6 @@ describe("incomplete-onboard --resume backstop (#6003)", () => {
           kind: "agent-runtime",
           id: "openclaw",
           packageVersion: "1.2.3",
-          contractVersion: 1,
           contentDigest: "c".repeat(64),
         },
       }),

@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { resolveMessagingPlanAuthority } from "../../../messaging/plan-authority";
 import type { CheckpointProviderBinding } from "../../../state/onboard-checkpoint-types";
 import { createSession } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
 import {
   baseOptions,
@@ -25,6 +26,15 @@ const resourceProfiles: [string, { cpu: string; memory: string } | null][] = [
 ];
 
 describe("sandbox create intent machine boundary", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("checks final policy requirements before credential provider registration (#9833)", async () => {
     const preflightPolicyRequirements = vi.fn(() => {
       throw new Error("external policy authority must supply the selected route");

@@ -36,7 +36,6 @@ function packageIdentity(
     kind: "agent-runtime",
     id,
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: DIGESTS[id],
     ...overrides,
   };

@@ -33,8 +33,8 @@ const SECURITY_IMAGES = [
   },
   {
     name: "Hermes",
-    dockerfile: path.join(ROOT, "agents", "hermes", "Dockerfile.base"),
-    finalDockerfile: path.join(ROOT, "agents", "hermes", "Dockerfile"),
+    dockerfile: path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base"),
+    finalDockerfile: path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile"),
     startMarker: "# Install the reviewed libexpat, jq, and Vim packages",
     additionalStartMarker: null,
     endMarker: "COPY scripts/lib/reviewed-npm-archive.mts",
@@ -42,8 +42,13 @@ const SECURITY_IMAGES = [
   },
   {
     name: "Deep Agents Code",
-    dockerfile: path.join(ROOT, "agents", "langchain-deepagents-code", "Dockerfile.base"),
-    finalDockerfile: path.join(ROOT, "agents", "langchain-deepagents-code", "Dockerfile"),
+    dockerfile: path.join(
+      ROOT,
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+      "Dockerfile.base",
+    ),
+    finalDockerfile: path.join(ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile"),
     startMarker: "# Install the reviewed libexpat, jq, and Vim packages",
     additionalStartMarker: null,
     endMarker: "# Node remains available",

@@ -7,9 +7,9 @@ import {
   createHarnessPackageFixture,
   type HarnessPackageFixture,
 } from "../../../../test/helpers/harness-packages";
-import { listHarnessPackageInventory } from "../../harness/package-catalog";
-import type { BundledHarnessPackageSourceIdentity } from "../../harness/package-receipt";
-import { resolvePinnedHarnessPackage } from "../../harness/package-store";
+import { listHarnessPackageInventory } from "../../agent-runtime/package/catalog";
+import type { BundledHarnessPackageSourceIdentity } from "../../agent-runtime/package/receipt";
+import { resolvePinnedHarnessPackage } from "../../agent-runtime/package/store";
 import {
   prepareLegacyHarnessMigration,
   reconcileLegacyHarnessMigration,
@@ -225,6 +225,50 @@ describe("reconcileInstallerHarnesses", () => {
       migratedOwnerCount: 0,
       retainedRecordCount: 0,
       upgradedRetainedRecordCount: 0,
+    });
+  });
+
+  it("accepts exact authority for a fourth bundled package without a core id branch", () => {
+    const identity = {
+      kind: "agent-runtime" as const,
+      id: "future-runtime",
+      packageVersion: "3.2.1",
+      contentDigest: "f".repeat(64),
+    };
+    const available = {
+      state: "available" as const,
+      id: identity.id,
+      displayName: "Future Runtime",
+      description: "Synthetic fourth package",
+      aliases: ["future"],
+      aliasSummary: null,
+      isDefaultOnboardingChoice: true,
+      defaultSandboxName: "future-sandbox",
+      identity,
+      packageRoot: "/private/bundled/nemoclaw-future-runtime",
+    };
+    const installed = {
+      ...available,
+      state: "installed" as const,
+      packageRoot: "/private/store/future-runtime/3.2.1",
+      matchesAvailableIdentity: true,
+    };
+    const harness = new InstallerStateHarness(null, [
+      {
+        ...registryEntry("future-sandbox", "future-runtime"),
+        harnessPackage: identity,
+      },
+    ]);
+
+    const result = reconcile(harness, {
+      listInventory: () => ({ available: [available], installed: [installed] }),
+      resolvePinnedPackage: () => ({ identity }) as never,
+    });
+
+    expect(result).toMatchObject({
+      outcome: "ready",
+      standardOwnerCount: 1,
+      migratedOwnerCount: 0,
     });
   });
 

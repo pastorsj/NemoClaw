@@ -6,8 +6,7 @@ import os from "node:os";
 
 import { describe, expect, it } from "vitest";
 
-import { AGENT_ALIASES } from "../../src/lib/agent/aliases";
-import { resolveAgentNameAlias } from "../../src/lib/agent/defs";
+import { getAgentAliasTargets, resolveAgentNameAlias } from "../../src/lib/agent/defs";
 import { INSTALLER_PAYLOAD, TEST_SYSTEM_PATH } from "../helpers/installer-sourced-env";
 
 const AVAILABLE_AGENTS = ["openclaw", "hermes", "langchain-deepagents-code"];
@@ -23,7 +22,9 @@ const NORMALIZATION_CASES = [
 ] as const;
 const ALIAS_CASES = [
   ...CANONICAL_CASES,
-  ...Object.entries(AGENT_ALIASES),
+  ...getAgentAliasTargets(AVAILABLE_AGENTS).flatMap(({ name, aliases }) =>
+    aliases.map((alias) => [alias, name] as const),
+  ),
   ...NORMALIZATION_CASES,
 ] as const;
 

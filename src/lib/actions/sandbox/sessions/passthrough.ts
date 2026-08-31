@@ -148,7 +148,7 @@ function capturedStderr(result: { stderr?: string }): string {
 
 function printJsonParseFailure(): void {
   console.error(
-    "  Could not parse `openclaw sessions list --json` output as a session index. Check the OpenClaw version pinned in agents/openclaw/manifest.yaml.",
+    "  Could not parse `openclaw sessions list --json` output as a session index. Check the OpenClaw version pinned in packages/nemoclaw-openclaw/manifest.yaml.",
   );
 }
 

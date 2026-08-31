@@ -12,7 +12,7 @@
 // config set:          Host-initiated config mutation with validation.
 // config rotate-token: Credential rotation via stdin or env var.
 
-import type { AgentDefinition } from "../agent/definition-types";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import type { AgentConfigTarget } from "./agent-config";
 
 export type { AgentConfigTarget } from "./agent-config";
@@ -686,7 +686,7 @@ function recomputeSandboxConfigHash(sandboxName: string, target: AgentConfigTarg
 }
 
 // Absolute path to the Hermes dashboard config seeder inside the sandbox image
-// (installed by the agents/hermes image build). The python resolution order
+// (installed by the packages/nemoclaw-hermes image build). The python resolution order
 // mirrors start.sh's trusted `_HERMES_PYTHON` list.
 const HERMES_DASHBOARD_SEEDER_PATH = "/usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py";
 const HERMES_MANAGED_POLICY_PATH = "/usr/local/share/nemoclaw/hermes-managed-policy.json";

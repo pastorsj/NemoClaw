@@ -8,7 +8,7 @@ import {
   InstallerHarnessReconciliationError,
   reconcileInstallerHarnesses,
 } from "../../../lib/actions/installer/harness-reconcile";
-import { getBundledHarnessPackageSourceIdentity } from "../../../lib/harness/package-receipt";
+import { getBundledHarnessPackageSourceIdentity } from "../../../lib/agent-runtime/package/receipt";
 
 const BLOCKED_RESULT = Object.freeze({
   schemaVersion: 1,

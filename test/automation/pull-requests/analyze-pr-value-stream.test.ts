@@ -660,36 +660,66 @@ describe("pull request value-stream analysis", () => {
     await expect(stat(candidate)).rejects.toThrow();
   });
 
-  test("reclaims stale publication locks but preserves active locks (#10542)", async () => {
+  test("reclaims stale publication locks but preserves live owners (#10542)", async () => {
     const publicationRoot = await mkdtemp(path.join(tmpdir(), "value-stream-lock-"));
     temporaryDirectories.push(publicationRoot);
     const lock = path.join(publicationRoot, "pr-42.lock");
     await mkdir(lock);
-    const liveStart = await readFile("/proc/" + process.pid + "/stat", "utf8");
-    const liveIdentity = liveStart
-      .slice(liveStart.lastIndexOf(")") + 2)
-      .trim()
-      .split(/\s+/u)[19];
-    await writeFile(
-      path.join(lock, "owner.json"),
-      JSON.stringify({ pid: process.pid, startIdentity: liveIdentity }),
-    );
+    await writeFile(path.join(lock, "owner.json"), JSON.stringify({ pid: process.pid }));
     expect(await reclaimStalePublicationLock(lock)).toBe(false);
     const stale = new Date(Date.now() - 6 * 60 * 1_000);
     await utimes(lock, stale, stale);
     expect(await reclaimStalePublicationLock(lock)).toBe(false);
-    await writeFile(path.join(lock, "owner.json"), JSON.stringify({ pid: process.pid }));
-    expect(await reclaimStalePublicationLock(lock)).toBe(false);
-    await writeFile(
-      path.join(lock, "owner.json"),
-      JSON.stringify({ pid: process.pid, startIdentity: "reused-owner" }),
-    );
-    expect(await reclaimStalePublicationLock(lock)).toBe(true);
+    await rm(lock, { recursive: true });
     await mkdir(lock);
     await utimes(lock, stale, stale);
     expect(await reclaimStalePublicationLock(lock)).toBe(true);
     await expect(stat(lock)).rejects.toThrow();
   });
+
+  test.runIf(process.platform === "linux")(
+    "distinguishes a current process from a reused PID on Linux (#10542)",
+    async () => {
+      const publicationRoot = await mkdtemp(path.join(tmpdir(), "value-stream-identity-"));
+      temporaryDirectories.push(publicationRoot);
+      const lock = path.join(publicationRoot, "pr-42.lock");
+      const liveStart = await readFile("/proc/" + process.pid + "/stat", "utf8");
+      const liveIdentity = liveStart
+        .slice(liveStart.lastIndexOf(")") + 2)
+        .trim()
+        .split(/\s+/u)[19];
+      const stale = new Date(Date.now() - 6 * 60 * 1_000);
+      await mkdir(lock);
+      await writeFile(
+        path.join(lock, "owner.json"),
+        JSON.stringify({ pid: process.pid, startIdentity: liveIdentity }),
+      );
+      await utimes(lock, stale, stale);
+      expect(await reclaimStalePublicationLock(lock)).toBe(false);
+      await writeFile(
+        path.join(lock, "owner.json"),
+        JSON.stringify({ pid: process.pid, startIdentity: "reused-owner" }),
+      );
+      expect(await reclaimStalePublicationLock(lock)).toBe(true);
+    },
+  );
+
+  test.runIf(process.platform !== "linux")(
+    "preserves a live owner's stale lock when process identity is unavailable (#10542)",
+    async () => {
+      const publicationRoot = await mkdtemp(path.join(tmpdir(), "value-stream-identity-"));
+      temporaryDirectories.push(publicationRoot);
+      const lock = path.join(publicationRoot, "pr-42.lock");
+      await mkdir(lock);
+      await writeFile(
+        path.join(lock, "owner.json"),
+        JSON.stringify({ pid: process.pid, startIdentity: "unavailable-on-this-host" }),
+      );
+      const stale = new Date(Date.now() - 6 * 60 * 1_000);
+      await utimes(lock, stale, stale);
+      expect(await reclaimStalePublicationLock(lock)).toBe(false);
+    },
+  );
 
   test("reports retained staging path without hiding publication failure (#10542)", async () => {
     const staging = "/tmp/value-stream-retained-staging";

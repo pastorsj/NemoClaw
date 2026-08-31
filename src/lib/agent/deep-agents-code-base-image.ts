@@ -144,8 +144,8 @@ export function createDeepAgentsCodeBaseImageResolutionOptions(
     // inputs. Per-agent cache-policy isolation is a separate cross-agent change.
     inputPaths: [
       path.join(agentRoot, "manifest.yaml"),
-      path.join(agentRoot, "requirements.lock"),
-      path.join(agentRoot, "fabric-requirements.lock"),
+      path.join(agentRoot, "runtime", "requirements.lock"),
+      path.join(agentRoot, "fabric", "requirements.lock"),
     ],
     validateImage: (imageRef) =>
       deepAgentsCodeBaseImageMatchesVersion(imageRef, expectedVersion) &&

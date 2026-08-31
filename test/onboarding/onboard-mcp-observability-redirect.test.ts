@@ -22,8 +22,13 @@ describe("onboard managed MCP recreation redirect", () => {
     const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
     const runnerPath = JSON.stringify(path.join(repoRoot, "src", "lib", "runner.ts"));
     const registryPath = JSON.stringify(path.join(repoRoot, "src", "lib", "state", "registry.ts"));
+    const dcodePackageRoot = path.join(
+      repoRoot,
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+    );
     const dcodePolicyPath = JSON.stringify(
-      path.join(repoRoot, "agents", "langchain-deepagents-code", "policy-additions.yaml"),
+      path.join(dcodePackageRoot, "policy-additions.yaml"),
     );
     const mocksPath = JSON.stringify(
       path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
@@ -32,6 +37,7 @@ describe("onboard managed MCP recreation redirect", () => {
 const runner = require(${runnerPath});
 const registry = require(${registryPath});
 const fixtureMocks = require(${mocksPath});
+const harnessFixture = fixtureMocks.installOnboardProcessHarnessPackage("langchain-deepagents-code");
 const normalize = (command) => (Array.isArray(command) ? command.join(" ") : String(command)).replace(/'/g, "");
 const existingSandbox = fixtureMocks.createCreatedSandboxFixture({
   sandboxName: "alpha",
@@ -51,8 +57,8 @@ runner.runCapture = (command) => {
   return mocked === null ? "" : mocked;
 };
 registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
+  ...harnessFixture.registryAuthority,
   name: "alpha",
-  agent: "langchain-deepagents-code",
   model: "model",
   provider: "provider",
   preferredInferenceApi: "openai-completions",
@@ -77,8 +83,8 @@ registry.getDefault = () => null;
 const { createSandbox } = require(${onboardPath});
 createSandbox(
   null, "model", "provider", "openai-completions", "alpha", null, null,
-  ${JSON.stringify(path.join(repoRoot, "agents", "langchain-deepagents-code", "Dockerfile"))},
-  { name: "langchain-deepagents-code", policyAdditionsPath: ${dcodePolicyPath} }, null, null, null, [], null,
+  ${JSON.stringify(path.join(dcodePackageRoot, "Dockerfile"))},
+  harnessFixture.agentDefinition, null, null, null, [], null,
   null,
   {
     recreate: true,

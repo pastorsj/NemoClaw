@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import type { HarnessPackageIdentity } from "../../../harness/package-identity";
+import type { HarnessPackageIdentity } from "../../../agent-runtime/package/identity";
 import { createSession, type Session } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
+import * as registry from "../../../state/registry";
 import {
   beginSandboxRecreateTransaction,
   fingerprintSandboxRecreateValue,
@@ -17,7 +18,6 @@ const DRIFTED_PACKAGE: HarnessPackageIdentity = {
   kind: "agent-runtime",
   id: "openclaw",
   packageVersion: "9.9.9",
-  contractVersion: 1,
   contentDigest: "d".repeat(64),
 };
 
@@ -35,6 +35,15 @@ const SOURCE_ENTRY: SandboxEntry = {
   gatewayName: "nemoclaw",
   gatewayPort: 8080,
 };
+
+beforeEach(() => {
+  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 it("rejects package authority drift at the handler journal-open mutation edge", async () => {
   const session = createSession({ sandboxName: "saved", agent: "openclaw" });

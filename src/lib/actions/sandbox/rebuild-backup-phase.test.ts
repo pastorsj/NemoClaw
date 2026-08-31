@@ -3,7 +3,6 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as sandboxState from "../../state/sandbox";
 import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import {
   normalizeRebuildObservabilityPolicyPresets,
@@ -198,15 +197,9 @@ describe("rebuild web-search policy normalization", () => {
   });
 
   it("records when --force skips a total backup failure", () => {
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.spyOn(console, "log").mockImplementation(() => undefined);
-    vi.spyOn(sandboxState, "backupSandboxState").mockReturnValue({
-      success: false,
-      backedUpDirs: [],
-      backedUpFiles: [],
-      failedDirs: [".openclaw"],
-      failedFiles: ["openclaw.json"],
-    });
+    const backupStateForRebuild = vi.fn<NonNullable<Parameters<typeof runRebuildBackupPhase>[1]>>(
+      () => null,
+    );
 
     const result = runRebuildBackupPhase(
       withSelectedBackupAuthority({
@@ -223,8 +216,10 @@ describe("rebuild web-search policy normalization", () => {
         },
         relockShieldsIfNeeded: () => true,
       }),
+      backupStateForRebuild,
     );
 
+    expect(backupStateForRebuild).toHaveBeenCalledOnce();
     expect(result?.backupManifest).toBeNull();
     expect(result?.backupWasForceSkipped).toBe(true);
   });

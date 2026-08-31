@@ -429,9 +429,9 @@ describe("complete managed-image publication workflow", () => {
     ]);
     expect(matrix.every(({ base_alias }) => base_alias?.endsWith(":latest"))).toBe(true);
     expect(matrixByAgent.get("openclaw")?.base_dockerfile).toBe("Dockerfile.base");
-    expect(matrixByAgent.get("hermes")?.base_dockerfile).toBe("agents/hermes/Dockerfile.base");
+    expect(matrixByAgent.get("hermes")?.base_dockerfile).toBe("packages/nemoclaw-hermes/Dockerfile.base");
     expect(matrixByAgent.get("langchain-deepagents-code")?.base_dockerfile).toBe(
-      "agents/langchain-deepagents-code/Dockerfile.base",
+      "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     );
     expect(steps.indexOf(permissionDrift)).toBeGreaterThan(
       steps.indexOf(step(prBuilder, "Checkout")),
@@ -898,7 +898,7 @@ fi
         agent: "hermes",
         arch: "amd64",
         display_name: "Hermes",
-        dockerfile: "agents/hermes/Dockerfile",
+        dockerfile: "packages/nemoclaw-hermes/Dockerfile",
         base_image: "nvidia/nemoclaw/hermes-sandbox-base",
         image: "nvidia/nemoclaw/hermes-sandbox",
         platform: "linux/amd64",
@@ -910,7 +910,7 @@ fi
         agent: "hermes",
         arch: "arm64",
         display_name: "Hermes",
-        dockerfile: "agents/hermes/Dockerfile",
+        dockerfile: "packages/nemoclaw-hermes/Dockerfile",
         base_image: "nvidia/nemoclaw/hermes-sandbox-base",
         image: "nvidia/nemoclaw/hermes-sandbox",
         platform: "linux/arm64",
@@ -922,7 +922,7 @@ fi
         agent: "langchain-deepagents-code",
         arch: "amd64",
         display_name: "Deep Agents Code",
-        dockerfile: "agents/langchain-deepagents-code/Dockerfile",
+        dockerfile: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
         base_image: "nvidia/nemoclaw/langchain-deepagents-code-sandbox-base",
         image: "nvidia/nemoclaw/langchain-deepagents-code-sandbox",
         platform: "linux/amd64",
@@ -934,7 +934,7 @@ fi
         agent: "langchain-deepagents-code",
         arch: "arm64",
         display_name: "Deep Agents Code",
-        dockerfile: "agents/langchain-deepagents-code/Dockerfile",
+        dockerfile: "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
         base_image: "nvidia/nemoclaw/langchain-deepagents-code-sandbox-base",
         image: "nvidia/nemoclaw/langchain-deepagents-code-sandbox",
         platform: "linux/arm64",

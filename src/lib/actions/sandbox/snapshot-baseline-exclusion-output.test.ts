@@ -10,7 +10,6 @@ const fixture = vi.hoisted(() => ({
     kind: "agent-runtime" as const,
     id: "hermes",
     packageVersion: "1.0.0-test",
-    contractVersion: 1 as const,
     contentDigest: "b".repeat(64),
   },
 }));

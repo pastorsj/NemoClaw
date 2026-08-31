@@ -332,11 +332,11 @@ describe("portable runtime cleanup in the uninstall run plan", testTimeoutOption
     const stderr = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const result = await runUninstallPlanProduction(
       { assumeYes: true, deleteModels: true, destroyUserData: true, keepOpenShell: false },
-      {
+      withManagedGatewayAuthority({
         ...admissionFailureDeps(scope),
         commandExists: (command) => command === "openshell",
         hasPortableRuntimeCleanup: () => (arm(), false),
-      },
+      }),
     );
     const output = stderr.mock.calls.flat().join("\n");
     expect(result.exitCode).toBe(1);

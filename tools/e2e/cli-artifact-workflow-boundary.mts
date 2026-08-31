@@ -217,10 +217,6 @@ export function validateCliArtifactRestoreAction(
     '*) echo "::error::CLI artifact contains an unsafe member',
     "CLI artifact contains a link or special file",
     '[[ ! -e "$GITHUB_WORKSPACE/dist" && ! -L "$GITHUB_WORKSPACE/dist" ]]',
-    '[[ -d "$GITHUB_WORKSPACE/nemoclaw" && ! -L "$GITHUB_WORKSPACE/nemoclaw" ]]',
-
-    '[[ ! -e "$GITHUB_WORKSPACE/nemoclaw/dist" && ! -L "$GITHUB_WORKSPACE/nemoclaw/dist" ]]',
-
     'restore_dir="$(mktemp -d',
     'tar --no-same-owner --no-same-permissions -xf "$payload" -C "$restore_dir"',
     '[[ -f "$cli_entrypoint" && ! -L "$cli_entrypoint" && -s "$cli_entrypoint" ]]',
@@ -228,8 +224,6 @@ export function validateCliArtifactRestoreAction(
     '[[ -f "$boundary_path" && ! -L "$boundary_path" && -s "$boundary_path" ]]',
 
     ".sourceRevision == $candidateSha",
-    'mv "$restore_dir/nemoclaw/dist" "$GITHUB_WORKSPACE/nemoclaw/dist"',
-
     'mv "$restore_dir/dist" "$GITHUB_WORKSPACE/dist"',
     'node "$GITHUB_WORKSPACE/bin/nemoclaw.js" --version',
   ]);
@@ -316,7 +310,7 @@ function validateProducer(errors: string[], producer: WorkflowRecord): void {
     "candidate CLI build identity does not match the candidate commit SHA",
     "--sort=name",
     "--mtime=@0",
-    "nemoclaw/dist/shared",
+    "dist/lib/shared",
 
     "source_tree=\"$(git rev-parse 'HEAD^{tree}')\"",
     'lockfile_sha256="$(sha256sum package-lock.json',

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
@@ -12,6 +12,15 @@ vi.mock("../../messaging-channel-setup", () => ({
 }));
 
 describe("sandbox create baseline exclusion locking (#7194)", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("resolves the complete create intent only after acquiring the sandbox mutation lock", async () => {
     let lockHeld = false;
     const { deps, calls } = createDeps({

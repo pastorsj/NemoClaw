@@ -224,8 +224,10 @@ grep -oE '(^|[^[:alnum:]_])(openshell|nemoclaw|openclaw)[[:space:]]+[a-z-]+' "$E
   | sort -u \
   | while IFS= read -r t; do
   echo "=== drift check: $t ==="
+  # Include the legacy paths because reported releases can predate the package move.
   git log "$REPORTED_VERSION".."$LATEST" -S"$t" --oneline -- \
-    src/ bin/ nemoclaw/src/ scripts/nemoclaw-start.sh \
+    src/ bin/ packages/nemoclaw-openclaw/plugin/src/ packages/nemoclaw-openclaw/start.sh \
+    nemoclaw/src/ scripts/nemoclaw-start.sh \
     nemoclaw-blueprint/openclaw-plugins/ 2>&1 | head -5
 done
 ```

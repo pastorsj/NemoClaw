@@ -13,8 +13,8 @@ const ROOT = path.resolve(import.meta.dirname, "../../..");
 const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
 const MANAGED_BASE_DOCKERFILES = [
   DOCKERFILE_BASE,
-  path.join(ROOT, "agents", "hermes", "Dockerfile.base"),
-  path.join(ROOT, "agents", "langchain-deepagents-code", "Dockerfile.base"),
+  path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base"),
+  path.join(ROOT, "packages", "nemoclaw-langchain-deepagents-code", "Dockerfile.base"),
 ] as const;
 const fixtures: string[] = [];
 

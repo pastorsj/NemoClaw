@@ -124,7 +124,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -156,7 +156,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             package-lock.json
-            nemoclaw/package-lock.json
+            packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json
           sparse-checkout-cone-mode: false
 
       - name: Checkout base package decision
@@ -170,7 +170,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -201,7 +201,7 @@ jobs:
                 (.packages | type == "object")) and
               ([.[] | .. | objects | select(has("resolved")) | .resolved] |
                 all(type == "string" and startswith("https://registry.npmjs.org/")))
-            ' package-lock.json nemoclaw/package-lock.json >/dev/null; then
+            ' package-lock.json packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json >/dev/null; then
               echo "::error title=SDK package unavailable::The pull request base requires two valid public-registry npm lockfiles."
               exit 1
             fi
@@ -354,7 +354,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -394,7 +394,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -468,7 +468,7 @@ jobs:
             ci/npm-audit-exceptions.json
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -516,7 +516,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -626,7 +626,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false
@@ -675,7 +675,7 @@ jobs:
             ci/reviewed-npm-audit.json
             scripts/audit-reviewed-npm-graph.mts
             scripts/checks/prepare-ci-npm-install.mts
-            scripts/lib/openclaw-npm-remediation.mts
+            packages/nemoclaw-openclaw/compat/npm-remediation.mts
             scripts/lib/reviewed-npm-archive.mts
             scripts/lib/reviewed-npm-audit.mts
           sparse-checkout-cone-mode: false

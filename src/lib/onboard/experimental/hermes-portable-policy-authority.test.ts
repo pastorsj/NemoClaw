@@ -196,14 +196,11 @@ describe("Hermes portable policy authority", () => {
       },
       "finalized custom policy authority is not supported",
     ],
-  ])(
-    "rejects finalized registry authority with %s (#9211)",
-    (_label, entry, expectedMessage) => {
-      expect(() =>
-        resolveHermesPortableExpectedPolicyBytes(CREATE, entry satisfies SandboxEntry),
-      ).toThrow(`Hermes portable policy authority ${expectedMessage}`);
-    },
-  );
+  ])("rejects finalized registry authority with %s (#9211)", (_label, entry, expectedMessage) => {
+    expect(() =>
+      resolveHermesPortableExpectedPolicyBytes(CREATE, entry satisfies SandboxEntry),
+    ).toThrow(`Hermes portable policy authority ${expectedMessage}`);
+  });
 
   it.each([
     {

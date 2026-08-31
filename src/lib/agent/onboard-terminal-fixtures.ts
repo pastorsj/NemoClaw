@@ -30,6 +30,15 @@ function recordDeepAgentsRuntimeCall(
   if (command.includes("/sandbox/.deepagents/config.toml")) {
     return "NEMOCLAW_AGENT_SMOKE_BEGIN\nNEMOCLAW_DEEPAGENTS_CONFIG_OK\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
   }
+  if (command.includes("/sandbox/.deepagents/fabric.json")) {
+    return "NEMOCLAW_AGENT_SMOKE_BEGIN\nNEMOCLAW_FABRIC_CONFIG_OK\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
+  }
+  if (command.includes("nemoclaw-fabric --version")) {
+    return "NEMOCLAW_AGENT_SMOKE_BEGIN\nnemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
+  }
+  if (command.includes("timeout --version")) {
+    return "NEMOCLAW_AGENT_SMOKE_BEGIN\ntimeout (GNU coreutils) 9.0\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
+  }
   return "";
 }
 

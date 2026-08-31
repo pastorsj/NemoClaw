@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
@@ -10,6 +10,11 @@ import { baseOptions, createDeps } from "./sandbox-test-fixtures";
 vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
 }));
+
+beforeEach(() => {
+  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+});
 
 afterEach(() => {
   vi.restoreAllMocks();

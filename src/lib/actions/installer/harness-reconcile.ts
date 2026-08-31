@@ -9,21 +9,22 @@ import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sa
 import {
   getBundledHarnessPackageRoot,
   listHarnessPackageInventory,
+  type AvailableHarnessPackageRecord,
   type HarnessPackageInventory,
-} from "../../harness/package-catalog";
+} from "../../agent-runtime/package/catalog";
 import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../../harness/package-identity";
-import type { BundledHarnessPackageSourceIdentity } from "../../harness/package-receipt";
+} from "../../agent-runtime/package/identity";
+import type { BundledHarnessPackageSourceIdentity } from "../../agent-runtime/package/receipt";
 import {
   getHarnessPackageStoreRoot,
   resolvePinnedHarnessPackage,
   type HarnessPackageStoreOptions,
   type InstalledHarnessPackage,
-} from "../../harness/package-store";
+} from "../../agent-runtime/package/store";
 import {
   prepareLegacyHarnessMigration,
   reconcileLegacyHarnessMigration,
@@ -54,7 +55,7 @@ import {
 } from "../../state/registry/persistence";
 import type { SandboxEntry, SandboxRegistry } from "../../state/registry/types";
 
-const STANDARD_HARNESS_IDS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);
+type BundledHarnessCatalog = ReadonlyMap<string, AvailableHarnessPackageRecord>;
 
 export interface ReconcileInstallerHarnessesInput {
   readonly sourceIdentity: BundledHarnessPackageSourceIdentity;
@@ -160,13 +161,13 @@ function reconciliationError(message: string): InstallerHarnessReconciliationErr
   return new InstallerHarnessReconciliationError(message);
 }
 
-function effectiveAgentId(value: unknown): string {
-  if (value === null || value === undefined || value === "openclaw") return "openclaw";
-  if (typeof value !== "string" || value.length === 0) {
+function effectiveAgentId(value: unknown, bundledHarnesses: BundledHarnessCatalog): string {
+  const agentId = value === null || value === undefined ? "openclaw" : value;
+  if (typeof agentId !== "string" || agentId.length === 0) {
     throw reconciliationError("an owner has an invalid harness identifier");
   }
-  if (STANDARD_HARNESS_IDS.has(value) || value === "nemocua" || isCandidateAgent(value)) {
-    return value;
+  if (bundledHarnesses.has(agentId) || agentId === "nemocua" || isCandidateAgent(agentId)) {
+    return agentId;
   }
   throw reconciliationError("an owner uses an unsupported harness identifier");
 }
@@ -251,12 +252,15 @@ function ownsProperty(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function inspectPeerAuthority(peer: DurableAuthorityPeer): {
+function inspectPeerAuthority(
+  peer: DurableAuthorityPeer,
+  bundledHarnesses: BundledHarnessCatalog,
+): {
   readonly effectiveAgentId: string;
   readonly candidate: boolean;
   readonly state: ReturnType<typeof inspectHarnessPackageState>;
 } {
-  const agentId = effectiveAgentId(peer.value.agent);
+  const agentId = effectiveAgentId(peer.value.agent, bundledHarnesses);
   const candidate = agentId === "nemocua" || isCandidateAgent(agentId);
   const state = inspectHarnessPackageState(
     peer.value.harnessPackage,
@@ -285,14 +289,19 @@ function inspectPeerAuthority(peer: DurableAuthorityPeer): {
   return { effectiveAgentId: agentId, candidate, state };
 }
 
-function inspectOwner(owner: OwnerSnapshot): ExactOwnerAuthority {
+function inspectOwner(
+  owner: OwnerSnapshot,
+  bundledHarnesses: BundledHarnessCatalog,
+): ExactOwnerAuthority {
   if (owner.session && hasInvalidSessionHarnessPackage(owner.session)) {
     throw reconciliationError("the onboarding session has malformed harness package authority");
   }
   const peers = [
-    ...(owner.session ? [inspectPeerAuthority({ kind: "session", value: owner.session })] : []),
+    ...(owner.session
+      ? [inspectPeerAuthority({ kind: "session", value: owner.session }, bundledHarnesses)]
+      : []),
     ...(owner.registryEntry
-      ? [inspectPeerAuthority({ kind: "registry", value: owner.registryEntry })]
+      ? [inspectPeerAuthority({ kind: "registry", value: owner.registryEntry }, bundledHarnesses)]
       : []),
   ];
   const first = peers[0];
@@ -428,13 +437,14 @@ function preflightRetainedRecords(
 function preflightOwner(
   owner: OwnerSnapshot,
   input: {
+    readonly bundledHarnesses: BundledHarnessCatalog;
     readonly bundledRoot: string;
     readonly sourceIdentity: BundledHarnessPackageSourceIdentity;
     readonly storeRoot: string;
   },
   deps: InstallerHarnessReconciliationDependencies,
 ): PreflightedOwner {
-  const authority = inspectOwner(owner);
+  const authority = inspectOwner(owner, input.bundledHarnesses);
   if (authority.kind === "candidate") {
     verifyCandidateQualification(owner, authority, input.storeRoot, deps);
     return {
@@ -508,6 +518,7 @@ function reconcileRetainedRecords(
   owner: OwnerSnapshot,
   authority: ExactOwnerAuthority,
   initial: readonly RetainedSandboxRecoveryRecord[],
+  bundledHarnesses: BundledHarnessCatalog,
   deps: InstallerHarnessReconciliationDependencies,
 ): { readonly total: number; readonly upgraded: number } {
   if (!owner.registryEntry || owner.selection.sandboxName === null)
@@ -520,7 +531,7 @@ function reconcileRetainedRecords(
       harnessPackage: authority.harnessPackage,
     });
     if (result.status === "upgraded") upgraded += 1;
-    const rereadOwner = inspectOwner(readOwner(owner.selection, deps));
+    const rereadOwner = inspectOwner(readOwner(owner.selection, deps), bundledHarnesses);
     if (
       rereadOwner.effectiveAgentId !== authority.effectiveAgentId ||
       !isDeepStrictEqual(rereadOwner.harnessPackage, authority.harnessPackage) ||
@@ -553,6 +564,7 @@ function assertNoOrphanedRetainedRecords(
 
 function verifyFinalOwners(
   preflightedOwners: readonly PreflightedOwner[],
+  bundledHarnesses: BundledHarnessCatalog,
   storeRoot: string,
   deps: InstallerHarnessReconciliationDependencies,
 ): void {
@@ -564,7 +576,7 @@ function verifyFinalOwners(
   }
   for (const preflighted of preflightedOwners) {
     const owner = readOwner(preflighted.selection, deps);
-    const authority = inspectOwner(owner);
+    const authority = inspectOwner(owner, bundledHarnesses);
     if (
       authority.requiresMigration ||
       !sameOwnerAuthority(authority, preflighted.desiredAuthority)
@@ -614,6 +626,9 @@ export function reconcileInstallerHarnesses(
     if (initialInventory.installed.some((record) => record.state === "damaged")) {
       throw reconciliationError("the installed harness package store is damaged");
     }
+    const bundledHarnesses: BundledHarnessCatalog = new Map(
+      initialInventory.available.map((record) => [record.id, record]),
+    );
     const selections = ownerSelections(initialState.session, initialState.registry);
     // Prepare and verify every owner before the first package or durable-state
     // write. A malformed later owner therefore cannot leave earlier owners
@@ -621,7 +636,12 @@ export function reconcileInstallerHarnesses(
     const preflightedOwners = selections.map((selection) =>
       preflightOwner(
         readOwner(selection, deps),
-        { bundledRoot, sourceIdentity: input.sourceIdentity, storeRoot },
+        {
+          bundledHarnesses,
+          bundledRoot,
+          sourceIdentity: input.sourceIdentity,
+          storeRoot,
+        },
         deps,
       ),
     );
@@ -644,7 +664,7 @@ export function reconcileInstallerHarnesses(
         deps.reconcileLegacyMigration(preflighted.preparedMigration);
         owner = readOwner(preflighted.selection, deps);
       }
-      const authority = inspectOwner(owner);
+      const authority = inspectOwner(owner, bundledHarnesses);
       if (
         authority.requiresMigration ||
         !sameOwnerAuthority(authority, preflighted.desiredAuthority)
@@ -658,6 +678,7 @@ export function reconcileInstallerHarnesses(
         owner,
         authority,
         preflighted.retainedRecords,
+        bundledHarnesses,
         deps,
       );
       retainedRecordCount += retained.total;
@@ -667,7 +688,7 @@ export function reconcileInstallerHarnesses(
     const finalState = readDurableState(deps);
     const finalRetained = deps.listRetainedRecords();
     assertNoOrphanedRetainedRecords(finalState.registry, finalRetained);
-    verifyFinalOwners(preflightedOwners, storeRoot, deps);
+    verifyFinalOwners(preflightedOwners, bundledHarnesses, storeRoot, deps);
     const inventory = deps.listInventory({ bundledRoot, storeRoot });
     if (inventory.installed.some((record) => record.state === "damaged")) {
       throw reconciliationError("the installed harness package store is damaged");

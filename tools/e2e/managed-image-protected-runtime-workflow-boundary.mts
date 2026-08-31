@@ -267,7 +267,7 @@ export function validateManagedImageProtectedRuntimeWorkflow(workflow: WorkflowR
     errors.push(`${JOB_ID} must use the shared reviewed Hermes platform resolver`);
   }
   requireValues(errors, `${JOB_ID} Hermes platform resolver`, record(hermesBase?.with), {
-    "dockerfile-path": ".candidate-runtime/agents/hermes/Dockerfile",
+    "dockerfile-path": ".candidate-runtime/packages/nemoclaw-hermes/Dockerfile",
     platform: "linux/amd64",
   });
 

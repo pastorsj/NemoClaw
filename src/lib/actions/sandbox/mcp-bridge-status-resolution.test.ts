@@ -710,7 +710,7 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 15_000 
   });
 });
 
-describe("MCP add post-add credential-resolution probe", () => {
+describe("MCP add post-add credential-resolution probe", { timeout: 15_000 }, () => {
   it("warns loudly on an identical-rejection probe without failing the committed add (#6379)", () => {
     const home = createTempHome("nemoclaw-mcp-resolution-add-");
     const { stdout } = runHarness(

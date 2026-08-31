@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import type { AgentDefinition, AgentStateLockPlan } from "../agent/definition-types";
+import type { AgentDefinition, AgentStateLockPlan } from "../agent-runtime/manifest-types";
 import {
   type AgentConfigDependencies,
   resolveAgentConfig,

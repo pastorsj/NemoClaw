@@ -128,8 +128,19 @@ esac
     const packageRoot = packageFixture.packageRoots.get(sandbox.agent);
     expect(packageRoot, `Missing harness package fixture for '${sandbox.agent}'`).toBeDefined();
     fs.copyFileSync(
-      path.join(import.meta.dirname, "../..", "agents", sandbox.agent, "manifest.yaml"),
-      path.join(packageRoot!, "agents", sandbox.agent, "manifest.yaml"),
+      path.join(
+        import.meta.dirname,
+        "../..",
+        "packages",
+        `nemoclaw-${sandbox.agent}`,
+        "manifest.yaml",
+      ),
+      path.join(
+        packageRoot!,
+        "packages",
+        `nemoclaw-${sandbox.agent}`,
+        "manifest.yaml",
+      ),
     );
     const installedHarness = packageFixture.install(sandbox.agent);
     const session = createSession({

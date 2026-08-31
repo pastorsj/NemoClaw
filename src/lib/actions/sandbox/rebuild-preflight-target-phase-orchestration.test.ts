@@ -3,6 +3,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
+import * as registry from "../../state/registry";
 
 const OPENCLAW_AGENT_AUTHORITY = Object.freeze({
   recordedAgent: null,
@@ -15,7 +16,6 @@ const OPENCLAW_AGENT_AUTHORITY = Object.freeze({
     kind: "agent-runtime",
     id: "openclaw",
     packageVersion: "1.0.0",
-    contractVersion: 1,
     contentDigest: "a".repeat(64),
   }),
   harnessPackageMigration: null,
@@ -74,6 +74,7 @@ import { prepareRebuildTargetPreflights } from "./rebuild-preflight-target-phase
 describe("prepareRebuildTargetPreflights", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
     mocks.prepareManagedWorkloadRebuildHandoff.mockResolvedValue(null);
     mocks.preflightAuthoritativeOnboardRuntime.mockResolvedValue(false);
   });

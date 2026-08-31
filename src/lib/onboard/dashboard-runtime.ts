@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isTerminalAgent } from "../agent/runtime-manifest";
+import { isTerminalAgent } from "../agent-runtime/runtime/manifest";
 
 export type DashboardRuntimeAgent = {
   forwardPort?: number | null;

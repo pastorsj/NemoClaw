@@ -29,7 +29,7 @@ const LIVE_TEST = /^test\/e2e\/live\/.+\.test\.ts$/u;
 const LIVE_HELPER = /^test\/e2e\/live\/(?!.*\.test\.ts$).+\.ts$/u;
 const FAST_TESTS = [
   /^src\/.+\.test\.ts$/u,
-  /^nemoclaw\/src\/.+\.test\.ts$/u,
+  /^packages\/nemoclaw-[^/]+\/(?:plugin\/src|tests)\/.+\.test\.ts$/u,
   /^test\/e2e\/support\/.+\.test\.ts$/u,
   /^test\/(?!e2e\/|package-contract\/).+\.test\.(?:js|ts)$/u,
 ] as const;

@@ -4,7 +4,7 @@
 /**
  * Shared, bounded OpenClaw device-scope approval pass.
  *
- * The in-sandbox auto-pair watcher (`scripts/nemoclaw-start.sh`) keeps
+ * The in-sandbox auto-pair watcher (`packages/nemoclaw-openclaw/start.sh`) keeps
  * approving allowlisted scope upgrades in slow-mode for hours after startup.
  * This host-side pass is the defense-in-depth recovery for the cases where the
  * watcher has exited (deadline reached), crashed, or was contended away by a
@@ -17,7 +17,7 @@
  *     OpenClaw tool-scope approvals without ever opening an SSH `connect`.
  *
  * Both surfaces apply the SAME narrow allowlist as the startup watcher
- * (`scripts/lib/openclaw_device_approval_policy.py`): the explicit `cli`,
+ * (`packages/nemoclaw-openclaw/runtime/device-approval.py`): the explicit `cli`,
  * `openclaw-cli`, and `openclaw-control-ui` client identities, restricted to
  * operator.pairing/read/write scopes. A known mode alone is never sufficient;
  * unknown clients are ignored, never approved.
@@ -99,9 +99,10 @@ export type AutoPairApprovalBudget = {
 
 const AUTO_PAIR_POLICY_PATH = path.join(
   ROOT,
-  "scripts",
-  "lib",
-  "openclaw_device_approval_policy.py",
+  "packages",
+  "nemoclaw-openclaw",
+  "runtime",
+  "device-approval.py",
 );
 
 export type AutoPairApprovalResult = {

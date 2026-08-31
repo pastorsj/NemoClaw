@@ -88,7 +88,6 @@ describe("resolveCheckpointForResume", () => {
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "1.2.3",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   };
   const validCheckpoint: OnboardCheckpoint = {
@@ -223,7 +222,6 @@ describe("resolveCheckpointForResume", () => {
       kind: "agent-runtime" as const,
       id: "hermes",
       packageVersion: "2.0.0",
-      contractVersion: 1 as const,
       contentDigest: "d".repeat(64),
     };
     const session = completedSession({

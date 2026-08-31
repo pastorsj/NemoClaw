@@ -14,7 +14,6 @@ const OPENCLAW_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "openclaw",
   packageVersion: "1.2.3",
-  contractVersion: 1 as const,
   contentDigest: "a".repeat(64),
 };
 

@@ -13,7 +13,7 @@ This runbook is the maintained runtime-validation path. Anyone reviewing #4851 a
 
 ## When to run
 
-- Before merging any PR that changes `nemoclaw-blueprint/scripts/nemotron-inference-fix.js` or `EXECUTION_TOOL_NAMES`.
+- Before merging any PR that changes `packages/nemoclaw-openclaw/runtime/preloads/nemotron-inference-fix.js` or `EXECUTION_TOOL_NAMES`.
 - When a NemoClaw release pins a new OpenClaw version that may change the upstream chat template behavior on Ultra 550B.
 - If QA reopens #4851.
 

@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
-const DEFAULT_PROJECTS = Object.freeze(["tsconfig.cli.json", "nemoclaw/tsconfig.json"]);
+const DEFAULT_PROJECTS = Object.freeze([
+  "tsconfig.cli.json",
+  "packages/nemoclaw-openclaw/plugin/tsconfig.json",
+]);
 const DEFAULT_TOP_FILES = 15;
 const DEFAULT_TOP_FUNCTIONS = 15;
 const DEFAULT_MIN_SCORE = 1;

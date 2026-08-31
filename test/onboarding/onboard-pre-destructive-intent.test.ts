@@ -156,8 +156,16 @@ const resolved = {
 const runner = require(${runnerPath});
 const registry = require(${registryPath});
 const defs = require(${defsPath});
+const fixtureMocks = require(${onboardScriptMocksPath});
 const childProcess = require("node:child_process");
 const record = (text) => { console.log("CMD " + text); return text; };
+const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  agentName: "hermes",
+  sandboxName: "my-assistant",
+  provider: "nvidia-prod",
+  model: "gpt-5.4",
+});
+const existingHarness = fixtureMocks.installOnboardProcessHarnessPackage("openclaw");
 
 // The gateway still holds the OpenClaw bridge binding for this sandbox name.
 const staleBinding = [
@@ -179,7 +187,7 @@ runner.runCapture = (command) => {
   const text = record(Array.isArray(command) ? command.join(" ") : String(command));
   return text.includes("provider get") && text.includes("googlechat-bridge") ? staleBinding : "";
 };
-registry.getSandbox = (name) => ({ name, agent: "openclaw" });
+registry.getSandbox = (name) => ({ name, ...existingHarness.registryAuthority });
 registry.removeSandbox = (name) => { record("registry remove " + name); };
 registry.updateSandbox = (name) => { record("registry update " + name); };
 registry.registerSandbox = (entry) => { record("registry register " + entry.name); };
@@ -190,21 +198,27 @@ const { createSandbox } = require(${onboardPath});
 (async () => {
   try {
     await createSandbox(
-      null,
-      "gpt-5.4",
-      "nvidia-prod",
-      null,
-      "my-assistant",
-      null,
-      ["googlechat"],
-      null,
-      defs.loadAgent("hermes"),
-      null,
-      null,
-      null,
-      [],
-      null,
-      { recreate: true, toolDisclosure: "progressive", observabilityEnabled: false, extraProviders: [] },
+      ...fixtureMocks.sandboxCreateArgsWithVerifiedReservation(
+        [
+          null,
+          "gpt-5.4",
+          "nvidia-prod",
+          null,
+          "my-assistant",
+          null,
+          ["googlechat"],
+          null,
+          defs.loadAgent("hermes"),
+          null,
+          null,
+          null,
+          [],
+          null,
+          null,
+          { recreate: true, toolDisclosure: "progressive", observabilityEnabled: false, extraProviders: [] },
+        ],
+        createFixture,
+      ),
     );
     console.log("CREATE-RETURNED");
   } catch (error) {

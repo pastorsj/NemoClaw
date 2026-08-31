@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-import type { AgentDefinition, AgentStateLockPlan } from "../../agent/definition-types";
+import type { AgentDefinition, AgentStateLockPlan } from "../../agent-runtime/manifest-types";
 import {
   RUNTIME_PROVIDER_STATE_MUTATION_PLAN_SCHEMA_VERSION,
   type RuntimeProviderPreparedStateMutationPlan,

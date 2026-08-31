@@ -155,13 +155,13 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci --ignore-scripts
-          cd nemoclaw
+          cd packages/nemoclaw-openclaw/plugin
           npm ci --ignore-scripts
 
       - name: Build CLI and plugin
         run: |
           npm run build:cli
-          cd nemoclaw
+          cd packages/nemoclaw-openclaw/plugin
           npm run build
 
       - name: Run full Vitest suite on macOS
@@ -320,7 +320,7 @@ jobs:
           cd $workdir
           npm ci --ignore-scripts
           npm run build:cli
-          cd nemoclaw
+          cd packages/nemoclaw-openclaw/plugin
           npm ci --ignore-scripts
           npm run build
           "@
@@ -362,13 +362,13 @@ jobs:
           fi
           install -d -o root -g root -m 0755 /usr/local/lib/nemoclaw
           install -o root -g root -m 0644 \
-            scripts/lib/normalize_mutable_config_perms.py \
+            packages/nemoclaw-openclaw/runtime/config-permissions.py \
             /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
-          npx vitest run --project integration \
-            test/agents/hermes/hermes-restart-config-seal-recovery.test.ts \
+          npx vitest run --config packages/nemoclaw-hermes/vitest.nemoclaw.ts \
+            packages/nemoclaw-hermes/tests/runtime/seal-recovery.test.ts \
             -t 'keeps the locked Hermes entry sticky-protected|lets a sandbox-group peer create state'
-          npx vitest run --project integration \
-            test/agents/openclaw/runtime/nemoclaw-start-perms.test.ts \
+          npx vitest run --config packages/nemoclaw-openclaw/vitest.nemoclaw.ts \
+            packages/nemoclaw-openclaw/tests/runtime/config-permissions.test.ts \
             -t 'requires both fixed files to match|reclaims a root-owned collapsed config|leaves a root-owned recovery baseline untouched'
           "@
           Invoke-WslScript -Distro $env:WSL_DISTRO -User root -Script $script

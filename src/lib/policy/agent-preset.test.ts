@@ -7,7 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDefinition } from "../agent/definition-types";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import * as agentDefs from "../agent/defs";
 import * as registry from "../state/registry";
 import { loadPresetForSandbox } from "./index";

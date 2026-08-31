@@ -18,7 +18,8 @@
  * different agent at runtime.
  */
 
-import { resolveAgentNameAlias } from "../agent/aliases";
+import { createAgentAliasMap, resolveAgentNameAlias } from "../agent/aliases";
+import { readAgentAliasTargets } from "../agent/manifest-inventory";
 
 const BRANDING_AGENTS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 
@@ -78,7 +79,8 @@ function resolveInvokedCliName(): string {
 export function getAgentBranding(
   agentName: string | null | undefined = process.env.NEMOCLAW_AGENT,
 ): AgentBranding {
-  const canonicalAgent = resolveAgentNameAlias(agentName, BRANDING_AGENTS) ?? agentName;
+  const aliases = createAgentAliasMap(readAgentAliasTargets(BRANDING_AGENTS));
+  const canonicalAgent = resolveAgentNameAlias(agentName, BRANDING_AGENTS, aliases) ?? agentName;
   const product =
     AGENT_PRODUCT_BRANDING[canonicalAgent || DEFAULT_AGENT] ?? DEFAULT_PRODUCT_BRANDING;
   return {

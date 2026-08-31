@@ -5,7 +5,7 @@ import type { SandboxPolicyAuthority } from "../../adapters/openshell/policy-aut
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import type { InferenceSelection } from "../../inference/selection";
 import type { ServingProfileProvenance } from "../../inference/serving/types";
 import type { WebSearchProvider } from "../../inference/web-search";

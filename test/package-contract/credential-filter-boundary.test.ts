@@ -12,18 +12,23 @@ const repoRoot = path.join(import.meta.dirname, "..", "..");
 const url = (...segments: string[]) => pathToFileURL(path.join(repoRoot, ...segments)).href;
 
 describe("credential filter package boundary", () => {
-  it("resolves both package wrappers to one generated implementation (#8291)", () => {
+  it("resolves each package wrapper to its package-owned implementation (#8291)", () => {
     // Native resolution bypasses the Vitest source alias so this checks the
     // generated files that the published CLI and plugin load.
     const script =
       `const cli = await import(${JSON.stringify(url("dist/lib/security/credential-filter.js"))});` +
-      `const plugin = await import(${JSON.stringify(url("nemoclaw/dist/security/credential-filter.js"))});` +
+      `const plugin = await import(${JSON.stringify(url("packages/nemoclaw-openclaw/plugin/dist/security/credential-filter.js"))});` +
       `const patterns = await import(${JSON.stringify(url("dist/lib/security/secret-patterns.js"))});` +
-      `const boundary = await import(${JSON.stringify(
-        url("nemoclaw/dist/shared/credential-filter-boundary.cjs"),
+      `const cliBoundary = await import(${JSON.stringify(
+        url("dist/lib/shared/credential-filter-boundary.cjs"),
+      )});` +
+      `const pluginBoundary = await import(${JSON.stringify(
+        url(
+          "packages/nemoclaw-openclaw/plugin/dist/shared/credential-filter-boundary.cjs",
+        ),
       )});` +
       `const fixture = {headers:{Authorization:"Bearer opaque-package-contract-secret"},args:["--api-key","opaque-value"],model:"keep-me"};` +
-      `process.stdout.write(JSON.stringify([cli.stripCredentials === boundary.stripCredentials, plugin.stripCredentials === boundary.stripCredentials, cli.sanitizeEnvFileContent === boundary.sanitizeEnvFileContent, plugin.sanitizeEnvFileContent === boundary.sanitizeEnvFileContent, patterns.SECRET_PATTERNS === boundary.SECRET_PATTERNS, cli.stripCredentials(fixture), plugin.stripCredentials(fixture)]));`;
+      `process.stdout.write(JSON.stringify([cli.stripCredentials === cliBoundary.stripCredentials, plugin.stripCredentials === pluginBoundary.stripCredentials, cli.sanitizeEnvFileContent === cliBoundary.sanitizeEnvFileContent, plugin.sanitizeEnvFileContent === pluginBoundary.sanitizeEnvFileContent, patterns.SECRET_PATTERNS === cliBoundary.SECRET_PATTERNS, cli.stripCredentials(fixture), plugin.stripCredentials(fixture)]));`;
     const output = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
       cwd: repoRoot,
       encoding: "utf8",
@@ -39,7 +44,10 @@ describe("credential filter package boundary", () => {
   });
 
   it("includes the CommonJS module and declaration in the plugin build (#8291)", () => {
-    const sharedDirectory = path.join(repoRoot, "nemoclaw", "dist", "shared");
+    const sharedDirectory = path.join(
+      repoRoot,
+      "packages/nemoclaw-openclaw/plugin/dist/shared",
+    );
     expect(fs.existsSync(path.join(sharedDirectory, "credential-filter-boundary.cjs"))).toBe(true);
     expect(fs.existsSync(path.join(sharedDirectory, "credential-filter-boundary.d.cts"))).toBe(
       true,

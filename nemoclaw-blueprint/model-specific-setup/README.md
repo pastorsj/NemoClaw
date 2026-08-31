@@ -27,8 +27,8 @@ The first OpenClaw entry is `openclaw/kimi-k2.6-managed-inference.json`. It pres
 Put model-specific sandbox compatibility here, not directly in generator conditionals:
 
 - Match logic belongs in a manifest.
-- OpenClaw executable wrappers belong under `nemoclaw-blueprint/openclaw-plugins/`.
-- Hermes executable wrappers belong under `agents/hermes/`.
+- OpenClaw executable wrappers belong under `packages/nemoclaw-openclaw/openclaw-plugins/`.
+- Hermes executable wrappers belong under `packages/nemoclaw-hermes/`.
 - Runtime transformations stay in agent-owned code or plugins; registry manifests stay declarative.
 
 Only add Hermes-specific Kimi behavior after a Hermes-specific failure or acceptance test proves it is needed.

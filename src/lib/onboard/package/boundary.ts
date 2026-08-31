@@ -3,19 +3,20 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import { resolveAgentNameAlias } from "../../agent/aliases";
+import { createAgentAliasMap, resolveAgentNameAlias } from "../../agent/aliases";
 import type { AgentDefinition } from "../../agent/defs";
-import { getBundledHarnessPackageRoot } from "../../harness/package-catalog";
+import { readAgentAliasTargets } from "../../agent/manifest-inventory";
+import { getBundledHarnessPackageRoot } from "../../agent-runtime/package/catalog";
 import {
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import {
   getBundledHarnessPackageSourceIdentity,
   type BundledHarnessPackageSourceIdentity,
-} from "../../harness/package-receipt";
-import { getHarnessPackageStoreRoot } from "../../harness/package-store";
+} from "../../agent-runtime/package/receipt";
+import { getHarnessPackageStoreRoot } from "../../agent-runtime/package/store";
 import {
   prepareLegacyHarnessMigration,
   reconcileLegacyHarnessMigration,
@@ -171,7 +172,11 @@ function assertResumeSelectionMatches(
 ): void {
   const requested = input.agentFlag?.trim() || input.environment.NEMOCLAW_AGENT?.trim();
   if (!requested) return;
-  if (resolveAgentNameAlias(requested, [effectiveAgentId]) !== effectiveAgentId) {
+  const aliases = readAgentAliasTargets([effectiveAgentId], input.environment);
+  if (
+    resolveAgentNameAlias(requested, [effectiveAgentId], createAgentAliasMap(aliases)) !==
+    effectiveAgentId
+  ) {
     throw new Error(
       `Requested harness '${requested}' does not match resumed harness '${effectiveAgentId}'`,
     );

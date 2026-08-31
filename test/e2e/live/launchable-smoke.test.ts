@@ -311,8 +311,8 @@ test("bootstrap install smoke: bootstrap, onboard, sandbox health, live inferenc
   expect(fs.existsSync(path.join(cloneDir, ".git")), `${cloneDir}/.git missing`).toBe(true);
   expect(fs.existsSync(path.join(cloneDir, "dist")), `${cloneDir}/dist missing`).toBe(true);
   expect(
-    fs.existsSync(path.join(cloneDir, "nemoclaw", "dist")),
-    `${cloneDir}/nemoclaw/dist missing`,
+    fs.existsSync(path.join(cloneDir, "packages", "nemoclaw-openclaw", "plugin", "dist")),
+    `${cloneDir}/packages/nemoclaw-openclaw/plugin/dist missing`,
   ).toBe(true);
 
   progress.phase("onboard the hosted inference sandbox");

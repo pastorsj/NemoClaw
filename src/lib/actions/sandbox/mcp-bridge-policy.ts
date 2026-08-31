@@ -5,7 +5,7 @@ import { isIP } from "node:net";
 import { isDeepStrictEqual } from "node:util";
 import YAML from "yaml";
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import { loadAgent, resolveAgentName, type AgentMcpAdapter } from "../../agent/defs";
 import { diagnosticPreview } from "../../name-validation";
 import * as policies from "../../policy";
 import { isBlockedMcpUrlTargetHost } from "../../security/mcp-url-target";
@@ -163,16 +163,12 @@ function resolveCanonicalManagedMcpAdapter(
   bridge: McpBridgeEntry,
 ): AgentMcpAdapter {
   if (isAgentMcpAdapter(bridge.adapter)) return bridge.adapter;
-  switch (sandbox.agent || "openclaw") {
-    case "openclaw":
-      return "mcporter";
-    case "hermes":
-      return "hermes-config";
-    case "langchain-deepagents-code":
-      return "deepagents-config";
-    default:
-      throw new Error("Managed MCP bridge has no canonical adapter");
+  const definition = loadAgent(sandbox.agent ?? resolveAgentName());
+  const adapter = definition.mcpCapability.adapter;
+  if (definition.mcpCapability.support !== "bridge" || !adapter) {
+    throw new Error("Managed MCP bridge has no canonical adapter");
   }
+  return adapter;
 }
 
 function requireCanonicalManagedPolicy(

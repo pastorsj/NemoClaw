@@ -46,7 +46,7 @@ export const CHECKS: readonly CheckCommand[] = [
   {
     name: "hermes-light-skin-boundary",
     command: TSX,
-    args: ["scripts/checks/hermes-light-skin-boundary.mts"],
+    args: ["packages/nemoclaw-hermes/checks/light-skin.mts"],
   },
   {
     name: "dependency-pins",

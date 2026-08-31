@@ -115,6 +115,48 @@ function redactedResultText(
   return [result.redactedStdout, result.redactedStderr].filter(Boolean).join("\n");
 }
 
+export function parseJsonObject(source: string, label: string): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    throw new Error(
+      `${label} did not return JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} did not return one JSON object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+export function expectResultOmitsSecret(
+  result: { readonly stderr: string; readonly stdout: string },
+  secret: string,
+  label: string,
+): void {
+  expect(
+    result.stdout.includes(secret) || result.stderr.includes(secret),
+    `${label} retained the hosted inference credential`,
+  ).toBe(false);
+}
+
+export function requireSuccessfulCleanupCommand(
+  result: Pick<RawRunResult, "exitCode" | "redactedStderr" | "redactedStdout" | "timedOut">,
+  label: string,
+): void {
+  if (result.exitCode !== 0 || result.timedOut) {
+    throw new Error(`${label} failed: ${redactedResultText(result)}`);
+  }
+}
+
+export function requireCleanupTargetAbsent(
+  result: { readonly exitCode: number | null },
+  label: string,
+): void {
+  if (result.exitCode === 0) throw new Error(`${label} remained after cleanup`);
+}
+
 function hasRawNodeStackTrace(text: string): boolean {
   return STACK_TRACE_PATTERNS.some((pattern) => pattern.test(text));
 }

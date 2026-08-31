@@ -3,7 +3,7 @@
 
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MANAGED_STARTUP_E2E_CORPORATE_CA_PEM,
   managedStartupE2eProfile,
@@ -19,6 +19,7 @@ import { SANDBOX_DESTROY_TIMEOUT_MS } from "../../actions/sandbox/destroy-gatewa
 import { startSandbox } from "../../actions/sandbox/start";
 import { stopSandbox } from "../../actions/sandbox/stop";
 import { loadAgent } from "../../agent/defs";
+import * as sandboxRegistry from "../../state/registry";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../../state/registry/types";
 import { cloneSandboxWorkloadReceipt } from "../../state/registry/workload";
 import { createDockerManagedBootstrapSurface } from "../managed-bootstrap/docker-runtime";
@@ -954,6 +955,10 @@ describe("sandbox workload ownership receipt", () => {
 describe("socket-free MXC action contract", () => {
   const agents = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it.each(agents)(
     "routes %s registration, lifecycle, inference authority, destroy, and cleanup through one injected bundle",
     async (agent) => {
@@ -974,6 +979,7 @@ describe("socket-free MXC action contract", () => {
         agent === "langchain-deepagents-code" ? "dcode-sandbox" : `${agent}-sandbox`;
       const imageTag = `mxc-memory:${agent}`;
       const registerSandbox = vi.fn();
+      vi.spyOn(sandboxRegistry, "getSandbox").mockReturnValue(null);
       const entry = registerCreatedSandbox({
         sandboxName,
         inferenceSelection: {

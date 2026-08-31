@@ -4,8 +4,8 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 
-import { parseHarnessPackageIdentity } from "../../../src/lib/harness/package-identity";
-import { resolvePinnedHarnessPackage } from "../../../src/lib/harness/package-store";
+import { parseHarnessPackageIdentity } from "../../../src/lib/agent-runtime/package/identity";
+import { resolvePinnedHarnessPackage } from "../../../src/lib/agent-runtime/package/store";
 import { ONBOARD_FINAL_HANDOFF_COMMAND_TIMEOUT_MS } from "../../../tools/e2e/onboard-timeout-contract.mts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText } from "../fixtures/clients/command.ts";

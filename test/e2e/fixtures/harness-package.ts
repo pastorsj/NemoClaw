@@ -14,13 +14,7 @@ const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const TOP_LEVEL_FIELDS = new Set(["schemaVersion", "installed", "available"]);
 const INSTALLED_FIELDS = new Set(["id", "displayName", "health", "identity"]);
 const AVAILABLE_FIELDS = new Set(["displayName", "identity", "installationState"]);
-const IDENTITY_FIELDS = new Set([
-  "kind",
-  "id",
-  "packageVersion",
-  "contractVersion",
-  "contentDigest",
-]);
+const IDENTITY_FIELDS = new Set(["kind", "id", "packageVersion", "contentDigest"]);
 const INSTALLATION_STATES = new Set(["not-installed", "active", "different", "damaged"]);
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const LIST_TIMEOUT_MS = 30_000;
@@ -31,7 +25,6 @@ export interface HarnessPackageIdentity {
   readonly kind: "agent-runtime";
   readonly id: string;
   readonly packageVersion: string;
-  readonly contractVersion: 1;
   readonly contentDigest: string;
 }
 
@@ -122,9 +115,6 @@ export function parseHarnessPackageIdentity(value: unknown): HarnessPackageIdent
   if (record.kind !== "agent-runtime") {
     throw new Error("Harness package identity kind must be agent-runtime");
   }
-  if (record.contractVersion !== 1) {
-    throw new Error("Harness package identity contractVersion must be 1");
-  }
   if (
     typeof record.contentDigest !== "string" ||
     !SHA256_DIGEST_PATTERN.test(record.contentDigest)
@@ -135,7 +125,6 @@ export function parseHarnessPackageIdentity(value: unknown): HarnessPackageIdent
     kind: "agent-runtime",
     id: requireHarnessId(record.id),
     packageVersion: requirePackageVersion(record.packageVersion),
-    contractVersion: 1,
     contentDigest: record.contentDigest,
   });
 }
@@ -148,7 +137,6 @@ export function harnessPackageIdentitiesEqual(
     left.kind === right.kind &&
     left.id === right.id &&
     left.packageVersion === right.packageVersion &&
-    left.contractVersion === right.contractVersion &&
     left.contentDigest === right.contentDigest
   );
 }

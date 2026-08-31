@@ -82,10 +82,10 @@ runs:
         done < <(
           sed -nE \
             's|^ARG BASE_IMAGE=(ghcr\.io/nvidia/nemoclaw/hermes-sandbox-base@sha256:[0-9a-f]{64})$|\1|p' \
-            agents/hermes/Dockerfile
+            packages/nemoclaw-hermes/Dockerfile
         )
         if (( ${#tracked_refs[@]} != 1 )); then
-          echo "::error::Expected exactly one immutable Hermes BASE_IMAGE ref in agents/hermes/Dockerfile"
+          echo "::error::Expected exactly one immutable Hermes BASE_IMAGE ref in packages/nemoclaw-hermes/Dockerfile"
           exit 1
         fi
 
@@ -101,7 +101,7 @@ runs:
         fi
 
         echo "::warning::No compatible GHCR Hermes sandbox base image found, building locally"
-        resolver_build_local agents/hermes/Dockerfile.base nemoclaw-hermes-base-local
+        resolver_build_local packages/nemoclaw-hermes/Dockerfile.base nemoclaw-hermes-base-local
         version="$(resolver_glibc_version nemoclaw-hermes-base-local || true)"
         if ! resolver_glibc_ok "$version" "$min_glibc"; then
           echo "::error::Local Hermes sandbox base image has glibc ${version:-unknown}; need >= ${min_glibc}"

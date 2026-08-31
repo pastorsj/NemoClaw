@@ -7,7 +7,7 @@ import {
   type HarnessPackageAuthority,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import type { InferenceSelection } from "../inference/selection";
 import {
   inferenceSelectionRegistryFields,

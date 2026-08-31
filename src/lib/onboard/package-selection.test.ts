@@ -10,7 +10,7 @@ import {
   createHarnessPackageFixture,
   type HarnessPackageFixture,
 } from "../../../test/helpers/harness-packages";
-import { listHarnessPackageInventory } from "../harness/package-catalog";
+import { listHarnessPackageInventory } from "../agent-runtime/package/catalog";
 import {
   OnboardHarnessInstallRequiredError,
   OnboardHarnessIntegrityError,
@@ -97,13 +97,13 @@ describe("selectOnboardHarnessPackage", () => {
     expect(menu).not.toContain("NemoCUA");
   });
 
-  it("keeps OpenClaw as the non-interactive default only when it is installed", async () => {
+  it("uses the installed manifest default for non-interactive selection", async () => {
     fixture.installMany(["openclaw", "hermes"]);
 
     const result = await selectOnboardHarnessPackage(selectionInput());
 
     assert.equal(result.kind, "package");
-    expect(result.recordedAgent).toBeNull();
+    expect(result.recordedAgent).toBe("openclaw");
     expect(result.harnessPackage.id).toBe("openclaw");
   });
 

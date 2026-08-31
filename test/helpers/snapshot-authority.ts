@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { loadAgent } from "../../src/lib/agent/defs";
-import type { HarnessPackageIdentity } from "../../src/lib/harness/package-identity";
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/identity";
 import type { BackupOptions, SnapshotRestoreOptions } from "../../src/lib/state/sandbox";
 
 type SnapshotAuthorityReader = Pick<
@@ -15,7 +15,6 @@ export function createSnapshotHarnessPackageFixture(agentId: string): HarnessPac
     kind: "agent-runtime",
     id: agentId,
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: "a".repeat(64),
   };
 }

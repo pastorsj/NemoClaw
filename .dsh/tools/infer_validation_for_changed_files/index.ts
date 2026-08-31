@@ -56,7 +56,9 @@ export default async function infer_validation_for_changed_files(input: {
       projects.add("cli");
       commands.add("npm run typecheck:cli");
     }
-    if (/agents\/langchain-deepagents-code\/Dockerfile|corporate-ca/.test(file)) {
+    if (
+      /packages\/nemoclaw-langchain-deepagents-code\/Dockerfile(?:\.base)?|corporate-ca/.test(file)
+    ) {
       [
         "test/security/corporate-ca-runtime-merge.test.ts",
         "test/install/corporate-ca-dockerfile-decode.test.ts",

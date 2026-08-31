@@ -129,18 +129,18 @@ const BUILDS = new Map([
   ["${MAP_SHA256}", "${overrides.sandboxMapVersion ?? openshellMax}"],
 ]);
 `,
-    "agents/hermes/Dockerfile": `
+    "packages/nemoclaw-hermes/Dockerfile": `
 COPY src/lib/actions/sandbox/${credentialManifestName} /usr/local/lib/nemoclaw/${`openshell-child-visible-credentials.v${overrides.hermesDockerfileBoundaryVersion ?? openshellMax}.json`}
 `,
-    "agents/hermes/mcp-config-transaction.py": `
+    "packages/nemoclaw-hermes/runtime/mcp-transaction.py": `
 BOUNDARY_MANIFEST_NAME = "openshell-child-visible-credentials.v${overrides.hermesTransactionBoundaryVersion ?? openshellMax}.json"
 if manifest.get("openshellVersion") != "${overrides.hermesTransactionExpectedVersion ?? openshellMax}":
     raise RuntimeError("invalid")
 `,
-    "scripts/update-hermes-agent.sh": `
+    "packages/nemoclaw-hermes/checks/update-agent.sh": `
 "openshell-child-visible-credentials.v${overrides.hermesUpdateBoundaryVersion ?? openshellMax}.json"
 `,
-    "Dockerfile.base": `
+    "packages/nemoclaw-openclaw/Dockerfile.base": `
 ARG OPENCLAW_VERSION=${openclawVersion}
 ARG ${openclawArg}_INTEGRITY=${openclawIntegrity}
 ARG ${openclawArg}_TARBALL=${openclawTarball}
@@ -150,7 +150,7 @@ ${openclawSelector(
 )}
 ${overrides.dockerfileBaseExtra ?? ""}
 `,
-    Dockerfile: `
+    "packages/nemoclaw-openclaw/Dockerfile": `
 ARG OPENCLAW_VERSION=${overrides.openclawDockerfileVersion ?? openclawVersion}
 ARG ${openclawArg}_INTEGRITY=${overrides.openclawDockerfileIntegrity ?? openclawIntegrity}
 ARG ${openclawArg}_TARBALL=${overrides.openclawDockerfileTarball ?? openclawTarball}
@@ -159,20 +159,20 @@ ${openclawSelector(
   overrides.openclawDockerfileSelectorArgVersion,
 )}
 `,
-    "agents/openclaw/manifest.yaml": `
+    "packages/nemoclaw-openclaw/manifest.yaml": `
 expected_version: "${overrides.openclawManifestVersion ?? openclawVersion}"
 `,
-    "nemoclaw/package.json": JSON.stringify({
+    "packages/nemoclaw-openclaw/plugin/package.json": JSON.stringify({
       openclaw: {
         build: {
           openclawVersion: overrides.openclawPackageVersion ?? openclawVersion,
         },
       },
     }),
-    "agents/hermes/Dockerfile.base": `
+    "packages/nemoclaw-hermes/Dockerfile.base": `
 ARG HERMES_SEMVER=${hermesSemver}
 `,
-    "agents/hermes/manifest.yaml": `
+    "packages/nemoclaw-hermes/manifest.yaml": `
 expected_version: "${overrides.hermesManifestVersion ?? hermesSemver}"
 `,
   };

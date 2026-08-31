@@ -1,0 +1,39 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
+  "name": "@nvidia/nemoclaw-langchain-deepagents-code",
+  "version": "0.1.0",
+  "description": "LangChain Deep Agents Code runtime package for NemoClaw",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test:fabric": "uv run --isolated --python 3.13 --with-requirements fabric/requirements.lock --with ../nemoclaw-fabric python -m unittest discover -s tests/fabric -p 'test_*.py'",
+    "test:package": "vitest run --config vitest.config.ts",
+    "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts",
+    "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree",
+    "test:watch": "vitest watch --config vitest.config.ts",
+    "test": "npm run test:package && npm run test:nemoclaw && npm run test:fabric",
+    "typecheck": "tsc -p tsconfig.test.json"
+  },
+  "files": [
+    "**/*",
+    "!tests/**",
+    "!package-lock.json",
+    "!tsconfig.test.json",
+    "!vitest.config.ts",
+    "!vitest.nemoclaw.ts",
+    "!**/__pycache__/**",
+    "!**/*.pyc"
+  ],
+  "nemoclaw": {
+    "harnessManifest": "manifest.yaml"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9",
+    "yaml": "2.8.3"
+  }
+}

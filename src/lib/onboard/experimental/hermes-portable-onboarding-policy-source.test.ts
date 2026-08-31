@@ -91,19 +91,22 @@ function checkpointFor(
     policyHash: "sha256:effective",
     policyVersion: 4,
   };
-  return pendingSandboxPolicyVerificationForBoundary({
-    registration: {
-      policyAuthority: "nemoclaw-managed" as const,
-      policyCreationReceipt,
-      observedPolicyAuthority: "owner-unknown" as const,
+  return pendingSandboxPolicyVerificationForBoundary(
+    {
+      registration: {
+        policyAuthority: "nemoclaw-managed" as const,
+        policyCreationReceipt,
+        observedPolicyAuthority: "owner-unknown" as const,
+      },
+      sandboxName: input.sandboxName,
+      gatewayName: input.gatewayName,
+      gatewayPort: GATEWAY_PORT,
+      lifecycleGeneration: input.lifecycleGeneration,
+      lifecycleLiveIdentityFingerprint: liveIdentityFingerprint,
+      route: "none" as const,
     },
-    sandboxName: input.sandboxName,
-    gatewayName: input.gatewayName,
-    gatewayPort: GATEWAY_PORT,
-    lifecycleGeneration: input.lifecycleGeneration,
-    lifecycleLiveIdentityFingerprint: liveIdentityFingerprint,
-    route: "none" as const,
-  }, input.inferenceRouteReservation);
+    input.inferenceRouteReservation,
+  );
 }
 
 function checkpointEntry(

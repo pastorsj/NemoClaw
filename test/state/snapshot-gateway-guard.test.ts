@@ -12,6 +12,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/identity";
+import { hashSnapshotBackupContent } from "../../src/lib/state/snapshot/content-digest.js";
+import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
 import { execTimeout } from "../helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "../..", "bin", "nemoclaw.js");
@@ -68,9 +71,10 @@ function writeSandboxRegistry(
   home: string,
   sandboxName: string,
   entry: Record<string, unknown> = {},
-): void {
+): HarnessPackageIdentity {
   const registryDir = path.join(home, ".nemoclaw");
   fs.mkdirSync(registryDir, { recursive: true });
+  const harnessPackage = installHomeHarnessPackageFixture(home, "openclaw").identity;
   fs.writeFileSync(
     path.join(registryDir, "sandboxes.json"),
     JSON.stringify({
@@ -81,6 +85,8 @@ function writeSandboxRegistry(
           provider: "nvidia-prod",
           gpuEnabled: false,
           policies: [],
+          agent: null,
+          harnessPackage,
           ...entry,
         },
       },
@@ -88,9 +94,14 @@ function writeSandboxRegistry(
     }),
     { mode: 0o600 },
   );
+  return harnessPackage;
 }
 
-function writeEmptyOpenClawSnapshot(home: string, name: string): void {
+function writeEmptyOpenClawSnapshot(
+  home: string,
+  name: string,
+  harnessPackage: HarnessPackageIdentity,
+): void {
   const backupPath = path.join(
     home,
     ".nemoclaw",
@@ -99,27 +110,29 @@ function writeEmptyOpenClawSnapshot(home: string, name: string): void {
     "2026-08-13T00-00-00-000Z",
   );
   fs.mkdirSync(backupPath, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(
-    path.join(backupPath, "rebuild-manifest.json"),
-    JSON.stringify({
-      version: 1,
-      sandboxName: "alpha",
-      timestamp: "2026-08-13T00:00:00.000Z",
-      agentType: "openclaw",
-      agentVersion: null,
-      expectedVersion: null,
-      stateDirs: [],
-      failedBackupDirs: [],
-      stateFiles: [],
-      dir: "/sandbox/.openclaw",
-      backupPath,
-      blueprintDigest: null,
-      policyPresets: [],
-      customPolicies: [],
-      name,
-    }),
-    { mode: 0o600 },
-  );
+  const manifest = {
+    version: 2,
+    sandboxName: "alpha",
+    timestamp: "2026-08-13T00:00:00.000Z",
+    agentType: "openclaw",
+    agentVersion: null,
+    expectedVersion: null,
+    harnessPackage,
+    stateDirs: [],
+    failedBackupDirs: [],
+    backupComplete: true,
+    stateFiles: [],
+    dir: "/sandbox/.openclaw",
+    backupPath,
+    blueprintDigest: null,
+    policyPresets: [],
+    customPolicies: [],
+    name,
+    backupContentSha256: hashSnapshotBackupContent(backupPath),
+  };
+  fs.writeFileSync(path.join(backupPath, "rebuild-manifest.json"), JSON.stringify(manifest), {
+    mode: 0o600,
+  });
 }
 
 function startReachableForward(port: number): void {
@@ -147,7 +160,7 @@ function startReachableForward(port: number): void {
 }
 
 function makeStoppedGatewayEnv(prefix: string): Record<string, string> {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const localBin = path.join(home, "bin");
   fs.mkdirSync(localBin, { recursive: true });
   writeSandboxRegistry(home, "alpha");
@@ -178,7 +191,7 @@ function makeStoppedGatewayEnv(prefix: string): Record<string, string> {
 }
 
 function makeHealthyVmGatewayEnv(prefix: string): Record<string, string> {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const localBin = path.join(home, "bin");
   fs.mkdirSync(localBin, { recursive: true });
   writeSandboxRegistry(home, "alpha", { openshellDriver: "vm" });
@@ -219,17 +232,17 @@ function makeVmRestoreToEnv(
   revalidatedCloneIdentity = cloneIdentity,
   supervisorReady = true,
 ): Record<string, string> {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const localBin = path.join(home, "bin");
   fs.mkdirSync(localBin, { recursive: true });
   const dashboardPort = nextFixturePort++;
-  writeSandboxRegistry(home, "alpha", {
+  const harnessPackage = writeSandboxRegistry(home, "alpha", {
     openshellDriver: "vm",
     dashboardPort,
     ...entry,
   });
   startReachableForward(dashboardPort);
-  writeEmptyOpenClawSnapshot(home, "baseline");
+  writeEmptyOpenClawSnapshot(home, "baseline", harnessPackage);
 
   const cloneReadyMarker = path.join(home, "clone-1-ready");
   const cloneRunningMarker = path.join(home, "clone-1-running");
@@ -270,7 +283,7 @@ function makeVmRestoreToEnv(
     '  if printf "%s" "$cmd" | grep -q "cat --"; then cat "$REMOTE_OPENCLAW_JSON"; exit 0; fi',
     '  touch "$SNAPSHOT_RESTORE_MARKER"',
     '  if printf "%s" "$cmd" | grep -q ".nemoclaw-restore"; then cat > "$REMOTE_OPENCLAW_JSON"; exit 0; fi',
-    '  exit 92',
+    "  exit 92",
     "fi",
     "exit 0",
   ]);
@@ -377,9 +390,7 @@ describe("snapshot VM-driver gateway guard", () => {
         .update("fixture-clone-1")
         .digest("hex"),
     });
-    expect(registryState.sandboxes["clone-1"].lifecycleGeneration).not.toBe(
-      "source-generation",
-    );
+    expect(registryState.sandboxes["clone-1"].lifecycleGeneration).not.toBe("source-generation");
   }, 15000);
 
   it("snapshot restore --to rejects a malformed clone identity before registration (#8942)", () => {
@@ -450,7 +461,7 @@ describe("snapshot VM-driver gateway guard", () => {
     expect(fs.existsSync(env.NEMOCLAW_TEST_SNAPSHOT_RESTORE_MARKER)).toBe(false);
   }, 15000);
 
-  it("snapshot restore --to removes registration when the clone supervisor is not ready (#9733)", () => {
+  it("snapshot restore --to preserves an identity-bound pending clone when its supervisor is not ready (#9733)", () => {
     const env = makeVmRestoreToEnv(
       "nemoclaw-snap-vm-gw-restore-to-supervisor-not-ready-",
       { imageTag: "openshell/sandbox-from:fast-path-test" },
@@ -465,9 +476,17 @@ describe("snapshot VM-driver gateway guard", () => {
     const registryState = JSON.parse(
       fs.readFileSync(path.join(env.HOME, ".nemoclaw", "sandboxes.json"), "utf8"),
     );
-    expect(registryState.sandboxes["clone-1"]).toBeUndefined();
-    expect(r.out).toContain("Snapshot state was not restored and the clone was not registered.");
-    expect(r.out).toContain("openshell sandbox delete -g 'nemoclaw' 'clone-1'");
+    expect(registryState.sandboxes["clone-1"]).toMatchObject({
+      name: "clone-1",
+      pendingRouteReservation: true,
+      lifecycleLiveIdentityFingerprint: createHash("sha256")
+        .update("fixture-clone-1")
+        .digest("hex"),
+    });
+    expect(r.out).toContain(
+      "Snapshot state was not restored. The pending registry entry and live clone were preserved for identity-bound recovery.",
+    );
+    expect(r.out).not.toContain("openshell sandbox delete");
     expect(fs.existsSync(env.NEMOCLAW_TEST_SNAPSHOT_RESTORE_MARKER)).toBe(false);
   }, 15000);
 

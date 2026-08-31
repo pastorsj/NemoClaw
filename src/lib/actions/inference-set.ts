@@ -806,7 +806,7 @@ async function runInferenceSetWithoutHostLock(
   const priorHttpsPinRouteId = parseHttpsPinRouteId(entry.endpointUrl);
   if (agentName !== "openclaw" && agentName !== "hermes") {
     // #6321: Deep Agents Code (langchain-deepagents-code) bakes its model into
-    // the sandbox image at build time (agents/langchain-deepagents-code/Dockerfile
+    // the sandbox image at build time (packages/nemoclaw-langchain-deepagents-code/Dockerfile
     // ARG NEMOCLAW_MODEL → ~/.deepagents/config.toml), so — unlike OpenClaw and
     // Hermes — it has no runtime inference-set config-mutation path. The blunt
     // "supports OpenClaw and Hermes" message left dcode users with no next step;

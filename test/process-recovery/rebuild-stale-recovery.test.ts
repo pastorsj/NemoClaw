@@ -67,7 +67,9 @@ describe("stale sandbox rebuild recovery (#4497)", () => {
     expect(output).toContain("Recovered from a stale registry entry");
     expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
     expect(harness.restoreSandboxStateSpy).not.toHaveBeenCalled();
-    expect(harness.prepareMcpBridgesForAbsentSandboxRebuildSpy).toHaveBeenCalledWith("alpha");
+    expect(harness.prepareMcpBridgesForAbsentSandboxRebuildSpy).toHaveBeenCalledWith("alpha", {
+      agentDefinition: expect.objectContaining({ name: "openclaw" }),
+    });
     expect(harness.onboardSpy).toHaveBeenCalledOnce();
     expect(harness.onboardSpy).toHaveBeenCalledWith(
       expect.objectContaining({

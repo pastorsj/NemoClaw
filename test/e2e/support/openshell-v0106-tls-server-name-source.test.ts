@@ -66,6 +66,7 @@ describe("OpenShell 0.0.106 TLS server-name boundary", () => {
     vi.stubEnv("OPENSHELL_LOCAL_TLS_DIR", process.env.OPENSHELL_LOCAL_TLS_DIR ?? "");
     try {
       const helpers = createDockerDriverGatewayRuntimeHelpers({
+        dockerCapture: () => JSON.stringify("unix:///var/run/docker.sock"),
         gatewayPort: 18_080,
         getBlueprintMaxOpenshellVersion: () => OPENSHELL_V0106_QUALIFICATION.version,
         getCachedOpenshellBinary: () => null,

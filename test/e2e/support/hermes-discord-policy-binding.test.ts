@@ -13,7 +13,7 @@ import { requireSuccessfulPolicyBoundaryBuild } from "../fixtures/hermes-discord
 
 const HELPER = path.resolve(import.meta.dirname, "../fixtures/hermes-discord-policy-binding.ts");
 const TYPESCRIPT = path.resolve("node_modules/typescript/bin/tsc");
-const POLICY_BOUNDARY_CONFIG = path.resolve("nemoclaw/tsconfig.shared.json");
+const POLICY_BOUNDARY_CONFIG = path.resolve("tsconfig.shared.json");
 const tempDirs: string[] = [];
 
 function runBinding(policyFile: string, protocol = "websocket") {

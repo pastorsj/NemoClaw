@@ -7,20 +7,16 @@ import os from "node:os";
 import path from "node:path";
 import { expect, it } from "vitest";
 
-import vitestConfig from "../../../vitest.config";
-
 const RUNTIME_CONFIG_GUARD = path.join(
   import.meta.dirname,
   "../../..",
-  "agents",
-  "hermes",
-  "runtime-config-guard.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "config-guard.py",
 );
 const PY_YAML_AVAILABLE =
   spawnSync("python3", ["-c", "import yaml"], { stdio: "ignore" }).status === 0;
-
-type ProjectEntry = { test?: { name?: string; setupFiles?: string[] } };
-const FIXTURE_UMASK_SETUP = "test/helpers/normalize-fixture-umask.ts";
 
 // Regression coverage for #6448. The shared setup file
 // test/helpers/normalize-fixture-umask.ts must force the conventional CI
@@ -116,18 +112,7 @@ else:
   },
 );
 
-// Named vitest projects (config objects), used by the config-contract guards
-// below. A future edit that drops or misorders the setup would otherwise only
-// resurface the permissive-umask failures on hosts with a permissive ambient
-// umask (CI at 0o022 would not catch it).
-function namedVitestProjects(): { name: string; setupFiles?: string[] }[] {
-  const projects = (vitestConfig.test?.projects ?? []) as ProjectEntry[];
-  return projects
-    .map((project) => project.test)
-    .filter((test): test is { name: string; setupFiles?: string[] } => test?.name !== undefined);
-}
-
-it("derives npm test projects and keeps omitted live projects off the fixture umask (#6448)", () => {
+it("runs deterministic core projects and leaves live E2E opt in (#6448)", () => {
   const npmCli = process.env.npm_execpath ?? "";
   expect(npmCli).not.toBe("");
 
@@ -153,19 +138,29 @@ it("derives npm test projects and keeps omitted live projects off the fixture um
       '#!/bin/sh\nprintf \'vitest %s\\n\' "$*" >> "$COMMAND_LOG"\n',
       { mode: 0o755 },
     );
-
+    const processEnvironment = {
+      ...process.env,
+      COMMAND_LOG: commandLog,
+      FAKE_BIN: fakeBin,
+      npm_config_script_shell: scriptShell,
+    };
     const result = spawnSync(process.execPath, [npmCli, "test"], {
       cwd: path.join(import.meta.dirname, "../../.."),
       encoding: "utf8",
-      env: {
-        ...process.env,
-        COMMAND_LOG: commandLog,
-        FAKE_BIN: fakeBin,
-        npm_config_script_shell: scriptShell,
-      },
+      env: processEnvironment,
     });
     expect(result.status, result.stderr || result.stdout).toBe(0);
 
+    const npmInvocations = fs.readFileSync(commandLog, "utf8").split("\n").filter(Boolean);
+    expect(npmInvocations).toEqual(["npm run test:core", "npm run test:packages"]);
+
+    fs.writeFileSync(commandLog, "");
+    const coreResult = spawnSync(process.execPath, [npmCli, "run", "test:core"], {
+      cwd: path.join(import.meta.dirname, "../../.."),
+      encoding: "utf8",
+      env: processEnvironment,
+    });
+    expect(coreResult.status, coreResult.stderr || coreResult.stdout).toBe(0);
     const vitestInvocation = fs
       .readFileSync(commandLog, "utf8")
       .split("\n")
@@ -174,22 +169,14 @@ it("derives npm test projects and keeps omitted live projects off the fixture um
     const selectedProjects = [...vitestInvocation!.matchAll(/--project\s+(\S+)/g)].map(
       ([, name]) => name,
     );
-    expect(selectedProjects.length).toBeGreaterThan(0);
-
-    const setupFilesByName = new Map(
-      namedVitestProjects().map((test) => [test.name, test.setupFiles ?? []]),
-    );
-    const selectedProjectNames = new Set(selectedProjects);
-    selectedProjects.forEach((name) => {
-      const setupFiles = setupFilesByName.get(name);
-      expect(setupFiles, name).toContain(FIXTURE_UMASK_SETUP);
-      expect(setupFiles?.indexOf(FIXTURE_UMASK_SETUP), name).toBe(0);
-    });
-    for (const project of namedVitestProjects().filter(
-      ({ name }) => !selectedProjectNames.has(name),
-    )) {
-      expect(project.setupFiles ?? [], project.name).not.toContain(FIXTURE_UMASK_SETUP);
-    }
+    expect(selectedProjects).toEqual([
+      "cli",
+      "integration",
+      "installer-integration",
+      "package-contract",
+      "e2e-support",
+    ]);
+    expect(selectedProjects).not.toContain("e2e-live");
   } finally {
     fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }

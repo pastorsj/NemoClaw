@@ -48,7 +48,6 @@ function harnessPackage(agent: string, digest = "a".repeat(64)) {
     kind: "agent-runtime" as const,
     id: agent,
     packageVersion: "1.0.0",
-    contractVersion: 1 as const,
     contentDigest: digest,
   };
 }

@@ -16,7 +16,7 @@ FAIL_COUNT=0
 OUTPUT_FORMAT="human"
 JSON_RESULTS=""
 NODE_HEAP_REMEDIATION_CLI="Run: NODE_OPTIONS=--max-old-space-size=5120 npm run typecheck:cli"
-NODE_HEAP_REMEDIATION_PLUGIN="Run: NODE_OPTIONS=--max-old-space-size=5120 npm --prefix nemoclaw run build"
+NODE_HEAP_REMEDIATION_PLUGIN="Run: NODE_OPTIONS=--max-old-space-size=5120 npm --prefix packages/nemoclaw-openclaw/plugin run build"
 
 usage() {
   cat <<'EOF'
@@ -412,16 +412,16 @@ repair_repository() {
   fi
   run_setup_step "Install root dependencies" npm install --include=dev --ignore-scripts || return 1
   run_setup_step "Install plugin dependencies" \
-    npm --prefix nemoclaw install --include=dev --ignore-scripts || return 1
+    npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts || return 1
   run_setup_step "Build the CLI" npm run build:cli || return 1
-  run_setup_step "Build and type-check the plugin" npm --prefix nemoclaw run build || return 1
+  run_setup_step "Build and type-check the plugin" npm --prefix packages/nemoclaw-openclaw/plugin run build || return 1
   # Keep the explicit checks aligned with the broader pre-push and CI contracts.
   run_setup_step_with_heap_hint "Type-check the CLI" "${NODE_HEAP_REMEDIATION_CLI}" \
     npm run typecheck:cli || return 1
   run_setup_step_with_heap_hint "Type-check the plugin without emitting files" \
     "${NODE_HEAP_REMEDIATION_PLUGIN}" \
-    "${REPO_ROOT}/nemoclaw/node_modules/.bin/tsc" --noEmit \
-    -p "${REPO_ROOT}/nemoclaw/tsconfig.json" || return 1
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/node_modules/.bin/tsc" --noEmit \
+    -p "${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/tsconfig.json" || return 1
   run_setup_step "Install repository Git hooks" "${REPO_ROOT}/node_modules/.bin/prek" install || return 1
   if [ "${EXPOSE_CLI}" = "true" ]; then
     printf '\nCLI exposure was explicitly requested.\n'
@@ -632,7 +632,7 @@ run_doctor() {
   check_command "hadolint" hadolint "Install hadolint (macOS: brew install hadolint)."
 
   root_tsc="${REPO_ROOT}/node_modules/.bin/tsc"
-  plugin_tsc="${REPO_ROOT}/nemoclaw/node_modules/.bin/tsc"
+  plugin_tsc="${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/node_modules/.bin/tsc"
   check_executable "Root TypeScript dependencies" "${root_tsc}" \
     "Run: npm install --include=dev --ignore-scripts"
   check_executable "Pinned Pi coding agent" "${REPO_ROOT}/node_modules/.bin/pi" \
@@ -640,22 +640,23 @@ run_doctor() {
   check_executable "Prek dependency" "${REPO_ROOT}/node_modules/.bin/prek" \
     "Run: npm install --include=dev --ignore-scripts"
   check_executable "Plugin TypeScript dependencies" "${plugin_tsc}" \
-    "Run: npm --prefix nemoclaw install --include=dev --ignore-scripts"
+    "Run: npm --prefix packages/nemoclaw-openclaw/plugin install --include=dev --ignore-scripts"
   check_build_artifact "CLI build artifacts" "${CLI_BUILD_ARTIFACT}" "Run: npm run build:cli" \
     "${REPO_ROOT}/src" "${REPO_ROOT}/bin" "${REPO_ROOT}/nemoclaw-blueprint/scripts" \
     "${REPO_ROOT}/tsconfig.src.json"
   check_build_artifact "Plugin build artifacts" "${PLUGIN_BUILD_ARTIFACT}" \
-    "Run: cd nemoclaw && npm run build" "${REPO_ROOT}/nemoclaw/src" \
-    "${REPO_ROOT}/nemoclaw/tsconfig.json" "${REPO_ROOT}/nemoclaw/package.json"
+    "Run: cd packages/nemoclaw-openclaw/plugin && npm run build" "${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/src" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/tsconfig.json" \
+    "${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/package.json"
   if [ -x "${root_tsc}" ]; then
     check_quiet_command_with_heap_hint "CLI type check" "Run: npm run typecheck:cli" \
       "${NODE_HEAP_REMEDIATION_CLI}" \
       "${root_tsc}" -p "${REPO_ROOT}/tsconfig.cli.json"
   fi
   if [ -x "${plugin_tsc}" ]; then
-    check_quiet_command_with_heap_hint "Plugin type check" "Run: npm --prefix nemoclaw run build" \
+    check_quiet_command_with_heap_hint "Plugin type check" "Run: npm --prefix packages/nemoclaw-openclaw/plugin run build" \
       "${NODE_HEAP_REMEDIATION_PLUGIN}" \
-      "${plugin_tsc}" --noEmit -p "${REPO_ROOT}/nemoclaw/tsconfig.json"
+      "${plugin_tsc}" --noEmit -p "${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/tsconfig.json"
   fi
 
   check_git_configuration
@@ -724,7 +725,7 @@ elif [ -n "${NEMOCLAW_DEV_DOCTOR_REPO_ROOT:-}" ]; then
   exit 2
 fi
 CLI_BUILD_ARTIFACT="${NEMOCLAW_DEV_DOCTOR_CLI_ARTIFACT:-${REPO_ROOT}/dist/nemoclaw.js}"
-PLUGIN_BUILD_ARTIFACT="${NEMOCLAW_DEV_DOCTOR_PLUGIN_ARTIFACT:-${REPO_ROOT}/nemoclaw/dist/index.js}"
+PLUGIN_BUILD_ARTIFACT="${NEMOCLAW_DEV_DOCTOR_PLUGIN_ARTIFACT:-${REPO_ROOT}/packages/nemoclaw-openclaw/plugin/dist/index.js}"
 
 if [ "${MODE}" = "doctor" ]; then
   run_doctor

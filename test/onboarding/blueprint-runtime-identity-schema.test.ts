@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { isRuntimeIdentityConfig } from "../../nemoclaw/src/blueprint/runtime-identity.ts";
+import { isRuntimeIdentityConfig } from "../../packages/nemoclaw-openclaw/plugin/src/blueprint/runtime-identity.ts";
 import { compileConfigSchema } from "../../scripts/validate-configs.mts";
 
 const validate = compileConfigSchema("schemas/blueprint.schema.json");

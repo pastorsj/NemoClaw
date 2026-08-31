@@ -11,6 +11,7 @@ import {
 } from "../../../state/onboard-checkpoint-decision";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../../state/onboard-checkpoint-types";
 import { createSession, type Session } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import { detectMessagingChannelsFromEnv } from "../../messaging-channel-setup";
 import { handleSandboxState } from "./sandbox";
 import {
@@ -47,6 +48,8 @@ function dcodeRegistryEntry(name: string, observabilityEnabled?: boolean) {
 describe("handleSandboxState", () => {
   beforeEach(() => {
     detectMessagingChannelsFromEnvMock.mockReturnValue([]);
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
   });
 
   it("creates a sandbox and records messaging/web search state", async () => {
@@ -1450,10 +1453,7 @@ describe("handleSandboxState", () => {
   });
 
   it("preserves an active registry channel without refresh when env adds a different channel", async () => {
-    // Regression guard: a reused plan with an active channel (slack) must not be
-    // rebuilt just because a new token (telegram) now appears in env. Rebuilding
-    // non-interactively would re-derive the plan from env and drop slack when
-    // its token is absent from this run, so active plans are preserved as-is.
+    // Preserve an active reused plan instead of re-deriving it from ambient tokens.
     detectMessagingChannelsFromEnvMock.mockReturnValue(["telegram"]);
     const registryPlan = makeMinimalPlan("my-assistant", "openclaw", ["slack"]);
     const session = createSession({ sandboxName: "my-assistant", messagingPlan: registryPlan });

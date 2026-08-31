@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createInMemoryRuntimeProviderBundle } from "../../../../../test/helpers/runtime-provider-bundle";
 import { loadAgent, type AgentDefinition } from "../../../agent/defs";
-import type { HarnessPackageIdentity } from "../../../harness/package-identity";
+import type { HarnessPackageIdentity } from "../../../agent-runtime/package/identity";
 import { fingerprintSandboxLiveIdentity } from "../../../onboard/sandbox-recreate-transaction";
 import { createSandboxHostLocalInferenceProvenance } from "../../../state/registry/host-local-inference";
 import {
@@ -45,7 +45,6 @@ function packageIdentity(agent: Agent): HarnessPackageIdentity {
     kind: "agent-runtime",
     id: agent,
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: "d".repeat(64),
   };
 }

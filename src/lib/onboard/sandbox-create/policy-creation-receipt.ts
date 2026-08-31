@@ -16,7 +16,7 @@ import {
 } from "../../adapters/openshell/policy-authority";
 import { waitUntil } from "../../core/wait";
 import type { NemoClawPolicyCreationReceipt } from "../../policy/merge";
-import type { HarnessPackageAuthority } from "../../harness/package-identity";
+import type { HarnessPackageAuthority } from "../../agent-runtime/package/identity";
 import { normalizePendingSandboxPolicyVerification } from "../../state/registry-normalization";
 import type { PendingSandboxPolicyVerification } from "../../state/registry/types";
 import {

@@ -9,8 +9,8 @@ export const E2E_ACTION_PROVENANCE = {
   },
   restoreCliArtifact: {
     reference:
-      "NVIDIA/NemoClaw/.github/actions/restore-e2e-cli-artifact@813ca162c2867a34ba3692ad60dba73f3282baea",
-    contentSha256: "6f8d0138589b7c48a977d004f41cc60f7328d193d85ea5365f0a48b65f3e7485",
+      "NVIDIA/NemoClaw/.github/actions/restore-e2e-cli-artifact@d01d19466469270607ac7aae3e432634a3cad442",
+    contentSha256: "851a950e16ae46eeb5ffc3f6f9340358ffdaab2c8a0f41819db9ab9954e09c8a",
   },
   uploadArtifacts: {
     reference:

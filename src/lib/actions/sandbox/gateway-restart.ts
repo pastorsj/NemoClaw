@@ -114,7 +114,7 @@ const GATEWAY_RESTART_SUPPORTED_AGENTS = ["openclaw", "hermes"] as const;
 // Substrings of the in-sandbox supervisor's quarantine lines. The supervisor
 // only forwards allowlisted lines to the host, so matching them is what tells
 // the host that no further relaunch will be attempted until the sandbox is
-// rebuilt. Keep in sync with the quarantine messages in agents/hermes/start.sh
+// rebuilt. Keep in sync with the quarantine messages in packages/nemoclaw-hermes/start.sh
 // and their allowlist in scripts/managed-gateway-control.py.
 const GATEWAY_RELAUNCH_QUARANTINE_MARKERS = [
   "quarantined until sandbox recreation",

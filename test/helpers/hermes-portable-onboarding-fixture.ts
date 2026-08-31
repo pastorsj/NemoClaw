@@ -40,7 +40,6 @@ export const HERMES_PORTABLE_TEST_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "hermes",
   packageVersion: "1.0.0-test",
-  contractVersion: 1 as const,
   contentDigest: "8".repeat(64),
 };
 

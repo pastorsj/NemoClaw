@@ -16,7 +16,7 @@ export interface SessionIndexEntry {
 //     strict parser and abort the export.
 //   - Source boundary: NemoClaw must accept the upstream-of-the-day shape
 //     read-only. The upstream-pinned contract is captured in
-//     `agents/openclaw/manifest.yaml -> expected_version`; this code does not
+//     `packages/nemoclaw-openclaw/manifest.yaml -> expected_version`; this code does not
 //     hard-code the literal so the manifest stays the single source of
 //     truth.
 //   - Source-fix constraint: tightening the parser to one shape would

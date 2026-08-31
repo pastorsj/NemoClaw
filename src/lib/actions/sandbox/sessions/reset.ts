@@ -12,7 +12,7 @@
 //         JSON-RPC to the in-sandbox OpenClaw gateway, and surface the
 //         response to the user.
 //       * OpenClaw side (upstream `openclaw` npm package, pinned at
-//         `agents/openclaw/manifest.yaml` -> `expected_version`): owns the
+//         `packages/nemoclaw-openclaw/manifest.yaml` -> `expected_version`): owns the
 //         actual reset semantics — clearing the session entry, releasing
 //         stale `.jsonl.lock` files, recovering from a corrupt
 //         `sessions.json`, and guaranteeing the next message lands on a
@@ -42,7 +42,7 @@
 //       * Upstream stale-lock / corrupt-store / clean-followup coverage
 //         lives in the `openclaw` npm package. At merge time the pinned
 //         version is the literal value in
-//         `agents/openclaw/manifest.yaml -> expected_version` (currently
+//         `packages/nemoclaw-openclaw/manifest.yaml -> expected_version` (currently
 //         `2026.5.22`); the manifest cite is the durable anchor — this
 //         comment intentionally avoids hard-coding the literal so it
 //         does not silently rot. The `sessions.reset` JSON-RPC handler

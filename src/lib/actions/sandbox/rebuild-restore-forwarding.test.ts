@@ -3,7 +3,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentDefinition } from "../../agent/definition-types";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import { runRebuildRestorePhase } from "./rebuild-restore-phase";
 import * as snapshotRestore from "./snapshot/restore-authority";
 

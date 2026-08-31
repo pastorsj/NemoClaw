@@ -3,7 +3,7 @@
 
 import { expect, vi } from "vitest";
 
-import type { HarnessPackageAuthority } from "../../../harness/package-identity";
+import type { HarnessPackageAuthority } from "../../../agent-runtime/package/identity";
 import type { SandboxMessagingPlan } from "../../../messaging/manifest";
 import { decisionSelected } from "../../../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../../../state/onboard-checkpoint-migrate";

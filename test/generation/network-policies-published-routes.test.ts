@@ -202,7 +202,7 @@ describe("shared Network Policies published routes", () => {
     expect(customize).not.toContain("Configure Raw TLS Passthrough");
     expect(customize).not.toContain("Explain Network Policy to Agents");
     expect(customize).not.toContain("Common Integration Policy Examples");
-    expect(baseline).toContain("agents/langchain-deepagents-code/policy-additions.yaml");
+    expect(baseline).toContain("packages/nemoclaw-langchain-deepagents-code/policy-additions.yaml");
     expect(presets).toContain("Deep Agents baseline, tier, Tavily, and observability");
     expect(presets).not.toContain("Common Integration Policy Examples");
     expect(presets).toContain("nemo-deepagents my-assistant policy add weather --dry-run");

@@ -24,7 +24,9 @@ const SIGTERM_IGNORING_CHILD_FIXTURE = fileURLToPath(
 const temporaryDirectories: string[] = [];
 
 function temporaryDirectory(): string {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "local-review-test-"));
+  const directory = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "local-review-test-")),
+  );
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -719,6 +721,10 @@ describe("local PR review advisor", () => {
         specialists: ADVISOR_SPECIALISTS.slice(0, 1),
         lifecycle: artifactLifecycle(),
         temporaryRoot: temporaryDirectory(),
+        prepareSnapshot: (_source, destination) => {
+          fs.mkdirSync(destination, { recursive: true });
+          return { baseRef: "fixture-base", headRef: "fixture-head" };
+        },
       }),
     ).rejects.toThrow(/must be a directory and not a symbolic link/u);
 

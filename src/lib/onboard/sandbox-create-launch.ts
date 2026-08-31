@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { AgentDefinition } from "../agent/definition-types";
+import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { buildSubprocessEnv } from "../subprocess-env";
 import {
   buildSandboxRuntimeEnvArgs,

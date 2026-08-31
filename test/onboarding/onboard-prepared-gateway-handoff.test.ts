@@ -43,6 +43,7 @@ function runHandoffScenario(scenario: HandoffScenario): HandoffResult {
   fs.writeFileSync(
     scriptPath,
     `
+const harnessFixture = require(${JSON.stringify(sourceRequireHook)}).installOnboardProcessHarnessPackage("langchain-deepagents-code");
 const initialFlow = require(${initialFlowPath});
 const onboardSession = require(${sessionPath});
 const { deriveCheckpointFromSession } = require(${checkpointPath});
@@ -62,6 +63,7 @@ if (scenario === "prepared") {
     mode: "non-interactive",
     agent: "langchain-deepagents-code",
     sandboxName: "prepared-dcode",
+    harnessPackage: harnessFixture.harnessPackage,
     provider: "compatible-endpoint",
     model: "nvidia/nemotron-3-super-120b-a12b",
     metadata: { gatewayName: "nemoclaw", fromDockerfile: null },

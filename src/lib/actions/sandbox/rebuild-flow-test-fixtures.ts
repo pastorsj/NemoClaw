@@ -24,7 +24,6 @@ export function makeRebuildAgentAuthority(
           kind: "agent-runtime" as const,
           id: effectiveAgentId,
           packageVersion: "1.0.0",
-          contractVersion: 1 as const,
           contentDigest: "a".repeat(64),
         }),
     harnessPackageMigration: null,

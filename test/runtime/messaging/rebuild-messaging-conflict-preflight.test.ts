@@ -13,6 +13,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { HarnessPackageIdentity } from "../../../src/lib/agent-runtime/package/identity";
+import { installHomeHarnessPackageFixture } from "../../helpers/harness-packages";
 
 const REPO_ROOT = path.join(import.meta.dirname, "../../..");
 const NODE_BIN = path.dirname(process.execPath);
@@ -68,7 +70,7 @@ function teamsPlan(sandboxName: string, credentialHash: string) {
   };
 }
 
-function completeSession(sandboxName: string) {
+function completeSession(sandboxName: string, harnessPackage: HarnessPackageIdentity) {
   const step = { status: "complete", startedAt: null, completedAt: null, error: null };
   return {
     version: 1,
@@ -82,6 +84,7 @@ function completeSession(sandboxName: string) {
     lastCompletedStep: "policies",
     failure: null,
     agent: null,
+    harnessPackage,
     sandboxName,
     provider: "nvidia-prod",
     model: "meta/llama-3.3-70b-instruct",
@@ -111,10 +114,11 @@ function completeSession(sandboxName: string) {
 // credential (matching hash). Rebuilding `my-assistant` must detect the
 // conflict against `hermes` before touching anything destructive.
 function createConflictFixture() {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-5954-"));
+  const tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-5954-")));
   tmpFixtures.push(tmpDir);
   const nemoclawDir = path.join(tmpDir, ".nemoclaw");
   fs.mkdirSync(nemoclawDir, { recursive: true, mode: 0o700 });
+  const harnessPackage = installHomeHarnessPackageFixture(tmpDir, "openclaw").identity;
 
   const sandboxEntry = (name: string) => ({
     name,
@@ -128,6 +132,7 @@ function createConflictFixture() {
     fromDockerfile: null,
     policies: [],
     agent: null,
+    harnessPackage,
     messaging: { schemaVersion: 1, plan: teamsPlan(name, "shared-teams-hash") },
   });
 
@@ -145,7 +150,7 @@ function createConflictFixture() {
 
   fs.writeFileSync(
     path.join(nemoclawDir, "onboard-session.json"),
-    JSON.stringify(completeSession("my-assistant")),
+    JSON.stringify(completeSession("my-assistant", harnessPackage)),
     { mode: 0o600 },
   );
 
@@ -234,22 +239,26 @@ function registryHasSandbox(nemoclawDir: string, name: string): boolean {
 }
 
 describe("rebuild messaging credential conflict preflight (#5954)", () => {
-  it("aborts BEFORE backup/delete when another sandbox shares the Teams credential", {
-    timeout: 90_000,
-  }, () => {
-    const f = createConflictFixture();
-    const result = runRebuild(f.tmpDir);
-    const output = `${result.stderr || ""}${result.stdout || ""}`;
+  it(
+    "aborts BEFORE backup/delete when another sandbox shares the Teams credential",
+    {
+      timeout: 90_000,
+    },
+    () => {
+      const f = createConflictFixture();
+      const result = runRebuild(f.tmpDir);
+      const output = `${result.stderr || ""}${result.stdout || ""}`;
 
-    // Aborted, with the actionable conflict explanation.
-    expect(result.status).not.toBe(0);
-    expect(output).toContain("uses the same teams credential");
-    expect(output).toContain("Aborting");
+      // Aborted, with the actionable conflict explanation.
+      expect(result.status).not.toBe(0);
+      expect(output).toContain("uses the same teams credential");
+      expect(output).toContain("Aborting");
 
-    // Nothing destructive ran: the sandbox is untouched and still registered.
-    expect(output).not.toContain("Backing up sandbox state");
-    expect(output).not.toContain("Old sandbox deleted");
-    expect(output).not.toContain("must not run before the conflict preflight");
-    expect(registryHasSandbox(f.nemoclawDir, "my-assistant")).toBe(true);
-  });
+      // Nothing destructive ran: the sandbox is untouched and still registered.
+      expect(output).not.toContain("Backing up sandbox state");
+      expect(output).not.toContain("Old sandbox deleted");
+      expect(output).not.toContain("must not run before the conflict preflight");
+      expect(registryHasSandbox(f.nemoclawDir, "my-assistant")).toBe(true);
+    },
+  );
 });

@@ -67,8 +67,12 @@ function createFixture(opts: {
   const packageRoot = packageFixture.packageRoots.get(agentName);
   expect(packageRoot, `Missing harness package fixture for '${agentName}'`).toBeDefined();
   fs.copyFileSync(
-    path.join(REPO_ROOT, "agents", agentName, "manifest.yaml"),
-    path.join(packageRoot!, "agents", agentName, "manifest.yaml"),
+    path.join(REPO_ROOT, "packages", `nemoclaw-${agentName}`, "manifest.yaml"),
+    path.join(packageRoot!, "packages", `nemoclaw-${agentName}`, "manifest.yaml"),
+  );
+  fs.copyFileSync(
+    path.join(REPO_ROOT, "packages", `nemoclaw-${agentName}`, "policy-additions.yaml"),
+    path.join(packageRoot!, "packages", `nemoclaw-${agentName}`, "policy-additions.yaml"),
   );
   const installedHarness = packageFixture.install(agentName);
 

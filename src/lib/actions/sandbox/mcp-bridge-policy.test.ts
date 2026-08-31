@@ -514,7 +514,7 @@ describe("MCP OpenShell policy", () => {
     },
   );
 
-  it("scopes binaries to the selected agent adapter", () => {
+  it("renders the policy binaries declared by each installed agent manifest", () => {
     const hermes = YAML.parse(
       buildMcpBridgePolicyYaml("srv", "https://mcp.example.test/mcp", "hermes-config", {
         addresses: ["8.8.8.8"],
@@ -539,6 +539,14 @@ describe("MCP OpenShell policy", () => {
       "/usr/local/bin/dcode",
       "/opt/venv/bin/python3*",
     ]);
+  });
+
+  it("rejects an adapter without an installed manifest declaration", () => {
+    expect(() =>
+      buildMcpBridgePolicyYaml("srv", "https://mcp.example.test/mcp", "uninstalled-adapter", {
+        addresses: ["8.8.8.8"],
+      }),
+    ).toThrow(/No installed agent manifest declares MCP adapter 'uninstalled-adapter'/);
   });
 
   it("uses stable collision-resistant provider names with a length guard", () => {

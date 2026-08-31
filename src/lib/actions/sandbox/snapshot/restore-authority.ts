@@ -12,11 +12,11 @@ import {
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../../../harness/package-identity";
+} from "../../../agent-runtime/package/identity";
 import {
   resolvePinnedHarnessPackage,
   type InstalledHarnessPackage,
-} from "../../../harness/package-store";
+} from "../../../agent-runtime/package/store";
 import { resolveSandboxGatewayName } from "../../../onboard/gateway-binding";
 import { CURRENT_RUNTIME_PROVIDER_BUNDLES } from "../../../onboard/runtime-provider/current";
 import { resolveSandboxAgent } from "../../../onboard/sandbox-agent";

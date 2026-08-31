@@ -18,12 +18,11 @@ const receiptGeneration = "0123456789abcdef0123456789abcdef";
 const otherReceiptGeneration = "fedcba9876543210fedcba9876543210";
 const openclawHarnessBinding = Object.freeze({
   kind: "package" as const,
-  recordedAgent: null,
+  recordedAgent: "openclaw",
   harnessPackage: Object.freeze({
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "0.1.0",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   }),
 });

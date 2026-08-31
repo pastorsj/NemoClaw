@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
 import {
   baseOptions,
@@ -18,6 +19,15 @@ vi.mock("../../messaging-channel-setup", () => ({
 }));
 
 describe("handleSandboxState resume recreation", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("recreates a ready sandbox when its baked reasoning capability drifted (#7570)", async () => {
     const session = createSession({ sandboxName: "saved" });
     session.steps.sandbox.status = "complete";

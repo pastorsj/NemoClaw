@@ -51,7 +51,7 @@ describe("release handoff summary", () => {
         [
           "install.sh",
           "src/lib/onboard/machine/runner.ts",
-          "nemoclaw/src/blueprint/ssrf.ts",
+          "packages/nemoclaw-openclaw/plugin/src/blueprint/ssrf.ts",
           ".github/workflows/e2e.yaml",
           "src/lib/inference/client.ts",
           "docs/changelog/2026-08-17.mdx",

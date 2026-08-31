@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -171,35 +170,46 @@ describe("reviewed npm cache seed", () => {
     ]);
   });
 
-  it("serves npm view offline from lock-derived packuments", async () => {
+  it("seeds complete packument-only records through the cache boundary", async () => {
     const input = fixture();
-    await seedReviewedNpmCache({
-      ...request(input, new Map()),
-      packumentsOnly: true,
-    });
+    const calls: PutCall[] = [];
 
-    const integrity = execFileSync(
-      "npm",
-      [
-        "view",
-        PACKAGE_SPEC,
-        "dist.integrity",
-        "--userconfig",
-        "/dev/null",
-        "--registry",
-        REGISTRY_ORIGIN,
-      ],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          NPM_CONFIG_CACHE: input.cacheDirectory,
-          NPM_CONFIG_OFFLINE: "true",
+    await expect(
+      seedReviewedNpmCache(
+        {
+          ...request(input, new Map()),
+          packumentsOnly: true,
         },
-      },
-    ).trim();
+        async (cachePath, key, data, options) => {
+          calls.push({ cachePath, data, key, metadata: options?.metadata });
+        },
+      ),
+    ).resolves.toEqual([PACKAGE_SPEC]);
 
-    expect(integrity).toBe(input.integrity);
+    expect(calls).toHaveLength(2);
+    expect(calls.map(({ key }) => key)).toEqual([
+      "make-fetch-happen:request-cache:https://registry.npmjs.org/@example%2freviewed",
+      "make-fetch-happen:request-cache:https://registry.npmjs.org/@example%2freviewed",
+    ]);
+    expect(calls.map(({ data }) => JSON.parse(data.toString()))).toEqual(
+      Array.from({ length: 2 }, () => ({
+        "dist-tags": { latest: "1.2.3" },
+        name: PACKAGE_NAME,
+        versions: {
+          "1.2.3": {
+            bundleDependencies: ["bundled-child"],
+            dist: { integrity: input.integrity, tarball: TARBALL_URL },
+            hasShrinkwrap: true,
+            name: PACKAGE_NAME,
+            version: "1.2.3",
+          },
+        },
+      })),
+    );
+    expect(calls.map(({ metadata }) => metadata?.resHeaders)).toEqual([
+      expect.objectContaining({ "content-type": "application/vnd.npm.install-v1+json" }),
+      expect.objectContaining({ "content-type": "application/json" }),
+    ]);
   });
 
   it("rejects an unreviewed npm version before loading npm cache internals", async () => {

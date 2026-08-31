@@ -7,7 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   harnessPackageIdentitiesEqual,
   type HarnessPackageIdentity,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import type {

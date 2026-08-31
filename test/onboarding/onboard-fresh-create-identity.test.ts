@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { beforeEach, describe, it, onTestFinished, vi } from "vitest";
-import { getHarnessPackageStoreRoot } from "../../src/lib/harness/package-store";
+import { getHarnessPackageStoreRoot } from "../../src/lib/agent-runtime/package/store";
 import { createHarnessPackageFixture } from "../helpers/harness-packages";
 import { writeOkOpenshell } from "../helpers/onboard-openshell-fixture";
 import { type CommandEntry, onboardScriptMocksPath } from "../helpers/onboard-split-context";

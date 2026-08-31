@@ -374,15 +374,17 @@ describe("OpenShell supervisor manifest trust", () => {
   it("rejects a post-map mutation of a parsed supervisor identity", () => {
     const result = runParser({
       transformSupervisor: (source) =>
-        source.replace(
-          "\n};\n\n/** Resolve the canonical gateway name",
-          `
+        replaceRequired(source, [
+          [
+            "\n};\n\nconst DOCKER_CONTEXT_HOST_FORMAT",
+            `
 };
 (OPENSHELL_SUPERVISOR_MANIFEST_DIGESTS as Record<string, string>)["0.0.103"] =
   "${REPLACEMENT_SUPERVISOR_MANIFEST_DIGEST}";
 
-/** Resolve the canonical gateway name`,
-        ),
+const DOCKER_CONTEXT_HOST_FORMAT`,
+          ],
+        ]),
     });
 
     expect(result.status).toBe(1);

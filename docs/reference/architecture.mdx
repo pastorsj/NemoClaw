@@ -200,20 +200,20 @@ The concrete files differ by agent because each runtime has its own plugin syste
 | Agent | Integration files | Runtime behavior |
 |---|---|---|
 <AgentOnly variant="openclaw">
-| OpenClaw | `nemoclaw/openclaw.plugin.json`, `nemoclaw/src/runtime-context.ts`, and the TypeScript package under `nemoclaw/src/` | Registers the `/nemoclaw` slash command, adds the NemoClaw inference provider, and injects sandbox and policy context into OpenClaw turns. |
+| OpenClaw | `packages/nemoclaw-openclaw/plugin/openclaw.plugin.json`, `packages/nemoclaw-openclaw/plugin/src/runtime-context.ts`, and the TypeScript package under `packages/nemoclaw-openclaw/plugin/src/` | Registers the `/nemoclaw` slash command, adds the NemoClaw inference provider, and injects sandbox and policy context into OpenClaw turns. |
 </AgentOnly>
 <AgentOnly variant="hermes">
-| Hermes | `agents/hermes/manifest.yaml`, `agents/hermes/runtime-config-guard.py`, `agents/hermes/config/`, and `agents/hermes/start.sh` | Declares the Hermes agent contract, materializes and guards managed runtime configuration during startup, and launches `hermes gateway run` behind the OpenShell proxy. |
+| Hermes | `packages/nemoclaw-hermes/manifest.yaml`, `packages/nemoclaw-hermes/runtime/config-guard.py`, `packages/nemoclaw-hermes/config/`, and `packages/nemoclaw-hermes/start.sh` | Declares the Hermes agent contract, materializes and guards managed runtime configuration during startup, and launches `hermes gateway run` behind the OpenShell proxy. |
 </AgentOnly>
 <AgentOnly variant="deepagents">
-| Deep Agents | `agents/langchain-deepagents-code/manifest.yaml`, `agents/langchain-deepagents-code/generate-config.ts`, `agents/langchain-deepagents-code/start.sh`, and the managed `dcode` launchers | Declares the terminal agent contract, writes `/sandbox/.deepagents/config.toml`, installs managed wrappers for `dcode` and `dcode -n`, and routes inference through `inference.local`. |
+| Deep Agents | `packages/nemoclaw-langchain-deepagents-code/manifest.yaml`, `packages/nemoclaw-langchain-deepagents-code/config/generate-config.ts`, `packages/nemoclaw-langchain-deepagents-code/start.sh`, and the managed `dcode` launchers | Declares the terminal agent contract, writes `/sandbox/.deepagents/config.toml`, installs managed wrappers for `dcode` and `dcode -n`, and routes inference through `inference.local`. |
 </AgentOnly>
 
 <AgentOnly variant="openclaw">
 The OpenClaw integration is a thin TypeScript plugin that runs in-process with the OpenClaw gateway inside the sandbox.
-Its durable entry points are `nemoclaw/src/index.ts`, `nemoclaw/src/runtime-context.ts`, and `nemoclaw/openclaw.plugin.json`.
-The `nemoclaw/src/commands/` directory contains in-sandbox `/nemoclaw` command handlers and migration helpers.
-The `nemoclaw/src/blueprint/` directory contains runner, state, snapshot, SSRF, and private-network validation code.
+Its durable entry points are `packages/nemoclaw-openclaw/plugin/src/index.ts`, `packages/nemoclaw-openclaw/plugin/src/runtime-context.ts`, and `packages/nemoclaw-openclaw/plugin/openclaw.plugin.json`.
+The `packages/nemoclaw-openclaw/plugin/src/commands/` directory contains in-sandbox `/nemoclaw` command handlers and migration helpers.
+The `packages/nemoclaw-openclaw/plugin/src/blueprint/` directory contains runner, state, snapshot, SSRF, and private-network validation code.
 
 Before an OpenClaw turn starts, the plugin prepends a short system-context block with the active sandbox name, sandbox phase, network policy summary, and filesystem policy summary.
 This guidance stays out of the visible chat transcript.
@@ -260,18 +260,18 @@ The blueprint schema and runner enforce these name constraints before the runner
 The default OpenClaw policy starts from `nemoclaw-blueprint/policies/openclaw-sandbox.yaml`.
 </AgentOnly>
 <AgentOnly variant="hermes">
-Hermes keeps its agent-owned image, plugin, config, entrypoint, and policy additions under `agents/hermes/`.
-The default Hermes policy starts from `agents/hermes/policy-additions.yaml`.
+Hermes keeps its agent-owned image, plugin, config, entrypoint, and policy additions under `packages/nemoclaw-hermes/`.
+The default Hermes policy starts from `packages/nemoclaw-hermes/policy-additions.yaml`.
 </AgentOnly>
 <AgentOnly variant="deepagents">
-Deep Agents keeps its agent-owned image, config generator, entrypoint, wrappers, and policy additions under `agents/langchain-deepagents-code/`.
-The default Deep Agents policy starts from `agents/langchain-deepagents-code/policy-additions.yaml`.
+Deep Agents Code keeps its image, configuration generator, entrypoint, wrappers, and baseline policy under `packages/nemoclaw-langchain-deepagents-code/`.
+The default Deep Agents policy starts from `packages/nemoclaw-langchain-deepagents-code/policy-additions.yaml`.
 </AgentOnly>
 
-The current blueprint runner implementation lives in the `nemoclaw/` TypeScript package:
+The OpenClaw blueprint runner implementation lives in `packages/nemoclaw-openclaw/plugin/`:
 
 ```text
-nemoclaw/src/blueprint/
+packages/nemoclaw-openclaw/plugin/src/blueprint/
 ├── runner.ts                       CLI runner: plan / apply / status / rollback
 ├── ssrf.ts                         SSRF endpoint validation (IP + DNS checks)
 ├── private-networks.ts             Shared private-network block list loader for SSRF checks

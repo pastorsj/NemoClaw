@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { HarnessPackageIdentity } from "../harness/package-identity";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/identity";
 import { inspectCheckpoint, serializeCheckpoint } from "./onboard-checkpoint";
 import { decisionSelected } from "./onboard-checkpoint-decision";
 import {
@@ -21,7 +21,6 @@ const PACKAGE: HarnessPackageIdentity = {
   kind: "agent-runtime",
   id: "openclaw",
   packageVersion: "1.2.3",
-  contractVersion: 1,
   contentDigest: "a".repeat(64),
 };
 

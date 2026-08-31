@@ -66,8 +66,8 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const BUDGET_PATH = path.join(REPO_ROOT, "ci", "source-architecture-budget.json");
 const DEFAULT_SCAN_ROOTS = [
   "src",
-  "nemoclaw/src",
-  "agents/hermes",
+  "packages/nemoclaw-openclaw/plugin/src",
+  "packages/nemoclaw-hermes",
   "bin",
   "scripts",
   "tools",

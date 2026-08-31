@@ -68,7 +68,7 @@ describe("sandbox baseline policy resolution (#7194)", () => {
     { label: "missing", policyAdditionsPath: null },
     { label: "unreadable", policyAdditionsPath: ROOT },
   ])(
-    "refuses to substitute OpenClaw for a $label recorded-agent baseline (#7194)",
+    "refuses to substitute another runtime for a $label recorded-agent baseline (#7194)",
     ({ policyAdditionsPath }) => {
       vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "alpha", agent: "hermes" } as never);
       vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
@@ -77,7 +77,7 @@ describe("sandbox baseline policy resolution (#7194)", () => {
       } as never);
 
       expect(() => resolveSandboxBaselinePolicy("alpha")).toThrow(
-        "Refusing to substitute the OpenClaw baseline",
+        "Refusing to substitute another runtime's baseline",
       );
     },
   );

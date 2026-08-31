@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import type { AddressInfo } from "node:net";
 import net from "node:net";
 import path from "node:path";
@@ -15,17 +16,21 @@ import {
   runOnboardProcess,
   workspaceEnv,
 } from "../helpers/onboard-child-process-harness";
+import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
 import { testTimeoutOptions } from "../helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "../..", "bin", "nemoclaw.js");
 
 describe("onboard gateway port conflict readiness (#6752)", () => {
   let workspace: OnboardProcessWorkspace;
+  let homeDir: string;
   let gatewayPort: number;
   let gatewayServer: net.Server;
 
   beforeEach(async () => {
     workspace = createOnboardProcessWorkspace("nemoclaw-6752-");
+    homeDir = fs.realpathSync(workspace.homeDir);
+    installHomeHarnessPackageFixture(homeDir, "openclaw");
     gatewayServer = net.createServer();
     await new Promise<void>((resolve, reject) => {
       gatewayServer.once("error", reject);
@@ -94,6 +99,7 @@ describe("onboard gateway port conflict readiness (#6752)", () => {
         {
           timeoutMs: 10_000,
           env: workspaceEnv(workspace, {
+            HOME: homeDir,
             NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
             NEMOCLAW_GATEWAY_PORT: String(gatewayPort),
             NEMOCLAW_OPENSHELL_BIN: path.join(workspace.binDir, "openshell"),

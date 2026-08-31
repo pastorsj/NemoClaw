@@ -162,7 +162,7 @@ describe("buildManagedStartupImageActionPlan", () => {
   });
 
   it.each([
-    ["openclaw", "/scripts/generate-openclaw-config.mts"],
+    ["openclaw", "/packages/nemoclaw-openclaw/config/generate-config.mts"],
     ["hermes", "/opt/nemoclaw-hermes-config/generate-config.ts"],
     ["langchain-deepagents-code", "/opt/nemoclaw-deepagents-code/generate-config.ts"],
     ["pi", "/opt/nemoclaw-pi/generate-config.ts"],

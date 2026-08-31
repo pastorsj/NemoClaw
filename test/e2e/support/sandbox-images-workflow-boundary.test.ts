@@ -501,7 +501,7 @@ describe("sandbox image workflow boundary", () => {
       name: "Rebuild Hermes production image",
       run: [
         "docker buildx \\",
-        "  build --load -f agents/hermes/Dockerfile -t nemoclaw-hermes-production .",
+        "  build --load -f packages/nemoclaw-hermes/Dockerfile -t nemoclaw-hermes-production .",
       ].join("\n"),
     });
 
@@ -527,7 +527,7 @@ describe("sandbox image workflow boundary", () => {
     const producer = imageWorkflow.jobs["build-hermes-sandbox-image"];
     producer.steps!.splice(-1, 0, {
       name: "Build Hermes production image again",
-      run: "docker buildx build --load -f agents/hermes/Dockerfile -t nemoclaw-hermes-production .",
+      run: "docker buildx build --load -f packages/nemoclaw-hermes/Dockerfile -t nemoclaw-hermes-production .",
     });
 
     expect(validateSandboxImagesWorkflow(imageWorkflow, mainWorkflow)).toContain(
@@ -886,7 +886,7 @@ describe("sandbox image workflow boundary", () => {
         (step) => step.name === "Run Hermes root entrypoint smoke Vitest test",
       )!;
       rootEntrypoint.env!.NEMOCLAW_HERMES_TEST_IMAGE = "nemoclaw-hermes-rebuilt";
-      rootEntrypoint.run = `${rootEntrypoint.run}\ndocker build -f agents/hermes/Dockerfile -t nemoclaw-hermes-rebuilt .`;
+      rootEntrypoint.run = `${rootEntrypoint.run}\ndocker build -f packages/nemoclaw-hermes/Dockerfile -t nemoclaw-hermes-rebuilt .`;
 
       expect(validateSandboxImagesWorkflow(imageWorkflow, mainWorkflow)).toEqual(
         expect.arrayContaining([

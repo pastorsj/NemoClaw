@@ -77,12 +77,12 @@ function runBaseResolution(jobId: string, stepName: string) {
   const fakeBin = path.join(fixture, "bin");
   const outputPath = path.join(fixture, "github-output");
   const runnerTemp = path.join(fixture, "runner-temp");
-  mkdirSync(path.join(fixture, "agents", "hermes"), { recursive: true });
+  mkdirSync(path.join(fixture, "packages", "nemoclaw-hermes"), { recursive: true });
   mkdirSync(fakeBin);
   mkdirSync(runnerTemp);
   writeFileSync(outputPath, "");
   writeFileSync(
-    path.join(fixture, "agents", "hermes", "Dockerfile"),
+    path.join(fixture, "packages", "nemoclaw-hermes", "Dockerfile"),
     `ARG BASE_IMAGE=${REVIEWED_HERMES_INDEX}\n`,
   );
   const dockerPath = path.join(fakeBin, "docker");

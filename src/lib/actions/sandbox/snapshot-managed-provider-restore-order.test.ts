@@ -11,7 +11,7 @@ import {
   type ShippedManagedImageAgent,
 } from "../../onboard/managed-image/contract";
 import { encodeManagedStartupProfile } from "../../onboard/managed-startup/profile";
-import type { HarnessPackageIdentity } from "../../harness/package-identity";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
 
 import * as fixture from "./snapshot-restore-test-fixture";
 
@@ -108,7 +108,6 @@ function harnessPackage(agent: ShippedManagedImageAgent): HarnessPackageIdentity
     kind: "agent-runtime",
     id: agent,
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: digestCharacter.repeat(64),
   };
 }

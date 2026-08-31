@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SandboxMessagingPlan } from "../messaging/manifest";
 import type { Session } from "../state/onboard-session";
@@ -9,6 +9,10 @@ import * as registry from "../state/registry";
 import { getStoredMessagingChannelConfig } from "./messaging-config";
 
 describe("getStoredMessagingChannelConfig", () => {
+  beforeEach(() => {
+    vi.spyOn(registry, "getSandbox").mockReturnValue(null);
+  });
+
   afterEach(() => {
     delete process.env.NEMOCLAW_MESSAGING_PLAN_B64;
     vi.restoreAllMocks();

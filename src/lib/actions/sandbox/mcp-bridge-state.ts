@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type AgentDefinition, type AgentMcpAdapter, loadAgent } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import { recoverNamedGatewayRuntime } from "../../gateway-runtime-action";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
@@ -23,6 +24,10 @@ export function getSandboxOrThrow(sandboxName: string): SandboxEntry {
     throw new McpBridgeError(`Sandbox '${sandboxName}' not found.`, 1);
   }
   return sandbox;
+}
+
+export function getSandboxHarnessPackage(sandboxName: string): HarnessPackageIdentity | null {
+  return registry.getSandbox(sandboxName)?.harnessPackage ?? null;
 }
 
 function getSandboxAgentName(sandbox: SandboxEntry): string {

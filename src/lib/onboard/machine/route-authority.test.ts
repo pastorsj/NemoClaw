@@ -1,25 +1,44 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   type InferenceEndpointSource,
   normalizeInferenceSelection,
 } from "../../inference/selection";
 import { createSession, type SessionUpdates } from "../../state/onboard-session";
-import {
-  getSandbox,
-  isPendingReservationForSession,
-  removeSandbox,
-  reserveSandboxInferenceRoute,
-} from "../../state/registry";
 import { classifySandboxInferenceRouteReservation } from "../../state/registry/route-reservation";
-import { context, createPhases } from "../../../../test/helpers/core-flow";
 import type { InferenceRouteReservationAuthority } from "../types";
 
 describe("core route authority", () => {
+  let coreFlow: typeof import("../../../../test/helpers/core-flow");
+  let home: string;
+  let registry: typeof import("../../state/registry");
+
+  beforeAll(async () => {
+    home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-onboard-route-authority-"));
+    vi.stubEnv("HOME", home);
+    vi.resetModules();
+    [registry, coreFlow] = await Promise.all([
+      import("../../state/registry"),
+      import("../../../../test/helpers/core-flow"),
+    ]);
+  });
+
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    await fs.rm(home, { recursive: true, force: true });
+  });
+
   it("keeps a fresh Bedrock route reservation identical through sandbox admission (#9833)", async () => {
+    const { context, createPhases } = coreFlow;
+    const { getSandbox, removeSandbox, reserveSandboxInferenceRoute } = registry;
     const durableSession = createSession();
     const sandboxName = `hosted-route-${durableSession.sessionId}`;
     const recordStepComplete = vi.fn(async (_stepName: string, updates: SessionUpdates = {}) => {
@@ -107,6 +126,13 @@ describe("core route authority", () => {
   });
 
   it("preserves the fresh install-ollama reservation endpoint source for Hermes portable creation (#9203)", async () => {
+    const { context, createPhases } = coreFlow;
+    const {
+      getSandbox,
+      isPendingReservationForSession,
+      removeSandbox,
+      reserveSandboxInferenceRoute,
+    } = registry;
     const durableSession = createSession();
     const sandboxName = `hermes-route-${durableSession.sessionId}`;
     const recordStepComplete = vi.fn(async (_stepName: string, updates: SessionUpdates = {}) => {

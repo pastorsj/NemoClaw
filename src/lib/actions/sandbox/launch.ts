@@ -4,7 +4,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import * as agentRuntime from "../../agent/runtime";
-import type { AgentDefinition } from "../../agent/definition-types";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import { spawnExitCode } from "../../core/process-exit";
 import { resolveSandboxGatewayName } from "../../gateway-runtime-action";
 import type { SandboxEntry } from "../../state/registry";

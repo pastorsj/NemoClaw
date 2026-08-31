@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHarnessInventoryView, type HarnessInventoryView } from "../harness/package-list";
+import {
+  listHarnessPackageInventory,
+  type HarnessPackageInventory,
+} from "../agent-runtime/package/catalog";
 
 export interface AgentRuntimeListEntry {
   readonly name: string;
@@ -9,25 +12,17 @@ export interface AgentRuntimeListEntry {
 }
 
 export interface AgentRuntimeListDependencies {
-  readonly createHarnessInventoryView: () => HarnessInventoryView;
+  readonly listHarnessPackageInventory: () => HarnessPackageInventory;
 }
 
 export const agentRuntimeListDependencies: AgentRuntimeListDependencies = {
-  createHarnessInventoryView,
+  listHarnessPackageInventory,
 };
-
-const STANDARD_AGENT_RUNTIME_DESCRIPTIONS: Readonly<Record<string, string>> = Object.freeze({
-  openclaw: "Gateway-based AI agent with plugin ecosystem (openclaw.ai)",
-  hermes: "Self-improving AI agent with learning loop (Nous Research)",
-  "langchain-deepagents-code": "Terminal coding agent built on the Deep Agents SDK",
-});
 
 function compareAgentRuntimeEntries(
   left: AgentRuntimeListEntry,
   right: AgentRuntimeListEntry,
 ): number {
-  if (left.name === "openclaw") return -1;
-  if (right.name === "openclaw") return 1;
   return left.name.localeCompare(right.name);
 }
 
@@ -35,14 +30,22 @@ function compareAgentRuntimeEntries(
 export function listAgentRuntimeEntries(
   dependencies: AgentRuntimeListDependencies = agentRuntimeListDependencies,
 ): AgentRuntimeListEntry[] {
-  return dependencies
-    .createHarnessInventoryView()
-    .installed.flatMap((installed): AgentRuntimeListEntry[] => {
-      const description = STANDARD_AGENT_RUNTIME_DESCRIPTIONS[installed.id];
-      if (installed.health !== "healthy" || installed.identity === null || !description) return [];
-      return [{ name: installed.id, description }];
+  const inventory = dependencies.listHarnessPackageInventory();
+  const defaultIds = new Set(
+    inventory.installed
+      .filter(({ isDefaultOnboardingChoice }) => isDefaultOnboardingChoice)
+      .map(({ id }) => id),
+  );
+  return inventory.installed
+    .flatMap((installed): AgentRuntimeListEntry[] => {
+      if (installed.state !== "installed") return [];
+      return [{ name: installed.id, description: installed.description ?? "" }];
     })
-    .sort(compareAgentRuntimeEntries);
+    .sort((left, right) => {
+      if (defaultIds.has(left.name)) return -1;
+      if (defaultIds.has(right.name)) return 1;
+      return compareAgentRuntimeEntries(left, right);
+    });
 }
 
 export function renderAgentRuntimeList(

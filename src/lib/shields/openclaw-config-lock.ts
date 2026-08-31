@@ -17,10 +17,10 @@ export const OPENCLAW_CONFIG_PATH = `${OPENCLAW_CONFIG_DIR}/openclaw.json`;
 export const OPENCLAW_CONFIG_HASH_PATH = `${OPENCLAW_CONFIG_DIR}/.config-hash`;
 
 const CONTAINER_HELPER = "/usr/local/lib/nemoclaw/openclaw-config-guard.py";
-const HOST_HELPER = path.resolve(__dirname, "../../../scripts/openclaw-config-guard.py");
+const HOST_HELPER = path.resolve(__dirname, "../../../packages/nemoclaw-openclaw/runtime/config-guard.py");
 const CONTAINER_TIMEOUT = ["timeout", "--signal=TERM", "--kill-after=5s", "5m"];
 // Must exceed STATE_DIR_GUARD_TIMEOUT_SECONDS (22m) in
-// scripts/openclaw-config-guard.py, which is the guard's whole-action budget
+// packages/nemoclaw-openclaw/runtime/config-guard.py, which is the guard's whole-action budget
 // for the unseal and its rollback together. The outer docker client timeout in
 // shields/index.ts must exceed this timeout plus its termination grace.
 const RECOVERY_CONTAINER_TIMEOUT = ["timeout", "--signal=TERM", "--kill-after=5s", "25m"];

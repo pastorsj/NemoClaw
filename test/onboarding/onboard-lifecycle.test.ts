@@ -67,10 +67,14 @@ function runLifecycleEntrypoint(mode: "fresh" | "resume" | "recovery"): Lifecycl
   const checkpointPath = JSON.stringify(
     path.join(repoRoot, "src", "lib", "state", "onboard-checkpoint-migrate.ts"),
   );
+  const fixtureMocksPath = JSON.stringify(
+    path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+  );
 
   fs.writeFileSync(
     scriptPath,
     `
+const harnessFixture = require(${fixtureMocksPath}).installOnboardProcessHarnessPackage("openclaw");
 const { OnboardRuntimeBoundary } = require(${runtimeBoundaryPath});
 const eventsModule = require(${eventsPath});
 const emittedEvents = [];
@@ -98,6 +102,7 @@ if (${JSON.stringify(mode)} === "resume") {
   const session = onboardModule.onboardSession.createSession({
     mode: "non-interactive",
     sandboxName: "resume-lifecycle",
+    harnessPackage: harnessFixture.harnessPackage,
     metadata: { gatewayName: "nemoclaw", fromDockerfile: null },
   });
   session.checkpoint = deriveCheckpointFromSession(session, { profile: "default" });
@@ -107,6 +112,7 @@ if (${JSON.stringify(mode)} === "recovery") {
   const session = onboardModule.onboardSession.createSession({
     mode: "non-interactive",
     sandboxName: "resume-lifecycle",
+    harnessPackage: harnessFixture.harnessPackage,
     status: "failed",
     lastStepStarted: "gateway",
     failure: {
@@ -180,10 +186,14 @@ function runResumeConflictEntrypoint(
   const checkpointPath = JSON.stringify(
     path.join(repoRoot, "src", "lib", "state", "onboard-checkpoint-migrate.ts"),
   );
+  const fixtureMocksPath = JSON.stringify(
+    path.join(repoRoot, "test", "helpers", "onboard-script-mocks.cjs"),
+  );
 
   fs.writeFileSync(
     scriptPath,
     `
+const harnessFixture = require(${fixtureMocksPath}).installOnboardProcessHarnessPackage("openclaw");
 const eventsModule = require(${eventsPath});
 const emittedEvents = [];
 const stderrLines = [];
@@ -216,6 +226,7 @@ const { deriveCheckpointFromSession } = require(${checkpointPath});
 const session = onboardModule.onboardSession.createSession({
   mode: "non-interactive",
   sandboxName: "recorded-sandbox",
+  harnessPackage: harnessFixture.harnessPackage,
   metadata: { gatewayName: "nemoclaw", fromDockerfile: null },
   steps: {
     sandbox: {

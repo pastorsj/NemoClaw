@@ -24,7 +24,7 @@ const PERMISSIVE_POLICY_PATH = new URL(
   "../../nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
   import.meta.url,
 );
-const HERMES_POLICY_PATH = new URL("../../agents/hermes/policy-additions.yaml", import.meta.url);
+const HERMES_POLICY_PATH = new URL("../../packages/nemoclaw-hermes/policy-additions.yaml", import.meta.url);
 
 type Blueprint = {
   digest?: string;

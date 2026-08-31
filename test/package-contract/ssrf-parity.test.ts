@@ -71,11 +71,11 @@ const cliHelper = loadHelper<NetworkHelper>(
   "`npm run build:cli`",
 );
 const pluginHelper = loadHelper<NetworkHelper>(
-  "../../nemoclaw/dist/blueprint/private-networks.js",
+  "../../packages/nemoclaw-openclaw/plugin/dist/blueprint/private-networks.js",
   "`npm run build` inside nemoclaw/",
 );
 const boundary = loadHelper<PrivateNetworkBoundary>(
-  "../../nemoclaw/dist/shared/private-networks-boundary.cjs",
+  "../../dist/lib/shared/private-networks-boundary.cjs",
   "`npm run build:cli`",
 );
 const sharedNetworks = cliHelper.getNetworkEntries();

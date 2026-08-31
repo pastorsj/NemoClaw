@@ -4,17 +4,17 @@
 import type { AgentDefinition } from "../agent/defs";
 import { createImmutableAgentDefinition, loadAgent, loadAgentFresh } from "../agent/defs";
 import { isCandidateAgent } from "../agent/candidate";
-import { buildAgentDefinition } from "../agent/definition-loader";
+import { buildAgentDefinition } from "../agent-runtime/manifest-loader";
 import { getVersion } from "../core/version";
 import {
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import {
   resolvePinnedHarnessPackage,
   type HarnessPackageStoreOptions,
-} from "../harness/package-store";
+} from "../agent-runtime/package/store";
 import { getNameValidationGuidance, NAME_ALLOWED_FORMAT } from "../name-validation";
 import { validateName } from "../runner";
 import type { SandboxEntry } from "../state/registry";
@@ -63,10 +63,7 @@ export function formatSandboxAgentName(agentName: string | null | undefined): st
 }
 
 export function getDefaultSandboxNameForAgent(agent: AgentDefinition | null | undefined): string {
-  const requestedAgent = getRequestedSandboxAgentName(agent);
-  if (requestedAgent === "hermes") return "hermes";
-  if (requestedAgent === "langchain-deepagents-code") return "deepagents-code";
-  return "my-assistant";
+  return getEffectiveSandboxAgent(agent).defaultSandboxName;
 }
 
 export function getSandboxPromptDefault(agent: AgentDefinition | null | undefined): string {

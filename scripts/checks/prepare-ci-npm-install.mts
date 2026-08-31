@@ -199,7 +199,7 @@ function inspectReviewedLocks(targetRoot: string, config: AuditConfig) {
       tarballUrl: reviewed.tarballUrl,
     },
   ];
-  const lockfiles = ["package-lock.json", "nemoclaw/package-lock.json"].map((relativePath) => {
+  const lockfiles = ["package-lock.json", "packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json"].map((relativePath) => {
     const lockfilePath = join(targetRoot, relativePath);
     const packages = verifyReviewedNpmLockPackages({
       allowedNestedShrinkwrapPackages: config.sourceNestedShrinkwrapPackages,

@@ -9,9 +9,9 @@
 # ── Fallback: maintainers review anything not matched below ──
 *                                   @NVIDIA/nemoclaw-maintainer
 
-# ── CLI plugin (Node/TS) ──
-/nemoclaw/                          @NVIDIA/nemoclaw-maintainer
-/nemoclaw/src/onboard/              @NVIDIA/nemoclaw-engineer
+# ── OpenClaw package and plugin (Node/TS) ──
+/packages/nemoclaw-openclaw/       @NVIDIA/nemoclaw-maintainer
+/packages/nemoclaw-openclaw/plugin/src/onboard/ @NVIDIA/nemoclaw-engineer
 
 # ── Blueprint & sandbox policy (Python) ──
 /nemoclaw-blueprint/                @NVIDIA/nemoclaw-maintainer

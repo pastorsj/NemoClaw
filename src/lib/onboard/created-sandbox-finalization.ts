@@ -5,7 +5,7 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 import type { AgentDefinition } from "../agent/defs";
-import type { HarnessPackageIdentity } from "../harness/package-types";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import type {
   OpenClawImagePluginInstall,
   OpenClawManagedExtensionDiscoveryResult,

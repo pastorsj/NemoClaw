@@ -42,7 +42,7 @@ export const MCP_RUNTIME_SANITIZED_ENV_VARS = [
   "SSLKEYLOGFILE",
 ] as const;
 
-function unsupportedAdapter(adapter: never): never {
+function unsupportedAdapter(adapter: string): never {
   throw new Error(`Unsupported MCP adapter: ${String(adapter)}`);
 }
 

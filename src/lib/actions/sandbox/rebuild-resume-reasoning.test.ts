@@ -19,7 +19,6 @@ const harnessPackage = Object.freeze({
   kind: "agent-runtime" as const,
   id: "openclaw",
   packageVersion: "1.0.0",
-  contractVersion: 1 as const,
   contentDigest: "a".repeat(64),
 });
 const entry = (overrides: Record<string, unknown> = {}) => ({
@@ -48,13 +47,7 @@ function prepareRebuildResumeConfig(
     harnessPackage,
     harnessPackageMigration: null,
   });
-  return preparePinnedRebuildResumeConfig(
-    sandboxName,
-    sandboxEntry,
-    authority,
-    log,
-    bail,
-  );
+  return preparePinnedRebuildResumeConfig(sandboxName, sandboxEntry, authority, log, bail);
 }
 
 afterEach(() => {

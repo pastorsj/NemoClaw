@@ -4,7 +4,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PUBLIC_DISPLAY_ENTRIES } from "../../lib/cli/public-display-defaults";
-import type { HarnessInventoryView } from "../../lib/harness/package-list";
+import type { HarnessInventoryView } from "../../lib/agent-runtime/package/inventory";
 import HarnessCommand from "../harness";
 import HarnessListCommand, { harnessListCommandDependencies } from "./list";
 
@@ -14,7 +14,6 @@ const IDENTITY = {
   kind: "agent-runtime",
   id: "openclaw",
   packageVersion: "0.1.0",
-  contractVersion: 1,
   contentDigest: DIGEST,
 } as const;
 const EMPTY_VIEW: HarnessInventoryView = {

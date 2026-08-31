@@ -10,6 +10,10 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     name: "test-agent",
     displayName: "Test Agent",
+    agentAliases: [],
+    agentAliasSummary: null,
+    isDefaultOnboardingChoice: false,
+    defaultSandboxName: "test-agent",
     binary_path: "/usr/local/bin/test-agent",
     gateway_command: "test-agent gateway run",
     healthProbe: { url: "http://127.0.0.1:19000/", port: 19000, timeout_seconds: 5 },

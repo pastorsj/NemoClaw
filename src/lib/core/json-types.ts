@@ -12,7 +12,7 @@
  * This module provides a single canonical set so the pattern is
  * consistent across the CLI codebase.
  *
- * Note: The plugin (`nemoclaw/src/`) has its own parallel types
+ * Note: The plugin (`packages/nemoclaw-openclaw/plugin/src/`) has its own parallel types
  * (`PluginScalar`, `PluginValue`, `PluginRecord`) because the plugin
  * and CLI are compiled separately and cannot share imports.
  */

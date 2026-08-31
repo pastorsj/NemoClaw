@@ -67,14 +67,14 @@ describe("protected managed-image runtime workflow", () => {
       "managed-image-multiarch-startup",
       "Resolve reviewed Hermes platform base image",
       "./.trusted-hermes-resolver/.github/actions/resolve-reviewed-hermes-platform",
-      "agents/hermes/Dockerfile",
+      "packages/nemoclaw-hermes/Dockerfile",
       validateManagedImageMultiarchWorkflow,
     ],
     [
       "managed-image-protected-runtime",
       "Resolve reviewed Hermes runtime base image",
       "./.github/actions/resolve-reviewed-hermes-platform",
-      ".candidate-runtime/agents/hermes/Dockerfile",
+      ".candidate-runtime/packages/nemoclaw-hermes/Dockerfile",
       validateManagedImageProtectedRuntimeWorkflow,
     ],
   ] as const)(

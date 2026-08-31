@@ -43,7 +43,7 @@ export async function promptForAgentChoice(
     deps.log(`    ${index + 1}) ${choice.displayName}${description}`);
   });
   deps.log("");
-  // OpenClaw is sorted first (getAgentChoices), so index 1 is the default.
+  // The caller puts its default choice first, so index 1 is the default.
   const reply = await deps.prompt("  Choose [1]: ");
   return deps.selectFromNumberedMenu(reply, 1, choices);
 }

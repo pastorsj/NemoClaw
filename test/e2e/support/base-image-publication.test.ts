@@ -187,9 +187,11 @@ describe("base-image publication evidence", () => {
         "Dockerfile",
         "Dockerfile.base",
         "agents/**",
-        "agents/hermes/Dockerfile.base",
-        "agents/langchain-deepagents-code/Dockerfile.base",
-        "nemoclaw/**",
+        "packages/nemoclaw-openclaw/**",
+        "packages/nemoclaw-hermes/**",
+        "packages/nemoclaw-langchain-deepagents-code/**",
+        "packages/nemoclaw-hermes/Dockerfile.base",
+        "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
         "nemoclaw-blueprint/**",
         "scripts/**",
         "src/lib/actions/sandbox/openshell-child-visible-credentials.v*.json",
@@ -213,6 +215,11 @@ describe("base-image publication evidence", () => {
     [
       "a glob",
       WORKFLOW_SOURCE.replace("Dockerfile.base", "Dockerfile.*"),
+      /not a safe literal path/u,
+    ],
+    [
+      "an unreviewed package glob",
+      WORKFLOW_SOURCE.replace("Dockerfile.base", "packages/**"),
       /not a safe literal path/u,
     ],
     [
@@ -251,11 +258,13 @@ describe("base-image publication evidence", () => {
     const expanded = expandBaseImagePushPaths(EXPECTED_SHA, [
       "Dockerfile",
       "agents/**",
+      "packages/nemoclaw-openclaw/**",
       "src/lib/messaging/**",
       "test/e2e/live/managed-image-activation-e2e*.ts",
     ]);
     expect(expanded).toEqual([
       ":(glob)agents/**",
+      ":(glob)packages/nemoclaw-openclaw/**",
       ":(glob)src/lib/messaging/**",
       ":(glob)test/e2e/live/managed-image-activation-e2e*.ts",
       "Dockerfile",

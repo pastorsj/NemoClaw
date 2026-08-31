@@ -24,6 +24,7 @@ import { pendingSandboxPolicyVerificationForBoundary } from "../../src/lib/onboa
 import { materializeHermesPortableCreatePlan } from "../../src/lib/onboard/sandbox-create-plan-materialization";
 import { resolveSandboxCreateIntent } from "../../src/lib/onboard/sandbox-create-intent";
 import { createPortableOnboardEnvironmentScope } from "../../src/lib/onboard/session-bootstrap";
+import { HERMES_PORTABLE_BUILD_CONTEXT_FILES } from "../../src/lib/onboard/experimental/hermes-portable-build-context-files";
 import {
   createHermesPortableTransactionFixture,
   HERMES_PORTABLE_TEST_LIVE_IDENTITY,
@@ -51,8 +52,63 @@ function createPrivateFixtureRoot(): string {
   return fixtureRoot;
 }
 
+function runFixtureGit(repository: string, args: readonly string[]): string {
+  const result = spawnSync("git", ["-C", repository, ...args], { encoding: "utf8" });
+  expect(result.status, result.stderr).toBe(0);
+  return result.stdout.trim();
+}
+
+function createHermesPortableSourceRepository(fixtureRoot: string): {
+  repository: string;
+  revision: string;
+} {
+  const repository = path.join(fixtureRoot, "accepted-source");
+  fs.mkdirSync(repository, { mode: 0o700 });
+  runFixtureGit(repository, ["init", "--quiet"]);
+
+  for (const entry of HERMES_PORTABLE_BUILD_CONTEXT_FILES.filter(
+    ({ mode }) => mode !== "160000",
+  )) {
+    const target = path.join(repository, entry.path);
+    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o755 });
+    fs.copyFileSync(path.join(ROOT, entry.path), target);
+    fs.chmodSync(target, entry.mode === "100755" ? 0o755 : 0o644);
+  }
+  runFixtureGit(repository, ["add", "--all"]);
+
+  for (const entry of HERMES_PORTABLE_BUILD_CONTEXT_FILES.filter(
+    ({ mode }) => mode === "160000",
+  )) {
+    const sourceEntry = runFixtureGit(ROOT, ["ls-tree", "HEAD", "--", entry.path]);
+    const objectId = /^160000 commit ([a-f0-9]{40,64})\t/u.exec(sourceEntry)?.[1];
+    expect(objectId, `missing Git link source for ${entry.path}`).toBeDefined();
+    runFixtureGit(repository, [
+      "update-index",
+      "--add",
+      "--cacheinfo",
+      `160000,${objectId!},${entry.path}`,
+    ]);
+  }
+
+  runFixtureGit(repository, [
+    "-c",
+    "user.name=NemoClaw Test",
+    "-c",
+    "user.email=nemoclaw-test@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "--no-verify",
+    "--quiet",
+    "-m",
+    "test: materialize Hermes portable source",
+  ]);
+  return { repository, revision: runFixtureGit(repository, ["rev-parse", "HEAD"]) };
+}
+
 function cloneWithInstaller(
   installer: string,
+  repository: string,
   ref: string,
   destination: string,
   callerUmask: string,
@@ -70,7 +126,7 @@ function cloneWithInstaller(
         CALLER_UMASK: callerUmask,
         DESTINATION: destination,
         GIT_CONFIG_COUNT: "1",
-        GIT_CONFIG_KEY_0: `url.file://${ROOT}.insteadOf`,
+        GIT_CONFIG_KEY_0: `url.file://${repository}.insteadOf`,
         GIT_CONFIG_VALUE_0: "https://github.com/NVIDIA/NemoClaw.git",
         INSTALLER_UNDER_TEST: installer,
         REF: ref,
@@ -94,16 +150,19 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
 
       try {
         fs.mkdirSync(workspaceRoot, { recursive: true, mode: 0o700 });
-        const sourceRevision = spawnSync("git", ["rev-parse", "HEAD"], {
-          cwd: ROOT,
-          encoding: "utf8",
-        }).stdout.trim();
-        cloneWithInstaller(CURL_PIPE_INSTALLER, sourceRevision, checkout, "0077");
+        const source = createHermesPortableSourceRepository(fixtureRoot);
+        cloneWithInstaller(
+          CURL_PIPE_INSTALLER,
+          source.repository,
+          source.revision,
+          checkout,
+          "0077",
+        );
         makeHermesPortableCheckoutPrivate(checkout);
         const sourceRoot = fs.realpathSync(checkout);
         expect(
           createHermesPortableBuildContextPlan(sourceRoot, BUILD_SETTINGS).authority.sourceRevision,
-        ).toBe(sourceRevision);
+        ).toBe(source.revision);
         fs.chmodSync(githubWorkRoot, mode);
         expect(() => createHermesPortableBuildContextPlan(sourceRoot, BUILD_SETTINGS)).toThrow(
           "Hermes portable build context source root directory chain is unsafe",
@@ -125,10 +184,7 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
     const registry = await import("../../src/lib/state/registry");
     const onboardSession = await import("../../src/lib/state/onboard-session");
     const { registerCreatedSandbox } = await import("../../src/lib/onboard/sandbox-registration");
-    const sourceRevision = spawnSync("git", ["rev-parse", "HEAD"], {
-      cwd: ROOT,
-      encoding: "utf8",
-    }).stdout.trim();
+    const source = createHermesPortableSourceRepository(fixtureRoot);
     const sandboxName = `hermes-install-${process.pid}`;
     const gatewayName = "nemoclaw";
     const payloadCheckout = path.join(fixtureRoot, "payload-checkout");
@@ -136,8 +192,20 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
     let restoreEnvironment: (() => void) | null = null;
 
     try {
-      cloneWithInstaller(INSTALLER_PAYLOAD, sourceRevision, payloadCheckout, "0022");
-      cloneWithInstaller(CURL_PIPE_INSTALLER, sourceRevision, curlPipeCheckout, "0077");
+      cloneWithInstaller(
+        INSTALLER_PAYLOAD,
+        source.repository,
+        source.revision,
+        payloadCheckout,
+        "0022",
+      );
+      cloneWithInstaller(
+        CURL_PIPE_INSTALLER,
+        source.repository,
+        source.revision,
+        curlPipeCheckout,
+        "0077",
+      );
       makeHermesPortableCheckoutPrivate(curlPipeCheckout);
 
       const payloadBuildContext = createHermesPortableBuildContextPlan(
@@ -148,8 +216,8 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
         fs.realpathSync(curlPipeCheckout),
         BUILD_SETTINGS,
       );
-      expect(payloadBuildContext.authority.sourceRevision).toBe(sourceRevision);
-      expect(activeBuildContext.authority.sourceRevision).toBe(sourceRevision);
+      expect(payloadBuildContext.authority.sourceRevision).toBe(source.revision);
+      expect(activeBuildContext.authority.sourceRevision).toBe(source.revision);
       payloadBuildContext.assertCurrentSource();
 
       const uid = process.getuid!();

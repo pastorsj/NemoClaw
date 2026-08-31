@@ -5,7 +5,7 @@ import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
 import {
   createHarnessInventoryView,
   renderHarnessInventoryText,
-} from "../../lib/harness/package-list";
+} from "../../lib/agent-runtime/package/inventory";
 
 export const harnessListCommandDependencies = {
   createHarnessInventoryView,

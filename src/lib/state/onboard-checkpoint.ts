@@ -10,7 +10,7 @@ import {
   harnessPackageIdentitiesEqual,
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import { normalizeWebSearchConfig, type WebSearchConfig } from "../inference/web-search";
 import { NAME_MAX_LENGTH, NAME_VALID_PATTERN } from "../name-validation";
 import { isOnboardMachineState } from "../onboard/machine/transitions";

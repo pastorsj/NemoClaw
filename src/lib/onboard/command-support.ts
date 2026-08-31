@@ -2,12 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Flags } from "@oclif/core";
+import type { AgentAliasTarget } from "../agent/aliases";
 import { TOOL_DISCLOSURE_VALUES, type ToolDisclosure } from "../tool-disclosure";
 import { describeAgentFlag } from "./agent-flag-help";
 import { PORTABLE_EXPERIMENTAL_PROFILE } from "./docker-driver-platform";
 import { NOTICE_ACCEPT_FLAG, NOTICE_ACCEPT_FLAG_NAME } from "./usage-notice";
 
-type AgentRegistryReader = () => readonly string[];
+export interface OnboardAgentRegistryEntry extends AgentAliasTarget {
+  readonly displayName: string;
+  readonly isDefaultOnboardingChoice: boolean;
+  readonly defaultSandboxName: string;
+}
+
+type AgentRegistryReader = () => readonly OnboardAgentRegistryEntry[];
 
 let agentRegistryReaderForTest: AgentRegistryReader | null = null;
 
@@ -15,32 +22,70 @@ export function setAgentRegistryReaderForTest(reader: AgentRegistryReader | null
   agentRegistryReaderForTest = reader;
 }
 
-export function readAgentRegistryNames(): readonly string[] {
-  if (agentRegistryReaderForTest) return agentRegistryReaderForTest();
-  const { listAgents } = require("../agent/defs") as typeof import("../agent/defs");
-  return listAgents();
-}
-
-function prioritizeDefaultAgent(names: readonly string[]): string[] {
-  return [...names].sort((left, right) => {
-    if (left === "openclaw") return -1;
-    if (right === "openclaw") return 1;
-    return left.localeCompare(right);
+function registryEntry(record: {
+  readonly id: string;
+  readonly displayName: string;
+  readonly aliases: readonly string[];
+  readonly aliasSummary: string | null;
+  readonly isDefaultOnboardingChoice: boolean;
+  readonly defaultSandboxName: string;
+}): OnboardAgentRegistryEntry {
+  return Object.freeze({
+    name: record.id,
+    displayName: record.displayName,
+    aliases: record.aliases,
+    aliasSummary: record.aliasSummary,
+    isDefaultOnboardingChoice: record.isDefaultOnboardingChoice,
+    defaultSandboxName: record.defaultSandboxName,
   });
 }
 
-// Resolve the installed agent runtimes for the `--agent` help, falling back to
-// the generic description if the agent registry can't be read (#5779). The
-// agent registry is loaded lazily via require (not a top-level import) so this
-// module — evaluated at command-class load via `static flags = ...` — does not
-// pull the agent/defs -> runner chain into the module-linking graph, matching
-// how other onboard modules consume agent/defs and avoiding a load cycle.
-// Remove this fallback only after command-class load no longer crosses the
-// agent/defs -> runner chain, or after the agent registry exposes a side-effect
-// free metadata reader for command help.
+function packageInventory() {
+  const { listHarnessPackageInventory } =
+    require("../agent-runtime/package/catalog") as typeof import("../agent-runtime/package/catalog");
+  return listHarnessPackageInventory();
+}
+
+function orderRegistryEntries(
+  entries: readonly OnboardAgentRegistryEntry[],
+): readonly OnboardAgentRegistryEntry[] {
+  return [...entries].sort((left, right) => {
+    if (left.isDefaultOnboardingChoice !== right.isDefaultOnboardingChoice) {
+      return left.isDefaultOnboardingChoice ? -1 : 1;
+    }
+    return left.name.localeCompare(right.name);
+  });
+}
+
+/** Read only packages whose active receipt and installed tree pass integrity checks. */
+export function readInstalledAgentRegistryEntries(): readonly OnboardAgentRegistryEntry[] {
+  if (agentRegistryReaderForTest) return orderRegistryEntries(agentRegistryReaderForTest());
+  return orderRegistryEntries(
+    packageInventory().installed.flatMap((record) =>
+      record.state === "installed" ? [registryEntry(record)] : [],
+    ),
+  );
+}
+
+/** Read package metadata from the reviewed bundle for command-input validation. */
+export function readReviewedAgentRegistryEntries(): readonly OnboardAgentRegistryEntry[] {
+  return orderRegistryEntries(packageInventory().available.map(registryEntry));
+}
+
+export function readAgentRegistryNames(): readonly string[] {
+  return readInstalledAgentRegistryEntries().map(({ name }) => name);
+}
+
+// Read installed package metadata lazily because oclif constructs static flag
+// help while loading the command class. If the catalogue is unavailable, keep
+// the command loadable and show the generic description (#5779).
 function agentFlagDescription(): string {
   try {
-    return describeAgentFlag(prioritizeDefaultAgent(readAgentRegistryNames()));
+    const entries = readInstalledAgentRegistryEntries();
+    return describeAgentFlag(
+      entries.map(({ name }) => name),
+      entries,
+    );
   } catch {
     return describeAgentFlag([]);
   }

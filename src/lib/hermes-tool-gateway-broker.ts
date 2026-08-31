@@ -10,11 +10,173 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
+const { parseHarnessPackageManifest } = require("./agent-runtime/package/manifest");
+const { readInstalledHarnessPackage } = require("./agent-runtime/package/store");
 const { ROOT, run, runCapture, runCaptureEx, validateName } = require("./runner");
 const { buildSubprocessEnv } = require("./subprocess-env");
 const { getCredsDir } = require("./credentials/store");
 const oauth = require("./oauth-device-code");
 const onboardProviders = require("./onboard/providers");
+
+const HERMES_HOST_RUNTIME_FILE_NAMES = Object.freeze([
+  "tool-broker.ts",
+  "broker-credentials.ts",
+  "clone-control.ts",
+  "request-proxy.ts",
+  "tool-matrix.json",
+  "refresh-credentials.ts",
+  "tool-contract.ts",
+  "name-validation.ts",
+]);
+const HERMES_HOST_RUNTIME_CACHE = Symbol.for("nemoclaw.hermes.host-runtime-cache");
+
+function sameFileSnapshot(left, right) {
+  return (
+    left.isFile() &&
+    right.isFile() &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.uid === right.uid &&
+    left.gid === right.gid &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function readStableHostRuntimeFile(sourcePath) {
+  const before = fs.lstatSync(sourcePath, { bigint: true });
+  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1n) {
+    throw new Error("Hermes host runtime must contain only regular package files");
+  }
+  const bytes = fs.readFileSync(sourcePath);
+  const after = fs.lstatSync(sourcePath, { bigint: true });
+  if (!sameFileSnapshot(before, after) || BigInt(bytes.length) !== after.size) {
+    throw new Error("Hermes host runtime changed while it was being captured");
+  }
+  return bytes;
+}
+
+function bundledHermesPackageRoot() {
+  const authoringPackage = path.join(ROOT, "packages", "nemoclaw-hermes");
+  const builtPackage = path.join(ROOT, "dist", "harnesses", "nemoclaw-hermes");
+  const candidates = __filename.endsWith(".ts")
+    ? [authoringPackage, builtPackage]
+    : [builtPackage, authoringPackage];
+  const packageRoot = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!packageRoot) throw new Error("Hermes harness package is unavailable");
+  return packageRoot;
+}
+
+function selectedHermesPackage() {
+  const installed = readInstalledHarnessPackage("hermes");
+  if (installed) {
+    return {
+      cacheIdentity: installed.identity.contentDigest,
+      integrationRoot: path.dirname(installed.packageManifest.manifestPath),
+      packageRoot: installed.packageRoot,
+    };
+  }
+  const packageRoot = bundledHermesPackageRoot();
+  const metadataPath = path.join(packageRoot, "nemoclaw-package.json");
+  return {
+    cacheIdentity: null,
+    integrationRoot: fs.existsSync(metadataPath)
+      ? path.dirname(parseHarnessPackageManifest(packageRoot).manifestPath)
+      : packageRoot,
+    packageRoot,
+  };
+}
+
+function hostRuntimeContentIdentity(files) {
+  const digest = crypto.createHash("sha256");
+  for (const { bytes, fileName } of files) {
+    digest.update(fileName);
+    digest.update("\0");
+    digest.update(bytes);
+    digest.update("\0");
+  }
+  return digest.digest("hex");
+}
+
+function hostRuntimeCache() {
+  const existing = process[HERMES_HOST_RUNTIME_CACHE];
+  if (
+    existing?.version === 1 &&
+    typeof existing.captures?.get === "function" &&
+    typeof existing.captures?.set === "function" &&
+    typeof existing.captures?.values === "function"
+  ) {
+    return existing;
+  }
+  if (existing !== undefined) {
+    throw new Error("Hermes host runtime cache has an invalid process-global value");
+  }
+
+  const state = { captures: new Map(), version: 1 };
+  Object.defineProperty(process, HERMES_HOST_RUNTIME_CACHE, {
+    configurable: false,
+    enumerable: false,
+    value: state,
+    writable: false,
+  });
+  process.once("exit", () => {
+    for (const runtimePaths of state.captures.values()) {
+      fs.rmSync(runtimePaths.runtimeRoot, { force: true, recursive: true });
+    }
+    state.captures.clear();
+  });
+  return state;
+}
+
+function captureHermesHostRuntime() {
+  const selected = selectedHermesPackage();
+  const sourceHostDir = path.join(selected.integrationRoot, "host");
+  const files = HERMES_HOST_RUNTIME_FILE_NAMES.map((fileName) => ({
+    bytes: readStableHostRuntimeFile(path.join(sourceHostDir, fileName)),
+    fileName,
+  }));
+  const contentIdentity = selected.cacheIdentity ?? hostRuntimeContentIdentity(files);
+  const cacheKey = `${selected.packageRoot}\0${contentIdentity}`;
+  const cache = hostRuntimeCache();
+  const cached = cache.captures.get(cacheKey);
+  if (cached && fs.existsSync(cached.runtimeRoot)) return cached;
+
+  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-host-"));
+  const hostDir = path.join(runtimeRoot, "host");
+  try {
+    fs.chmodSync(runtimeRoot, 0o700);
+    fs.mkdirSync(hostDir, { mode: 0o700 });
+    fs.chmodSync(hostDir, 0o700);
+    for (const { bytes, fileName } of files) {
+      const destination = path.join(hostDir, fileName);
+      fs.writeFileSync(destination, bytes, { flag: "wx", mode: 0o400 });
+      fs.chmodSync(destination, 0o400);
+    }
+    const runtimePaths = Object.freeze({
+      packageRoot: selected.packageRoot,
+      runtimeRoot,
+      hostDir,
+      script: path.join(hostDir, "tool-broker.ts"),
+      brokerCredentials: path.join(hostDir, "broker-credentials.ts"),
+      cloneControl: path.join(hostDir, "clone-control.ts"),
+      requestProxy: path.join(hostDir, "request-proxy.ts"),
+      matrix: path.join(hostDir, "tool-matrix.json"),
+      runtimeCredentials: path.join(hostDir, "refresh-credentials.ts"),
+      controlContract: path.join(hostDir, "tool-contract.ts"),
+      nameValidation: path.join(hostDir, "name-validation.ts"),
+    });
+    cache.captures.set(cacheKey, runtimePaths);
+    return runtimePaths;
+  } catch (error) {
+    fs.rmSync(runtimeRoot, { force: true, recursive: true });
+    throw error;
+  }
+}
+
+const HERMES_TOOL_GATEWAY_RUNTIME_PATHS = captureHermesHostRuntime();
 const {
   HERMES_CLONE_CONTROL_CLIENT_TIMEOUT_MS,
   HERMES_CLONE_CONTROL_STATUS_TIMEOUT_MS,
@@ -22,7 +184,7 @@ const {
   isValidControlRequestId,
   isValidProviderName,
   newControlDeadline,
-} = require(path.join(ROOT, "agents", "hermes", "host", "tool-gateway-control-contract.ts"));
+} = require(HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract);
 
 const HERMES_TOOL_GATEWAY_REFRESH_CREDENTIAL_ENV = "NEMOCLAW_HERMES_TOOL_GATEWAY_REFRESH_TOKEN";
 const HERMES_TOOL_GATEWAY_PORT = 11436;
@@ -33,34 +195,12 @@ const HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH = path.join(
   getCredsDir(),
   "hermes-tool-gateway-broker.sock",
 );
-const HERMES_TOOL_GATEWAY_SCRIPT = path.join(
-  ROOT,
-  "agents",
-  "hermes",
-  "host",
-  "tool-gateway-broker.ts",
-);
-const HERMES_TOOL_GATEWAY_MATRIX_PATH = path.join(
-  ROOT,
-  "agents",
-  "hermes",
-  "host",
-  "managed-tool-gateway-matrix.json",
-);
-const HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH = path.join(
-  ROOT,
-  "agents",
-  "hermes",
-  "host",
-  "runtime-refresh-credentials.ts",
-);
-const HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH = path.join(
-  ROOT,
-  "agents",
-  "hermes",
-  "host",
-  "tool-gateway-control-contract.ts",
-);
+const HERMES_TOOL_GATEWAY_SCRIPT = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.script;
+const HERMES_TOOL_GATEWAY_MATRIX_PATH = HERMES_TOOL_GATEWAY_RUNTIME_PATHS.matrix;
+const HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH =
+  HERMES_TOOL_GATEWAY_RUNTIME_PATHS.runtimeCredentials;
+const HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH =
+  HERMES_TOOL_GATEWAY_RUNTIME_PATHS.controlContract;
 const HERMES_TOOL_GATEWAY_RUNTIME_MISMATCH_RECOVERY =
   "Reauthorize every managed-tool Hermes sandbox, then retry.";
 const HERMES_TOOL_GATEWAY_UNOWNED_LISTENER_RECOVERY =
@@ -610,15 +750,15 @@ function brokerRuntimeHash() {
     .update(
       JSON.stringify({
         port: HERMES_TOOL_GATEWAY_PORT,
-        script: HERMES_TOOL_GATEWAY_SCRIPT,
+        script: path.basename(HERMES_TOOL_GATEWAY_SCRIPT),
         scriptSha256: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_SCRIPT),
-        runtimeCredentials: HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH,
+        runtimeCredentials: path.basename(HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH),
         runtimeCredentialsSha256: brokerRuntimeFileHash(
           HERMES_TOOL_GATEWAY_RUNTIME_CREDENTIALS_PATH,
         ),
-        controlContract: HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH,
+        controlContract: path.basename(HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH),
         controlContractSha256: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_CONTROL_CONTRACT_PATH),
-        matrix: HERMES_TOOL_GATEWAY_MATRIX_PATH,
+        matrix: path.basename(HERMES_TOOL_GATEWAY_MATRIX_PATH),
         matrixSha256: brokerRuntimeFileHash(HERMES_TOOL_GATEWAY_MATRIX_PATH),
         stateDir: HERMES_TOOL_GATEWAY_STATE_DIR,
         controlSocket: HERMES_TOOL_GATEWAY_CONTROL_SOCKET_PATH,
@@ -652,7 +792,7 @@ function clearBrokerHash() {
 function isHermesToolGatewayBrokerProcess(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   const cmdline = runCapture(["ps", "-p", String(pid), "-o", "args="], { ignoreError: true });
-  return Boolean(cmdline && cmdline.includes("tool-gateway-broker.ts"));
+  return Boolean(cmdline && cmdline.includes(path.basename(HERMES_TOOL_GATEWAY_SCRIPT)));
 }
 
 function isHermesToolGatewayBrokerPortOwner(pid, deps = {}) {
@@ -934,6 +1074,7 @@ function ensureHermesToolGatewayBrokerForSandboxEntry(entry, options = {}) {
 }
 
 module.exports = {
+  HERMES_TOOL_GATEWAY_RUNTIME_PATHS,
   HERMES_TOOL_GATEWAY_REFRESH_CREDENTIAL_ENV,
   HERMES_TOOL_GATEWAY_STATE_DIR,
   HERMES_TOOL_GATEWAY_PORT,

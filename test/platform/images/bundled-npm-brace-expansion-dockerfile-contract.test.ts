@@ -17,13 +17,13 @@ import { requireSingleReviewedDockerfileRunCommand } from "../../helpers/dockerf
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const baseDockerfiles = [
   "Dockerfile.base",
-  "agents/hermes/Dockerfile.base",
-  "agents/langchain-deepagents-code/Dockerfile.base",
+  "packages/nemoclaw-hermes/Dockerfile.base",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
 ] as const;
 const finalDockerfiles = [
   "Dockerfile",
-  "agents/hermes/Dockerfile",
-  "agents/langchain-deepagents-code/Dockerfile",
+  "packages/nemoclaw-hermes/Dockerfile",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ] as const;
 const copyInstruction =
   "COPY scripts/patch-bundled-npm-brace-expansion.mts /scripts/patch-bundled-npm-brace-expansion.mts";
@@ -37,8 +37,8 @@ const hermesTarCacheSeedArguments = [
 ] as const;
 const tarPatchArgumentsByDockerfile = {
   Dockerfile: npmRootArguments,
-  "agents/hermes/Dockerfile": hermesTarCacheSeedArguments,
-  "agents/langchain-deepagents-code/Dockerfile": npmRootArguments,
+  "packages/nemoclaw-hermes/Dockerfile": hermesTarCacheSeedArguments,
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile": npmRootArguments,
 } as const;
 
 describe("bundled npm brace-expansion image remediation contract", () => {

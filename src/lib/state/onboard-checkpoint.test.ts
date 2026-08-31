@@ -291,7 +291,6 @@ describe("checkpoint schema inspection", () => {
       kind: "agent-runtime" as const,
       id: "hermes",
       packageVersion: "2.0.0",
-      contractVersion: 1 as const,
       contentDigest: "d".repeat(64),
     };
     const serialized = serializeCheckpoint(baseCheckpoint({ harnessPackage }));
@@ -328,7 +327,6 @@ describe("checkpoint schema inspection", () => {
       kind: "agent-runtime",
       id: "hermes",
       packageVersion: "2.0.0",
-      contractVersion: 1,
       contentDigest: "d".repeat(64),
       apiKey: "secret",
     },

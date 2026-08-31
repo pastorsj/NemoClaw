@@ -7,7 +7,7 @@ import { expect } from "vitest";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
-} from "../../../harness/package-identity";
+} from "../../../agent-runtime/package/identity";
 import { fingerprintSandboxRecreateValue } from "../../../onboard/sandbox-recreate-transaction";
 import * as f from "../snapshot-restore-test-fixture";
 
@@ -39,7 +39,6 @@ export function harnessPackage(
     kind: "agent-runtime",
     id,
     packageVersion: "1.2.3",
-    contractVersion: 1,
     contentDigest: digestCharacter.repeat(64),
   };
 }

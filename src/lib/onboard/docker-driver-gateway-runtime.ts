@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { dockerCapture as defaultDockerCapture } from "../adapters/docker/command";
 import { isErrnoException } from "../core/errno";
 import { isSupportedGatewayDockerHost } from "../domain/docker-host";
 import {
@@ -70,9 +71,10 @@ type RunCaptureEx = (args: readonly string[]) => {
   exitCode: number | null;
   timedOut: boolean;
 };
+type DockerCapture = typeof defaultDockerCapture;
 type DockerDriverGatewayEnvModule = typeof import("./docker-driver-gateway-env");
 
-function resolveGatewayDockerHost(env: NodeJS.ProcessEnv, runCapture: RunCapture): string {
+function resolveGatewayDockerHost(env: NodeJS.ProcessEnv, dockerCapture: DockerCapture): string {
   const explicitDockerHost = env.DOCKER_HOST;
   if (explicitDockerHost?.trim()) {
     if (!isSupportedGatewayDockerHost(explicitDockerHost)) {
@@ -83,10 +85,9 @@ function resolveGatewayDockerHost(env: NodeJS.ProcessEnv, runCapture: RunCapture
     return explicitDockerHost.trim();
   }
 
-  const inspection = runCapture(
-    ["docker", "context", "inspect", "--format", DOCKER_CONTEXT_HOST_FORMAT],
-    { ignoreError: true },
-  ).trim();
+  const inspection = dockerCapture(["context", "inspect", "--format", DOCKER_CONTEXT_HOST_FORMAT], {
+    ignoreError: true,
+  }).trim();
   let contextDockerHost: unknown;
   try {
     contextDockerHost = JSON.parse(inspection);
@@ -116,6 +117,7 @@ function resolveGatewayDockerHost(env: NodeJS.ProcessEnv, runCapture: RunCapture
 // attached to a Docker-driver gateway. These heuristics can be retired when
 // OpenShell owns and reports the same runtime identity fields directly.
 export interface DockerDriverGatewayRuntimeDeps {
+  dockerCapture?: DockerCapture;
   gatewayPort: number | (() => number);
   getCachedOpenshellBinary(): string | null;
   getBlueprintMaxOpenshellVersion(): string | null;
@@ -298,7 +300,7 @@ export function createDockerDriverGatewayRuntimeHelpers(deps: DockerDriverGatewa
     }
     const resolvedDockerHost = portable
       ? undefined
-      : resolveGatewayDockerHost(process.env, deps.runCapture);
+      : resolveGatewayDockerHost(process.env, deps.dockerCapture ?? defaultDockerCapture);
     const gatewayEnv = dockerDriverGatewayEnv.buildDockerDriverGatewayEnv({
       platform,
       gatewayPort: currentGatewayPort(),

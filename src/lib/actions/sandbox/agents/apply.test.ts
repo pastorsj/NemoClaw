@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as registry from "../../../state/registry";
 import {
   buildAgentsApplyDiff,
   buildOpenclawAgentAddArgs,
@@ -27,9 +28,14 @@ function manifestFile(name: string, content: string): string {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-agents-apply-"));
+  vi.spyOn(registry, "getSandbox").mockReturnValue({
+    name: "my-assistant",
+    agent: "openclaw",
+  });
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 

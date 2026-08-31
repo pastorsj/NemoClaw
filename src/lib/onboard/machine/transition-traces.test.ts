@@ -12,8 +12,9 @@
  * and are owned by #6227.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as registry from "../../state/registry";
 import type { OnboardMachineEvent } from "./events";
 import { handleSandboxState } from "./handlers/sandbox";
 import { baseOptions, bindJournaledRecreate, createDeps } from "./handlers/sandbox-test-fixtures";
@@ -106,6 +107,15 @@ function fullRunHandlers(
     ...overrides,
   };
 }
+
+beforeEach(() => {
+  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("onboard machine lifecycle traces (#6225)", () => {
   it("emits the fresh-run lifecycle event stream in canonical order (#6225)", async () => {

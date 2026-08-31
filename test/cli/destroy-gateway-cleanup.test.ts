@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { writeManagedGatewayDeclaration } from "../helpers/gateway-management";
 import { runWithEnv, testTimeoutOptions } from "./helpers";
 
 const LIVE_DOCKER_IDENTITY = `#!/bin/sh
@@ -25,6 +26,14 @@ esac
 exit 0
 `;
 
+function writeEmptyOllamaStub(localBin: string): void {
+  fs.writeFileSync(
+    path.join(localBin, "curl"),
+    ["#!/bin/sh", "printf '%s\\n' '{\"models\":[]}'"].join("\n"),
+    { mode: 0o755 },
+  );
+}
+
 describe("CLI dispatch", () => {
   it(
     "uses the platform gateway default when the last sandbox is destroyed (#2166, #4662)",
@@ -35,7 +44,9 @@ describe("CLI dispatch", () => {
       const registryDir = path.join(home, ".nemoclaw");
       const openshellLog = path.join(home, "openshell.log");
       const bashLog = path.join(home, "docker.log");
+      const gatewayManagement = writeManagedGatewayDeclaration(home);
       fs.mkdirSync(localBin, { recursive: true });
+      writeEmptyOllamaStub(localBin);
       fs.mkdirSync(registryDir, { recursive: true });
       fs.writeFileSync(
         path.join(registryDir, "sandboxes.json"),
@@ -80,10 +91,11 @@ describe("CLI dispatch", () => {
 
       const r = runWithEnv("alpha destroy -y", {
         HOME: home,
+        NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
         PATH: `${localBin}:${process.env.PATH || ""}`,
       });
 
-      expect(r.code).toBe(0);
+      expect(r.code, r.out).toBe(0);
       const openshellOutput = fs.readFileSync(openshellLog, "utf8");
       const dockerOutput = fs.readFileSync(bashLog, "utf8");
       const shouldCleanupGateway = process.platform === "darwin";
@@ -109,6 +121,7 @@ describe("CLI dispatch", () => {
       const openshellLog = path.join(home, "openshell.log");
       const bashLog = path.join(home, "docker.log");
       fs.mkdirSync(localBin, { recursive: true });
+      writeEmptyOllamaStub(localBin);
       fs.mkdirSync(registryDir, { recursive: true });
       fs.writeFileSync(
         path.join(registryDir, "sandboxes.json"),
@@ -192,7 +205,9 @@ describe("CLI dispatch", () => {
       const registryDir = path.join(home, ".nemoclaw");
       const openshellLog = path.join(home, "openshell.log");
       const bashLog = path.join(home, "docker.log");
+      const gatewayManagement = writeManagedGatewayDeclaration(home);
       fs.mkdirSync(localBin, { recursive: true });
+      writeEmptyOllamaStub(localBin);
       fs.mkdirSync(registryDir, { recursive: true });
       fs.writeFileSync(
         path.join(registryDir, "sandboxes.json"),
@@ -243,6 +258,7 @@ describe("CLI dispatch", () => {
           HOME: home,
           PATH: `${localBin}:${process.env.PATH || ""}`,
           NEMOCLAW_CLEANUP_GATEWAY: "1",
+          NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
         },
         30_000,
       );
@@ -431,6 +447,7 @@ describe("CLI dispatch", () => {
     const openshellLog = path.join(home, "openshell.log");
     const bashLog = path.join(home, "docker.log");
     fs.mkdirSync(localBin, { recursive: true });
+    writeEmptyOllamaStub(localBin);
     fs.mkdirSync(registryDir, { recursive: true });
     fs.writeFileSync(
       path.join(registryDir, "sandboxes.json"),
@@ -505,6 +522,7 @@ describe("CLI dispatch", () => {
     const openshellLog = path.join(home, "openshell.log");
     const bashLog = path.join(home, "docker.log");
     fs.mkdirSync(localBin, { recursive: true });
+    writeEmptyOllamaStub(localBin);
     fs.mkdirSync(registryDir, { recursive: true });
     fs.writeFileSync(
       path.join(registryDir, "sandboxes.json"),
@@ -792,7 +810,9 @@ describe("CLI dispatch", () => {
       const registryDir = path.join(home, ".nemoclaw");
       const openshellLog = path.join(home, "openshell.log");
       const bashLog = path.join(home, "docker.log");
+      const gatewayManagement = writeManagedGatewayDeclaration(home);
       fs.mkdirSync(localBin, { recursive: true });
+      writeEmptyOllamaStub(localBin);
       fs.mkdirSync(registryDir, { recursive: true });
       fs.writeFileSync(
         path.join(registryDir, "sandboxes.json"),
@@ -843,10 +863,11 @@ describe("CLI dispatch", () => {
 
       const r = runWithEnv("alpha destroy --yes", {
         HOME: home,
+        NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
         PATH: `${localBin}:${process.env.PATH || ""}`,
       });
 
-      expect(r.code).toBe(0);
+      expect(r.code, r.out).toBe(0);
       expect(r.out).toContain("already absent from the live gateway");
       expect(r.out).toContain("Sandbox 'alpha' destroyed");
 
@@ -873,7 +894,9 @@ describe("CLI dispatch", () => {
     const registryDir = path.join(home, ".nemoclaw");
     const openshellLog = path.join(home, "openshell.log");
     const bashLog = path.join(home, "docker.log");
+    const gatewayManagement = writeManagedGatewayDeclaration(home);
     fs.mkdirSync(localBin, { recursive: true });
+    writeEmptyOllamaStub(localBin);
     fs.mkdirSync(registryDir, { recursive: true });
     fs.writeFileSync(
       path.join(registryDir, "sandboxes.json"),
@@ -918,10 +941,11 @@ describe("CLI dispatch", () => {
 
     const r = runWithEnv("alpha destroy --yes", {
       HOME: home,
+      NEMOCLAW_GATEWAY_MANAGEMENT: gatewayManagement,
       PATH: `${localBin}:${process.env.PATH || ""}`,
     });
 
-    expect(r.code).toBe(0);
+    expect(r.code, r.out).toBe(0);
     const log = fs.readFileSync(openshellLog, "utf8");
     expect(log).toContain("provider delete alpha-telegram-bridge");
     expect(log).toContain("provider delete alpha-discord-bridge");

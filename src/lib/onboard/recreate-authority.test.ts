@@ -23,7 +23,6 @@ const packageIdentity = {
   kind: "agent-runtime" as const,
   id: "langchain-deepagents-code",
   packageVersion: "0.1.0",
-  contractVersion: 1 as const,
   contentDigest: "a".repeat(64),
 };
 

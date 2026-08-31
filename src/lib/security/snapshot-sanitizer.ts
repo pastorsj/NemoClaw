@@ -11,7 +11,7 @@ import {
   type SnapshotSanitizationAction,
   type SnapshotScannedFile,
   scanDescriptorSnapshot,
-} from "../../../nemoclaw/dist/shared/snapshot-sanitizer-boundary.cjs";
+} from "../shared/snapshot-sanitizer-boundary.cjs";
 
 import {
   CREDENTIAL_SENSITIVE_BASENAMES,
@@ -24,7 +24,7 @@ import {
 } from "./credential-filter";
 
 /** Re-exported so CLI callers identify the prerequisite failure without importing the plugin boundary module. (#8202) */
-export { SnapshotSanitizerPrerequisiteError } from "../../../nemoclaw/dist/shared/snapshot-sanitizer-boundary.cjs";
+export { SnapshotSanitizerPrerequisiteError } from "../shared/snapshot-sanitizer-boundary.cjs";
 
 const MAX_SANITIZATION_PASSES = 3;
 

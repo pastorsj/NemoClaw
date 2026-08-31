@@ -12,25 +12,34 @@ const repoRoot = path.join(import.meta.dirname, "..", "..");
 const url = (...segments: string[]) => pathToFileURL(path.join(repoRoot, ...segments)).href;
 
 describe("banner boundary package contract", () => {
-  it("resolves both built package wrappers to the one generated boundary function", () => {
+  it("resolves each built package wrapper to its package-owned boundary function", () => {
     // Native subprocess: only native resolution bypasses the Vitest source alias
     // (which maps *banner-boundary.cjs to .cts) to compare the real shipped dist.
     const script =
       `const cli = await import(${JSON.stringify(url("dist/lib/cli/banner.js"))});` +
-      `const plugin = await import(${JSON.stringify(url("nemoclaw/dist/banner.js"))});` +
-      `const b = await import(${JSON.stringify(url("nemoclaw/dist/shared/banner-boundary.cjs"))});` +
+      `const plugin = await import(${JSON.stringify(url("packages/nemoclaw-openclaw/plugin/dist/banner.js"))});` +
+      `const cliBoundary = await import(${JSON.stringify(url("dist/lib/shared/banner-boundary.cjs"))});` +
+      `const pluginBoundary = await import(${JSON.stringify(url("packages/nemoclaw-openclaw/plugin/dist/shared/banner-boundary.cjs"))});` +
       `const cliRenderBox = cli.renderBox ?? cli.default.renderBox;` +
-      `process.stdout.write(JSON.stringify([cliRenderBox === b.renderBox, plugin.renderBox === b.renderBox, cliRenderBox(["abcdef"], { columns: 5 })]));`;
+      `process.stdout.write(JSON.stringify([cliRenderBox === cliBoundary.renderBox, plugin.renderBox === pluginBoundary.renderBox, cliRenderBox(["abcdef"], { columns: 5 }), plugin.renderBox(["abcdef"], { columns: 5 })]));`;
     const output = execFileSync(process.execPath, ["--input-type=module", "-e", script], {
       cwd: repoRoot,
       encoding: "utf8",
       timeout: 30_000,
     });
-    expect(JSON.parse(output)).toEqual([true, true, ["  ┌─┐", "  │ │", "  └─┘"]]);
+    expect(JSON.parse(output)).toEqual([
+      true,
+      true,
+      ["  ┌─┐", "  │ │", "  └─┘"],
+      ["  ┌─┐", "  │ │", "  └─┘"],
+    ]);
   });
 
   it("ships the generated canonical CJS boundary and its declaration", () => {
-    const sharedDir = path.join(repoRoot, "nemoclaw", "dist", "shared");
+    const sharedDir = path.join(
+      repoRoot,
+      "packages/nemoclaw-openclaw/plugin/dist/shared",
+    );
     expect(fs.existsSync(path.join(sharedDir, "banner-boundary.cjs"))).toBe(true);
     expect(fs.existsSync(path.join(sharedDir, "banner-boundary.d.cts"))).toBe(true);
     expect(fs.existsSync(path.join(sharedDir, "banner-boundary.js"))).toBe(false);

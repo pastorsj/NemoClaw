@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type Session, updateSession } from "../state/onboard-session";
-import { inspectHarnessPackageState } from "../harness/package-identity";
+import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
 import { clearAgentScopedResumeState } from "./agent-resume-state";
 import { isDcodeAutoApprovalMode } from "./dcode-auto-approval";
 import { managedSandboxFeatureIssue } from "./managed-sandbox-feature";

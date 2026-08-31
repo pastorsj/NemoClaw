@@ -11,7 +11,10 @@ import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 import { ROOT } from "../../runner";
 import { createHermesPortableBuildContextPlan } from "./hermes-portable-build-context";
-import { HERMES_PORTABLE_BUILD_CONTEXT_FILES } from "./hermes-portable-build-context-files";
+import {
+  HERMES_PORTABLE_BUILD_CONTEXT_FILES,
+  HERMES_PORTABLE_DOCKERFILE_COPY_SOURCES,
+} from "./hermes-portable-build-context-files";
 
 const TRANSACTION_ID = "11111111-1111-4111-8111-111111111111";
 const CREATE_INTENT = "a".repeat(64);
@@ -23,6 +26,23 @@ const BUILD_SETTINGS = {
 } as const;
 
 let stateDir: string;
+
+interface HermesPortableBuildContextManifest {
+  readonly dockerfileCopySources: readonly string[];
+  readonly trackedFiles: readonly {
+    readonly path: string;
+    readonly mode: "100644" | "100755" | "160000";
+  }[];
+}
+
+function readPackageBuildContextManifest(): HermesPortableBuildContextManifest {
+  return JSON.parse(
+    fs.readFileSync(
+      path.join(ROOT, "packages/nemoclaw-hermes/portable-build-context.json"),
+      "utf8",
+    ),
+  ) as HermesPortableBuildContextManifest;
+}
 
 function emulatePrivateSourceAncestor(): void {
   const original = fs.lstatSync;
@@ -108,6 +128,13 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
+  it("keeps the package build-context manifest synchronized with the loader", () => {
+    const manifest = readPackageBuildContextManifest();
+
+    expect(manifest.dockerfileCopySources).toEqual(HERMES_PORTABLE_DOCKERFILE_COPY_SOURCES);
+    expect(manifest.trackedFiles).toEqual(HERMES_PORTABLE_BUILD_CONTEXT_FILES);
+  });
+
   it("publishes, reuses, and retires only the reviewed exact source context (#9203)", () => {
     const plan = createHermesPortableBuildContextPlan(ROOT, BUILD_SETTINGS);
     const first = plan.materialize(contextInput());
@@ -123,7 +150,9 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
         ),
       ),
     ).toBe(true);
-    expect(fs.existsSync(path.join(inferredContext, "agents/hermes/Dockerfile"))).toBe(false);
+    expect(fs.existsSync(path.join(inferredContext, "packages/nemoclaw-hermes/Dockerfile"))).toBe(
+      false,
+    );
     expect(plan.authority.sourceRevision).toMatch(/^[a-f0-9]{40,64}$/u);
     expect(plan.authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
     const stagedDockerfile = fs.readFileSync(first.dockerfilePath, "utf8");
@@ -174,7 +203,9 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
       ),
     ).toBe(true);
     expect(
-      fs.existsSync(path.join(first.buildContextPath, "agents/hermes/plugin/__pycache__")),
+      fs.existsSync(
+        path.join(first.buildContextPath, "packages/nemoclaw-hermes/plugin/__pycache__"),
+      ),
     ).toBe(false);
 
     const reused = plan.materialize(contextInput());
@@ -303,13 +334,32 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     expect(fs.readFileSync(foreign, "utf8")).toBe("do not delete\n");
   });
 
-  it("captures the exact allowlist from an ordinary primary Git clone (#9203)", () => {
+  it("captures the exact allowlist from a primary clone with many packed references (#9203)", () => {
     const source = primaryCloneFixture();
+    const gitDirectory = path.join(source, ".git");
+    const packedReferencesPath = path.join(gitDirectory, "packed-refs");
+    const packedReferences = [
+      "# pack-refs with: peeled fully-peeled sorted",
+      `${"b".repeat(40)} refs/heads/main`,
+      `${"c".repeat(40)} refs/stash`,
+      ...Array.from(
+        { length: 128 },
+        (_, index) =>
+          `${"d".repeat(40)} refs/remotes/origin/review-${String(index).padStart(3, "0")}`,
+      ),
+      "",
+    ].join("\n");
+    fs.writeFileSync(packedReferencesPath, packedReferences, { mode: 0o600 });
+    fs.unlinkSync(path.join(gitDirectory, "refs/heads/main"));
+    expect(Buffer.byteLength(packedReferences)).toBeGreaterThan(4 * 1024);
 
     const plan = createHermesPortableBuildContextPlan(source, BUILD_SETTINGS);
 
     expect(plan.authority.sourceRevision).toBe("b".repeat(40));
     expect(plan.authority.contextManifestSha256).toMatch(/^[a-f0-9]{64}$/u);
+
+    fs.writeFileSync(packedReferencesPath, Buffer.alloc(3 * 1024 * 1024, "a"));
+    expect(() => plan.assertCurrentSource()).toThrow("source revision evidence is unsafe");
   });
 
   it("accepts a private installer checkout created under umask 077 (#9203)", () => {
@@ -349,16 +399,16 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     { access: "other", mode: 0o602 },
   ])("rejects $access-write access on a source file (#9203)", ({ mode }) => {
     const source = primaryCloneFixture();
-    fs.chmodSync(path.join(source, "agents/hermes/Dockerfile"), mode);
+    fs.chmodSync(path.join(source, "packages/nemoclaw-hermes/Dockerfile"), mode);
 
     expect(() => createHermesPortableBuildContextPlan(source, BUILD_SETTINGS)).toThrow(
-      "source file authority is unsafe: agents/hermes/Dockerfile",
+      "source file authority is unsafe: packages/nemoclaw-hermes/Dockerfile",
     );
   });
 
   it("rejects lowercase Dockerfile copy opcodes before reservation (#9203)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     fs.writeFileSync(dockerfile, fs.readFileSync(dockerfile, "utf8").replace(/^COPY /mu, "copy "), {
       mode: 0o644,
     });
@@ -370,7 +420,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("rejects BuildKit-only local COPY options before reservation (#10007)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     const reservationRoot = path.join(stateDir, "hermes-portable-build-context");
     fs.writeFileSync(
       dockerfile,
@@ -392,7 +442,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("rejects BuildKit-only remote ADD options before reservation (#10007)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     const reservationRoot = path.join(stateDir, "hermes-portable-build-context");
     fs.writeFileSync(
       dockerfile,
@@ -435,7 +485,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
     "rejects BuildKit-only $instruction option $option before reservation (#10007)",
     ({ instruction, option, continued, commented }) => {
       const source = primaryCloneFixture();
-      const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+      const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
       const reservationRoot = path.join(stateDir, "hermes-portable-build-context");
       const replacement = continued
         ? `${instruction} \\\n${commented ? "    # ignored continuation comment\n" : ""}    ${option} mkdir -p /sandbox/.nemoclaw`
@@ -456,7 +506,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("rejects a non-backslash Dockerfile escape directive before reservation (#10007)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     const reservationRoot = path.join(stateDir, "hermes-portable-build-context");
     const bytes = fs
       .readFileSync(dockerfile, "utf8")
@@ -475,7 +525,7 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("treats a later escape-shaped Dockerfile comment as an ordinary comment (#10007)", () => {
     const source = primaryCloneFixture();
-    const dockerfile = path.join(source, "agents/hermes/Dockerfile");
+    const dockerfile = path.join(source, "packages/nemoclaw-hermes/Dockerfile");
     fs.appendFileSync(dockerfile, "\n# escape=`\n");
 
     expect(() => createHermesPortableBuildContextPlan(source, BUILD_SETTINGS)).not.toThrow();
@@ -483,10 +533,10 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
 
   it("rejects source symlinks, hardlinks, and unreviewed secret paths (#9203)", () => {
     const source = primaryCloneFixture();
-    const script = path.join(source, "agents/hermes/start.sh");
+    const script = path.join(source, "packages/nemoclaw-hermes/start.sh");
     const original = fs.readFileSync(script);
     fs.unlinkSync(script);
-    fs.symlinkSync(path.join(source, "agents/hermes/Dockerfile"), script);
+    fs.symlinkSync(path.join(source, "packages/nemoclaw-hermes/Dockerfile"), script);
     expect(() => createHermesPortableBuildContextPlan(source, BUILD_SETTINGS)).toThrow(
       "symlink or special entry",
     );

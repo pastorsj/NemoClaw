@@ -22,6 +22,11 @@ import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readiness";
 import { quoteMcpBridgeShellArg } from "./mcp-bridge-runtime-command";
 import { getAgentConfigDir } from "./mcp-bridge-state";
+import {
+  buildInstalledMcpRegistrationCommand,
+  buildInstalledMcpRemovalCommand,
+  requireMcpShellCommand,
+} from "./mcp-bridge/package-command";
 import { executeSandboxCommand } from "./process-recovery";
 
 export const MCPORTER_VERSION = "0.7.3";
@@ -151,9 +156,16 @@ export function registerOpenClawAdapter(
 ): void {
   ensureMcporter(sandboxName);
   const root = mcporterRootForEntry(entry, projectRoot);
+  const installedCommand = buildInstalledMcpRegistrationCommand(sandboxName, "mcporter", entry, {
+    replaceExisting,
+    credentialRevision,
+    configRoot: root,
+  });
   const result = executeSandboxCommand(
     sandboxName,
-    buildOpenClawMcporterRegisterCommand(entry, replaceExisting, root, credentialRevision),
+    installedCommand === null
+      ? buildOpenClawMcporterRegisterCommand(entry, replaceExisting, root, credentialRevision)
+      : requireMcpShellCommand(installedCommand),
   );
   const output = redactBridgeSecretsForDisplay(
     [result?.stdout, result?.stderr].filter(Boolean).join("\n").trim(),
@@ -195,9 +207,15 @@ export function unregisterOpenClawAdapter(
   projectRoot?: string,
 ): void {
   const root = mcporterRootForEntry(entry, projectRoot);
+  const installedCommand = buildInstalledMcpRemovalCommand(sandboxName, "mcporter", entry, {
+    force: options.force === true,
+    configRoot: root,
+  });
   const result = executeSandboxCommand(
     sandboxName,
-    buildOpenClawMcporterRemoveCommand(entry, options.force === true, root),
+    installedCommand === null
+      ? buildOpenClawMcporterRemoveCommand(entry, options.force === true, root)
+      : requireMcpShellCommand(installedCommand),
   );
   const output = redactBridgeSecretsForDisplay(
     [result?.stdout, result?.stderr].filter(Boolean).join("\n").trim(),

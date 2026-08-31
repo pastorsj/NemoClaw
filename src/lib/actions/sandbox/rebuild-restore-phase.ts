@@ -3,7 +3,7 @@
 
 import { CLI_NAME } from "../../cli/branding";
 import { G, R, YW } from "../../cli/terminal-style";
-import type { AgentDefinition } from "../../agent/definition-types";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import {
   OBSERVABILITY_OTLP_LOCAL_POLICY_PRESET,
   OBSERVABILITY_POLICY_BINDING,

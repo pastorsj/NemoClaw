@@ -51,7 +51,6 @@ describe("backupSandboxBeforeRecreate", () => {
       kind: "agent-runtime" as const,
       id: "hermes",
       packageVersion: "0.13.0",
-      contractVersion: 1 as const,
       contentDigest: "b".repeat(64),
     };
     const sandboxEntry = {

@@ -32,7 +32,7 @@ export function detectRiskyAreas(changedFiles: string[]): string[] {
       areas.add("installer/bootstrap shell");
     if (file === "src/lib/onboard.ts" || file === "bin/nemoclaw.js" || file.startsWith("scripts/"))
       areas.add("onboarding/host glue");
-    if (file.startsWith("nemoclaw/src/blueprint/") || file.startsWith("nemoclaw-blueprint/"))
+    if (file.startsWith("packages/nemoclaw-openclaw/plugin/src/blueprint/") || file.startsWith("nemoclaw-blueprint/"))
       areas.add("sandbox/policy/SSRF");
     if (file.startsWith(".github/workflows/") || file.includes("prek") || file.includes("dco"))
       areas.add("workflow/enforcement");

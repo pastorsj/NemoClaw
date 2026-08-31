@@ -12,6 +12,7 @@ import {
 const live = "test/e2e/live/example.test.ts";
 const liveHelper = "test/e2e/live/example-helper.ts";
 const fast = "test/e2e/support/example.test.ts";
+const packageFast = "packages/nemoclaw-openclaw/tests/runtime/example.test.ts";
 const TAGGED_NEW_SOURCE = "// @module-tag e2e/credential-free\n";
 const exists = (file: string) => file === live || file === liveHelper || file === fast;
 
@@ -108,6 +109,16 @@ describe("changed live E2E mock parity", () => {
         manifest: manifest([{ live, fast: [fast] }]),
         changedFiles: [live, fast],
         fileExists: exists,
+      }),
+    ).toEqual([]);
+  });
+
+  it("accepts a harness-package test as fast parity coverage", () => {
+    expect(
+      validateMockParity({
+        manifest: manifest([{ live, fast: [packageFast] }]),
+        changedFiles: [live, packageFast],
+        fileExists: (file) => file === live || file === packageFast,
       }),
     ).toEqual([]);
   });

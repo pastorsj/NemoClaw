@@ -184,7 +184,7 @@ on:
   });
 
   it("requires exact publication after an immutable managed-image input change", async () => {
-    const request = exactCommitRequest("agents/hermes/plugin/__init__.py", (apiPath) => {
+    const request = exactCommitRequest("packages/nemoclaw-hermes/plugin/__init__.py", (apiPath) => {
       throw new Error(`publication lookup reached: ${apiPath}`);
     });
 

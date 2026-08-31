@@ -394,12 +394,12 @@ export interface SandboxStateOptions<
     finalizeSandboxRouteReservation(
       sandboxName: string,
       sessionId: string,
-      packageAuthority: import("../../../harness/package-identity").HarnessPackageAuthority,
+      packageAuthority: import("../../../agent-runtime/package/identity").HarnessPackageAuthority,
     ): boolean;
     revalidateHarnessPackageAuthority(
       session: Session,
       operation: string,
-    ): import("../../../harness/package-identity").HarnessPackageAuthority;
+    ): import("../../../agent-runtime/package/identity").HarnessPackageAuthority;
     updateSandboxRegistry(sandboxName: string, updates: Record<string, unknown>): void;
     getSandboxAgentRegistryFields(
       agent: Agent,

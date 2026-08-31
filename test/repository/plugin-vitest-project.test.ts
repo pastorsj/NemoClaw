@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const rootRequire = createRequire(path.join(repositoryRoot, "package.json"));
-const pluginRequire = createRequire(path.join(repositoryRoot, "nemoclaw", "package.json"));
+const pluginRoot = path.join(repositoryRoot, "packages/nemoclaw-openclaw/plugin");
+const pluginRequire = createRequire(path.join(pluginRoot, "package.json"));
 const pluginTypeScript = pluginRequire.resolve("typescript/bin/tsc");
 
 function installedVersion(requireFromPackage: NodeJS.Require, packageName: string): string {
@@ -38,17 +39,22 @@ describe("plugin Vitest project contract", () => {
   );
 
   it("typechecks plugin production and test sources without emitting tests", () => {
-    const productionFiles = listedTypeScriptFiles("nemoclaw/tsconfig.json");
-    const testFiles = listedTypeScriptFiles("nemoclaw/tsconfig.test.json");
-    const typecheckOutput = execFileSync("npm", ["--prefix", "nemoclaw", "run", "typecheck"], {
-      cwd: repositoryRoot,
-      encoding: "utf8",
-    });
+    const productionFiles = listedTypeScriptFiles(
+      "packages/nemoclaw-openclaw/plugin/tsconfig.json",
+    );
+    const testFiles = listedTypeScriptFiles(
+      "packages/nemoclaw-openclaw/plugin/tsconfig.test.json",
+    );
+    const typecheckOutput = execFileSync(
+      "npm",
+      ["--prefix", "packages/nemoclaw-openclaw/plugin", "run", "typecheck"],
+      { cwd: repositoryRoot, encoding: "utf8" },
+    );
 
     expect(productionFiles.some((file) => file.endsWith(".test.ts"))).toBe(false);
-    expect(testFiles).toContain(path.join(repositoryRoot, "nemoclaw", "src", "register.test.ts"));
-    expect(testFiles).toContain(path.join(repositoryRoot, "nemoclaw", "vitest.config.ts"));
-    expect(testFiles).toContain(path.join(repositoryRoot, "nemoclaw", "vitest.project.ts"));
+    expect(testFiles).toContain(path.join(pluginRoot, "src", "register.test.ts"));
+    expect(testFiles).toContain(path.join(pluginRoot, "vitest.config.ts"));
+    expect(testFiles).toContain(path.join(pluginRoot, "vitest.project.ts"));
     expect(typecheckOutput).toContain("tsc --noEmit -p tsconfig.test.json");
   });
 });

@@ -9,7 +9,7 @@ import type { GatewayRestartResult } from "../../src/lib/actions/sandbox/gateway
 import type { OpenShellSandboxInventory } from "../../src/lib/adapters/openshell/sandbox-observer";
 import { DASHBOARD_PORT_RANGE_START } from "../../src/lib/core/ports";
 import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
-import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
 import {
   agentDefs,
   agentOnboard,

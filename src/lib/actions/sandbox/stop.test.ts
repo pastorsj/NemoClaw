@@ -429,18 +429,20 @@ describe("stopSandbox", () => {
 
   it("keeps active Hermes stop out of Docker and Docker-capable channel transport (#9203)", () => {
     const unloadOllamaModels = vi.fn(() => successfulUnload());
-    const h = harness({ unloadOllamaModels });
-    h.getSandbox.mockReturnValue(
-      sandbox({
-        agent: "hermes",
-        gatewayName: "nemoclaw",
-        lifecycleGeneration: "generation-alpha",
-        lifecycleLiveIdentityFingerprint: "identity-alpha",
-        model: "qwen2.5:7b",
-        openshellDriver: "docker",
-        provider: "ollama/qwen3-vl:4b",
-      }),
-    );
+    const hermesSandbox = sandbox({
+      agent: "hermes",
+      gatewayName: "nemoclaw",
+      lifecycleGeneration: "generation-alpha",
+      lifecycleLiveIdentityFingerprint: "identity-alpha",
+      model: "qwen2.5:7b",
+      openshellDriver: "docker",
+      provider: "ollama/qwen3-vl:4b",
+    });
+    const h = harness({
+      listSandboxes: () => ({ sandboxes: [hermesSandbox], defaultSandbox: null }),
+      unloadOllamaModels,
+    });
+    h.getSandbox.mockReturnValue(hermesSandbox);
     h.hasPortableLifecycleReceipt.mockReturnValue(true);
     h.stopPortableSandbox.mockReturnValue({ kind: "stopped", portableAgent: "hermes" });
 

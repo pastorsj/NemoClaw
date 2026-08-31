@@ -60,9 +60,13 @@ const inventory = [
   {
     name: "fast-uri",
     version: "3.1.2",
-    origin: "agents/openclaw/mcporter-runtime/package-lock.json",
+    origin: "packages/nemoclaw-openclaw/runtime/mcporter/npm-shrinkwrap.json",
   },
-  { name: "tar", version: "7.5.20", origin: "agents/openclaw/mcporter-runtime/package-lock.json" },
+  {
+    name: "tar",
+    version: "7.5.20",
+    origin: "packages/nemoclaw-openclaw/runtime/mcporter/npm-shrinkwrap.json",
+  },
   { name: "openclaw", version: "2026.6.10", origin: "ci/reviewed-npm-audit.json" },
 ] as const;
 

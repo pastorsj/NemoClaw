@@ -523,7 +523,7 @@ function generatorCommand(agent: ManagedStartupAgent): readonly string[] {
       return [
         "/usr/local/bin/node",
         "--experimental-strip-types",
-        "/scripts/generate-openclaw-config.mts",
+        "/packages/nemoclaw-openclaw/config/generate-config.mts",
       ];
     case "hermes":
       return [

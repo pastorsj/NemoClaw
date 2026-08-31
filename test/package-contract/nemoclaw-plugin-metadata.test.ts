@@ -13,7 +13,7 @@ import {
 } from "./fixtures/minimum-openclaw-plugin-api";
 
 const repoRoot = path.join(import.meta.dirname, "../..");
-const pluginRoot = path.join(repoRoot, "nemoclaw");
+const pluginRoot = path.join(repoRoot, "packages/nemoclaw-openclaw/plugin");
 
 type Release = readonly [year: number, month: number, day: number];
 

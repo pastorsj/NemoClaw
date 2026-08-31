@@ -271,7 +271,7 @@ export function validateManagedImageMultiarchWorkflow(workflow: WorkflowRecord):
     errors.push(`${JOB_ID} must use the shared reviewed Hermes platform resolver`);
   }
   requireValues(errors, `${JOB_ID} Hermes platform resolver`, record(hermesBase?.with), {
-    "dockerfile-path": "agents/hermes/Dockerfile",
+    "dockerfile-path": "packages/nemoclaw-hermes/Dockerfile",
     platform: "${{ matrix.platform }}",
   });
 

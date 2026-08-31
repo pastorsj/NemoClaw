@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { isObjectRecord } from "../core/json-types";
+import { isOpenclawAgent } from "./openclaw-otel-policy-presets";
 
 // Load YAML lazily via require to match the rest of the onboard pipeline
 // (see src/lib/sandbox/config.ts and src/lib/policy/index.ts). Importing
@@ -19,7 +20,7 @@ const ALLOWED_TOP_KEYS = new Set<string>(["agents", "defaults", "main"]);
 const AGENT_DATA_ROOT = "/sandbox/.openclaw";
 
 // Defence-in-depth credential-name denylist: the authoritative reject lives
-// at the build-time validator (scripts/generate-openclaw-config.mts) which
+// at the build-time validator (packages/nemoclaw-openclaw/config/generate-config.mts) which
 // only permits a small allowlist of nested keys. Even so, the host writes
 // `NEMOCLAW_EXTRA_AGENTS_JSON` and the Dockerfile patcher base64-bakes the
 // payload into `NEMOCLAW_EXTRA_AGENTS_JSON_B64` before the build runs. A
@@ -103,10 +104,29 @@ export interface AgentsManifestPayload {
   main?: unknown;
 }
 
+/** Validate the OpenClaw-only option and return its canonical source path. */
+export function resolveAgentsManifestPath(
+  requestedPath: string | undefined,
+  agent: string | null,
+): string | null {
+  if (requestedPath === undefined) return null;
+  if (!isOpenclawAgent(agent)) {
+    throw new Error(
+      `--agents is OpenClaw-specific and cannot be used with --agent ${agent}; the declarative manifest only drives OpenClaw secondary agents.`,
+    );
+  }
+  const resolved = path.resolve(requestedPath);
+  if (!fs.existsSync(resolved)) throw new Error(`--agents path not found: ${resolved}`);
+  if (!fs.statSync(resolved).isFile()) {
+    throw new Error(`--agents must point to a file: ${resolved}`);
+  }
+  return resolved;
+}
+
 /**
  * Load and shallow-shape-check the agents manifest YAML. Heavy validation
  * (shape of each agent entry, model-ref/provider match, allowlists) lives
- * at the build-time validator in scripts/generate-openclaw-config.mts so
+ * at the build-time validator in packages/nemoclaw-openclaw/config/generate-config.mts so
  * the build is the single source of truth for structured errors. We only
  * surface obvious early errors (missing file, top-level shape) and
  * auto-fill canonical workspace/agentDir paths from the agent id so the

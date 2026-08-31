@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
-import type { HarnessPackageIdentity } from "../../src/lib/harness/package-types";
+import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
 import {
   createHarnessPackageFixture,
   type HarnessPackageFixture,

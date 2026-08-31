@@ -23,8 +23,8 @@ export function readOpenClawExpectedVersion(): string {
     import.meta.dirname,
     "..",
     "..",
-    "agents",
-    "openclaw",
+    "packages",
+    "nemoclaw-openclaw",
     "manifest.yaml",
   );
   const manifest = parseYaml(fs.readFileSync(manifestPath, "utf8")) as {
@@ -33,7 +33,7 @@ export function readOpenClawExpectedVersion(): string {
   if (typeof manifest.expected_version === "string" && manifest.expected_version.trim()) {
     return manifest.expected_version;
   }
-  throw new Error("agents/openclaw/manifest.yaml is missing expected_version");
+  throw new Error("packages/nemoclaw-openclaw/manifest.yaml is missing expected_version");
 }
 
 export const OPENCLAW_EXPECTED_VERSION = readOpenClawExpectedVersion();
@@ -213,7 +213,14 @@ function runWithEnvInternal(
     }
     return { code, out: `${stdout}${stderr}${errorOutput}` };
   } finally {
-    if (implicitHome) fs.rmSync(implicitHome, { force: true, recursive: true });
+    if (implicitHome) {
+      fs.rmSync(implicitHome, {
+        force: true,
+        maxRetries: 3,
+        recursive: true,
+        retryDelay: 50,
+      });
+    }
   }
 }
 
@@ -515,7 +522,11 @@ export function createDebugCommandTestEnv(
   fs.mkdirSync(localBin, { recursive: true });
   // Register the env-sourced sandbox plus any extra names supplied via the
   // --sandbox flag so the validation gate accepts them.
-  writeSandboxRegistry(home, sandboxName, options.gatewayPort ? { gatewayPort: options.gatewayPort } : {});
+  writeSandboxRegistry(
+    home,
+    sandboxName,
+    options.gatewayPort ? { gatewayPort: options.gatewayPort } : {},
+  );
   if (options.extraSandboxNames && options.extraSandboxNames.length > 0) {
     const registryPath = path.join(home, ".nemoclaw", "sandboxes.json");
     const current = JSON.parse(fs.readFileSync(registryPath, "utf-8")) as {

@@ -51,8 +51,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/repository/github-actions-workflow-names.test.ts"),
   },
   {
-    pattern:
-      /(?:^|\/)test\/helpers\/(?:onboard-fixture-contract\.json|onboard-script-mocks\.cjs)$/,
+    pattern: /(?:^|\/)test\/helpers\/(?:onboard-fixture-contract\.json|onboard-script-mocks\.cjs)$/,
     testsToRun: runTests(
       "test/helpers/onboard-created-sandbox-fixture.test.ts",
       "test/onboarding/onboard-custom-dockerfile.test.ts",
@@ -104,7 +103,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   },
   {
     pattern: /(?:^|\/)internal\/security-reviews\/hermes-0\.19\.0-dependency-review\.md$/,
-    testsToRun: runTests("test/agents/hermes/hermes-dependency-review.test.ts"),
+    testsToRun: runTests("packages/nemoclaw-hermes/tests/image/dependency-review.test.ts"),
   },
   {
     pattern: /(?:^|\/)\.github\/actions\/resolve-hermes-base-image\/action\.yaml$/,
@@ -113,27 +112,32 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   {
     pattern: /(?:^|\/)\.github\/actions\/resolve-reviewed-hermes-platform\/action\.yaml$/,
     testsToRun: runTests(
-      "test/agents/hermes/reviewed-hermes-platform-action.test.ts",
+      "packages/nemoclaw-hermes/tests/integration/platform-resolver.test.ts",
       "test/platform/images/protected-managed-image-contract.test.ts",
       "test/e2e/support/managed-image-protected-runtime-workflow.test.ts",
     ),
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/Dockerfile\.base$/,
+    pattern:
+      /(?:^|\/)\.agents\/skills\/nemoclaw-contributor-update-dependencies\/scripts\/collect-hermes-release-supplement\.py$/,
+    testsToRun: runTests("packages/nemoclaw-hermes/tests/integration/release-supplement.test.ts"),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/Dockerfile\.base$/,
     testsToRun: runTests(
-      "test/agents/hermes/hermes-dependency-review.test.ts",
-      "test/agents/hermes/hermes-share-mount-deps.test.ts",
+      "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
+      "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
       "test/runtime/sandbox/sandbox-provisioning.test.ts",
     ),
   },
   {
-    pattern: /(?:^|\/)(agents\/(?:hermes|langchain-deepagents-code)\/)?Dockerfile$/,
+    pattern: /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code)\/)?Dockerfile$/,
     testsToRun: (_file, match) => {
-      if (match[1] === "agents/hermes/") {
+      if (match[1] === "packages/nemoclaw-hermes/") {
         return [
           "src/lib/onboard/managed-startup-profile.test.ts",
-          "test/agents/hermes/hermes-mcp-runtime-capability.test.ts",
+          "packages/nemoclaw-hermes/tests/image/mcp-runtime.test.ts",
         ];
       }
       return match[1]
@@ -145,7 +149,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     },
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/policy-additions\.yaml$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/policy-additions\.yaml$/,
     testsToRun: runTests(
       "src/lib/onboard/initial-policy-real-policy.test.ts",
       "src/lib/onboard/initial-policy.test.ts",
@@ -154,7 +158,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   {
     pattern:
       /(?:^|\/)(?:agents\/pi\/(?:Dockerfile(?:\.base)?|dependency-review\.md|generate-config\.ts|manifest\.yaml|policy-additions\.yaml|start\.sh|pi-runtime\/package(?:-lock)?\.json)|\.github\/workflows\/(?:managed-images|base-image)\.yaml)$/,
-    testsToRun: runTests("test/agents/openclaw/runtime/pi-candidate-runtime-artifacts.test.ts"),
+    testsToRun: runTests("test/platform/images/pi-candidate.test.ts"),
   },
   {
     pattern: /(?:^|\/)src\/lib\/messaging\/channels\/[^/]+\/policy\/(?:hermes|openclaw)\.yaml$/,
@@ -175,14 +179,14 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/onboarding/effective-policy-contracts.test.ts"),
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/runtime-config-guard\.py$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/runtime\/config-guard\.py$/,
     testsToRun: runTests("src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts"),
   },
   {
-    pattern: /(?:^|\/)agents\/hermes\/mcp-config-transaction\.py$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/runtime\/mcp-transaction\.py$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts",
-      "test/agents/hermes/hermes-mcp-credential-revision.test.ts",
+      "packages/nemoclaw-hermes/tests/runtime/credential-revision.test.ts",
     ),
   },
   {
@@ -191,7 +195,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   },
   {
     pattern:
-      /(?:^|\/)nemoclaw\/(?:src\/shared\/openshell-policy-boundary\.cts|tsconfig\.shared\.json)$/,
+      /(?:^|\/)(?:src\/lib\/shared\/openshell-policy-boundary\.cts|packages\/nemoclaw-openclaw\/plugin\/tsconfig\.shared\.json)$/,
     testsToRun: runTests("test/e2e/support/hermes-discord-policy-binding.test.ts"),
   },
   {
@@ -208,7 +212,6 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests(
       "test/inference/managed/managed-base-image-contract.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
-      "test/agents/deepagents/dcode-base-image-workflow.test.ts",
     ),
   },
   {
@@ -225,8 +228,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   {
     pattern: /(?:^|\/)\.github\/actions\/build-base-image-platform\/action\.yaml$/,
     testsToRun: runTests(
-      "test/agents/deepagents/dcode-base-image-workflow.test.ts",
-      "test/agents/openclaw/openclaw-dependency-review.test.ts",
+      "packages/nemoclaw-openclaw/tests/image/dependency-review.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
     ),
   },
@@ -240,10 +242,9 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   {
     pattern: /(?:^|\/)\.github\/workflows\/base-image-platform\.yaml$/,
     testsToRun: runTests(
-      "test/agents/deepagents/dcode-base-image-workflow.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
       "test/install/perl-critical-cve-remediation.test.ts",
-      "test/agents/openclaw/runtime/pi-candidate-runtime-artifacts.test.ts",
+      "test/platform/images/pi-candidate.test.ts",
     ),
   },
   {
@@ -251,9 +252,9 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("test/inference/managed/validate-managed-base-index.test.ts"),
   },
   {
-    pattern: /(?:^|\/)scripts\/checks\/download-hermes-source-archive[.]sh$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/checks\/download-source[.]sh$/,
     testsToRun: runTests(
-      "test/agents/hermes/hermes-share-mount-deps.test.ts",
+      "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
     ),
   },
@@ -263,7 +264,6 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
       "test/platform/images/retry-docker-imagetools-inspect.test.ts",
       "test/inference/managed/validate-managed-base-index.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
-      "test/agents/deepagents/dcode-base-image-workflow.test.ts",
     ),
   },
   {

@@ -8,7 +8,7 @@ import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
   type HarnessPackageAuthority,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import { isWebSearchProvider } from "../../inference/web-search/provider";
 import { normalizePendingSandboxPolicyVerification } from "./pending-policy-verification";
 import type { PendingSandboxPolicyVerification, SandboxEntry } from "./types";

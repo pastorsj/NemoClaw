@@ -8,17 +8,25 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readHermesBuildSettings } from "../../agents/hermes/config/build-env.ts";
-import { buildConfig } from "../../scripts/generate-openclaw-config.mts";
+import { readHermesBuildSettings } from "../../packages/nemoclaw-hermes/config/build-env.ts";
+import { buildConfig } from "../../packages/nemoclaw-openclaw/config/generate-config.mts";
 import { patchStagedDockerfile } from "../../src/lib/onboard/dockerfile-patch";
 
-const START_SCRIPT = path.join(import.meta.dirname, "../..", "scripts", "nemoclaw-start.sh");
+const AUTH_PROFILE_SOURCE = path.join(
+  import.meta.dirname,
+  "../..",
+  "packages",
+  "nemoclaw-openclaw",
+  "runtime",
+  "gateway-setup.sh",
+);
 const SECRET_BOUNDARY_VALIDATOR = path.join(
   import.meta.dirname,
   "../..",
-  "agents",
-  "hermes",
-  "validate-env-secret-boundary.py",
+  "packages",
+  "nemoclaw-hermes",
+  "runtime",
+  "env-boundary.py",
 );
 
 const tmpDirs: string[] = [];
@@ -53,8 +61,8 @@ function stageDockerfile(providerArgLine: string): string {
 
 const MANAGED_DOCKERFILES = [
   "Dockerfile",
-  "agents/hermes/Dockerfile",
-  "agents/langchain-deepagents-code/Dockerfile",
+  "packages/nemoclaw-hermes/Dockerfile",
+  "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ];
 
 describe("inference provider route identifier rename (#7177)", () => {
@@ -84,16 +92,17 @@ describe("inference provider route identifier rename (#7177)", () => {
     expect(patched).toContain("ARG NEMOCLAW_PROVIDER_KEY=inference");
   });
 
-  it.each(
-    MANAGED_DOCKERFILES,
-  )("declares the non-secret route identifier and no secret-shaped name in %s", (relative) => {
-    const source = fs.readFileSync(path.join(process.cwd(), relative), "utf-8");
-    expect(source).toMatch(/^ARG NEMOCLAW_INFERENCE_PROVIDER_ID=/m);
-    expect(source).toMatch(
-      /^\s*NEMOCLAW_INFERENCE_PROVIDER_ID=\$\{NEMOCLAW_INFERENCE_PROVIDER_ID\}/m,
-    );
-    expect(source).not.toContain("NEMOCLAW_PROVIDER_KEY");
-  });
+  it.each(MANAGED_DOCKERFILES)(
+    "declares the non-secret route identifier and no secret-shaped name in %s",
+    (relative) => {
+      const source = fs.readFileSync(path.join(process.cwd(), relative), "utf-8");
+      expect(source).toMatch(/^ARG NEMOCLAW_INFERENCE_PROVIDER_ID=/m);
+      expect(source).toMatch(
+        /^\s*NEMOCLAW_INFERENCE_PROVIDER_ID=\$\{NEMOCLAW_INFERENCE_PROVIDER_ID\}/m,
+      );
+      expect(source).not.toContain("NEMOCLAW_PROVIDER_KEY");
+    },
+  );
 
   it("reads the route identifier from NEMOCLAW_INFERENCE_PROVIDER_ID", () => {
     const settings = readHermesBuildSettings({
@@ -144,6 +153,7 @@ describe("inference provider route identifier rename (#7177)", () => {
 describe("write_auth_profile route identifier migration (#7177)", () => {
   const wrapper = [
     "set -euo pipefail",
+    'openclaw_config_dir_owner() { printf "%s\\n" "sandbox"; }',
     `eval "$(sed -n '/^write_auth_profile() {$/,/^}$/p' "$1")"`,
     "write_auth_profile",
   ].join("\n");
@@ -156,7 +166,7 @@ describe("write_auth_profile route identifier migration (#7177)", () => {
   } {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-provider-id-auth-"));
     tmpDirs.push(home);
-    const result = spawnSync("bash", ["-s", "--", START_SCRIPT], {
+    const result = spawnSync("bash", ["-s", "--", AUTH_PROFILE_SOURCE], {
       input: wrapper,
       env: { PATH: process.env.PATH, HOME: home, ...env },
       encoding: "utf-8",

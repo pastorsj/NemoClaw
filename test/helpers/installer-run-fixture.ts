@@ -250,9 +250,10 @@ export function writeSourceCheckoutPackages(root: string): void {
     path.join(root, "package.json"),
     JSON.stringify({ name: "nemoclaw", version: "0.1.0" }, null, 2),
   );
-  fs.mkdirSync(path.join(root, "nemoclaw"), { recursive: true });
+  const pluginRoot = path.join(root, "packages", "nemoclaw-openclaw", "plugin");
+  fs.mkdirSync(pluginRoot, { recursive: true });
   fs.writeFileSync(
-    path.join(root, "nemoclaw", "package.json"),
+    path.join(pluginRoot, "package.json"),
     JSON.stringify({ name: "nemoclaw-plugin", version: "0.1.0" }, null, 2),
   );
 }

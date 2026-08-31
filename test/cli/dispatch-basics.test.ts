@@ -180,12 +180,10 @@ describe("CLI dispatch", () => {
     expect(helpCommand.out).not.toContain("command inference not found");
   });
 
-  it("agents list exits 0 and lists global agent runtimes", () => {
+  it("agents list exits 0 and reports an empty installed set", () => {
     const r = run("agents list");
     expect(r.code).toBe(0);
-    expect(r.out).toContain("openclaw");
-    expect(r.out).toContain("hermes");
-    expect(r.out).toContain("langchain-deepagents-code");
+    expect(r.out).toContain("No agent runtimes are installed.");
   });
 
   it("exits 0 for --help", async () => {

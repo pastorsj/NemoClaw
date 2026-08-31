@@ -87,6 +87,7 @@ createdSandbox.installRuntimeObservation();
 const commands = [];
 const registerCalls = [];
 const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
+  agentName: "langchain-deepagents-code",
   sandboxName,
   provider: "nvidia-prod",
   model: "nvidia/nemotron-3-super-120b-a12b",

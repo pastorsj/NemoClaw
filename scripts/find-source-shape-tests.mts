@@ -84,8 +84,11 @@ const SKIP_DIRS = new Set([
   "coverage",
   "dist",
   "docs/_build",
-  "nemoclaw/dist",
-  "nemoclaw/node_modules",
+  "packages/nemoclaw-hermes/node_modules",
+  "packages/nemoclaw-langchain-deepagents-code/node_modules",
+  "packages/nemoclaw-openclaw/node_modules",
+  "packages/nemoclaw-openclaw/plugin/dist",
+  "packages/nemoclaw-openclaw/plugin/node_modules",
   "node_modules",
   "worktrees",
 ]);

@@ -117,7 +117,7 @@ describe("trusted reviewed npm audit workflow (#5896)", () => {
       exceptionFile: "ci/npm-audit-exceptions.json",
       lockedGraphs: [
         {
-          directory: "agents/openclaw/openclaw-runtime",
+          directory: "packages/nemoclaw-openclaw/runtime/openclaw",
           id: "openclaw-runtime",
           lockSha256: digest,
           replacementLockSha256: digest,

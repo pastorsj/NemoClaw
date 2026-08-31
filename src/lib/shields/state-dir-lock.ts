@@ -3,7 +3,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentStateLockPlan } from "../agent/definition-types";
+import type { AgentStateLockPlan } from "../agent-runtime/manifest-types";
 
 // State-dir lock fan-out for shields up/down. The actual traversal lives in a
 // root-only Python helper because shell `chown -R` / `chmod -R` cannot provide

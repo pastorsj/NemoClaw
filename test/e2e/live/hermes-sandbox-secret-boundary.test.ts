@@ -368,7 +368,7 @@ async function buildBaseImageWhenNeeded(
 ): Promise<void> {
   await (baseImageFromEnv
     ? Promise.resolve()
-    : probe.expect(["build", "-f", "agents/hermes/Dockerfile.base", "-t", baseImage, "."], {
+    : probe.expect(["build", "-f", "packages/nemoclaw-hermes/Dockerfile.base", "-t", baseImage, "."], {
         artifactName,
         timeoutMs: BUILD_TIMEOUT_MS,
       }));
@@ -383,7 +383,7 @@ async function buildHermesProductionImage(
     [
       "build",
       "-f",
-      "agents/hermes/Dockerfile",
+      "packages/nemoclaw-hermes/Dockerfile",
       "--build-arg",
       `BASE_IMAGE=${baseImage}`,
       "-t",
@@ -432,7 +432,7 @@ async function buildManagedBaseImageWhenNeeded(
   });
   await (baseImageFromEnv || baseExists.exitCode === 0
     ? Promise.resolve()
-    : probe.expect(["build", "-f", "agents/hermes/Dockerfile.base", "-t", baseImage, "."], {
+    : probe.expect(["build", "-f", "packages/nemoclaw-hermes/Dockerfile.base", "-t", baseImage, "."], {
         artifactName: "build-managed-hermes-base-image",
         timeoutMs: BUILD_TIMEOUT_MS,
       }));
@@ -447,7 +447,7 @@ async function buildManagedProductionImage(
     [
       "build",
       "-f",
-      "agents/hermes/Dockerfile",
+      "packages/nemoclaw-hermes/Dockerfile",
       "--build-arg",
       `BASE_IMAGE=${baseImage}`,
       "--build-arg",

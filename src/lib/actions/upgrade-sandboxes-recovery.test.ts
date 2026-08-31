@@ -36,7 +36,7 @@ import * as agentDefinitions from "../agent/defs";
 import * as coreVersion from "../core/version";
 import * as sandboxList from "../openshell-sandbox-list";
 import * as sandboxVersion from "../sandbox/version";
-import type { HarnessPackageIdentity, HarnessPackageMigration } from "../harness/package-identity";
+import type { HarnessPackageIdentity, HarnessPackageMigration } from "../agent-runtime/package/identity";
 import * as registry from "../state/registry";
 import * as sandboxState from "../state/sandbox";
 import { hashSnapshotBackupContent } from "../state/snapshot/content-digest";

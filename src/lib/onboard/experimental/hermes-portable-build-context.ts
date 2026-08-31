@@ -10,12 +10,17 @@ import {
   renderHermesPortableDockerfileBuildSettings,
   type HermesPortableDockerfileBuildSettings,
 } from "../dockerfile-patch";
-import { HERMES_PORTABLE_BUILD_CONTEXT_FILES } from "./hermes-portable-build-context-files";
+import {
+  HERMES_PORTABLE_BUILD_CONTEXT_FILES,
+  HERMES_PORTABLE_DOCKERFILE_COPY_SOURCES,
+} from "./hermes-portable-build-context-files";
 
 const CONTEXT_SCHEMA_VERSION = 1 as const;
 const MAX_CONTEXT_ENTRIES = 1024;
 const MAX_CONTEXT_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_CONTEXT_TOTAL_BYTES = 16 * 1024 * 1024;
+const MAX_REVISION_EVIDENCE_BYTES = 4 * 1024;
+const MAX_PACKED_REFERENCES_BYTES = 2 * 1024 * 1024;
 const MAX_RELATIVE_PATH_BYTES = 512;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
@@ -26,74 +31,8 @@ const OPEN_READ_FLAGS =
   fs.constants.O_RDONLY |
   (typeof fs.constants.O_NOFOLLOW === "number" ? fs.constants.O_NOFOLLOW : 0) |
   (typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0);
-const SOURCE_DOCKERFILE_RELATIVE_PATH = "agents/hermes/Dockerfile" as const;
+const SOURCE_DOCKERFILE_RELATIVE_PATH = "packages/nemoclaw-hermes/Dockerfile" as const;
 const CONTEXT_DOCKERFILE_RELATIVE_PATH = "Dockerfile" as const;
-
-const LOCAL_COPY_SOURCES = [
-  "agents/hermes/build-mcp-digest.py",
-  "agents/hermes/config/",
-  "agents/hermes/cron-restore-control.py",
-  "agents/hermes/finalize-tirith-marker.py",
-  "agents/hermes/generate-config.ts",
-  "agents/hermes/hermes-cli-adapter-v1.json",
-  "agents/hermes/hermes-wrapper.py",
-  "agents/hermes/host/managed-tool-gateway-matrix.json",
-  "agents/hermes/image-build-probes.py",
-  "agents/hermes/managed_policy.py",
-  "agents/hermes/mcp-config-transaction.py",
-  "agents/hermes/patch-cron-execution-runtime.py",
-  "agents/hermes/patch-cron-restore-drain.py",
-  "agents/hermes/patch-discord-recovery-permissions.py",
-  "agents/hermes/patch-gateway-process-identity.py",
-  "agents/hermes/patch-gateway-runtime-metadata.py",
-  "agents/hermes/patch-hermes-sqlite-temp-store.py",
-  "agents/hermes/patch-langfuse-credentials.mts",
-  "agents/hermes/patch-neutral-platform-env-activation.py",
-  "agents/hermes/patch-profile-policy-defaults.py",
-  "agents/hermes/patch-session-list-preview.py",
-  "agents/hermes/plugin/",
-  "agents/hermes/runtime-config-guard.py",
-  "agents/hermes/runtime-state-mutation-publisher-v1.json",
-  "agents/hermes/security-dependencies.patch",
-  "agents/hermes/seed-dashboard-config.py",
-  "agents/hermes/start.sh",
-  "agents/hermes/state-lock-plan.json",
-  "agents/hermes/validate-cli-adapter.py",
-  "agents/hermes/validate-env-secret-boundary.py",
-  "nemoclaw-blueprint/",
-  "nemoclaw-blueprint/scripts/*.js",
-  "scripts/gateway-control.sh",
-  "scripts/lib/bundled-npm-package.mts",
-  "scripts/lib/corporate-ca-runtime.sh",
-  "scripts/lib/entrypoint-env-wrapper.sh",
-  "scripts/lib/gateway-supervisor.sh",
-  "scripts/lib/openclaw-npm-remediation.mts",
-  "scripts/lib/patch-bundled-npm-ip-address.mts",
-  "scripts/lib/reviewed-npm-archive.mts",
-  "scripts/lib/sandbox-init.sh",
-  "scripts/lib/sandbox-rlimits.sh",
-  "scripts/managed-bootstrap-entrypoint.c",
-  "scripts/managed-bootstrap-trampoline.sh",
-  "scripts/managed-gateway-control.py",
-  "scripts/managed-startup-hold.sh",
-  "scripts/patch-bundled-npm-brace-expansion.mts",
-  "scripts/patch-bundled-npm-tar.mts",
-  "scripts/runtime-state-mutation-control.py",
-  "scripts/runtime-state-mutation-transport-broker.py",
-  "scripts/runtime-state-mutation-startup-gate.py",
-  "scripts/runtime_state_mutation_hermes_publisher.py",
-  "scripts/state-dir-guard.py",
-  "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
-  "src/lib/hermes-managed-route.ts",
-  "src/lib/messaging/",
-  "src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py",
-  "src/lib/tool-disclosure.ts",
-  "tools/mcp-tool-discovery-runtime/npm-cache-seed/tar-7.5.21.tgz",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/managed-startup-image-runtime.bundle",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/BUNDLED_PACKAGES.json",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/THIRD_PARTY_LICENSES.txt",
-  "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle",
-] as const;
 
 type SourceEntry = {
   readonly kind: "directory" | "file";
@@ -233,14 +172,6 @@ function isIgnoredCachePath(relativePath: string): boolean {
   return parts.includes("__pycache__") || parts.includes(".cache") || relativePath.endsWith(".pyc");
 }
 
-function sourceTokenMatches(relativePath: string, token: string): boolean {
-  if (token.endsWith("/")) return relativePath.startsWith(token);
-  if (token === "nemoclaw-blueprint/scripts/*.js") {
-    return /^nemoclaw-blueprint\/scripts\/[^/]+\.js$/u.test(relativePath);
-  }
-  return relativePath === token;
-}
-
 function parseDockerfileSources(bytes: Buffer): readonly string[] {
   let text: string;
   try {
@@ -319,7 +250,7 @@ function parseDockerfileSources(bytes: Buffer): readonly string[] {
     if (options.length > 0) fail("Dockerfile has a non-Portable local COPY option");
     local.push(...sources);
   }
-  const expected = [...LOCAL_COPY_SOURCES].sort();
+  const expected = [...HERMES_PORTABLE_DOCKERFILE_COPY_SOURCES].sort();
   const actual = [...local].sort();
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     fail("Dockerfile local COPY sources disagree with the reviewed allowlist");
@@ -327,7 +258,10 @@ function parseDockerfileSources(bytes: Buffer): readonly string[] {
   return local;
 }
 
-function readRevisionFile(filePath: string): {
+function readRevisionFile(
+  filePath: string,
+  maximumBytes = MAX_REVISION_EVIDENCE_BYTES,
+): {
   readonly bytes: Buffer;
   readonly evidence: RevisionEvidence["files"][number];
 } {
@@ -342,7 +276,7 @@ function readRevisionFile(filePath: string): {
       before.nlink !== 1n ||
       (before.mode & 0o22n) !== 0n ||
       before.size < 1n ||
-      before.size > 4096n ||
+      before.size > BigInt(maximumBytes) ||
       named.dev !== before.dev ||
       named.ino !== before.ino
     ) {
@@ -376,6 +310,26 @@ function readRevisionFile(filePath: string): {
   }
 }
 
+function isValidGitReferenceName(reference: string): boolean {
+  const components = reference.split("/");
+  return (
+    reference.startsWith("refs/") &&
+    !reference.endsWith("/") &&
+    !reference.endsWith(".") &&
+    !reference.includes("..") &&
+    !reference.includes("@{") &&
+    !reference.includes("//") &&
+    !CONTROL.test(reference) &&
+    ![" ", "~", "^", ":", "?", "*", "[", "\\"].some((character) =>
+      reference.includes(character),
+    ) &&
+    components.every(
+      (component) =>
+        component.length > 0 && !component.startsWith(".") && !component.endsWith(".lock"),
+    )
+  );
+}
+
 function strictText(bytes: Buffer, label: string): string {
   try {
     return UTF8.decode(bytes).trim();
@@ -401,13 +355,33 @@ function readPackedRevision(
   commonDirectory: string,
   reference: string,
 ): { readonly revision: string; readonly evidence: RevisionEvidence["files"][number] } {
-  const packed = readRevisionFile(path.join(commonDirectory, "packed-refs"));
+  const packed = readRevisionFile(
+    path.join(commonDirectory, "packed-refs"),
+    MAX_PACKED_REFERENCES_BYTES,
+  );
   const text = strictText(packed.bytes, "Git packed references");
   let revision: string | null = null;
+  let mayHavePeeledRevision = false;
+  const references = new Set<string>();
   for (const line of text.split("\n")) {
-    if (!line || line.startsWith("#") || line.startsWith("^")) continue;
-    const match = /^([a-f0-9]{40,64}) (refs\/(?:heads|tags)\/[A-Za-z0-9._/-]+)$/u.exec(line);
-    if (!match) fail("Git packed references are invalid");
+    if (!line || line.startsWith("#")) {
+      mayHavePeeledRevision = false;
+      continue;
+    }
+    if (line.startsWith("^")) {
+      if (!mayHavePeeledRevision || !/^\^[a-f0-9]{40,64}$/u.test(line)) {
+        fail("Git packed references are invalid");
+      }
+      mayHavePeeledRevision = false;
+      continue;
+    }
+    const match = /^([a-f0-9]{40,64}) (refs\/.+)$/u.exec(line);
+    if (!match || !isValidGitReferenceName(match[2]!)) {
+      fail("Git packed references are invalid");
+    }
+    mayHavePeeledRevision = true;
+    if (references.has(match[2]!)) fail("Git packed references are invalid");
+    references.add(match[2]!);
     if (match[2] === reference) {
       if (revision) fail("Git packed reference is ambiguous");
       revision = match[1]!;
@@ -676,15 +650,9 @@ function captureSourceEntries(
   };
 
   visit(SOURCE_DOCKERFILE_RELATIVE_PATH);
-  for (const token of LOCAL_COPY_SOURCES) {
+  for (const token of HERMES_PORTABLE_DOCKERFILE_COPY_SOURCES) {
     if (token.endsWith("/")) {
       visit(token.slice(0, -1));
-    } else if (token === "nemoclaw-blueprint/scripts/*.js") {
-      for (const relativePath of [...selected]
-        .filter((entry) => sourceTokenMatches(entry, token))
-        .sort()) {
-        if (!entries.some((entry) => entry.relativePath === relativePath)) visit(relativePath);
-      }
     } else if (!entries.some((entry) => entry.relativePath === token)) {
       visit(token);
     }

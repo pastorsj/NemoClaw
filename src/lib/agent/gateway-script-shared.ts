@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { shellQuote } from "../runner";
-import { buildGatewayGuardRecoveryLines } from "./runtime-recovery-preload";
+import { buildGatewayGuardRecoveryLines } from "../agent-runtime/lifecycle/recovery-preload";
 
 export function buildNoFollowLogSetupCommand(
   path: string,

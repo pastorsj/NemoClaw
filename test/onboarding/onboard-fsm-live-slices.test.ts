@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeAll, describe, it } from "vitest";
-import { getHarnessPackageStoreRoot } from "../../src/lib/harness/package-store";
+import { getHarnessPackageStoreRoot } from "../../src/lib/agent-runtime/package/store";
 import { createHarnessPackageFixture } from "../helpers/harness-packages";
 
 const repoRoot = path.join(import.meta.dirname, "../..");
@@ -182,7 +182,9 @@ function runSliceProbe(options: ProbeOptions) {
   const harnessFixture = createHarnessPackageFixture({
     storeRoot: getHarnessPackageStoreRoot(tmpDir),
   });
-  harnessFixture.install(scenario.mode === "dashboard-port-composition" ? "hermes" : "openclaw");
+  const installedHarness = harnessFixture.install(
+    scenario.mode === "dashboard-port-composition" ? "hermes" : "openclaw",
+  );
   const scriptPath = path.join(tmpDir, `probe-${scenario.mode}-${scenario.slice}.js`);
   const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
   const flowSlicesPath = JSON.stringify(
@@ -254,6 +256,7 @@ packageBoundary.prepareOnboardHarnessOperation = (input, overrides) =>
 const called = [];
 const sentinel = new Error("slice-called");
 const staleAdmissionExit = new Error("stale recovery admission refused");
+const installedHarnessPackage = ${JSON.stringify(installedHarness.identity)};
 
 if (scenario.mode === "dashboard-port-composition") {
   const finalizationHandlerDeps = require(${finalizationDepsPath}).finalizationHandlerDeps;
@@ -312,6 +315,7 @@ function seedResumeSession(state, sandboxComplete = true) {
     sandboxName: "fsm-sandbox",
     provider: "openai-api",
     model: "gpt-test",
+    harnessPackage: installedHarnessPackage,
     machine: machine(state),
     metadata: { gatewayName: "nemoclaw", fromDockerfile: null },
   });
@@ -413,7 +417,7 @@ flowSlices.runCoreOnboardFlowSequence = async ({ context, runtime }) => {
   await runtime.applyResult(advanceTo("inference", { metadata: { state: "provider_selection" } }));
   await runtime.applyResult(advanceTo("sandbox", { metadata: { state: "inference" } }));
   await runtime.applyResult(
-    branchTo(scenario.mode === "dashboard-port-composition" ? "agent_setup" : "openclaw", {
+    branchTo("agent_setup", {
       metadata: { state: "sandbox" },
     }),
   );
@@ -426,6 +430,7 @@ flowSlices.runFinalOnboardFlowSequence = async ({ context, phases }) => {
     registry.registerSandbox({
       name: "fsm-sandbox",
       agent: "hermes",
+      harnessPackage: installedHarnessPackage,
       provider: "openai-api",
       model: "gpt-test",
       gatewayName: "nemoclaw",
@@ -471,6 +476,7 @@ if (
 ) {
   registry.registerSandbox({
     name: "fsm-sandbox",
+    harnessPackage: installedHarnessPackage,
     provider: "openai-api",
     model: "gpt-test",
     endpointUrl: "https://persisted.example.test/v1",
@@ -494,9 +500,14 @@ if (scenario.mode === "stale-recovery-admission") {
         gatewayPort: 8080,
         lifecycleGeneration: "stale-admission-generation",
         verifiedEffectivePolicyIdentity: null,
-        harnessPackage: null,
+        harnessPackage: installedHarnessPackage,
         createAttemptNonce: "c".repeat(62),
         policyCreationReceipt: null,
+        resources: {
+          sharedInferenceProviders: [],
+          sandboxScopedProviders: [],
+          credentialEnvironmentVariables: [],
+        },
         reason: "retained_after_sandbox_creation_failure",
       });
       return [];

@@ -13,9 +13,9 @@ const REMOTE_BIND_ARG_RE = /^ARG\s+NEMOCLAW_DASHBOARD_BIND=/;
 const REMOTE_BIND_PATCHED_ARG_RE = /^ARG\s+NEMOCLAW_DASHBOARD_BIND=0\.0\.0\.0$/;
 const REMOTE_BIND_PROMOTION_RE = /NEMOCLAW_DASHBOARD_BIND=\$\{NEMOCLAW_DASHBOARD_BIND\}/;
 const OPENCLAW_CONFIG_GENERATOR_RE =
-  /^RUN\s+(?:NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=0\s+)?(?:NEMOCLAW_OPENCLAW_MANAGED_PROXY=0\s+)?node\s+--experimental-strip-types\s+\/scripts\/generate-openclaw-config\.mts$/;
+  /^RUN\s+(?:NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION=0\s+)?(?:NEMOCLAW_OPENCLAW_MANAGED_PROXY=0\s+)?node\s+--experimental-strip-types\s+\/packages\/nemoclaw-openclaw\/config\/generate-config\.mts$/;
 const SAFE_VALIDATION_GENERATOR_RE =
-  /^RUN\s+validation_home="\$validation_root\/progressive";\s+HOME=(?:"\$validation_home"|\$validation_home)\s+node\s+--experimental-strip-types\s+\/scripts\/generate-openclaw-config\.mts$/;
+  /^RUN\s+validation_home="\$validation_root\/progressive";\s+HOME=(?:"\$validation_home"|\$validation_home)\s+node\s+--experimental-strip-types\s+\/packages\/nemoclaw-openclaw\/config\/generate-config\.mts$/;
 const PASSIVE_FINAL_STAGE_INSTRUCTION_RE = /^(?:ARG|ENV|WORKDIR|USER|HEALTHCHECK|ENTRYPOINT|CMD)\b/;
 const CONFIG_MODE_RE = /^RUN\s+chmod\s+660\s+\/sandbox\/\.openclaw\/openclaw\.json$/;
 const CONFIG_HASH_RE =
@@ -77,6 +77,15 @@ const CANONICAL_POST_GENERATOR_INSTRUCTION_SHA256 = new Set([
   "c6b042ac2cc3d5570ae43f1e387a951cbe89fbb22e8cd9df486f99719bb32939",
   "ba29b499af923b4331cf7abf14648f187dc0e0b8f3dc2c33dac61f079981c187",
   "f91353eff1014dbe84120fc954cf2db18be7c3b01b3af95f6bbc0dbb2771003d",
+  // Reviewed package-path equivalents after the OpenClaw runtime moved under
+  // packages/nemoclaw-openclaw. These instructions preserve the generated
+  // configuration while validating, installing, and checking package payloads.
+  "42b4e4a1ec8b6f8dd950443938b084f501afc87616e9c0859d4e1583d7ba1814",
+  "1d01fb557668aa859e89964ee2a5ae699fc1e9521e7b6886fd10755d84358f7b",
+  "8fd22d6aafb4aec898e2ad1d021ebf4aa65232ac7e867cadae8bcaf238df448b",
+  "525c47213e5c184ced226eeb369fa70a32dd6180d6d2c71d9bb7a59f85609be0",
+  "8b1a73bf8ef0aec2c6cd1fa63990dac978e060b739048ca664fd55ebacf17961",
+  "701c1c57b2b3e225f02e5e1c0d9b01d709cad54f54aa495af1f17bfaae4bd7fa",
   // COPY --from=openclaw-runtime-payload / /
   // The reviewed scratch payload has no /sandbox/.openclaw content, so this
   // exact late copy preserves the generated remote-dashboard configuration.
@@ -200,7 +209,7 @@ export function patchRemoteDashboardBindContract(
   if (dashboardBind === "0.0.0.0" && !dashboardRemoteBindPrepared) {
     throw new Error(
       "Dockerfile declares ARG NEMOCLAW_DASHBOARD_BIND but does not promote it to " +
-        "generate-openclaw-config.mts or preserve the generated remote dashboard output; " +
+        "the package config generator or preserve the generated remote dashboard output; " +
         "cannot prepare remote dashboard exposure.",
     );
   }

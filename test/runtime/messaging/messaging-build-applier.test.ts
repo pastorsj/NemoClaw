@@ -25,14 +25,19 @@ const { remediateReviewedArchive } = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("../../../scripts/lib/openclaw-npm-remediation.mts", async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import("../../../scripts/lib/openclaw-npm-remediation.mts")>();
-  return {
-    ...original,
-    remediateReviewedOpenClawPluginArchive: remediateReviewedArchive,
-  };
-});
+vi.mock(
+  "../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts",
+  async (importOriginal) => {
+    const original =
+      await importOriginal<
+        typeof import("../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts")
+      >();
+    return {
+      ...original,
+      remediateReviewedOpenClawPluginArchive: remediateReviewedArchive,
+    };
+  },
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -51,8 +56,10 @@ const SCRIPT_PATH = path.join(
 const GENERATOR_PATH = path.join(
   import.meta.dirname,
   "../../..",
-  "scripts",
-  "generate-openclaw-config.mts",
+  "packages",
+  "nemoclaw-openclaw",
+  "config",
+  "generate-config.mts",
 );
 const OPENCLAW_DISCORD_2026_7_1_INTEGRITY =
   "sha512-tZfdC1YA8oVLvc2BK1w0F6rUljS5ugCOp2uWe0vPsbG1fbzVVIO4V32RoqZznGHe5u2R9u4n1aV5Z/qa1m2oFg==";
@@ -1271,7 +1278,7 @@ describe("messaging-build-applier.mts: agent-install", () => {
         'if (args[0] !== "doctor" || args[1] !== "--fix" || args[2] !== "--non-interactive") process.exit(46);',
         'const configPath = path.join(process.env.HOME, ".openclaw", "openclaw.json");',
         'const config = JSON.parse(fs.readFileSync(configPath, "utf8"));',
-        'if (config.channels?.telegram?.accounts?.default?.botToken !== undefined) process.exit(40);',
+        "if (config.channels?.telegram?.accounts?.default?.botToken !== undefined) process.exit(40);",
         "if (config.channels?.discord?.enabled !== true) process.exit(41);",
         "if (config.plugins?.entries?.discord?.enabled !== true) process.exit(42);",
         "if (config.plugins?.entries?.slack?.enabled !== true) process.exit(43);",

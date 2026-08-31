@@ -56,6 +56,10 @@ describe("CLI source-checkout upgrade build", () => {
         path.join(REPOSITORY_ROOT, "tsconfig.src.json"),
         path.join(fixtureRoot, "tsconfig.src.json"),
       );
+      copyFileSync(
+        path.join(REPOSITORY_ROOT, "tsconfig.shared.json"),
+        path.join(fixtureRoot, "tsconfig.shared.json"),
+      );
       writeFileSync(path.join(fixtureRoot, ".source-revision"), `${"a".repeat(40)}\n`);
       // The harness builder has its own artifact contract tests. This fixture keeps the normal
       // build command intact and proves its final step runs without copying every harness source.
@@ -73,27 +77,6 @@ describe("CLI source-checkout upgrade build", () => {
         "junction",
       );
       symlinkSync(path.join(REPOSITORY_ROOT, "src"), path.join(fixtureRoot, "src"), "junction");
-
-      const policyRoot = path.join(fixtureRoot, "nemoclaw");
-      mkdirSync(policyRoot);
-      copyFileSync(
-        path.join(REPOSITORY_ROOT, "nemoclaw", "tsconfig.json"),
-        path.join(policyRoot, "tsconfig.json"),
-      );
-      copyFileSync(
-        path.join(REPOSITORY_ROOT, "nemoclaw", "tsconfig.shared.json"),
-        path.join(policyRoot, "tsconfig.shared.json"),
-      );
-      symlinkSync(
-        path.join(REPOSITORY_ROOT, "nemoclaw", "node_modules"),
-        path.join(policyRoot, "node_modules"),
-        "junction",
-      );
-      symlinkSync(
-        path.join(REPOSITORY_ROOT, "nemoclaw", "src"),
-        path.join(policyRoot, "src"),
-        "junction",
-      );
 
       const blueprintRoot = path.join(fixtureRoot, "nemoclaw-blueprint");
       mkdirSync(blueprintRoot);

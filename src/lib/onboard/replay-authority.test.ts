@@ -3,7 +3,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import type { HarnessPackageIdentity, HarnessPackageMigration } from "../harness/package-identity";
+import type {
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
+} from "../agent-runtime/package/identity";
 import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import type {
   CheckpointSandboxRecreateTransactionV2,
@@ -17,7 +20,6 @@ const PACKAGE: HarnessPackageIdentity = {
   kind: "agent-runtime",
   id: "hermes",
   packageVersion: "2.0.0",
-  contractVersion: 1,
   contentDigest: "a".repeat(64),
 };
 const MIGRATION: HarnessPackageMigration = {

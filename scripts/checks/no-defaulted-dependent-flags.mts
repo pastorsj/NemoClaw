@@ -11,7 +11,7 @@
  *
  * The scan covers direct `Flags.<method>({...})` object literals. Options
  * passed through `Flags.custom` factories, spread composition, or aliased
- * imports are out of scope; no flag under `src` or `nemoclaw/src` combines
+ * imports are out of scope; no flag under `src` or `packages/nemoclaw-openclaw/plugin/src` combines
  * them with dependsOn today.
  */
 
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SCAN_ROOTS = ["src", "nemoclaw/src"];
+const SCAN_ROOTS = ["src", "packages/nemoclaw-openclaw/plugin/src"];
 const SKIP_DIRS = new Set([".git", "coverage", "dist", "node_modules"]);
 
 export interface DefaultedDependentFlagViolation {

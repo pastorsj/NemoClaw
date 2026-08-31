@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 
-import { loadManagedToolGatewayMatrix } from "../../agents/hermes/config/managed-tool-gateway.ts";
+import { loadManagedToolGatewayMatrix } from "../../packages/nemoclaw-hermes/config/tool-gateway.ts";
 import { loadAgent } from "../../src/lib/agent/defs.ts";
 import { requiredMessagingChannelPolicyPresets } from "../../src/lib/onboard/messaging-policy-presets.ts";
 import * as policies from "../../src/lib/policy";

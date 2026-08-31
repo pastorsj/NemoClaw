@@ -9,7 +9,6 @@ const fixture = vi.hoisted(() => ({
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "1.0.0-test",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   },
 }));

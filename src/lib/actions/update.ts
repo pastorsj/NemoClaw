@@ -6,7 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveAgentNameAlias } from "../agent/aliases";
+import { createAgentAliasMap, resolveAgentNameAlias } from "../agent/aliases";
+import { readAgentAliasTargets } from "../agent/manifest-inventory";
 import { normalizeVersion } from "../domain/installer/version";
 
 export const NEMOCLAW_INSTALLER_URL = "https://www.nvidia.com/nemoclaw.sh";
@@ -94,8 +95,13 @@ function maintainedUpdateCommand(agent?: (typeof UPDATE_BRANDING_AGENTS)[number]
 }
 
 function updateBranding(env: NodeJS.ProcessEnv): UpdateBranding {
+  const aliasTargets = readAgentAliasTargets(UPDATE_BRANDING_AGENTS, env);
   const agent =
-    resolveAgentNameAlias(env.NEMOCLAW_AGENT, UPDATE_BRANDING_AGENTS) ?? env.NEMOCLAW_AGENT;
+    resolveAgentNameAlias(
+      env.NEMOCLAW_AGENT,
+      UPDATE_BRANDING_AGENTS,
+      createAgentAliasMap(aliasTargets),
+    ) ?? env.NEMOCLAW_AGENT;
   if (agent === "hermes") {
     return {
       cliName: "nemohermes",

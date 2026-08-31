@@ -4,7 +4,7 @@
 import type { captureOpenshell } from "../../adapters/openshell/runtime";
 import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
-import { runAgentSmokeCommands } from "../../agent/terminal-smoke";
+import { runAgentSmokeCommands } from "../../agent-runtime/runtime/terminal-smoke";
 import { redact } from "../../runner";
 
 export type EnsureTerminalInferenceRoute = (

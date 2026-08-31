@@ -149,7 +149,7 @@ describe("Vitest temp root", () => {
   it("isolates each test file's NemoClaw state inside the run root", () => {
     const root = process.env.TMPDIR as string;
     const stateDir = process.env.NEMOCLAW_TEST_STATE_DIR as string;
-    const relativeStateDir = path.relative(root, stateDir);
+    const relativeStateDir = path.relative(fs.realpathSync(root), fs.realpathSync(stateDir));
 
     expect(relativeStateDir).toMatch(/^state-\d+-/);
     expect(relativeStateDir.startsWith(`..${path.sep}`)).toBe(false);

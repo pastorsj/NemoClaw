@@ -29,7 +29,8 @@ function makeFixture(): { root: string; trace: string; path: string } {
   const npm = join(bin, "npm");
   writeFileSync(npm, `#!/bin/sh\nprintf '%s\n' "$*" >> "$NPM_TRACE"\n`);
   chmodSync(npm, 0o755);
-  mkdirSync(join(root, "nemoclaw"));
+  const pluginRoot = join(root, "packages", "nemoclaw-openclaw", "plugin");
+  mkdirSync(pluginRoot, { recursive: true });
   const lock = JSON.stringify({
     lockfileVersion: 3,
     name: "fixture",
@@ -38,7 +39,7 @@ function makeFixture(): { root: string; trace: string; path: string } {
     version: "1.0.0",
   });
   writeFileSync(join(root, "package-lock.json"), `${lock}\n`);
-  writeFileSync(join(root, "nemoclaw", "package-lock.json"), `${lock}\n`);
+  writeFileSync(join(pluginRoot, "npm-shrinkwrap.json"), `${lock}\n`);
   return { root, trace, path: `${bin}:${process.env.PATH || ""}` };
 }
 
@@ -66,14 +67,14 @@ describe("shared CI dependency installer", () => {
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(fixture.trace, "utf8").trim().split("\n")).toEqual([
       `ci --ignore-scripts --prefer-offline --cache ${join(fixture.root, "npm-cache")}`,
-      `--prefix nemoclaw ci --ignore-scripts --prefer-offline --cache ${join(fixture.root, "npm-cache")}`,
+      `--prefix packages/nemoclaw-openclaw/plugin ci --ignore-scripts --prefer-offline --cache ${join(fixture.root, "npm-cache")}`,
     ]);
   });
 
   it("rejects candidate npm configuration before npm receives the package token", () => {
     const fixture = makeFixture();
     writeFileSync(
-      join(fixture.root, "nemoclaw", ".npmrc"),
+      join(fixture.root, "packages", "nemoclaw-openclaw", "plugin", ".npmrc"),
       "@nvidia:registry=https://example.invalid\n",
     );
 
@@ -118,33 +119,30 @@ describe("shared CI dependency installer", () => {
     expect(existsSync(fixture.trace)).toBe(false);
   });
 
-  it.each(["npm-shrinkwrap.json", "nemoclaw/npm-shrinkwrap.json"])(
-    "rejects candidate %s before npm runs",
-    (relativePath) => {
-      const fixture = makeFixture();
-      writeFileSync(join(fixture.root, relativePath), "{}\n");
+  it.each(["npm-shrinkwrap.json"])("rejects candidate %s before npm runs", (relativePath) => {
+    const fixture = makeFixture();
+    writeFileSync(join(fixture.root, relativePath), "{}\n");
 
-      const result = spawnSync("bash", [installer], {
-        cwd: fixture.root,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          GITHUB_EVENT_NAME: "push",
-          NODE_AUTH_TOKEN: "credential-sentinel",
-          NPM_TRACE: fixture.trace,
-          PATH: fixture.path,
-        },
-      });
+    const result = spawnSync("bash", [installer], {
+      cwd: fixture.root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_EVENT_NAME: "push",
+        NODE_AUTH_TOKEN: "credential-sentinel",
+        NPM_TRACE: fixture.trace,
+        PATH: fixture.path,
+      },
+    });
 
-      expect(result.status).toBe(1);
-      expect(result.stderr).toBe(
-        "Candidate npm shrinkwrap files are not allowed during trusted dependency installation.\n",
-      );
-      expect(existsSync(fixture.trace)).toBe(false);
-    },
-  );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toBe(
+      "Candidate npm shrinkwrap files are not allowed during trusted dependency installation.\n",
+    );
+    expect(existsSync(fixture.trace)).toBe(false);
+  });
 
-  it.each(["package-lock.json", "nemoclaw/package-lock.json"])(
+  it.each(["package-lock.json", "packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json"])(
     "rejects an unreviewed dev package in %s before npm runs",
     (relativePath) => {
       const fixture = makeFixture();

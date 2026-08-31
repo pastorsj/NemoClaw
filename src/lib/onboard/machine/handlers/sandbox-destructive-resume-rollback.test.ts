@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
+import * as registry from "../../../state/registry";
 import type { SandboxEntry } from "../../../state/registry";
 import { detectMessagingChannelsFromEnv } from "../../messaging-channel-setup";
 import { fingerprintSandboxRegistryEntry } from "../../sandbox-recreate-transaction";
@@ -15,6 +16,15 @@ vi.mock("../../messaging-channel-setup", () => ({
 }));
 
 vi.mocked(detectMessagingChannelsFromEnv).mockReturnValue([]);
+
+beforeEach(() => {
+  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
+  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("handleSandboxState journaled replacement failure", () => {
   it("keeps the registry row unchanged when replacement creation fails (#7194)", async () => {

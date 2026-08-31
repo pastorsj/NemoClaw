@@ -167,9 +167,9 @@ let managedHermesVolume = recreate ? {
 // Route the root CLI's generated shared-boundary import back to its canonical
 // .cts source so this test cannot pass only because a local dist tree exists.
 const canonicalSandboxNameSource =
-  ${source("nemoclaw/src/shared/sandbox-name.cts")};
+  ${source("src/lib/shared/sandbox-name.cts")};
 const generatedSandboxName =
-  ${source("nemoclaw/dist/shared/sandbox-name.cjs")};
+  ${source("dist/lib/shared/sandbox-name.cjs")};
 const resolveFilename = Module._resolveFilename;
 Module._extensions[".cts"] = Module._extensions[".ts"];
 Module._resolveFilename = function(request, parent, isMain, options) {
@@ -555,6 +555,7 @@ registry.setDefault = () => true;
 registry.removeSandbox = () => true;
 const createFixture = fixtureMocks.installVerifiedSandboxCreateFixture(registry, {
   sandboxName,
+  agentName,
   provider,
   model,
   preferredInferenceApi: "openai-completions",

@@ -64,7 +64,7 @@ function discoverTargets(): ConfigTarget[] {
     },
     {
       schema: "schemas/openclaw-plugin.schema.json",
-      files: ["nemoclaw/openclaw.plugin.json"],
+      files: ["packages/nemoclaw-openclaw/plugin/openclaw.plugin.json"],
     },
     {
       schema: "schemas/router-pool-config.schema.json",
@@ -95,6 +95,27 @@ function discoverTargets(): ConfigTarget[] {
     const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
     if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
     // agents directory may not exist — not an error
+  }
+
+  const packagesDir = join(REPO_ROOT, "packages");
+  try {
+    const packagePolicyFiles = readdirSync(packagesDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+      .flatMap((entry) => {
+        const base = `packages/${entry.name}`;
+        return [`${base}/policy-additions.yaml`, `${base}/policies/permissive.yaml`];
+      })
+      .filter((file) => existsSync(join(REPO_ROOT, file)));
+    if (packagePolicyFiles.length > 0) {
+      const sandboxPolicyTarget = targets.find(
+        (target) => target.schema === "schemas/sandbox-policy.schema.json",
+      );
+      sandboxPolicyTarget?.files.push(...packagePolicyFiles);
+    }
+  } catch (err) {
+    const code = typeof err === "object" && err !== null && "code" in err ? err.code : undefined;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    // packages directory may not exist — not an error
   }
 
   const modelSetupDir = join(REPO_ROOT, "nemoclaw-blueprint", "model-specific-setup");

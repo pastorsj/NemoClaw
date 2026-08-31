@@ -55,12 +55,11 @@ const SERVING_PROFILE_PROVENANCE = {
 
 const OPENCLAW_HARNESS_BINDING = Object.freeze({
   kind: "package" as const,
-  recordedAgent: null,
+  recordedAgent: "openclaw",
   harnessPackage: Object.freeze({
     kind: "agent-runtime" as const,
     id: "openclaw",
     packageVersion: "0.1.0",
-    contractVersion: 1 as const,
     contentDigest: "a".repeat(64),
   }),
 });
@@ -401,20 +400,20 @@ describe("prepareOnboardSession", () => {
     expect(result.session?.observabilityRequestedExplicitly).toBe(true);
     expect(result.session?.apfInterceptorRequested).toBe(true);
     expect(result.session).toMatchObject({
-      agent: null,
+      agent: "openclaw",
       harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
       harnessPackageMigration: null,
     });
     expect(deps.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: null,
+        agent: "openclaw",
         harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
         harnessPackageMigration: null,
       }),
     );
     expect(deps.saveSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        agent: null,
+        agent: "openclaw",
         harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
         harnessPackageMigration: null,
       }),

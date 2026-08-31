@@ -6,7 +6,7 @@ import path from "node:path";
 import { isCandidateAgent } from "../agent/candidate";
 import type { ServingProfileProvenance } from "../inference/serving/types";
 import { NEMOCLAW_VLLM_GPU_DEVICE_ENV, parseVllmGpuDevice } from "../inference/vllm-models";
-import { inspectHarnessPackageState } from "../harness/package-identity";
+import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
 import { PERSONAL_POLICY_TIER_NAME } from "../policy/tiers";
 import { redact, redactFull, redactSensitiveText } from "../security/redact";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
@@ -652,9 +652,8 @@ function requireFreshHarnessBinding(
   if (packageState.status !== "valid") {
     throw new Error("Fresh harness package authority is malformed");
   }
-  const effectiveAgent = binding.recordedAgent ?? "openclaw";
-  if (packageState.harnessPackage.id !== effectiveAgent) {
-    throw new Error("Fresh harness package authority does not match its compatibility agent");
+  if (packageState.harnessPackage.id !== binding.recordedAgent) {
+    throw new Error("Fresh harness package authority does not match its recorded agent");
   }
   return { ...binding, harnessPackage: packageState.harnessPackage };
 }

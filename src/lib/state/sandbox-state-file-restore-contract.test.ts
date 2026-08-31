@@ -311,7 +311,6 @@ process.exit(0);
             kind: "agent-runtime",
             id: "langchain-deepagents-code",
             packageVersion: "1.2.3",
-            contractVersion: 1,
             contentDigest: "a".repeat(64),
           },
         }),

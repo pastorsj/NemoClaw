@@ -55,6 +55,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
 import { testTimeoutOptions } from "../helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "../..", "bin", "nemoclaw.js");
@@ -251,9 +252,10 @@ describe("onboard dashboard-port exhaustion exits non-zero (#5974)", () => {
   let binDir: string;
 
   beforeEach(() => {
-    home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-5974-onboard-"));
+    home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "nemoclaw-5974-onboard-"));
     binDir = path.join(home, "bin");
     fs.mkdirSync(binDir, { recursive: true });
+    installHomeHarnessPackageFixture(home, "openclaw");
 
     // Fake one coherent OpenShell release: onboard probes the CLI with `-V`,
     // validates the sibling gateway/sandbox versions with `--version`, and

@@ -414,8 +414,13 @@ moduleRuntime._resolveFilename = function resolveSourceFilename(request, parent,
   } catch (error) {
     const parentFilename = parent?.filename ? path.resolve(parent.filename) : "";
     const sourceRoot = path.join(repoRoot, "src") + path.sep;
-    if (request.startsWith(".") && request.endsWith(".js") && parentFilename) {
-      const sourceRequest = `${request.slice(0, -3)}.ts`;
+    if (request.startsWith(".") && parentFilename) {
+      const sourceRequest = request.endsWith(".cjs")
+        ? `${request.slice(0, -4)}.cts`
+        : request.endsWith(".js")
+          ? `${request.slice(0, -3)}.ts`
+          : null;
+      if (!sourceRequest) throw error;
       const sourceCandidate = path.resolve(path.dirname(parentFilename), sourceRequest);
       if (sourceCandidate.startsWith(sourceRoot) && fs.existsSync(sourceCandidate)) {
         return resolveFilename.call(this, sourceRequest, parent, isMain, options);
@@ -434,3 +439,5 @@ moduleRuntime._extensions[".ts"] = (module, filename) => {
   stats.compileMs += nowMs() - compileStart;
   module._compile(outputText, filename);
 };
+
+moduleRuntime._extensions[".cts"] = moduleRuntime._extensions[".ts"];

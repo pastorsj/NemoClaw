@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 
 const REPOSITORY_ROOT = path.join(import.meta.dirname, "..", "..");
-const PLUGIN_SOURCE = path.join(REPOSITORY_ROOT, "nemoclaw");
+const PLUGIN_SOURCE = path.join(REPOSITORY_ROOT, "packages/nemoclaw-openclaw/plugin");
 const PRIVATE_AUTHENTICATION_CONTENTS = "opaque-private-authentication-material";
 const PRIVATE_AMBIENT_CONTENTS = "opaque-ambient-gateway-material";
 const CA_PEM = rootCertificates[0]!;

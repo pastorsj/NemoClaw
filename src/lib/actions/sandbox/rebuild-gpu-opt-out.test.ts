@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { AgentDefinition } from "../../agent/defs";
-import type { HarnessPackageIdentity } from "../../harness/package-identity";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 
@@ -18,7 +18,6 @@ function packageIdentity(id: string): HarnessPackageIdentity {
     kind: "agent-runtime" as const,
     id,
     packageVersion: "1.0.0",
-    contractVersion: 1,
     contentDigest: "a".repeat(64),
   };
 }

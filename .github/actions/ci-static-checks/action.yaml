@@ -14,7 +14,7 @@ runs:
         cache: npm
         cache-dependency-path: |
           package-lock.json
-          nemoclaw/package-lock.json
+          packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json
 
     - name: Install base-trusted createRequire verifier dependencies
       shell: bash

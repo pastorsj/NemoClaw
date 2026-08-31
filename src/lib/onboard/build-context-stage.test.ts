@@ -82,7 +82,7 @@ describe("stageCreateSandboxBuildContext", () => {
     const agentDir = path.join(repoRoot, "agents", "hermes");
     fs.mkdirSync(agentDir, { recursive: true });
     const agentDockerfile = path.join(agentDir, "Dockerfile");
-    fs.writeFileSync(agentDockerfile, "FROM scratch\nCOPY agents/hermes/plugin/ /opt/plugin/\n");
+    fs.writeFileSync(agentDockerfile, "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\n");
     const agentBuild = {
       buildCtx: makeTmpDir("nemoclaw-agent-staged-"),
       stagedDockerfile: path.join(makeTmpDir("nemoclaw-agent-staged-df-"), "agent.Dockerfile"),
@@ -112,7 +112,7 @@ describe("stageCreateSandboxBuildContext", () => {
   it("filters checkout credentials from the staged managed repository-root context (#7205)", () => {
     const repoRoot = fs.realpathSync(makeTmpDir("nemoclaw-managed-context-security-"));
     const requiredFiles = [
-      ["agents/hermes/plugin/entry.py", "required-plugin-bytes"],
+      ["packages/nemoclaw-hermes/plugin/__init__.py", "required-plugin-bytes"],
       ["src/lib/tool-disclosure.ts", "required-tool-disclosure-bytes"],
       ["scripts/lib/reviewed-npm-archive.mts", "required-script-bytes"],
       ["scripts/lib/bundled-npm-package.mts", "required-package-helper-bytes"],
@@ -128,11 +128,11 @@ describe("stageCreateSandboxBuildContext", () => {
       ["certs/client.pem", "forbidden-pem-canary"],
       ["keys/client.key", "forbidden-key-canary"],
     ] as const;
-    const agentDockerfile = path.join(repoRoot, "agents", "hermes", "Dockerfile");
+    const agentDockerfile = path.join(repoRoot, "packages", "nemoclaw-hermes", "Dockerfile");
     writeFixtureFile(
       repoRoot,
-      "agents/hermes/Dockerfile",
-      "FROM scratch\nCOPY agents/hermes/plugin/ /opt/plugin/\nCOPY src/ /src/\nCOPY scripts/ /scripts/\nCOPY nemoclaw-blueprint/ /blueprint/\n",
+      "packages/nemoclaw-hermes/Dockerfile",
+      "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\nCOPY src/ /src/\nCOPY scripts/ /scripts/\nCOPY nemoclaw-blueprint/ /blueprint/\n",
     );
     [...requiredFiles, ...credentialFiles].forEach(([relativePath, contents]) => {
       writeFixtureFile(repoRoot, relativePath, contents);

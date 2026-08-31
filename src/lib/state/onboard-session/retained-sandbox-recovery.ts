@@ -13,7 +13,7 @@ import {
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../../harness/package-identity";
+} from "../../agent-runtime/package/identity";
 import {
   parseNemoClawPolicyCreationReceipt,
   type NemoClawPolicyCreationReceipt,

@@ -3,7 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import type { AgentStateLockPlan } from "../agent/definition-types";
+import type { AgentStateLockPlan } from "../agent-runtime/manifest-types";
 import type { PrivilegedExec } from "./state-dir-lock";
 import {
   applyStateDirLockMode,

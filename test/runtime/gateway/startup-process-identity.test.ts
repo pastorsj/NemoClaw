@@ -245,8 +245,8 @@ print(json.dumps(proof))
 `;
 
 const GUARDS = [
-  ["OpenClaw", path.resolve("scripts/openclaw-config-guard.py")],
-  ["Hermes", path.resolve("agents/hermes/runtime-config-guard.py")],
+  ["OpenClaw", path.resolve("packages/nemoclaw-openclaw/runtime/config-guard.py")],
+  ["Hermes", path.resolve("packages/nemoclaw-hermes/runtime/config-guard.py")],
 ] as const;
 
 function runIdentityHarness(guardPath: string) {

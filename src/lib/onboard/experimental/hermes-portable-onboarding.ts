@@ -6,7 +6,7 @@ import { spawnSync, type SpawnSyncReturns } from "node:child_process";
 import { isDeepStrictEqual, TextDecoder } from "node:util";
 
 import type { AgentDefinition } from "../../agent/defs";
-import type { HarnessPackageAuthority } from "../../harness/package-identity";
+import type { HarnessPackageAuthority } from "../../agent-runtime/package/identity";
 import { normalizeInferenceSelection, type InferenceSelection } from "../../inference/selection";
 import {
   fingerprintOpenShellSandboxLiveIdentity,

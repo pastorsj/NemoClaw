@@ -1,19 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { resolveAgentNameAlias } from "../agent/aliases";
-import type { AgentChoice, AgentDefinition } from "../agent/definition-types";
+import { createAgentAliasMap, resolveAgentNameAlias } from "../agent/aliases";
+import type { AgentChoice, AgentDefinition } from "../agent-runtime/manifest-types";
 import {
   listHarnessPackageInventory,
   type HealthyInstalledHarnessPackageRecord,
   type HarnessPackageCatalogOptions,
   type HarnessPackageInventory,
-} from "../harness/package-catalog";
+} from "../agent-runtime/package/catalog";
 import {
   resolvePinnedHarnessPackage,
   type InstalledHarnessPackage,
-} from "../harness/package-store";
-import type { HarnessPackageIdentity } from "../harness/package-types";
+} from "../agent-runtime/package/store";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import { promptForAgentChoice, resolveQualifiedOnboardAgent } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 import { resolveSandboxAgent } from "./sandbox-agent";
@@ -30,7 +30,7 @@ export interface SelectOnboardHarnessPackageInput {
 
 export interface SelectedOnboardHarnessPackage {
   readonly kind: "package";
-  readonly recordedAgent: string | null;
+  readonly recordedAgent: string;
   readonly harnessPackage: HarnessPackageIdentity;
   readonly resolvedPackage: InstalledHarnessPackage;
   readonly effectiveDefinition: AgentDefinition;
@@ -118,8 +118,8 @@ function orderInstalledPackages(
   records: readonly HealthyInstalledHarnessPackageRecord[],
 ): HealthyInstalledHarnessPackageRecord[] {
   return [...records].sort((left, right) => {
-    if (left.id === "openclaw") return -1;
-    if (right.id === "openclaw") return 1;
+    if (left.isDefaultOnboardingChoice) return -1;
+    if (right.isDefaultOnboardingChoice) return 1;
     return left.id.localeCompare(right.id);
   });
 }
@@ -129,7 +129,6 @@ function identityMatches(left: HarnessPackageIdentity, right: HarnessPackageIden
     left.kind === right.kind &&
     left.id === right.id &&
     left.packageVersion === right.packageVersion &&
-    left.contractVersion === right.contractVersion &&
     left.contentDigest === right.contentDigest
   );
 }
@@ -142,7 +141,7 @@ function resolveExactSelection(
   const resolvedPackage = dependencies.resolvePinnedHarnessPackage(selected.identity, {
     storeRoot: input.storeRoot,
   });
-  const recordedAgent = selected.id === "openclaw" ? null : selected.id;
+  const recordedAgent = selected.id;
   const resolvedAgent = dependencies.resolveSandboxAgent(
     {
       agent: recordedAgent,
@@ -173,7 +172,13 @@ function explicitInstalledPackage(
   installed: readonly HealthyInstalledHarnessPackageRecord[],
 ): HealthyInstalledHarnessPackageRecord {
   const availableIds = inventory.available.map(({ id }) => id);
-  const resolvedId = resolveAgentNameAlias(selector, availableIds);
+  const aliases = createAgentAliasMap(
+    inventory.available.map(({ id, aliases: packageAliases }) => ({
+      name: id,
+      aliases: packageAliases,
+    })),
+  );
+  const resolvedId = resolveAgentNameAlias(selector, availableIds, aliases);
   if (!resolvedId) {
     throw new Error(
       `Unknown harness package '${selector}'. Reviewed harnesses: ${availableIds.join(", ")}.`,
@@ -214,10 +219,12 @@ async function selectFromInstalledPackages(
   }
   if (installed.length === 1) return installed[0]!;
   if (!input.canPrompt) {
-    const openclaw = installed.find(({ id }) => id === "openclaw");
-    if (openclaw) return openclaw;
+    const defaultPackage = installed.find(({ isDefaultOnboardingChoice }) =>
+      Boolean(isDefaultOnboardingChoice),
+    );
+    if (defaultPackage) return defaultPackage;
     throw new OnboardHarnessSelectionRequiredError(
-      `Multiple harness packages are installed (${installed.map(({ id }) => id).join(", ")}), but OpenClaw is not installed. Pass '--agent <id>' to select one.`,
+      `Multiple harness packages are installed (${installed.map(({ id }) => id).join(", ")}), but no installed package is the onboarding default. Pass '--agent <id>' to select one.`,
     );
   }
 

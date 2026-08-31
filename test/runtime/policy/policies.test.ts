@@ -57,6 +57,8 @@ describe("policies", () => {
       SANDBOX_IDENTITY,
     );
     vi.spyOn(registryForTest, "compareAndSetSandboxPolicyCreationReceipt").mockReturnValue(true);
+    vi.spyOn(registryForTest, "getBaselineExclusions").mockReturnValue([]);
+    vi.spyOn(registryForTest, "getBaselineExclusionTransition").mockReturnValue(null);
   });
 
   afterEach(() => {

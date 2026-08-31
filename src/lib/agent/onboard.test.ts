@@ -34,6 +34,10 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
     name: "agent",
     displayName: "Agent",
+    agentAliases: [],
+    agentAliasSummary: null,
+    isDefaultOnboardingChoice: false,
+    defaultSandboxName: "agent",
     healthProbe: { url: "http://127.0.0.1:19000/", port: 19000, timeout_seconds: 5 },
     forwardPort: 19000,
     dashboard: { kind: "ui", label: "UI", path: "/", healthPath: "/health", auth: "url_token" },

@@ -37,7 +37,10 @@ const REVIEWED_MSTEAMS_CONTRACT = {
 
 function readPinnedOpenClawVersion(): string {
   const packageJson = JSON.parse(
-    fs.readFileSync(path.join(repoRoot, "nemoclaw", "package.json"), "utf8"),
+    fs.readFileSync(
+      path.join(repoRoot, "packages/nemoclaw-openclaw/plugin/package.json"),
+      "utf8",
+    ),
   ) as { openclaw?: { build?: { openclawVersion?: unknown } } };
   return String(packageJson.openclaw?.build?.openclawVersion ?? "");
 }

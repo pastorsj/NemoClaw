@@ -81,7 +81,7 @@ describe("OpenShell policy mutation read discovery (#6921)", () => {
       "}",
     ].join("\n");
 
-    expect(classifyPolicyReadCalls(source, "/repo/nemoclaw/src/blueprint/runner.ts", "/repo"))
+    expect(classifyPolicyReadCalls(source, "/repo/packages/nemoclaw-openclaw/plugin/src/blueprint/runner.ts", "/repo"))
       .toEqual([
         { site: "actionApply", view: "base", failureHandling: "error-preserving" },
         {
@@ -352,7 +352,14 @@ describe("OpenShell policy mutation read discovery (#6921)", () => {
   it("discovers builder and direct policy reads in new production files", () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-read-discovery-"));
     const mutationPath = path.join(repoRoot, "src", "lib", "new-policy-mutation.ts");
-    const diagnosticPath = path.join(repoRoot, "nemoclaw", "src", "new-policy-diagnostic.ts");
+    const diagnosticPath = path.join(
+      repoRoot,
+      "packages",
+      "nemoclaw-openclaw",
+      "plugin",
+      "src",
+      "new-policy-diagnostic.ts",
+    );
     fs.mkdirSync(path.dirname(mutationPath), { recursive: true });
     fs.mkdirSync(path.dirname(diagnosticPath), { recursive: true });
     fs.writeFileSync(
@@ -370,7 +377,7 @@ describe("OpenShell policy mutation read discovery (#6921)", () => {
     try {
       expect(discoverPolicyReadSites(repoRoot)).toEqual([
         {
-          relativePath: "nemoclaw/src/new-policy-diagnostic.ts",
+          relativePath: "packages/nemoclaw-openclaw/plugin/src/new-policy-diagnostic.ts",
           readCalls: 1,
           reads: [{ site: "<module>", view: "full", failureHandling: "error-preserving" }],
         },

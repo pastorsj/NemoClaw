@@ -10,9 +10,9 @@ import { prompt } from "../../lib/credentials/store";
 import {
   listHarnessPackageInventory,
   resolveHarnessPackageInstallSelection,
-} from "../../lib/harness/package-catalog";
-import { installHarnessPackage } from "../../lib/harness/package-install";
-import { promptForHarnessPackage } from "../../lib/harness/package-prompt";
+} from "../../lib/agent-runtime/package/catalog";
+import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
+import { promptForHarnessPackage } from "../../lib/agent-runtime/package/prompt";
 
 export const harnessInstallCommandDependencies = {
   getBuildIdentity,

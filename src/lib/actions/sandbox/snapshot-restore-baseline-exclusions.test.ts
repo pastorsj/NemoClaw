@@ -9,7 +9,6 @@ const HERMES_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "hermes",
   packageVersion: "1.2.3",
-  contractVersion: 1 as const,
   contentDigest: "b".repeat(64),
 };
 const HERMES_PACKAGE_ROOT = `/state/harnesses/objects/${HERMES_PACKAGE.contentDigest}`;

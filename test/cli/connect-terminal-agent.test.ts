@@ -57,6 +57,9 @@ describe("CLI dispatch for terminal agents", () => {
         '  case "$cmd" in',
         '    *"dcode --version"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "dcode 0.1.55"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         '    *"config.toml"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_DEEPAGENTS_CONFIG_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
+        '    *"fabric.json"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_FABRIC_CONFIG_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
+        '    *"nemoclaw-fabric --version"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
+        '    *"timeout --version"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "timeout (GNU coreutils) 9.0"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         '    *"NEMOCLAW_DCODE_EMPTY_PROMPT_OK"*) echo "NEMOCLAW_AGENT_SMOKE_BEGIN"; echo "NEMOCLAW_DCODE_EMPTY_PROMPT_OK"; echo "NEMOCLAW_AGENT_SMOKE_EXIT:0"; exit 0 ;;',
         "  esac",
         "fi",
@@ -71,7 +74,7 @@ describe("CLI dispatch for terminal agents", () => {
     });
 
     // Evidence unavailability on macOS is a note, not a failure (#9278).
-    expect(r.code).toBe(0);
+    expect(r.code, r.out).toBe(0);
     expect(r.out.includes(PLATFORM_EVIDENCE_UNAVAILABLE)).toBe(process.platform === "darwin");
     expect(r.out).toContain("terminal smoke checks passed");
     const calls = fs.readFileSync(markerFile, "utf8").trim().split("\n").filter(Boolean);
@@ -83,6 +86,17 @@ describe("CLI dispatch for terminal agents", () => {
         call.includes("nemoclaw-agent-smoke test -s /sandbox/.deepagents/config.toml"),
       ),
     ).toBe(true);
+    expect(
+      calls.some((call) =>
+        call.includes("nemoclaw-agent-smoke test -s /sandbox/.deepagents/fabric.json"),
+      ),
+    ).toBe(true);
+    expect(
+      calls.some((call) => call.includes("nemoclaw-agent-smoke nemoclaw-fabric --version")),
+    ).toBe(true);
+    expect(calls.some((call) => call.includes("nemoclaw-agent-smoke timeout --version"))).toBe(
+      true,
+    );
     expect(
       calls.some(
         (call) =>

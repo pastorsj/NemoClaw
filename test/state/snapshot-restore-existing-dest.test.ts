@@ -19,6 +19,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { hashSnapshotBackupContent } from "../../src/lib/state/snapshot/content-digest.js";
+import { installHomeHarnessPackageFixture } from "../helpers/harness-packages";
 import { execTimeout } from "../helpers/timeouts";
 
 const CLI = path.join(import.meta.dirname, "../..", "bin", "nemoclaw.js");
@@ -64,12 +66,12 @@ interface MakeEnvOptions {
   withSourceImage?: boolean;
   /** Put dst on a registered non-default gateway and hide it from src's gateway list. */
   destinationGatewayPort?: number;
-  /** When false, selecting the destination's persisted gateway fails. */
-  destinationGatewaySelectSucceeds?: boolean;
-  /** When false, the destination gateway probe fails before --force can delete it. */
-  destinationGatewayRunning?: boolean;
+  /** When false, the scoped destination list fails before --force can delete it. */
+  destinationGatewayListSucceeds?: boolean;
+  /** When false, the scoped destination identity lookup fails before deletion. */
+  destinationGatewayGetSucceeds?: boolean;
   /** Let the currently-active source gateway also report a same-named destination. */
-  foreignActiveGatewayListsDestination?: boolean;
+  sourceGatewayListsDestination?: boolean;
 }
 
 /**
@@ -77,10 +79,11 @@ interface MakeEnvOptions {
  *  - registry containing `src` and `dst`
  *  - snapshot manifest for `src` at ~/.nemoclaw/rebuild-backups/src/<ts>/rebuild-manifest.json (unless withSnapshot=false)
  *  - fake openshell that:
- *    - `sandbox list` reports live sandboxes for the active gateway
+ *    - `sandbox list -g <gateway>` reports live sandboxes for that gateway
  *      and omits `dst` from later source-gateway listings after deletion
  *    - `status` reports the gateway as Connected
- *    - `sandbox delete dst` exits 0 (and logs the call)
+ *    - `sandbox get -g <gateway> dst` returns a stable live identity
+ *    - `sandbox delete -g <gateway> dst` exits 0 (and logs the call)
  *    - `sandbox create` exits non-zero (intentional; the integration tests
  *      only need to verify control flow reached/passed the delete step)
  *  - fake docker that:
@@ -92,7 +95,7 @@ function makeExistingDestEnv(
   prefix: string,
   opts: MakeEnvOptions = {},
 ): { env: Record<string, string>; osLog: string } {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   const localBin = path.join(home, "bin");
   fs.mkdirSync(localBin, { recursive: true });
   const destinationGatewayName = opts.destinationGatewayPort
@@ -101,6 +104,7 @@ function makeExistingDestEnv(
 
   const registryDir = path.join(home, ".nemoclaw");
   fs.mkdirSync(registryDir, { recursive: true });
+  const harnessPackage = installHomeHarnessPackageFixture(home, "openclaw").identity;
   fs.writeFileSync(
     path.join(registryDir, "sandboxes.json"),
     JSON.stringify({
@@ -111,6 +115,8 @@ function makeExistingDestEnv(
           provider: "nvidia-prod",
           gpuEnabled: false,
           policies: [],
+          agent: null,
+          harnessPackage,
         },
         dst: {
           name: "dst",
@@ -118,6 +124,8 @@ function makeExistingDestEnv(
           provider: "nvidia-prod",
           gpuEnabled: false,
           policies: [],
+          agent: null,
+          harnessPackage,
           ...(destinationGatewayName
             ? {
                 gatewayName: destinationGatewayName,
@@ -135,22 +143,26 @@ function makeExistingDestEnv(
     const timestamp = "2026-05-19T12-34-56-789Z";
     const snapshotDir = path.join(registryDir, "rebuild-backups", "src", timestamp);
     fs.mkdirSync(snapshotDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(snapshotDir, "rebuild-manifest.json"),
-      JSON.stringify({
-        version: 2,
-        sandboxName: "src",
-        timestamp,
-        agentType: "openclaw",
-        agentVersion: "2026.4.24",
-        expectedVersion: null,
-        stateDirs: [],
-        dir: snapshotDir,
-        backupPath: snapshotDir,
-        blueprintDigest: null,
-      }),
-      { mode: 0o600 },
-    );
+    const manifest = {
+      version: 2,
+      sandboxName: "src",
+      timestamp,
+      agentType: "openclaw",
+      agentVersion: "2026.4.24",
+      expectedVersion: null,
+      harnessPackage,
+      stateDirs: [],
+      failedBackupDirs: [],
+      backupComplete: true,
+      stateFiles: [],
+      dir: snapshotDir,
+      backupPath: snapshotDir,
+      blueprintDigest: null,
+      backupContentSha256: hashSnapshotBackupContent(snapshotDir),
+    };
+    fs.writeFileSync(path.join(snapshotDir, "rebuild-manifest.json"), JSON.stringify(manifest), {
+      mode: 0o600,
+    });
   }
 
   const osLog = path.join(home, "openshell.log");
@@ -164,16 +176,27 @@ function makeExistingDestEnv(
       `ACTIVE_GATEWAY=${JSON.stringify(activeGateway)}`,
       `DELETED_DESTINATION=${JSON.stringify(deletedDestination)}`,
       'if [ "$1" = "gateway" ] && [ "$2" = "select" ]; then',
-      destinationGatewayName && opts.destinationGatewaySelectSucceeds === false
-        ? `  if [ "$3" = ${JSON.stringify(destinationGatewayName)} ]; then echo "select failed" >&2; exit 17; fi`
-        : "  :",
       '  printf "%s\\n" "$3" > "$ACTIVE_GATEWAY"',
       "  exit 0",
       "fi",
       'if [ "$1" = "sandbox" ] && [ "$2" = "list" ]; then',
+      '  gateway="$(if [ "$3" = "-g" ]; then printf "%s" "$4"; else cat "$ACTIVE_GATEWAY" 2>/dev/null || printf "%s" nemoclaw; fi)"',
+      destinationGatewayName && opts.destinationGatewayListSucceeds === false
+        ? `  if [ "$gateway" = ${JSON.stringify(destinationGatewayName)} ]; then echo "list failed" >&2; exit 17; fi`
+        : "  :",
       destinationGatewayName
-        ? `  active="$(cat "$ACTIVE_GATEWAY" 2>/dev/null || printf '%s' nemoclaw)"; if [ "$active" = ${JSON.stringify(destinationGatewayName)} ]; then printf "NAME STATUS\\ndst Ready\\n"; else ${opts.foreignActiveGatewayListsDestination ? 'printf "NAME STATUS\\nsrc Ready\\ndst Ready\\n"' : 'printf "NAME STATUS\\nsrc Ready\\n"'}; fi`
+        ? `  if [ "$gateway" = ${JSON.stringify(destinationGatewayName)} ]; then if [ -e "$DELETED_DESTINATION" ]; then printf "NAME STATUS\\n"; else printf "NAME STATUS\\ndst Ready\\n"; fi; else ${opts.sourceGatewayListsDestination ? 'printf "NAME STATUS\\nsrc Ready\\ndst Ready\\n"' : 'printf "NAME STATUS\\nsrc Ready\\n"'}; fi`
         : '  if [ -e "$DELETED_DESTINATION" ]; then printf "NAME STATUS\nsrc Ready\n"; else printf "NAME STATUS\nsrc Ready\ndst Ready\n"; fi',
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "sandbox" ] && [ "$2" = "get" ]; then',
+      '  gateway="$(if [ "$3" = "-g" ]; then printf "%s" "$4"; else cat "$ACTIVE_GATEWAY" 2>/dev/null || printf "%s" nemoclaw; fi)"',
+      '  sandbox="$(if [ "$3" = "-g" ]; then printf "%s" "$5"; else printf "%s" "$3"; fi)"',
+      destinationGatewayName && opts.destinationGatewayGetSucceeds === false
+        ? `  if [ "$gateway" = ${JSON.stringify(destinationGatewayName)} ] && [ "$sandbox" = "dst" ]; then echo "get failed" >&2; exit 17; fi`
+        : "  :",
+      '  if [ "$sandbox" = "dst" ] && [ -e "$DELETED_DESTINATION" ]; then echo "Not found" >&2; exit 1; fi',
+      '  printf "Name: %s\\nId: fixture-%s\\nPhase: Ready\\n" "$sandbox" "$sandbox"',
       "  exit 0",
       "fi",
       'if [ "$1" = "status" ]; then',
@@ -181,9 +204,11 @@ function makeExistingDestEnv(
       "  exit 0",
       "fi",
       'if [ "$1" = "sandbox" ] && [ "$2" = "delete" ]; then',
+      '  [ "$3" = "-g" ] || { echo "delete was not gateway-scoped" >&2; exit 42; }',
       destinationGatewayName
-        ? `  active="$(cat "$ACTIVE_GATEWAY" 2>/dev/null || printf '%s' nemoclaw)"; if [ "$active" != ${JSON.stringify(destinationGatewayName)} ]; then echo "delete on wrong gateway: $active" >&2; exit 42; fi`
-        : "  :",
+        ? `  [ "$4" = ${JSON.stringify(destinationGatewayName)} ] || { echo "delete on wrong gateway: $4" >&2; exit 42; }`
+        : '  [ "$4" = "nemoclaw" ] || { echo "delete on wrong gateway: $4" >&2; exit 42; }',
+      '  [ "$5" = "dst" ] || { echo "unexpected delete target: $5" >&2; exit 42; }',
       '  touch "$DELETED_DESTINATION"',
       "  exit 0",
       "fi",
@@ -205,9 +230,6 @@ function makeExistingDestEnv(
     [
       "#!/bin/sh",
       'if [ "$1" = "inspect" ]; then',
-      destinationGatewayName && opts.destinationGatewayRunning === false
-        ? `  case "$*" in *openshell-cluster-${destinationGatewayName}*) echo "false"; exit 0 ;; esac`
-        : "  :",
       '  echo "true"',
       "  exit 0",
       "fi",
@@ -236,7 +258,7 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.out).toMatch(/Re-run with --force/);
     // Critically, no delete is attempted in the refuse path.
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 
   it("refuses by default when the destination is registered on another gateway", () => {
@@ -247,7 +269,7 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Destination sandbox 'dst' already exists/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 
   it("refuses by default before running source-image preflight per Codex P2 review (#3796)", () => {
@@ -272,7 +294,7 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Deleting existing destination 'dst'/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).toMatch(/sandbox delete dst/);
+    expect(log).toMatch(/sandbox delete -g nemoclaw dst/);
   });
 
   it("deletes a registered cross-gateway destination on its own gateway before recreating", () => {
@@ -283,36 +305,37 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Deleting existing destination 'dst'/);
     const lines = fs.readFileSync(osLog, "utf-8").trim().split("\n");
-    const deleteIndex = lines.indexOf("sandbox delete dst");
+    const deleteIndex = lines.indexOf("sandbox delete -g nemoclaw-8090 dst");
     expect(deleteIndex).toBeGreaterThan(0);
-    expect(lines.slice(0, deleteIndex)).toContain("gateway select nemoclaw-8090");
+    expect(lines.slice(0, deleteIndex)).toContain("sandbox list -g nemoclaw-8090");
+    expect(lines.slice(0, deleteIndex)).toContain("sandbox get -g nemoclaw-8090 dst");
     expect(lines.slice(deleteIndex + 1)).toContain("gateway select nemoclaw");
   });
 
   it("aborts before deleting when a registered destination gateway cannot be verified", () => {
     const { env, osLog } = makeExistingDestEnv("nemoclaw-snap-restore-cross-unverified-", {
       destinationGatewayPort: 8090,
-      destinationGatewayRunning: false,
+      destinationGatewayListSucceeds: false,
     });
     const r = runCli(["src", "snapshot", "restore", "--to", "dst", "--force", "--yes"], env);
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Cannot verify destination sandbox 'dst'/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 
-  it("aborts before deleting when destination gateway select fails even if the active gateway lists dst", () => {
+  it("aborts before deleting when scoped destination identity lookup fails even if the source gateway lists dst", () => {
     const { env, osLog } = makeExistingDestEnv("nemoclaw-snap-restore-cross-select-fails-", {
       destinationGatewayPort: 8090,
-      destinationGatewaySelectSucceeds: false,
-      foreignActiveGatewayListsDestination: true,
+      destinationGatewayGetSucceeds: false,
+      sourceGatewayListsDestination: true,
     });
     const r = runCli(["src", "snapshot", "restore", "--to", "dst", "--force", "--yes"], env);
     expect(r.code).toBe(1);
-    expect(r.out).toMatch(/Cannot verify destination sandbox 'dst'/);
+    expect(r.out).toMatch(/live identity could not be captured/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).toMatch(/gateway select nemoclaw-8090/);
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).toMatch(/sandbox get -g nemoclaw-8090 dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 
   it("skips the prompt under NEMOCLAW_NON_INTERACTIVE=1 even without --yes", () => {
@@ -322,7 +345,7 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/Deleting existing destination 'dst'/);
     const log = fs.existsSync(base.osLog) ? fs.readFileSync(base.osLog, "utf-8") : "";
-    expect(log).toMatch(/sandbox delete dst/);
+    expect(log).toMatch(/sandbox delete -g nemoclaw dst/);
   });
 
   // #3756 P1: preflight failures must not delete the destination.
@@ -335,7 +358,7 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.out).toMatch(/No snapshots found for 'src'/);
     expect(r.out).not.toMatch(/Deleting existing destination 'dst'/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 
   it("does NOT delete the destination when the selector resolves to nothing (--force --yes)", () => {
@@ -348,7 +371,7 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.out).toMatch(/No snapshot matching 'not-a-real-snap' found/);
     expect(r.out).not.toMatch(/Deleting existing destination 'dst'/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 
   it("does NOT delete the destination when the source pod image cannot be resolved (--force --yes)", () => {
@@ -361,6 +384,6 @@ describe("snapshot restore --to existing destination (#3756)", () => {
     expect(r.out).toMatch(/aborting before deleting 'dst'/);
     expect(r.out).not.toMatch(/Deleting existing destination 'dst'/);
     const log = fs.existsSync(osLog) ? fs.readFileSync(osLog, "utf-8") : "";
-    expect(log).not.toMatch(/sandbox delete dst/);
+    expect(log).not.toMatch(/sandbox delete/);
   });
 });

@@ -35,7 +35,7 @@ if openclaw plugins install /opt/nemoclaw 2>&1; then
   pass "Plugin installed"
 else
   # If plugins install isn't available, verify the built artifacts exist
-  if [ -f /opt/nemoclaw/dist/index.js ]; then
+  if [ -f /opt/packages/nemoclaw-openclaw/plugin/dist/index.js ]; then
     pass "Plugin built successfully (dist/index.js exists)"
   else
     fail "Plugin build artifacts missing"
@@ -116,7 +116,7 @@ cd /opt/nemoclaw-blueprint
 # Use 'ncp' profile (empty endpoint skips SSRF DNS lookup in sandbox).
 # Catch only the expected error — anything else propagates as a real failure.
 NEMOCLAW_BLUEPRINT_PATH=/opt/nemoclaw-blueprint node --input-type=module -e "
-  const { main } = await import('/opt/nemoclaw/dist/blueprint/runner.js');
+  const { main } = await import('/opt/packages/nemoclaw-openclaw/plugin/dist/blueprint/runner.js');
   try {
     await main(['plan', '--profile', 'ncp', '--dry-run']);
   } catch (err) {
@@ -232,7 +232,7 @@ PATH="$FAKE_OPENSHELL_BIN:$PATH" \
   NEMOCLAW_BLUEPRINT_PATH=/opt/nemoclaw-blueprint \
   OPENSHELL_SANDBOX_POLICY=/opt/nemoclaw-blueprint/policies/openclaw-sandbox.yaml \
   node --input-type=module -e "
-  const { main } = await import('/opt/nemoclaw/dist/blueprint/runner.js');
+  const { main } = await import('/opt/packages/nemoclaw-openclaw/plugin/dist/blueprint/runner.js');
   await main(['apply', '--profile', 'ncp']);
 " 2>&1 | tee "$APPLY_OUTPUT"
 if grep -q "RUN_ID:" "$APPLY_OUTPUT"; then
@@ -305,7 +305,7 @@ info "6. Verify snapshot creation (migration pre-step)"
 if node --input-type=module -e "
   import fs from 'node:fs';
   import path from 'node:path';
-  const { createSnapshot, listSnapshots } = await import('/opt/nemoclaw/dist/blueprint/snapshot.js');
+  const { createSnapshot, listSnapshots } = await import('/opt/packages/nemoclaw-openclaw/plugin/dist/blueprint/snapshot.js');
 
   const snap = createSnapshot();
   if (!snap) throw new Error('Snapshot returned null');
@@ -330,7 +330,7 @@ if node --input-type=module -e "
   import fs from 'node:fs';
   import path from 'node:path';
   import os from 'node:os';
-  const { listSnapshots, rollbackFromSnapshot } = await import('/opt/nemoclaw/dist/blueprint/snapshot.js');
+  const { listSnapshots, rollbackFromSnapshot } = await import('/opt/packages/nemoclaw-openclaw/plugin/dist/blueprint/snapshot.js');
 
   const snaps = listSnapshots();
   const snapPath = snaps[0].path;
@@ -370,7 +370,7 @@ import {
   createArchiveFromDirectory,
   createSnapshotBundle,
   detectHostOpenClaw,
-} from "/opt/nemoclaw/dist/commands/migration-state.js";
+} from "/opt/packages/nemoclaw-openclaw/plugin/dist/commands/migration-state.js";
 
 const logger = {
   info() {},
@@ -454,22 +454,22 @@ pass "Migration inventory handles overrides, external roots, and symlink-safe ar
 # -------------------------------------------------------
 info "9. Verify plugin TypeScript compilation"
 # -------------------------------------------------------
-if [ -f /opt/nemoclaw/dist/index.js ]; then
+if [ -f /opt/packages/nemoclaw-openclaw/plugin/dist/index.js ]; then
   pass "index.js compiled"
 else
   fail "index.js missing"
 fi
-if [ -f /opt/nemoclaw/dist/commands/slash.js ]; then
+if [ -f /opt/packages/nemoclaw-openclaw/plugin/dist/commands/slash.js ]; then
   pass "slash.js compiled"
 else
   fail "slash.js missing"
 fi
-if [ -f /opt/nemoclaw/dist/commands/migration-state.js ]; then
+if [ -f /opt/packages/nemoclaw-openclaw/plugin/dist/commands/migration-state.js ]; then
   pass "migration-state.js compiled"
 else
   fail "migration-state.js missing"
 fi
-if [ -f /opt/nemoclaw/dist/blueprint/state.js ]; then
+if [ -f /opt/packages/nemoclaw-openclaw/plugin/dist/blueprint/state.js ]; then
   pass "state.js compiled"
 else
   fail "state.js missing"
@@ -480,7 +480,7 @@ info "10. Verify NemoClaw state management"
 # -------------------------------------------------------
 if node --input-type=module -e "
 import { strict as assert } from 'node:assert';
-const { loadState, saveState, clearState } = await import('/opt/nemoclaw/dist/blueprint/state.js');
+const { loadState, saveState, clearState } = await import('/opt/packages/nemoclaw-openclaw/plugin/dist/blueprint/state.js');
 
 // Initial state should be empty
 let state = loadState();

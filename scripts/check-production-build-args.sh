@@ -12,16 +12,18 @@ set -euo pipefail
 readonly legacy_fixture_key="NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW"
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly repo_root
-readonly -a production_dockerfiles=(
+production_dockerfiles=(
   "${repo_root}/Dockerfile"
   "${repo_root}/Dockerfile.base"
-  "${repo_root}/agents/hermes/Dockerfile"
-  "${repo_root}/agents/hermes/Dockerfile.base"
-  "${repo_root}/agents/langchain-deepagents-code/Dockerfile"
-  "${repo_root}/agents/langchain-deepagents-code/Dockerfile.base"
-  "${repo_root}/agents/pi/Dockerfile"
-  "${repo_root}/agents/pi/Dockerfile.base"
 )
+while IFS= read -r -d '' dockerfile; do
+  production_dockerfiles+=("${dockerfile}")
+done < <(
+  find "${repo_root}/packages" "${repo_root}/agents" \
+    -mindepth 2 -maxdepth 2 -type f \
+    \( -name Dockerfile -o -name Dockerfile.base \) -print0
+)
+readonly production_dockerfiles
 
 fail_legacy_fixture() {
   echo "ERROR: ${legacy_fixture_key}=1 is only allowed in explicit stale-upgrade E2E fixture builds." >&2

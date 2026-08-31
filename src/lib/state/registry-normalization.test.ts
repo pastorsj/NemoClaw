@@ -66,7 +66,6 @@ describe("sandbox registry normalization", () => {
     kind: "agent-runtime" as const,
     id: "hermes",
     packageVersion: "1.2.3",
-    contractVersion: 1 as const,
     contentDigest: "4".repeat(64),
   };
   const harnessPackageMigration = {

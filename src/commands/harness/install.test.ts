@@ -6,14 +6,13 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { listBundledHarnessSources } from "../../lib/harness/bundled-source";
 import {
   HarnessPackageUnavailableError,
   listHarnessPackageInventory,
   resolveHarnessPackageInstallSelection,
-} from "../../lib/harness/package-catalog";
-import { installHarnessPackage } from "../../lib/harness/package-install";
-import type { BundledHarnessPackageSourceIdentity } from "../../lib/harness/package-receipt";
+} from "../../lib/agent-runtime/package/catalog";
+import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
+import type { BundledHarnessPackageSourceIdentity } from "../../lib/agent-runtime/package/receipt";
 import HarnessInstallCommand, { harnessInstallCommandDependencies } from "./install";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-harness-command-tests");
@@ -25,6 +24,16 @@ const SOURCE_IDENTITY: BundledHarnessPackageSourceIdentity = {
   },
 };
 const originalHome = process.env.HOME;
+const REVIEWED_FIXTURES = Object.freeze([
+  { id: "hermes", displayName: "Hermes Agent", packageVersion: "0.1.0" },
+  {
+    id: "langchain-deepagents-code",
+    displayName: "LangChain Deep Agents Code",
+    packageVersion: "0.1.4",
+    aliases: ["dcode"],
+  },
+  { id: "openclaw", displayName: "OpenClaw", packageVersion: "0.1.1" },
+]);
 
 fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
 
@@ -43,8 +52,9 @@ function writeFixtureFile(root: string, relativePath: string, contents: string):
 
 function writeReviewedBundle(): void {
   fs.mkdirSync(bundledRoot, { recursive: true, mode: 0o700 });
-  listBundledHarnessSources().forEach((declaration) => {
+  REVIEWED_FIXTURES.forEach((declaration) => {
     const packageRoot = path.join(bundledRoot, `nemoclaw-${declaration.id}`);
+    const manifestPath = `packages/nemoclaw-${declaration.id}/manifest.yaml`;
     fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
     writeFixtureFile(
       packageRoot,
@@ -55,14 +65,21 @@ function writeReviewedBundle(): void {
         id: declaration.id,
         displayName: declaration.displayName,
         packageVersion: declaration.packageVersion,
-        contractVersion: 1,
-        manifest: declaration.manifestPath,
+        manifest: manifestPath,
       })}\n`,
     );
     writeFixtureFile(
       packageRoot,
-      declaration.manifestPath,
-      `name: ${declaration.id}\ndisplay_name: ${JSON.stringify(declaration.displayName)}\ndescription: Reviewed adapter\n`,
+      manifestPath,
+      [
+        `name: ${declaration.id}`,
+        `display_name: ${JSON.stringify(declaration.displayName)}`,
+        "description: Reviewed adapter",
+        ...(declaration.aliases
+          ? ["aliases:", ...declaration.aliases.map((alias) => `  - ${alias}`)]
+          : []),
+        "",
+      ].join("\n"),
     );
     writeFixtureFile(packageRoot, "runtime/payload.txt", `${declaration.id}\n`);
   });
@@ -170,7 +187,7 @@ describe("harness install oclif command", () => {
   it("prompts on a TTY and installs only the selected reviewed package", async () => {
     const dependencies = wirePrivateDependencies();
     dependencies.isStdinTty.mockReturnValue(true);
-    dependencies.prompt.mockResolvedValue("2");
+    dependencies.prompt.mockResolvedValue("1");
 
     await HarnessInstallCommand.run([], process.cwd());
 
@@ -216,7 +233,7 @@ describe("harness install oclif command", () => {
     await HarnessInstallCommand.run([], process.cwd());
 
     expect(dependencies.prompt).not.toHaveBeenCalled();
-    expect(installedIds()).toEqual(["openclaw", "hermes", "langchain-deepagents-code"]);
+    expect(installedIds()).toEqual(["hermes", "langchain-deepagents-code", "openclaw"]);
   });
 
   it("keeps an exact reinstall idempotent", async () => {

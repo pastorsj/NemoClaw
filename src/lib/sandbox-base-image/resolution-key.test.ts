@@ -101,7 +101,13 @@ describe("sandbox base-image resolution key", () => {
 
   it("changes when an agent-specific dependency lock changes (#6456)", () => {
     const root = fixture();
-    const lockfile = path.join(root, "agents", "langchain-deepagents-code", "requirements.lock");
+    const lockfile = path.join(
+      root,
+      "packages",
+      "nemoclaw-langchain-deepagents-code",
+      "runtime",
+      "requirements.lock",
+    );
     fs.mkdirSync(path.dirname(lockfile), { recursive: true });
     fs.writeFileSync(lockfile, "deepagents-code==0.1.55\n");
     const keyedOptions = { ...options(root), inputPaths: [lockfile] };

@@ -23,6 +23,11 @@ import {
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { commandOutput, redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readiness";
+import {
+  buildInstalledMcpRegistrationCommand,
+  buildInstalledMcpRemovalCommand,
+  requireMcpArgvCommand,
+} from "./mcp-bridge/package-command";
 import { executeGatewaySupervisorAction } from "./process-recovery";
 
 const HERMES_MCP_EXEC_TIMEOUT_SECONDS = 620;
@@ -298,10 +303,18 @@ export function registerHermesAdapter(
   replaceExisting = false,
   credentialRevision?: McpAttachedCredentialRevision,
 ): void {
+  const installedCommand = buildInstalledMcpRegistrationCommand(
+    sandboxName,
+    "hermes-config",
+    entry,
+    { replaceExisting, credentialRevision },
+  );
   runHermesAdapterCommand(
     sandboxName,
     entry,
-    buildHermesMcpRegisterCommand(entry, replaceExisting, credentialRevision),
+    installedCommand === null
+      ? buildHermesMcpRegisterCommand(entry, replaceExisting, credentialRevision)
+      : requireMcpArgvCommand(installedCommand),
     `Hermes MCP config registration failed for '${entry.server}'.`,
     { envValues, requireReload: true },
   );
@@ -313,10 +326,15 @@ export function unregisterHermesAdapter(
   entry: McpBridgeEntry,
   options: AdapterMutationOptions = {},
 ): void {
+  const installedCommand = buildInstalledMcpRemovalCommand(sandboxName, "hermes-config", entry, {
+    force: options.force === true,
+  });
   runHermesAdapterCommand(
     sandboxName,
     entry,
-    buildHermesMcpRemoveCommand(entry, options.force === true),
+    installedCommand === null
+      ? buildHermesMcpRemoveCommand(entry, options.force === true)
+      : requireMcpArgvCommand(installedCommand),
     `Hermes MCP config removal failed for '${entry.server}'.`,
     options,
   );

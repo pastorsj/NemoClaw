@@ -15,6 +15,7 @@ import { auditOpenShellPolicyBoundaryDependencies } from "../../scripts/checks/v
 import { createPackageFixture } from "./helpers/package-fixture";
 
 const repoRoot = path.join(import.meta.dirname, "..", "..");
+const pluginRoot = path.join(repoRoot, "packages/nemoclaw-openclaw/plugin");
 const require = createRequire(import.meta.url);
 
 function packageFiles(packageRoot: string): string[] {
@@ -27,7 +28,13 @@ function packageFiles(packageRoot: string): string[] {
 function collectPackedPaths(): ReadonlySet<string> {
   const fixtureRoot = createPackageFixture({
     prefix: "nemoclaw-agent-assets-pack-",
-    entries: ["agents"],
+    entries: [
+      "agents",
+      "packages/nemoclaw-hermes/host",
+      "packages/nemoclaw-hermes/manifest.yaml",
+      "packages/nemoclaw-openclaw/manifest.yaml",
+      "packages/nemoclaw-openclaw/policies/permissive.yaml",
+    ],
   });
   try {
     const output = JSON.parse(
@@ -49,7 +56,7 @@ function collectPackedPaths(): ReadonlySet<string> {
 const packedPaths = collectPackedPaths();
 
 describe("OpenShell policy boundary package contract", () => {
-  it.each([repoRoot, path.join(repoRoot, "nemoclaw")])(
+  it.each([repoRoot, pluginRoot])(
     "pins the YAML parser used by both production package boundaries [case %#]",
     (packageRoot) => {
       const output = execFileSync("npm", ["pkg", "get", "dependencies.yaml"], {
@@ -88,7 +95,7 @@ describe("OpenShell policy boundary package contract", () => {
 
     const pluginBoundary = (await import(
       pathToFileURL(
-        path.join(repoRoot, "nemoclaw", "dist", "shared", "openshell-policy-boundary.cjs"),
+        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs"),
       ).href
     )) as {
       assertExternalPolicyRequirementContainment: typeof cliPolicy.assertExternalPolicyRequirementContainment;
@@ -105,7 +112,7 @@ describe("OpenShell policy boundary package contract", () => {
       stripProviderComposedPolicies: (policy: string) => string;
     };
     const canonicalBoundary =
-      require("../../nemoclaw/dist/shared/openshell-policy-boundary.cjs") as {
+      require("../../dist/lib/shared/openshell-policy-boundary.cjs") as {
         assertExternalPolicyRequirementContainment: typeof cliPolicy.assertExternalPolicyRequirementContainment;
         assertMatchingPolicyAuthority: typeof cliPolicy.assertMatchingPolicyAuthority;
         parseActiveGlobalPolicyAuthorityMetadata: typeof cliPolicy.parseActiveGlobalPolicyAuthorityMetadata;
@@ -173,13 +180,13 @@ describe("OpenShell policy boundary package contract", () => {
     );
 
     const pluginRunner = await import(
-      pathToFileURL(path.join(repoRoot, "nemoclaw", "dist", "blueprint", "runner.js")).href
+      pathToFileURL(path.join(pluginRoot, "dist", "blueprint", "runner.js")).href
     );
     expect(pluginRunner.actionApply).toBeTypeOf("function");
   });
 
   it("loads the source plugin runner through the tsx subprocess boundary", () => {
-    const runnerPath = path.join(repoRoot, "nemoclaw", "src", "blueprint", "runner.ts");
+    const runnerPath = path.join(pluginRoot, "src", "blueprint", "runner.ts");
     const output = execFileSync(
       process.execPath,
       [
@@ -198,7 +205,7 @@ describe("OpenShell policy boundary package contract", () => {
     const cliPolicy = require("../../dist/lib/policy/index.js") as {
       parseCurrentPolicy: (raw: string | null | undefined) => string;
     };
-    const canonical = require("../../nemoclaw/dist/shared/openshell-policy-boundary.cjs") as {
+    const canonical = require("../../dist/lib/shared/openshell-policy-boundary.cjs") as {
       parseOpenShellPolicy: (raw: string) => {
         yamlBody: string;
         policy: Record<string, unknown>;
@@ -231,47 +238,44 @@ describe("OpenShell policy boundary package contract", () => {
   });
 
   it("ships the generated canonical CJS boundary through both package manifests", () => {
-    expect(packageFiles(repoRoot)).toContain("nemoclaw/dist/");
-    expect(packageFiles(path.join(repoRoot, "nemoclaw"))).toContain("dist/");
+    expect(packageFiles(repoRoot)).toContain("dist/");
+    expect(packageFiles(pluginRoot)).toContain("dist/");
 
     expect(
       fs.existsSync(
-        path.join(repoRoot, "nemoclaw", "src", "shared", "openshell-policy-boundary.cts"),
+        path.join(pluginRoot, "src", "shared", "openshell-policy-boundary.cts"),
       ),
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(repoRoot, "nemoclaw", "dist", "shared", "openshell-policy-boundary.cjs"),
+        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs"),
       ),
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(repoRoot, "nemoclaw", "dist", "shared", "openshell-policy-boundary.d.cts"),
+        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.d.cts"),
       ),
     ).toBe(true);
     expect(
       fs.existsSync(
-        path.join(repoRoot, "nemoclaw", "dist", "shared", "openshell-policy-boundary.js"),
+        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.js"),
       ),
     ).toBe(false);
   });
 
   it.each([
-    "managed-tool-gateway-matrix.json",
-    "runtime-refresh-credentials.ts",
-    "tool-gateway-broker.ts",
-    "tool-gateway-control-contract.ts",
+    "tool-matrix.json",
+    "refresh-credentials.ts",
+    "tool-broker.ts",
+    "tool-contract.ts",
   ])("ships the Hermes host broker with its canonical sandbox-name boundary [%s]", (file) => {
-    expect(packageFiles(repoRoot)).toContain("agents/hermes/host/");
+    expect(packageFiles(repoRoot)).toContain("packages/nemoclaw-*/**/*");
 
-    expect(packedPaths).toContain(`agents/hermes/host/${file}`);
+    expect(packedPaths).toContain(`packages/nemoclaw-hermes/host/${file}`);
 
     const controlContractPath = path.join(
       repoRoot,
-      "agents",
-      "hermes",
-      "host",
-      "tool-gateway-control-contract.ts",
+      "packages/nemoclaw-hermes/host/tool-contract.ts",
     );
     const validation = JSON.parse(
       execFileSync(
@@ -280,7 +284,7 @@ describe("OpenShell policy boundary package contract", () => {
           "--experimental-strip-types",
           "--no-warnings",
           "--eval",
-          `const contract = require(${JSON.stringify(controlContractPath)}); process.stdout.write(JSON.stringify([contract.isValidName("packaged-hermes"), contract.isValidName("../packaged-hermes")]));`,
+          `const contract = require(${JSON.stringify(controlContractPath)}); process.stdout.write(JSON.stringify([contract.isValidSandboxName("packaged-hermes"), contract.isValidSandboxName("../packaged-hermes")]));`,
         ],
         { cwd: repoRoot, encoding: "utf8" },
       ),
@@ -288,16 +292,16 @@ describe("OpenShell policy boundary package contract", () => {
     expect(validation).toEqual([true, false]);
   });
 
-  it("ships agent manifests, generated state lock plans, and the OpenClaw policy asset", () => {
+  it("ships agent manifests, generated state lock plans, and package-owned policy assets", () => {
     expect(packageFiles(repoRoot)).toEqual(
       expect.arrayContaining([
         "agents/*/manifest.yaml",
         "agents/*/state-lock-plan.json",
-        "agents/openclaw/policy-permissive.yaml",
+        "packages/nemoclaw-*/**/*",
       ]),
     );
-    expect(packedPaths).toContain("agents/openclaw/manifest.yaml");
-    expect(packedPaths).toContain("agents/openclaw/policy-permissive.yaml");
+    expect(packedPaths).toContain("packages/nemoclaw-openclaw/manifest.yaml");
+    expect(packedPaths).toContain("packages/nemoclaw-openclaw/policies/permissive.yaml");
   });
 
   it("ships the complete repository-owned NemoCUA agent definition (#9649)", () => {
@@ -329,7 +333,7 @@ describe("OpenShell policy boundary package contract", () => {
 
     const fixtureRoot = createPackageFixture({
       prefix: "nemoclaw-policy-pack-",
-      entries: ["dist", "nemoclaw/dist", "schemas"],
+      entries: ["dist", "schemas"],
     });
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-package-"));
     try {
@@ -430,8 +434,7 @@ process.stdout.write("validated");
 
   it("locks the generated sandbox boundary to its reviewed direct dependency", () => {
     const boundaryPath = path.join(
-      repoRoot,
-      "nemoclaw",
+      pluginRoot,
       "dist",
       "shared",
       "openshell-policy-boundary.cjs",

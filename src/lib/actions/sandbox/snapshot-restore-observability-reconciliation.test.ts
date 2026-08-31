@@ -9,7 +9,6 @@ const DCODE_PACKAGE = {
   kind: "agent-runtime" as const,
   id: "langchain-deepagents-code",
   packageVersion: "1.2.3",
-  contractVersion: 1 as const,
   contentDigest: "c".repeat(64),
 };
 const DCODE_SNAPSHOT = {

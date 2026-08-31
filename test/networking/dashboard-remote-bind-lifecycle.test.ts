@@ -33,7 +33,7 @@ function remoteBindDockerfile(...postGeneratorInstructions: string[]): string {
     "ARG CHAT_UI_URL=",
     "ARG NEMOCLAW_DASHBOARD_BIND=",
     "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-    "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
+    "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
     ...postGeneratorInstructions,
   ].join("\n");
 }
@@ -81,7 +81,7 @@ describe("remote dashboard bind production lifecycle", () => {
     const dockerfile = path.join(directory, "Dockerfile");
     const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
     const generator =
-      "RUN NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 node --experimental-strip-types /scripts/generate-openclaw-config.mts";
+      "RUN NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts";
     const proxyPatch = 'RUN python3 -c "\\\n';
     const configHash =
       "RUN sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash";
@@ -177,7 +177,7 @@ describe("remote dashboard bind production lifecycle", () => {
         "ARG NEMOCLAW_DASHBOARD_BIND=",
         "ARG NEMOCLAW_DISABLE_DEVICE_AUTH=0",
         "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
       ].join("\n"),
     );
 
@@ -273,7 +273,7 @@ describe("remote dashboard bind production lifecycle", () => {
     try {
       expect(() =>
         patchStagedDockerfile(dockerfile, "test-model", "http://127.0.0.1:18789"),
-      ).toThrow(/does not promote it to generate-openclaw-config/);
+      ).toThrow(/does not promote it to the package config generator/);
       expect(hasPreparedRemoteDashboardBind(dockerfile)).toBe(false);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
@@ -290,7 +290,7 @@ describe("remote dashboard bind production lifecycle", () => {
         "FROM scratch AS decoy",
         "ARG NEMOCLAW_DASHBOARD_BIND=",
         "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
         "FROM scratch",
         "ARG NEMOCLAW_MODEL=",
         "ARG CHAT_UI_URL=",
@@ -301,7 +301,7 @@ describe("remote dashboard bind production lifecycle", () => {
     try {
       expect(() =>
         patchStagedDockerfile(dockerfile, "test-model", "http://127.0.0.1:18789"),
-      ).toThrow(/does not promote it to generate-openclaw-config/);
+      ).toThrow(/does not promote it to the package config generator/);
       expect(hasPreparedRemoteDashboardBind(dockerfile)).toBe(false);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
@@ -320,7 +320,7 @@ describe("remote dashboard bind production lifecycle", () => {
         "ARG CHAT_UI_URL=",
         "ARG NEMOCLAW_DASHBOARD_BIND=",
         "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
         "RUN printf '{}' > /sandbox/.openclaw/openclaw.json",
       ].join("\n"),
     );
@@ -339,8 +339,8 @@ describe("remote dashboard bind production lifecycle", () => {
     [
       "generator",
       remoteBindDockerfile().replace(
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts && printf '{}' > /sandbox/.openclaw/openclaw.json",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts && printf '{}' > /sandbox/.openclaw/openclaw.json",
       ),
     ],
     [
@@ -438,7 +438,7 @@ describe("remote dashboard bind production lifecycle", () => {
         "ARG CHAT_UI_URL=",
         "ARG NEMOCLAW_DASHBOARD_BIND=",
         "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
         "RUN chmod 660 /sandbox/.openclaw/openclaw.json",
         "RUN sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash",
       ].join("\n"),
@@ -508,8 +508,8 @@ describe("remote dashboard bind production lifecycle", () => {
         "ARG CHAT_UI_URL=",
         "ARG NEMOCLAW_DASHBOARD_BIND=",
         "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
       ].join("\n"),
     );
 
@@ -535,8 +535,8 @@ describe("remote dashboard bind production lifecycle", () => {
         "ARG CHAT_UI_URL=",
         "ARG NEMOCLAW_DASHBOARD_BIND=",
         "ENV NEMOCLAW_DASHBOARD_BIND=${NEMOCLAW_DASHBOARD_BIND}",
-        "RUN node --experimental-strip-types /scripts/generate-openclaw-config.mts",
-        'RUN validation_home="$validation_root/progressive"; HOME="$validation_home" node --experimental-strip-types /scripts/generate-openclaw-config.mts',
+        "RUN node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts",
+        'RUN validation_home="$validation_root/progressive"; HOME="$validation_home" node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts',
       ].join("\n"),
     );
 

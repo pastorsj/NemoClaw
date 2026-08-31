@@ -21,7 +21,7 @@ import {
   parseHarnessPackageId,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
-} from "../harness/package-identity";
+} from "../agent-runtime/package/identity";
 import {
   parseServingProfileProvenance,
   type ServingProfileProvenance,

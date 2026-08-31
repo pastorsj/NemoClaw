@@ -20,7 +20,7 @@
       "src/lib/core/url-utils.ts": 30,
       "src/lib/core/wait.ts": 37,
       "src/lib/credentials/store.ts": 46,
-      "src/lib/harness/package-identity.ts": 24,
+      "src/lib/agent-runtime/package/identity.ts": 24,
       "src/lib/inference/config.ts": 30,
       "src/lib/inference/web-search.ts": 21,
       "src/lib/messaging/channels/index.ts": 25,
@@ -68,6 +68,6 @@
     "src/lib/actions/sandbox": 183,
     "src/lib/state": 40,
     "src/lib/inference": 63,
-    "scripts": 43
+    "scripts": 32
   }
 }

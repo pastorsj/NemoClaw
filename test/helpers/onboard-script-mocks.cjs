@@ -281,7 +281,11 @@ const OPENCLAW_SECURITY_INVENTORY_PROBE = [
 
 const ONBOARD_SANDBOX_OLD_CONTAINER_ID = "a".repeat(64);
 const ONBOARD_SANDBOX_NEW_CONTAINER_ID = "b".repeat(64);
-const PROCESS_HARNESS_PACKAGE_AGENTS = new Set(["openclaw", "hermes"]);
+const PROCESS_HARNESS_PACKAGE_DISPLAY_NAMES = Object.freeze({
+  openclaw: "OpenClaw",
+  hermes: "Hermes Agent",
+  "langchain-deepagents-code": "LangChain Deep Agents Code",
+});
 const PROCESS_HARNESS_PACKAGE_SOURCE = Object.freeze({
   kind: "bundled",
   nemoclawBuildIdentity: Object.freeze({
@@ -335,7 +339,8 @@ function copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, targetRe
  * identity so unrelated macOS temporary-directory activity cannot invalidate package ancestry.
  */
 function installOnboardProcessHarnessPackage(agentName = "openclaw") {
-  if (!PROCESS_HARNESS_PACKAGE_AGENTS.has(agentName)) {
+  const displayName = PROCESS_HARNESS_PACKAGE_DISPLAY_NAMES[agentName];
+  if (typeof displayName !== "string") {
     throw new Error(`Unsupported onboarding process harness fixture '${agentName}'`);
   }
   const fs = require("node:fs");
@@ -344,6 +349,7 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
   const home = fs.realpathSync(configuredHome);
   const sourceParent = path.join(home, ".nemoclaw-process-harness-sources");
   const packageRoot = path.join(sourceParent, `nemoclaw-${agentName}`);
+  const packageSourceRoot = `packages/nemoclaw-${agentName}`;
   ensurePrivateDirectory(sourceParent);
   if (!fs.existsSync(packageRoot)) {
     ensurePrivateDirectory(packageRoot);
@@ -351,10 +357,9 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
       schemaVersion: 1,
       kind: "agent-runtime",
       id: agentName,
-      displayName: agentName === "openclaw" ? "OpenClaw" : "Hermes Agent",
+      displayName,
       packageVersion: "0.1.0-process-fixture",
-      contractVersion: 1,
-      manifest: `agents/${agentName}/manifest.yaml`,
+      manifest: "manifest.yaml",
     };
     fs.writeFileSync(
       path.join(packageRoot, "nemoclaw-package.json"),
@@ -363,8 +368,8 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
     );
     copyProcessHarnessPackageFile(
       packageRoot,
-      `agents/${agentName}/manifest.yaml`,
-      `agents/${agentName}/manifest.yaml`,
+      `${packageSourceRoot}/manifest.yaml`,
+      "manifest.yaml",
     );
     for (const asset of [
       "Dockerfile",
@@ -373,27 +378,28 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
       "policy-permissive.yaml",
       "start.sh",
     ]) {
-      const sourceRelativePath = `agents/${agentName}/${asset}`;
+      const sourceRelativePath = `${packageSourceRoot}/${asset}`;
       if (fs.existsSync(path.join(path.resolve(__dirname, "../.."), sourceRelativePath))) {
-        copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, sourceRelativePath);
-      }
-    }
-    if (agentName === "openclaw") {
-      for (const asset of [
-        "Dockerfile",
-        "Dockerfile.base",
-        "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
-      ]) {
-        copyProcessHarnessPackageFile(packageRoot, asset, asset);
+        copyProcessHarnessPackageFile(packageRoot, sourceRelativePath, asset);
       }
     }
   }
 
-  const packageStore = require(path.resolve(__dirname, "../../src/lib/harness/package-store.ts"));
+  const packageStore = require(
+    path.resolve(__dirname, "../../src/lib/agent-runtime/package/store.ts"),
+  );
   const { parseHarnessPackageManifest } = require(
-    path.resolve(__dirname, "../../src/lib/harness/package-manifest.ts"),
+    path.resolve(__dirname, "../../src/lib/agent-runtime/package/manifest.ts"),
   );
   const packageManifest = parseHarnessPackageManifest(packageRoot);
+  const { buildAgentDefinition } = require(
+    path.resolve(__dirname, "../../src/lib/agent-runtime/manifest-loader.ts"),
+  );
+  const agentDefinition = buildAgentDefinition({
+    manifest: packageManifest.manifest,
+    manifestPath: packageManifest.manifestPath,
+    packageRoot: packageManifest.packageRoot,
+  });
   const contentDigest = require("node:crypto")
     .createHash("sha256")
     .update(`nemoclaw-onboard-process-fixture:${agentName}:v1`)
@@ -402,12 +408,12 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
     kind: packageManifest.envelope.kind,
     id: packageManifest.envelope.id,
     packageVersion: packageManifest.envelope.packageVersion,
-    contractVersion: packageManifest.envelope.contractVersion,
     contentDigest,
   });
   const installed = Object.freeze({
     state: "installed",
     identity,
+    agentDefinition,
     receipt: Object.freeze({
       schemaVersion: 1,
       identity,
@@ -419,7 +425,7 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
   });
   processHarnessPackages.set(`${identity.id}\0${identity.contentDigest}`, installed);
   const packageCatalog = require(
-    path.resolve(__dirname, "../../src/lib/harness/package-catalog.ts"),
+    path.resolve(__dirname, "../../src/lib/agent-runtime/package/catalog.ts"),
   );
   packageCatalog.listHarnessPackageInventory = () => {
     const packagesById = new Map(
@@ -439,6 +445,10 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
             id: fixturePackage.identity.id,
             displayName: fixturePackage.packageManifest.envelope.displayName,
             description: null,
+            aliases: fixturePackage.agentDefinition.agentAliases,
+            aliasSummary: fixturePackage.agentDefinition.agentAliasSummary,
+            isDefaultOnboardingChoice: fixturePackage.agentDefinition.isDefaultOnboardingChoice,
+            defaultSandboxName: fixturePackage.agentDefinition.defaultSandboxName,
             identity: fixturePackage.identity,
             packageRoot: fixturePackage.packageRoot,
           }),
@@ -451,6 +461,10 @@ function installOnboardProcessHarnessPackage(agentName = "openclaw") {
             id: fixturePackage.identity.id,
             displayName: fixturePackage.packageManifest.envelope.displayName,
             description: null,
+            aliases: fixturePackage.agentDefinition.agentAliases,
+            aliasSummary: fixturePackage.agentDefinition.agentAliasSummary,
+            isDefaultOnboardingChoice: fixturePackage.agentDefinition.isDefaultOnboardingChoice,
+            defaultSandboxName: fixturePackage.agentDefinition.defaultSandboxName,
             identity: fixturePackage.identity,
             packageRoot: fixturePackage.packageRoot,
             matchesAvailableIdentity: true,

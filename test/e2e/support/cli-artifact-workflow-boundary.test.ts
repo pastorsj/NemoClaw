@@ -86,9 +86,7 @@ type RestoreFixtureOptions = {
   manifestRunAttempt?: string;
   preexistingDist?:
     | "dangling-symlink"
-    | "directory"
-    | "plugin-directory"
-    | "symlinked-plugin-parent";
+    | "directory";
   producerRunAttempt?: string;
 };
 
@@ -108,12 +106,12 @@ function writeCliArchive(
   customizeShared: (shared: string) => void = () => undefined,
 ): void {
   const dist = path.join(context.payloadRoot, "dist");
-  const shared = path.join(context.payloadRoot, "nemoclaw", "dist", "shared");
+  const shared = path.join(dist, "lib", "shared");
   fs.mkdirSync(dist);
   fs.mkdirSync(shared, { recursive: true });
   fs.writeFileSync(
     path.join(dist, "nemoclaw.js"),
-    'require("../nemoclaw/dist/shared/sandbox-name.cjs");\nconsole.log("nemoclaw v0.0.0");\n',
+    'require("../dist/lib/shared/sandbox-name.cjs");\nconsole.log("nemoclaw v0.0.0");\n',
   );
   fs.writeFileSync(
     path.join(dist, "build-identity.json"),
@@ -132,14 +130,7 @@ function writeCliArchive(
   customizeShared(shared);
 
   customizeDist(dist);
-  execFileSync("tar", [
-    "-cf",
-    context.payload,
-    "-C",
-    context.payloadRoot,
-    "dist",
-    "nemoclaw/dist/shared",
-  ]);
+  execFileSync("tar", ["-cf", context.payload, "-C", context.payloadRoot, "dist"]);
 }
 
 function writeValidArchive(context: ArchiveFixtureContext): void {
@@ -228,25 +219,9 @@ function writePreexistingDistDirectory(workspace: string): void {
   fs.writeFileSync(path.join(workspace, "dist", "existing.txt"), "preserve\n");
 }
 
-function writePreexistingPluginDistDirectory(workspace: string): void {
-  const shared = path.join(workspace, "nemoclaw", "dist", "shared");
-  fs.mkdirSync(shared, { recursive: true });
-  fs.writeFileSync(path.join(shared, "existing.cjs"), "module.exports = {};\n");
-}
-
-function writeSymlinkedPluginParent(workspace: string): void {
-  const escaped = path.join(path.dirname(workspace), "escaped");
-  fs.rmSync(path.join(workspace, "nemoclaw"), { force: true, recursive: true });
-  fs.mkdirSync(escaped);
-  fs.symlinkSync(escaped, path.join(workspace, "nemoclaw"), "dir");
-}
-
 const PREEXISTING_DIST_WRITERS = {
   "dangling-symlink": writeDanglingDistSymlink,
   directory: writePreexistingDistDirectory,
-  "plugin-directory": writePreexistingPluginDistDirectory,
-  "symlinked-plugin-parent": writeSymlinkedPluginParent,
-
   none: () => undefined,
 } satisfies Record<
   NonNullable<RestoreFixtureOptions["preexistingDist"]> | "none",
@@ -261,8 +236,6 @@ function runRestoreValidation(options: RestoreFixtureOptions = {}) {
   const payloadRoot = path.join(root, "payload-root");
   const toolDirectory = path.join(root, "tools");
   fs.mkdirSync(path.join(workspace, "bin"), { recursive: true });
-  fs.mkdirSync(path.join(workspace, "nemoclaw"), { recursive: true });
-
   fs.mkdirSync(artifactDirectory, { recursive: true });
   fs.mkdirSync(payloadRoot, { recursive: true });
   fs.mkdirSync(toolDirectory, { recursive: true });
@@ -642,7 +615,7 @@ describe("exact-commit CLI artifact workflow boundary", () => {
       expect(fs.existsSync(path.join(fixture.workspace, "dist", "nemoclaw.js"))).toBe(true);
       expect(
         fs.existsSync(
-          path.join(fixture.workspace, "nemoclaw", "dist", "shared", "sandbox-name.cjs"),
+          path.join(fixture.workspace, "dist", "lib", "shared", "sandbox-name.cjs"),
         ),
       ).toBe(true);
     } finally {
@@ -738,7 +711,7 @@ describe("exact-commit CLI artifact workflow boundary", () => {
       ).toEqual({ nemoclawVersion: "0.0.0", sourceRevision: fixture.candidateSha });
       expect(
         fs.existsSync(
-          path.join(fixture.workspace, "nemoclaw", "dist", "shared", "sandbox-name.cjs"),
+          path.join(fixture.workspace, "dist", "lib", "shared", "sandbox-name.cjs"),
         ),
       ).toBe(true);
 
@@ -820,42 +793,6 @@ describe("exact-commit CLI artifact workflow boundary", () => {
       expect(fs.readFileSync(path.join(fixture.workspace, "dist", "existing.txt"), "utf8")).toBe(
         "preserve\n",
       );
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("does not overwrite a preexisting nemoclaw/dist directory (#7915)", () => {
-    const fixture = runRestoreValidation({ preexistingDist: "plugin-directory" });
-    try {
-      expect(fixture.result.status, fixture.output).not.toBe(0);
-      expect(fixture.output).toContain(
-        "consumer unexpectedly built nemoclaw/dist before artifact restore",
-      );
-      expect(
-        fs.readFileSync(
-          path.join(fixture.workspace, "nemoclaw", "dist", "shared", "existing.cjs"),
-          "utf8",
-        ),
-      ).toBe("module.exports = {};\n");
-      expect(fs.existsSync(path.join(fixture.workspace, "dist"))).toBe(false);
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("rejects a symlinked nemoclaw directory without writing outside the workspace (#7915)", () => {
-    const fixture = runRestoreValidation({ preexistingDist: "symlinked-plugin-parent" });
-    try {
-      expect(fixture.result.status, fixture.output).not.toBe(0);
-      expect(fixture.output).toContain(
-        "consumer nemoclaw directory must be a non-symlink directory",
-      );
-      expect(fs.lstatSync(path.join(fixture.workspace, "nemoclaw")).isSymbolicLink()).toBe(true);
-      expect(fs.existsSync(path.join(path.dirname(fixture.workspace), "escaped", "dist"))).toBe(
-        false,
-      );
-      expect(fs.existsSync(path.join(fixture.workspace, "dist"))).toBe(false);
     } finally {
       fixture.cleanup();
     }

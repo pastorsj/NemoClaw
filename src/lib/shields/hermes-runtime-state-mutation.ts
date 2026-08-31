@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import type { AgentDefinition, AgentStateLockPlan } from "../agent/definition-types";
+import type { AgentDefinition, AgentStateLockPlan } from "../agent-runtime/manifest-types";
 import type {
   RuntimeProviderBundleRegistry,
   RuntimeProviderStateMutationActivationProof,

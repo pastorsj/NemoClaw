@@ -17,9 +17,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentStateLockPlan } from "../../../src/lib/agent/definition-types";
+import type { AgentStateLockPlan } from "../../../src/lib/agent-runtime/manifest-types";
 
-const START_SCRIPT = path.join(import.meta.dirname, "..", "..", "..", "scripts", "nemoclaw-start.sh");
+const RUNTIME_STATE_SCRIPT = path.join(
+  import.meta.dirname,
+  "..",
+  "..",
+  "..",
+  "packages",
+  "nemoclaw-openclaw",
+  "runtime",
+  "runtime-state.sh",
+);
 const MUTABLE_CONFIG_NORMALIZER = path.join(
   import.meta.dirname,
   "../../..",
@@ -72,7 +81,7 @@ function stateDirGuardAction(command: string[]): string | null {
 function extractShellFunctionFromSource(src: string, name: string): string {
   const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
   if (!match) {
-    throw new Error(`Expected ${name} in scripts/nemoclaw-start.sh`);
+    throw new Error(`Expected ${name} in OpenClaw runtime-state.sh`);
   }
   return `${name}() {${match[1]}\n}`;
 }
@@ -90,22 +99,22 @@ function restoreCachedModule(modulePath: string, previous: NodeJS.Module | undef
 }
 
 function normalizeMutableConfigPermsFor(configDir: string): string {
-  const startScript = fs.readFileSync(START_SCRIPT, "utf-8");
+  const runtimeStateScript = fs.readFileSync(RUNTIME_STATE_SCRIPT, "utf-8");
   const normalizeFunction = replaceRequired(
-    extractShellFunctionFromSource(startScript, "normalize_mutable_config_perms"),
+    extractShellFunctionFromSource(runtimeStateScript, "normalize_mutable_config_perms"),
     'local config_dir="/sandbox/.openclaw"',
     `local config_dir=${JSON.stringify(configDir)}`,
   );
   const resolveNormalizerFunction = extractShellFunctionFromSource(
-    startScript,
+    runtimeStateScript,
     "resolve_mutable_config_normalizer",
   );
   const reclaimFunction = extractShellFunctionFromSource(
-    startScript,
+    runtimeStateScript,
     "reclaim_collapsed_mutable_config",
   );
   const classifyFunction = extractShellFunctionFromSource(
-    startScript,
+    runtimeStateScript,
     "classify_openclaw_config_seal",
   );
   return [resolveNormalizerFunction, classifyFunction, reclaimFunction, normalizeFunction].join(
