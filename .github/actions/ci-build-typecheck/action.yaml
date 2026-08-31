@@ -2,38 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: ci-build-typecheck
-description: Run shared Node.js build and type-check CI gates.
+description: Run package-contract checks and CLI, plugin, and JavaScript type checks.
 
 runs:
   using: composite
   steps:
-    - name: Setup Node.js
-      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-      with:
-        node-version: "22"
-        cache: npm
-        cache-dependency-path: |
-          package-lock.json
-          packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json
-
     - name: Setup Python
       uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: "3.13"
-
-    - name: Install dependencies
-      shell: bash
-      env:
-        NODE_AUTH_TOKEN: ${{ github.event_name == 'push' && github.token || '' }}
-      run: bash "$GITHUB_ACTION_PATH/../ci-install-dependencies.sh"
-
-    - name: Build TypeScript plugin
-      shell: bash
-      run: cd packages/nemoclaw-openclaw/plugin && npm run build
-
-    - name: Build CLI TypeScript modules
-      shell: bash
-      run: npm run build:cli
 
     - name: Verify compiled package contracts
       shell: bash
