@@ -377,7 +377,7 @@ jobs:
           name: compiled-test-inputs
           path: |
             dist
-            nemoclaw/dist
+            packages/nemoclaw-openclaw/plugin/dist
           if-no-files-found: error
           retention-days: 1
 
@@ -440,7 +440,7 @@ jobs:
           cache: npm
           cache-dependency-path: |
             package-lock.json
-            nemoclaw/package-lock.json
+            packages/nemoclaw-openclaw/plugin/npm-shrinkwrap.json
 
       - name: Install dependencies
         run: bash .trusted-ci-actions/.github/actions/ci-install-dependencies.sh
@@ -619,9 +619,9 @@ jobs:
         run: |
           test -s dist/nemoclaw.js
           test -s dist/managed-inference/catalog.json
-          test -s nemoclaw/dist/index.js
-          test -s nemoclaw/dist/shared/openshell-gateway-endpoint-boundary.cjs
-          test -s nemoclaw/dist/shared/sandbox-name.cjs
+          test -s packages/nemoclaw-openclaw/plugin/dist/index.js
+          test -s packages/nemoclaw-openclaw/plugin/dist/shared/openshell-gateway-endpoint-boundary.cjs
+          test -s packages/nemoclaw-openclaw/plugin/dist/shared/sandbox-name.cjs
 
       - name: Run CLI coverage shard
         uses: ./.trusted-ci-actions/.github/actions/ci-cli-coverage-shard

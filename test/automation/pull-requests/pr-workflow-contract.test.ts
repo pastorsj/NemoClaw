@@ -465,9 +465,7 @@ describe("pull request and main workflow contracts", () => {
   ) as TypeScriptConfig;
   const sharedActions = {
     staticChecks: readYaml<CompositeAction>(".github/actions/ci-static-checks/action.yaml"),
-    compileArtifacts: readYaml<CompositeAction>(
-      ".github/actions/ci-compile-artifacts/action.yaml",
-    ),
+    compileArtifacts: readYaml<CompositeAction>(".github/actions/ci-compile-artifacts/action.yaml"),
     buildTypecheck: readYaml<CompositeAction>(".github/actions/ci-build-typecheck/action.yaml"),
     cliCoverageShard: readYaml<CompositeAction>(
       ".github/actions/ci-cli-coverage-shard/action.yaml",
@@ -486,6 +484,48 @@ describe("pull request and main workflow contracts", () => {
     ["main", mainWorkflow],
   ] as const)("keeps the %s CLI coverage shard budget aligned", (_workflowName, workflow) => {
     expect(workflow.jobs["cli-test-shards"]?.["timeout-minutes"]).toBe(cliShardTimeoutMinutes);
+  });
+
+  // source-shape-contract: compatibility -- Every compiled plugin producer and consumer must use the extracted package path
+  it("keeps compiled plugin artifacts on the extracted package path", () => {
+    const pluginRoot = "packages/nemoclaw-openclaw/plugin";
+    const expectedInputs = `dist\n${pluginRoot}/dist\n`;
+    const expectedLocks = `package-lock.json\n${pluginRoot}/npm-shrinkwrap.json\n`;
+    const pluginEntry = `${pluginRoot}/dist/index.js`;
+    const gatewayBoundary = `${pluginRoot}/dist/shared/openshell-gateway-endpoint-boundary.cjs`;
+    const sandboxNameBoundary = `${pluginRoot}/dist/shared/sandbox-name.cjs`;
+    const compiledOutputs = [pluginEntry, gatewayBoundary, sandboxNameBoundary];
+
+    const workflowUploads = [prWorkflow, mainWorkflow].map(
+      (workflow) =>
+        requiredWorkflowStep(workflow.jobs["compile-artifacts"], "Upload compiled test inputs").with
+          ?.path,
+    );
+    const workflowLocks = [prWorkflow, mainWorkflow].map(
+      (workflow) =>
+        requiredWorkflowStep(workflow.jobs["build-typecheck"], "Setup Node.js").with?.[
+          "cache-dependency-path"
+        ],
+    );
+    const workflowVerifiers = [prWorkflow, mainWorkflow].map(
+      (workflow) =>
+        requiredWorkflowStep(workflow.jobs["cli-test-shards"], "Verify compiled test inputs").run,
+    );
+
+    expect(workflowUploads).toEqual([expectedInputs, expectedInputs]);
+    expect(workflowLocks).toEqual([expectedLocks, expectedLocks]);
+    expect(
+      workflowVerifiers.every((verify) =>
+        compiledOutputs.every((output) => verify?.includes(`test -s ${output}`)),
+      ),
+    ).toBe(true);
+    expect(workflowVerifiers.every((verify) => !verify?.includes("nemoclaw/dist/"))).toBe(true);
+
+    const compile = requiredStep(sharedActions.compileArtifacts, "Compile and verify outputs").run;
+    expect(
+      [pluginEntry, sandboxNameBoundary].every((output) => compile?.includes(`test -s ${output}`)),
+    ).toBe(true);
+    expect(compile).not.toContain("nemoclaw/dist/");
   });
 
   // source-shape-contract: security -- Pull request jobs must never receive the GitHub Packages credential
