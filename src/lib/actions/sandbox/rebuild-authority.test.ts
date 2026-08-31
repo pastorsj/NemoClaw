@@ -101,6 +101,7 @@ function buildOptions(
     targetGatewayName: "nemoclaw",
     targetGatewayPort: 8080,
     onboardLockAlreadyHeld: true,
+    deferProcessExit: true,
     harnessPackage: PACKAGE,
     harnessPackageMigration: MIGRATION,
     autoYes: true,

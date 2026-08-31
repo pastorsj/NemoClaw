@@ -129,6 +129,7 @@ export type RebuildRecreateOnboardOpts = {
   onboardLockAlreadyHeld: true;
   /** Internal outer-rebuild agent authority consumed before inner runtime effects. */
   authoritativeRebuildAgentAuthority?: ResolvedSandboxAgent;
+  deferProcessExit: true;
   /** Target fingerprint of the replacement journal opened before deletion. */
   recreateJournalTargetIntentFingerprint?: string;
   /** Exact source package authority retained across the outer rebuild. */
@@ -235,6 +236,7 @@ export function buildRebuildRecreateOnboardOpts(args: {
     targetGatewayName,
     targetGatewayPort,
     onboardLockAlreadyHeld: true,
+    deferProcessExit: true,
     ...packageAuthority,
     ...(args.preparedDcodeRebuild ? { preparedDcodeRebuild: args.preparedDcodeRebuild } : {}),
     autoYes: args.autoYes,

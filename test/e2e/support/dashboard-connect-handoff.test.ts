@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { expect, test } from "../fixtures/e2e-test.ts";
+import { requireAgentDockerfilePath } from "../fixtures/shell-probe.ts";
 import { runDashboardConnectUntilForwardHandoff } from "../live/dashboard-connect-handoff.ts";
 
 const SANDBOX_NAME = "e2e-dashboard-bind";
@@ -37,15 +38,25 @@ async function stopFixtureProcess(pid: number): Promise<void> {
   expect(processExists(pid)).toBe(false);
 }
 
-test("accepts a normally completed connect when the forward is already healthy", async ({
+test("accepts a normally completed connect with the local Dockerfile workload", async ({
   artifacts,
   progress,
 }) => {
   const result = await runDashboardConnectUntilForwardHandoff({
     artifacts,
-    command: [process.execPath, "-e", "process.exit(0)"],
+    command: [
+      process.execPath,
+      "-e",
+      "process.exit(process.env.NEMOCLAW_FROM_DOCKERFILE === process.argv[1] ? 0 : 1)",
+      requireAgentDockerfilePath("openclaw"),
+    ],
     dashboardPort: DASHBOARD_PORT,
-    env: process.env,
+    env: {
+      ...process.env,
+      E2E_TARGET_ID: "dashboard-remote-bind",
+      E2E_WORKLOAD_SOURCE: "local-dockerfile",
+      NEMOCLAW_AGENT: "openclaw",
+    },
     progress,
     sandboxName: SANDBOX_NAME,
     timeoutMs: 2_000,

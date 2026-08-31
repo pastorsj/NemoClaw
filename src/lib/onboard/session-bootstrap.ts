@@ -4,9 +4,10 @@
 import path from "node:path";
 
 import { isCandidateAgent } from "../agent/candidate";
+import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
+import { normalizeProcessExitCode } from "../core/process-exit";
 import type { ServingProfileProvenance } from "../inference/serving/types";
 import { NEMOCLAW_VLLM_GPU_DEVICE_ENV, parseVllmGpuDevice } from "../inference/vllm-models";
-import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
 import { PERSONAL_POLICY_TIER_NAME } from "../policy/tiers";
 import { redact, redactFull, redactSensitiveText } from "../security/redact";
 import { isDecisionSelected } from "../state/onboard-checkpoint-decision";
@@ -206,8 +207,8 @@ export function wrapOnboardDeferredExit<TOptions extends DeferredExitOptions>(
     const resolvedOptions = options ?? ({} as TOptions);
     const originalProcessExit = process.exit;
     let deferredExit: OnboardDeferredExitError | null = null;
-    process.exit = ((code?: number): never => {
-      throw new OnboardDeferredExitError(code ?? 0);
+    process.exit = ((code?: number | string | null): never => {
+      throw new OnboardDeferredExitError(normalizeProcessExitCode(code));
     }) as typeof process.exit;
     try {
       await run(resolvedOptions);

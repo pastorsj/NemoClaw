@@ -76,7 +76,7 @@ beforeEach(() => {
 });
 
 describe("prepared rebuild backup recovery validation (#6114)", () => {
-  it("removes only an exact backup child owned by the target sandbox", () => {
+  it("removes only an exact backup child owned by the target sandbox (#10639)", () => {
     const manifest = writeBackup("alpha", "2026-07-01T06-50-42-043Z");
     const outsidePath = path.join(TMP_HOME, "outside-backup");
     fs.mkdirSync(outsidePath, { recursive: true });
@@ -87,7 +87,7 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
     expect(fs.existsSync(outsidePath)).toBe(true);
   });
 
-  it("refuses to remove a backup path that is a symbolic link", () => {
+  it("refuses to remove a backup path that is a symbolic link (#10639)", () => {
     const sandboxBackupRoot = path.join(BACKUPS_ROOT, "alpha");
     const backupPath = path.join(sandboxBackupRoot, "2026-07-01T06-50-42-043Z");
     const outsidePath = path.join(TMP_HOME, "outside-backup");
@@ -168,19 +168,20 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
   });
 
   it.each([1, 2] as const)("rejects an explicitly incomplete schema v%s backup", (version) => {
-    writeBackup("alpha", `2026-07-01T06-50-42-05${String(version)}Z`, {
+    const manifest = writeBackup("alpha", `2026-07-01T06-50-42-05${String(version)}Z`, {
       version,
       ...(version === 2 ? { harnessPackage: OPENCLAW_PACKAGE } : {}),
       backupComplete: false,
     });
-    const latest = sandboxState.getLatestBackup("alpha");
+    const incomplete = sandboxState.readSandboxStateBackupManifest(String(manifest.backupPath));
 
-    expect(latest).not.toBeNull();
+    expect(sandboxState.getLatestBackup("alpha")).toBeNull();
+    expect(incomplete).not.toBeNull();
     expect(
       sandboxState.validateRebuildRecoveryManifest(
         "alpha",
         version === 2 ? OPENCLAW_OWNER : "openclaw",
-        latest!,
+        incomplete!,
       ),
     ).toEqual({
       ok: false,
@@ -189,15 +190,16 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
   });
 
   it("rejects automatic recovery from a legacy manifest with failed directory captures", () => {
-    writeBackup("alpha", "2026-07-01T06-50-42-052Z", {
+    const manifest = writeBackup("alpha", "2026-07-01T06-50-42-052Z", {
       version: 1,
       stateDirs: ["workspace"],
       failedBackupDirs: ["workspace"],
     });
-    const latest = sandboxState.getLatestBackup("alpha");
+    const incomplete = sandboxState.readSandboxStateBackupManifest(String(manifest.backupPath));
 
-    expect(latest).not.toBeNull();
-    expect(sandboxState.validateRebuildRecoveryManifest("alpha", "openclaw", latest!)).toEqual({
+    expect(sandboxState.getLatestBackup("alpha")).toBeNull();
+    expect(incomplete).not.toBeNull();
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", "openclaw", incomplete!)).toEqual({
       ok: false,
       reason: "legacy backup manifest records failed directory captures",
     });

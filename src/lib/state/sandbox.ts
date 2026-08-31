@@ -693,27 +693,6 @@ export function sanitizeBackupDirectory(
   }
 }
 
-export interface IncompleteSnapshotRemoval {
-  readonly removed: boolean;
-  readonly error?: string;
-}
-
-export function removeIncompleteSnapshot(
-  backupPath: string,
-  overrides: Partial<Pick<BackupSanitizationOperations, "removeBackup" | "backupExists">> = {},
-): IncompleteSnapshotRemoval {
-  const operations = { ...DEFAULT_BACKUP_SANITIZATION_OPERATIONS, ...overrides };
-  try {
-    operations.removeBackup(backupPath);
-  } catch (error) {
-    return { removed: false, error: error instanceof Error ? error.message : String(error) };
-  }
-  if (operations.backupExists(backupPath)) {
-    return { removed: false, error: "the snapshot directory still exists after removal" };
-  }
-  return { removed: true };
-}
-
 // ── Logging ────────────────────────────────────────────────────────
 
 const _verbose = () => process.env.NEMOCLAW_REBUILD_VERBOSE === "1";
@@ -2881,9 +2860,18 @@ export function clearRebuildPolicyHandoff(
   return true;
 }
 
-
 // ── Listing ────────────────────────────────────────────────────────
 
+function legacyStateFilesArePresent(backupPath: string, manifest: RebuildManifest): boolean {
+  if (manifest.backupComplete !== undefined) return true;
+  return (manifest.stateFiles ?? []).every((spec) => {
+    try {
+      return lstatSync(path.join(backupPath, spec.path)).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
 /**
  * Remove one completed rebuild backup without allowing a caller-controlled
  * path to escape the sandbox's timestamped backup directory.
@@ -2960,8 +2948,16 @@ export function listBackups(sandboxName: string): SnapshotEntry[] {
 
   const manifests: RebuildManifest[] = [];
   for (const entry of rawEntries) {
-    const m = readManifest(path.join(dir, entry.name));
-    if (m) manifests.push(m);
+    const backupPath = path.join(dir, entry.name);
+    const m = readManifest(backupPath);
+    if (
+      m &&
+      m.backupComplete !== false &&
+      (m.failedBackupDirs?.length ?? 0) === 0 &&
+      legacyStateFilesArePresent(backupPath, m)
+    ) {
+      manifests.push(m);
+    }
   }
 
   // Assign version numbers by timestamp-ascending position (v1 = oldest).

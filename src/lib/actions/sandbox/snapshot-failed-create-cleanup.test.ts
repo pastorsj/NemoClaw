@@ -17,13 +17,7 @@ const mocks = vi.hoisted(() => ({
   backupWithAuthority: vi.fn(),
   captureOpenshell: vi.fn(() => ({ status: 0, output: "alpha Ready\n" })),
   findBackup: vi.fn(() => ({ match: null })),
-  removeIncompleteSnapshot: vi.fn(
-    () =>
-      ({ removed: true }) as {
-        removed: boolean;
-        error?: string;
-      },
-  ),
+  removeSandboxStateBackup: vi.fn(() => true),
 }));
 
 vi.mock("../../adapters/openshell/runtime", () => ({
@@ -60,7 +54,7 @@ vi.mock("../../state/registry", () => ({
 
 vi.mock("../../state/sandbox", () => ({
   findBackup: mocks.findBackup,
-  removeIncompleteSnapshot: mocks.removeIncompleteSnapshot,
+  removeSandboxStateBackup: mocks.removeSandboxStateBackup,
 }));
 
 vi.mock("./snapshot/dependencies", async (importOriginal) => ({
@@ -74,6 +68,8 @@ vi.mock("./sandbox-gateway-routing", () => ({
   selectSandboxGatewayIfRegistered: vi.fn(() => true),
   usesGatewayMetadataProbe: vi.fn(() => false),
 }));
+
+const { runSandboxSnapshot } = await import("./snapshot");
 
 const INCOMPLETE_PATH = "/home/user/.nemoclaw/rebuild-backups/alpha/2026-08-04T06-53-38-310Z";
 
@@ -92,7 +88,7 @@ function failedCaptureWithPublishedSnapshot(overrides: Record<string, unknown> =
 describe("snapshot create cleanup after a failed capture", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.removeIncompleteSnapshot.mockReturnValue({ removed: true });
+    mocks.removeSandboxStateBackup.mockReturnValue(true);
     mocks.findBackup.mockReturnValue({ match: null });
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -103,7 +99,6 @@ describe("snapshot create cleanup after a failed capture", () => {
   });
 
   async function createSnapshot(): Promise<string> {
-    const { runSandboxSnapshot } = await import("./snapshot");
     await expect(runSandboxSnapshot("alpha", { kind: "create" })).rejects.toMatchObject({
       exitCode: 1,
     });
@@ -130,23 +125,23 @@ describe("snapshot create cleanup after a failed capture", () => {
 
     const errors = await createSnapshot();
 
-    expect(mocks.removeIncompleteSnapshot).toHaveBeenCalledWith(INCOMPLETE_PATH);
+    expect(mocks.removeSandboxStateBackup).toHaveBeenCalledWith("alpha", INCOMPLETE_PATH);
     expect(errors).toContain("Removed the incomplete snapshot.");
   });
 
-  it("names the snapshot that is still listed when removal fails", async () => {
+  it("reports that a retained incomplete snapshot cannot be selected", async () => {
     mocks.backupWithAuthority.mockReturnValue(failedCaptureWithPublishedSnapshot());
-    mocks.removeIncompleteSnapshot.mockReturnValue({
-      removed: false,
-      error: "EACCES: permission denied",
-    });
+    mocks.removeSandboxStateBackup.mockReturnValue(false);
 
     const errors = await createSnapshot();
 
     expect(errors).toContain(
-      `The incomplete snapshot at '${INCOMPLETE_PATH}' could not be removed: EACCES: permission denied`,
+      `The incomplete snapshot at '${INCOMPLETE_PATH}' could not be removed.`,
     );
-    expect(errors).toContain("Remove it before the next restore.");
+    expect(errors).toContain("excluded from `nemoclaw alpha snapshot list`");
+    expect(errors).toContain(
+      "Remove it only after the original sandbox or a complete snapshot contains every required state item.",
+    );
   });
 
   it("does not attempt removal when the capture failed before publishing a snapshot", async () => {
@@ -161,7 +156,7 @@ describe("snapshot create cleanup after a failed capture", () => {
 
     const errors = await createSnapshot();
 
-    expect(mocks.removeIncompleteSnapshot).not.toHaveBeenCalled();
+    expect(mocks.removeSandboxStateBackup).not.toHaveBeenCalled();
     expect(errors).toContain("Snapshot name 'dup' already exists.");
   });
 
@@ -174,10 +169,9 @@ describe("snapshot create cleanup after a failed capture", () => {
       backedUpFiles: ["openclaw.json"],
       failedFiles: [],
     });
-    const { runSandboxSnapshot } = await import("./snapshot");
 
     await runSandboxSnapshot("alpha", { kind: "create" });
 
-    expect(mocks.removeIncompleteSnapshot).not.toHaveBeenCalled();
+    expect(mocks.removeSandboxStateBackup).not.toHaveBeenCalled();
   });
 });
