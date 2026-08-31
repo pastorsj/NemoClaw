@@ -23,8 +23,6 @@ function readAgentFile(name: string): string {
   return fs.readFileSync(path.join(agentDir, name), "utf8");
 }
 
-afterEach(cleanupPackageFixtures);
-
 describe("LangChain Deep Agents Code managed fetch proxy", () => {
   it("persists the root-owned proxy as the explicit fetch_url delegation", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-fetch-proxy-"));

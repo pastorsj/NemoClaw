@@ -183,6 +183,10 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests("src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts"),
   },
   {
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/runtime\/wechat\/refresh-placeholder\.py$/,
+    testsToRun: runTests("packages/nemoclaw-openclaw/tests/runtime/wechat-placeholder.test.ts"),
+  },
+  {
     pattern: /(?:^|\/)packages\/nemoclaw-hermes\/runtime\/mcp-transaction\.py$/,
     testsToRun: runTests(
       "src/lib/actions/sandbox/gateway-restart-hermes-drift.test.ts",

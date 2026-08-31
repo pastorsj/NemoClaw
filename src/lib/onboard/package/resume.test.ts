@@ -42,7 +42,7 @@ function preparePackageResume(
       rootDir: fixture.fixtureRoot,
     },
     {
-      assertWriterLockOwned: vi.fn(),
+      assertOnboardLockOwned: vi.fn(),
       compareAndSwapSession: vi.fn(() => "mismatch" as const),
       loadSession,
       getStoreRoot: () => fixture.storeRoot,

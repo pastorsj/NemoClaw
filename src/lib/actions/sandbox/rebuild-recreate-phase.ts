@@ -15,7 +15,7 @@ import type { Session } from "../../state/onboard-session";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import { cloneSandboxHostMounts } from "../../state/registry/host-mount";
-import { excludePolicyPresetsByName, type RebuildBackupManifest } from "./rebuild-backup-phase";
+import type { RebuildBackupManifest } from "./rebuild-backup-phase";
 import type { RebuildBail, RebuildLog } from "./rebuild-credential-preflight";
 import type { RebuildDurableConfig } from "./rebuild-durable-config";
 import { isolateAmbientRecreateEnv } from "./rebuild-env-isolation";
@@ -56,7 +56,7 @@ export interface RebuildRecreatePhaseInput {
   rebuildsHermesSandbox: boolean;
   hermesToolGateways: string[];
   hasHermesToolGateways: boolean;
-  sessionPolicyPresets: string[] | null;
+  policySourcePath?: string;
   credentialEnv: string | null;
   baseImagePreflight: RebuildAgentBaseImagePreflight;
   recoveryRecreate: boolean;
@@ -68,6 +68,16 @@ export interface RebuildRecreatePhaseInput {
   onCreated: () => void;
   log: RebuildLog;
   bail: RebuildBail;
+}
+
+/** Prefer the actionable nested failure over the recovery wrapper around it. */
+export function describeRebuildOnboardFailure(error: unknown): string {
+  if (error instanceof AggregateError) {
+    const nested = error.errors.find((entry) => entry instanceof Error);
+    if (nested) return describeRebuildOnboardFailure(nested);
+  }
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 /**
@@ -91,7 +101,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     rebuildsHermesSandbox,
     hermesToolGateways: rebuildHermesToolGateways,
     hasHermesToolGateways: hasRebuildHermesToolGateways,
-    sessionPolicyPresets: rebuildSessionPolicyPresets,
+    policySourcePath: rebuildPolicySourcePath,
     credentialEnv: rebuildCredentialEnv,
     baseImagePreflight: rebuildBaseImagePreflight,
     recoveryRecreate,
@@ -104,6 +114,9 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     log,
     bail,
   } = input;
+  if (!rebuildPolicySourcePath) {
+    return input.bail("Rebuild has no captured OpenShell policy source.");
+  }
   if (
     !rebuildPackageIdentityMatches(
       recreateJournal.harnessPackage,
@@ -114,13 +127,6 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   }
   console.log("");
   console.log("  Creating new sandbox with current image...");
-
-  const recreatePolicyPresets = Array.isArray(rebuildSessionPolicyPresets)
-    ? excludePolicyPresetsByName(
-        rebuildSessionPolicyPresets,
-        rebuildMcpEntries.map((entry) => entry.policyName),
-      )
-    : null;
 
   const rebuildGpuOverrides = getRebuildSandboxGpuOverrides(sb);
   log(
@@ -137,13 +143,10 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   const journaledSession = onboardSession.loadSession();
   if (
     !journaledSession ||
-    !rebuildPackageAuthorityMatches(
-      journaledSession,
-      {
-        harnessPackage: recreateOptions.harnessPackage,
-        harnessPackageMigration: recreateOptions.harnessPackageMigration,
-      },
-    )
+    !rebuildPackageAuthorityMatches(journaledSession, {
+      harnessPackage: recreateOptions.harnessPackage,
+      harnessPackageMigration: recreateOptions.harnessPackageMigration,
+    })
   ) {
     return bail("Authoritative rebuild session package authority changed before sandbox recreation.");
   }
@@ -236,11 +239,6 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     s.agent = rebuildAgent;
     s.messagingPlan = rebuildMessagingPlan;
     s.hermesToolGateways = rebuildsHermesSandbox ? rebuildHermesToolGateways : [];
-    // MCP preparation removes these generated policies before sandbox delete,
-    // and the dedicated post-rebuild phase restores them with their provider
-    // bindings. Do not ask inner onboarding to resolve their stale preset names
-    // as built-ins while the generated definitions are intentionally absent.
-    s.policyPresets = recreatePolicyPresets;
     s.gpuPassthrough = rebuildGpuOverrides.sessionGpuPassthrough;
     s.metadata.fromDockerfile = storedFromDockerfile;
     s.provider = resumeConfig.provider;
@@ -299,9 +297,6 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   // this call; remove it when onboard accepts an explicit outer-backup handoff.
   process.env.NEMOCLAW_RECREATE_WITHOUT_BACKUP = "1";
   if (rebuildMessagingPlan) MessagingSetupApplier.writePlanToEnv(rebuildMessagingPlan);
-  if (recreateOptions.policyTier) {
-    process.env.NEMOCLAW_POLICY_TIER = recreateOptions.policyTier;
-  }
   // Isolation removed the ambient reasoning inputs so an unrelated onboard
   // cannot steer this recreate (#5735). The recreate still has to reapply the
   // *recorded* compatible-endpoint reasoning configuration: both the recovered
@@ -320,9 +315,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
       ...recreateOptions,
       authoritativeRebuildAgentAuthority: resumeConfig.agentAuthority,
       rebuildGatewayAuthority,
-      ...(Array.isArray(recreatePolicyPresets)
-        ? { rebuildPolicyPresets: recreatePolicyPresets }
-        : {}),
+      rebuildPolicySourcePath,
       ...(rebuildsHermesSandbox && backupManifest?.preservedEnv
         ? { rebuildPreservedEnv: backupManifest.preservedEnv }
         : {}),
@@ -331,7 +324,7 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     log("onboard() returned successfully");
   } catch (error) {
     onboardFailed = true;
-    const message = error instanceof Error ? error.message : String(error);
+    const message = describeRebuildOnboardFailure(error);
     const name = error instanceof Error ? error.name : "";
     if (name !== "RebuildOnboardExit") {
       log(`onboard() threw: ${message}`);

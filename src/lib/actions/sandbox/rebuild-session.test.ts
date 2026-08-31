@@ -100,7 +100,6 @@ const recreateOptions: RebuildRecreateOnboardOpts = {
   dcodeAutoApprovalRequestedExplicitly: false,
   observabilityEnabled: false,
   observabilityRequestedExplicitly: false,
-  policyTier: null,
   baseImageResolutionHint: null,
   rebuildGatewayAuthority: GATEWAY_AUTHORITY,
 };
@@ -173,7 +172,7 @@ function makeInput(overrides: Partial<RebuildRecreatePhaseInput> = {}): RebuildR
     rebuildsHermesSandbox: false,
     hermesToolGateways: [],
     hasHermesToolGateways: false,
-    sessionPolicyPresets: [],
+    policySourcePath: "/tmp/current-policy.yaml",
     credentialEnv: "NVIDIA_API_KEY",
     baseImagePreflight: { ok: true, imageRef: null, overrideEnvVar: null },
     recoveryRecreate: false,

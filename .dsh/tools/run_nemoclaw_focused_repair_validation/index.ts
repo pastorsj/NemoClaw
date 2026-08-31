@@ -120,9 +120,14 @@ export default async function run_nemoclaw_focused_repair_validation(input: {
   if (
     input.typecheckPlugin === true ||
     (input.typecheckPlugin !== false &&
-      files.some((f) => f.startsWith("nemoclaw/") && /\.[cm]?tsx?$/.test(f)))
+      files.some(
+        (f) => f.startsWith("packages/nemoclaw-openclaw/plugin/") && /\.[cm]?tsx?$/.test(f),
+      ))
   )
-    commands.push({ name: "Plugin typecheck", command: "npm --prefix nemoclaw run typecheck" });
+    commands.push({
+      name: "Plugin typecheck",
+      command: "npm --prefix packages/nemoclaw-openclaw/plugin run typecheck",
+    });
   if (input.repoChecks !== false)
     commands.push({ name: "Repository checks", command: "npm run checks:repository" });
   if (tests.length)

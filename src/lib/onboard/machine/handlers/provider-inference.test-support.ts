@@ -97,7 +97,6 @@ export function createDeps(
       requiredEndpointUrl: null,
       requiredInferenceApi: null,
     })),
-    preflightPolicyRequirements: vi.fn(),
     revalidateHarnessPackageAuthority: vi.fn(() => ({
       harnessPackage: null,
       harnessPackageMigration: null,
@@ -160,7 +159,6 @@ export function createDeps(
     deps: {
       checkGatewayRouteCompatibility: calls.checkGatewayRouteCompatibility,
       preflightGatewayRouteDiscovery: calls.preflightGatewayRouteDiscovery,
-      preflightPolicyRequirements: calls.preflightPolicyRequirements,
       revalidateHarnessPackageAuthority: calls.revalidateHarnessPackageAuthority,
       getSandboxRecoveryAuthority: (): "missing" => "missing",
       withGatewayRouteMutationLock: async <T>(

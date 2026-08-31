@@ -5,15 +5,11 @@ import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 
 import {
-  assertExternalPolicyRequirementContainment,
-  assertMatchingPolicyAuthority,
-  assertNemoClawPolicyCreationReceiptMatches,
   assertPolicyRequirementContainment,
   classifyOpenShellGlobalPolicyHistory,
-  parseActiveGlobalPolicyAuthorityMetadata,
-  parseNemoClawPolicyCreationReceipt,
+  parseActiveGlobalPolicyMetadata,
   parseOpenShellPolicy,
-  parseSandboxPolicyAuthorityMetadata,
+  parseSandboxPolicyMetadata,
   stripProviderComposedPolicies,
   withoutProviderComposedPolicies,
 } from "#nemoclaw-shared/openshell-policy-boundary.cjs";
@@ -89,7 +85,7 @@ const POLICY_CASES = [
   },
 ] as const;
 
-describe("sandbox policy authority boundary", () => {
+describe("OpenShell live policy boundary", () => {
   const policy = { version: 1, network_policies: { required: { allow: true } } };
   const metadata = (policySource: "sandbox" | "global", sandbox = "alpha") =>
     JSON.stringify({
@@ -102,29 +98,26 @@ describe("sandbox policy authority boundary", () => {
       policy,
     });
 
-  it.each([
-    ["sandbox", "owner-unknown"],
-    ["global", "externally-managed"],
-  ] as const)("classifies the %s policy source as %s", (policySource, authority) => {
-    expect(parseSandboxPolicyAuthorityMetadata(metadata(policySource), "alpha")).toEqual({
-      authority,
+  it.each(["sandbox", "global"] as const)("preserves the %s policy source", (policySource) => {
+    expect(parseSandboxPolicyMetadata(metadata(policySource), "alpha")).toEqual({
+      policySource,
       effectivePolicy: policy,
       policyIdentity: { activeVersion: 7, hash: "sha256:effective" },
     });
   });
 
   it.each([
-    ["empty", " \n\t", /empty sandbox policy authority metadata/u],
-    ["malformed", "{", /malformed sandbox policy authority metadata/u],
-    ["non-object", "[]", /malformed sandbox policy authority metadata/u],
-    ["mismatched", metadata("sandbox", "beta"), /invalid sandbox policy authority metadata/u],
-  ])("rejects %s sandbox authority metadata", (_caseName, raw, expected) => {
-    expect(() => parseSandboxPolicyAuthorityMetadata(raw, "alpha")).toThrow(expected);
+    ["empty", " \n\t", /empty sandbox policy metadata/u],
+    ["malformed", "{", /malformed sandbox policy metadata/u],
+    ["non-object", "[]", /malformed sandbox policy metadata/u],
+    ["mismatched", metadata("sandbox", "beta"), /invalid sandbox policy metadata/u],
+  ])("rejects %s sandbox metadata", (_caseName, raw, expected) => {
+    expect(() => parseSandboxPolicyMetadata(raw, "alpha")).toThrow(expected);
   });
 
-  it("accepts a loaded global policy as active external authority (#9833)", () => {
+  it("accepts a loaded global policy as active OpenShell state (#9833)", () => {
     expect(
-      parseActiveGlobalPolicyAuthorityMetadata(
+      parseActiveGlobalPolicyMetadata(
         JSON.stringify({
           scope: "global",
           status: "loaded",
@@ -137,7 +130,7 @@ describe("sandbox policy authority boundary", () => {
     ).toEqual({
       state: "active",
       inspection: {
-        authority: "externally-managed",
+        policySource: "global",
         effectivePolicy: policy,
         policyIdentity: { activeVersion: 9, hash: "sha256:global" },
       },
@@ -158,7 +151,7 @@ describe("sandbox policy authority boundary", () => {
 
   it("treats a superseded global revision as absent without requiring an identity (#9833)", () => {
     expect(
-      parseActiveGlobalPolicyAuthorityMetadata(
+      parseActiveGlobalPolicyMetadata(
         JSON.stringify({
           scope: "global",
           status: "superseded",
@@ -169,13 +162,13 @@ describe("sandbox policy authority boundary", () => {
   });
 
   it.each([
-    ["empty output", " \n\t", /empty global policy authority metadata/u],
-    ["malformed JSON", "{", /malformed global policy authority metadata/u],
-    ["non-object JSON", "[]", /malformed global policy authority metadata/u],
+    ["empty output", " \n\t", /empty global policy metadata/u],
+    ["malformed JSON", "{", /malformed global policy metadata/u],
+    ["non-object JSON", "[]", /malformed global policy metadata/u],
     [
-      "invalid authority metadata",
+      "invalid metadata",
       JSON.stringify({ scope: "sandbox", status: "loaded", policy_source: "global" }),
-      /invalid global policy authority metadata/u,
+      /invalid global policy metadata/u,
     ],
     [
       "sandbox-scoped global metadata",
@@ -185,7 +178,7 @@ describe("sandbox policy authority boundary", () => {
         policy_source: "global",
         sandbox: "alpha",
       }),
-      /invalid global policy authority metadata/u,
+      /invalid global policy metadata/u,
     ],
     [
       "missing loaded policy",
@@ -196,7 +189,7 @@ describe("sandbox policy authority boundary", () => {
         active_version: 9,
         hash: "sha256:global",
       }),
-      /invalid global policy authority metadata/u,
+      /invalid global policy metadata/u,
     ],
     [
       "empty policy identity",
@@ -208,7 +201,7 @@ describe("sandbox policy authority boundary", () => {
         hash: "",
         policy,
       }),
-      /invalid global policy authority metadata/u,
+      /invalid global policy metadata/u,
     ],
     [
       "malformed policy identity",
@@ -220,30 +213,15 @@ describe("sandbox policy authority boundary", () => {
         hash: "sha256:global",
         policy,
       }),
-      /invalid global policy authority metadata/u,
+      /invalid global policy metadata/u,
     ],
-  ])("rejects %s for global policy authority inspection (#9833)", (_name, raw, expected) => {
-    expect(() => parseActiveGlobalPolicyAuthorityMetadata(raw)).toThrow(expected);
+  ])("rejects %s for global policy inspection (#9833)", (_name, raw, expected) => {
+    expect(() => parseActiveGlobalPolicyMetadata(raw)).toThrow(expected);
   });
 
-  it("accepts matching authority and rejects invalid or changed authority", () => {
-    expect(() =>
-      assertMatchingPolicyAuthority("externally-managed", "externally-managed"),
-    ).not.toThrow();
-    expect(() => assertMatchingPolicyAuthority(undefined, "externally-managed")).toThrow(
-      /recorded policy authority is unavailable/u,
-    );
-    expect(() => assertMatchingPolicyAuthority("externally-managed", "unknown")).toThrow(
-      /observed OpenShell policy authority is unavailable/u,
-    );
-    expect(() => assertMatchingPolicyAuthority("nemoclaw-managed", "externally-managed")).toThrow(
-      /changed from nemoclaw-managed to externally-managed/u,
-    );
-  });
-
-  it("requires external entries and sections while allowing unrelated content", () => {
+  it("requires entries and sections while allowing unrelated live content", () => {
     const inspection = {
-      authority: "externally-managed" as const,
+      policySource: "global" as const,
       policyIdentity: { activeVersion: 7, hash: "sha256:effective" },
       effectivePolicy: {
         version: 9,
@@ -253,14 +231,14 @@ describe("sandbox policy authority boundary", () => {
       },
     };
     expect(() =>
-      assertExternalPolicyRequirementContainment(inspection, {
+      assertPolicyRequirementContainment(inspection, {
         version: 1,
         filesystem_policy: { read_only: true },
         network_policies: { required: { allow: true } },
       }),
     ).not.toThrow();
     expect(() =>
-      assertExternalPolicyRequirementContainment(inspection, {
+      assertPolicyRequirementContainment(inspection, {
         filesystem_policy: { read_only: false },
         process: { user: 1000 },
         network_policies: { required: { allow: false }, missing: {} },
@@ -269,89 +247,10 @@ describe("sandbox policy authority boundary", () => {
       /missing entries "missing"; drifted entries "required"; missing sections "process"; drifted sections "filesystem_policy"/u,
     );
     expect(() =>
-      assertExternalPolicyRequirementContainment(
-        {
-          authority: "unknown" as never,
-          effectivePolicy: {},
-          policyIdentity: { activeVersion: 7, hash: "sha256:effective" },
-        },
-        {},
-      ),
-    ).toThrow(/observed OpenShell policy authority is invalid/u);
-    expect(() =>
-      assertExternalPolicyRequirementContainment(inspection, {
+      assertPolicyRequirementContainment(inspection, {
         network_policies: [] as never,
       }),
     ).toThrow(/required network policy input is invalid/u);
-  });
-
-  it("rejects a non-plain policy value that resembles an empty mapping (#9833)", () => {
-    expect(() =>
-      assertExternalPolicyRequirementContainment(
-        {
-          authority: "externally-managed",
-          effectivePolicy: { network_policies: { required: new Date(0) } },
-          policyIdentity: { activeVersion: 7, hash: "sha256:effective" },
-        },
-        { network_policies: { required: {} } },
-      ),
-    ).toThrow(/drifted entries "required"/u);
-  });
-
-  it("requires recorded entries in a NemoClaw-managed policy", () => {
-    const inspection = {
-      authority: "nemoclaw-managed" as const,
-      effectivePolicy: { network_policies: { required: { allow: true } } },
-      policyIdentity: { activeVersion: 7, hash: "sha256:effective" },
-    };
-    expect(() =>
-      assertPolicyRequirementContainment(inspection, {
-        network_policies: { required: { allow: true } },
-      }),
-    ).not.toThrow();
-    expect(() =>
-      assertPolicyRequirementContainment(inspection, {
-        network_policies: { missing: { allow: true } },
-      }),
-    ).toThrow(/missing entries "missing"/u);
-
-    expect(() =>
-      assertPolicyRequirementContainment(
-        { ...inspection, authority: "invalid" as never },
-        { network_policies: {} },
-      ),
-    ).toThrow(/observed OpenShell policy authority is invalid/u);
-    expect(() =>
-      assertExternalPolicyRequirementContainment(
-        { ...inspection, authority: "owner-unknown" },
-        { network_policies: {} },
-      ),
-    ).toThrow(/observed OpenShell policy authority is unknown/u);
-  });
-
-  it("accepts only a complete secret-free receipt for the exact live policy", () => {
-    const receipt = {
-      schemaVersion: 1 as const,
-      origin: "sandbox-create" as const,
-      gatewayName: "nemoclaw",
-      gatewayPort: 8080,
-      sandboxName: "alpha",
-      lifecycleGeneration: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-      sandboxIdentityFingerprint: "b".repeat(64),
-      policyHash: "sha256:effective",
-      policyVersion: 7,
-    };
-    expect(parseNemoClawPolicyCreationReceipt(receipt)).toEqual(receipt);
-    expect(() =>
-      assertNemoClawPolicyCreationReceiptMatches(receipt, {
-        ...receipt,
-        policyHash: "sha256:drifted",
-      }),
-    ).toThrow(/does not match the live sandbox policy/u);
-    expect(() => parseNemoClawPolicyCreationReceipt({ ...receipt, status: "pending" })).toThrow(
-      /unavailable or invalid/u,
-    );
-    expect(JSON.stringify(receipt)).not.toMatch(/credential|network_policies|secret/u);
   });
 });
 

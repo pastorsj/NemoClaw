@@ -68,11 +68,11 @@ function boundaryDependencies(
   overrides: Partial<OnboardHarnessPackageBoundaryDependencies> = {},
 ): Pick<
   OnboardHarnessPackageBoundaryDependencies,
-  "assertWriterLockOwned" | "compareAndSwapSession" | "loadSession"
+  "assertOnboardLockOwned" | "compareAndSwapSession" | "loadSession"
 > &
   Partial<OnboardHarnessPackageBoundaryDependencies> {
   return {
-    assertWriterLockOwned: vi.fn(),
+    assertOnboardLockOwned: vi.fn(),
     compareAndSwapSession: vi.fn(() => "mismatch" as const),
     loadSession: getSession,
     getBundledRoot: () => fixture.bundledRoot,
@@ -172,7 +172,7 @@ describe("onboarding harness package ordering", () => {
     await runPreparedHarnessWorkflow(
       operationInput(),
       boundaryDependencies(() => session, {
-        assertWriterLockOwned: vi.fn(() => events.push("lock-asserted")),
+        assertOnboardLockOwned: vi.fn(() => events.push("lock-asserted")),
         selectHarnessPackage: async (input, overrides) => {
           events.push("prepare");
           return selectOnboardHarnessPackage(input, overrides);

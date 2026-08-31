@@ -101,11 +101,27 @@ function readWorktreeFile(file: string): string | null {
   return existsSync(absolute) ? readFileSync(absolute, "utf8") : null;
 }
 
-function readFiles(
+function readFilesCached(
   paths: readonly string[],
+  cache: Map<string, string | null>,
   read: (file: string) => string | null,
 ): ReadonlyMap<string, string | null> {
-  return new Map([...new Set(paths)].map((file) => [file, read(file)]));
+  const uniquePaths = [...new Set(paths)];
+  uniquePaths
+    .filter((file) => !cache.has(file))
+    .forEach((file) => cache.set(file, read(file)));
+  return new Map(uniquePaths.map((file) => [file, cache.get(file) ?? null]));
+}
+
+function readGitFilesCached(
+  ref: string,
+  paths: readonly string[],
+  cache: Map<string, string | null>,
+): ReadonlyMap<string, string | null> {
+  const uniquePaths = [...new Set(paths)];
+  const missingPaths = uniquePaths.filter((file) => !cache.has(file));
+  for (const [file, content] of readGitFiles(ref, missingPaths)) cache.set(file, content);
+  return new Map(uniquePaths.map((file) => [file, cache.get(file) ?? null]));
 }
 
 function selectLocalComparisonBase(
@@ -170,14 +186,16 @@ function loadLocalDiff(): GrowthGuardrailDiff {
   for (const filename of untracked.split("\0").filter(Boolean)) {
     if (!known.has(filename)) files.push({ filename, status: "added" });
   }
+  const baseCache = new Map<string, string | null>();
+  const headCache = new Map<string, string | null>();
 
   return {
     files,
     async readBase(paths) {
-      return readGitFiles(comparisonBase, paths);
+      return readGitFilesCached(comparisonBase, paths, baseCache);
     },
     async readHead(paths) {
-      return readFiles(paths, readWorktreeFile);
+      return readFilesCached(paths, headCache, readWorktreeFile);
     },
   };
 }
@@ -220,14 +238,16 @@ function loadPullRequestDiff(): GrowthGuardrailDiff {
     cwd: REPO_ROOT,
     encoding: "utf8",
   });
+  const baseCache = new Map<string, string | null>();
+  const headCache = new Map<string, string | null>();
 
   return {
     files: parseChangedFiles(changed),
     async readBase(paths) {
-      return readGitFiles(baseSha, paths);
+      return readGitFilesCached(baseSha, paths, baseCache);
     },
     async readHead(paths) {
-      return readGitFiles(headSha, paths);
+      return readGitFilesCached(headSha, paths, headCache);
     },
   };
 }
@@ -239,5 +259,6 @@ export function loadGrowthGuardrailDiff(): Promise<GrowthGuardrailDiff> {
 export const testOnly = {
   parseAncestorProbe,
   parseChangedFiles,
+  readFilesCached,
   selectLocalComparisonBase,
 };

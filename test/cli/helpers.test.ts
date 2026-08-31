@@ -177,15 +177,18 @@ describe("source-loader Node options", () => {
     const preload = path.join(directory, "record-home.cjs");
     fs.writeFileSync(
       preload,
-      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, process.env.HOME ?? "");`,
+      [
+        `require("node:fs").writeFileSync(${JSON.stringify(marker)}, process.env.HOME ?? "");`,
+        "process.exit(7);",
+      ].join("\n"),
     );
 
-    const result = runWithEnv("not-a-command", {
+    const result = runWithEnv("--version", {
       NODE_OPTIONS: `${sourceLoaderNodeOptions(undefined)} --require=${preload}`,
     });
     const implicitHome = fs.readFileSync(marker, "utf8");
 
-    expect(result.code).not.toBe(0);
+    expect(result.code).toBe(7);
     expect(fs.existsSync(implicitHome)).toBe(false);
   });
 

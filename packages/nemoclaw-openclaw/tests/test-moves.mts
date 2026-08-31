@@ -102,8 +102,6 @@ export const openclawNemoclawTestMoves = createTestMoveRecords({
     "tests/runtime/pair-bootstrap.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-early-output.test.ts":
     "tests/runtime/early-output.test.ts",
-  "test/agents/openclaw/runtime/nemoclaw-start-extra-placeholder-breadcrumb.test.ts":
-    "tests/runtime/placeholders.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-gateway-health.test.ts":
     "tests/runtime/gateway-health.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-gateway-marker.test.ts":
@@ -132,6 +130,8 @@ export const openclawNemoclawTestMoves = createTestMoveRecords({
     "tests/runtime/model-reconcile.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-runtime-env-alias.test.ts":
     "tests/runtime/env-alias.test.ts",
+  "test/agents/openclaw/runtime/nemoclaw-start-wechat-placeholder.test.ts":
+    "tests/runtime/wechat-placeholder.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-safe-tmp.test.ts": "tests/runtime/safe-temp.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-scope-replacement.test.ts":
     "tests/runtime/device-scope.test.ts",

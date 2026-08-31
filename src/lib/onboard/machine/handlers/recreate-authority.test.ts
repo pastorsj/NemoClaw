@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import type { HarnessPackageIdentity } from "../../../agent-runtime/package/identity";
 import { createSession, type Session } from "../../../state/onboard-session";
 import type { SandboxEntry } from "../../../state/registry";
-import * as registry from "../../../state/registry";
 import {
   beginSandboxRecreateTransaction,
   fingerprintSandboxRecreateValue,
@@ -35,11 +34,6 @@ const SOURCE_ENTRY: SandboxEntry = {
   gatewayName: "nemoclaw",
   gatewayPort: 8080,
 };
-
-beforeEach(() => {
-  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -123,7 +117,6 @@ it("preserves the hashed target fingerprint of a package-migrated v1 handler jou
       inferenceProvider?: string | null;
       extraProviders: readonly string[];
       staleExtraProviders: readonly string[];
-      baselineExclusions?: readonly unknown[];
     }) => {
       const resolved = {
         sandboxName: input.sandboxName,
@@ -141,7 +134,6 @@ it("preserves the hashed target fingerprint of a package-migrated v1 handler jou
             directGpu: false,
             additionalPresets: [],
             policyTier: null,
-            baselineExclusions: [],
           },
         },
         gpuCreateArgs: [],
@@ -154,11 +146,11 @@ it("preserves the hashed target fingerprint of a package-migrated v1 handler jou
       const {
         extraProviders: _extraProviders,
         staleExtraProviders: _staleExtraProviders,
+        policy: _policy,
         ...durableCreateIntent
       } = resolved;
       const lightFingerprint = [
         "saved",
-        "default",
         "provider",
         "model",
         "openai-completions",
@@ -199,7 +191,7 @@ it("preserves the hashed target fingerprint of a package-migrated v1 handler jou
 
   expect(resolveSandboxCreateIntent).toHaveBeenCalledOnce();
   expect(legacyTargetIntentFingerprint).toMatch(/^[a-f0-9]{64}$/u);
-  expect(journal.completeCreate.mock.calls[0]?.at(-2)).toMatchObject({
+  expect(journal.completeCreate.mock.calls[0]?.at(-1)).toMatchObject({
     recreateTransaction: {
       targetIntentFingerprint: legacyTargetIntentFingerprint,
     },

@@ -277,7 +277,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.restoreSandboxStateMock).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps active-timer restore, permission repair, and policy reconciliation serialized", async () => {
+  it("keeps active-timer state and permission repair serialized without replaying snapshot policy", async () => {
     f.lifecycleMock.readTimerMarkerMock.mockReturnValue({
       pid: 4242,
       sandboxName: "alpha",
@@ -304,10 +304,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.lifecycleMock.events).toContain("lock:restore sandbox snapshot");
     expectSnapshotStateRestore("alpha");
     expect(f.shieldsMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
-    expect(f.applyPresetMock).toHaveBeenCalledWith("alpha", "github", {
-      nonFatal: true,
-      skipRegistryUpdate: true,
-    });
+    expect(f.applyPresetMock).not.toHaveBeenCalled();
   });
 
   it("hardens an active timer window before force-deleting a restore destination", async () => {

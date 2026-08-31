@@ -40,7 +40,6 @@ describe("Deep Agents Code E2E acceptance contracts", () => {
         [],
         {
           agentName: "langchain-deepagents-code",
-          policyTier: "balanced",
           additionalPresets: ["observability-otlp-local"],
         },
       );

@@ -43,8 +43,13 @@ import {
 } from "../sandbox-agent";
 import type { FreshOnboardHarnessBinding } from "../session-bootstrap";
 import { assertCheckpointPackageAuthorityChain } from "../checkpoint-replay";
+import {
+  type HarnessPackageSessionAuthority,
+  type OnboardHarnessPackageAuthority,
+  requireCurrentSessionHarnessPackageAuthority,
+} from "./package-authority";
 
-export { requireCurrentSessionHarnessPackageAuthority } from "./package-authority";
+export { requireCurrentSessionHarnessPackageAuthority };
 
 type SelectedOnboardHarness = Exclude<
   OnboardHarnessPackageSelection,
@@ -95,7 +100,7 @@ export interface OnboardHarnessPackageBoundaryInput {
 }
 
 export interface OnboardHarnessPackageBoundaryDependencies {
-  readonly assertWriterLockOwned: () => void;
+  readonly assertOnboardLockOwned: () => void;
   readonly compareAndSwapSession: (
     matches: (session: Session) => boolean,
     mutator: (session: Session) => Session | void,
@@ -138,6 +143,10 @@ export interface PreparedOnboardHarnessOperation {
     loadRuntimeSession: Parameters<typeof prepareLockedOnboardRuntime>[3],
   ): Promise<BoundOnboardRuntimePreparation>;
   requireBoundAuthority(): BoundOnboardHarnessPackage;
+  revalidateSessionAuthority(
+    expected: HarnessPackageSessionAuthority,
+    operation: string,
+  ): OnboardHarnessPackageAuthority;
   resolveAgents(
     session: Session | null,
     selectAgent: (input: {
@@ -365,7 +374,7 @@ function bindFreshSelection(
       deps,
       "Selected qualified harness authority did not survive portable recovery",
     );
-    deps.assertWriterLockOwned();
+    deps.assertOnboardLockOwned();
     return bindResolvedAgentAuthority(
       resolved,
       prepared.authoritativeRebuildAgentAuthority,
@@ -386,7 +395,7 @@ function bindFreshSelection(
   ) {
     throw new Error("Selected harness package changed during post-recovery resolution");
   }
-  deps.assertWriterLockOwned();
+  deps.assertOnboardLockOwned();
   return bindResolvedAgentAuthority(
     resolved,
     prepared.authoritativeRebuildAgentAuthority,
@@ -398,7 +407,7 @@ async function prepareBoundary(
   input: OnboardHarnessPackageBoundaryInput,
   deps: OnboardHarnessPackageBoundaryDependencies,
 ): Promise<PreparedOnboardHarnessPackage> {
-  deps.assertWriterLockOwned();
+  deps.assertOnboardLockOwned();
   const context = packageContext(input, deps);
   if (!input.resume) {
     const selection = await deps.selectHarnessPackage({
@@ -410,7 +419,7 @@ async function prepareBoundary(
       prompt: input.prompt,
       storeRoot: context.storeRoot,
     });
-    deps.assertWriterLockOwned();
+    deps.assertOnboardLockOwned();
     if (selection.kind === "install-required") throw new Error(selection.message);
     return { kind: "fresh", selection, ...context };
   }
@@ -450,7 +459,7 @@ async function prepareBoundary(
       storeRoot: context.storeRoot,
       env: input.environment,
     });
-    deps.assertWriterLockOwned();
+    deps.assertOnboardLockOwned();
     return { kind: "package-resume", ownerSnapshot: structuredClone(session), ...context };
   }
 
@@ -484,7 +493,7 @@ function bindBoundary(
   prepared: PreparedOnboardHarnessPackage,
   deps: OnboardHarnessPackageBoundaryDependencies,
 ): BoundOnboardHarnessPackage {
-  deps.assertWriterLockOwned();
+  deps.assertOnboardLockOwned();
   if (prepared.kind === "fresh") {
     return bindFreshSelection(prepared, deps);
   }
@@ -510,7 +519,7 @@ function bindBoundary(
         storeRoot: prepared.storeRoot,
         env: prepared.environment,
       });
-    deps.assertWriterLockOwned();
+    deps.assertOnboardLockOwned();
     return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
   }
   if (prepared.kind === "qualified-resume") {
@@ -543,7 +552,7 @@ function bindBoundary(
         deps,
         "Qualified harness authority did not survive portable recovery",
       );
-    deps.assertWriterLockOwned();
+    deps.assertOnboardLockOwned();
     return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
   }
   if (prepared.kind === "deferred-resume") {
@@ -583,7 +592,7 @@ function bindBoundary(
     },
     { storeRoot: prepared.storeRoot, env: prepared.environment },
   );
-  deps.assertWriterLockOwned();
+  deps.assertOnboardLockOwned();
   return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
 }
 
@@ -591,7 +600,7 @@ function bindBoundary(
 export function createOnboardHarnessPackageBoundary(
   overrides: Pick<
     OnboardHarnessPackageBoundaryDependencies,
-    "assertWriterLockOwned" | "compareAndSwapSession" | "loadSession"
+    "assertOnboardLockOwned" | "compareAndSwapSession" | "loadSession"
   > &
     Partial<OnboardHarnessPackageBoundaryDependencies>,
 ): OnboardHarnessPackageBoundary {
@@ -610,10 +619,11 @@ export async function prepareOnboardHarnessOperation(
   input: PrepareOnboardHarnessOperationInput,
   dependencyOverrides: Pick<
     OnboardHarnessPackageBoundaryDependencies,
-    "assertWriterLockOwned" | "compareAndSwapSession" | "loadSession"
+    "assertOnboardLockOwned" | "compareAndSwapSession" | "loadSession"
   > &
     Partial<OnboardHarnessPackageBoundaryDependencies>,
 ): Promise<PreparedOnboardHarnessOperation> {
+  const environment = input.environment ?? process.env;
   const boundary = createOnboardHarnessPackageBoundary({
     ...dependencyOverrides,
   });
@@ -621,7 +631,7 @@ export async function prepareOnboardHarnessOperation(
     agentFlag: input.agentFlag,
     authoritativeRebuildAgentAuthority: input.authoritativeRebuildAgentAuthority,
     canPrompt: input.canPrompt,
-    environment: input.environment ?? process.env,
+    environment,
     log: input.log ?? ((message = "") => console.log(message)),
     prompt: input.prompt,
     resume: input.resume,
@@ -647,6 +657,17 @@ export async function prepareOnboardHarnessOperation(
       if (!authority) throw new Error("Onboarding harness package authority was not bound");
       return authority;
     },
+    revalidateSessionAuthority: (expected, operation) =>
+      requireCurrentSessionHarnessPackageAuthority(
+        expected,
+        operation,
+        { env: environment },
+        {
+          loadSession: dependencyOverrides.loadSession,
+          resolveSandboxAgent:
+            dependencyOverrides.resolveSandboxAgent ?? PRODUCTION_DEPENDENCIES.resolveSandboxAgent,
+        },
+      ).authority,
     resolveAgents: (session, selectAgent) =>
       resolveBoundHarnessAgents(operation.requireBoundAuthority(), () =>
         selectAgent({

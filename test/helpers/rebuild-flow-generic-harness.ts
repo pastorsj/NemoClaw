@@ -6,7 +6,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { vi } from "vitest";
-import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
 import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
 import {
   agentDefs,
@@ -22,6 +21,7 @@ import {
   hermesProviderAuth,
   installRebuildHarnessPackage,
   installTerminalStepFailureMock,
+  listHarnessRebuildBackups,
   loadRebuildSandbox,
   mcpBridge,
   messaging,
@@ -31,6 +31,7 @@ import {
   onboardSession,
   openshellRuntime,
   policies,
+  policyGet,
   processRecovery,
   purgeRebuildModule,
   type RebuildFlowHarness,
@@ -44,6 +45,7 @@ import {
   rebuildUsageNotice,
   registry,
   registryPersistence,
+  registerHarnessRebuildBackup,
   resolve,
   sandboxList,
   sandboxSession,
@@ -54,10 +56,13 @@ import {
 } from "./rebuild-flow-harness";
 
 export {
+  createHarnessTempDir,
   installRebuildFlowTestHooks,
   originalSandboxName,
+  policyGet,
   portableAgentLifecycle,
   snapshotEnv,
+  tempFiles,
 } from "./rebuild-flow-harness";
 
 export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): RebuildFlowHarness {
@@ -66,6 +71,11 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const backupPath = createHarnessTempDir("nemoclaw-rebuild-backup-");
+  let latestValidatedRecoveryManifest: Record<string, unknown> | null = null;
+  vi.spyOn(policyGet, "getSandboxPolicy").mockReturnValue({
+    yaml: "version: 1\nnetwork_policies:\n  host_preserved: {}\n",
+  });
 
   const session = createRebuildFlowSession(onboardSession.MACHINE_SNAPSHOT_VERSION);
   const rebuildShieldsWindow = { relocked: false, wasLocked: false };
@@ -453,54 +463,73 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
           ? overrides.sandboxEntry.agent
           : "openclaw");
       const stateDirs = [...(options.agentDefinition?.backupStateDirs ?? ["workspace"])];
+      const manifest = {
+        version: options.agentDefinition ? 2 : 1,
+        sandboxName: "alpha",
+        agentType: agentName,
+        agentVersion: "0.1.0",
+        expectedVersion: options.agentDefinition?.expectedVersion ?? null,
+        ...(options.agentDefinition ? { harnessPackage: options.harnessPackage ?? null } : {}),
+        stateDirs,
+        backedUpDirs: ["workspace"],
+        stateFiles: [...(options.agentDefinition?.stateFiles ?? [])],
+        dir: options.agentDefinition?.configPaths?.dir ?? "/sandbox/.openclaw",
+        backupPath,
+        timestamp: "2026-06-01T00:00:00.000Z",
+        blueprintDigest: null,
+        ...(overrides.backupPreservedEnv
+          ? { preservedEnv: structuredClone(overrides.backupPreservedEnv) }
+          : {}),
+        ...(modelsCustomOpenClawImage
+          ? {
+              reconcileOpenClawImagePluginProvenance: true,
+              openclawImagePluginInstalls: structuredClone(
+                currentSandboxEntry.openclawImagePluginInstalls,
+              ),
+            }
+          : {}),
+      };
+      registerHarnessRebuildBackup(manifest as ReturnType<typeof sandboxState.listBackups>[number]);
       return {
         success: true,
         backedUpDirs: ["workspace"],
         backedUpFiles: ["user.md"],
         failedDirs: [],
         failedFiles: [],
-        manifest: {
-          version: options.agentDefinition ? 2 : 1,
-          sandboxName: "alpha",
-          agentType: agentName,
-          agentVersion: "0.1.0",
-          expectedVersion: options.agentDefinition?.expectedVersion ?? null,
-          ...(options.agentDefinition ? { harnessPackage: options.harnessPackage ?? null } : {}),
-          stateDirs,
-          backedUpDirs: ["workspace"],
-          stateFiles: [...(options.agentDefinition?.stateFiles ?? [])],
-          dir: options.agentDefinition?.configPaths?.dir ?? "/sandbox/.openclaw",
-          backupPath: "/tmp/nemoclaw-rebuild-backup",
-          timestamp: "2026-06-01T00:00:00.000Z",
-          blueprintDigest: null,
-          policyPresets: overrides.backupPolicyPresets ?? ["npm", "bad", "throw"],
-          customPolicies: [],
-          ...(overrides.backupPreservedEnv
-            ? { preservedEnv: structuredClone(overrides.backupPreservedEnv) }
-            : {}),
-          ...(modelsCustomOpenClawImage
-            ? {
-                reconcileOpenClawImagePluginProvenance: true,
-                openclawImagePluginInstalls: structuredClone(
-                  currentSandboxEntry.openclawImagePluginInstalls,
-                ),
-              }
-            : {}),
-        },
+        manifest,
       };
     });
   vi.spyOn(sandboxState, "validateRebuildRecoveryManifest").mockImplementation(
     (...args: unknown[]) => {
       const manifest = args[2] as Record<string, unknown>;
-      return overrides.recoveryManifestValidation?.(manifest) ?? { ok: true, manifest };
+      const persistedPath = path.join(String(manifest.backupPath), "rebuild-manifest.json");
+      const persistedManifest = fs.existsSync(persistedPath)
+        ? (JSON.parse(fs.readFileSync(persistedPath, "utf8")) as Record<string, unknown>)
+        : manifest;
+      const result = overrides.recoveryManifestValidation?.(manifest) ?? {
+        ok: true,
+        manifest: persistedManifest,
+      };
+      if (result.ok) {
+        latestValidatedRecoveryManifest = result.manifest;
+        registerHarnessRebuildBackup(
+          result.manifest as ReturnType<typeof sandboxState.listBackups>[number],
+        );
+      }
+      return result;
     },
   );
-  vi.spyOn(sandboxState, "getLatestBackup").mockImplementation(
-    () =>
-      (overrides.preDeleteLatestManifest === undefined
-        ? makePreparedRecoveryManifest()
-        : overrides.preDeleteLatestManifest) as ReturnType<typeof sandboxState.getLatestBackup>,
-  );
+  vi.spyOn(sandboxState, "getLatestBackup").mockImplementation(() => {
+    const manifest =
+      overrides.preDeleteLatestManifest === undefined
+        ? (latestValidatedRecoveryManifest ?? listHarnessRebuildBackups().at(-1) ?? null)
+        : overrides.preDeleteLatestManifest;
+    if (manifest) {
+      registerHarnessRebuildBackup(manifest as ReturnType<typeof sandboxState.listBackups>[number]);
+    }
+    return manifest as ReturnType<typeof sandboxState.getLatestBackup>;
+  });
+  vi.spyOn(sandboxState, "listBackups").mockImplementation(listHarnessRebuildBackups);
   vi.spyOn(sandboxState, "hasPositiveManagedImageEvidence").mockReturnValue(
     overrides.managedImageEvidence ?? true,
   );
@@ -737,6 +766,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   warnSpy.mockClear();
 
   return {
+    backupPath,
     rebuildSandbox: loadRebuildSandbox(),
     applyPresetSpy,
     backupSandboxStateSpy,

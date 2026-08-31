@@ -32,7 +32,6 @@ import type {
 import { normalizeSandboxGpuMode } from "../../onboard/sandbox-gpu-mode";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type { ManagedWorkloadRebuildHandoff } from "../../onboard/workload/rebuild";
-import { getTier } from "../../policy/tiers";
 import type { SandboxBaseImageResolutionMetadata } from "../../sandbox-base-image";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
 import type { PreservedEnvFile } from "../../state/preserved-env";
@@ -51,7 +50,6 @@ export type RebuildGpuOptOutEntry = {
   toolDisclosure?: ToolDisclosure;
   dcodeAutoApprovalMode?: DcodeAutoApprovalMode;
   observabilityEnabled?: boolean;
-  policyTier?: string | null;
   endpointSource?: InferenceEndpointSource | null;
   provider?: string | null;
   model?: string | null;
@@ -148,7 +146,7 @@ export type RebuildRecreateOnboardOpts = {
   preparedImageRebuild?: PreparedImageRebuildHandoff;
   managedWorkloadRebuild?: ManagedWorkloadRebuildHandoff;
   rebuildPreservedEnv?: readonly PreservedEnvFile[];
-  rebuildPolicyPresets?: readonly string[];
+  rebuildPolicySourcePath?: string;
   hostMounts?: readonly import("../../state/registry/types").SandboxHostMount[];
   autoYes: boolean;
   toolDisclosure: ToolDisclosure;
@@ -158,7 +156,6 @@ export type RebuildRecreateOnboardOpts = {
   observabilityEnabled: boolean;
   /** Whether the rebuild command explicitly overrode the recorded observability state. */
   observabilityRequestedExplicitly: boolean;
-  policyTier: string | null;
   baseImageResolutionHint: SandboxBaseImageResolutionMetadata | null;
   preResolvedBaseImageMetadata?: SandboxBaseImageResolutionMetadata;
   noGpu?: true;
@@ -201,10 +198,6 @@ export function buildRebuildRecreateOnboardOpts(args: {
     harnessPackageMigration: args.agentAuthority.harnessPackageMigration,
   };
   const hostMounts = normalizePersistedSandboxHostMounts(args.sb?.hostMounts);
-  const rawPolicyTier = args.sb?.policyTier?.trim().toLowerCase() || null;
-  if (rawPolicyTier && !getTier(rawPolicyTier)) {
-    throw new Error(`Invalid recorded policy tier '${String(args.sb?.policyTier)}'.`);
-  }
   const targetGatewayName = resolveSandboxGatewayName(args.sb);
   const targetGatewayPort = resolveGatewayPortFromName(targetGatewayName);
   if (targetGatewayPort === null) {
@@ -250,7 +243,6 @@ export function buildRebuildRecreateOnboardOpts(args: {
     dcodeAutoApprovalRequestedExplicitly: false,
     observabilityEnabled: args.sb?.observabilityEnabled === true,
     observabilityRequestedExplicitly: false,
-    policyTier: rawPolicyTier,
     baseImageResolutionHint: args.baseImageResolutionHint ?? null,
     ...(rebuildShouldOptOutGpu(args.sb) ? { noGpu: true as const } : {}),
     ...(hostMounts.length > 0 ? { hostMounts } : {}),

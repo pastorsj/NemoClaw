@@ -329,7 +329,6 @@ registry.getSandbox = (name) =>
         provider: "hermes-provider",
         model: "moonshotai/kimi-k2.6",
         hermesToolGateways: [],
-        policies: ["nous-web"],
       }
     : null;
 registry.reserveSandboxInferenceRoute = (name, updates) => {
@@ -410,7 +409,6 @@ const resumeSession = onboardSession.createSession({
   credentialEnv: "NOUS_API_KEY",
   hermesAuthMethod: "api_key",
   hermesToolGateways: [],
-  policyPresets: ["nous-web"],
   metadata: { gatewayName: "nemoclaw", fromDockerfile: null },
   steps: {
     preflight: complete(),
@@ -873,66 +871,6 @@ console.log(JSON.stringify({
     try {
       expect(result.status).toBe(0);
       expect(JSON.parse(result.stdout.trim())).toEqual({ ready: true });
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it("detects when recorded policy presets are already applied", () => {
-    const repoRoot = path.join(import.meta.dirname, "../..");
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-ready-"));
-    const registryDir = path.join(tmpDir, ".nemoclaw");
-    const registryFile = path.join(registryDir, "sandboxes.json");
-    const scriptPath = path.join(tmpDir, "policy-ready-check.js");
-    const onboardPath = JSON.stringify(path.join(repoRoot, "src", "lib", "onboard.ts"));
-
-    fs.mkdirSync(registryDir, { recursive: true });
-    fs.writeFileSync(
-      registryFile,
-      JSON.stringify(
-        {
-          sandboxes: {
-            "my-assistant": {
-              name: "my-assistant",
-              policies: ["pypi", "npm"],
-            },
-          },
-          defaultSandbox: "my-assistant",
-        },
-        null,
-        2,
-      ),
-    );
-
-    fs.writeFileSync(
-      scriptPath,
-      `
-const { arePolicyPresetsApplied } = require(${onboardPath});
-console.log(JSON.stringify({
-  ready: arePolicyPresetsApplied("my-assistant", ["pypi", "npm"]),
-  missing: arePolicyPresetsApplied("my-assistant", ["pypi", "slack"]),
-  empty: arePolicyPresetsApplied("my-assistant", []),
-}));
-`,
-    );
-
-    const result = spawnSync(process.execPath, [scriptPath], {
-      cwd: repoRoot,
-      encoding: "utf-8",
-      env: {
-        ...process.env,
-        HOME: tmpDir,
-      },
-    });
-
-    try {
-      expect(result.status).toBe(0);
-      const payload = JSON.parse(result.stdout.trim());
-      expect(payload).toEqual({
-        ready: true,
-        missing: false,
-        empty: false,
-      });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

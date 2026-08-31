@@ -75,7 +75,7 @@ export const HERMES_PORTABLE_DOCKERFILE_COPY_SOURCES = [
   "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle",
 ] as const;
 
-/** Files and Git links admitted by the Hermes Portable build-context contract. */
+/** Exact shipped files admitted by the schema-7 Hermes Dockerfile COPY contract. */
 export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "nemoclaw-blueprint/blueprint.yaml", mode: "100644" },
   { path: "nemoclaw-blueprint/model-specific-setup/hermes/README.md", mode: "100644" },
@@ -228,6 +228,7 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
     mode: "100644",
   },
   { path: "src/lib/messaging/AGENTS.md", mode: "100644" },
+  { path: "src/lib/messaging/applier/agent-config-remove.test.ts", mode: "100644" },
   { path: "src/lib/messaging/applier/agent-config.ts", mode: "100644" },
   { path: "src/lib/messaging/applier/build/messaging-build-applier.mts", mode: "100755" },
   { path: "src/lib/messaging/applier/conflict-detection-entry.test.ts", mode: "100644" },
@@ -410,6 +411,14 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "src/lib/messaging/channels/wechat/qr.test.ts", mode: "100644" },
   { path: "src/lib/messaging/channels/wechat/qr.ts", mode: "100644" },
   { path: "src/lib/messaging/channels/wechat/rendered-config-parser.ts", mode: "100644" },
+  {
+    path: "src/lib/messaging/channels/wechat/runtime/wechat-account-placeholder.test.ts",
+    mode: "100644",
+  },
+  {
+    path: "src/lib/messaging/channels/wechat/runtime/wechat-account-placeholder.ts",
+    mode: "100644",
+  },
   { path: "src/lib/messaging/channels/wechat/runtime/wechat-diagnostics.ts", mode: "100644" },
   { path: "src/lib/messaging/channels/wechat/template-resolver.ts", mode: "100644" },
   { path: "src/lib/messaging/channels/whatsapp/hooks/index.ts", mode: "100644" },
@@ -447,6 +456,10 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "src/lib/messaging/compiler/manifest-compiler.ts", mode: "100644" },
   { path: "src/lib/messaging/compiler/types.ts", mode: "100644" },
   { path: "src/lib/messaging/compiler/workflow-planner-hermes-slack.test.ts", mode: "100644" },
+  {
+    path: "src/lib/messaging/compiler/workflow-planner-removal-tombstone.test.ts",
+    mode: "100644",
+  },
   { path: "src/lib/messaging/compiler/workflow-planner.test.ts", mode: "100644" },
   { path: "src/lib/messaging/compiler/workflow-planner.ts", mode: "100644" },
   { path: "src/lib/messaging/diagnostics.test.ts", mode: "100644" },

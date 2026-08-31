@@ -109,7 +109,6 @@ function buildOptions(
     dcodeAutoApprovalRequestedExplicitly: false,
     observabilityEnabled: false,
     observabilityRequestedExplicitly: false,
-    policyTier: null,
     baseImageResolutionHint: null,
     ...overrides,
   };

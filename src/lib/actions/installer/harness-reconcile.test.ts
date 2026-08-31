@@ -72,7 +72,7 @@ function legacyRetainedRecord(sandboxName: string): RetainedSandboxRecoveryRecor
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
     lifecycleGeneration: null,
-    verifiedEffectivePolicyIdentity: null,
+    createAttemptNonce: "a".repeat(62),
     resources: {
       sharedInferenceProviders: [],
       sandboxScopedProviders: [],
@@ -173,8 +173,7 @@ class InstallerStateHarness {
             ...legacy,
             schemaVersion: 2 as const,
             recordId: `current-${legacy.sandboxName}`,
-            createAttemptNonce: legacy.createAttemptNonce ?? null,
-            policyCreationReceipt: legacy.policyCreationReceipt ?? null,
+            createAttemptNonce: legacy.createAttemptNonce,
             harnessPackage: structuredClone(harnessPackage),
           };
           this.retained.splice(selectedIndex, 1, upgraded);

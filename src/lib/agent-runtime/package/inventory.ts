@@ -6,8 +6,7 @@ import {
   type HarnessPackageInventory,
   type InstalledHarnessPackageRecord,
 } from "./catalog";
-import { parseHarnessPackageIdentity } from "./identity";
-import { parseHarnessPackageId } from "./receipt";
+import { parseHarnessPackageId, parseHarnessPackageIdentity } from "./receipt";
 import type { HarnessPackageIdentity } from "./types";
 
 const DISPLAY_NAME_MAX_LENGTH = 128;

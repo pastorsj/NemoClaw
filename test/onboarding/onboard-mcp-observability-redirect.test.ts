@@ -56,7 +56,7 @@ runner.runCapture = (command) => {
   const mocked = require(${mocksPath}).mockOnboardRunCapture(command, { defaultCurlOutput: "ok" });
   return mocked === null ? "" : mocked;
 };
-registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
+registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture({
   ...harnessFixture.registryAuthority,
   name: "alpha",
   model: "model",
@@ -64,7 +64,6 @@ registry.getSandbox = () => fixtureMocks.managedSandboxPolicyReceiptFixture({
   preferredInferenceApi: "openai-completions",
   toolDisclosure: "progressive",
   observabilityEnabled: true,
-  policyAuthority: "nemoclaw-managed",
   mcp: {
     version: 1,
     bridges: {

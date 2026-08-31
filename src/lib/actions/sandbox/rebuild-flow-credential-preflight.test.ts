@@ -235,7 +235,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
       hydrateCredentialEnv: () => "host-provider-key",
       runOpenshell: (args) =>
         args[0] === "provider" ? (providerLookups.shift() ?? registeredProvider)(args) : undefined,
-      staleRecovery: true,
+      staleRecovery: false,
       preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
@@ -271,7 +271,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
         return credentialHydrations < 3 ? "host-provider-key" : null;
       },
       runOpenshell: providerRuntime([]),
-      staleRecovery: true,
+      staleRecovery: false,
       preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {
@@ -314,7 +314,7 @@ describe("rebuildSandbox flow: credential preflight", () => {
         args[0] === "provider"
           ? (providerLookups.shift() ?? indeterminateProvider)(args)
           : undefined,
-      staleRecovery: true,
+      staleRecovery: false,
       preDeleteLatestManifest: recoveryManifest,
     });
     configureSession(harness, "compatible-endpoint", "COMPATIBLE_API_KEY", {

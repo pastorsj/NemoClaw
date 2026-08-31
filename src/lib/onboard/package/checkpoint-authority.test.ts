@@ -56,7 +56,7 @@ function boundaryFor(
   ),
 ) {
   return createOnboardHarnessPackageBoundary({
-    assertWriterLockOwned: vi.fn(),
+    assertOnboardLockOwned: vi.fn(),
     loadSession: readSession,
     loadRegistry: readRegistry,
     compareAndSwapSession: (matches, mutate) => {

@@ -1,19 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
-import * as registry from "../../../state/registry";
 import { apfCreateFingerprintFields, apfCreateIntentFields, handleSandboxState } from "./sandbox";
 import { baseOptions, createDeps } from "./sandbox-test-fixtures";
 
 describe("APF sandbox create selection", () => {
-  beforeEach(() => {
-    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -21,7 +15,7 @@ describe("APF sandbox create selection", () => {
   it("binds selection to the future deferred create intent (#9833)", () => {
     expect(apfCreateIntentFields(true)).toEqual({
       apfInterceptorRequested: true,
-      deferSandboxEffectsUntilPolicyVerification: true,
+      deferSandboxEffectsUntilIdentityVerification: true,
     });
     expect(apfCreateIntentFields(false)).toEqual({});
   });
@@ -70,14 +64,14 @@ describe("APF sandbox create selection", () => {
     const createCall = calls.createSandbox.mock.calls[0] ?? [];
     expect(createCall.at(-2)).toMatchObject({
       apfInterceptorRequested: true,
-      deferSandboxEffectsUntilPolicyVerification: true,
+      deferSandboxEffectsUntilIdentityVerification: true,
     });
     const activateVerifiedEffects = createCall.at(-1);
     expect(activateVerifiedEffects).toEqual(expect.any(Function));
 
     const sessionUpdatesBeforeVerifiedEffects = calls.updateSession.mock.calls.length;
     await (activateVerifiedEffects as unknown as (context: unknown) => Promise<void>)({
-      revalidatePolicyRequirements: () => undefined,
+      revalidateSandboxIdentity: () => undefined,
     });
     expect(calls.updateSession.mock.calls.length).toBeGreaterThan(
       sessionUpdatesBeforeVerifiedEffects,

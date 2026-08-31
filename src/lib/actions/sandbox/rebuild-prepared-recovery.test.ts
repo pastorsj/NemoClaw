@@ -88,23 +88,14 @@ describe("prepared rebuild recovery", () => {
       recoveryManifest.backupPath,
       expect.objectContaining({ targetAgentType: "openclaw" }),
     );
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
-      1,
-      "alpha",
-      null,
-      recoveryManifest,
-    );
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
-      2,
-      "alpha",
-      null,
-      recoveryManifest,
-    );
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
-      3,
-      "alpha",
-      null,
-      recoveryManifest,
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledTimes(5);
+    const expectedRecovery = expect.objectContaining({
+      sandboxName: recoveryManifest.sandboxName,
+      timestamp: recoveryManifest.timestamp,
+      backupPath: recoveryManifest.backupPath,
+    });
+    expect(sandboxState.validateRebuildRecoveryManifest.mock.calls).toEqual(
+      Array.from({ length: 5 }, () => ["alpha", null, expectedRecovery]),
     );
   });
 
@@ -164,7 +155,7 @@ describe("prepared rebuild recovery", () => {
     expectNoSandboxDelete(harness.runOpenshellSpy);
   });
 
-  it("keeps the complete package owner at both schema v2 recovery fences", async () => {
+  it("keeps the complete package owner through schema v2 recovery and transaction fences", async () => {
     const harnessPackage = installRebuildHarnessPackage("openclaw");
     expect(harnessPackage).not.toBeNull();
     const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
@@ -184,23 +175,15 @@ describe("prepared rebuild recovery", () => {
       agent: null,
       harnessPackage,
     });
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
-      1,
-      "alpha",
-      expectedOwner,
-      recoveryManifest,
-    );
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
-      2,
-      "alpha",
-      expectedOwner,
-      recoveryManifest,
-    );
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenNthCalledWith(
-      3,
-      "alpha",
-      expectedOwner,
-      recoveryManifest,
+    const expectedRecovery = expect.objectContaining({
+      sandboxName: recoveryManifest.sandboxName,
+      timestamp: recoveryManifest.timestamp,
+      backupPath: recoveryManifest.backupPath,
+      harnessPackage,
+    });
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledTimes(5);
+    expect(sandboxState.validateRebuildRecoveryManifest.mock.calls).toEqual(
+      Array.from({ length: 5 }, () => ["alpha", expectedOwner, expectedRecovery]),
     );
   });
 
@@ -211,13 +194,15 @@ describe("prepared rebuild recovery", () => {
       expect(harnessPackage).not.toBeNull();
       const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
       let validationCount = 0;
+      let resolutionCount = 0;
       const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
       const rejectDrift = (..._args: unknown[]) => {
         throw new Error(`retained harness package ${authorityKind} failed integrity validation`);
       };
-      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) =>
-        (validationCount === 2 ? rejectDrift : resolveExact)(...args),
-      );
+      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+        resolutionCount++;
+        return (resolutionCount === 3 ? rejectDrift : resolveExact)(...args);
+      });
       const harness = createPreparedRecoveryHarness({
         harnessPackage,
         preDeleteLatestManifest: recoveryManifest,
@@ -234,7 +219,8 @@ describe("prepared rebuild recovery", () => {
         }),
       ).rejects.toThrow("prepared recovery agent authority could not be resolved");
 
-      expect(validationCount).toBe(2);
+      expect(resolutionCount).toBe(3);
+      expect(validationCount).toBe(3);
       expectNoSandboxDelete(harness.runOpenshellSpy);
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     },
@@ -245,10 +231,12 @@ describe("prepared rebuild recovery", () => {
     expect(harnessPackage).not.toBeNull();
     const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
     let validationCount = 0;
+    let resolutionCount = 0;
     const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
     vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+      resolutionCount++;
       const authority = resolveExact(...args);
-      return validationCount === 2
+      return resolutionCount === 3
         ? {
             ...authority,
             definition: { ...authority.definition, name: "hermes" },
@@ -271,25 +259,28 @@ describe("prepared rebuild recovery", () => {
       }),
     ).rejects.toThrow("resolved agent authority does not match the owning sandbox");
 
-    expect(validationCount).toBe(2);
+    expect(resolutionCount).toBe(3);
+    expect(validationCount).toBe(3);
     expectNoSandboxDelete(harness.runOpenshellSpy);
     expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["pre-delete", 1],
-    ["delete edge", 2],
+    ["pre-delete", 2, 1],
+    ["delete edge", 3, 3],
   ] as const)(
     "rejects same-name definition root drift at the %s recovery fence",
-    async (_edge, driftAfterValidationCount) => {
+    async (_edge, driftAtResolution, expectedValidationCount) => {
       const harnessPackage = installRebuildHarnessPackage("openclaw");
       expect(harnessPackage).not.toBeNull();
       const recoveryManifest = schemaV2RecoveryManifest(harnessPackage!);
       let validationCount = 0;
+      let resolutionCount = 0;
       const resolveExact = sandboxAgent.resolveSandboxAgent.bind(sandboxAgent);
       vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((...args: unknown[]) => {
+        resolutionCount++;
         const authority = resolveExact(...args);
-        return validationCount === driftAfterValidationCount
+        return resolutionCount === driftAtResolution
           ? {
               ...authority,
               definition: {
@@ -315,7 +306,8 @@ describe("prepared rebuild recovery", () => {
         }),
       ).rejects.toThrow("resolved agent authority does not match the owning sandbox");
 
-      expect(validationCount).toBe(driftAfterValidationCount);
+      expect(resolutionCount).toBe(driftAtResolution);
+      expect(validationCount).toBe(expectedValidationCount);
       expectNoSandboxDelete(harness.runOpenshellSpy);
       expect(harness.onboardSpy).not.toHaveBeenCalled();
     },
@@ -365,12 +357,11 @@ describe("prepared rebuild recovery", () => {
       packageFixture.cleanup();
     }
 
-    expect(validationCount).toBe(3);
+    expect(validationCount).toBe(5);
     const advancedPackage = advancedPackages[0];
     assert.ok(advancedPackage, "prepared recovery test must advance the active package");
     expect(advancedPackage.identity).not.toEqual(harnessPackage);
-    expect(resolutionValidationCounts).toContain(0);
-    expect(resolutionValidationCounts).toContain(1);
+    expect(resolutionValidationCounts.slice(0, 3)).toEqual([0, 1, 3]);
     expect(resolvedAuthorities.map((authority) => authority.harnessPackage)).toEqual(
       Array.from({ length: resolvedAuthorities.length }, () => harnessPackage),
     );
@@ -429,7 +420,7 @@ describe("prepared rebuild recovery", () => {
       restoreEnv("NEMOCLAW_CUA_ENABLED", priorCuaEnabled);
     }
 
-    expect(validationCount).toBe(2);
+    expect(validationCount).toBe(3);
     expectNoSandboxDelete(harness.runOpenshellSpy);
     expect(harness.onboardSpy).not.toHaveBeenCalled();
   });
@@ -472,7 +463,7 @@ describe("prepared rebuild recovery", () => {
       }),
     ).rejects.toThrow("Recovery registry configuration changed during preflight");
 
-    expect(validationCount).toBe(2);
+    expect(validationCount).toBe(3);
     expect(observedRegistryReads).toContainEqual({
       drift: true,
       model: "delete-edge-drift",
@@ -620,7 +611,6 @@ describe("prepared rebuild recovery", () => {
         name: "alpha",
         provider: "compatible-endpoint",
         model: "new-model",
-        policies: ["npm", "github"],
         agent: null,
         agentVersion: "0.1.0",
         nemoclawVersion: "0.0.71",

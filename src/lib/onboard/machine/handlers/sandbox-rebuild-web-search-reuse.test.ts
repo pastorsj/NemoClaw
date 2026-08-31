@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { decisionSelected, decisionUnset } from "../../../state/onboard-checkpoint-decision";
 import {
@@ -12,7 +12,6 @@ import {
   type OnboardCheckpoint,
 } from "../../../state/onboard-checkpoint-types";
 import { createSession, type Session } from "../../../state/onboard-session";
-import * as registry from "../../../state/registry";
 import { detectMessagingChannelsFromEnv } from "../../messaging-channel-setup";
 import { handleSandboxState } from "./sandbox";
 import { baseOptions, createDeps } from "./sandbox-test-fixtures";
@@ -144,11 +143,6 @@ function recreateWebSearch(
 }
 
 describe("rebuild web-search credential reuse", () => {
-  beforeEach(() => {
-    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });

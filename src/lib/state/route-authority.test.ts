@@ -8,7 +8,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SandboxInferenceRouteReservationDisposition } from "./registry/route-reservation";
-import type { PendingSandboxPolicyVerification, SandboxEntry } from "./registry/types";
+import type { PendingSandboxCreateIdentity, SandboxEntry } from "./registry/types";
 
 const HARNESS_PACKAGE = {
   kind: "agent-runtime" as const,
@@ -47,36 +47,21 @@ function ownedReservation(disposition: SandboxInferenceRouteReservationDispositi
   return (disposition as Extract<typeof disposition, { kind: "owned" }>).reservation;
 }
 
-function managedCheckpoint(): PendingSandboxPolicyVerification {
+function createIdentityCheckpoint(): PendingSandboxCreateIdentity {
   return {
     schemaVersion: 1,
     state: "verified-create",
-    policyAuthority: "nemoclaw-managed",
-    observedPolicyAuthority: "owner-unknown",
     gatewayName: ROUTE_AUTHORITY.gatewayName,
     gatewayPort: 8080,
     sandboxName: ROUTE_AUTHORITY.sandboxName,
     lifecycleGeneration: "123e4567-e89b-42d3-a456-426614174983",
     sandboxIdentityFingerprint: "a".repeat(64),
     route: "none",
-    policyHash: "sha256:policy-1",
-    policyVersion: 1,
     harnessPackage: HARNESS_PACKAGE,
-    policyCreationReceipt: {
-      schemaVersion: 1,
-      origin: "sandbox-create",
-      gatewayName: ROUTE_AUTHORITY.gatewayName,
-      gatewayPort: 8080,
-      sandboxName: ROUTE_AUTHORITY.sandboxName,
-      lifecycleGeneration: "123e4567-e89b-42d3-a456-426614174983",
-      sandboxIdentityFingerprint: "a".repeat(64),
-      policyHash: "sha256:policy-1",
-      policyVersion: 1,
-    },
   };
 }
 
-function completedEntry(checkpoint: PendingSandboxPolicyVerification): SandboxEntry {
+function completedEntry(checkpoint: PendingSandboxCreateIdentity): SandboxEntry {
   return {
     name: ROUTE_AUTHORITY.sandboxName,
     ...ROUTE_SELECTION,
@@ -86,10 +71,8 @@ function completedEntry(checkpoint: PendingSandboxPolicyVerification): SandboxEn
     gatewayPort: checkpoint.gatewayPort,
     lifecycleGeneration: checkpoint.lifecycleGeneration,
     lifecycleLiveIdentityFingerprint: checkpoint.sandboxIdentityFingerprint,
-    policyAuthority: checkpoint.policyAuthority,
     harnessPackage: HARNESS_PACKAGE,
     harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
-    policyCreationReceipt: checkpoint.policyCreationReceipt,
   };
 }
 
@@ -99,7 +82,7 @@ afterEach(() => {
 });
 
 describe("registry route package authority", () => {
-  it("preserves exact package authority through route and policy checkpoints", async () => {
+  it("preserves exact package authority through route and create identity checkpoints", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-route-package-"));
     vi.stubEnv("HOME", home);
     vi.resetModules();
@@ -132,14 +115,14 @@ describe("registry route package authority", () => {
         harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
       });
 
-      const checkpoint = managedCheckpoint();
-      const pending = registry.recordPendingSandboxPolicyVerification(create, checkpoint);
+      const checkpoint = createIdentityCheckpoint();
+      const pending = registry.recordPendingSandboxCreateIdentity(create, checkpoint);
       expect(pending).toMatchObject({
         harnessPackage: HARNESS_PACKAGE,
         harnessPackageMigration: HARNESS_PACKAGE_MIGRATION,
-        pendingPolicyVerification: { harnessPackage: HARNESS_PACKAGE },
+        pendingCreateIdentity: { harnessPackage: HARNESS_PACKAGE },
       });
-      expect(pending.pendingPolicyVerification).not.toHaveProperty("harnessPackageMigration");
+      expect(pending.pendingCreateIdentity).not.toHaveProperty("harnessPackageMigration");
       expect(registry.isCurrentSandboxInferenceRouteReservation(route, pending)).toBe(true);
 
       const completed = completedEntry(checkpoint);

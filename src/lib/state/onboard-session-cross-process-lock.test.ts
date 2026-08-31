@@ -353,10 +353,8 @@ describe("cross-process onboard lock", () => {
           gatewayName: "nemoclaw",
           gatewayPort: 8080,
           lifecycleGeneration: "generation-" + role,
-          verifiedEffectivePolicyIdentity: null,
           harnessPackage: null,
-          createAttemptNonce: "c".repeat(62),
-          policyCreationReceipt: null,
+          createAttemptNonce: role.repeat(62),
           resources: {
             sharedInferenceProviders: [],
             sandboxScopedProviders: [],
@@ -409,17 +407,6 @@ describe("cross-process onboard lock", () => {
       packageVersion: "1.2.3",
       contentDigest: "c".repeat(64),
     } as const;
-    const policyCreationReceipt = {
-      schemaVersion: 1,
-      origin: "sandbox-create",
-      gatewayName: "nemoclaw",
-      gatewayPort: 8080,
-      sandboxName: "alpha",
-      lifecycleGeneration,
-      sandboxIdentityFingerprint: fingerprint,
-      policyHash: "sha256:effective",
-      policyVersion: 4,
-    };
     const writer = spawnSync(
       process.execPath,
       [
@@ -457,9 +444,7 @@ describe("cross-process onboard lock", () => {
           gatewayName: "nemoclaw",
           gatewayPort: 8080,
           lifecycleGeneration,
-          verifiedEffectivePolicyIdentity: { hash: "sha256:effective", activeVersion: 4 },
           createAttemptNonce,
-          policyCreationReceipt,
         }),
       ],
       { env: { ...process.env, HOME: tempHome }, encoding: "utf8" },
@@ -476,10 +461,8 @@ describe("cross-process onboard lock", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration,
-        verifiedEffectivePolicyIdentity: { hash: "sha256:effective", activeVersion: 4 },
         harnessPackage,
         createAttemptNonce,
-        policyCreationReceipt,
       }),
     ]);
   });

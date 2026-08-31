@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import { decisionSelected, decisionUnset } from "../../../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../../../state/onboard-checkpoint-migrate";
 import { createSession, type Session } from "../../../state/onboard-session";
-import * as registry from "../../../state/registry";
 import type { SandboxEntry } from "../../../state/registry";
 import {
   advanceSandboxRecreateTransaction,
@@ -17,11 +16,6 @@ import {
 } from "../../sandbox-recreate-transaction";
 import { handleSandboxState } from "./sandbox";
 import { baseOptions, bindJournaledRecreate, createDeps } from "./sandbox-test-fixtures";
-
-beforeEach(() => {
-  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -134,7 +128,7 @@ it("journals not-ready repair on the selected non-default gateway (#6492)", asyn
   });
 
   expect(createSandbox).toHaveBeenCalledOnce();
-  const createIntent = createSandbox.mock.calls[0]?.at(-2);
+  const createIntent = createSandbox.mock.calls[0]?.at(-1);
   expect(createIntent).toMatchObject({
     recreate: true,
     recreateTransaction: {
@@ -177,58 +171,60 @@ it.each([
   "authority-unproven",
   "no-owned-image",
   "image-reused",
-] as const)("reports the bounded %s image-retirement skip after journaled recreation", async (reason) => {
+] as const)(
+  "reports the bounded %s image-retirement skip after journaled recreation",
+  async (reason) => {
+    const session = createSession({ sandboxName: "saved", agent: "openclaw" });
+    const journal = bindJournaledRecreate(session);
+    const sourceEntry: SandboxEntry = {
+      name: "saved",
+      provider: "provider",
+      model: "model",
+      endpointUrl: null,
+      preferredInferenceApi: "openai-completions",
+      webSearchEnabled: false,
+      toolDisclosure: "progressive",
+      fromDockerfile: null,
+      hermesAuthMethod: null,
+      imageTag: "openshell/sandbox-from:old",
+      workload: {
+        schemaVersion: 1,
+        kind: "legacy-dockerfile",
+        reference: "openshell/sandbox-from:old",
+        shared: false,
+      },
+    };
+    const retireReplacedSandboxWorkload = vi.fn(() => ({
+      status: "skipped" as const,
+      reason,
+    }));
+    const { deps, calls } = createDeps(
+      {
+        getSandboxReuseState: () => "not_ready",
+        getSandboxRecreateObservation: journal.observe,
+        getSandboxRegistryEntry: () => sourceEntry,
+        createSandbox: journal.completeCreate,
+        retireReplacedSandboxWorkload,
+      },
+      session,
+    );
+
+    await handleSandboxState({
+      ...baseOptions(deps, session),
+      resume: true,
+      sandboxName: "saved",
+    });
+
+    const diagnostics = calls.note.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.startsWith("  Obsolete sandbox image retirement skipped:"));
+    expect(diagnostics).toEqual([`  Obsolete sandbox image retirement skipped: ${reason}`]);
+    expect(retireReplacedSandboxWorkload).toHaveBeenCalledOnce();
+  },
+);
+
+it("does not carry a recorded preset list through post-delete onboard resume", async () => {
   const session = createSession({ sandboxName: "saved", agent: "openclaw" });
-  const journal = bindJournaledRecreate(session);
-  const sourceEntry: SandboxEntry = {
-    name: "saved",
-    provider: "provider",
-    model: "model",
-    endpointUrl: null,
-    preferredInferenceApi: "openai-completions",
-    webSearchEnabled: false,
-    toolDisclosure: "progressive",
-    fromDockerfile: null,
-    hermesAuthMethod: null,
-    imageTag: "openshell/sandbox-from:old",
-    workload: {
-      schemaVersion: 1,
-      kind: "legacy-dockerfile",
-      reference: "openshell/sandbox-from:old",
-      shared: false,
-    },
-  };
-  const retireReplacedSandboxWorkload = vi.fn(() => ({
-    status: "skipped" as const,
-    reason,
-  }));
-  const { deps, calls } = createDeps(
-    {
-      getSandboxReuseState: () => "not_ready",
-      getSandboxRecreateObservation: journal.observe,
-      getSandboxRegistryEntry: () => sourceEntry,
-      createSandbox: journal.completeCreate,
-      retireReplacedSandboxWorkload,
-    },
-    session,
-  );
-
-  await handleSandboxState({
-    ...baseOptions(deps, session),
-    resume: true,
-    sandboxName: "saved",
-  });
-
-  const diagnostics = calls.note.mock.calls
-    .map(([message]) => message)
-    .filter((message) => message.startsWith("  Obsolete sandbox image retirement skipped:"));
-  expect(diagnostics).toEqual([`  Obsolete sandbox image retirement skipped: ${reason}`]);
-  expect(retireReplacedSandboxWorkload).toHaveBeenCalledOnce();
-});
-
-it("carries filtered presets through post-delete onboard resume", async () => {
-  const session = createSession({ sandboxName: "saved", agent: "openclaw" });
-  session.policyPresets = ["github"];
   session.steps.sandbox.status = "complete";
   session.machine.state = "agent_setup";
   session.checkpoint = {
@@ -257,8 +253,6 @@ it("carries filtered presets through post-delete onboard resume", async () => {
     hermesAuthMethod: null,
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
-    policies: ["github", "mcp-bridge-fake"],
-    policyPresetsFinalized: true,
   };
   const targetIntentFingerprint = fingerprintSandboxRecreateValue({
     sandboxName: "saved",
@@ -289,13 +283,12 @@ it("carries filtered presets through post-delete onboard resume", async () => {
     liveIdentityFingerprint: null,
   };
   const createSandbox = vi.fn(async (...args: unknown[]) => {
-    const createIntent = args.at(-2);
+    const createIntent = args.at(-1);
     expect(createIntent).toMatchObject({
       recreate: true,
       recreateJournalTargetIntentFingerprint: targetIntentFingerprint,
-      rebuildPolicyPresets: ["github"],
       resolved: {
-        policy: { options: { additionalPresets: ["github"] } },
+        policy: { options: { additionalPresets: [] } },
       },
       recreateTransaction: {
         id: transaction.id,
@@ -459,7 +452,7 @@ it("removes the journaled source image after resuming a registered replacement",
   await handleSandboxState(options);
 
   expect(createSandbox).toHaveBeenCalledTimes(2);
-  expect(createSandbox.mock.calls[1]?.at(-2)).toMatchObject({
+  expect(createSandbox.mock.calls[1]?.at(-1)).toMatchObject({
     recreateTransaction: {
       id: journal?.id,
       targetGeneration: journal?.targetGeneration,
@@ -732,7 +725,7 @@ it("opens the lifecycle journal for a fresh route reservation before creation (#
   const createSandbox = vi.fn(async (...args: unknown[]) => {
     const transaction = session.checkpoint?.sandboxRecreate;
     expect(transaction).toBeDefined();
-    expect(args.at(-2)).toMatchObject({
+    expect(args.at(-1)).toMatchObject({
       recreate: true,
       recreateTransaction: {
         id: transaction?.id,

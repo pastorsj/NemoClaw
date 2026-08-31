@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import * as credentialStore from "../../credentials/store";
 import {
@@ -9,7 +9,6 @@ import {
   normalizeInferenceSelection,
 } from "../../inference/selection";
 import { createSession, type Session, type SessionUpdates } from "../../state/onboard-session";
-import * as registry from "../../state/registry";
 import { classifySandboxInferenceRouteReservation } from "../../state/registry/route-reservation";
 import type { InferenceRouteReservationAuthority } from "../types";
 import {
@@ -38,15 +37,6 @@ import {
 } from "../../../../test/helpers/core-flow";
 
 describe("core onboard flow phases", () => {
-  beforeEach(() => {
-    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it("carries provider selection output into sandbox setup", async () => {
     const updateSandboxRegistry = vi.fn();
     const createSandbox = vi.fn(async () => "created-sandbox");
@@ -126,7 +116,7 @@ describe("core onboard flow phases", () => {
         staleExtraProviders: ["stale-provider"],
       },
     });
-    expect(createIntent).not.toHaveProperty("deferSandboxEffectsUntilPolicyVerification");
+    expect(createIntent).not.toHaveProperty("deferSandboxEffectsUntilIdentityVerification");
   });
 
   it("carries authoritative rebuild state into sandbox creation (#7803)", async () => {
@@ -137,9 +127,9 @@ describe("core onboard flow phases", () => {
         assignments: ["SLACK_HOME_CHANNEL=C0123"],
       },
     ];
-    const rebuildPolicyPresets = ["github"];
+    const rebuildPolicySourcePath = "/tmp/current-policy.yaml";
     const { providerInference: providerPhase, sandbox: sandboxPhase } = createPhases({
-      sandboxOptions: { rebuildPreservedEnv, rebuildPolicyPresets },
+      sandboxOptions: { rebuildPreservedEnv, rebuildPolicySourcePath },
       sandboxDeps: { createSandbox },
     });
 
@@ -148,7 +138,7 @@ describe("core onboard flow phases", () => {
 
     expect((createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
       rebuildPreservedEnv,
-      rebuildPolicyPresets,
+      rebuildPolicySourcePath,
     });
   });
 
@@ -160,18 +150,18 @@ describe("core onboard flow phases", () => {
     });
     const createSandbox = vi.fn(async (...args: unknown[]) => {
       const createIntent = args[15] as {
-        deferSandboxEffectsUntilPolicyVerification?: boolean;
+        deferSandboxEffectsUntilIdentityVerification?: boolean;
         resolved?: { policy?: { basePolicyPath?: string } };
       };
       const runVerifiedEffects = args[16] as
         | ((context: {
-            revalidatePolicyRequirements: (operation: string) => void;
+            revalidateSandboxIdentity: (operation: string) => void;
           }) => Promise<void>)
         | undefined;
       expect(createIntent).toMatchObject({
         resolved: { policy: { basePolicyPath: "/repo/policy.yaml" } },
       });
-      expect(createIntent.deferSandboxEffectsUntilPolicyVerification).toBeUndefined();
+      expect(createIntent.deferSandboxEffectsUntilIdentityVerification).toBeUndefined();
       expect(runVerifiedEffects).toBeUndefined();
       expect(stageSandboxCredentialProviders).toHaveBeenCalledOnce();
       events.push("sandbox-create");
@@ -392,7 +382,7 @@ describe("core onboard flow phases", () => {
       expect(args[2]).toBe("");
       expect(args[15]).toMatchObject({
         apfInterceptorRequested: true,
-        deferSandboxEffectsUntilPolicyVerification: true,
+        deferSandboxEffectsUntilIdentityVerification: true,
       });
       return "created-sandbox";
     });
@@ -537,16 +527,16 @@ describe("core onboard flow phases", () => {
   });
 
   it.each([
-    ["post-create policy verification", "policy verification refused"],
+    ["post-create identity verification", "identity verification refused"],
     ["durable checkpoint publication", "checkpoint publication refused"],
   ])("withholds APF provider effects when %s fails", async (_boundary, failure) => {
     const stageSandboxCredentialProviders = vi.fn(async () => []);
     const createSandbox = vi.fn(async (...args: unknown[]) => {
       const createIntent = args[15] as {
-        deferSandboxEffectsUntilPolicyVerification?: boolean;
+        deferSandboxEffectsUntilIdentityVerification?: boolean;
       };
       const runVerifiedEffects = args[16];
-      expect(createIntent.deferSandboxEffectsUntilPolicyVerification).toBe(true);
+      expect(createIntent.deferSandboxEffectsUntilIdentityVerification).toBe(true);
       expect(runVerifiedEffects).toEqual(expect.any(Function));
       expect(stageSandboxCredentialProviders).not.toHaveBeenCalled();
       throw new Error(failure);
@@ -627,7 +617,6 @@ describe("core onboard flow phases", () => {
           preferredInferenceApi: null,
           gatewayName: "nemoclaw",
           gpuEnabled: false,
-          policies: [],
         }),
       },
     });
@@ -671,7 +660,6 @@ describe("core onboard flow phases", () => {
           harnessPackage: null,
           harnessPackageMigration: null,
         },
-        revalidatePolicyRequirements: expect.any(Function),
       },
     );
     expect(result.context.hermesToolGateways).toEqual(["nous-web"]);
@@ -728,7 +716,6 @@ describe("core onboard flow phases", () => {
         preferredInferenceApi: "openai-completions",
         gatewayName: "nemoclaw",
         gpuEnabled: false,
-        policies: [],
       }));
       const { providerInference: providerPhase, sandbox: sandboxPhase } = createPhases({
         providerDeps: {

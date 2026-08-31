@@ -437,18 +437,13 @@ PYCORS
   [ "$_write_rc" -eq 0 ] || return "$_write_rc"
 }
 
-# OpenShell provider snapshots can expose revision-scoped placeholders such as
-# openshell:resolve:env:v11_<ENV_KEY> in the child environment. Refresh
-# baked canonical placeholders in openclaw.json after the integrity check so
-# token egress keeps working across provider attach/refresh generations without
-# ever writing a raw credential to disk.
 refresh_openclaw_provider_placeholders() {
   local config_file="/sandbox/.openclaw/openclaw.json"
   local hash_file="/sandbox/.openclaw/.config-hash"
   [ -f "$config_file" ] || return 0
 
   if [ "$(openclaw_config_dir_owner "$(dirname "$config_file")")" = "root" ]; then
-    printf '[config] Shields are up; preserving sealed provider placeholders unchanged\n' >&2
+    printf '[config] Shields are up; preserving sealed openclaw.json provider placeholders unchanged\n' >&2
     return 0
   fi
 
@@ -778,4 +773,5 @@ PYPLACEHOLDERS
 
   restore_openclaw_config_after_write "$config_file" "$hash_file"
   [ "$_write_rc" -eq 0 ] || return "$_write_rc"
+  return 0
 }

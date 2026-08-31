@@ -148,7 +148,6 @@ function writeAgentRegistry(
           model: "m",
           provider: "p",
           gpuEnabled: false,
-          policies: [],
           agent,
           harnessPackage: testHarnessPackage(effectiveAgentId),
           ...overrides,
@@ -272,19 +271,6 @@ describe("listBackups computes virtual versions", () => {
     ]);
   });
 
-  it("surfaces customPolicies (name + content + sourcePath) through the manifest round-trip", () => {
-    const custom = [
-      {
-        name: "my-custom",
-        content: "version: 1\n\nnetwork_policies: {}\n",
-        sourcePath: "/host/policy.yaml",
-      },
-    ];
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z", { customPolicies: custom });
-    const [entry] = sandboxState.listBackups("test-sandbox");
-    expect(entry.customPolicies).toEqual(custom);
-  });
-
   it("round-trips normalized managed workload and provider runtime authority", () => {
     const authority = managedSnapshotAuthority();
     writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z", {
@@ -317,33 +303,6 @@ describe("listBackups computes virtual versions", () => {
     expect(sandboxState.listBackups("test-sandbox")).toEqual([]);
   });
 
-  it("preserves an empty customPolicies array so restore can distinguish zero-custom from legacy snapshots", () => {
-    writeBackup("test-sandbox", "2026-04-21T14-00-00-000Z", { customPolicies: [] });
-    const [entry] = sandboxState.listBackups("test-sandbox");
-    expect(entry.customPolicies).toEqual([]);
-  });
-
-  it("ignores rebuild manifests with malformed customPolicies (entry missing content)", () => {
-    const dir = path.join(BACKUPS_ROOT, "test-sandbox", "2026-04-21T14-02-00-000Z");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      path.join(dir, "rebuild-manifest.json"),
-      JSON.stringify({
-        version: 1,
-        sandboxName: "test-sandbox",
-        timestamp: "2026-04-21T14-02-00-000Z",
-        agentType: "openclaw",
-        agentVersion: null,
-        expectedVersion: null,
-        stateDirs: [],
-        dir: "/sandbox/.openclaw",
-        backupPath: dir,
-        blueprintDigest: null,
-        customPolicies: [{ name: "no-content" }],
-      }),
-    );
-    expect(sandboxState.listBackups("test-sandbox")).toEqual([]);
-  });
   it("preserves legacy manifests created before blueprintDigest existed", () => {
     const dir = path.join(BACKUPS_ROOT, "test-sandbox", "2026-04-21T13-59-00-000Z");
     fs.mkdirSync(dir, { recursive: true });
@@ -379,11 +338,10 @@ describe("listBackups computes virtual versions", () => {
         agentType: "openclaw",
         agentVersion: null,
         expectedVersion: null,
-        stateDirs: [],
+        stateDirs: "invalid",
         writableDir: "/sandbox/.openclaw-data",
         backupPath: dir,
         blueprintDigest: null,
-        policyPresets: [1],
       }),
     );
     expect(sandboxState.listBackups("test-sandbox")).toEqual([]);

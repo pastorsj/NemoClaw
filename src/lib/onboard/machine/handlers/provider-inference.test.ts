@@ -34,7 +34,6 @@ function setupOptions(
       harnessPackage: null,
       harnessPackageMigration: null,
     },
-    revalidatePolicyRequirements: expect.any(Function),
     ...overrides,
   };
 }
@@ -310,7 +309,6 @@ describe("handleProviderInferenceState", () => {
       "nemoclaw",
       "compatible-endpoint",
       "COMPATIBLE_API_KEY",
-      expect.any(Function),
     );
     expect(calls.complete).toHaveBeenCalledWith(
       "provider_selection",
@@ -459,7 +457,6 @@ describe("handleProviderInferenceState", () => {
       "nemoclaw",
       "ollama-local",
       null,
-      expect.any(Function),
     );
     expect(calls.skipped).toHaveBeenCalledWith("provider_selection", "ollama-local / llama3.1");
     expect(calls.recordSkip).toHaveBeenCalledWith("provider_selection", {

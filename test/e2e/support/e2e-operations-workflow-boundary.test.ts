@@ -15,19 +15,10 @@ import {
 } from "../../../tools/e2e/operations-workflow-boundary.mts";
 import { validateE2eWorkflow } from "../../../tools/e2e/workflow-boundary.mts";
 import { testTimeoutOptions } from "../../helpers/timeouts.ts";
+import { AsyncFunction, readWorkflowStepScript } from "./workflow-script.ts";
 
-const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (
-  ...parameters: string[]
-) => (...args: unknown[]) => Promise<unknown>;
 const COLD_ONBOARD_PERFORMANCE_EVIDENCE_PATH =
   "e2e-artifacts/live/${{ matrix.id }}/onboard-progress-budget.json";
-
-function workflowScript(jobName: string, stepName: string): string {
-  const workflow = readE2eOperationsWorkflow();
-  const step = workflow.jobs[jobName]?.steps?.find((candidate) => candidate.name === stepName);
-  expect(step?.with?.script).toEqual(expect.any(String));
-  return step?.with?.script as string;
-}
 
 describe("E2E operations workflow", testTimeoutOptions(15_000), () => {
   it("accepts the checked-in workflow", () => {
@@ -1168,7 +1159,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
   });
 
   it("executes the scorecard workflow body and emits advisory budget warnings", async () => {
-    const script = workflowScript("scorecard", "Generate E2E scorecard");
+    const script = readWorkflowStepScript("scorecard", "Generate E2E scorecard");
     const warning = vi.fn();
     const setOutput = vi.fn();
     const summary = {
@@ -1309,7 +1300,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
   });
 
   it("keeps scorecard outputs available when a progress artifact is invalid", async () => {
-    const script = workflowScript("scorecard", "Generate E2E scorecard");
+    const script = readWorkflowStepScript("scorecard", "Generate E2E scorecard");
     const warning = vi.fn();
     const setOutput = vi.fn();
     const summary = {
@@ -1409,7 +1400,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
   });
 
   it("keeps selective scorecards silent unless Slack posting is explicitly enabled", async () => {
-    const script = workflowScript("scorecard", "Post scorecard to Slack");
+    const script = readWorkflowStepScript("scorecard", "Post scorecard to Slack");
     const info = vi.fn();
     const fetchMock = vi.fn();
     vi.stubEnv(
@@ -1448,7 +1439,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       { channel: "daily", payload: { text: "hi", attachments: [{ blocks: [] }] } },
     ],
   ])("rejects a precomputed Slack payload with %s before calling fetch", async (_label, data) => {
-    const script = workflowScript("scorecard", "Post scorecard to Slack");
+    const script = readWorkflowStepScript("scorecard", "Post scorecard to Slack");
     const setFailed = vi.fn();
     const fetchMock = vi.fn();
     vi.stubEnv("SLACK_DATA", JSON.stringify(data));
@@ -1463,6 +1454,45 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
+    }
+  });
+
+  it("sanitizes raw traces before cleanup", () => {
+    const workflow = readE2eOperationsWorkflow();
+    const cloudSteps = workflow.jobs["cloud-onboard"].steps!;
+    const sanitize = cloudSteps.find(
+      (step) => step.name === "Build trusted cloud-onboard timing summary",
+    )!;
+    sanitize.run = "cp -R raw-traces e2e-artifacts";
+
+    expect(validateE2eOperationsWorkflow(workflow)).toContain(
+      "cloud-onboard trace sanitizer must retain scripts/e2e/sanitize-trace-timing.py",
+    );
+  });
+
+  it("prevents the PR Review Advisor from writing to Actions or dispatching workflows", () => {
+    const workflow = readE2eOperationsWorkflow();
+    const directory = mkdtempSync(join(tmpdir(), "nemoclaw-e2e-operations-"));
+    const advisorPath = join(directory, "advisor.yaml");
+    try {
+      writeFileSync(advisorPath, "permissions: write-all\njobs:\n  advisor:\n    steps: []\n");
+      expect(validateE2eOperationsWorkflow(workflow, advisorPath)).toContain(
+        "Unified advisor must not hold actions: write",
+      );
+
+      writeFileSync(
+        advisorPath,
+        'permissions: read-all\njobs:\n  review-specialists:\n    env: { BASE_REF: target/base~1, HEAD_REF: HEAD~1 }\n    permissions:\n      actions: "write"\n    steps:\n      - run: createWorkflowDispatch()\n',
+      );
+      expect(validateE2eOperationsWorkflow(workflow, advisorPath)).toEqual(
+        expect.arrayContaining([
+          "Unified advisor must not hold actions: write",
+          "Unified advisor must not auto-dispatch workflows",
+          "Unified advisor specialists must retain target refs through execution",
+        ]),
+      );
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
     }
   });
 });

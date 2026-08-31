@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   executeGatewaySupervisorAction: vi.fn(),
   executeSandboxCommand: vi.fn(),
   executeSandboxExecCommand: vi.fn(),
+  getSandboxPolicy: vi.fn(),
   getLiveSandboxPolicyEntryDigest: vi.fn(),
   getPresetContentGatewayState: vi.fn(),
   recoverNamedGatewayRuntime: vi.fn(),
@@ -30,11 +31,16 @@ vi.mock("../../../../src/lib/gateway-runtime-action", () => ({
   recoverNamedGatewayRuntime: mocks.recoverNamedGatewayRuntime,
 }));
 
-vi.mock("../../../../src/lib/policy", () => ({
+vi.mock("../../../../src/lib/policy", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../src/lib/policy")>()),
   applyPresetContent: mocks.applyPresetContent,
   getLiveSandboxPolicyEntryDigest: mocks.getLiveSandboxPolicyEntryDigest,
   getPresetContentGatewayState: mocks.getPresetContentGatewayState,
   removePreset: mocks.removePreset,
+}));
+
+vi.mock("../../../../src/lib/actions/sandbox/policy-get", () => ({
+  getSandboxPolicy: mocks.getSandboxPolicy,
 }));
 
 vi.mock("../../../../src/lib/actions/sandbox/process-recovery", () => ({
@@ -66,7 +72,6 @@ let providerResourceVersion = 1;
 let attached = true;
 let adapterRegistered = true;
 let adapterRemovalOutcome = "";
-let deepAgentsCapability = false;
 let policyApplyCalls = 0;
 let policyState = "match";
 let adapterCalls: string[] = [];
@@ -111,7 +116,6 @@ beforeEach(() => {
   attached = true;
   adapterRegistered = true;
   adapterRemovalOutcome = "";
-  deepAgentsCapability = false;
   policyApplyCalls = 0;
   policyState = "match";
   adapterCalls = [];
@@ -186,6 +190,13 @@ beforeEach(() => {
     policyState = "absent";
     return true;
   });
+  mocks.getSandboxPolicy.mockReset().mockImplementation(() => ({
+    raw: "",
+    yaml:
+      policyState === "absent"
+        ? "version: 1\nnetwork_policies: {}\n"
+        : "version: 1\nnetwork_policies:\n  mcp_bridge_github: {}\n",
+  }));
 
   mocks.executeGatewaySupervisorAction.mockReset();
   mocks.executeSandboxCommand
@@ -194,9 +205,7 @@ beforeEach(() => {
       adapterCalls.push(command);
       switch (true) {
         case command === "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability":
-          return deepAgentsCapability
-            ? { status: 0, stdout: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2\n", stderr: "" }
-            : { status: 2, stdout: "", stderr: "unknown option" };
+          return { status: 2, stdout: "", stderr: "unknown option" };
         case command.includes("servers.pop(payload['server'])"): {
           const outcome = adapterRemovalOutcome || (adapterRegistered ? "removed" : "absent");
           adapterRegistered = outcome === "unowned" ? adapterRegistered : false;
@@ -257,17 +266,6 @@ beforeEach(() => {
     agent: "langchain-deepagents-code",
     gatewayName: "nemoclaw",
     mcp: { bridges: { github: entry } },
-  });
-  registry.addCustomPolicy("alpha", {
-    name: entry.policyName,
-    content: bridge.buildMcpBridgePolicyYaml(
-      entry.server,
-      entry.url,
-      entry.adapter,
-      { addresses: ["8.8.8.8"] },
-      entry.providerName,
-    ),
-    sourcePath: "generated:nemoclaw-mcp-bridge",
   });
 });
 

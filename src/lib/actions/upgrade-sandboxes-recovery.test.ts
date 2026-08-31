@@ -36,7 +36,10 @@ import * as agentDefinitions from "../agent/defs";
 import * as coreVersion from "../core/version";
 import * as sandboxList from "../openshell-sandbox-list";
 import * as sandboxVersion from "../sandbox/version";
-import type { HarnessPackageIdentity, HarnessPackageMigration } from "../agent-runtime/package/identity";
+import type {
+  HarnessPackageIdentity,
+  HarnessPackageMigration,
+} from "../agent-runtime/package/identity";
 import * as registry from "../state/registry";
 import * as sandboxState from "../state/sandbox";
 import { hashSnapshotBackupContent } from "../state/snapshot/content-digest";
@@ -85,8 +88,6 @@ function makeManifest(sandboxName: string, agentType: ManifestAgentType = "openc
     dir: MANIFEST_DIR_BY_AGENT[agentType],
     backupPath: `/tmp/rebuild-backups/${sandboxName}/${timestamp}`,
     blueprintDigest: null,
-    policyPresets: [],
-    customPolicies: [],
     snapshotVersion: 1,
   };
 }
@@ -125,8 +126,6 @@ function writeRecoveryManifest(input: {
     dir: `/sandbox/.${input.agentType}`,
     backupPath,
     blueprintDigest: null,
-    policyPresets: [],
-    customPolicies: [],
     ...(input.version === 2
       ? {
           harnessPackage: input.harnessPackage ?? null,

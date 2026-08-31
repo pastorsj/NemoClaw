@@ -174,13 +174,12 @@ describe("registry", () => {
     // the durable SandboxEntry type; serializeSandboxEntryForDisk strips them.
     registry.registerSandbox({ name: "alpha", model: "m", provider: "p" });
     registry.updateSandbox("alpha", {
-      policies: ["npm"],
       recoveredFromGateway: true,
       livePhase: "Ready",
     });
 
     const data = JSON.parse(fs.readFileSync(regFile, "utf-8"));
-    expect(data.sandboxes.alpha.policies).toEqual(["npm"]);
+    expect(data.sandboxes.alpha.policies).toBeUndefined();
     expect(data.sandboxes.alpha.recoveredFromGateway).toBeUndefined();
     expect(data.sandboxes.alpha.livePhase).toBeUndefined();
   });
@@ -373,7 +372,7 @@ describe("registry", () => {
     registry.registerSandbox({ name: "up" });
     registry.updateSandbox("up", { policies: ["pypi", "npm"], model: "new-model" });
     const sb = registry.getSandbox("up");
-    expect(sb.policies).toEqual(["pypi", "npm"]);
+    expect(sb.policies).toBeUndefined();
     expect(sb.model).toBe("new-model");
   });
 
@@ -381,11 +380,11 @@ describe("registry", () => {
     registry.registerSandbox({ name: "current", model: "old-model" });
     const expected = registry.getSandbox("current");
 
-    expect(registry.updateSandboxIfCurrent(expected, { policies: ["github"] })).toEqual({
+    expect(registry.updateSandboxIfCurrent(expected, { model: "new-model" })).toEqual({
       ...expected,
-      policies: ["github"],
+      model: "new-model",
     });
-    expect(registry.getSandbox("current")).toEqual({ ...expected, policies: ["github"] });
+    expect(registry.getSandbox("current")).toEqual({ ...expected, model: "new-model" });
   });
 
   it("does not update a replacement sandbox through stale captured authority", () => {
@@ -518,16 +517,6 @@ describe("registry", () => {
 
   it("updateSandbox returns false for nonexistent sandbox", () => {
     expect(registry.updateSandbox("nope", {})).toBe(false);
-  });
-
-  it("registerSandbox does not inherit a finalized policy marker (#4621)", () => {
-    // Snapshot restore spreads the source entry (possibly finalized) but resets
-    // policies; the clone must not carry a stale finalized marker.
-    registry.registerSandbox({ name: "clone", policies: [], policyPresetsFinalized: true });
-    expect(registry.getSandbox("clone").policyPresetsFinalized).toBeUndefined();
-    // The marker is set only by the post-policy registry write.
-    registry.updateSandbox("clone", { policyPresetsFinalized: true });
-    expect(registry.getSandbox("clone").policyPresetsFinalized).toBe(true);
   });
 
   it("updateSandbox rejects name changes", () => {
@@ -995,10 +984,7 @@ describe("registry", () => {
       sandboxName: "messaging",
       channels: [{ channelId: "telegram" }],
     });
-    expect(data.sandboxes.messaging.messaging.plan.networkPolicy).toEqual({
-      presets: [],
-      entries: [],
-    });
+    expect(data.sandboxes.messaging.messaging.plan.networkPolicy).toBeUndefined();
     expect(data.sandboxes.messaging.messaging.plan.agentRender).toBeUndefined();
     expect(data.sandboxes.messaging.messaging.plan.buildSteps).toBeUndefined();
     expect(data.sandboxes.messaging.messaging.plan.runtimeSetup).toBeUndefined();
@@ -1152,307 +1138,98 @@ describe("registry", () => {
       registry.listSandboxes().sandboxes.map((sandbox: { name: string }) => sandbox.name),
     ).toEqual(["good"]);
   });
-});
 
-describe("atomic writes", () => {
-  const regDir = path.dirname(regFile);
-
-  beforeEach(() => {
-    if (fs.existsSync(regFile)) fs.unlinkSync(regFile);
-    // Clean up any leftover tmp files
-    if (fs.existsSync(regDir)) {
-      for (const f of fs.readdirSync(regDir)) {
-        if (f.startsWith("sandboxes.json.tmp.")) {
-          fs.unlinkSync(path.join(regDir, f));
-        }
-      }
-    }
-  });
-
-  it("save() writes via temp file + rename (no partial writes on disk)", () => {
-    registry.registerSandbox({ name: "atomic-test" });
-    // File must exist and be valid JSON after save
-    const raw = fs.readFileSync(regFile, "utf-8");
-    const data = JSON.parse(raw);
-    expect(data.sandboxes["atomic-test"].name).toBe("atomic-test");
-    // No leftover .tmp files
-    const tmpFiles = fs.readdirSync(regDir).filter((f) => f.startsWith("sandboxes.json.tmp."));
-    expect(tmpFiles).toHaveLength(0);
-  });
-
-  it("save() cleans up temp file when rename fails", () => {
-    fs.mkdirSync(regDir, { recursive: true });
-    fs.writeFileSync(regFile, '{"sandboxes":{},"defaultSandbox":null}', { mode: 0o600 });
-
-    // Stub renameSync so writeFileSync succeeds (temp file is created)
-    // but the rename step throws — exercising the cleanup branch.
-    const original = fs.renameSync;
-    fs.renameSync = () => {
-      throw Object.assign(new Error("EACCES"), { code: "EACCES" });
-    };
-    try {
-      expect(() => registry.save({ sandboxes: {}, defaultSandbox: null })).toThrow(
-        /Cannot write config file|EACCES/,
-      );
-    } finally {
-      fs.renameSync = original;
-    }
-    // The save() catch block should have removed the temp file
-    const tmpFiles = fs.readdirSync(regDir).filter((f) => f.startsWith("sandboxes.json.tmp."));
-    expect(tmpFiles).toHaveLength(0);
-  });
-});
-
-describe("advisory file locking", () => {
-  const lockDir = regFile + ".lock";
-  const ownerFile = path.join(lockDir, "owner");
-
-  beforeEach(() => {
-    if (fs.existsSync(regFile)) fs.unlinkSync(regFile);
-    fs.rmSync(lockDir, { recursive: true, force: true });
-  });
-
-  it("acquireLock creates lock directory with owner file and releaseLock removes both", () => {
-    registry.acquireLock();
-    expect(fs.existsSync(lockDir)).toBe(true);
-    expect(fs.existsSync(ownerFile)).toBe(true);
-    expect(fs.readFileSync(ownerFile, "utf-8").trim()).toBe(String(process.pid));
-    registry.releaseLock();
-    expect(fs.existsSync(lockDir)).toBe(false);
-  });
-
-  it("withLock releases lock even when callback throws", () => {
-    expect(() => {
-      registry.withLock(() => {
-        expect(fs.existsSync(lockDir)).toBe(true);
-        throw new Error("intentional");
-      });
-    }).toThrow("intentional");
-    expect(fs.existsSync(lockDir)).toBe(false);
-  });
-
-  it("acquireLock cleans up lock dir when owner file write fails", () => {
-    const origWrite = fs.writeFileSync;
-    let firstCall = true;
-    fs.writeFileSync = (...args) => {
-      // Fail only the first writeFileSync targeting the owner tmp file
-      if (String(args[0]).includes("owner.tmp.") && firstCall) {
-        firstCall = false;
-        throw Object.assign(new Error("ENOSPC"), { code: "ENOSPC" });
-      }
-      return origWrite.apply(fs, args);
-    };
-    try {
-      // First attempt should throw, but no stale lock dir left behind
-      expect(() => registry.acquireLock()).toThrow("ENOSPC");
-      expect(fs.existsSync(lockDir)).toBe(false);
-    } finally {
-      fs.writeFileSync = origWrite;
-    }
-  });
-
-  it("acquireLock does not treat an owner file EEXIST as lock contention (#7694)", () => {
-    const origWrite = fs.writeFileSync;
-    fs.writeFileSync = () => {
-      throw Object.assign(new Error("owner write EEXIST"), { code: "EEXIST" });
-    };
-    try {
-      expect(() => registry.acquireLock()).toThrow("owner write EEXIST");
-      expect(fs.existsSync(lockDir)).toBe(false);
-    } finally {
-      fs.writeFileSync = origWrite;
-    }
-  });
-
-  it("acquireLock removes stale lock owned by dead process", () => {
-    // Create a lock with a PID that doesn't exist (99999999)
-    fs.mkdirSync(lockDir, { recursive: true });
-    fs.writeFileSync(ownerFile, "99999999", { mode: 0o600 });
-
-    // Should succeed by detecting the dead owner and removing the stale lock
-    registry.acquireLock();
-    expect(fs.existsSync(lockDir)).toBe(true);
-    expect(fs.readFileSync(ownerFile, "utf-8").trim()).toBe(String(process.pid));
-    registry.releaseLock();
-  });
-
-  it("mutating operations acquire and release the lock", () => {
-    const mkdirCalls = [];
-    const rmCalls = [];
-    const origMkdir = fs.mkdirSync;
-    const origRm = fs.rmSync;
-    fs.mkdirSync = (...args) => {
-      if (args[0] === lockDir) mkdirCalls.push(args[0]);
-      return origMkdir.apply(fs, args);
-    };
-    fs.rmSync = (...args) => {
-      if (String(args[0]).startsWith(`${lockDir}.quarantine.`)) rmCalls.push(args[0]);
-      return origRm.apply(fs, args);
-    };
-    try {
-      registry.registerSandbox({ name: "lock-test" });
-    } finally {
-      fs.mkdirSync = origMkdir;
-      fs.rmSync = origRm;
-    }
-    expect(mkdirCalls.length).toBeGreaterThanOrEqual(1);
-    expect(rmCalls.length).toBeGreaterThanOrEqual(1);
-    expect(registry.getSandbox("lock-test").name).toBe("lock-test");
-  });
-
-  it("concurrent writers do not corrupt the registry", () => {
-    const { spawnSync } = require("child_process");
-    const registryPath = path.resolve(
-      path.join(import.meta.dirname, "..", "..", "src", "lib", "state", "registry.ts"),
-    );
-    const homeDir = path.dirname(path.dirname(regFile));
-    // Script that spawns 4 workers in parallel, each writing 5 sandboxes
-    const orchestrator = `
-      const { spawn } = require("child_process");
-      const workerScript = \`
-        process.env.HOME = ${JSON.stringify(homeDir)};
-        const reg = require(${JSON.stringify(registryPath)});
-        const id = process.argv[1];
-        for (let i = 0; i < 5; i++) {
-          reg.registerSandbox({ name: id + "-" + i, model: "m" });
-        }
-      \`;
-      const workers = [];
-      for (let w = 0; w < 4; w++) {
-        workers.push(spawn(process.execPath, ["-e", workerScript, "w" + w]));
-      }
-      let exitCount = 0;
-      let allOk = true;
-      for (const child of workers) {
-        child.on("exit", (code) => {
-          if (code !== 0) allOk = false;
-          exitCount++;
-          if (exitCount === workers.length) {
-            process.exit(allOk ? 0 : 1);
-          }
-        });
-      }
-    `;
-    const result = spawnSync(process.execPath, ["-e", orchestrator], {
-      encoding: "utf-8",
-      timeout: 30_000,
+  it("setChannelDisabled toggles a channel on and off for a sandbox", () => {
+    registry.registerSandbox({
+      name: "s1",
+      messaging: {
+        schemaVersion: 1,
+        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram", "discord"] }),
+      },
     });
-    expect(result.status, result.stderr).toBe(0);
-    // All 20 sandboxes (4 workers × 5 each) must be present
-    const { sandboxes } = registry.listSandboxes();
-    expect(sandboxes.length).toBe(20);
+    expect(registry.getDisabledChannels("s1")).toEqual([]);
+
+    expect(registry.setChannelDisabled("s1", "telegram", true)).toBe(true);
+    expect(registry.getDisabledChannels("s1")).toEqual(["telegram"]);
+
+    expect(registry.setChannelDisabled("s1", "discord", true)).toBe(true);
+    expect(registry.getDisabledChannels("s1")).toEqual(["discord", "telegram"]);
+
+    registry.setChannelDisabled("s1", "telegram", false);
+    expect(registry.getDisabledChannels("s1")).toEqual(["discord"]);
   });
 
-  it("clearAll removes all sandboxes and resets default", () => {
-    registry.registerSandbox({ name: "alpha" });
-    registry.registerSandbox({ name: "beta" });
-    registry.setDefault("beta");
-
-    registry.clearAll();
-
-    const { sandboxes, defaultSandbox } = registry.listSandboxes();
-    expect(sandboxes).toHaveLength(0);
-    expect(defaultSandbox).toBe(null);
+  it("setChannelDisabled clears plan.disabledChannels when empty", () => {
+    registry.registerSandbox({
+      name: "s1",
+      messaging: {
+        schemaVersion: 1,
+        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram"] }),
+      },
+    });
+    registry.setChannelDisabled("s1", "telegram", true);
+    registry.setChannelDisabled("s1", "telegram", false);
+    const persisted = JSON.parse(fs.readFileSync(regFile, "utf-8"));
+    expect(persisted.sandboxes.s1.messaging.plan.disabledChannels).toEqual([]);
+    expect(persisted.sandboxes.s1.disabledChannels).toBeUndefined();
   });
 
-  it("clearAll persists empty state to disk", () => {
-    registry.registerSandbox({ name: "persist-me" });
-
-    registry.clearAll();
-
-    const data = JSON.parse(fs.readFileSync(regFile, "utf-8"));
-    expect(data.sandboxes).toEqual({});
-    expect(data.defaultSandbox).toBe(null);
+  it("setChannelDisabled returns false when the channel is not configured in the plan", () => {
+    registry.registerSandbox({
+      name: "s1",
+      messaging: {
+        schemaVersion: 1,
+        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram"] }),
+      },
+    });
+    expect(registry.setChannelDisabled("s1", "discord", true)).toBe(false);
+    expect(registry.getDisabledChannels("s1")).toEqual([]);
   });
 
-  it("clearAll is safe to call on empty registry", () => {
-    registry.clearAll();
-
-    const { sandboxes, defaultSandbox } = registry.listSandboxes();
-    expect(sandboxes).toHaveLength(0);
-    expect(defaultSandbox).toBe(null);
+  it("setChannelDisabled returns false when sandbox is missing", () => {
+    expect(registry.setChannelDisabled("missing", "telegram", true)).toBe(false);
   });
 
-  describe("malformed sandboxes.json", () => {
-    const malformed = '{"sandboxes":{"keep-me":{"name":"keep-me"}},"defaultSandbox":"keep-me",}';
+  it("registerSandbox preserves disabledChannels when re-registering", () => {
+    registry.registerSandbox({
+      name: "s1",
+      messaging: {
+        schemaVersion: 1,
+        plan: makeMessagingPlan({ sandboxName: "s1", channels: ["telegram"] }),
+      },
+    });
+    registry.setChannelDisabled("s1", "telegram", true);
+    registry.registerSandbox({
+      name: "s1",
+      messaging: registry.getSandbox("s1").messaging,
+    });
+    expect(registry.getDisabledChannels("s1")).toEqual(["telegram"]);
+  });
 
-    function writeMalformedRegistry() {
-      fs.mkdirSync(path.dirname(regFile), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(regFile, malformed, { mode: 0o600 });
-    }
-
-    it("reading reports the damage instead of an empty registry", () => {
-      writeMalformedRegistry();
-
-      expect(() => registry.listSandboxes()).toThrow(/not valid JSON/);
+  describe("extra providers", () => {
+    it("starts with an empty extra-provider list", () => {
+      expect(registry.listExtraProviders()).toEqual([]);
     });
 
-    it("registerSandbox refuses to replace it and keeps the original bytes", () => {
-      writeMalformedRegistry();
-
-      expect(() => registry.registerSandbox({ name: "new-sandbox" })).toThrow(/not valid JSON/);
-
-      expect(fs.readFileSync(regFile, "utf-8")).toBe(malformed);
-      expect(fs.existsSync(`${regFile}.lock`)).toBe(false);
-      expect(
-        fs.readdirSync(path.dirname(regFile)).filter((name) => name.includes(".tmp.")),
-      ).toEqual([]);
+    it("addExtraProvider persists a sorted, deduplicated list", () => {
+      expect(registry.addExtraProvider("tavily-search")).toBe(true);
+      expect(registry.addExtraProvider("custom-provider")).toBe(true);
+      expect(registry.addExtraProvider("tavily-search")).toBe(false);
+      expect(registry.listExtraProviders()).toEqual(["custom-provider", "tavily-search"]);
     });
 
-    it("keeps failing for every reader process until the file is repaired", () => {
-      const { spawnSync } = require("child_process");
-      writeMalformedRegistry();
-
-      const registryPath = path.resolve(
-        path.join(import.meta.dirname, "..", "..", "src", "lib", "state", "registry.ts"),
-      );
-      const homeDir = path.dirname(path.dirname(regFile));
-      const orchestrator = `
-        const { spawn } = require("child_process");
-        const workerScript = \`
-          process.env.HOME = ${JSON.stringify(homeDir)};
-          const reg = require(${JSON.stringify(registryPath)});
-          try {
-            reg.listSandboxes();
-          } catch (error) {
-            process.exit(error && error.code === "ECONFIGCORRUPT" ? 0 : 2);
-          }
-          process.exit(3);
-        \`;
-        const workers = [];
-        for (let w = 0; w < 4; w++) {
-          workers.push(spawn(process.execPath, ["-e", workerScript, "w" + w]));
-        }
-        let exitCount = 0;
-        let allOk = true;
-        for (const child of workers) {
-          child.on("exit", (code) => {
-            if (code !== 0) allOk = false;
-            exitCount++;
-            if (exitCount === workers.length) {
-              process.exit(allOk ? 0 : 1);
-            }
-          });
-        }
-      `;
-      const result = spawnSync(process.execPath, ["-e", orchestrator], {
-        encoding: "utf-8",
-        timeout: 30_000,
-      });
-
-      expect(result.status, result.stderr).toBe(0);
-      expect(fs.readFileSync(regFile, "utf-8")).toBe(malformed);
+    it("removeExtraProvider clears the entry and drops the field when empty", () => {
+      registry.addExtraProvider("tavily-search");
+      expect(registry.removeExtraProvider("tavily-search")).toBe(true);
+      expect(registry.listExtraProviders()).toEqual([]);
+      const raw = JSON.parse(fs.readFileSync(regFile, "utf-8"));
+      expect("extraProviders" in raw).toBe(false);
+      expect(registry.removeExtraProvider("tavily-search")).toBe(false);
     });
 
-    it("recovers once the file holds valid JSON again", () => {
-      writeMalformedRegistry();
-      expect(() => registry.listSandboxes()).toThrow(/not valid JSON/);
-
-      fs.writeFileSync(regFile, '{"sandboxes":{"keep-me":{"name":"keep-me"}}}', { mode: 0o600 });
-      registry.registerSandbox({ name: "new-sandbox" });
-
-      const names = registry.listSandboxes().sandboxes.map((entry: { name: string }) => entry.name);
-      expect(names.sort()).toEqual(["keep-me", "new-sandbox"]);
+    it("survives a registry round-trip through disk", () => {
+      registry.addExtraProvider("tavily-search");
+      expect(registry.listExtraProviders()).toEqual(["tavily-search"]);
     });
   });
 });

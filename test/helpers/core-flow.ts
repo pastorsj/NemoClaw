@@ -101,7 +101,6 @@ export function createPhases(
     preferredInferenceApi: "chat",
     gatewayName: "nemoclaw",
     gpuEnabled: false,
-    policies: [],
   });
   const endpointProvenance = {
     getSandboxRegistryEntry,
@@ -214,8 +213,6 @@ export function createPhases(
       }) as (code: number) => never,
       deleteEnv: vi.fn(),
       ...overrides.providerDeps,
-      preflightPolicyRequirements:
-        overrides.providerDeps?.preflightPolicyRequirements ?? (() => undefined),
     },
   });
   const sandbox = createSandboxOnboardFlowPhase<CoreContext>({
@@ -285,7 +282,6 @@ export function createPhases(
               directGpu: false,
               additionalPresets: [],
               policyTier: null,
-              baselineExclusions: [],
             },
           },
           gpuCreateArgs: [],
@@ -316,8 +312,6 @@ export function createPhases(
         throw new Error(`exit ${code}`);
       }) as (code: number) => never,
       ...overrides.sandboxDeps,
-      preflightPolicyRequirements:
-        overrides.sandboxDeps?.preflightPolicyRequirements ?? (() => undefined),
       checkGatewayRouteCompatibility:
         overrides.sandboxDeps?.checkGatewayRouteCompatibility ?? (() => ({ ok: true })),
       withGatewayRouteMutationLock:

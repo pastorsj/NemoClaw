@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import {
   installRebuildFlowTestHooks,
@@ -27,9 +31,11 @@ import { rebuildSandbox } from "./rebuild";
 import * as rebuildImagePreflight from "./rebuild-custom-image-preflight";
 import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
 import * as rebuildRoutePreflight from "./rebuild-preflight-guards";
+import * as rebuildRecreateJournal from "./rebuild-recreate-journal";
 import * as rebuildShields from "./rebuild-shields";
 import * as rebuildUsageNotice from "./rebuild-usage-notice";
 import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
+import * as policyGet from "./policy-get";
 import * as snapshotBackup from "./snapshot/backup-authority";
 
 function cloneSession(session: Session): Session {
@@ -43,6 +49,7 @@ describe("rebuild resume snapshot repair", () => {
   let errorSpy: MockInstance;
   let logSpy: MockInstance;
   let session: Session;
+  let backupPath: string;
   let openclawAgent: ReturnType<typeof makeRebuildAgentAuthority>;
   let openclawPackage: NonNullable<ReturnType<typeof installRebuildHarnessPackage>>;
   const originalSandboxName = process.env.NEMOCLAW_SANDBOX_NAME;
@@ -58,6 +65,7 @@ describe("rebuild resume snapshot repair", () => {
   };
 
   beforeEach(() => {
+    backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-rebuild-resume-"));
     spies = [];
     observed.handoffOptions = null;
     observed.preRepairMachineState = null;
@@ -75,6 +83,11 @@ describe("rebuild resume snapshot repair", () => {
 
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    spies.push(
+      vi.spyOn(rebuildRecreateJournal, "recordRebuildRecoveryBackup").mockImplementation(
+        () => undefined,
+      ),
+    );
 
     session = onboardSession.createSession({
       agent: openclawAgent.recordedAgent,
@@ -166,7 +179,6 @@ describe("rebuild resume snapshot repair", () => {
         name: "alpha",
         provider: "ollama-local",
         model: "nvidia/nemotron",
-        policies: [],
         agent: openclawAgent.recordedAgent,
         harnessPackage: openclawPackage,
         harnessPackageMigration: null,
@@ -216,9 +228,8 @@ describe("rebuild resume snapshot repair", () => {
         failedDirs: [],
         failedFiles: [],
         manifest: {
-          backupPath: "/tmp/nemoclaw-rebuild-backup",
+          backupPath,
           timestamp: "2026-06-01T00:00:00.000Z",
-          policyPresets: [],
         },
       } as never),
       vi
@@ -261,6 +272,10 @@ describe("rebuild resume snapshot repair", () => {
         imageTag: null,
       } as never),
       vi.spyOn(rebuildUsageNotice, "ensureRebuildUsageNoticeAccepted").mockResolvedValue(true),
+      vi.spyOn(policyGet, "getSandboxPolicy").mockReturnValue({
+        raw: "version: 1\nnetwork_policies: {}\n",
+        yaml: "version: 1\nnetwork_policies: {}\n",
+      }),
       vi
         .spyOn(rebuildOnboardDependencies, "onboard")
         .mockImplementation(async (options: unknown) => {
@@ -283,6 +298,7 @@ describe("rebuild resume snapshot repair", () => {
     for (const spy of spies) spy.mockRestore();
     errorSpy.mockRestore();
     logSpy.mockRestore();
+    fs.rmSync(backupPath, { recursive: true, force: true });
     if (originalSandboxName === undefined) {
       delete process.env.NEMOCLAW_SANDBOX_NAME;
     } else {

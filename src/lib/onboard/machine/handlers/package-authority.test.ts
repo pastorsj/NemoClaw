@@ -15,7 +15,6 @@ function expectedSetupOptions(sessionId: string, harnessPackageAuthority: Record
     reservationSessionId: sessionId,
     harnessPackageAuthority,
     preferredInferenceApi: "openai-responses",
-    revalidatePolicyRequirements: expect.any(Function),
   };
 }
 

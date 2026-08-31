@@ -45,7 +45,6 @@ function writeHermesRegistry(): void {
           model: "m",
           provider: "p",
           gpuEnabled: false,
-          policies: [],
           agent: "hermes",
           harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
         },

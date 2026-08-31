@@ -88,7 +88,9 @@ vi.mock("../../adapters/openshell/runtime", () => ({
   captureOpenshell: vi.fn((args: string[]) => ({
     status: 0,
     output:
-      args[0] === "sandbox" && args[1] === "get"
+      args[0] === "policy"
+        ? "version: 1\nnetwork_policies: {}\n"
+        : args[0] === "sandbox" && args[1] === "get"
         ? "Name: alpha\nId: alpha-live-id\nPhase: Ready\n"
         : "alpha Ready\n",
   })),
@@ -125,6 +127,7 @@ vi.mock("../../policy", () => ({
   getAppliedPresets: vi.fn(() => []),
   getPresetContentGatewayState: vi.fn(() => "absent"),
   loadPresetForSandbox: vi.fn(() => null),
+  parseCurrentPolicy: (raw: unknown) => String(raw),
   removePreset: vi.fn(() => true),
 }));
 
@@ -149,8 +152,6 @@ vi.mock("../../state/mcp-lifecycle-lock", () => ({
 }));
 
 vi.mock("../../state/registry", () => ({
-  getBaselineExclusions: vi.fn(() => []),
-  getCustomPolicies: vi.fn(() => []),
   getSandbox: harness.getSandbox,
   listSandboxes: vi.fn(() => ({
     sandboxes: [harness.getSandbox()].filter(Boolean),

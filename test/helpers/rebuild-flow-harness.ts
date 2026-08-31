@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, vi } from "vitest";
+import { cleanupPreparedRecoveryManifests } from "../../src/lib/actions/sandbox/rebuild-flow-test-fixtures";
 import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package/types";
 import {
   createHarnessPackageFixture,
@@ -52,6 +53,7 @@ export const onboardCredentialEnv = requireDist("../../onboard/credential-env.js
 export const onboardSession = requireDist("../../state/onboard-session.js");
 export const openshellRuntime = requireDist("../../adapters/openshell/runtime.js");
 export const policies = requireDist("../../policy/index.js");
+export const policyGet = requireDist("./policy-get.js");
 export const portableAgentLifecycle = requireDist(
   "../../onboard/experimental/portable-agent-lifecycle.js",
 );
@@ -75,6 +77,7 @@ export const sandboxSession = requireDist("../../state/sandbox-session.js");
 export const sandboxState = requireDist("../../state/sandbox.js");
 export const sandboxVersion = requireDist("../../sandbox/version.js");
 export const shields = requireDist("../../shields/index.js");
+export const tempFiles = requireDist("../../onboard/temp-files.js");
 
 export function purgeRebuildModule(): void {
   delete require.cache[requireDist.resolve(rebuildModulePath)];
@@ -101,6 +104,20 @@ const harnessPackageFixtures = new Map<
     readonly identities: Map<string, HarnessPackageIdentity>;
   }
 >();
+type HarnessRebuildBackup = ReturnType<typeof sandboxState.listBackups>[number];
+const harnessRebuildBackups: HarnessRebuildBackup[] = [];
+
+export function registerHarnessRebuildBackup(backup: HarnessRebuildBackup): void {
+  const existing = harnessRebuildBackups.findIndex(
+    (entry) => entry.backupPath === backup.backupPath,
+  );
+  if (existing >= 0) harnessRebuildBackups.splice(existing, 1);
+  harnessRebuildBackups.push(structuredClone(backup));
+}
+
+export function listHarnessRebuildBackups(): HarnessRebuildBackup[] {
+  return structuredClone(harnessRebuildBackups);
+}
 
 export function createHarnessTempDir(prefix: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -159,6 +176,7 @@ export function installRebuildFlowTestHooks(options: RebuildFlowTestHookOptions 
     fs.chmodSync(testHome, 0o700);
     harnessTempDirs.push(testHome);
     process.env.HOME = testHome;
+    harnessRebuildBackups.splice(0);
     delete process.env.NEMOCLAW_SANDBOX_NAME;
     if (options.acceptThirdPartySoftware) {
       process.env.NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE = "1";
@@ -173,6 +191,7 @@ export function installRebuildFlowTestHooks(options: RebuildFlowTestHookOptions 
       fs.rmSync(dir, { recursive: true, force: true });
     }
     for (const cleanup of harnessCleanupCallbacks.splice(0)) cleanup();
+    cleanupPreparedRecoveryManifests();
     restoreRebuildFlowEnv();
   });
 }

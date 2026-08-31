@@ -51,7 +51,6 @@ vi.mock("../../state/mcp-lifecycle-lock", () => ({
 }));
 
 vi.mock("../../state/registry", () => ({
-  getBaselineExclusions: vi.fn(() => []),
   getSandbox: vi.fn(() => ({
     name: "alpha",
     agent: "openclaw",

@@ -156,11 +156,7 @@ describe("sandbox build context staging", () => {
       "tsconfig.shared.json",
       "openclaw.plugin.json",
     ]) {
-      writeFixture(
-        path.join("packages", "nemoclaw-openclaw", "plugin", fileName),
-        "{}\n",
-        0o600,
-      );
+      writeFixture(path.join("packages", "nemoclaw-openclaw", "plugin", fileName), "{}\n", 0o600);
     }
     writeFixture(
       path.join("packages", "nemoclaw-openclaw", "plugin", "src", "index.ts"),
@@ -271,6 +267,9 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("scripts", "lib", "clean_runtime_shell_env_shim.py"));
     writeFixture(path.join("scripts", "lib", "normalize_mutable_config_perms.py"));
     writeFixture(
+      path.join("packages", "nemoclaw-openclaw", "runtime", "wechat", "refresh-placeholder.py"),
+    );
+    writeFixture(
       path.join("src", "lib", "messaging", "applier", "build", "messaging-build-applier.mts"),
     );
     writeFixture(
@@ -371,8 +370,13 @@ describe("sandbox build context staging", () => {
         "runtime",
         runtimeName,
       );
-      expect(fs.readdirSync(runtimeDir).sort()).toEqual(["npm-shrinkwrap.json", "package.json"]);
-      for (const fileName of ["package.json", "npm-shrinkwrap.json"]) {
+      const expectedFiles = [
+        "npm-shrinkwrap.json",
+        "package.json",
+        ...(runtimeName === "wechat" ? ["refresh-placeholder.py"] : []),
+      ];
+      expect(fs.readdirSync(runtimeDir).sort()).toEqual(expectedFiles);
+      for (const fileName of expectedFiles) {
         expect(fs.readFileSync(path.join(runtimeDir, fileName), "utf8")).toBe(
           fs.readFileSync(
             path.join(
@@ -386,13 +390,8 @@ describe("sandbox build context staging", () => {
             "utf8",
           ),
         );
+        expect((fs.statSync(path.join(runtimeDir, fileName)).mode & 0o777).toString(8)).toBe("644");
       }
-      expect((fs.statSync(path.join(runtimeDir, "package.json")).mode & 0o777).toString(8)).toBe(
-        "644",
-      );
-      expect(
-        (fs.statSync(path.join(runtimeDir, "npm-shrinkwrap.json")).mode & 0o777).toString(8),
-      ).toBe("644");
     }
 
     const managedRuntimeDir = path.join(
@@ -410,14 +409,7 @@ describe("sandbox build context staging", () => {
     for (const fileName of ["package.json", "npm-shrinkwrap.json"]) {
       expect(fs.readFileSync(path.join(managedRuntimeDir, fileName), "utf8")).toBe(
         fs.readFileSync(
-          path.join(
-            sourceRoot,
-            "packages",
-            "nemoclaw-openclaw",
-            "runtime",
-            "messaging",
-            fileName,
-          ),
+          path.join(sourceRoot, "packages", "nemoclaw-openclaw", "runtime", "messaging", fileName),
           "utf8",
         ),
       );

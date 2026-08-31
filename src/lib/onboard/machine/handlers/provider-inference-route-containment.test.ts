@@ -86,7 +86,6 @@ function createDeps() {
   const deps: Options["deps"] = {
     checkGatewayRouteCompatibility: calls.checkGatewayRouteCompatibility,
     preflightGatewayRouteDiscovery: calls.preflightGatewayRouteDiscovery,
-    preflightPolicyRequirements: vi.fn(),
     revalidateHarnessPackageAuthority: () => ({
       harnessPackage: null,
       harnessPackageMigration: null,

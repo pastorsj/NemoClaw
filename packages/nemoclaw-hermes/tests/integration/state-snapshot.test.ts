@@ -262,7 +262,6 @@ for (const name of ["SOUL.md", ".hermes_history"]) {
               model: "m",
               provider: "p",
               gpuEnabled: false,
-              policies: [],
               agent: "hermes",
               harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
             },

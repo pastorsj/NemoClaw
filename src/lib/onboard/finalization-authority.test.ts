@@ -88,7 +88,7 @@ describe("created OpenClaw restore authority", () => {
         readSandboxStateBackupManifest: () => manifest,
         captureSnapshotRestoreAuthority: vi.fn(() => authority),
         revalidateHarnessPackageAuthority,
-        revalidatePolicyAuthority: vi.fn(),
+        revalidateSandboxIdentity: vi.fn(),
         getDcodeSelectionDrift: vi.fn(),
         register,
         note: vi.fn(),
@@ -164,7 +164,7 @@ describe("created OpenClaw restore authority", () => {
             ...OPENCLAW_PACKAGE,
             contentDigest: "c".repeat(64),
           }),
-          revalidatePolicyAuthority: vi.fn(),
+          revalidateSandboxIdentity: vi.fn(),
           getDcodeSelectionDrift: vi.fn(),
           register,
           note: vi.fn(),
@@ -188,7 +188,7 @@ describe("created OpenClaw restore authority", () => {
     const error = vi.fn();
     let liveIdentity = "created-sandbox-id";
     let filesystemMutationStarted = false;
-    const revalidatePolicyAuthority = vi.fn(() =>
+    const revalidateSandboxIdentity = vi.fn(() =>
       liveIdentity === "created-sandbox-id"
         ? undefined
         : (() => {
@@ -242,7 +242,7 @@ describe("created OpenClaw restore authority", () => {
             contentSha256: "b".repeat(64),
           }),
           revalidateHarnessPackageAuthority: () => OPENCLAW_PACKAGE,
-          revalidatePolicyAuthority,
+          revalidateSandboxIdentity,
           getDcodeSelectionDrift: vi.fn(),
           register,
           note: vi.fn(),
@@ -255,7 +255,7 @@ describe("created OpenClaw restore authority", () => {
     ).toThrow("created sandbox live identity changed");
 
     expect(filesystemMutationStarted).toBe(false);
-    expect(revalidatePolicyAuthority).toHaveBeenCalledTimes(3);
+    expect(revalidateSandboxIdentity).toHaveBeenCalledTimes(3);
     expect(register).not.toHaveBeenCalled();
     expect(error).not.toHaveBeenCalled();
   });

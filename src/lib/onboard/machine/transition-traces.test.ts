@@ -12,9 +12,8 @@
  * and are owned by #6227.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import * as registry from "../../state/registry";
 import type { OnboardMachineEvent } from "./events";
 import { handleSandboxState } from "./handlers/sandbox";
 import { baseOptions, bindJournaledRecreate, createDeps } from "./handlers/sandbox-test-fixtures";
@@ -107,11 +106,6 @@ function fullRunHandlers(
     ...overrides,
   };
 }
-
-beforeEach(() => {
-  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-});
 
 afterEach(() => {
   vi.restoreAllMocks();

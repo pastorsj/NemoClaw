@@ -15,8 +15,8 @@ const canonicalOpenShellExternalTargetBoundary = path.resolve(
   "src/shared/openshell-external-target-boundary.cts",
 );
 const canonicalOpenShellPolicyBoundary = path.resolve(
-  repositoryRoot,
-  "src/lib/shared/openshell-policy-boundary.cts",
+  import.meta.dirname,
+  "src/shared/openshell-policy-boundary.cts",
 );
 const canonicalPrivateNetworksBoundary = path.resolve(
   repositoryRoot,

@@ -11,7 +11,6 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { SandboxPolicyAuthority } from "../adapters/openshell/policy-authority";
 import { isErrnoException } from "../core/errno";
 import { isObjectRecord, type JsonObject, type JsonValue } from "../core/json-types";
 import { DEFAULT_GATEWAY_PORT, GATEWAY_PORT } from "../core/ports";
@@ -70,7 +69,6 @@ import {
 import { nextMachineStateAfterCompletedStep } from "./onboard-step-state";
 import {
   listRetainedSandboxRecoveryRecords as readRetainedSandboxRecoveryRecords,
-  parseNemoClawPolicyCreationReceipt,
   reconcileRetainedRecoveryPackage as writeRetainedRecoveryPackage,
   recordRetainedSandboxRecovery as writeRetainedSandboxRecovery,
   requireRetainedRecoveryPackage,
@@ -82,7 +80,6 @@ import {
   type RecordRetainedSandboxRecoveryInput,
   type RetainedSandboxRecoveryRecord,
   type RetainedSandboxRecoveryReason,
-  type RetainedSandboxVerifiedEffectivePolicyIdentity,
 } from "./onboard-session/retained-sandbox-recovery";
 import type { SandboxHostMount } from "./registry/types";
 import { hasUnsafeHostMountTerminalText } from "./registry/host-mount";
@@ -105,7 +102,6 @@ const LEGACY_STATE_MIGRATION_LOCK = path.join(
 );
 const SAFE_VLLM_INSTALL_MODEL = /^[A-Za-z0-9._:/-]+$/;
 
-export class InvalidPersistedPolicyAuthorityError extends Error {}
 export class InvalidPersistedApfInterceptorIntentError extends Error {}
 export class InvalidPersistedHarnessPackageError extends Error {}
 export class InvalidPersistedCancellationRecoveryError extends Error {}
@@ -150,11 +146,7 @@ export interface SessionCancellationRecovery {
   readonly gatewayName: string;
   readonly gatewayPort: number;
   readonly lifecycleGeneration: string;
-  readonly verifiedEffectivePolicyIdentity: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
   readonly createAttemptNonce: string;
-  readonly policyCreationReceipt:
-    | NonNullable<RetainedSandboxRecoveryRecord["policyCreationReceipt"]>
-    | null;
   readonly recordedAt: string;
 }
 
@@ -163,10 +155,6 @@ function sameCancellationRecovery(
   right: SessionCancellationRecovery | null,
 ): boolean {
   if (left === null || right === null) return left === right;
-  const leftPolicy = left.verifiedEffectivePolicyIdentity;
-  const rightPolicy = right.verifiedEffectivePolicyIdentity;
-  const leftReceipt = left.policyCreationReceipt;
-  const rightReceipt = right.policyCreationReceipt;
   return (
     left.reason === right.reason &&
     left.sandboxName === right.sandboxName &&
@@ -175,22 +163,7 @@ function sameCancellationRecovery(
     left.gatewayPort === right.gatewayPort &&
     left.lifecycleGeneration === right.lifecycleGeneration &&
     left.createAttemptNonce === right.createAttemptNonce &&
-    left.recordedAt === right.recordedAt &&
-    (leftPolicy === null || rightPolicy === null
-      ? leftPolicy === rightPolicy
-      : leftPolicy.hash === rightPolicy.hash &&
-        leftPolicy.activeVersion === rightPolicy.activeVersion) &&
-    (leftReceipt === null || rightReceipt === null
-      ? leftReceipt === rightReceipt
-      : leftReceipt.schemaVersion === rightReceipt.schemaVersion &&
-        leftReceipt.origin === rightReceipt.origin &&
-        leftReceipt.gatewayName === rightReceipt.gatewayName &&
-        leftReceipt.gatewayPort === rightReceipt.gatewayPort &&
-        leftReceipt.sandboxName === rightReceipt.sandboxName &&
-        leftReceipt.lifecycleGeneration === rightReceipt.lifecycleGeneration &&
-        leftReceipt.sandboxIdentityFingerprint === rightReceipt.sandboxIdentityFingerprint &&
-        leftReceipt.policyHash === rightReceipt.policyHash &&
-        leftReceipt.policyVersion === rightReceipt.policyVersion)
+    left.recordedAt === right.recordedAt
   );
 }
 
@@ -334,9 +307,6 @@ export interface Session {
   /** Operator-selected APF create mode; this is not observed policy provenance. */
   apfInterceptorRequested: boolean;
   hermesToolGateways: string[] | null;
-  policyPresets: string[] | null;
-  /** Policy authority selected from OpenShell metadata before policy-dependent effects. */
-  policyAuthority: SandboxPolicyAuthority | null;
   messagingPlan: SandboxMessagingPlan | null;
   /** Non-secret names of credential providers registered before sandbox setup completed. */
   stagedCredentialProviders: string[];
@@ -418,8 +388,6 @@ export interface SessionUpdates {
   toolDisclosure?: ToolDisclosure;
   observabilityEnabled?: boolean;
   hermesToolGateways?: string[] | null;
-  policyPresets?: string[] | null;
-  policyAuthority?: SandboxPolicyAuthority | null;
   messagingPlan?: SandboxMessagingPlan | null;
   migratedLegacyValueHashes?: Record<string, string>;
   gpuPassthrough?: boolean;
@@ -456,8 +424,6 @@ export interface DebugSessionSummary {
   observabilityRequestedExplicitly: boolean;
   apfInterceptorRequested: boolean;
   hermesToolGateways: string[] | null;
-  policyPresets: string[] | null;
-  policyAuthority: SandboxPolicyAuthority | null;
   gpuPassthrough: boolean;
   lastStepStarted: string | null;
   lastCompletedStep: string | null;
@@ -600,10 +566,6 @@ function parseVllmGpuDevice(value: unknown): string | null {
 
 function readHermesAuthMethod(value: SessionJsonValue | undefined): HermesAuthMethod | null {
   return value === "oauth" || value === "api_key" ? value : null;
-}
-
-function readPolicyAuthority(value: unknown): SandboxPolicyAuthority | null {
-  return value === "nemoclaw-managed" || value === "externally-managed" ? value : null;
 }
 
 function readPositiveInteger(value: SessionJsonValue | undefined): number | null {
@@ -935,25 +897,6 @@ function parseSessionCancellationRecovery(
   const gatewayPort = value.gatewayPort;
   const lifecycleGeneration = readString(value.lifecycleGeneration);
   const createAttemptNonce = readString(value.createAttemptNonce);
-  const verifiedEffectivePolicyIdentity = (() => {
-    if (value.verifiedEffectivePolicyIdentity === null) return null;
-    if (!isObject(value.verifiedEffectivePolicyIdentity)) return undefined;
-    const hash = readString(value.verifiedEffectivePolicyIdentity.hash);
-    const activeVersion = value.verifiedEffectivePolicyIdentity.activeVersion;
-    return hash && Number.isSafeInteger(activeVersion) && Number(activeVersion) > 0
-      ? { hash, activeVersion: Number(activeVersion) }
-      : undefined;
-  })();
-  let policyCreationReceipt:
-    | NonNullable<RetainedSandboxRecoveryRecord["policyCreationReceipt"]>
-    | null = null;
-  if (value.policyCreationReceipt !== null) {
-    try {
-      policyCreationReceipt = parseNemoClawPolicyCreationReceipt(value.policyCreationReceipt);
-    } catch {
-      return null;
-    }
-  }
   if (
     !sandboxName ||
     sandboxName.length > NAME_MAX_LENGTH ||
@@ -965,17 +908,8 @@ function parseSessionCancellationRecovery(
     Number(gatewayPort) < 1024 ||
     Number(gatewayPort) > 65_535 ||
     !lifecycleGeneration ||
-    verifiedEffectivePolicyIdentity === undefined ||
     !createAttemptNonce ||
-    !/^[0-9a-f]{62}$/u.test(createAttemptNonce) ||
-    (policyCreationReceipt !== null &&
-      (policyCreationReceipt.gatewayName !== gatewayName ||
-        policyCreationReceipt.gatewayPort !== Number(gatewayPort) ||
-        policyCreationReceipt.sandboxName !== sandboxName ||
-        policyCreationReceipt.lifecycleGeneration !== lifecycleGeneration ||
-        policyCreationReceipt.sandboxIdentityFingerprint !== fingerprint ||
-        policyCreationReceipt.policyHash !== verifiedEffectivePolicyIdentity?.hash ||
-        policyCreationReceipt.policyVersion !== verifiedEffectivePolicyIdentity?.activeVersion))
+    !/^[0-9a-f]{62}$/u.test(createAttemptNonce)
   ) {
     return null;
   }
@@ -986,9 +920,7 @@ function parseSessionCancellationRecovery(
     gatewayName,
     gatewayPort: Number(gatewayPort),
     lifecycleGeneration,
-    verifiedEffectivePolicyIdentity,
     createAttemptNonce,
-    policyCreationReceipt,
     recordedAt,
   };
 }
@@ -1078,7 +1010,6 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     ...defaultSteps(),
     ...(overrides.steps ?? {}),
   };
-  const policyAuthority = readPolicyAuthority(overrides.policyAuthority);
   const harnessPackageState = inspectHarnessPackageState(
     overrides.harnessPackage,
     overrides.harnessPackageMigration,
@@ -1136,9 +1067,6 @@ export function createSession(overrides: Partial<Session> = {}): Session {
     observabilityRequestedExplicitly: overrides.observabilityRequestedExplicitly === true,
     apfInterceptorRequested: overrides.apfInterceptorRequested === true,
     hermesToolGateways: readStringArray(overrides.hermesToolGateways),
-    policyPresets:
-      policyAuthority === "externally-managed" ? null : readStringArray(overrides.policyPresets),
-    policyAuthority,
     messagingPlan: parseSandboxMessagingPlan(overrides.messagingPlan),
     stagedCredentialProviders: readStringArray(overrides.stagedCredentialProviders) ?? [],
     migratedLegacyValueHashes: overrides.migratedLegacyValueHashes
@@ -1174,12 +1102,6 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
   ) {
     throw new InvalidPersistedApfInterceptorIntentError(
       "Refusing to load the onboarding session: the saved APF selection is invalid.",
-    );
-  }
-  const policyAuthority = readPolicyAuthority(data.policyAuthority);
-  if (hasOwn(data, "policyAuthority") && data.policyAuthority !== null && !policyAuthority) {
-    throw new InvalidPersistedPolicyAuthorityError(
-      "Refusing to load the onboarding session: the saved policy authority is invalid.",
     );
   }
   const servingProfileProvenance = parseServingProfileProvenance(data.servingProfileProvenance);
@@ -1274,8 +1196,6 @@ export function normalizeSession(data: Session | SessionJsonValue | undefined): 
     observabilityRequestedExplicitly: data.observabilityRequestedExplicitly === true,
     apfInterceptorRequested: data.apfInterceptorRequested === true,
     hermesToolGateways: readStringArray(data.hermesToolGateways),
-    policyPresets: readStringArray(data.policyPresets),
-    policyAuthority,
     messagingPlan: parseSandboxMessagingPlan(data.messagingPlan),
     stagedCredentialProviders: readStringArray(data.stagedCredentialProviders) ?? [],
     migratedLegacyValueHashes: readStringRecord(data.migratedLegacyValueHashes),
@@ -1398,11 +1318,7 @@ export function loadSession(): Session | null {
     if (lockOwned) assertOnboardLockOwned();
     return normalized;
   } catch (error) {
-    if (
-      error instanceof InvalidPersistedPolicyAuthorityError ||
-      error instanceof InvalidPersistedApfInterceptorIntentError ||
-      error instanceof InvalidPersistedCancellationRecoveryError
-    ) {
+    if (error instanceof InvalidPersistedApfInterceptorIntentError) {
       throw error;
     }
     if (lockOwned) throw error;
@@ -2110,20 +2026,6 @@ export function filterSafeUpdates(updates: SessionUpdates): Partial<Session> {
       (value) => typeof value === "string",
     );
   }
-  if (updates.policyPresets === null) {
-    safe.policyPresets = null;
-  } else if (Array.isArray(updates.policyPresets)) {
-    safe.policyPresets = updates.policyPresets.filter((value) => typeof value === "string");
-  }
-  if (updates.policyAuthority === null) {
-    safe.policyAuthority = null;
-  } else {
-    const policyAuthority = readPolicyAuthority(updates.policyAuthority);
-    if (policyAuthority) {
-      safe.policyAuthority = policyAuthority;
-      if (policyAuthority === "externally-managed") safe.policyPresets = null;
-    }
-  }
   if (updates.messagingPlan === null) {
     safe.messagingPlan = null;
   } else {
@@ -2176,11 +2078,7 @@ export interface RetainedSandboxRecoveryContext {
   readonly gatewayName: string;
   readonly gatewayPort: number;
   readonly lifecycleGeneration: string;
-  readonly verifiedEffectivePolicyIdentity: RetainedSandboxVerifiedEffectivePolicyIdentity | null;
   readonly createAttemptNonce: string;
-  readonly policyCreationReceipt:
-    | NonNullable<RetainedSandboxRecoveryRecord["policyCreationReceipt"]>
-    | null;
 }
 
 function retainedSandboxResourceEvidence(session: Session) {
@@ -2215,9 +2113,7 @@ function persistIndependentRetainedSandboxRecovery(
     gatewayName: context.gatewayName,
     gatewayPort: context.gatewayPort,
     lifecycleGeneration: context.lifecycleGeneration,
-    verifiedEffectivePolicyIdentity: context.verifiedEffectivePolicyIdentity,
     createAttemptNonce: context.createAttemptNonce,
-    policyCreationReceipt: context.policyCreationReceipt,
     harnessPackage,
     resources: retainedSandboxResourceEvidence(session),
     reason,
@@ -2269,9 +2165,7 @@ export function listRetainedSandboxRecoveryRecords(): readonly RetainedSandboxRe
           gatewayName: recovery.gatewayName,
           gatewayPort: recovery.gatewayPort,
           lifecycleGeneration: recovery.lifecycleGeneration,
-          verifiedEffectivePolicyIdentity: recovery.verifiedEffectivePolicyIdentity,
           createAttemptNonce: recovery.createAttemptNonce,
-          policyCreationReceipt: recovery.policyCreationReceipt,
           harnessPackage: requireRetainedRecoveryPackage(current),
           resources: retainedSandboxResourceEvidence(current),
           reason: recovery.reason,
@@ -2818,8 +2712,6 @@ export function summarizeForDebug(
     observabilityRequestedExplicitly: session.observabilityRequestedExplicitly,
     apfInterceptorRequested: session.apfInterceptorRequested,
     hermesToolGateways: session.hermesToolGateways,
-    policyPresets: session.policyPresets,
-    policyAuthority: session.policyAuthority,
     gpuPassthrough: session.gpuPassthrough,
     lastStepStarted: session.lastStepStarted,
     lastCompletedStep: session.lastCompletedStep,

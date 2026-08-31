@@ -11,7 +11,6 @@ import {
 } from "../../../state/onboard-checkpoint-decision";
 import { CHECKPOINT_SCHEMA_VERSION } from "../../../state/onboard-checkpoint-types";
 import { createSession, type Session } from "../../../state/onboard-session";
-import * as registry from "../../../state/registry";
 import { detectMessagingChannelsFromEnv } from "../../messaging-channel-setup";
 import { handleSandboxState } from "./sandbox";
 import {
@@ -48,8 +47,6 @@ function dcodeRegistryEntry(name: string, observabilityEnabled?: boolean) {
 describe("handleSandboxState", () => {
   beforeEach(() => {
     detectMessagingChannelsFromEnvMock.mockReturnValue([]);
-    vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-    vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
   });
 
   it("creates a sandbox and records messaging/web search state", async () => {
@@ -89,7 +86,6 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
-      undefined,
     );
     expect(calls.finalizeRouteReservation).not.toHaveBeenCalled();
     expect(calls.updateSandbox).toHaveBeenCalledWith(
@@ -136,10 +132,7 @@ describe("handleSandboxState", () => {
       hostLocalInferenceRouteOnly: true,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ endpointSource: null });
-    expect(calls.preflightPolicyRequirements).toHaveBeenCalledWith(
-      expect.objectContaining({ hostLocalInferenceRouteOnly: true }),
-    );
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ endpointSource: null });
   });
 
   it("records credential-provider bindings and the resource-profile decision in the checkpoint (#7022)", async () => {
@@ -238,28 +231,22 @@ describe("handleSandboxState", () => {
       ...baseOptions(deps),
       agent: { name: "langchain-deepagents-code" },
       authoritativeResumeConfig: true,
-      authoritativePolicyTier: "restricted",
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
-      policyTier: "restricted",
-    });
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({});
   });
 
-  it("preserves an authoritative null tier in the sandbox create intent", async () => {
+  it("does not persist an authoritative policy tier in sandbox create state", async () => {
     const { deps, calls } = createDeps();
 
     await handleSandboxState({
       ...baseOptions(deps),
       agent: { name: "langchain-deepagents-code" },
       authoritativeResumeConfig: true,
-      authoritativePolicyTier: null,
     });
 
-    expect(calls.resolveCreateIntent).toHaveBeenCalledWith(
-      expect.objectContaining({ policyTier: null }),
-    );
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toHaveProperty("policyTier", null);
+    expect(calls.resolveCreateIntent.mock.calls[0]?.[0]).not.toHaveProperty("policyTier");
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).not.toHaveProperty("policyTier");
   });
 
   it("rejects observability for a selected non-DCode agent", async () => {
@@ -294,7 +281,7 @@ describe("handleSandboxState", () => {
       sandboxName: "saved",
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
       observabilityEnabled: true,
     });
     expect(session.observabilityEnabled).toBe(true);
@@ -371,7 +358,7 @@ describe("handleSandboxState", () => {
       requestedObservabilityEnabled: false,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
       observabilityEnabled: false,
       observabilityRequestedExplicitly: true,
     });
@@ -429,7 +416,7 @@ describe("handleSandboxState", () => {
         requestedObservabilityEnabled: requested,
       });
 
-      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
+      expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
         recreate: true,
         observabilityEnabled: requested,
       });
@@ -468,7 +455,7 @@ describe("handleSandboxState", () => {
         sandboxName: "saved",
       });
 
-      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
+      expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
         recreate: true,
         observabilityEnabled: requested,
       });
@@ -526,7 +513,7 @@ describe("handleSandboxState", () => {
       requestedObservabilityEnabled: false,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
       recreate: true,
       observabilityEnabled: false,
     });
@@ -569,7 +556,6 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
-      undefined,
     );
     expect(result.hermesToolGateways).toEqual(["nous-audio"]);
     expect(calls.note).toHaveBeenCalledWith(
@@ -863,7 +849,6 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
-      undefined,
     );
   });
 
@@ -1038,7 +1023,6 @@ describe("handleSandboxState", () => {
           targetIntentFingerprint: expect.any(String),
         }),
       }),
-      undefined,
     );
     expect(result.webSearchConfigChanged).toBe(true);
   });
@@ -1172,7 +1156,6 @@ describe("handleSandboxState", () => {
           targetIntentFingerprint: expect.any(String),
         }),
       }),
-      undefined,
     );
     expect(result.webSearchConfig).toBeNull();
   });

@@ -14,7 +14,12 @@ removed_marker="$0.removed"
 case "$1" in
   ps)
     if [ ! -e "$removed_marker" ]; then
-      printf 'aaaaaaaaaaaa\topenshell\tdefault\tsb-alpha\n'
+      last_arg=""
+      for arg do last_arg="$arg"; done
+      case "$last_arg" in
+        '{{.ID}}') printf 'aaaaaaaaaaaa\n' ;;
+        *) printf 'aaaaaaaaaaaa\topenshell\tdefault\tsb-alpha\n' ;;
+      esac
     fi
     ;;
   rm)
@@ -57,7 +62,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
             },
           },
           defaultSandbox: "alpha",
@@ -132,7 +136,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
               gatewayName: "nemoclaw-8081",
               gatewayPort: 8081,
             },
@@ -218,7 +221,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
             },
           },
           defaultSandbox: "alpha",
@@ -311,7 +313,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
               gatewayName: "nemoclaw-8081",
               gatewayPort: 8081,
             },
@@ -382,7 +383,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
             },
           },
           defaultSandbox: "alpha",
@@ -458,7 +458,6 @@ describe("CLI dispatch", () => {
             model: "test-model",
             provider: "nvidia-prod",
             gpuEnabled: false,
-            policies: [],
             gatewayName: "nemoclaw-8081",
             gatewayPort: 8081,
           },
@@ -467,7 +466,6 @@ describe("CLI dispatch", () => {
             model: "test-model",
             provider: "nvidia-prod",
             gpuEnabled: false,
-            policies: [],
           },
         },
         defaultSandbox: "alpha",
@@ -533,7 +531,6 @@ describe("CLI dispatch", () => {
             model: "test-model",
             provider: "nvidia-prod",
             gpuEnabled: false,
-            policies: [],
           },
         },
         defaultSandbox: "alpha",
@@ -600,7 +597,6 @@ describe("CLI dispatch", () => {
             model: "test-model",
             provider: "nvidia-prod",
             gpuEnabled: false,
-            policies: [],
             gatewayName: "nemoclaw-8081",
             gatewayPort: 8081,
           },
@@ -694,7 +690,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
               gatewayName: "nemoclaw-8081",
               gatewayPort: 8081,
             },
@@ -759,7 +754,6 @@ describe("CLI dispatch", () => {
             model: "test-model",
             provider: "nvidia-prod",
             gpuEnabled: false,
-            policies: [],
           },
         },
         defaultSandbox: "alpha",
@@ -823,7 +817,6 @@ describe("CLI dispatch", () => {
               model: "test-model",
               provider: "nvidia-prod",
               gpuEnabled: false,
-              policies: [],
             },
           },
           defaultSandbox: "alpha",
@@ -907,7 +900,6 @@ describe("CLI dispatch", () => {
             model: "test-model",
             provider: "nvidia-prod",
             gpuEnabled: false,
-            policies: [],
           },
         },
         defaultSandbox: "alpha",

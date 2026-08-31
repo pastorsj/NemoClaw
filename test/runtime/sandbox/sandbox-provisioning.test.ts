@@ -22,7 +22,7 @@ import {
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
 const DOCKERFILE = path.join(ROOT, "Dockerfile");
-const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
+const DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base");
 const DOCKERFILE_SANDBOX = path.join(ROOT, "test", "Dockerfile.sandbox");
 const HERMES_DOCKERFILE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile");
 const HERMES_DOCKERFILE_BASE = path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base");
@@ -1277,8 +1277,19 @@ describe("Hermes sandbox provisioning", () => {
         expect(run.result.status).toBe(0);
         const hermesDir = path.join(run.sandboxRoot, ".hermes");
         expect((fs.statSync(hermesDir).mode & 0o7777).toString(8)).toBe("3770");
-        expect(["logs", "logs/curator", "cache", "hooks", "image_cache", "audio_cache", "platforms"].every((dir) =>
-              Object.is((fs.statSync(path.join(hermesDir, dir)).mode & 0o777).toString(8), "770"))).toBe(true);
+        expect(
+          [
+            "logs",
+            "logs/curator",
+            "cache",
+            "hooks",
+            "image_cache",
+            "audio_cache",
+            "platforms",
+          ].every((dir) =>
+            Object.is((fs.statSync(path.join(hermesDir, dir)).mode & 0o777).toString(8), "770"),
+          ),
+        ).toBe(true);
         expect((fs.statSync(path.join(hermesDir, "platforms")).mode & 0o7777).toString(8)).toBe(
           "2770",
         );

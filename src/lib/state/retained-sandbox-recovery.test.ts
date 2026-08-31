@@ -26,10 +26,8 @@ const evidence = {
   sandboxScopedProviders: ["sandbox-telegram"],
   credentialEnvironmentVariables: ["NVIDIA_API_KEY", "TELEGRAM_BOT_TOKEN"],
 } as const;
-
 const recoveryAuthority = {
   createAttemptNonce: "c".repeat(62),
-  policyCreationReceipt: null,
 } as const;
 
 const harnessPackage = {
@@ -56,7 +54,7 @@ function createLegacyRecoveryRecord() {
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
     lifecycleGeneration: "legacy-generation",
-    verifiedEffectivePolicyIdentity: null,
+    ...recoveryAuthority,
     resources: evidence,
     reason: "cancelled_after_sandbox_creation",
     recordedAt: "2026-08-27T00:00:00.000Z",
@@ -69,34 +67,15 @@ function createLegacyRecoveryRecord() {
         fields.sandboxName,
         fields.sandboxIdentityFingerprint,
         fields.lifecycleGeneration,
-        fields.verifiedEffectivePolicyIdentity,
+        fields.createAttemptNonce,
       ]),
     )
     .digest("hex");
   return { schemaVersion: 1 as const, recordId, ...fields };
 }
 
-function createAuthorityLegacyRecoveryRecord() {
-  const legacy = createLegacyRecoveryRecord();
-  const recordId = createHash("sha256")
-    .update(
-      JSON.stringify([
-        legacy.gatewayName,
-        legacy.gatewayPort,
-        legacy.sandboxName,
-        legacy.sandboxIdentityFingerprint,
-        legacy.lifecycleGeneration,
-        legacy.verifiedEffectivePolicyIdentity,
-        recoveryAuthority.createAttemptNonce,
-        recoveryAuthority.policyCreationReceipt,
-      ]),
-    )
-    .digest("hex");
-  return { ...legacy, ...recoveryAuthority, recordId };
-}
-
 describe("retained sandbox recovery state", () => {
-  it("persists verified identity independently", async () => {
+  it("persists verified identity and secret-free resource evidence independently", async () => {
     const recovery = await import("./onboard-session");
     const fingerprint = "a".repeat(64);
     const input = {
@@ -105,7 +84,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
       lifecycleGeneration: "00000000-0000-4000-8000-000000000001",
-      verifiedEffectivePolicyIdentity: { hash: "sha256:policy-1", activeVersion: 1 },
       ...recoveryAuthority,
       harnessPackage,
       resources: evidence,
@@ -120,8 +98,8 @@ describe("retained sandbox recovery state", () => {
       schemaVersion: 2,
       sandboxName: "retained-sb",
       sandboxIdentityFingerprint: fingerprint,
-      verifiedEffectivePolicyIdentity: input.verifiedEffectivePolicyIdentity,
       harnessPackage,
+      identityWasUnavailable: false,
       resources: evidence,
     });
     expect(recorded).not.toHaveProperty("harnessPackageMigration");
@@ -139,7 +117,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
       lifecycleGeneration: null,
-      verifiedEffectivePolicyIdentity: null,
       ...recoveryAuthority,
       harnessPackage: null,
       resources: {
@@ -227,7 +204,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
       lifecycleGeneration: "reordered-generation",
-      verifiedEffectivePolicyIdentity: null,
       ...recoveryAuthority,
       harnessPackage: reorderedHarnessPackage,
       resources: evidence,
@@ -258,14 +234,13 @@ describe("retained sandbox recovery state", () => {
 
   it("rejects a conflicting version 2 destination for a legacy package binding", async () => {
     const recovery = await import("./onboard-session");
-    const legacy = createAuthorityLegacyRecoveryRecord();
+    const legacy = createLegacyRecoveryRecord();
     const conflicting = recovery.recordRetainedSandboxRecovery({
       sandboxName: legacy.sandboxName,
       sandboxIdentityFingerprint: legacy.sandboxIdentityFingerprint,
       gatewayName: legacy.gatewayName,
       gatewayPort: legacy.gatewayPort,
       lifecycleGeneration: legacy.lifecycleGeneration,
-      verifiedEffectivePolicyIdentity: legacy.verifiedEffectivePolicyIdentity,
       ...recoveryAuthority,
       harnessPackage,
       resources: {
@@ -301,7 +276,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
       lifecycleGeneration: "current-generation",
-      verifiedEffectivePolicyIdentity: null,
       ...recoveryAuthority,
       resources: evidence,
       reason: "cancelled_after_sandbox_creation" as const,
@@ -404,7 +378,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
       lifecycleGeneration: "generation-7",
-      verifiedEffectivePolicyIdentity: null,
       ...recoveryAuthority,
       harnessPackage,
       resources: evidence,
@@ -431,13 +404,12 @@ describe("retained sandbox recovery state", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration: "00000000-0000-4000-8000-000000000001",
-         verifiedEffectivePolicyIdentity: null,
-         ...recoveryAuthority,
-         harnessPackage: null,
-         resources: evidence,
-         reason: "retained_after_sandbox_creation_failure",
-       }),
-     ).toThrow("Cannot persist invalid retained sandbox recovery evidence");
+        ...recoveryAuthority,
+        harnessPackage: null,
+        resources: evidence,
+        reason: "retained_after_sandbox_creation_failure",
+      }),
+    ).toThrow("Cannot persist invalid retained sandbox recovery evidence");
   });
 
   it("preserves distinct unresolved lifecycle tuples for one sandbox name (#9833)", async () => {
@@ -448,7 +420,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw-18080",
       gatewayPort: 18080,
       lifecycleGeneration: "00000000-0000-4000-8000-000000000001",
-      verifiedEffectivePolicyIdentity: { hash: "sha256:policy-1", activeVersion: 1 },
       ...recoveryAuthority,
       harnessPackage,
       resources: evidence,
@@ -460,7 +431,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw-18080",
       gatewayPort: 18080,
       lifecycleGeneration: "00000000-0000-4000-8000-000000000002",
-      verifiedEffectivePolicyIdentity: { hash: "sha256:policy-2", activeVersion: 2 },
       ...recoveryAuthority,
       harnessPackage,
       resources: evidence,
@@ -508,8 +478,7 @@ describe("retained sandbox recovery state", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration: "generation-1",
-          verifiedEffectivePolicyIdentity: null,
-          ...recoveryAuthority,
+        ...recoveryAuthority,
         harnessPackage: null,
         resources: evidence,
         reason: "retained_after_sandbox_creation_failure",
@@ -545,8 +514,7 @@ describe("retained sandbox recovery state", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration: "generation-1",
-          verifiedEffectivePolicyIdentity: null,
-          ...recoveryAuthority,
+        ...recoveryAuthority,
         harnessPackage: null,
         resources: evidence,
         reason: "retained_after_sandbox_creation_failure",
@@ -587,8 +555,7 @@ describe("retained sandbox recovery state", () => {
           gatewayName: "nemoclaw",
           gatewayPort: 8080,
           lifecycleGeneration: "generation-1",
-          verifiedEffectivePolicyIdentity: null,
-          ...recoveryAuthority,
+          createAttemptNonce: recoveryAuthority.createAttemptNonce,
         },
       ),
     ).toThrow(/state directory changed|lock ownership changed/u);
@@ -610,7 +577,6 @@ describe("retained sandbox recovery state", () => {
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
       lifecycleGeneration: "generation-1",
-      verifiedEffectivePolicyIdentity: null,
       ...recoveryAuthority,
       harnessPackage,
       resources: evidence,
@@ -641,7 +607,6 @@ describe("retained sandbox recovery state", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration: "generation-1",
-        verifiedEffectivePolicyIdentity: null,
         ...recoveryAuthority,
       },
     );
@@ -680,7 +645,6 @@ describe("retained sandbox recovery state", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration: "generation-1",
-        verifiedEffectivePolicyIdentity: null,
         ...recoveryAuthority,
       },
     );
@@ -716,7 +680,6 @@ describe("retained sandbox recovery state", () => {
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
         lifecycleGeneration: "generation-1",
-        verifiedEffectivePolicyIdentity: null,
         ...recoveryAuthority,
       },
     );

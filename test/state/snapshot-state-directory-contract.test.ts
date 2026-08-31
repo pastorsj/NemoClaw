@@ -62,7 +62,6 @@ function writeAgentRegistry(sandboxName: string, agent: string): void {
           model: "m",
           provider: "p",
           gpuEnabled: false,
-          policies: [],
           agent,
           harnessPackage: createSnapshotHarnessPackageFixture(agent),
         },

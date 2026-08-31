@@ -87,7 +87,6 @@ process.exit(result.status === null ? 1 : result.status);
             model: "m",
             provider: "p",
             gpuEnabled: false,
-            policies: [],
             agent: "hermes",
             harnessPackage: createSnapshotHarnessPackageFixture("hermes"),
           },

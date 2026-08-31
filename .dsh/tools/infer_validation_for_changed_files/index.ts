@@ -30,7 +30,7 @@ export default async function infer_validation_for_changed_files(input: {
   const projectForTest = (file) => {
     if (!/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(file) || file.startsWith("test/e2e/live/"))
       return null;
-    if (file.startsWith("nemoclaw/")) return "plugin";
+    if (file.startsWith("packages/nemoclaw-openclaw/plugin/")) return "plugin";
     if (file.startsWith("src/")) return "cli";
     if (file.startsWith("test/package-contract/")) return "package-contract";
     if (file.startsWith("test/e2e/")) return "e2e-support";
@@ -48,9 +48,9 @@ export default async function infer_validation_for_changed_files(input: {
         "Live E2E tests changed; run npm run test:live-e2e only with explicit approval and a selected live target.",
       );
     if (/^(docs|fern)\//.test(file) || file === "docs/index.yml") commands.add("npm run docs");
-    if (file.startsWith("nemoclaw/") && /\.[cm]?tsx?$/.test(file)) {
+    if (file.startsWith("packages/nemoclaw-openclaw/plugin/") && /\.[cm]?tsx?$/.test(file)) {
       projects.add("plugin");
-      commands.add("npm --prefix nemoclaw run typecheck");
+      commands.add("npm --prefix packages/nemoclaw-openclaw/plugin run typecheck");
     }
     if (file.startsWith("src/") && /\.[cm]?tsx?$/.test(file)) {
       projects.add("cli");
@@ -60,11 +60,19 @@ export default async function infer_validation_for_changed_files(input: {
       /packages\/nemoclaw-langchain-deepagents-code\/Dockerfile(?:\.base)?|corporate-ca/.test(file)
     ) {
       [
-        "test/security/corporate-ca-runtime-merge.test.ts",
         "test/install/corporate-ca-dockerfile-decode.test.ts",
         "src/lib/onboard/corporate-ca-host-anchors.test.ts",
         "src/lib/onboard/dockerfile-patch-corporate-ca.test.ts",
       ].forEach((x) => tests.add(x));
+      commands.add(
+        "npm --prefix packages/nemoclaw-openclaw run test:package -- tests/runtime/corporate-ca.test.ts",
+      );
+      commands.add(
+        "npm --prefix packages/nemoclaw-hermes run test:package -- tests/runtime/corporate-ca.test.ts",
+      );
+      commands.add(
+        "npm --prefix packages/nemoclaw-langchain-deepagents-code run test:package -- tests/image/corporate-ca.test.ts",
+      );
       projects.add("cli");
       projects.add("integration");
       notes.push("Corporate CA Dockerfile changes need CA ordering and decode guard tests.");

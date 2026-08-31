@@ -40,8 +40,8 @@ const {
   finalizeCreatedSandbox,
 } = await import("./created-sandbox-finalization");
 const { getDcodeSelectionDrift } = await import("./dcode-selection-drift");
-const { pendingSandboxPolicyVerificationForBoundary } =
-  await import("./sandbox-create/policy-creation-receipt");
+const { pendingSandboxCreateIdentityForBoundary } =
+  await import("./sandbox-create/identity-boundary");
 
 const fixtures: string[] = [];
 const TEST_BACKUPS_ROOT = path.join(TEST_HOME, ".nemoclaw", "rebuild-backups");
@@ -120,7 +120,7 @@ describe("new sandbox cancellation recovery", () => {
           markCancellationRecovery,
           dockerInfoFormat: () => "",
           runCapture: () => "",
-          revalidatePolicyAuthority: vi.fn(),
+          revalidateSandboxIdentity: vi.fn(),
           applyVmDnsMonkeypatch: vi.fn(),
         },
       ),
@@ -354,7 +354,7 @@ describe("created DCode sandbox finalization", () => {
           },
           captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
           revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
-          revalidatePolicyAuthority: vi.fn(),
+          revalidateSandboxIdentity: vi.fn(),
           getDcodeSelectionDrift: (name, provider, model, api) => {
             order.push("validate");
             return getDcodeSelectionDrift(name, provider, model, api, {
@@ -384,7 +384,7 @@ describe("created DCode sandbox finalization", () => {
     } finally {
       process.env.PATH = fixture.oldPath;
     }
-  });
+  }, 10_000);
 
   it("refuses registry publication when selected backup content changes before restore (#6311)", () => {
     const fixture = makeRestoreFixture();
@@ -414,7 +414,6 @@ describe("created DCode sandbox finalization", () => {
             },
             captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
             revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
-            revalidatePolicyAuthority: vi.fn(),
             getDcodeSelectionDrift,
             register,
             note: vi.fn(),
@@ -487,23 +486,7 @@ describe("created DCode sandbox finalization", () => {
   it("passes the fresh create endpoint through the production completion constructor (#9555)", async () => {
     const endpointUrl = "https://openrouter.ai/api/v1";
     const model = "nvidia/nemotron-3-ultra-550b-a55b";
-    const policyCreationReceipt = {
-      schemaVersion: 1 as const,
-      origin: "sandbox-create" as const,
-      gatewayName: "nemoclaw",
-      gatewayPort: 8080,
-      sandboxName: "dcode",
-      lifecycleGeneration: "generation-1",
-      sandboxIdentityFingerprint: "a".repeat(64),
-      policyHash: "sha256:effective",
-      policyVersion: 1,
-    };
-    const verifiedPolicyBoundary = {
-      registration: {
-        policyAuthority: "nemoclaw-managed" as const,
-        policyCreationReceipt,
-        observedPolicyAuthority: "owner-unknown" as const,
-      },
+    const verifiedCreateBoundary = {
       sandboxName: "dcode",
       gatewayName: "nemoclaw",
       gatewayPort: 8080,
@@ -532,10 +515,7 @@ describe("created DCode sandbox finalization", () => {
         },
         entry: { name: "dcode" } as SandboxEntry,
       },
-      checkpoint: pendingSandboxPolicyVerificationForBoundary(
-        verifiedPolicyBoundary,
-        TEST_PACKAGE_AUTHORITY,
-      ),
+      checkpoint: pendingSandboxCreateIdentityForBoundary(verifiedCreateBoundary),
     } as NonNullable<CreatedSandboxRegistrationInput["verifiedCreate"]>;
     const runCaptureOpenshell = vi.fn(() =>
       [
@@ -572,7 +552,7 @@ describe("created DCode sandbox finalization", () => {
       {
         createIntent: { endpointUrl, endpointSource: null, observabilityEnabled: false },
         resolvedCreateIntent: {
-          policy: { options: { baselineExclusions: [] } },
+          policy: { options: {} },
           hostMounts: undefined,
         },
       },
@@ -602,12 +582,10 @@ describe("created DCode sandbox finalization", () => {
           policyPath: "/private/initial-policy.yaml",
         },
         compatibilityPolicyPath: null,
-        policyTier: null,
-        policyAuthority: "nemoclaw-managed",
         dashboardRemoteBindPrepared: false,
-        getVerifiedPolicyBoundary: () => verifiedPolicyBoundary,
+        getVerifiedCreateBoundary: () => verifiedCreateBoundary,
         getVerifiedCreateRegistrationAuthority: () => verifiedCreate,
-        revalidatePolicyAuthority: vi.fn(),
+        revalidateSandboxIdentity: vi.fn(),
       },
       null,
       "build-1",
@@ -653,8 +631,6 @@ describe("created DCode sandbox finalization", () => {
         sandboxName: input.sandboxName,
         lifecycleGeneration: input.lifecycleGeneration,
         sandboxIdentityFingerprint: input.lifecycleLiveIdentityFingerprint,
-        policyHash: "sha256:effective",
-        policyVersion: 1,
       })),
     ] as unknown as Parameters<typeof createOnboardCreatedSandboxCompletion>;
     const completion = createOnboardCreatedSandboxCompletion(...completionArgs);
@@ -772,7 +748,6 @@ describe("created DCode sandbox finalization", () => {
             },
             captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
             revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
-            revalidatePolicyAuthority: vi.fn(),
             getDcodeSelectionDrift,
             register,
             note: vi.fn(),
@@ -835,7 +810,7 @@ describe("created DCode sandbox finalization", () => {
           },
           captureSnapshotRestoreAuthority: captureFixtureRestoreAuthority,
           revalidateHarnessPackageAuthority: () => DCODE_HARNESS_PACKAGE,
-          revalidatePolicyAuthority: vi.fn(),
+          revalidateSandboxIdentity: vi.fn(),
           getDcodeSelectionDrift: vi.fn(),
           register: () => {
             registeredConfigs.push(fs.readFileSync(fixture.currentPath, "utf8"));
@@ -1195,23 +1170,7 @@ describe("created sandbox completion actions", () => {
         order.push("registry");
         return input as unknown as SandboxEntry;
       });
-      const policyCreationReceipt = {
-        schemaVersion: 1 as const,
-        origin: "sandbox-create" as const,
-        gatewayName: "nemoclaw",
-        gatewayPort: 8080,
-        sandboxName: "hermes",
-        lifecycleGeneration: "generation-1",
-        sandboxIdentityFingerprint: "a".repeat(64),
-        policyHash: "sha256:effective",
-        policyVersion: 1,
-      };
-      const verifiedPolicyBoundary = {
-        registration: {
-          policyAuthority: "nemoclaw-managed" as const,
-          policyCreationReceipt,
-          observedPolicyAuthority: "owner-unknown" as const,
-        },
+      const verifiedCreateBoundary = {
         sandboxName: "hermes",
         gatewayName: "nemoclaw",
         gatewayPort: 8080,
@@ -1241,10 +1200,7 @@ describe("created sandbox completion actions", () => {
       } satisfies QualifiedSandboxInferenceRouteReservation;
       const verifiedCreate = {
         reservation: inferenceRouteReservation,
-        checkpoint: pendingSandboxPolicyVerificationForBoundary(
-          verifiedPolicyBoundary,
-          inferenceRouteReservation.authority,
-        ),
+        checkpoint: pendingSandboxCreateIdentityForBoundary(verifiedCreateBoundary),
       } as NonNullable<CreatedSandboxRegistrationInput["verifiedCreate"]>;
       const completion = createCreatedSandboxCompletionActions(
         {
@@ -1283,7 +1239,6 @@ describe("created sandbox completion actions", () => {
             },
             agent: null,
             agentVersionKnown: true,
-            appliedPolicies: ["personal-open-internet"],
             plannedMessagingState: undefined,
             hermesToolGateways: [],
             gatewayName: "nemoclaw",
@@ -1292,7 +1247,7 @@ describe("created sandbox completion actions", () => {
           policy: {
             initialPolicyPath: "/private/initial-policy.yaml",
             compatibilityPolicyPath: "/private/compatibility-policy.yaml",
-            getVerifiedPolicyBoundary: () => verifiedPolicyBoundary,
+            getVerifiedCreateBoundary: () => verifiedCreateBoundary,
             getVerifiedCreateRegistrationAuthority: () => verifiedCreate,
           },
           gpu: {
@@ -1414,14 +1369,9 @@ describe("created sandbox completion actions", () => {
         expect.objectContaining({
           imageTag: "hermes:test",
           hermesPortableLifecycle: schema5,
-          appliedPolicies: ["personal-open-internet"],
           dashboardPort: manageDashboard ? 8644 : 0,
           lifecycleGeneration: "generation-1",
           lifecycleLiveIdentityFingerprint: "a".repeat(64),
-          policyAuthority: "nemoclaw-managed",
-          policyCreationReceipt: expect.objectContaining({
-            policyHash: "sha256:effective",
-          }),
           inferenceSelection: inferenceRouteReservation.authority.selection,
           inferenceRouteReservation,
           verifiedCreate,

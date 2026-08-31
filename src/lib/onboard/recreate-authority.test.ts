@@ -33,7 +33,6 @@ describe("ordinary recreate restore authority", () => {
       .fn()
       .mockReturnValueOnce(packageIdentity)
       .mockReturnValue(changedPackage);
-    const revalidatePolicyAuthority = vi.fn();
     const register = vi.fn();
     const error = vi.fn();
     const restoreRecreatedSandboxState = vi.fn((_name, _backup, options): RestoreResult => {
@@ -78,7 +77,7 @@ describe("ordinary recreate restore authority", () => {
             backupPath: legacyManifest.backupPath,
             contentSha256: "c".repeat(64),
           }),
-          revalidatePolicyAuthority,
+          revalidateSandboxIdentity: vi.fn(),
           revalidateHarnessPackageAuthority,
           discoverFreshOpenClawImagePluginInstalls: vi.fn(),
           restoreRecreatedSandboxState,
@@ -101,7 +100,6 @@ describe("ordinary recreate restore authority", () => {
       2,
       "restore files for sandbox 'dcode'",
     );
-    expect(revalidatePolicyAuthority).toHaveBeenCalledWith("restore files for sandbox 'dcode'");
     expect(register).not.toHaveBeenCalled();
     expect(error.mock.calls.flat().join("\n")).toContain(
       "snapshot harness package authority changed",

@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,11 +27,19 @@ import {
   storePendingClone,
 } from "./snapshot/lifecycle-test-fixture";
 
+const tempHomes: string[] = [];
 beforeEach(() => {
   f.resetSnapshotRestoreMocks();
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-restore-home-"));
+  tempHomes.push(tempHome);
+  vi.stubEnv("HOME", tempHome);
 });
 afterEach(() => {
   f.cleanupSnapshotRestoreMocks();
+  vi.unstubAllEnvs();
+  for (const tempHome of tempHomes.splice(0)) {
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
 });
 describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   it.each([
@@ -181,17 +192,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("revalidates the prepared snapshot after policy preparation and before destination deletion", async () => {
-    const source: f.SandboxRecord = {
-      ...packageManagedSandbox("alpha", OPENCLAW_PACKAGE),
-      baselineExclusions: [
-        {
-          version: 1,
-          agent: "openclaw",
-          key: "legacy-policy",
-          digest: "a".repeat(64),
-        },
-      ],
-    };
+    const source = packageManagedSandbox("alpha", OPENCLAW_PACKAGE);
     const entries = new Map<string, f.SandboxRecord>([
       ["alpha", source],
       ["beta", packageManagedSandbox("beta", OPENCLAW_PACKAGE)],
@@ -215,12 +216,18 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       validate,
       cleanup,
     });
-    f.prepareInitialSandboxCreatePolicyMock.mockImplementation((policyPath) => {
-      policyPrepared = true;
-      validate.mockImplementation(() => {
-        throw new Error("operation-owned snapshot content changed before lifecycle mutation");
+    f.captureOpenshellMock.mockImplementation((args) => {
+      const result = f.openshellResponses(args, {
+        "sandbox exec": { status: 0, output: f.dcodeProbeOutput("no-runtime") },
+        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       });
-      return { policyPath, appliedPresets: [] };
+      runWhen(args[0] === "policy" && args[1] === "get", () => {
+        policyPrepared = true;
+        validate.mockImplementation(() => {
+          throw new Error("operation-owned snapshot content changed before lifecycle mutation");
+        });
+      });
+      return result;
     });
     const { runSandboxSnapshot } = await import("./snapshot");
 
@@ -241,6 +248,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.lifecycleMock.events).not.toContain("delete");
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
     expect(f.restoreSandboxStateMock).not.toHaveBeenCalled();
+    expect(f.prepareInitialSandboxCreatePolicyMock).not.toHaveBeenCalled();
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
@@ -313,7 +321,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     },
   );
 
-  it("clones the selected package identity and resolves baseline policy from its definition", async () => {
+  it("clones the selected package identity while preserving its pinned definition", async () => {
     const entries = new Map<string, f.SandboxRecord>([["alpha", packageManagedSandbox("alpha")]]);
     configureCloneRegistry(entries.get("alpha")!, entries);
     f.removeSandboxMock.mockImplementation((name) => entries.delete(name));
@@ -340,20 +348,23 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       harnessPackage: HERMES_PACKAGE,
       snapshotSourceRegistryFingerprint: fingerprintSandboxRecreateValue(entries.get("alpha")!),
     });
-    expect(f.resolveAgentDefinitionBaselinePolicyMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "hermes",
-        packageRoot: `/state/harnesses/objects/${HERMES_PACKAGE.contentDigest}`,
-        policyAdditionsPath: `/state/harnesses/objects/${HERMES_PACKAGE.contentDigest}/policy-additions.yaml`,
-      }),
-    );
-    expect(f.resolveAgentBaselinePolicyMock).not.toHaveBeenCalled();
-    expect(f.loadAgentMock).not.toHaveBeenCalled();
     expect(f.restoreSandboxStateMock).toHaveBeenCalledWith(
       "beta",
       "/tmp/backup-alpha",
-      expect.objectContaining({ validateBeforeMutation: expect.any(Function) }),
+      expect.objectContaining({
+        agentDefinition: expect.objectContaining({
+          name: "hermes",
+          packageRoot: `/state/harnesses/objects/${HERMES_PACKAGE.contentDigest}`,
+        }),
+        validateBeforeMutation: expect.any(Function),
+      }),
     );
+    expect(f.captureOpenshellMock).toHaveBeenCalledWith(
+      expect.arrayContaining(["policy", "get", "alpha"]),
+    );
+    expect(f.resolveAgentDefinitionBaselinePolicyMock).not.toHaveBeenCalled();
+    expect(f.resolveAgentBaselinePolicyMock).not.toHaveBeenCalled();
+    expect(f.loadAgentMock).not.toHaveBeenCalled();
     expect(entries.get("beta")?.harnessPackage).toEqual(HERMES_PACKAGE);
   });
 
@@ -365,20 +376,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
         contentDigest: "e".repeat(64),
       };
       const entries = new Map<string, f.SandboxRecord>([
-        [
-          "alpha",
-          {
-            ...packageManagedSandbox("alpha"),
-            baselineExclusions: [
-              {
-                version: 1,
-                agent: "hermes",
-                key: "network_policies.hermes",
-                digest: "f".repeat(64),
-              },
-            ],
-          },
-        ],
+        ["alpha", packageManagedSandbox("alpha")],
         ["beta", packageManagedSandbox("beta")],
       ]);
       f.getSandboxMock.mockImplementation((name) => entries.get(name ?? "") ?? null);
@@ -496,19 +494,17 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     configureCloneRegistry(source, entries);
     f.getLatestBackupMock.mockReturnValue(packageManagedSnapshot(OPENCLAW_PACKAGE));
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
-    f.captureOpenshellMock.mockImplementation((args) =>
-      f.openshellResponses(args, {
+    let policyPrepared = false;
+    f.captureOpenshellMock.mockImplementation((args) => {
+      const result = f.openshellResponses(args, {
         "sandbox exec": { status: 0, output: f.dcodeProbeOutput("no-runtime") },
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
-      }),
-    );
-    f.resolveAgentDefinitionBaselinePolicyMock.mockImplementation((agent) => {
-      entries.set("alpha", { ...source, imageTag: "nemoclaw-alpha:replacement" });
-      return {
-        agent: agent.name,
-        policyPath: agent.policyAdditionsPath ?? "/repo/openclaw-policy.yaml",
-        content: "version: 1\nnetwork_policies: {}\n",
-      };
+      });
+      runWhen(args[0] === "policy" && args[1] === "get", () => {
+        policyPrepared = true;
+        entries.set("alpha", { ...source, imageTag: "nemoclaw-alpha:replacement" });
+      });
+      return result;
     });
     const { runSandboxSnapshot } = await import("./snapshot");
 
@@ -522,6 +518,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     ).rejects.toMatchObject({ exitCode: 1 });
 
     expect(entries.get("alpha")?.imageTag).toBe("nemoclaw-alpha:replacement");
+    expect(policyPrepared).toBe(true);
     expect(entries.has("beta")).toBe(true);
     expect(f.lifecycleMock.events).not.toContain("delete");
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
@@ -664,11 +661,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     await runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
 
     expect(definitionSelections).toBeGreaterThan(2);
-    expect(f.resolveAgentDefinitionBaselinePolicyMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stateFiles: [{ path: "locked-selection.json", strategy: "copy" }],
-      }),
-    );
+    expect(f.resolveAgentDefinitionBaselinePolicyMock).not.toHaveBeenCalled();
     expect(f.restoreSandboxStateMock).toHaveBeenCalledWith(
       "beta",
       "/tmp/backup-alpha",
@@ -691,16 +684,16 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
       stateFiles: definitionChanged ? [{ path: "different.json", strategy: "copy" as const }] : [],
     }));
-    f.resolveAgentDefinitionBaselinePolicyMock.mockImplementation((agent) => {
-      definitionChanged = true;
-      return {
-        agent: agent.name,
-        policyPath: agent.policyAdditionsPath ?? "/repo/openclaw-policy.yaml",
-        content: "version: 1\nnetwork_policies: {}\n",
-      };
-    });
     f.getLatestBackupMock.mockReturnValue(candidateSnapshot());
     configureCloneGateway();
+    const captureCloneGateway = f.captureOpenshellMock.getMockImplementation();
+    f.captureOpenshellMock.mockImplementation((args, options) => {
+      const result = captureCloneGateway!(args, options);
+      runWhen(args[0] === "policy" && args[1] === "get", () => {
+        definitionChanged = true;
+      });
+      return result;
+    });
     const { runSandboxSnapshot } = await import("./snapshot");
 
     await expect(

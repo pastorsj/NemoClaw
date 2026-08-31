@@ -63,7 +63,6 @@ function writeRegistry(sandboxName: string): void {
           model: "m",
           provider: "p",
           gpuEnabled: false,
-          policies: [],
           agent: null,
           harnessPackage: createSnapshotHarnessPackageFixture("openclaw"),
         },

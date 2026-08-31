@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SandboxInferenceRouteReservationDisposition } from "./registry/route-reservation";
-import type { PendingSandboxPolicyVerification } from "./registry/types";
+import type { PendingSandboxCreateIdentity } from "./registry/types";
 
 const HARNESS_PACKAGE = {
   kind: "agent-runtime" as const,
@@ -66,35 +66,17 @@ function ownedReservation(disposition: SandboxInferenceRouteReservationDispositi
   return (disposition as Extract<typeof disposition, { kind: "owned" }>).reservation;
 }
 
-function managedCheckpoint(): PendingSandboxPolicyVerification {
-  const boundary = {
-    gatewayPort: 8080,
-    lifecycleGeneration: "123e4567-e89b-42d3-a456-426614174983",
-    sandboxIdentityFingerprint: "a".repeat(64),
-    route: "none" as const,
-    policyHash: "sha256:policy-1",
-    policyVersion: 1,
-    harnessPackage: HARNESS_PACKAGE,
-  };
+function createIdentityCheckpoint(): PendingSandboxCreateIdentity {
   return {
     schemaVersion: 1,
     state: "verified-create",
-    policyAuthority: "nemoclaw-managed",
-    observedPolicyAuthority: "owner-unknown",
     gatewayName: EXACT_ROUTE_AUTHORITY.gatewayName,
+    gatewayPort: 8080,
     sandboxName: EXACT_ROUTE_AUTHORITY.sandboxName,
-    ...boundary,
-    policyCreationReceipt: {
-      schemaVersion: 1,
-      origin: "sandbox-create",
-      gatewayName: EXACT_ROUTE_AUTHORITY.gatewayName,
-      gatewayPort: boundary.gatewayPort,
-      sandboxName: EXACT_ROUTE_AUTHORITY.sandboxName,
-      lifecycleGeneration: boundary.lifecycleGeneration,
-      sandboxIdentityFingerprint: boundary.sandboxIdentityFingerprint,
-      policyHash: boundary.policyHash,
-      policyVersion: boundary.policyVersion,
-    },
+    lifecycleGeneration: "123e4567-e89b-42d3-a456-426614174983",
+    sandboxIdentityFingerprint: "a".repeat(64),
+    route: "none" as const,
+    harnessPackage: HARNESS_PACKAGE,
   };
 }
 
@@ -136,9 +118,6 @@ describe("sandbox inference route reservation qualification (#9203)", () => {
     const disposition = classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, {
       ...EXACT_QUALIFIED_ROUTE_RESERVATION,
       dashboardPort: 8080,
-      policies: ["github"],
-      policyPresetsFinalized: true,
-      policyTier: "personal",
       webSearchEnabled: false,
       webSearchProvider: null,
     });
@@ -155,13 +134,13 @@ describe("sandbox inference route reservation qualification (#9203)", () => {
         EXACT_QUALIFIED_ROUTE_RESERVATION,
       ),
     );
-    const checkpoint = managedCheckpoint();
+    const checkpoint = createIdentityCheckpoint();
     const pending = {
       ...EXACT_QUALIFIED_ROUTE_RESERVATION,
       gatewayPort: checkpoint.gatewayPort,
       lifecycleGeneration: checkpoint.lifecycleGeneration,
       lifecycleLiveIdentityFingerprint: checkpoint.sandboxIdentityFingerprint,
-      pendingPolicyVerification: checkpoint,
+      pendingCreateIdentity: checkpoint,
     };
 
     expect(classifySandboxInferenceRouteReservation(EXACT_ROUTE_AUTHORITY, pending).kind).toBe(
@@ -181,10 +160,6 @@ describe("sandbox inference route reservation qualification (#9203)", () => {
 
   it.each([
     ["invalid dashboard port", { dashboardPort: 0 }],
-    ["duplicate policies", { policies: ["github", "github"] }],
-    ["control character in a policy", { policies: ["github\u0000"] }],
-    ["control character in the policy tier", { policyTier: "personal\u0000" }],
-    ["non-boolean policy finalization", { policyPresetsFinalized: "yes" }],
     ["non-boolean web search state", { webSearchEnabled: "yes" }],
     ["unknown web search provider", { webSearchProvider: "unknown" }],
   ])("rejects %s in carried route metadata (#10056)", async (_case, updates) => {
@@ -215,7 +190,6 @@ describe("sandbox inference route reservation qualification (#9203)", () => {
         await import("./registry/route-reservation");
       const entry = {
         ...EXACT_QUALIFIED_ROUTE_RESERVATION,
-        policies: ["github"],
         ...updates,
       } as Parameters<typeof classifySandboxInferenceRouteReservation>[1];
 

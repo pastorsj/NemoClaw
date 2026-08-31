@@ -319,7 +319,7 @@ describe("buildRebuildRecreateOnboardOpts", () => {
     expect(legacy.observabilityEnabled).toBe(false);
   });
 
-  it("carries the authoritative restricted tier with observability into inner onboard", () => {
+  it("carries observability into inner onboard without policy shadow state", () => {
     const opts = buildRebuildRecreateOnboardOpts({
       ...baseArgs,
       agentAuthority: DCODE_AUTHORITY,
@@ -328,21 +328,11 @@ describe("buildRebuildRecreateOnboardOpts", () => {
         harnessPackage: DCODE_PACKAGE,
         dashboardPort: 0,
         observabilityEnabled: true,
-        policyTier: "restricted",
       },
     });
 
-    expect(opts.policyTier).toBe("restricted");
+    expect(opts).not.toHaveProperty("policyTier");
     expect(opts.observabilityEnabled).toBe(true);
-  });
-
-  it("rejects an invalid recorded policy tier before destructive recreate work", () => {
-    expect(() =>
-      buildRebuildRecreateOnboardOpts({
-        ...baseArgs,
-        sb: { ...dashboard, policyTier: "unknown-tier" },
-      }),
-    ).toThrow("Invalid recorded policy tier 'unknown-tier'.");
   });
 
   it.each([

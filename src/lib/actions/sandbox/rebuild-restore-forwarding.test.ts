@@ -34,8 +34,6 @@ describe("rebuild restore target forwarding", () => {
       agentDefinition,
       targetImageIsCustom: true,
       backupManifest: { agentType: "openclaw", backupPath: "/tmp/rebuild-backup" } as never,
-      policyPresets: [],
-      customPolicies: [],
       reconcileManagedDcodeObservability: false,
       log: vi.fn(),
     });

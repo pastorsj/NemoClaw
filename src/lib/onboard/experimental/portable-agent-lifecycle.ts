@@ -411,8 +411,19 @@ function qualifyOperatingCommandAuthority(
     authority.snapshot,
     operatingAuthority.assertCurrent,
   );
+  const assertTransactionCurrent = retainRequalifiedOperatingAuthority(
+    sandboxName,
+    stateDir,
+    authority.snapshot,
+    operatingAuthority.assertTransactionCurrent,
+  );
   assertCurrent();
-  return { ...commandAuthority, assertCurrent };
+  return {
+    ...commandAuthority,
+    receipt: operatingAuthority.receipt,
+    assertTransactionCurrent,
+    assertCurrent,
+  };
 }
 
 export function buildHermesPortableCommandAuthority(
@@ -500,7 +511,7 @@ export function qualifyHermesPortableAcceptedReadinessAuthority(
   };
 }
 
-/** Requalify a pending/configuring receipt only for its schema-5 onboarding child. */
+/** Requalify a pending/configuring receipt only for its schema-7 onboarding child. */
 export function buildHermesPortableOnboardingCommandAuthority(
   sandboxName: string,
   gatewayName: string,

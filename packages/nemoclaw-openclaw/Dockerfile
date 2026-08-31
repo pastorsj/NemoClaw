@@ -593,6 +593,7 @@ COPY scripts/lib/sandbox-rlimits.sh /usr/local/lib/nemoclaw/sandbox-rlimits.sh
 COPY packages/nemoclaw-openclaw/runtime/device-approval.py /usr/local/lib/nemoclaw/openclaw_device_approval_policy.py
 COPY packages/nemoclaw-openclaw/compat/shell-env.py /usr/local/lib/nemoclaw/clean_runtime_shell_env_shim.py
 COPY packages/nemoclaw-openclaw/runtime/config-permissions.py /usr/local/lib/nemoclaw/normalize_mutable_config_perms.py
+COPY packages/nemoclaw-openclaw/runtime/wechat/refresh-placeholder.py /usr/local/lib/nemoclaw/refresh-openclaw-wechat-placeholder.py
 COPY scripts/state-dir-guard.py /usr/local/lib/nemoclaw/state-dir-guard.py
 COPY packages/nemoclaw-openclaw/runtime/state/plan.json /usr/local/share/nemoclaw/state-lock-plan.json
 COPY packages/nemoclaw-openclaw/runtime/config-guard.py /usr/local/lib/nemoclaw/openclaw-config-guard.py

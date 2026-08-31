@@ -6,7 +6,7 @@ import { checkGatewayRouteCompatibility } from "../inference/gateway-route-compa
 import type { SandboxEntry } from "../state/registry";
 import { createSetupInference, type SetupInferenceDeps } from "./setup-inference";
 
-const revalidatePolicyRequirements = () => undefined;
+const revalidateSandboxIdentity = () => undefined;
 const TEST_PACKAGE_AUTHORITY = {
   harnessPackage: null,
   harnessPackageMigration: null,
@@ -57,7 +57,7 @@ describe("onboard shared gateway route containment", () => {
     await expect(
       setupInference("alpha", "model-a", "provider-a", null, null, null, [], {
         ...incompleteAuthority,
-        revalidatePolicyRequirements: revalidate,
+        revalidateSandboxIdentity: revalidate,
       } as never),
     ).rejects.toThrow(/requires both Session and harness package authority/u);
     expect(revalidate).not.toHaveBeenCalled();
@@ -168,7 +168,7 @@ describe("onboard shared gateway route containment", () => {
       "COMPATIBLE_API_KEY",
       null,
       [],
-      { revalidatePolicyRequirements },
+      { revalidateSandboxIdentity },
     ).then(
       () => null,
       (error: Error) => error.message,
@@ -276,7 +276,7 @@ describe("onboard shared gateway route containment", () => {
         "ROUTER_KEY",
         null,
         [],
-        { revalidatePolicyRequirements },
+        { revalidateSandboxIdentity },
       ),
     ).resolves.toEqual({ ok: true });
 
@@ -347,7 +347,7 @@ describe("onboard shared gateway route containment", () => {
         "KEY_B",
         null,
         [],
-        { preferredInferenceApi: "openai-completions", revalidatePolicyRequirements },
+        { preferredInferenceApi: "openai-completions", revalidateSandboxIdentity },
       ),
     ).rejects.toThrow("exit 1");
 
@@ -395,7 +395,7 @@ describe("onboard shared gateway route containment", () => {
         {
           reservationSessionId: "session-current",
           harnessPackageAuthority: TEST_PACKAGE_AUTHORITY,
-          revalidatePolicyRequirements,
+          revalidateSandboxIdentity,
           isRecordedProviderRecoveryAuthorized: () => {
             events.push("recovery-authority");
             return false;
@@ -501,7 +501,7 @@ describe("onboard shared gateway route containment", () => {
       "ROUTER_KEY",
       null,
       [],
-      { endpointSource: "inference-set", revalidatePolicyRequirements },
+      { endpointSource: "inference-set", revalidateSandboxIdentity },
     );
     await vi.waitFor(() => expect(verifyOnboardInferenceSmoke).toHaveBeenCalledOnce());
     expect(reservations).toEqual([
@@ -522,7 +522,7 @@ describe("onboard shared gateway route containment", () => {
       "ROUTER_KEY",
       null,
       [],
-      { revalidatePolicyRequirements },
+      { revalidateSandboxIdentity },
     );
     const resultsPending = Promise.allSettled([firstSetup, secondSetup]);
     expect(runOpenshell).toHaveBeenCalledTimes(1);
@@ -613,7 +613,7 @@ describe("onboard shared gateway route containment", () => {
           skipHostInferenceSmoke: true,
           reservationSessionId: "session-gamma",
           harnessPackageAuthority: TEST_PACKAGE_AUTHORITY,
-          revalidatePolicyRequirements,
+          revalidateSandboxIdentity,
         },
       ),
     ).resolves.toEqual({ ok: true });

@@ -21,9 +21,7 @@ function retainedRecoveryRecord(sandboxId = "sb-alpha"): RetainedSandboxRecovery
     gatewayName: "nemoclaw-19080",
     gatewayPort: 19080,
     lifecycleGeneration: "generation-alpha",
-    verifiedEffectivePolicyIdentity: null,
     createAttemptNonce: "c".repeat(62),
-    policyCreationReceipt: null,
     resources: {
       sharedInferenceProviders: [],
       sandboxScopedProviders: [],
@@ -221,11 +219,9 @@ describe("destroySandbox retained recovery flow", () => {
     async () => {
       const recovery = retainedRecoveryRecord();
       const bootstrapContainerId = "b".repeat(64);
-      const pendingPolicyVerification = {
+      const pendingCreateIdentity = {
         schemaVersion: 1 as const,
         state: "verified-create" as const,
-        policyAuthority: "externally-managed" as const,
-        observedPolicyAuthority: "externally-managed" as const,
         gatewayName: recovery.gatewayName,
         gatewayPort: recovery.gatewayPort,
         sandboxName: recovery.sandboxName,
@@ -233,8 +229,6 @@ describe("destroySandbox retained recovery flow", () => {
         sandboxIdentityFingerprint: recovery.sandboxIdentityFingerprint!,
         createAttemptNonce: recovery.createAttemptNonce!,
         route: "none" as const,
-        policyHash: "policy-hash",
-        policyVersion: 1,
       };
       const harness = createDestroyHarness({
         sandboxPresent: false,
@@ -246,7 +240,7 @@ describe("destroySandbox retained recovery flow", () => {
         registryEntryOverrides: {
           lifecycleGeneration: recovery.lifecycleGeneration!,
           lifecycleLiveIdentityFingerprint: recovery.sandboxIdentityFingerprint!,
-          pendingPolicyVerification,
+          pendingCreateIdentity,
         },
         retainedRecoveryRecords: [recovery],
       });

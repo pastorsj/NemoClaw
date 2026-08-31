@@ -1,21 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import { PolicyAuthorityRefusalError } from "../adapters/openshell/policy-authority";
-import * as registry from "../state/registry";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureAgentDashboardForward } from "./agent-dashboard-forward";
 
 describe("ensureAgentDashboardForward", () => {
-  beforeEach(() => {
-    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "hm", hermesApiPort: 8642 });
-  });
-
   afterEach(() => {
-    vi.restoreAllMocks();
     delete process.env.CHAT_UI_URL;
-    delete process.env.NEMOCLAW_HERMES_API_PORT;
   });
 
   it("preserves additional host-forward ports during dashboard refresh", async () => {
@@ -164,52 +155,6 @@ describe("ensureAgentDashboardForward", () => {
       { preserveSandboxPorts: [9120, 8642] },
     );
     expect(process.env.CHAT_UI_URL).toBe("https://hermes.example.test:9120/ui");
-  });
-
-  it("compensates primary and optional forwards when final authority is refused (#9833)", async () => {
-    const refusal = new PolicyAuthorityRefusalError("policy authority changed at finality");
-    const revalidatePolicyAuthority = vi
-      .fn<(operation: string) => void>()
-      .mockImplementationOnce(() => undefined)
-      .mockImplementationOnce(() => undefined)
-      .mockImplementationOnce(() => undefined)
-      .mockImplementationOnce(() => {
-        throw refusal;
-      });
-    const compensateDashboardForward = vi.fn();
-    const ensureDashboardForward = vi.fn(
-      (
-        _sandboxName,
-        chatUiUrl = "",
-        options?: {
-          revalidatePolicyAuthority?: (operation: string) => void;
-          onForwardStarted?: (port: number) => void;
-        },
-      ) => {
-        const port = Number(new URL(chatUiUrl).port);
-        options?.revalidatePolicyAuthority?.(`start dashboard forward ${String(port)}`);
-        options?.onForwardStarted?.(port);
-        return port;
-      },
-    );
-
-    await expect(
-      ensureAgentDashboardForward({
-        sandboxName: "hm",
-        agent: {
-          dashboard: { kind: "ui" },
-          forwardPort: 18789,
-          forward_ports: [18789, 8642],
-        },
-        ensureDashboardForward,
-        revalidatePolicyAuthority,
-        compensateDashboardForward,
-      }),
-    ).rejects.toBe(refusal);
-
-    expect(ensureDashboardForward).toHaveBeenCalledTimes(2);
-    expect(compensateDashboardForward.mock.calls).toEqual([[8642], [18789]]);
-    expect(process.env.CHAT_UI_URL).toBeUndefined();
   });
 
   it("forwards an API-kind agent on the sandbox-owned primary port", async () => {

@@ -94,7 +94,6 @@ function completeSession(sandboxName: string, harnessPackage: HarnessPackageIden
     preferredInferenceApi: null,
     nimContainer: null,
     webSearchConfig: null,
-    policyPresets: [],
     messagingPlan: null,
     metadata: { gatewayName: "nemoclaw", fromDockerfile: null },
     steps: {
@@ -105,7 +104,6 @@ function completeSession(sandboxName: string, harnessPackage: HarnessPackageIden
       inference: step,
       openclaw: step,
       agent_setup: { status: "pending", startedAt: null, completedAt: null, error: null },
-      policies: step,
     },
   };
 }
@@ -130,7 +128,6 @@ function createConflictFixture() {
     gatewayPort: 8080,
     dashboardPort: 18789,
     fromDockerfile: null,
-    policies: [],
     agent: null,
     harnessPackage,
     messaging: { schemaVersion: 1, plan: teamsPlan(name, "shared-teams-hash") },

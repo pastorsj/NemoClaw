@@ -11,7 +11,11 @@ import {
   type HermesCronRestorePlan,
   validateHermesCronRestoreBackup,
 } from "../../state/rebuild/hermes-cron-restore-backup";
-import { inspectRebuildManifestHarnessPackage, type RebuildManifest } from "../../state/sandbox";
+import {
+  inspectRebuildManifestHarnessPackage,
+  readRebuildPolicyHandoff,
+  type RebuildManifest,
+} from "../../state/sandbox";
 import { assertMcpDestroyNotPending } from "./mcp-bridge-state";
 import {
   preflightRebuildCredentials,
@@ -42,7 +46,6 @@ import { printRebuildPreflightFailure } from "./rebuild-preflight-error";
 import {
   acquireRebuildOnboardLock,
   assertRebuildEntryUnchanged,
-  blockRebuildOnPendingBaselineTransition,
   blockRebuildOnRetainedSandboxRecovery,
   checkRebuildGatewaySchemaPreflight,
   expectedRebuildEntryAfterVersionCheck,
@@ -140,7 +143,6 @@ export async function runRebuildPreflightPhase(
   const sandboxEntry = getRebuildSandboxEntryOrBail(sandboxName, bail);
   if (!sandboxEntry) return null;
   if (blockRebuildOnRetainedSandboxRecovery(sandboxName, bail)) return null;
-  if (blockRebuildOnPendingBaselineTransition(sandboxEntry, sandboxName, bail)) return null;
   const activeSessionCount = countActiveSandboxSessionsForRebuild(sandboxName);
   // #6376: refuse a stuck MCP destroy transaction up front — before backup,
   // image prep, or the old-sandbox delete. The only MCP marker check used to
@@ -182,9 +184,6 @@ export async function runRebuildPreflightPhase(
     : null;
   let agentAuthority: ResolvedSandboxAgent;
   try {
-    // Resolve package-managed definitions from the registry's exact receipt and
-    // object before any gateway, image, or target work. Qualified candidates
-    // pass through the same boundary with their explicit null package identity.
     agentAuthority = resolveSandboxAgent(sandboxEntry);
   } catch (error) {
     printRebuildPreflightFailure(
@@ -309,7 +308,16 @@ export async function runRebuildPreflightPhase(
       baseImagePreflight = preparedTarget.baseImagePreflight;
       preparedImage = preparedTarget.preparedImage;
 
-      const liveState = await resolveRebuildLiveState(sandboxName, expectedSandboxEntry, log, bail);
+      const liveState = await resolveRebuildLiveState(
+        sandboxName,
+        expectedSandboxEntry,
+        log,
+        bail,
+        {
+          authoritativeRecoveryPolicyAvailable:
+            recoveryManifest !== null && readRebuildPolicyHandoff(recoveryManifest) !== null,
+        },
+      );
       if (!liveState) return null;
       if (isDcodeRebuildAgent(rebuildAgent)) {
         const recoveryRecreate = liveState.staleRecovery || recoveryManifest !== null;

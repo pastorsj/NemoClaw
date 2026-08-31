@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
-import * as registry from "../../../state/registry";
 import { handleSandboxState } from "./sandbox";
 import { baseOptions, createDeps } from "./sandbox-test-fixtures";
 
@@ -12,11 +11,6 @@ vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
   detectUnconfiguredMessagingChannels: vi.fn(() => []),
 }));
-
-beforeEach(() => {
-  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -60,7 +54,7 @@ describe("Hermes portable sandbox endpoint provenance", () => {
 
     expect(calls.skipped).not.toHaveBeenCalledWith("sandbox", "saved");
     expect(createSandbox).toHaveBeenCalledOnce();
-    expect(createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ recreate: false });
+    expect(createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ recreate: false });
     expect(calls.removeSandbox).not.toHaveBeenCalled();
     expect(calls.complete).toHaveBeenCalledWith(
       "sandbox",
@@ -80,7 +74,7 @@ describe("Hermes portable sandbox endpoint provenance", () => {
       hermesPortableLifecycle: true,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ endpointSource: null });
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ endpointSource: null });
     expect(calls.updateSandbox).toHaveBeenCalledWith(
       "my-assistant",
       expect.objectContaining({ endpointSource: null }),
@@ -98,6 +92,6 @@ describe("Hermes portable sandbox endpoint provenance", () => {
       hostLocalInferenceRouteOnly: false,
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ endpointSource: null });
+    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({ endpointSource: null });
   });
 });

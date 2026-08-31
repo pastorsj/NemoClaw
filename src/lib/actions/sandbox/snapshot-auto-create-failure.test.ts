@@ -36,9 +36,12 @@ const harness = vi.hoisted(() => ({
   prepareDestroy: vi.fn((value: unknown) => value),
   destroy: vi.fn((value: unknown) => ({ status: "removed", receipt: value })),
 }));
-const captureOpenshellMock = vi.fn(() => ({
+const captureOpenshellMock = vi.fn((args: string[]) => ({
   status: 0,
-  output: "alpha Ready\nbeta Ready\nId: beta-runtime-id\n",
+  output:
+    args[0] === "policy"
+      ? "version: 1\nnetwork_policies: {}\n"
+      : "alpha Ready\nbeta Ready\nId: beta-runtime-id\n",
 }));
 const getSandboxMock = vi.fn((name?: string) => harness.entries.get(name ?? "") ?? null);
 const registerSandboxMock = vi.fn(
@@ -265,9 +268,9 @@ vi.mock("../../policy", () => ({
   applyPreset: vi.fn(() => true),
   applyPresetContent: vi.fn(() => true),
   getAppliedPresets: vi.fn(() => []),
-  getCustomPolicies: vi.fn(() => []),
   getPresetContentGatewayState: vi.fn(() => "absent"),
   loadPresetForSandbox: vi.fn(() => null),
+  parseCurrentPolicy: (raw: unknown) => String(raw),
   removePreset: vi.fn(() => true),
   resolveAgentDefinitionBaselinePolicy: vi.fn((agent: { name: string }) =>
     resolveTestAgentBaselinePolicy(agent.name),

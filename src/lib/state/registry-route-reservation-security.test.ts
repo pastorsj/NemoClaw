@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { PendingSandboxCreateIdentity } from "./registry/types";
+
 const EXACT_ROUTE_SELECTION = {
   provider: "ollama-local",
   model: "qwen3-vl:4b",
@@ -34,37 +36,20 @@ const CANDIDATE_PACKAGE_AUTHORITY = {
   harnessPackageMigration: null,
 } as const;
 
-function managedCheckpoint(packageFields: Record<string, unknown> = {}) {
-  const lifecycleGeneration = "123e4567-e89b-42d3-a456-426614174983";
-  const sandboxIdentityFingerprint = "a".repeat(64);
-  const policyHash = "sha256:policy-1";
-  const policyVersion = 1;
+function createIdentityCheckpoint(
+  packageFields: Record<string, unknown> = {},
+): PendingSandboxCreateIdentity {
   return {
     schemaVersion: 1 as const,
     state: "verified-create" as const,
-    policyAuthority: "nemoclaw-managed" as const,
-    observedPolicyAuthority: "owner-unknown" as const,
     gatewayName: "nemoclaw",
     gatewayPort: 8080,
     sandboxName: "alpha",
-    lifecycleGeneration,
-    sandboxIdentityFingerprint,
+    lifecycleGeneration: "123e4567-e89b-42d3-a456-426614174983",
+    sandboxIdentityFingerprint: "a".repeat(64),
     route: "none" as const,
-    policyHash,
-    policyVersion,
-    policyCreationReceipt: {
-      schemaVersion: 1 as const,
-      origin: "sandbox-create" as const,
-      gatewayName: "nemoclaw",
-      gatewayPort: 8080,
-      sandboxName: "alpha",
-      lifecycleGeneration,
-      sandboxIdentityFingerprint,
-      policyHash,
-      policyVersion,
-    },
     ...packageFields,
-  };
+  } as PendingSandboxCreateIdentity;
 }
 
 describe("sandbox inference route reservation security", () => {
@@ -273,8 +258,8 @@ describe("sandbox inference route reservation security", () => {
       { harnessPackage: HARNESS_PACKAGE, harnessPackageMigration: HARNESS_PACKAGE_MIGRATION },
     ],
     ["identity drift", { harnessPackage: { ...HARNESS_PACKAGE, contentDigest: "f".repeat(64) } }],
-  ])("rejects %s before recording a policy checkpoint", async (_case, packageFields) => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-policy-package-"));
+  ])("rejects %s before recording a create identity checkpoint", async (_case, packageFields) => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "nemoclaw-create-package-"));
     vi.stubEnv("HOME", home);
     vi.resetModules();
     try {
@@ -301,11 +286,11 @@ describe("sandbox inference route reservation security", () => {
       const before = registry.getSandbox("alpha");
 
       expect(() =>
-        registry.recordPendingSandboxPolicyVerification(
+        registry.recordPendingSandboxCreateIdentity(
           reservation,
-          managedCheckpoint(packageFields) as never,
+          createIdentityCheckpoint(packageFields) as never,
         ),
-      ).toThrow(/(?:harness package authority|pending policy verification)/u);
+      ).toThrow(/(?:harness package authority|pending sandbox create verification)/u);
       expect(registry.getSandbox("alpha")).toEqual(before);
     } finally {
       await fs.rm(home, { recursive: true, force: true });

@@ -244,7 +244,7 @@ describe("managed snapshot backup authority", () => {
   });
 
   it("resolves one exact package definition for maintenance preflight", () => {
-    const entry = { ...sandbox("openclaw"), policies: ["github"] } satisfies SandboxEntry;
+    const entry = sandbox("openclaw");
     const baseResolved = resolvedAgent(entry);
     const stateFiles = [{ path: "state.db", strategy: "sqlite_backup" as const }];
     const definition = {
@@ -263,13 +263,10 @@ describe("managed snapshot backup authority", () => {
       harnessPackage: entry.harnessPackage,
       registryEntry: entry,
     });
-    entry.policies.push("brave");
     stateFiles[0]!.path = "changed.db";
-    expect(authority.registryEntry.policies).toEqual(["github"]);
     expect(authority.agentDefinition.stateFiles[0]?.path).toBe("state.db");
     expect(Object.isFrozen(authority)).toBe(true);
     expect(Object.isFrozen(authority.registryEntry)).toBe(true);
-    expect(Object.isFrozen(authority.registryEntry.policies)).toBe(true);
     expect(Object.isFrozen(authority.agentDefinition)).toBe(true);
     expect(Object.isFrozen(authority.agentDefinition.stateFiles)).toBe(true);
     expect(getSandbox).toHaveBeenCalledOnce();
@@ -309,8 +306,8 @@ describe("managed snapshot backup authority", () => {
   });
 
   it("rejects non-package registry drift at the maintenance mutation boundary", () => {
-    const initial = { ...sandbox("openclaw"), policies: ["github"] } satisfies SandboxEntry;
-    const changed = { ...initial, policies: ["github", "brave"] } satisfies SandboxEntry;
+    const initial = sandbox("openclaw");
+    const changed = { ...initial, model: "changed-model" } satisfies SandboxEntry;
     const resolved = resolvedAgent(initial);
 
     expect(() =>
@@ -931,7 +928,7 @@ describe("managed snapshot backup authority", () => {
     const initial = sandbox("openclaw");
     const changed = {
       ...initial,
-      policies: ["github"],
+      model: "changed-model",
     } satisfies SandboxEntry;
     const getSandbox = vi
       .fn<() => SandboxEntry | null>()

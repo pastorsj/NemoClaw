@@ -44,13 +44,11 @@ import {
   type SandboxRuntimeSnapshot,
 } from "../registry/runtime-snapshot.js";
 import type {
-  CustomPolicyEntry,
   SandboxEntry,
   SandboxHostLocalInferenceProvenance,
   SandboxWorkloadReceipt,
 } from "../registry/types.js";
 import { cloneSandboxWorkloadReceipt } from "../registry/workload.js";
-import { normalizeCustomPolicyEntries } from "../registry-normalization.js";
 import { hashSnapshotBackupContent } from "./content-digest.js";
 
 const MANIFEST_VERSION = 2;
@@ -85,9 +83,13 @@ export interface RebuildManifest {
   writableDir?: string;
   backupPath: string;
   blueprintDigest: string | null;
-  policyPresets?: string[];
-  /** Exact custom policy content needed to recreate gateway policy state. */
-  customPolicies?: CustomPolicyEntry[];
+  /** Bounded live-policy handoff retained only while a rebuild transaction is recoverable. */
+  rebuildPolicyHandoff?: {
+    readonly file: string;
+    readonly sha256: string;
+    /** Cleanup-only identity; retired handoffs cannot be consumed for recovery. */
+    readonly retired?: boolean;
+  };
   /** Allowlisted non-secret environment assignments captured for image recreation. */
   preservedEnv?: PreservedEnvFile[];
   /** Provider-neutral runtime and acceleration state for managed-image snapshots. */
@@ -155,15 +157,15 @@ export interface ManifestPublishOps {
   remove(filePath: string, options: { force: true }): void;
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}
-
 export function normalizeStateFilePath(filePath: string): string | null {
   if (!filePath || filePath.includes("\0") || path.isAbsolute(filePath)) return null;
   const normalized = path.posix.normalize(filePath.replace(/\\/g, "/"));
   if (normalized === "." || normalized.startsWith("../") || normalized === "..") return null;
   return normalized;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
 function isSafeStateDirPath(dirPath: string): boolean {
@@ -222,16 +224,6 @@ function isInstanceBackup(value: unknown): value is InstanceBackup {
     typeof value.dataDir === "string" &&
     isBackedUpDirArray(value.backedUpDirs, value.stateDirs)
   );
-}
-
-function isCustomPolicyEntryArray(value: unknown): value is CustomPolicyEntry[] {
-  if (!Array.isArray(value)) return false;
-  if (value.length === 0) return true;
-  try {
-    return normalizeCustomPolicyEntries(value) !== undefined;
-  } catch {
-    return false;
-  }
 }
 
 function isRepositoryQualifiedManifestAgent(agentType: string): boolean {
@@ -342,8 +334,15 @@ function isRebuildManifest(value: unknown): value is RebuildManifest {
     (value.blueprintDigest === undefined ||
       value.blueprintDigest === null ||
       typeof value.blueprintDigest === "string") &&
-    (value.policyPresets === undefined || isStringArray(value.policyPresets)) &&
-    (value.customPolicies === undefined || isCustomPolicyEntryArray(value.customPolicies)) &&
+    (value.rebuildPolicyHandoff === undefined ||
+      (isObjectRecord(value.rebuildPolicyHandoff) &&
+        typeof value.rebuildPolicyHandoff.file === "string" &&
+        typeof value.rebuildPolicyHandoff.sha256 === "string" &&
+        CONTENT_SHA256_PATTERN.test(value.rebuildPolicyHandoff.sha256) &&
+        (value.rebuildPolicyHandoff.retired === undefined ||
+          value.rebuildPolicyHandoff.retired === true) &&
+        value.rebuildPolicyHandoff.file ===
+          `rebuild-policy-handoff.${value.rebuildPolicyHandoff.sha256}.yaml`)) &&
     (value.preservedEnv === undefined ||
       (value.agentType === "hermes" &&
         validatePreservedEnvFiles(value.preservedEnv, HERMES_PRESERVED_ENV_INVENTORY))) &&

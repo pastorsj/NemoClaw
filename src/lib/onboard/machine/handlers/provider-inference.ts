@@ -83,8 +83,8 @@ interface ProviderInferenceSetupOptionsBase {
   inferenceCapabilityCache?: OnboardInferenceCapabilityCache;
   /** Recheck recorded-route ownership after acquiring route mutation locks. */
   isRecordedProviderRecoveryAuthorized?: () => boolean;
-  /** Recheck the receipt-bound policy requirements at each inference mutation edge. */
-  revalidatePolicyRequirements?: (operation: string) => void;
+  /** Recheck live OpenShell sandbox identity at each inference mutation edge. */
+  revalidateSandboxIdentity?: (operation: string) => void;
   /** Operation-scoped provider request selected for this onboarding attempt. */
   hostLocalInference?: HostLocalInferenceStartupSelection;
   /** Proxy token prepared after configuration review; avoids repeating host mutations in setup. */
@@ -173,19 +173,6 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
   deps: {
     checkGatewayRouteCompatibility: CurrentGatewayRouteCompatibilityCheck;
     preflightGatewayRouteDiscovery: CurrentGatewayRouteDiscoveryPreflight;
-    preflightPolicyRequirements(input: {
-      gatewayName: string;
-      sandboxName: string | null;
-      agent: Agent;
-      selectedMessagingChannels: readonly string[];
-      hermesToolGateways: readonly string[];
-      gpuPassthrough: boolean;
-      provider: string | null;
-      hostLocalInferenceRouteOnly?: boolean;
-      webSearchConfig: WebSearchConfig | null;
-      observabilityEnabled: boolean;
-      operation: string;
-    }): void;
     revalidateHarnessPackageAuthority(
       session: Session,
       operation: string,
@@ -212,7 +199,7 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       ) => GatewayRouteDiscoveryConstraints,
       canProbeRoute?: (provider: string) => boolean,
       recoverySessionId?: string | null,
-      revalidatePolicyRequirements?: (
+      revalidateSandboxIdentity?: (
         route: ProviderInferenceProbeRoute,
         operation: string,
       ) => void,
@@ -241,12 +228,12 @@ export interface ProviderInferenceStateOptions<Gpu, Agent, Host> {
       gatewayName: string,
       provider: string | null | undefined,
       credentialEnv: string | null | undefined,
-      revalidatePolicyRequirements?: (operation: string) => void,
+      revalidateSandboxIdentity?: (operation: string) => void,
     ): Promise<{ forceInferenceSetup: boolean; credentialEnv: string | null }>;
     ensureManagedLlamaCppResumeReady(
       provider: string | null | undefined,
       sandboxName: string | null | undefined,
-      revalidatePolicyRequirements?: (operation: string) => void,
+      revalidateSandboxIdentity?: (operation: string) => void,
     ): Promise<boolean>;
     isResumeProviderSurfaceReady(
       gatewayName: string,
@@ -699,12 +686,10 @@ async function ensureLegacyManagedLlamaCppResumeReady(
   ensure: (
     provider: string | null | undefined,
     sandboxName: string | null | undefined,
-    revalidatePolicyRequirements?: (operation: string) => void,
   ) => Promise<boolean>,
-  revalidatePolicyRequirements?: (operation: string) => void,
 ): Promise<void> {
   if (selection?.setupOptions.hostLocalInference) return;
-  await ensure(provider, sandboxName, revalidatePolicyRequirements);
+  await ensure(provider, sandboxName);
 }
 
 function endpointSourceForCurrentUrl(
@@ -1025,7 +1010,6 @@ async function repairOrRecoverResumedHostLocalInference(
   provider: string,
   model: string,
   agent: unknown,
-  revalidatePolicyRequirements: (operation: string, requiredProvider?: string | null) => void,
   forceInferenceSetup: boolean,
   deps: ResumedHostLocalInferenceRepairDeps,
 ): Promise<boolean> {
@@ -1034,10 +1018,6 @@ async function repairOrRecoverResumedHostLocalInference(
     deps.log("  [resume] Recovering managed Ollama through its receipt-bound runtime.");
     return true;
   }
-  revalidatePolicyRequirements(
-    `repair local inference provider ${JSON.stringify(provider)}`,
-    provider,
-  );
   await repairResumedLocalInference(provider, model, agent, {
     ...deps,
     repairLocalInferenceSystemdOverrideOrExit: (options) =>
@@ -1182,7 +1162,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   let compatibleEndpointReasoningEffort = initial.compatibleEndpointReasoningEffort;
   let nimContainer = initial.nimContainer;
   const webSearchConfig = initial.webSearchConfig;
-  const observabilityEnabled = session?.observabilityEnabled === true;
   let forceProviderSelection = initialForceProviderSelection;
   let allowToolsIncompatible = false;
   let skipHostInferenceSmoke = false;
@@ -1295,32 +1274,10 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
   const stateResults: OnboardStateTransitionResult[] = [];
   const retryStateResults: OnboardStateTransitionResult[] = [];
 
-  const revalidatePolicyRequirements = (
-    operation: string,
-    requiredProvider: string | null = provider,
-  ): HarnessPackageAuthority => {
-    const harnessPackageAuthority = session
+  const revalidateHarnessPackage = (operation: string): HarnessPackageAuthority =>
+    session
       ? deps.revalidateHarnessPackageAuthority(session, operation)
       : ({ harnessPackage: null, harnessPackageMigration: null } as const);
-    const routeKnownForProvider =
-      requiredProvider === provider
-        ? hostLocalInferenceRouteKnown
-        : prospectiveHostLocalPolicyRoute?.provider === requiredProvider;
-    deps.preflightPolicyRequirements({
-      gatewayName,
-      sandboxName,
-      agent,
-      selectedMessagingChannels,
-      hermesToolGateways,
-      gpuPassthrough,
-      provider: requiredProvider,
-      hostLocalInferenceRouteOnly: routeKnownForProvider && hostLocalInferenceRouteOnly,
-      webSearchConfig,
-      observabilityEnabled,
-      operation,
-    });
-    return harnessPackageAuthority;
-  };
   const requireSessionRouteAuthority = (
     operation: string,
   ): HarnessPackageAuthority & { readonly reservationSessionId: string } => {
@@ -1329,22 +1286,21 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     }
     return {
       reservationSessionId: session.sessionId,
-      ...revalidatePolicyRequirements(operation),
+      ...revalidateHarnessPackage(operation),
     };
   };
   const setupInferenceRouteAuthority = (operation: string) => {
     if (!session?.sessionId) {
       throw new Error(`Cannot ${operation}: onboarding session route owner is missing`);
     }
-    const harnessPackageAuthority = revalidatePolicyRequirements(operation);
+    const harnessPackageAuthority = revalidateHarnessPackage(operation);
     return {
       reservationSessionId: session.sessionId,
       harnessPackageAuthority,
     };
   };
 
-  revalidatePolicyRequirements("select an inference provider");
-
+  revalidateHarnessPackage("select an inference provider");
   while (true) {
     // Drop a context window auto-detected by a prior compatible-endpoint pass
     // before every provider-selection path — fresh, resume, and repair — so a
@@ -1407,22 +1363,16 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       // gateway-owned llama.cpp lifecycle before the selection shortcut can
       // skip setup. The dependency is a no-op for operator-attached llama.cpp
       // routes because those routes have no matching managed owner state.
-      revalidatePolicyRequirements(
-        `recover managed runtime for inference provider ${JSON.stringify(provider)}`,
-      );
       await ensureLegacyManagedLlamaCppResumeReady(
         earlyManagedHostLocalLifecycleSelection,
         provider,
         sandboxName,
         deps.ensureManagedLlamaCppResumeReady,
-        (operation) => revalidatePolicyRequirements(operation, provider),
       );
-      revalidatePolicyRequirements(`recover inference provider ${JSON.stringify(provider)}`);
       const recovery = await deps.ensureResumeProviderReady(
         gatewayName,
         provider,
         credentialEnv,
-        (operation) => revalidatePolicyRequirements(operation, provider),
       );
       forceInferenceSetup ||= recovery.forceInferenceSetup;
       credentialEnv = recovery.credentialEnv;
@@ -1482,7 +1432,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         forceInferenceSetup = true;
         deps.log("  [resume] Refreshing compatible-endpoint inference route for messaging.");
       }
-      revalidatePolicyRequirements("record resumed provider selection");
       deps.skippedStepMessage("provider_selection", `${provider} / ${model}`);
       const selectedAgentName = (agent as { name?: string } | null)?.name;
       if ((!selectedAgentName || selectedAgentName === "openclaw") && reusableResumeSandboxName) {
@@ -1508,7 +1457,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         resumedSelection.provider,
         resumedSelection.model,
         agent,
-        revalidatePolicyRequirements,
         forceInferenceSetup,
         deps,
       );
@@ -1517,7 +1465,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       // Station resume wrapper restores the exact provider/model as non-interactive env input,
       // so this re-runs the failed managed install without presenting selection prompts and
       // obtains a fresh checkpoint identity before the provider step is committed.
-      revalidatePolicyRequirements("record provider selection start");
       await deps.startRecordedStep("provider_selection");
       const recoverRecordedProvider = providerRecovery.shouldRecover();
       const selection = await withProviderSelectionTrace(
@@ -1546,10 +1493,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               return preflight.ok || isAdvisoryGatewayRouteConflict(preflight.result);
             },
             providerRecovery.sessionId,
-            (route, operation) => {
-              resolveProspectiveHostLocalPolicyRoute(route);
-              revalidatePolicyRequirements(operation, route.provider ?? null);
-            },
+            (route) => resolveProspectiveHostLocalPolicyRoute(route),
           ),
       );
       model = selection.model;
@@ -1629,7 +1573,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         preferredInferenceApi,
       });
     }
-    revalidatePolicyRequirements(`configure inference provider ${JSON.stringify(provider)}`);
     if (
       shouldRecordProviderSelection &&
       (authoritativeResumeConfig || effectiveResume) &&
@@ -1740,7 +1683,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           const inferenceOptions = {
             gatewayName,
             allowToolsIncompatible,
-            revalidatePolicyRequirements,
             ...(skipHostInferenceSmoke ? { skipHostInferenceSmoke } : {}),
             ...(reuseGatewayCredentialWithoutLocalKey
               ? { reuseGatewayCredentialWithoutLocalKey }
@@ -1762,11 +1704,8 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             selectedProvider,
             selectedModel,
             credentialEnv,
-            () => {
-              revalidatePolicyRequirements(
-                `configure inference provider ${JSON.stringify(provider)}`,
-              );
-              return deps.setupInference(
+            () =>
+              deps.setupInference(
                 confirmedSandboxName,
                 selectedModel,
                 selectedProvider,
@@ -1775,8 +1714,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
                 hermesAuthMethod,
                 hermesToolGateways,
                 inferenceOptions,
-              );
-            },
+              ),
           );
         } finally {
           clearStagedCredentialEnv(deps, credentialEnv);
@@ -1790,7 +1728,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           forceProviderSelection = true;
           continue;
         }
-        revalidatePolicyRequirements("record successful resumed inference configuration");
         session = await deps.recordStepComplete(
           "inference",
           deps.toSessionUpdates({
@@ -1803,7 +1740,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             hermesToolGateways,
           }),
         );
-        revalidatePolicyRequirements("finish successful resumed inference configuration");
         break;
       }
       const sandboxStepComplete = session?.steps?.sandbox?.status === "complete";
@@ -1831,9 +1767,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               credentialEnv,
               preferredInferenceApi,
             });
-            revalidatePolicyRequirements(
-              `reconcile model router for inference provider ${JSON.stringify(provider)}`,
-            );
             try {
               await deps.reconcileModelRouter();
             } catch (err) {
@@ -1842,9 +1775,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
               );
               deps.exitProcess(1);
             }
-            revalidatePolicyRequirements(
-              `update routed inference provider ${JSON.stringify(provider)}`,
-            );
             const reupserted = deps.reupsertRoutedProvider(
               gatewayName,
               selectedProvider,
@@ -1923,14 +1853,12 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           deps.exitProcess(1);
         }
       }
-      revalidatePolicyRequirements("record reused inference setup");
       deps.skippedStepMessage("inference", `${provider} / ${model}`);
       await deps.recordStateSkipped("inference", {
         reason: "resume",
         provider,
         model,
       });
-      revalidatePolicyRequirements("record successful reused inference configuration");
       if (nimContainer && sandboxName) deps.registryUpdateSandbox(sandboxName, { nimContainer });
       session = await deps.recordStepComplete(
         "inference",
@@ -1944,7 +1872,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
           hermesToolGateways,
         }),
       );
-      revalidatePolicyRequirements("finish successful reused inference configuration");
       break;
     }
 
@@ -2001,7 +1928,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         !effectiveResume &&
         !deferProviderSelectionUntilInference
       ) {
-        revalidatePolicyRequirements("record reviewed provider selection");
         session = await deps.recordStepComplete(
           "provider_selection",
           deps.toSessionUpdates({
@@ -2023,7 +1949,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       // secret-free route. Do not start or persist the legacy host Ollama
       // proxy alongside it; that would leave cross-engine residue before the
       // provider-owned transaction can prove and commit its authority.
-      revalidatePolicyRequirements(`prepare local inference provider ${JSON.stringify(provider)}`);
       const preparedOllamaProxyToken = await prepareSelectedLocalProvider(
         activeHostLocalInferenceSetupOptions.hostLocalInference,
         provider,
@@ -2032,7 +1957,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
       const inferenceOptions = {
         gatewayName,
         allowToolsIncompatible,
-        revalidatePolicyRequirements,
         ...(preparedOllamaProxyToken ? { preparedOllamaProxyToken } : {}),
         ...(skipHostInferenceSmoke ? { skipHostInferenceSmoke } : {}),
         ...(reuseGatewayCredentialWithoutLocalKey ? { reuseGatewayCredentialWithoutLocalKey } : {}),
@@ -2050,16 +1974,14 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         ),
         ...activeHostLocalInferenceSetupOptions,
       };
-      revalidatePolicyRequirements("record inference setup start");
       await deps.startRecordedStep("inference", { provider, model });
       inferenceResult = await withInferenceTrace(
         confirmedSandboxName,
         selectedProvider,
         selectedModel,
         credentialEnv,
-        () => {
-          revalidatePolicyRequirements(`configure inference provider ${JSON.stringify(provider)}`);
-          return deps.setupInference(
+        () =>
+          deps.setupInference(
             confirmedSandboxName,
             selectedModel,
             selectedProvider,
@@ -2068,8 +1990,7 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
             hermesAuthMethod,
             hermesToolGateways,
             inferenceOptions,
-          );
-        },
+          ),
       );
     } finally {
       clearStagedCredentialEnv(deps, credentialEnv);
@@ -2092,13 +2013,11 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
     endpointUrl = hostLocalRoute.endpointUrl;
     endpointSource = hostLocalRoute.endpointSource;
     onboardEndpointUrl = hostLocalRoute.onboardEndpointUrl;
-    revalidatePolicyRequirements("record inference runtime metadata");
     if (nimContainer && sandboxName) deps.registryUpdateSandbox(sandboxName, { nimContainer });
     if (deferProviderSelectionUntilInference) {
       // Provider selection remains in progress until its inference route has
       // configured successfully. This retains the selected provider/model for
       // interruption recovery without claiming a usable route prematurely.
-      revalidatePolicyRequirements("record successful deferred provider selection");
       session = await deps.recordStepComplete(
         "provider_selection",
         deps.toSessionUpdates({
@@ -2118,7 +2037,6 @@ export async function handleProviderInferenceState<Gpu, Agent, Host>({
         }),
       );
     }
-    revalidatePolicyRequirements("record successful inference configuration");
     session = await deps.recordStepComplete(
       "inference",
       deps.toSessionUpdates({

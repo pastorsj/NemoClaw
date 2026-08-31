@@ -223,7 +223,6 @@ describe("remote dashboard bind production lifecycle", () => {
         agent: { name: "openclaw" } as never,
         agentVersionKnown: true,
         imageTag: null,
-        appliedPolicies: [],
         plannedMessagingState: undefined,
         hermesToolGateways: [],
         hermesDashboardState: { enabled: false, config: null },

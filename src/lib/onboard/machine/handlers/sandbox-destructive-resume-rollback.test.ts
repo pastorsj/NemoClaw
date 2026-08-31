@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createSession } from "../../../state/onboard-session";
-import * as registry from "../../../state/registry";
 import type { SandboxEntry } from "../../../state/registry";
 import { detectMessagingChannelsFromEnv } from "../../messaging-channel-setup";
 import { fingerprintSandboxRegistryEntry } from "../../sandbox-recreate-transaction";
@@ -16,11 +15,6 @@ vi.mock("../../messaging-channel-setup", () => ({
 }));
 
 vi.mocked(detectMessagingChannelsFromEnv).mockReturnValue([]);
-
-beforeEach(() => {
-  vi.spyOn(registry, "getBaselineExclusionTransition").mockReturnValue(null);
-  vi.spyOn(registry, "getBaselineExclusions").mockReturnValue([]);
-});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -45,9 +39,6 @@ describe("handleSandboxState journaled replacement failure", () => {
       preferredInferenceApi: "openai-completions",
       toolDisclosure: "progressive",
       webSearchEnabled: true,
-      baselineExclusions: [
-        { version: 1 as const, agent: "openclaw", key: "nous_research", digest: "abc" },
-      ],
     } satisfies SandboxEntry;
     const journal = bindJournaledRecreate(session);
     const getSandboxRegistryEntry = vi.fn(() => sourceEntry);
