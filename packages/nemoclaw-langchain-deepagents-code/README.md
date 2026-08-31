@@ -106,4 +106,4 @@ Tests that exercise the composed build and current NemoClaw boundaries run throu
 [`packages/README.md`](../README.md) with package ID `langchain-deepagents-code`. The composed
 rehearsal builds an exact temporary NemoClaw revision, overlays only this package, runs the complete
 package command, and verifies `nemoclaw harness install langchain-deepagents-code`,
-`nemoclaw harness list`, and the temporary-home receipt.
+the human inventory, and the receipt-verified digest from `nemoclaw harness list --json`.

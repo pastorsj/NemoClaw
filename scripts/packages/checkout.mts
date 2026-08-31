@@ -13,7 +13,7 @@ import { makeManagedOutputWritable } from "../build-harnesses.mts";
 
 const HARNESS_ID = /^[a-z][a-z0-9-]{0,62}$/u;
 const EXACT_COMMIT_SHA = /^[a-f0-9]{40}$/u;
-const RECEIPT_DIGEST = /^[a-f0-9]{64}$/u;
+const HARNESS_CONTENT_DIGEST = /^[a-f0-9]{64}$/u;
 const COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
 // Keep the private rehearsal root compact. Darwin limits Unix-domain socket
 // paths, and tools such as tsx add their own directories beneath TMPDIR.
@@ -517,33 +517,62 @@ function materializeExactCoreRevision(
   fs.rmSync(archivePath, { force: true });
 }
 
-function readInstalledDigest(home: string, packageId: string): string {
-  const receiptPath = path.join(
-    home,
-    ".nemoclaw",
-    "harnesses",
-    `nemoclaw-${packageId}`,
-    ".nemoclaw-install.json",
-  );
-  let receipt: unknown;
+function requireExactJsonRecord(
+  value: unknown,
+  fields: ReadonlySet<string>,
+): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Candidate package inventory is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== fields.size || keys.some((key) => !fields.has(key))) {
+    throw new Error("Candidate package inventory is invalid");
+  }
+  return record;
+}
+
+/** Read one receipt-verified installed digest from public CLI inventory JSON. */
+export function readInstalledHarnessDigest(source: string, packageId: string): string {
+  let inventory: unknown;
   try {
-    receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
-  } catch (error) {
-    throw new Error(`Candidate package installation receipt is invalid: ${receiptPath}`, {
-      cause: error,
-    });
+    inventory = JSON.parse(source);
+  } catch {
+    throw new Error("Candidate package inventory is invalid");
   }
+  const record = requireExactJsonRecord(
+    inventory,
+    new Set(["schemaVersion", "installed", "available"]),
+  );
   if (
-    !receipt ||
-    typeof receipt !== "object" ||
-    Array.isArray(receipt) ||
-    Object.keys(receipt).length !== 1 ||
-    typeof (receipt as Record<string, unknown>).installedDigest !== "string" ||
-    !RECEIPT_DIGEST.test((receipt as Record<string, string>).installedDigest)
+    record.schemaVersion !== 1 ||
+    !Array.isArray(record.installed) ||
+    !Array.isArray(record.available)
   ) {
-    throw new Error(`Candidate package installation receipt is invalid: ${receiptPath}`);
+    throw new Error("Candidate package inventory is invalid");
   }
-  return (receipt as Record<string, string>).installedDigest;
+  const installed = record.installed.map((row) =>
+    requireExactJsonRecord(row, new Set(["id", "displayName", "health", "identity"])),
+  );
+  const matching = installed.filter(({ id }) => id === packageId);
+  if (matching.length !== 1 || matching[0].health !== "healthy") {
+    throw new Error("Candidate package inventory is invalid");
+  }
+  const identity = requireExactJsonRecord(
+    matching[0].identity,
+    new Set(["kind", "id", "packageVersion", "contentDigest"]),
+  );
+  if (
+    identity.kind !== "agent-runtime" ||
+    identity.id !== packageId ||
+    typeof identity.packageVersion !== "string" ||
+    identity.packageVersion.length === 0 ||
+    typeof identity.contentDigest !== "string" ||
+    !HARNESS_CONTENT_DIGEST.test(identity.contentDigest)
+  ) {
+    throw new Error("Candidate package inventory is invalid");
+  }
+  return identity.contentDigest;
 }
 
 function assertInstalledPackageListed(output: string, packageId: string): void {
@@ -573,7 +602,6 @@ function runPackageOnlyRehearsal(
 function runComposedRehearsal(
   options: PackageCheckoutOptions,
   rehearsalRoot: string,
-  home: string,
   env: NodeJS.ProcessEnv,
   runCommand: CheckoutCommandRunner,
 ): PackageCheckoutResult {
@@ -638,7 +666,15 @@ function runComposedRehearsal(
     purpose: "list installed harnesses",
   });
   assertInstalledPackageListed(listOutput, options.packageId);
-  const installedDigest = readInstalledDigest(home, options.packageId);
+  const { stdout: inventoryOutput } = runCommand({
+    executable: process.execPath,
+    args: [cliPath, "harness", "list", "--json"],
+    cwd: coreRoot,
+    env,
+    output: "capture",
+    purpose: "read installed harness digest",
+  });
+  const installedDigest = readInstalledHarnessDigest(inventoryOutput, options.packageId);
   return {
     mode: "composed",
     packageId: options.packageId,
@@ -669,7 +705,9 @@ export function runPackageCheckoutRehearsal(
 
   const candidatePackageDir = path.resolve(options.candidatePackageDir);
   assertCandidatePackageMetadata(candidatePackageDir, options.packageId);
-  const temporaryParentDir = path.resolve(options.temporaryParentDir ?? os.tmpdir());
+  const selectedTemporaryParentDir = path.resolve(options.temporaryParentDir ?? os.tmpdir());
+  assertRegularDirectory(selectedTemporaryParentDir, "Temporary parent directory");
+  const temporaryParentDir = fs.realpathSync.native(selectedTemporaryParentDir);
   assertRegularDirectory(temporaryParentDir, "Temporary parent directory");
   const rehearsalRoot = fs.mkdtempSync(path.join(temporaryParentDir, REHEARSAL_PREFIX));
   try {
@@ -706,7 +744,7 @@ export function runPackageCheckoutRehearsal(
         runCommand,
       );
     }
-    return runComposedRehearsal(options, rehearsalRoot, home, env, runCommand);
+    return runComposedRehearsal(options, rehearsalRoot, env, runCommand);
   } finally {
     prepareCheckoutRootRemoval(rehearsalRoot);
     fs.rmSync(rehearsalRoot, { recursive: true, force: true });
@@ -756,8 +794,10 @@ function readCliOptions(args: readonly string[]): PackageCheckoutOptions {
 /** Format the durable evidence emitted after the private rehearsal workspace is removed. */
 export function formatCheckoutResult(result: PackageCheckoutResult): string {
   const revision = result.coreCommit ? ` against NemoClaw ${result.coreCommit}` : "";
-  const receipt = result.installedDigest ? ` Installed receipt: ${result.installedDigest}.` : "";
-  return `${result.mode} rehearsal passed for ${result.packageId}${revision}.${receipt}`;
+  const digestEvidence = result.installedDigest
+    ? ` Installed digest: ${result.installedDigest}.`
+    : "";
+  return `${result.mode} rehearsal passed for ${result.packageId}${revision}.${digestEvidence}`;
 }
 
 function main(): void {
