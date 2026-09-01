@@ -70,9 +70,14 @@ export function requireAgentDockerfilePath(
 export function resolveLiveE2eWorkloadSourceEnv(input: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const targetId = input.E2E_TARGET_ID ?? process.env.E2E_TARGET_ID;
   const source = input.E2E_WORKLOAD_SOURCE ?? process.env.E2E_WORKLOAD_SOURCE;
-  if (!targetId || source !== "local-dockerfile" || input.NEMOCLAW_FROM_DOCKERFILE) return input;
+  if (!targetId || source !== "local-dockerfile") return input;
+  const localBuildEnvironment = { ...input, NEMOCLAW_SANDBOX_PREBUILD: "1" };
+  if (input.NEMOCLAW_FROM_DOCKERFILE) return localBuildEnvironment;
   const agentName = input.NEMOCLAW_AGENT ?? process.env.NEMOCLAW_AGENT ?? "openclaw";
-  return { ...input, NEMOCLAW_FROM_DOCKERFILE: requireAgentDockerfilePath(agentName, input) };
+  return {
+    ...localBuildEnvironment,
+    NEMOCLAW_FROM_DOCKERFILE: requireAgentDockerfilePath(agentName, input),
+  };
 }
 
 export interface ShellProbeResult {
