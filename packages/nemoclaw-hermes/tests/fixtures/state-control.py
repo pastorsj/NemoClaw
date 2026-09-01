@@ -1646,24 +1646,32 @@ with tempfile.TemporaryDirectory() as root:
         )
         broker_before = os.path.getsize(heartbeat_path)
         writer_before = os.path.getsize(mutation_path)
-        time.sleep(0.15)
-        results["broker_guard_broker_running"] = (
-            os.path.getsize(heartbeat_path) > broker_before
-        )
-        results["broker_guard_writer_held"] = (
-            os.path.getsize(mutation_path) == writer_before
-        )
-        selected = 0
-        status = 0
         deadline = time.monotonic() + 2
+        broker_running = False
+        writer_held = True
+        writer_stopped = False
         while time.monotonic() < deadline:
-            selected, status = os.waitpid(writer_pid, os.WUNTRACED | os.WNOHANG)
-            if selected == writer_pid and os.WIFSTOPPED(status):
+            if os.path.getsize(mutation_path) != writer_before:
+                writer_held = False
+                break
+            if os.path.getsize(heartbeat_path) > broker_before:
+                broker_running = True
+            if not writer_stopped:
+                selected, status = os.waitpid(
+                    writer_pid,
+                    os.WUNTRACED | os.WNOHANG,
+                )
+                writer_stopped = (
+                    selected == writer_pid and os.WIFSTOPPED(status)
+                )
+            if broker_running and writer_stopped:
                 break
             time.sleep(0.01)
-        results["broker_guard_writer_stopped"] = (
-            selected == writer_pid and os.WIFSTOPPED(status)
-        )
+        if writer_held:
+            writer_held = os.path.getsize(mutation_path) == writer_before
+        results["broker_guard_broker_running"] = broker_running
+        results["broker_guard_writer_held"] = writer_held
+        results["broker_guard_writer_stopped"] = writer_stopped
     finally:
         os.close(ready_read)
         if not controller_waited:
