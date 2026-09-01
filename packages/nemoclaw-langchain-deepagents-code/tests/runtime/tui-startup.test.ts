@@ -542,6 +542,32 @@ describe("Deep Agents Code TUI startup check helpers", () => {
   const redactsSecret = (token: string) =>
     runTuiStartupCheckHelper('printf "%s" "$TOKEN" | redact_secrets', { TOKEN: token });
 
+  const inspectSecretSamples = (samples: string[]) => {
+    const fieldSeparator = "\0";
+    const output = execFileSync("bash", ["-s", "--", ...samples], {
+      encoding: "utf8",
+      env: process.env,
+      input: `${tuiStartupCheckSource}
+for token in "$@"; do
+  if printf "%s" "$token" | contains_secret; then printf 'secret\\0'; else printf 'clean\\0'; fi
+  printf "%s" "$token" | redact_secrets
+  printf '\\0'
+done
+`,
+      timeout: 15_000,
+    });
+    const fields = output.split(fieldSeparator);
+    const trailingField = fields.pop();
+    if (trailingField !== "" || fields.length !== samples.length * 2) {
+      throw new Error("TUI secret inspection returned an invalid result record");
+    }
+
+    return samples.map((_sample, index) => ({
+      detection: fields[index * 2],
+      redacted: fields[index * 2 + 1],
+    }));
+  };
+
   it(
     "detects and redacts every canonical secret family in TUI startup artifacts",
     { timeout: 30_000 },
@@ -735,18 +761,25 @@ describe("Deep Agents Code TUI startup check helpers", () => {
       ].map(fingerprint);
       expect([...canonicalSamples.keys()]).toEqual(canonicalFingerprints);
 
-      [...canonicalSamples.values(), ...extraSamples].forEach(({ name, sample, rawSecret }) => {
-        expect(detectsSecret(sample), `${name} should be detected`).toBe("secret");
-        const redacted = redactsSecret(sample);
+      const samples = [...canonicalSamples.values(), ...extraSamples];
+      const inspections = inspectSecretSamples(samples.map(({ sample }) => sample));
+      let langsmithPtRedaction: string | undefined;
+      let langsmithSkRedaction: string | undefined;
+
+      samples.forEach(({ name, sample, rawSecret }, index) => {
+        const { detection, redacted } = inspections[index];
+        expect(detection, `${name} should be detected`).toBe("secret");
         expect(redacted, `${name} should include a redaction marker`).toContain(
           "[REDACTED_SECRET]",
         );
         expect(redacted, `${name} should not retain the raw secret`).not.toContain(
           rawSecret ?? sample,
         );
+        if (name === "langsmith_pt") langsmithPtRedaction = redacted;
+        if (name === "langsmith_sk") langsmithSkRedaction = redacted;
       });
-      expect(redactsSecret(langsmithPt)).toBe("[REDACTED_SECRET]");
-      expect(redactsSecret(langsmithSk)).toBe("[REDACTED_SECRET]");
+      expect(langsmithPtRedaction).toBe("[REDACTED_SECRET]");
+      expect(langsmithSkRedaction).toBe("[REDACTED_SECRET]");
     },
   );
 
