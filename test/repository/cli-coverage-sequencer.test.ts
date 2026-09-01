@@ -117,9 +117,9 @@ describe("stable CLI coverage sharding", () => {
     expect(Object.fromEntries(owners)).toEqual({
       "cli:src/lib/example.test.ts": 6,
       "e2e-support:test/e2e/support/example.test.ts": 1,
-      "integration:test/runtime/sandbox/config-write.test.ts": 6,
-      "integration:test/credentials/local-credential-helper-fields.test.ts": 5,
-      "integration:test/regular-0.test.ts": 4,
+      "integration:test/runtime/sandbox/config-write.test.ts": 7,
+      "integration:test/credentials/local-credential-helper-fields.test.ts": 1,
+      "integration:test/regular-0.test.ts": 8,
     });
   });
 
