@@ -244,7 +244,9 @@ describe("gateway serving watchdog (#4710, #7377)", () => {
       curlPlan: [7, 7, 7, 7],
       env: { NEMOCLAW_GATEWAY_WATCHDOG_BOOT_GRACE_PROBES: "1000" },
       expectKill: false,
-      settleSeconds: 1.2,
+      // The fifth probe starts only after the fourth has been classified and
+      // its boot-grace diagnostic has been emitted.
+      settleProbes: 5,
     });
     try {
       expect(result.status, `script failed: ${result.stderr}`).toBe(0);

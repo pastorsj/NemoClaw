@@ -355,8 +355,9 @@ process.stderr.write('FailoverError: token=123456:LATER\\n');
       spawnSync(
         "bash",
         [
+          "--noprofile",
           "--norc",
-          "-lc",
+          "-c",
           `source ${JSON.stringify(proxyEnv)}; printf 'NODE_OPTIONS=%s\\n' "$NODE_OPTIONS"`,
         ],
         {
