@@ -7,7 +7,7 @@ import type { BackupOptions, SnapshotRestoreOptions } from "../../src/lib/state/
 
 type SnapshotAuthorityReader = Pick<
   typeof import("../../src/lib/state/sandbox"),
-  "captureSnapshotRestoreAuthority" | "getLatestBackup"
+  "captureSnapshotRestoreAuthority" | "readSandboxStateBackupManifest"
 >;
 
 export function createSnapshotHarnessPackageFixture(agentId: string): HarnessPackageIdentity {
@@ -36,8 +36,10 @@ export function createSnapshotRestoreAuthorityFixture(
 ): Required<
   Pick<SnapshotRestoreOptions, "agentDefinition" | "authority" | "validateBeforeMutation">
 > {
-  const manifest = state.getLatestBackup(sandboxName);
-  if (!manifest) throw new Error(`No snapshot fixture exists for '${sandboxName}'`);
+  const manifest = state.readSandboxStateBackupManifest(backupPath);
+  if (!manifest || manifest.sandboxName !== sandboxName) {
+    throw new Error(`No matching snapshot fixture exists for '${sandboxName}'`);
+  }
   const authority = state.captureSnapshotRestoreAuthority(backupPath, manifest);
   if (!authority) throw new Error(`Could not capture snapshot authority for '${sandboxName}'`);
   return {
