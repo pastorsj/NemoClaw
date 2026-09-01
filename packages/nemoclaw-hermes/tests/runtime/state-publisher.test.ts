@@ -633,9 +633,7 @@ describe("Hermes runtime state mutation publisher", () => {
   });
 
   it("retains the mutable operation without a receipt when final posture verification fails (#9485)", () => {
-    const failures = harnessResult.mutable_verification_failures as Array<
-      Record<string, unknown>
-    >;
+    const failures = harnessResult.mutable_verification_failures as Array<Record<string, unknown>>;
     expect(failures).toHaveLength(2);
     const retainedFailure = {
       failure: "publisher-state-posture-invalid",
