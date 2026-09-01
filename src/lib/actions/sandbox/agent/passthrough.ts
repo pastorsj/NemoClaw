@@ -10,10 +10,9 @@
 //
 //    - Invalid state: the local registry is the source of truth for which
 //      agent a sandbox runs (openclaw vs hermes vs future variants).
-//      Forwarding to `openclaw agent` against a non-OpenClaw sandbox triggers
-//      an in-sandbox binary that does not exist (or exists with incompatible
-//      flags), and would silently bypass the host-side guard intended to
-//      redirect Hermes callers to the sandbox's OpenAI-compatible API port.
+//      Forwarding to `openclaw agent` against a different agent package can
+//      invoke a missing binary or pass incompatible flags. A gateway package
+//      can opt into non-interactive dispatch with a manifest headless command.
 //    - Source boundary: the registry and its exact retained package receipt
 //      are NemoClaw-owned. The in-sandbox invocation, its argv contract, and
 //      its streaming behaviour are owned by the selected upstream agent
@@ -27,7 +26,9 @@
 //      pre-execution probe that reveals the sandbox's configured agent. A
 //      registry read or retained-package resolution failure therefore has to
 //      fail closed — silently degrading to a current bundled definition could
-//      dispatch a command that does not belong to the sandbox image.
+//      dispatch a command that does not belong to the sandbox image. Gateway
+//      packages without a headless command remain unavailable through this
+//      wrapper.
 //
 // 2. Non-ready phase guard (OpenShell phase mirror).
 //
@@ -49,7 +50,7 @@
 //      cannot be parsed for a `Phase:` line at all, the wrapper fails closed
 //      with exit 2 rather than dispatching against an unknown phase.
 //
-// 3. Selector-required guard (OpenClaw argv mirror).
+// 3. Selector-required guard (native OpenClaw argv mirror).
 //
 //    - Invalid state: upstream `openclaw agent` reports the missing-selector
 //      error on stderr but then exits with status `0` (success), so CLI
@@ -60,7 +61,10 @@
 //    - Source boundary: OpenClaw owns the argv contract; NemoClaw mirrors
 //      only the selector requirement (one of `--agent`, `--session-id`,
 //      `--session-key`, `--to`) to surface a clean exit 2 with a usage hint
-//      before sending the argv into the sandbox. The scan stops at the
+//      before sending the argv into the sandbox. A plain positional prompt can
+//      use OpenClaw's receipt-pinned headless command when the manifest defines
+//      one. Calls with OpenClaw selector flags keep the native passthrough. The
+//      scan stops at the
 //      first literal `--`, mirroring the help-token boundary, so a token
 //      that looks like a selector after the argv separator is treated as
 //      OpenClaw's payload and not as the host-side selector.
@@ -89,9 +93,9 @@
 //    `passthrough-dispatch.ts`; the operator-facing failure text lives beside
 //    the help copy in `passthrough-help.ts`.
 //
-// Regression tests: `passthrough.test.ts` covers the Hermes redirect, the
-// forwarded argv, SIGTERM exit status, the registry-miss fallback to OpenClaw,
-// registry and package-resolution fail-closed paths, receipt-pinned terminal
+// Regression tests: `passthrough.test.ts` covers the Hermes redirect, gateway
+// headless dispatch, forwarded argv, SIGTERM exit status, the registry-miss
+// fallback to OpenClaw, registry and package-resolution fail-closed paths, receipt-pinned terminal
 // commands, quoted manifest command rejection, the enforced `--no-tty` argv
 // shape, the non-Ready phase recovery path, the unparseable phase fail-closed
 // path, the OpenClaw no-selector rejection, and the `--flag=value`
@@ -264,7 +268,7 @@ type RegistryReadResult =
     }
   | { kind: "error"; message: string };
 type ResolvedRegistryReadResult = Exclude<RegistryReadResult, { kind: "error" }>;
-type TerminalCommandResult =
+type ManifestCommandResult =
   | { kind: "command"; argv: string[] }
   | { kind: "unsupported"; message: string };
 
@@ -321,22 +325,30 @@ function rejectAgentResolutionError(
   return proc.exit(2);
 }
 
-function splitManifestCommand(command: string): TerminalCommandResult {
+function splitManifestCommand(command: string): ManifestCommandResult {
   const trimmed = command.trim();
   if (!trimmed) return { kind: "command", argv: [] };
   if (/["'\\]/.test(trimmed)) {
     return {
       kind: "unsupported",
       message:
-        "terminal runtime commands must be simple whitespace-delimited argv tokens; quoted or escaped shell syntax is not supported",
+        "runtime manifest commands must be simple whitespace-delimited argv tokens; quoted or escaped shell syntax is not supported",
     };
   }
   return { kind: "command", argv: trimmed.split(/\s+/).filter(Boolean) };
 }
 
-function getTerminalPassthroughCommand(agent: AgentDefinition): TerminalCommandResult {
+function getTerminalPassthroughCommand(agent: AgentDefinition): ManifestCommandResult {
   const command = agent.runtime?.headless_command ?? agent.runtime?.interactive_command ?? "";
   return splitManifestCommand(command);
+}
+
+function getGatewayHeadlessCommand(agent: AgentDefinition): ManifestCommandResult {
+  return splitManifestCommand(agent.runtime?.headless_command ?? "");
+}
+
+function isPlainPromptInvocation(args: readonly string[]): boolean {
+  return args.length > 0 && args.every((arg) => arg.trim().length > 0 && !arg.startsWith("-"));
 }
 
 function getPassthroughCommand(
@@ -379,27 +391,30 @@ function getPassthroughCommand(
   }
 
   const agentName = authority.effectiveAgentId;
+  const agent: AgentDefinition = authority.definition;
   if (agentName === "openclaw") {
     if (hasAgentPassthroughHelpToken(extraArgs)) {
       printAgentPassthroughHelp();
       return null;
     }
-    return ["openclaw", "agent", ...extraArgs];
+    // Selector and option-shaped calls retain OpenClaw's native argv contract.
+    // A positional prompt can use the package-owned headless contract without
+    // changing existing automation that calls `openclaw agent` flags.
+    if (!isPlainPromptInvocation(extraArgs) || !agent.runtime?.headless_command) {
+      return ["openclaw", "agent", ...extraArgs];
+    }
   }
 
-  const agent: AgentDefinition = authority.definition;
-  if (!isTerminalAgent(agent)) {
+  const manifestCommand = isTerminalAgent(agent)
+    ? getTerminalPassthroughCommand(agent)
+    : getGatewayHeadlessCommand(agent);
+  if (manifestCommand.kind === "unsupported") {
+    rejectAgentResolutionError(sandboxName, agentName, manifestCommand.message, proc);
+  }
+  if (manifestCommand.argv.length === 0) {
     rejectNonOpenclawAgent(sandboxName, agentName, proc);
   }
-
-  const terminalCommand = getTerminalPassthroughCommand(agent);
-  if (terminalCommand.kind === "unsupported") {
-    rejectAgentResolutionError(sandboxName, agentName, terminalCommand.message, proc);
-  }
-  if (terminalCommand.argv.length === 0) {
-    rejectNonOpenclawAgent(sandboxName, agentName, proc);
-  }
-  return [...terminalCommand.argv, ...extraArgs];
+  return [...manifestCommand.argv, ...extraArgs];
 }
 
 function isOpenClawPassthroughCommand(command: readonly string[]): boolean {

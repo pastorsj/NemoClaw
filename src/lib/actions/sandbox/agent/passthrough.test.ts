@@ -185,6 +185,72 @@ describe("runAgentPassthrough", () => {
     expect(stderr).not.toMatch(/8642/);
   });
 
+  it("dispatches a plain prompt through a receipt-pinned Hermes headless command", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "0.1.0",
+      contentDigest: "d".repeat(64),
+    };
+    const entry = { agent: "hermes", harnessPackage };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "hermes",
+      effectiveAgentId: "hermes",
+      definition: {
+        name: "hermes",
+        runtime: {
+          kind: "gateway",
+          interactive_command: "hermes",
+          headless_command: "nemoclaw-fabric run --config /sandbox/.hermes/fabric.json",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage,
+      harnessPackageMigration: null,
+    });
+
+    await runAgentPassthrough("hermes-sandbox", { extraArgs: ["Reply with PONG"] });
+
+    expect(resolveLifecycleEligibleSandboxAgentMock).toHaveBeenCalledWith(entry);
+    expect(loadAgentMock).not.toHaveBeenCalled();
+    expect(execMock).toHaveBeenCalledWith(
+      "hermes-sandbox",
+      ["nemoclaw-fabric", "run", "--config", "/sandbox/.hermes/fabric.json", "Reply with PONG"],
+      { tty: false },
+    );
+  });
+
+  it("rejects a receipt-pinned gateway package without a headless command", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "0.1.0",
+      contentDigest: "e".repeat(64),
+    };
+    const entry = { agent: "hermes", harnessPackage };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "hermes",
+      effectiveAgentId: "hermes",
+      definition: {
+        name: "hermes",
+        runtime: { kind: "gateway", interactive_command: "hermes" },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage,
+      harnessPackageMigration: null,
+    });
+    const { writes, exit, proc } = makeProcMock();
+
+    await expect(
+      runAgentPassthrough("hermes-sandbox", { extraArgs: ["Reply with PONG"] }, { process: proc }),
+    ).rejects.toThrow("__exit:2");
+
+    expect(ensureLiveMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledWith(2);
+    expect(writes.join("")).toContain("because it runs 'hermes'");
+  });
+
   it("dispatches NemoCUA through the ordinary terminal-agent headless command (#9649)", async () => {
     const entry = { name: "alpha", agent: "nemocua" };
     getSandboxMock.mockReturnValueOnce(entry as never);
@@ -295,11 +361,32 @@ describe("runAgentPassthrough", () => {
     expect(writes.join("")).toContain("has not been qualified");
   });
 
-  it("forwards extraArgs verbatim to `openclaw agent` for OpenClaw sandboxes with --no-tty enforced", async () => {
+  it("keeps native OpenClaw passthrough when a headless package receives selector flags", async () => {
     const execNonJson = vi.fn(((): never => {
       throw new Error("__exit:0");
     }) as NonNullable<AgentPassthroughDeps["execNonJson"]>);
-    getSandboxMock.mockReturnValueOnce({ agent: "openclaw" });
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "0.1.0",
+      contentDigest: "f".repeat(64),
+    };
+    const entry = { agent: "openclaw", harnessPackage };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: {
+        name: "openclaw",
+        runtime: {
+          kind: "gateway",
+          interactive_command: "openclaw tui",
+          headless_command: "nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage,
+      harnessPackageMigration: null,
+    });
     await expect(
       runAgentPassthrough(
         "alpha",
@@ -313,6 +400,39 @@ describe("runAgentPassthrough", () => {
       "alpha",
       ["openclaw", "agent", "--agent", "work", "--session-id", "s-1", "-m", "ping"],
       expect.anything(),
+    );
+  });
+
+  it("dispatches a plain prompt through a receipt-pinned OpenClaw headless command", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "openclaw",
+      packageVersion: "0.1.0",
+      contentDigest: "1".repeat(64),
+    };
+    const entry = { agent: "openclaw", harnessPackage };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: {
+        name: "openclaw",
+        runtime: {
+          kind: "gateway",
+          interactive_command: "openclaw tui",
+          headless_command: "nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage,
+      harnessPackageMigration: null,
+    });
+
+    await runAgentPassthrough("openclaw-sandbox", { extraArgs: ["Reply with PONG"] });
+
+    expect(execMock).toHaveBeenCalledWith(
+      "openclaw-sandbox",
+      ["nemoclaw-fabric", "run", "--config", "/sandbox/.openclaw/fabric.json", "Reply with PONG"],
+      { tty: false },
     );
   });
 
