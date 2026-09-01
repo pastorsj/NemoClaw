@@ -517,33 +517,10 @@ function execute(
   };
 }
 
-function generatorCommand(agent: ManagedStartupAgent): readonly string[] {
-  switch (agent) {
-    case "openclaw":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/packages/nemoclaw-openclaw/config/generate-config.mts",
-      ];
-    case "hermes":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/opt/nemoclaw-hermes-config/generate-config.ts",
-      ];
-    case "langchain-deepagents-code":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/opt/nemoclaw-deepagents-code/generate-config.ts",
-      ];
-    case "pi":
-      return [
-        "/usr/local/bin/node",
-        "--experimental-strip-types",
-        "/opt/nemoclaw-pi/generate-config.ts",
-      ];
-  }
+function generatorCommand(): readonly string[] {
+  // Every managed image owns this command. Core does not need to know how an
+  // agent runtime represents or generates its native configuration.
+  return ["/usr/local/lib/nemoclaw/generate-config"];
 }
 
 function messagingCommand(
@@ -609,7 +586,7 @@ export function buildManagedStartupImageActionPlan(
         commands.push({
           action: "generate-agent-config",
           runAs: action.runAs,
-          argv: generatorCommand(action.agent),
+          argv: generatorCommand(),
         });
         break;
       }

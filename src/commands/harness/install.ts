@@ -8,8 +8,14 @@ import { getBuildIdentity } from "../../lib/core/version";
 import { isStdinTty } from "../../lib/core/stdin";
 import { prompt } from "../../lib/credentials/store";
 import {
+  isCandidateAgent,
+  isCandidateAgentSelectable,
+  requireCandidateAgentSelectable,
+} from "../../lib/agent/candidate";
+import {
   listHarnessPackageInventory,
   resolveHarnessPackageInstallSelection,
+  type HarnessPackageInventory,
 } from "../../lib/agent-runtime/package/catalog";
 import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
 import { promptForHarnessPackage } from "../../lib/agent-runtime/package/prompt";
@@ -17,12 +23,28 @@ import { promptForHarnessPackage } from "../../lib/agent-runtime/package/prompt"
 export const harnessInstallCommandDependencies = {
   getBuildIdentity,
   installHarnessPackage,
+  isCandidateAgent,
+  isCandidateAgentSelectable,
   isStdinTty,
   listHarnessPackageInventory,
   prompt,
   promptForHarnessPackage,
+  requireCandidateAgentSelectable,
   resolveHarnessPackageInstallSelection,
 };
+
+function selectableHarnessInventory(inventory: HarnessPackageInventory): HarnessPackageInventory {
+  return Object.freeze({
+    ...inventory,
+    available: Object.freeze(
+      inventory.available.filter(
+        ({ id }) =>
+          !harnessInstallCommandDependencies.isCandidateAgent(id) ||
+          harnessInstallCommandDependencies.isCandidateAgentSelectable(id),
+      ),
+    ),
+  });
+}
 
 export default class HarnessInstallCommand extends NemoClawCommand {
   static id = "harness:install";
@@ -55,7 +77,9 @@ export default class HarnessInstallCommand extends NemoClawCommand {
         );
       }
       const selection = await harnessInstallCommandDependencies.promptForHarnessPackage({
-        inventory: harnessInstallCommandDependencies.listHarnessPackageInventory(),
+        inventory: selectableHarnessInventory(
+          harnessInstallCommandDependencies.listHarnessPackageInventory(),
+        ),
         log: (message = "") => this.log(message),
         prompt: harnessInstallCommandDependencies.prompt,
       });
@@ -74,6 +98,7 @@ export default class HarnessInstallCommand extends NemoClawCommand {
 
     const available =
       harnessInstallCommandDependencies.resolveHarnessPackageInstallSelection(selector);
+    harnessInstallCommandDependencies.requireCandidateAgentSelectable(available.id);
     const installed = harnessInstallCommandDependencies.installHarnessPackage({
       packageRoot: available.packageRoot,
       sourceIdentity: {

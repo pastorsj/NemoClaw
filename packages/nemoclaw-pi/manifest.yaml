@@ -1,5 +1,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
+# Data-only capabilities consumed by the NemoClaw agent runtime package contract.
 name: pi
 display_name: "Pi"
 description: "Terminal coding agent with read, bash, edit, and write tools, plus session management"
@@ -20,14 +21,19 @@ managed_image:
 runtime:
   kind: terminal
   interactive_command: "pi"
-  headless_command: "pi --no-approve --print"
+  headless_command: "timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.pi/agent/fabric.json"
   smoke_commands:
     - "pi --version"
+    - "nemoclaw-fabric --version"
     - "test -s /sandbox/.pi/agent/models.json && echo NEMOCLAW_PI_MODELS_OK"
+    - "test -s /sandbox/.pi/agent/fabric.json && echo NEMOCLAW_PI_FABRIC_OK"
     - 'test "$(stat -c %a /sandbox/.pi/agent/models.json)" = 600 && echo NEMOCLAW_PI_MODE_OK'
+    - 'test "$(stat -c %a /sandbox/.pi/agent/fabric.json)" = 600 && echo NEMOCLAW_PI_FABRIC_MODE_OK'
 config:
   dir: /sandbox/.pi/agent
   config_file: models.json
+  shields_files:
+    - fabric.json
   format: json
 state_lock_plan_in_image: false
 state_dirs:

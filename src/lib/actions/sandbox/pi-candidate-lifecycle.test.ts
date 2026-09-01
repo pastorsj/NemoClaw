@@ -188,38 +188,32 @@ describe("Pi candidate operational surfaces", () => {
     );
   });
 
-  it("keeps an explicitly qualified Pi outside installed package selection (#7927)", async () => {
+  it("selects qualified Pi through its installed package authority (#7927)", async () => {
     const env = qualify();
     const packageFixture = createHarnessPackageFixture();
     const prompt = vi.fn(async () => "1");
-    packageFixture.installMany(["openclaw", "hermes"]);
+    const installed = packageFixture.install("pi");
 
     try {
-      const selected = await selectOnboardHarnessPackage(
-        {
-          agentFlag: "pi",
-          bundledRoot: packageFixture.bundledRoot,
-          storeRoot: packageFixture.storeRoot,
-          canPrompt: true,
-          environment: env,
-          log: vi.fn(),
-          prompt,
-        },
-        {
-          listHarnessPackageInventory: () => {
-            throw new Error("qualified Pi must not consult standard package inventory");
-          },
-        },
-      );
+      const selected = await selectOnboardHarnessPackage({
+        agentFlag: "pi",
+        bundledRoot: packageFixture.bundledRoot,
+        storeRoot: packageFixture.storeRoot,
+        canPrompt: true,
+        environment: env,
+        log: vi.fn(),
+        prompt,
+      });
 
       expect(selected).toMatchObject({
-        kind: "qualified-agent",
+        kind: "package",
         recordedAgent: "pi",
-        harnessPackage: null,
-        resolvedPackage: null,
+        harnessPackage: installed.identity,
+        resolvedPackage: { identity: installed.identity },
       });
-      assert.equal(selected.kind, "qualified-agent");
+      assert.equal(selected.kind, "package");
       expect(selected.effectiveDefinition.name).toBe("pi");
+      expect(selected.effectiveDefinition.packageRoot).toBe(installed.packageRoot);
       expect(prompt).not.toHaveBeenCalled();
     } finally {
       packageFixture.cleanup();

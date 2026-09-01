@@ -4,7 +4,6 @@
 import { isDeepStrictEqual } from "node:util";
 import path from "node:path";
 
-import { isCandidateAgent } from "../../agent/candidate";
 import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
   getBundledHarnessPackageRoot,
@@ -166,7 +165,7 @@ function effectiveAgentId(value: unknown, bundledHarnesses: BundledHarnessCatalo
   if (typeof agentId !== "string" || agentId.length === 0) {
     throw reconciliationError("an owner has an invalid harness identifier");
   }
-  if (bundledHarnesses.has(agentId) || agentId === "nemocua" || isCandidateAgent(agentId)) {
+  if (bundledHarnesses.has(agentId) || agentId === "nemocua") {
     return agentId;
   }
   throw reconciliationError("an owner uses an unsupported harness identifier");
@@ -261,7 +260,7 @@ function inspectPeerAuthority(
   readonly state: ReturnType<typeof inspectHarnessPackageState>;
 } {
   const agentId = effectiveAgentId(peer.value.agent, bundledHarnesses);
-  const candidate = agentId === "nemocua" || isCandidateAgent(agentId);
+  const candidate = agentId === "nemocua";
   const state = inspectHarnessPackageState(
     peer.value.harnessPackage,
     peer.value.harnessPackageMigration,

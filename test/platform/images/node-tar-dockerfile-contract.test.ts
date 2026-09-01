@@ -50,13 +50,13 @@ const dockerfiles = [
     patchCount: 1,
   },
   {
-    file: "agents/pi/Dockerfile.base",
+    file: "packages/nemoclaw-pi/Dockerfile.base",
     installsPatchDownloader: true,
     installsWithNpm: true,
     patchCount: 2,
   },
   {
-    file: "agents/pi/Dockerfile",
+    file: "packages/nemoclaw-pi/Dockerfile",
     installsPatchDownloader: false,
     installsWithNpm: false,
     patchCount: 1,
@@ -74,7 +74,7 @@ const pinnedBaseDockerfiles = [
   "Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
-  "agents/pi/Dockerfile.base",
+  "packages/nemoclaw-pi/Dockerfile.base",
 ] as const;
 const reviewedNodeBases = new Set<string>(NODE_BASES_REQUIRING_BUNDLED_NPM_TAR_PATCH);
 
@@ -288,7 +288,7 @@ describe("node-tar image remediation contract", () => {
     "Dockerfile.base",
     "packages/nemoclaw-hermes/Dockerfile.base",
     "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
-    "agents/pi/Dockerfile.base",
+    "packages/nemoclaw-pi/Dockerfile.base",
   ])("installs curl before patching the bundled npm tar in $file", (file) => {
     const source = completedStage(fs.readFileSync(path.join(repoRoot, file), "utf8"));
     const curlInstall = source.indexOf("curl=");
@@ -467,7 +467,7 @@ describe("reviewed npm image remediation contract", () => {
     { file: "Dockerfile.base", installsWithNpm: true },
     { file: "packages/nemoclaw-hermes/Dockerfile.base", installsWithNpm: true },
     { file: "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base", installsWithNpm: false },
-    { file: "agents/pi/Dockerfile.base", installsWithNpm: true },
+    { file: "packages/nemoclaw-pi/Dockerfile.base", installsWithNpm: true },
   ])(
     "patches tar before and after upgrading the complete npm tree in $file",
     ({ file, installsWithNpm }) => {

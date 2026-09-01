@@ -12,6 +12,7 @@ import {
   installRebuildFlowTestHooks,
   makePreparedRecoveryManifest,
 } from "../../../../test/helpers/rebuild-flow-dcode-harness";
+import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import {
   installRebuildHarnessPackage,
   registryPersistence,
@@ -186,6 +187,52 @@ describe("prepared rebuild recovery", () => {
       Array.from({ length: 5 }, () => ["alpha", expectedOwner, expectedRecovery]),
     );
   });
+
+  it.each([
+    ["before rebuild preflight", 1, "Pi candidate qualification receipt was removed"],
+    ["before prepared recovery deletion", 2, "prepared recovery agent authority"],
+    ["at the sandbox delete edge", 3, "prepared recovery agent authority"],
+  ] as const)(
+    "refuses package-backed Pi when qualification is withdrawn %s",
+    async (_edge, withdrawAtResolution, expectedError) => {
+      const piAuthority = makeRebuildAgentAuthority("pi");
+      assert.ok(piAuthority.harnessPackage);
+      const recoveryManifest = {
+        ...schemaV2RecoveryManifest(piAuthority.harnessPackage),
+        agentType: "pi",
+      };
+      let resolutionCount = 0;
+      vi.spyOn(sandboxAgent, "resolveSandboxAgent").mockImplementation((_entry, options) => {
+        resolutionCount++;
+        expect(options).toMatchObject({ requireLifecycleEligibility: true });
+        return resolutionCount === withdrawAtResolution
+          ? (() => {
+              throw new Error("Pi candidate qualification receipt was removed");
+            })()
+          : piAuthority;
+      });
+      const harness = createPreparedRecoveryHarness({
+        agentName: "pi",
+        harnessPackage: piAuthority.harnessPackage,
+        preDeleteLatestManifest: recoveryManifest,
+        sandboxEntry: {
+          agent: "pi",
+          harnessPackageMigration: null,
+        },
+      });
+
+      await expect(
+        harness.rebuildSandbox("alpha", ["--yes"], {
+          throwOnError: true,
+          recoveryManifest,
+        }),
+      ).rejects.toThrow(expectedError);
+
+      expect(resolutionCount).toBe(withdrawAtResolution);
+      expectNoSandboxDelete(harness.runOpenshellSpy);
+      expect(harness.onboardSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["object", "receipt"] as const)(
     "rejects %s drift observed only at the delete edge",

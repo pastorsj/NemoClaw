@@ -166,10 +166,10 @@ describe("onboard session package persistence", () => {
     expect(session.listRetainedSandboxRecoveryRecords()).toEqual([]);
   });
 
-  it("records explicit null only for a qualified candidate recovery", () => {
+  it("records explicit null only for a qualified repository recovery", () => {
     session.saveSession(
       session.createSession({
-        agent: "pi",
+        agent: "nemocua",
         sandboxName: "retained-sb",
         harnessPackage: null,
         harnessPackageMigration: null,

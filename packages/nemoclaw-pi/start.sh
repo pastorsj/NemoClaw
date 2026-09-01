@@ -5,6 +5,8 @@
 # NemoClaw sandbox entrypoint for Pi.
 
 set -euo pipefail
+
+# This package entry point establishes the trusted proxy and runtime boundary.
 unset BASH_ENV ENV
 
 # Sessions and generated configuration are confidential user state, so every
@@ -71,6 +73,7 @@ fi
 
 export PI_OFFLINE=1
 export PI_TELEMETRY=0
+export PI_FABRIC_API_KEY=nemoclaw-managed-inference
 
 # Harden RLIMITs (nproc + nofile) for the long-running Pi process tree. The
 # initial root pass lowers the inherited limits before the privilege transition;
@@ -353,6 +356,7 @@ prepare_runtime_env() {
     printf '%s\n' 'export PATH="/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"'
     printf '%s\n' 'export PI_OFFLINE=1'
     printf '%s\n' 'export PI_TELEMETRY=0'
+    printf '%s\n' 'export PI_FABRIC_API_KEY=nemoclaw-managed-inference'
     printf '%s\n' 'unset ALL_PROXY all_proxy OPENAI_PROXY'
     write_export_if_set HTTP_PROXY
     write_export_if_set HTTPS_PROXY

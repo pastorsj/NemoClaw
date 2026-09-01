@@ -12,7 +12,7 @@ export function makeRebuildAgentAuthority(
   recordedAgent: string | null = null,
 ): ResolvedSandboxAgent {
   const effectiveAgentId = recordedAgent ?? "openclaw";
-  const usesRepositoryAuthority = effectiveAgentId === "pi" || effectiveAgentId === "nemocua";
+  const usesRepositoryAuthority = effectiveAgentId === "nemocua";
   return Object.freeze({
     recordedAgent,
     effectiveAgentId,

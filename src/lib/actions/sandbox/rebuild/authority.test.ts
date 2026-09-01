@@ -1,19 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import path from "node:path";
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { REPOSITORY_ROOT } from "../../../core/repository-root";
 import * as sandboxAgent from "../../../onboard/sandbox-agent";
 import { makeRebuildAgentAuthority } from "../rebuild-flow-test-fixtures";
 import { rebuildAgentAuthoritiesMatch, verifyRecreatedAgentAuthority } from "./authority";
-
-function restoreEnvironmentValue(name: string, previous: string | undefined): void {
-  Reflect.deleteProperty(process.env, name);
-  Object.assign(process.env, previous === undefined ? {} : { [name]: previous });
-}
 
 describe("recreated rebuild agent authority", () => {
   afterEach(() => {
@@ -51,7 +43,7 @@ describe("recreated rebuild agent authority", () => {
         verifyRecreatedAgentAuthority("alpha", owners.authority, owners.entry, owners.session),
       ).toBeNull();
       expect(resolveAgent).toHaveBeenCalledOnce();
-      expect(owners.authority.harnessPackage === null).toBe(recordedAgent !== null);
+      expect(owners.authority.harnessPackage === null).toBe(recordedAgent === "nemocua");
     },
   );
 
@@ -85,8 +77,23 @@ describe("recreated rebuild agent authority", () => {
     ).toContain("receipt or repository definition could not be verified");
   });
 
-  it("rejects a qualified repository definition whose object root changed", () => {
+  it("rejects recreated package-backed Pi after qualification receipt loss", () => {
     const owners = matchingAuthorityOwners("pi");
+    const resolveAgent = vi
+      .spyOn(sandboxAgent, "resolveSandboxAgent")
+      .mockImplementation((_entry, options) => {
+        expect(options).toMatchObject({ requireLifecycleEligibility: true });
+        throw new Error("Pi candidate qualification receipt was removed");
+      });
+
+    expect(
+      verifyRecreatedAgentAuthority("alpha", owners.authority, owners.entry, owners.session),
+    ).toContain("receipt or repository definition could not be verified");
+    expect(resolveAgent).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a qualified repository definition whose object root changed", () => {
+    const owners = matchingAuthorityOwners("nemocua");
     const driftedAuthority = {
       ...owners.authority,
       definition: {
@@ -102,37 +109,17 @@ describe("recreated rebuild agent authority", () => {
     expect(owners.authority.harnessPackage).toBeNull();
   });
 
-  it("rejects Pi after its repository qualification is removed", () => {
-    const enableName = "NEMOCLAW_CANDIDATE_AGENTS";
-    const receiptName = "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT";
-    const previousEnable = process.env[enableName];
-    const previousReceipt = process.env[receiptName];
-    delete process.env[enableName];
-    delete process.env[receiptName];
+  it("rejects NemoCUA after its repository qualification is removed", () => {
+    const authority = sandboxAgent.resolveSandboxAgent(
+      { agent: "nemocua" },
+      { env: { NEMOCLAW_CUA_ENABLED: "1" } },
+    );
+    const entry = { name: "alpha", agent: "nemocua" } as never;
+    const session = { sandboxName: "alpha", agent: "nemocua" } as never;
 
-    try {
-      const authority = sandboxAgent.resolveSandboxAgent(
-        { agent: "pi" },
-        {
-          env: {
-            [enableName]: "1",
-            [receiptName]: path.join(
-              REPOSITORY_ROOT,
-              "ci/pi-agent-qualification-v1-linux-amd64.json",
-            ),
-          },
-        },
-      );
-      const entry = { name: "alpha", agent: "pi" } as never;
-      const session = { sandboxName: "alpha", agent: "pi" } as never;
-
-      expect(verifyRecreatedAgentAuthority("alpha", authority, entry, session)).toContain(
-        "receipt or repository definition could not be verified",
-      );
-    } finally {
-      restoreEnvironmentValue(enableName, previousEnable);
-      restoreEnvironmentValue(receiptName, previousReceipt);
-    }
+    expect(verifyRecreatedAgentAuthority("alpha", authority, entry, session)).toContain(
+      "receipt or repository definition could not be verified",
+    );
   });
 
   const authorityDrifts: Array<

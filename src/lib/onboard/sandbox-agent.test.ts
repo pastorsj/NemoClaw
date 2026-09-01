@@ -93,6 +93,39 @@ function installOpenClawPackage() {
   );
 }
 
+function installPiPackage() {
+  fs.rmSync(sourceRoot, { recursive: true, force: true });
+  fs.mkdirSync(sourceRoot, { recursive: true, mode: 0o700 });
+  writeFixtureFile(
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "pi",
+      displayName: "Pi",
+      packageVersion: "0.1.0",
+      manifest: "packages/nemoclaw-pi/manifest.yaml",
+    })}\n`,
+  );
+  writeFixtureFile(
+    "packages/nemoclaw-pi/manifest.yaml",
+    [
+      "name: pi",
+      "display_name: Pi",
+      "binary_path: /usr/local/bin/pi",
+      "runtime:",
+      "  kind: terminal",
+      "  interactive_command: pi",
+      "",
+    ].join("\n"),
+  );
+  writeFixtureFile("runtime/payload.txt", "pi package\n");
+  return installHarnessPackage(
+    { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+    { storeRoot },
+  );
+}
+
 beforeEach(() => {
   fixtureRoot = fs.mkdtempSync(path.join(TEST_PARENT, "fixture-"));
   fs.chmodSync(fixtureRoot, 0o700);
@@ -255,27 +288,60 @@ describe("sandbox agent authority", () => {
     expect(() => resolveSandboxAgent(entry, { storeRoot })).toThrow(/recorded agent/u);
   });
 
-  it("keeps qualified Pi on repository authority without a fabricated package identity", () => {
+  it("resolves qualified Pi through exact installed package authority", () => {
     const qualification = candidateQualificationEnvironment();
     qualificationFixtures.push(qualification);
     candidateAuthority.digests.push(qualification.receiptDigest);
+    const installed = installPiPackage();
 
-    const resolved = resolveSandboxAgent({ agent: "pi" }, { storeRoot, env: qualification.env });
+    expect(() =>
+      resolveSandboxAgent({ agent: "pi" }, { storeRoot, env: qualification.env }),
+    ).toThrow(/requires legacy package migration/u);
+    const resolved = resolveSandboxAgent(
+      { agent: "pi", harnessPackage: installed.identity },
+      { storeRoot, env: qualification.env, requireLifecycleEligibility: true },
+    );
 
     expect(resolved.recordedAgent).toBe("pi");
     expect(resolved.effectiveAgentId).toBe("pi");
     expect(resolved.definition.name).toBe("pi");
-    expect(resolved.harnessPackage).toBeNull();
+    expect(resolved.definition.packageRoot).toBe(installed.packageRoot);
+    expect(resolved.harnessPackage).toEqual(installed.identity);
     expect(resolved.harnessPackageMigration).toBeNull();
   });
 
-  it("re-reads qualified repository definitions as detached immutable authority", () => {
+  it("rejects an installed Pi package when candidate qualification is unavailable", () => {
+    const installed = installPiPackage();
+
+    expect(() =>
+      resolveSandboxAgent(
+        { agent: "pi", harnessPackage: installed.identity },
+        { storeRoot, env: {}, requireLifecycleEligibility: true },
+      ),
+    ).toThrow(/release candidate.*not selectable/u);
+  });
+
+  it("keeps installed Pi authority inspectable when lifecycle qualification is unavailable", () => {
+    const installed = installPiPackage();
+
+    const resolved = resolveSandboxAgent(
+      { agent: "pi", harnessPackage: installed.identity },
+      { storeRoot, env: {} },
+    );
+
+    expect(resolved.definition.name).toBe("pi");
+    expect(resolved.harnessPackage).toEqual(installed.identity);
+  });
+
+  it("re-reads installed Pi definitions as detached immutable authority", () => {
     const qualification = candidateQualificationEnvironment();
     qualificationFixtures.push(qualification);
     candidateAuthority.digests.push(qualification.receiptDigest);
+    const installed = installPiPackage();
 
-    const first = resolveSandboxAgent({ agent: "pi" }, { storeRoot, env: qualification.env });
-    const second = resolveSandboxAgent({ agent: "pi" }, { storeRoot, env: qualification.env });
+    const entry = { agent: "pi", harnessPackage: installed.identity };
+    const first = resolveSandboxAgent(entry, { storeRoot, env: qualification.env });
+    const second = resolveSandboxAgent(entry, { storeRoot, env: qualification.env });
 
     expect(first.definition).toEqual(second.definition);
     expect(first.definition).not.toBe(second.definition);
@@ -300,12 +366,18 @@ describe("sandbox agent authority", () => {
     expect(resolved.harnessPackageMigration).toBeNull();
   });
 
-  it("rejects package authority on a separately qualified candidate row", () => {
+  it("rejects Pi authority bound to another harness package", () => {
+    const qualification = candidateQualificationEnvironment();
+    qualificationFixtures.push(qualification);
+    candidateAuthority.digests.push(qualification.receiptDigest);
     const installed = installOpenClawPackage();
 
     expect(() =>
-      resolveSandboxAgent({ agent: "pi", harnessPackage: installed.identity }, { storeRoot }),
-    ).toThrow(/must not carry harness package authority/u);
+      resolveSandboxAgent(
+        { agent: "pi", harnessPackage: installed.identity },
+        { storeRoot, env: qualification.env },
+      ),
+    ).toThrow(/does not match/u);
   });
 
   it("accepts an installed legacy backup owner with matching migration provenance", () => {

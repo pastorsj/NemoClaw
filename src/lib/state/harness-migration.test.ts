@@ -47,6 +47,7 @@ const REVIEWED_FIXTURES = Object.freeze([
     packageVersion: "0.1.4",
   },
   { id: "openclaw", displayName: "OpenClaw", packageVersion: "0.1.1" },
+  { id: "pi", displayName: "Pi", packageVersion: "0.1.0" },
 ]);
 
 fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
@@ -289,6 +290,7 @@ describe("legacy harness migration", () => {
     ["openclaw", "openclaw"],
     ["hermes", "hermes"],
     ["langchain-deepagents-code", "langchain-deepagents-code"],
+    ["pi", "pi"],
   ] as const)("maps legacy agent %s to the exact reviewed %s package", (agent, expectedId) => {
     const session = legacySession(agent);
     attachLegacyRecreate(session);
@@ -555,7 +557,7 @@ describe("legacy harness migration", () => {
     expect(() => reconcile(harness, prepared)).toThrow("registry compatibility agent changed");
   });
 
-  it.each(["pi", "nemocua", "unknown-agent"])("rejects non-standard legacy agent %s", (agent) => {
+  it.each(["nemocua", "unknown-agent"])("rejects non-standard legacy agent %s", (agent) => {
     const harness = new MigrationHarness(legacySession(agent), [
       legacyRegistryEntry("owner", agent),
     ]);

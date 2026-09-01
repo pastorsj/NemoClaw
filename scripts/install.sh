@@ -3009,11 +3009,11 @@ reconcile_and_select_installer_harness() {
   local cli_runner="$1" selector="${NEMOCLAW_AGENT:-openclaw}"
   run_installer_harness_reconciliation "$cli_runner"
 
-  # Repository candidates do not participate in the ordinary package store.
-  # The hidden reconciliation command revalidates their qualification and
-  # peer-specific package absence before this selector may bypass installation.
+  # NemoCUA remains the one repository agent outside the package store. The
+  # hidden reconciliation command revalidates its qualification and package
+  # absence before this selector may bypass installation.
   case "$selector" in
-    pi | nemocua) return 0 ;;
+    nemocua) return 0 ;;
   esac
 
   # Automation and an explicit standard selection preserve the established

@@ -3,6 +3,10 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { resolveLifecycleEligibleSandboxAgent } from "../../../onboard/package/package-authority";
+
+type ResolvedSandboxAgent = ReturnType<typeof resolveLifecycleEligibleSandboxAgent>;
+
 const execMock = vi.hoisted(() => vi.fn(async () => {}));
 const ensureLiveMock = vi.hoisted(() =>
   vi.fn(
@@ -25,9 +29,6 @@ const getSandboxMock = vi.hoisted(() =>
         endpointUrl?: string | null;
       } | null,
   ),
-);
-const listAgentsMock = vi.hoisted(() =>
-  vi.fn(() => ["custom-terminal", "hermes", "langchain-deepagents-code", "openclaw"]),
 );
 const loadAgentMock = vi.hoisted(() =>
   vi.fn(
@@ -52,6 +53,18 @@ const loadAgentMock = vi.hoisted(() =>
           : undefined,
     }),
   ),
+);
+const resolveLifecycleEligibleSandboxAgentMock = vi.hoisted(() =>
+  vi.fn((entry: { agent?: string | null }): ResolvedSandboxAgent => {
+    const effectiveAgentId = entry.agent ?? "openclaw";
+    return {
+      recordedAgent: entry.agent ?? null,
+      effectiveAgentId,
+      definition: loadAgentMock(effectiveAgentId) as ResolvedSandboxAgent["definition"],
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    };
+  }),
 );
 const isTerminalAgentMock = vi.hoisted(() =>
   vi.fn((agent: { runtime?: { kind?: string } }) => agent.runtime?.kind === "terminal"),
@@ -78,8 +91,10 @@ vi.mock("../gateway-state", () => ({ ensureLiveSandboxOrExit: ensureLiveMock }))
 vi.mock("../../../state/registry", () => ({ getSandbox: getSandboxMock }));
 vi.mock("../../../agent/defs", () => ({
   isTerminalAgent: isTerminalAgentMock,
-  listAgents: listAgentsMock,
   loadAgent: loadAgentMock,
+}));
+vi.mock("../../../onboard/package/package-authority", () => ({
+  resolveLifecycleEligibleSandboxAgent: resolveLifecycleEligibleSandboxAgentMock,
 }));
 // Default to no recent shields auto-restore so tests that don't inject
 // getRecentShieldsAutoRestore don't read ~/.nemoclaw/state/shields-audit.jsonl.
@@ -92,7 +107,9 @@ vi.mock("../../../../../packages/nemoclaw-openclaw/plugin/src/onboard/config.js"
   describeOnboardProvider: vi.fn(() => "NVIDIA Endpoint API"),
 }));
 
-import registerPlugin, { type OpenClawPluginApi } from "../../../../../packages/nemoclaw-openclaw/plugin/src/index";
+import registerPlugin, {
+  type OpenClawPluginApi,
+} from "../../../../../packages/nemoclaw-openclaw/plugin/src/index";
 import { buildOpenshellExecArgs } from "../exec";
 import {
   type AgentNonJsonPassthroughDeps,
@@ -171,13 +188,6 @@ describe("runAgentPassthrough", () => {
   it("dispatches NemoCUA through the ordinary terminal-agent headless command (#9649)", async () => {
     const entry = { name: "alpha", agent: "nemocua" };
     getSandboxMock.mockReturnValueOnce(entry as never);
-    listAgentsMock.mockReturnValueOnce([
-      "custom-terminal",
-      "hermes",
-      "langchain-deepagents-code",
-      "nemocua",
-      "openclaw",
-    ]);
     loadAgentMock.mockReturnValueOnce({
       name: "nemocua",
       runtime: {
@@ -194,31 +204,95 @@ describe("runAgentPassthrough", () => {
     );
   });
 
-  it("dispatches Pi through its manifest headless command", async () => {
-    getSandboxMock.mockReturnValueOnce({ agent: "pi" });
-    listAgentsMock.mockReturnValueOnce([
-      "custom-terminal",
-      "hermes",
-      "langchain-deepagents-code",
-      "openclaw",
-      "pi",
-    ]);
-    loadAgentMock.mockReturnValueOnce({
-      name: "pi",
-      runtime: {
-        kind: "terminal",
-        interactive_command: "pi",
-        headless_command: "pi --no-approve --print",
-      },
+  it("dispatches Pi through the receipt-pinned command instead of the active definition", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "pi",
+      packageVersion: "0.1.0",
+      contentDigest: "a".repeat(64),
+    };
+    const entry = { agent: "pi", harnessPackage };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "pi",
+      effectiveAgentId: "pi",
+      definition: {
+        name: "pi",
+        runtime: {
+          kind: "terminal",
+          interactive_command: "pi",
+          headless_command: "receipt-pinned-pi --print",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage,
+      harnessPackageMigration: null,
     });
 
     await runAgentPassthrough("pi-sandbox", { extraArgs: ["Reply with PONG"] });
 
+    expect(resolveLifecycleEligibleSandboxAgentMock).toHaveBeenCalledWith(entry);
+    expect(loadAgentMock).not.toHaveBeenCalled();
     expect(execMock).toHaveBeenCalledWith(
       "pi-sandbox",
-      ["pi", "--no-approve", "--print", "Reply with PONG"],
+      ["receipt-pinned-pi", "--print", "Reply with PONG"],
       { tty: false },
     );
+  });
+
+  it.each([
+    ["missing", "the retained package object is missing"],
+    ["tampered", "the retained package object digest does not match its receipt"],
+  ])("fails closed when the receipt-pinned Pi package is %s", async (_state, message) => {
+    const entry = {
+      agent: "pi",
+      harnessPackage: {
+        kind: "agent-runtime" as const,
+        id: "pi",
+        packageVersion: "0.1.0",
+        contentDigest: "b".repeat(64),
+      },
+    };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockImplementationOnce(() => {
+      throw new Error(`Sandbox agent authority is invalid: ${message}`);
+    });
+    const { writes, exit, proc } = makeProcMock();
+
+    await expect(
+      runAgentPassthrough("pi-sandbox", { extraArgs: ["Reply with PONG"] }, { process: proc }),
+    ).rejects.toThrow("__exit:2");
+
+    expect(resolveLifecycleEligibleSandboxAgentMock).toHaveBeenCalledWith(entry);
+    expect(ensureLiveMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+    expect(exit).toHaveBeenCalledWith(2);
+    expect(writes.join("")).toContain(message);
+  });
+
+  it("fails closed when Pi qualification is no longer enabled", async () => {
+    const entry = {
+      agent: "pi",
+      harnessPackage: {
+        kind: "agent-runtime" as const,
+        id: "pi",
+        packageVersion: "0.1.0",
+        contentDigest: "c".repeat(64),
+      },
+    };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockImplementationOnce(() => {
+      throw new Error("Candidate agent 'pi' has not been qualified for this NemoClaw build");
+    });
+    const { writes, proc } = makeProcMock();
+
+    await expect(
+      runAgentPassthrough("pi-sandbox", { extraArgs: ["Reply with PONG"] }, { process: proc }),
+    ).rejects.toThrow("__exit:2");
+
+    expect(resolveLifecycleEligibleSandboxAgentMock).toHaveBeenCalledWith(entry);
+    expect(ensureLiveMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+    expect(writes.join("")).toContain("has not been qualified");
   });
 
   it("forwards extraArgs verbatim to `openclaw agent` for OpenClaw sandboxes with --no-tty enforced", async () => {
@@ -582,6 +656,19 @@ describe("runAgentPassthrough", () => {
     expect(execMock).not.toHaveBeenCalled();
   });
 
+  it("keeps legacy OpenClaw --help local without resolving package authority", async () => {
+    getSandboxMock.mockReturnValueOnce({ agent: null });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await runAgentPassthrough("placeholder-sandbox", { extraArgs: ["--help"] });
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(resolveLifecycleEligibleSandboxAgentMock).not.toHaveBeenCalled();
+    expect(ensureLiveMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the registry read throws and never spawns OpenShell exec", async () => {
     getSandboxMock.mockImplementationOnce(() => {
       throw new Error("EACCES: permission denied, open '~/.config/nemoclaw/sandboxes.json'");
@@ -599,8 +686,13 @@ describe("runAgentPassthrough", () => {
     expect(all).toMatch(/EACCES/);
   });
 
-  it("fails closed when a registered agent is not in the manifest allowlist", async () => {
+  it("fails closed when the recorded agent authority is malformed", async () => {
     getSandboxMock.mockReturnValueOnce({ agent: "../missing-agent" });
+    resolveLifecycleEligibleSandboxAgentMock.mockImplementationOnce(() => {
+      throw new Error(
+        "Sandbox agent authority is invalid: the recorded agent must be a canonical identifier",
+      );
+    });
     const { writes, exit, proc } = makeProcMock();
     await expect(
       runAgentPassthrough("../missing-agent", { extraArgs: ["--help"] }, { process: proc }),
@@ -611,14 +703,13 @@ describe("runAgentPassthrough", () => {
     expect(exit).toHaveBeenCalledWith(2);
     const all = writes.join("");
     expect(all).toMatch(/registered agent '\.\.\/missing-agent'/);
-    expect(all).toMatch(/not present in the local agent manifest allowlist/);
+    expect(all).toMatch(/recorded agent must be a canonical identifier/);
     expect(all).toMatch(/Refusing to dispatch/);
   });
 
   it("fails closed when a known registered agent cannot be resolved before OpenShell exec", async () => {
     getSandboxMock.mockReturnValueOnce({ agent: "missing-agent" });
-    listAgentsMock.mockReturnValueOnce(["missing-agent"]);
-    loadAgentMock.mockImplementationOnce(() => {
+    resolveLifecycleEligibleSandboxAgentMock.mockImplementationOnce(() => {
       throw new Error("Agent manifest not found: agents/missing-agent/manifest.yaml");
     });
     const { writes, exit, proc } = makeProcMock();

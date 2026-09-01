@@ -155,8 +155,10 @@ describe("sandbox registry normalization", () => {
     expect(reloadedRegistry.getSandbox("managed")).toMatchObject(input);
   });
 
-  it.each(["pi", "nemocua"])("keeps the %s candidate row package-absent", async (agent) => {
-    const registry = await loadRegistryWith({ candidate: { name: "candidate", agent } });
+  it("keeps the repository-qualified NemoCUA row package-absent", async () => {
+    const registry = await loadRegistryWith({
+      candidate: { name: "candidate", agent: "nemocua" },
+    });
 
     expect(registry.getSandbox("candidate")).not.toHaveProperty("harnessPackage");
     expect(registry.getSandbox("candidate")).not.toHaveProperty("harnessPackageMigration");

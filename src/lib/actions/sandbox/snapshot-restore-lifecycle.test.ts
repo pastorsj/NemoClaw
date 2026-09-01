@@ -14,8 +14,6 @@ import * as f from "./snapshot-restore-test-fixture";
 import {
   HERMES_PACKAGE,
   OPENCLAW_PACKAGE,
-  candidateSandbox,
-  candidateSnapshot,
   configureCloneGateway,
   configureCloneRegistry,
   harnessPackage,
@@ -23,6 +21,8 @@ import {
   packageManagedSnapshot,
   packageSnapshotWithCompletionEvidence,
   pendingPackageManagedSandbox,
+  repositorySandbox,
+  repositorySnapshot,
   runWhen,
   storePendingClone,
 } from "./snapshot/lifecycle-test-fixture";
@@ -526,15 +526,15 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.restoreSandboxStateMock).not.toHaveBeenCalled();
   });
 
-  it("does not clean up a forced destination after candidate qualification is lost", async () => {
+  it("does not clean up a forced destination after repository qualification is lost", async () => {
     const entries = new Map<string, f.SandboxRecord>([
-      ["alpha", candidateSandbox("alpha")],
-      ["beta", candidateSandbox("beta")],
+      ["alpha", repositorySandbox("alpha")],
+      ["beta", repositorySandbox("beta")],
     ]);
-    let candidateSelectable = true;
+    let repositorySelectable = true;
     f.loadAgentMock.mockImplementation((name) => {
-      runWhen(name === "pi" && !candidateSelectable, () => {
-        throw new Error("candidate qualification was withdrawn");
+      runWhen(name === "nemocua" && !repositorySelectable, () => {
+        throw new Error("repository qualification was withdrawn");
       });
       return {
         name,
@@ -543,7 +543,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       };
     });
     f.getSandboxMock.mockImplementation((name) => entries.get(name ?? "") ?? null);
-    f.getLatestBackupMock.mockReturnValue(candidateSnapshot());
+    f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
     f.lifecycleMock.readTimerMarkerMock.mockReturnValue({ sandboxName: "beta" });
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -555,7 +555,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     f.parseLiveSandboxNamesMock.mockImplementation(() => {
       liveSandboxParses += 1;
       runWhen(liveSandboxParses === 2, () => {
-        candidateSelectable = false;
+        repositorySelectable = false;
       });
       return new Set(["alpha", "beta"]);
     });
@@ -578,10 +578,10 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
   });
 
-  it("does not clean up a forced destination after its candidate definition changes", async () => {
+  it("does not clean up a forced destination after its repository definition changes", async () => {
     const entries = new Map<string, f.SandboxRecord>([
-      ["alpha", candidateSandbox("alpha")],
-      ["beta", candidateSandbox("beta")],
+      ["alpha", repositorySandbox("alpha")],
+      ["beta", repositorySandbox("beta")],
     ]);
     let definitionChanged = false;
     f.loadAgentMock.mockImplementation((name) => ({
@@ -591,7 +591,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       stateFiles: definitionChanged ? [{ path: "different.json", strategy: "copy" as const }] : [],
     }));
     f.getSandboxMock.mockImplementation((name) => entries.get(name ?? "") ?? null);
-    f.getLatestBackupMock.mockReturnValue(candidateSnapshot());
+    f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
     f.lifecycleMock.readTimerMarkerMock.mockReturnValue({ sandboxName: "beta" });
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -626,8 +626,8 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
   });
 
-  it("carries the candidate definition selected inside clone locks through final restore", async () => {
-    const source = candidateSandbox("alpha");
+  it("carries the repository definition selected inside clone locks through final restore", async () => {
+    const source = repositorySandbox("alpha");
     const entries = configureCloneRegistry(source);
     let definitionSelections = 0;
     f.loadAgentMock.mockImplementation((name) => {
@@ -644,7 +644,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
         ],
       };
     });
-    f.getLatestBackupMock.mockReturnValue(candidateSnapshot());
+    f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
     configureCloneGateway();
     f.restoreSandboxStateMock.mockImplementation((_name, _backupPath, options) => {
       options.validateBeforeMutation();
@@ -671,11 +671,11 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
         }),
       }),
     );
-    expect(entries.get("beta")).toMatchObject({ name: "beta", agent: "pi" });
+    expect(entries.get("beta")).toMatchObject({ name: "beta", agent: "nemocua" });
   });
 
-  it("does not create a candidate clone after its same-root definition changes", async () => {
-    const source = candidateSandbox("alpha");
+  it("does not create a repository clone after its same-root definition changes", async () => {
+    const source = repositorySandbox("alpha");
     const entries = configureCloneRegistry(source);
     let definitionChanged = false;
     f.loadAgentMock.mockImplementation((name) => ({
@@ -684,7 +684,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       policyAdditionsPath: `/repo/agents/${name}/policy-additions.yaml`,
       stateFiles: definitionChanged ? [{ path: "different.json", strategy: "copy" as const }] : [],
     }));
-    f.getLatestBackupMock.mockReturnValue(candidateSnapshot());
+    f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
     configureCloneGateway();
     const captureCloneGateway = f.captureOpenshellMock.getMockImplementation();
     f.captureOpenshellMock.mockImplementation((args, options) => {
@@ -706,8 +706,8 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(f.registerSandboxMock).not.toHaveBeenCalled();
   });
 
-  it("does not finalize a candidate clone after its same-root definition changes", async () => {
-    const source = candidateSandbox("alpha");
+  it("does not finalize a repository clone after its same-root definition changes", async () => {
+    const source = repositorySandbox("alpha");
     const entries = configureCloneRegistry(source);
     let definitionChanged = false;
     f.loadAgentMock.mockImplementation((name) => ({
@@ -727,7 +727,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       });
       return current;
     });
-    f.getLatestBackupMock.mockReturnValue(candidateSnapshot());
+    f.getLatestBackupMock.mockReturnValue(repositorySnapshot());
     configureCloneGateway();
     const { runSandboxSnapshot } = await import("./snapshot");
 

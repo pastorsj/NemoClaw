@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Keep Pi on the latest released Fabric graph. The official TypeScript Pi
+# adapter is not published yet, so this graph combines the generic SDK with
+# the small package-owned adapter installed from this directory.
+nemo-fabric==0.2.0
+nemo-fabric-adapter-contract==0.2.0
+nemo-fabric-adapters-common==0.2.0

@@ -293,7 +293,7 @@ const STOCK_DOCKER_ARGS = {
   "langchain-deepagents-code": dockerArgs(
     path.join(process.cwd(), "packages/nemoclaw-langchain-deepagents-code/Dockerfile"),
   ),
-  pi: dockerArgs(path.join(process.cwd(), "agents/pi/Dockerfile")),
+  pi: dockerArgs(path.join(process.cwd(), "packages/nemoclaw-pi/Dockerfile")),
 } satisfies Record<ManagedStartupAgent, Set<string>>;
 
 const RUNTIME_INPUT_SOURCE_FILES = [

@@ -223,7 +223,7 @@ describe("install.sh harness package selection", () => {
   });
 
   it("does not ordinary-install a qualified repository candidate", () => {
-    const result = runHarnessSelectionFlow({ outcomes: [EMPTY_STORE], selector: "pi" });
+    const result = runHarnessSelectionFlow({ outcomes: [EMPTY_STORE], selector: "nemocua" });
 
     expect(result.status, result.output).toBe(0);
     expect(result.calls).toEqual(["internal installer reconcile-harnesses --json"]);

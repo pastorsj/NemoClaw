@@ -80,7 +80,7 @@ describe("harness package migration provenance", () => {
     expect(parseHarnessPackageMigration(MIGRATION, IDENTITY)).toEqual(MIGRATION);
   });
 
-  it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
+  it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
     "accepts same-name standard legacy mapping for %s",
     (id) => {
       const identity = { ...IDENTITY, id };
@@ -98,10 +98,6 @@ describe("harness package migration provenance", () => {
     [
       { ...MIGRATION, legacyAgent: "deepagents" },
       { ...IDENTITY, id: "langchain-deepagents-code" },
-    ],
-    [
-      { ...MIGRATION, legacyAgent: "pi" },
-      { ...IDENTITY, id: "pi" },
     ],
     [
       { ...MIGRATION, legacyAgent: "nemocua" },

@@ -52,7 +52,6 @@ function makeDifferingImageInspection(
     : "";
 }
 
-const LEGACY_AGENTS_DIR = path.resolve(import.meta.dirname, "../../../agents");
 const PACKAGES_DIR = path.resolve(import.meta.dirname, "../../../packages");
 
 function agentPackageDir(agentName: string): string {
@@ -82,7 +81,9 @@ const CORPORATE_CA_BASE_IMAGE_AGENTS = fs
   .readdirSync(PACKAGES_DIR)
   .filter((directoryName) => directoryName.startsWith("nemoclaw-"))
   .map((directoryName) => directoryName.slice("nemoclaw-".length))
-  .filter((agentName) => declaresCorporateCaBuildArg(path.join(agentPackageDir(agentName), "Dockerfile.base")));
+  .filter((agentName) =>
+    declaresCorporateCaBuildArg(path.join(agentPackageDir(agentName), "Dockerfile.base")),
+  );
 
 expect(
   CORPORATE_CA_BASE_IMAGE_AGENTS,
@@ -155,8 +156,7 @@ describe("agent base image provisioning", () => {
 
   it("stages managed sandbox bytes from the selected package root", () => {
     const packageRoot = fs.realpathSync(tmpDir());
-    const agentDir = path.join(packageRoot, "agents", "pi");
-    fs.mkdirSync(agentDir, { recursive: true });
+    const agentDir = packageRoot;
     const dockerfilePath = path.join(agentDir, "Dockerfile");
     fs.writeFileSync(dockerfilePath, "FROM scratch\nCOPY package-sentinel.txt /sandbox/\n");
     fs.writeFileSync(path.join(packageRoot, "package-sentinel.txt"), "selected-package");
@@ -192,9 +192,8 @@ describe("agent base image provisioning", () => {
 
   it("makes private installed package bytes readable to Docker image users", () => {
     const packageRoot = fs.realpathSync(tmpDir());
-    const agentDir = path.join(packageRoot, "agents", "pi");
+    const agentDir = packageRoot;
     const scriptDir = path.join(packageRoot, "scripts", "lib");
-    fs.mkdirSync(agentDir, { recursive: true });
     fs.mkdirSync(scriptDir, { recursive: true });
     const dockerfilePath = path.join(agentDir, "Dockerfile");
     const scriptPath = path.join(scriptDir, "openclaw-npm-remediation.mts");
@@ -266,7 +265,7 @@ describe("agent base image provisioning", () => {
     const pi = makeAgent({
       name: "pi",
       displayName: "Pi",
-      dockerfileBasePath: path.join(LEGACY_AGENTS_DIR, "pi/Dockerfile.base"),
+      dockerfileBasePath: path.join(agentPackageDir("pi"), "Dockerfile.base"),
     });
     withMockedDocker(({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
       ensureAgentBaseImage(pi);
@@ -597,7 +596,10 @@ describe("agent base image provisioning", () => {
           name: "langchain-deepagents-code",
           displayName: "LangChain Deep Agents Code",
           expectedVersion: "0.1.55",
-          dockerfileBasePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile.base"),
+          dockerfileBasePath: path.join(
+            agentPackageDir("langchain-deepagents-code"),
+            "Dockerfile.base",
+          ),
           dockerfilePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile"),
         }),
       );
@@ -667,7 +669,10 @@ describe("agent base image provisioning", () => {
           name: "langchain-deepagents-code",
           displayName: "LangChain Deep Agents Code",
           expectedVersion: "0.1.55",
-          dockerfileBasePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile.base"),
+          dockerfileBasePath: path.join(
+            agentPackageDir("langchain-deepagents-code"),
+            "Dockerfile.base",
+          ),
           dockerfilePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile"),
         }),
         { forceBaseImageRebuild: true },
@@ -690,7 +695,10 @@ describe("agent base image provisioning", () => {
             name: "langchain-deepagents-code",
             displayName: "LangChain Deep Agents Code",
             expectedVersion: null,
-            dockerfileBasePath: path.join(agentPackageDir("langchain-deepagents-code"), "Dockerfile.base"),
+            dockerfileBasePath: path.join(
+              agentPackageDir("langchain-deepagents-code"),
+              "Dockerfile.base",
+            ),
           }),
         ),
       ).toThrow(

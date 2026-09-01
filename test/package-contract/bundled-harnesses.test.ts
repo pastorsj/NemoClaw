@@ -20,7 +20,7 @@ const PRIVATE_BUILD_EXPRESSION = `
 import { materializeBundledHarnesses } from "./scripts/build-harnesses.mts";
 materializeBundledHarnesses(process.argv[1] ?? "");
 `;
-const EXPECTED_IDS = ["openclaw", "hermes", "langchain-deepagents-code"] as const;
+const EXPECTED_IDS = ["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const;
 const DOCKERFILES = {
   openclaw: ["packages/nemoclaw-openclaw/Dockerfile", "packages/nemoclaw-openclaw/Dockerfile.base"],
   hermes: ["packages/nemoclaw-hermes/Dockerfile", "packages/nemoclaw-hermes/Dockerfile.base"],
@@ -28,6 +28,7 @@ const DOCKERFILES = {
     "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
     "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
   ],
+  pi: ["packages/nemoclaw-pi/Dockerfile", "packages/nemoclaw-pi/Dockerfile.base"],
 } as const;
 
 type PackResult = Array<{ files: Array<{ path: string }> }>;
@@ -258,7 +259,7 @@ describe("bundled harness package artifacts", () => {
     expect(missingAssets).toEqual([]);
   }, 120_000);
 
-  it("omits candidate, authoring, credential, and dynamic host callback surfaces", () => {
+  it("omits excluded candidates, authoring files, credentials, and host callbacks", () => {
     const artifactFiles = packedFileList().filter((filePath) =>
       filePath.startsWith("dist/harnesses/"),
     );
@@ -266,9 +267,7 @@ describe("bundled harness package artifacts", () => {
       filePath.replace(/^dist\/harnesses\/nemoclaw-[^/]+\//u, ""),
     );
     expect(artifactFiles).not.toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(/dist\/harnesses\/nemoclaw-(?:pi|nemocua)(?:\/|$)/u),
-      ]),
+      expect.arrayContaining([expect.stringMatching(/dist\/harnesses\/nemoclaw-nemocua(?:\/|$)/u)]),
     );
     expect(payloadFiles).not.toEqual(
       expect.arrayContaining([

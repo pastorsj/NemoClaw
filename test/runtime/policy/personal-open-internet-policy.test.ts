@@ -45,7 +45,7 @@ const AGENT_POLICY_BASELINES = [
     "Deep Agents Code",
     path.join(ROOT, "packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"),
   ],
-  ["pi", "Pi", path.join(ROOT, "agents", "pi", "policy-additions.yaml")],
+  ["pi", "Pi", path.join(ROOT, "packages", "nemoclaw-pi", "policy-additions.yaml")],
 ] as const;
 
 const PERSONAL_COMPOSITION_CASES = AGENT_POLICY_BASELINES.flatMap(

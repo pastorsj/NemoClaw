@@ -236,6 +236,20 @@ describe("E2E workflow plan", () => {
     expect(plan.catalogueMatrices["nvidia-api"].map((row) => row.id)).toEqual(targetIds);
     expect(plan.catalogueMatrices["nvidia-inference"]).toEqual([]);
     expect(selectedWorkflowJobs(plan)).toEqual(["catalogue-nvidia-api"]);
+    expect(targetIds.map((id) => catalogueTarget(id).owningPaths)).toEqual([
+      expect.arrayContaining(["packages/nemoclaw-pi/"]),
+      expect.arrayContaining(["packages/nemoclaw-pi/"]),
+    ]);
+    expect(
+      catalogueTargetsForChangedFiles(["packages/nemoclaw-pi/config/generate-config.ts"]).map(
+        ({ id }) => id,
+      ),
+    ).toEqual(targetIds);
+    expect(
+      catalogueTargetsForChangedFiles(["packages/nemoclaw-fabric/src/nemoclaw_fabric/command.py"])
+        .map(({ id }) => id)
+        .filter((id) => targetIds.includes(id)),
+    ).toEqual(targetIds);
   });
 
   it("emits the required workflow fields for migrated targets", () => {

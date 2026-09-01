@@ -144,6 +144,7 @@ from its package-root lock before running a command:
 npm --prefix packages/nemoclaw-openclaw ci --ignore-scripts
 npm --prefix packages/nemoclaw-hermes ci --ignore-scripts
 npm --prefix packages/nemoclaw-langchain-deepagents-code ci --ignore-scripts
+npm --prefix packages/nemoclaw-pi ci --ignore-scripts
 ```
 
 OpenClaw also has a nested plugin lock. Install both OpenClaw locks before running its complete

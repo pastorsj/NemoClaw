@@ -283,7 +283,7 @@ describe("sandbox workload source resolution", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "pi",
-        legacyDockerfilePath: "agents/pi/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-pi/Dockerfile",
         runtime: managedRuntime("podman"),
         catalog: CATALOG,
       }),

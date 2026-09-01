@@ -184,7 +184,9 @@ export async function runRebuildPreflightPhase(
     : null;
   let agentAuthority: ResolvedSandboxAgent;
   try {
-    agentAuthority = resolveSandboxAgent(sandboxEntry);
+    agentAuthority = resolveSandboxAgent(sandboxEntry, {
+      requireLifecycleEligibility: true,
+    });
   } catch (error) {
     printRebuildPreflightFailure(
       "the recorded sandbox agent authority could not be resolved.",

@@ -3,19 +3,14 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import { isCandidateAgent } from "../../agent/candidate";
 import {
   inspectHarnessPackageState,
   type HarnessPackageAuthority,
   type HarnessPackageIdentity,
   type HarnessPackageMigration,
 } from "../../agent-runtime/package/identity";
-import { normalizeSandboxAgentName } from "../sandbox-agent";
-import type {
-  resolveSandboxAgent,
-  ResolveSandboxAgentOptions,
-  ResolvedSandboxAgent,
-} from "../sandbox-agent";
+import { normalizeSandboxAgentName, resolveSandboxAgent } from "../sandbox-agent";
+import type { ResolveSandboxAgentOptions, ResolvedSandboxAgent } from "../sandbox-agent";
 
 /** Exact package authority carried by one onboarding session and its registry writes. */
 export type OnboardHarnessPackageAuthority = HarnessPackageAuthority;
@@ -37,6 +32,14 @@ export interface HarnessPackageSessionAuthority {
   readonly harnessPackageMigration: HarnessPackageMigration | null;
 }
 
+/** Resolve exact package bytes and any release-candidate qualification together. */
+export function resolveLifecycleEligibleSandboxAgent(
+  entry: Parameters<typeof resolveSandboxAgent>[0],
+  options: Omit<ResolveSandboxAgentOptions, "requireLifecycleEligibility"> = {},
+): ResolvedSandboxAgent {
+  return resolveSandboxAgent(entry, { ...options, requireLifecycleEligibility: true });
+}
+
 /** Parse the complete package pair without treating explicit candidate absence as malformed. */
 export function onboardHarnessPackageAuthority(
   session: Pick<
@@ -50,7 +53,7 @@ export function onboardHarnessPackageAuthority(
   }
   if (state.status === "absent") {
     const effectiveAgentId = normalizeSandboxAgentName(session.agent);
-    if (effectiveAgentId !== "nemocua" && !isCandidateAgent(effectiveAgentId)) {
+    if (effectiveAgentId !== "nemocua") {
       throw new Error(
         `Onboarding session agent '${effectiveAgentId}' requires harness package migration`,
       );

@@ -76,9 +76,13 @@
         "test/e2e/live/pi-agent-qualification-events.ts"
       ],
       "fast": [
+        "packages/nemoclaw-pi/tests/config/generator.test.ts",
+        "packages/nemoclaw-pi/tests/integration/package-discovery.test.ts",
+        "packages/nemoclaw-pi/tests/runtime/shell-entrypoints.test.ts",
         "src/lib/agent/candidate.test.ts",
         "src/lib/agent/pi-lifecycle.test.ts",
         "src/lib/onboard/pi-candidate-rebuild.test.ts",
+        "test/e2e/support/harness-package.test.ts",
         "test/e2e/support/onboard-interactive-pty.test.ts",
         "test/e2e/support/pi-agent-qualification-events.test.ts",
         "test/platform/images/pi-candidate.test.ts"

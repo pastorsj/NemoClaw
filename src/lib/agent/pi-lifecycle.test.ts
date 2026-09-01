@@ -75,7 +75,7 @@ describe("Pi candidate lifecycle integration", () => {
     const sources = ["docker", "mxc-shaped-test", "portable-test"].map((driverName) =>
       resolveSandboxWorkloadSource({
         agentName: "pi",
-        legacyDockerfilePath: "agents/pi/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-pi/Dockerfile",
         runtime: capableRuntime(driverName),
         catalog: { pi: piContract() },
         candidateAgentsEnabled: true,
@@ -103,7 +103,7 @@ describe("Pi candidate lifecycle integration", () => {
     ) =>
       resolveSandboxWorkloadSource({
         agentName: "pi",
-        legacyDockerfilePath: "agents/pi/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-pi/Dockerfile",
         runtime,
         catalog,
         candidateAgentsEnabled: true,
@@ -128,7 +128,7 @@ describe("Pi candidate lifecycle integration", () => {
     expect(() =>
       resolveSandboxWorkloadSource({
         agentName: "pi",
-        legacyDockerfilePath: "agents/pi/Dockerfile",
+        legacyDockerfilePath: "packages/nemoclaw-pi/Dockerfile",
         customDockerfilePath: "/tmp/Dockerfile.pi",
         runtime: permissive({}),
         catalog: { pi: piContract() },

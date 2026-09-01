@@ -289,16 +289,99 @@ describe("onboarding harness package ordering", () => {
     },
   );
 
-  it("rejects fresh candidate qualification lost during recovery", async () => {
-    const candidate = { ...loadAgent("openclaw"), name: "pi" };
+  it("rechecks package-backed Pi qualification at the final runtime binding", async () => {
+    const pinned = fixture.install("pi");
+    const session = createSession({
+      agent: "pi",
+      harnessPackage: pinned.identity,
+      harnessPackageMigration: null,
+    });
+    const resolvePi = vi.fn<OnboardHarnessPackageBoundaryDependencies["resolveSandboxAgent"]>(
+      (entry, options) =>
+        options?.requireLifecycleEligibility === true
+          ? (() => {
+              throw new Error("Pi candidate qualification changed during recovery");
+            })()
+          : resolveSandboxAgent(entry, {
+              ...options,
+              requireLifecycleEligibility: false,
+            }),
+    );
+    const operation = await prepareOnboardHarnessOperation(
+      operationInput({ resume: true }),
+      boundaryDependencies(() => session, { resolveSandboxAgent: resolvePi }),
+    );
+
+    expect(() => operation.beforeRuntimeEffects()).toThrow(
+      "Pi candidate qualification changed during recovery",
+    );
+    expect(resolvePi).toHaveBeenCalledTimes(2);
+    expect(resolvePi.mock.calls[0]?.[1]).not.toMatchObject({
+      requireLifecycleEligibility: true,
+    });
+    expect(resolvePi.mock.calls[1]?.[1]).toMatchObject({
+      requireLifecycleEligibility: true,
+    });
+    expect(() => operation.requireBoundAuthority()).toThrow("was not bound");
+  });
+
+  it.each([
+    ["removed", (receiptPath: string) => fs.rmSync(receiptPath)],
+    ["changed", (receiptPath: string) => fs.writeFileSync(receiptPath, "{}\n", { mode: 0o600 })],
+  ] as const)(
+    "rejects a Pi mutation after its qualification receipt is %s",
+    async (_failure, changeReceipt) => {
+      const pinned = fixture.install("pi");
+      const receiptPath = path.join(fixture.fixtureRoot, "pi-qualification.json");
+      fs.writeFileSync(
+        receiptPath,
+        fs.readFileSync(path.resolve("ci/pi-agent-qualification-v1-linux-amd64.json")),
+        { mode: 0o600 },
+      );
+      const environment = {
+        NEMOCLAW_CANDIDATE_AGENTS: "1",
+        NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT: receiptPath,
+      };
+      const session = createSession({
+        agent: "pi",
+        harnessPackage: pinned.identity,
+        harnessPackageMigration: null,
+      });
+      const resolvePi = vi.fn<OnboardHarnessPackageBoundaryDependencies["resolveSandboxAgent"]>(
+        (entry, options) =>
+          resolveSandboxAgent(entry, {
+            ...options,
+            storeRoot: fixture.storeRoot,
+          }),
+      );
+      const operation = await prepareOnboardHarnessOperation(
+        operationInput({ environment, resume: true }),
+        boundaryDependencies(() => session, { resolveSandboxAgent: resolvePi }),
+      );
+
+      operation.beforeRuntimeEffects();
+      changeReceipt(receiptPath);
+
+      expect(() => operation.revalidateSessionAuthority(session, "start Pi")).toThrow(
+        /release candidate.*not selectable/u,
+      );
+      expect(resolvePi).toHaveBeenCalledTimes(3);
+      expect(resolvePi.mock.calls[2]?.[1]).toMatchObject({
+        requireLifecycleEligibility: true,
+      });
+    },
+  );
+
+  it("rejects fresh repository qualification lost during recovery", async () => {
+    const candidate = { ...loadAgent("openclaw"), name: "nemocua" };
     const resolveCandidate = vi.fn().mockReturnValueOnce(null);
     const operation = await prepareOnboardHarnessOperation(
-      operationInput({ agentFlag: "pi" }),
+      operationInput({ agentFlag: "nemocua" }),
       boundaryDependencies(() => null, {
         resolveQualifiedAgent: resolveCandidate,
         selectHarnessPackage: async () => ({
           kind: "qualified-agent",
-          recordedAgent: "pi",
+          recordedAgent: "nemocua",
           harnessPackage: null,
           resolvedPackage: null,
           effectiveDefinition: candidate,
@@ -417,28 +500,31 @@ describe("onboarding harness package ordering", () => {
   });
 
   it.each([
-    ["flag", { agentFlag: "nemocua", environment: {} }],
-    ["environment", { agentFlag: null, environment: { NEMOCLAW_AGENT: "nemocua" } }],
-  ] as const)("rejects a candidate resume %s mismatch before recovery", async (_name, selector) => {
-    const session = legacySession("pi");
-    const recover = vi.fn();
-    const candidate = { ...loadAgent("openclaw"), name: "pi" };
+    ["flag", { agentFlag: "pi", environment: {} }],
+    ["environment", { agentFlag: null, environment: { NEMOCLAW_AGENT: "pi" } }],
+  ] as const)(
+    "rejects a repository harness resume %s mismatch before recovery",
+    async (_name, selector) => {
+      const session = legacySession("nemocua");
+      const recover = vi.fn();
+      const candidate = { ...loadAgent("openclaw"), name: "nemocua" };
 
-    await expect(
-      runPreparedHarnessWorkflow(
-        operationInput({ ...selector, resume: true }),
-        boundaryDependencies(() => session, {
-          resolveQualifiedAgent: vi.fn(() => candidate),
-        }),
-        recover,
-      ),
-    ).rejects.toThrow("does not match resumed harness 'pi'");
+      await expect(
+        runPreparedHarnessWorkflow(
+          operationInput({ ...selector, resume: true }),
+          boundaryDependencies(() => session, {
+            resolveQualifiedAgent: vi.fn(() => candidate),
+          }),
+          recover,
+        ),
+      ).rejects.toThrow("does not match resumed harness 'nemocua'");
 
-    expect(recover).not.toHaveBeenCalled();
-  });
+      expect(recover).not.toHaveBeenCalled();
+    },
+  );
 
-  it("rejects a qualified candidate resolver that returns another harness", async () => {
-    const session = legacySession("pi");
+  it("rejects a qualified repository resolver that returns another harness", async () => {
+    const session = legacySession("nemocua");
     const recover = vi.fn();
 
     await expect(
@@ -453,37 +539,35 @@ describe("onboarding harness package ordering", () => {
     expect(recover).not.toHaveBeenCalled();
   });
 
-  it.each(["pi", "nemocua"] as const)(
-    "requalifies the package-free %s agent after benign recovery updates",
-    async (agentId) => {
-      let session: Session | null = legacySession(agentId);
-      const candidate = { ...loadAgent("openclaw"), name: agentId };
-      const resolveCandidate = vi.fn(() => candidate);
-      const operation = await prepareOnboardHarnessOperation(
-        operationInput({ resume: true }),
-        boundaryDependencies(() => session, {
-          resolveQualifiedAgent: resolveCandidate,
-        }),
-      );
-      session = { ...session, updatedAt: "2026-08-28T11:00:00.000Z" };
+  it("requalifies the package-free NemoCUA agent after benign recovery updates", async () => {
+    const agentId = "nemocua";
+    let session: Session | null = legacySession(agentId);
+    const candidate = { ...loadAgent("openclaw"), name: agentId };
+    const resolveCandidate = vi.fn(() => candidate);
+    const operation = await prepareOnboardHarnessOperation(
+      operationInput({ resume: true }),
+      boundaryDependencies(() => session, {
+        resolveQualifiedAgent: resolveCandidate,
+      }),
+    );
+    session = { ...session, updatedAt: "2026-08-28T11:00:00.000Z" };
 
-      operation.beforeRuntimeEffects();
-      const authority = operation.requireBoundAuthority();
+    operation.beforeRuntimeEffects();
+    const authority = operation.requireBoundAuthority();
 
-      expect(resolveCandidate).toHaveBeenCalledTimes(2);
-      expect(authority).toMatchObject({
-        effectiveDefinition: { name: agentId },
-        freshHarnessBinding: null,
-        selectedAgent: { name: agentId },
-        selectionIsAuthoritative: true,
-      });
-    },
-  );
+    expect(resolveCandidate).toHaveBeenCalledTimes(2);
+    expect(authority).toMatchObject({
+      effectiveDefinition: { name: agentId },
+      freshHarnessBinding: null,
+      selectedAgent: { name: agentId },
+      selectionIsAuthoritative: true,
+    });
+  });
 
-  it("rejects authoritative candidate definition drift before runtime effects", async () => {
+  it("rejects authoritative repository definition drift before runtime effects", async () => {
     const pinnedDefinition = {
       ...loadAgent("openclaw"),
-      name: "pi",
+      name: "nemocua",
       expectedVersion: "pinned-version",
     };
     const currentDefinition = {
@@ -491,8 +575,8 @@ describe("onboarding harness package ordering", () => {
       expectedVersion: "changed-version",
     };
     const pinnedAuthority: ResolvedSandboxAgent = Object.freeze({
-      recordedAgent: "pi",
-      effectiveAgentId: "pi",
+      recordedAgent: "nemocua",
+      effectiveAgentId: "nemocua",
       definition: pinnedDefinition,
       harnessPackage: null,
       harnessPackageMigration: null,
@@ -509,7 +593,7 @@ describe("onboarding harness package ordering", () => {
         authoritativeRebuildAgentAuthority: pinnedAuthority,
         resume: true,
       }),
-      boundaryDependencies(() => legacySession("pi"), {
+      boundaryDependencies(() => legacySession("nemocua"), {
         resolveQualifiedAgent: resolveCandidate,
         resolveSandboxAgent: resolveCurrent,
       }),
@@ -594,15 +678,15 @@ describe("onboarding harness package ordering", () => {
     expect(reconcileLegacyMigration).not.toHaveBeenCalled();
   });
 
-  it("keeps the outer candidate definition after current authority is re-proved", async () => {
+  it("keeps the outer repository definition after current authority is re-proved", async () => {
     const pinnedDefinition = {
       ...loadAgent("openclaw"),
-      name: "pi",
+      name: "nemocua",
       expectedVersion: "pinned-version",
     };
     const pinnedAuthority: ResolvedSandboxAgent = Object.freeze({
-      recordedAgent: "pi",
-      effectiveAgentId: "pi",
+      recordedAgent: "nemocua",
+      effectiveAgentId: "nemocua",
       definition: pinnedDefinition,
       harnessPackage: null,
       harnessPackageMigration: null,
@@ -619,7 +703,7 @@ describe("onboarding harness package ordering", () => {
         authoritativeRebuildAgentAuthority: pinnedAuthority,
         resume: true,
       }),
-      boundaryDependencies(() => legacySession("pi"), {
+      boundaryDependencies(() => legacySession("nemocua"), {
         resolveQualifiedAgent: resolveCandidate,
         resolveSandboxAgent: resolveCurrent,
       }),
@@ -633,9 +717,9 @@ describe("onboarding harness package ordering", () => {
     expect(resolveCurrent).toHaveBeenCalledOnce();
   });
 
-  it("rejects candidate qualification lost during portable recovery", async () => {
-    const session = legacySession("pi");
-    const candidate = { ...loadAgent("openclaw"), name: "pi" };
+  it("rejects repository qualification lost during portable recovery", async () => {
+    const session = legacySession("nemocua");
+    const candidate = { ...loadAgent("openclaw"), name: "nemocua" };
     const resolveCandidate = vi.fn().mockReturnValueOnce(candidate).mockReturnValueOnce(null);
     const operation = await prepareOnboardHarnessOperation(
       operationInput({ resume: true }),

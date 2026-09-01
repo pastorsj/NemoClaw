@@ -26,6 +26,7 @@ const DIGESTS: Record<StandardHarnessId, string> = {
   openclaw: "a".repeat(64),
   hermes: "b".repeat(64),
   "langchain-deepagents-code": "c".repeat(64),
+  pi: "d".repeat(64),
 };
 
 function packageIdentity(
@@ -110,20 +111,20 @@ describe("harness package E2E evidence", () => {
     const secret = `nvapi-${"s".repeat(24)}`;
     const previousSecret = process.env.NVIDIA_INFERENCE_API_KEY;
     process.env.NVIDIA_INFERENCE_API_KEY = secret;
-    const identity = packageIdentity("openclaw");
+    const identity = packageIdentity("pi");
     const { host, runner } = createHost(
-      shellResult(0, "Installed harness package 'openclaw'.\n"),
-      shellResult(0, inventoryJson("openclaw")),
+      shellResult(0, "Installed harness package 'pi'.\n"),
+      shellResult(0, inventoryJson("pi")),
     );
     try {
-      const evidence = await installHarnessPackage(host, "openclaw");
+      const evidence = await installHarnessPackage(host, "pi");
 
       expect(evidence.identity).toEqual(identity);
       expect(evidence.identity.contentDigest).toHaveLength(64);
       expect(evidence.installResult.stdout).toContain("Installed harness package");
       expect(evidence.inventoryResult.stdout).toContain('"schemaVersion":1');
       expect(runner.calls.map(({ args }) => args)).toEqual([
-        ["harness", "install", "openclaw"],
+        ["harness", "install", "pi"],
         ["harness", "list", "--json"],
       ]);
       expect(
@@ -150,6 +151,32 @@ describe("harness package E2E evidence", () => {
     const evidence = await readInstalledHarnessPackage(host, "hermes");
 
     expect(evidence.identity).toEqual(hermes);
+  });
+
+  it("forwards qualified candidate selection through installation and inventory", async () => {
+    const qualification = {
+      PATH: "/usr/bin:/bin",
+      NEMOCLAW_CANDIDATE_AGENTS: "1",
+      NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT: "/tmp/pi-qualification.json",
+      NVIDIA_INFERENCE_API_KEY: `nvapi-${"q".repeat(24)}`,
+    };
+    const { host, runner } = createHost(
+      shellResult(0, "Installed.\n"),
+      shellResult(0, inventoryJson("pi")),
+    );
+
+    await installHarnessPackage(host, "pi", qualification);
+
+    expect(
+      runner.calls.map(({ options }) => ({
+        candidateAgents: options?.env?.NEMOCLAW_CANDIDATE_AGENTS,
+        receipt: options?.env?.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT,
+        secret: options?.env?.NVIDIA_INFERENCE_API_KEY,
+      })),
+    ).toEqual([
+      { candidateAgents: "1", receipt: "/tmp/pi-qualification.json", secret: undefined },
+      { candidateAgents: "1", receipt: "/tmp/pi-qualification.json", secret: undefined },
+    ]);
   });
 
   it("keeps repeated public installation idempotent and identity-stable", async () => {

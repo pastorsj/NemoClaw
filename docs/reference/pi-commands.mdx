@@ -15,13 +15,27 @@ content:
   type: "reference"
 agent-variants: ["pi"]
 ---
-Use `nemoclaw` for Pi sandbox lifecycle and `pi` for work inside the sandbox.
+Use `nemoclaw` for Pi sandbox lifecycle and headless tasks.
+Use `pi` for interactive work or direct Pi command access inside the sandbox.
 
 <Warning>
-Pi remains a release candidate. Ordinary installations reject `--agent pi` until final activation lands in a release. Internal candidate qualification settings are not user commands.
+Pi remains a release candidate.
+Ordinary installations reject `--agent pi` until final activation lands in a release.
+Internal candidate qualification settings are not user commands.
 </Warning>
 
 ## Onboard and Inspect
+
+After activation, start from the ordinary agent runtime package workflow:
+
+```bash
+nemoclaw harness list
+nemoclaw harness install pi
+nemoclaw harness list
+nemoclaw onboard --agent pi --name <name>
+```
+
+The second `harness list` must show Pi as healthy and active before onboarding.
 
 | Command | Purpose |
 |---|---|
@@ -38,6 +52,7 @@ Pi remains a release candidate. Ordinary installations reject `--agent pi` until
 |---|---|
 | `nemoclaw launch <name>` | Run launch preflight and open interactive Pi |
 | `nemoclaw <name> connect` | Open a shell in the sandbox |
+| `nemoclaw <name> agent -m "<task>" --json` | Run one headless task through the package-owned NeMo Fabric adapter |
 | `nemoclaw <name> exec --workdir /sandbox --no-tty -- pi --no-approve --print "<task>"` | Run one headless task from the host |
 | `nemoclaw <name> exec --workdir /sandbox --no-tty -- pi --no-approve --mode json --print "<task>"` | Emit newline-delimited JSON task events |
 
@@ -50,7 +65,13 @@ pi --no-approve --mode json --print --tools read "Read README.md"
 pi --no-context-files
 ```
 
-`--no-approve` ignores project-local executable resources. It does not disable `AGENTS.md` or `CLAUDE.md`; use `--no-context-files` for that boundary.
+`--no-approve` ignores project-local executable resources.
+It does not disable `AGENTS.md` or `CLAUDE.md`; use `--no-context-files` for that boundary.
+
+For this candidate qualification, the `agent` command runs a normalized headless task through the package-owned Fabric adapter.
+It loads `/sandbox/.pi/agent/fabric.json`, discovers the root-owned `nvidia.nemoclaw.pi` adapter, and returns one normalized JSON result.
+Successful results contain `status: "succeeded"`, `harness: "nvidia.nemoclaw.pi"`, `adapter_kind: "python"`, and the final text in `output.response`.
+The direct `exec` forms remain available when you need Pi's native text or event output.
 
 ## Preserve and Replace State
 
@@ -82,7 +103,8 @@ nemoclaw <name> stop
 nemoclaw <name> start
 ```
 
-Create a snapshot before destroy when user state must survive. Destroy does not remove a provider credential from the OpenShell gateway.
+Create a snapshot before destroy when user state must survive.
+Destroy does not remove a provider credential from the OpenShell gateway.
 
 ```bash
 nemoclaw <name> shields down

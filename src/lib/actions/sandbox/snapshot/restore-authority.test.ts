@@ -59,7 +59,7 @@ function packageIdentity(agent: string, digest = "d".repeat(64)): HarnessPackage
   };
 }
 
-function legacyPackageMigration(agent: ShippedManagedImageAgent): HarnessPackageMigration {
+function legacyPackageMigration(agent: string): HarnessPackageMigration {
   return {
     schemaVersion: 1,
     source: "legacy-current-bundle",
@@ -132,22 +132,17 @@ function packageRoot(identity: HarnessPackageIdentity): string {
   return `/state/harnesses/objects/${identity.contentDigest}`;
 }
 
-function pinnedAgentDefinition(
-  agent: ShippedManagedImageAgent,
-  identity = packageIdentity(agent),
-): AgentDefinition {
-  return Object.freeze({ ...loadAgent(agent), packageRoot: packageRoot(identity) });
+function pinnedAgentDefinition(agent: string, identity = packageIdentity(agent)): AgentDefinition {
+  const definition = agent === "pi" ? { ...loadAgent("openclaw"), name: "pi" } : loadAgent(agent);
+  return Object.freeze({ ...definition, packageRoot: packageRoot(identity) });
 }
 
-function repositoryAgentDefinition(
-  agent: "pi" | "nemocua",
-  packageRootValue: string,
-): AgentDefinition {
+function repositoryAgentDefinition(packageRootValue: string): AgentDefinition {
   return Object.freeze({
     ...loadAgent("openclaw"),
-    name: agent,
+    name: "nemocua",
     packageRoot: packageRootValue,
-    manifestPath: `${packageRootValue}/agents/${agent}/manifest.yaml`,
+    manifestPath: `${packageRootValue}/manifest.yaml`,
   });
 }
 
@@ -525,11 +520,11 @@ describe("managed rebuild restore authority", () => {
     ).toThrow("snapshot target standard agent has no harness package authority");
   });
 
-  it("keeps null package authority for a forced qualified candidate destination", () => {
+  it("keeps null package authority for a forced qualified repository destination", () => {
     const sourceIdentity = packageIdentity("hermes");
     const entries: Record<string, SandboxEntry> = {
       alpha: packageSandbox("alpha", "hermes", sourceIdentity),
-      beta: { name: "beta", agent: "pi" },
+      beta: { name: "beta", agent: "nemocua" },
     };
 
     const authority = prepareSnapshotPackageAuthority(
@@ -549,7 +544,7 @@ describe("managed rebuild restore authority", () => {
     );
 
     expect(authority.targetOwner).toEqual({
-      agentType: "pi",
+      agentType: "nemocua",
       harnessPackage: null,
       packageRoot: null,
     });
@@ -613,23 +608,23 @@ describe("managed rebuild restore authority", () => {
     },
   );
 
-  it("keeps candidate package absence explicit without resolving a standard package", () => {
-    const candidate: SandboxEntry = { name: "pi-source", agent: "pi" };
-    const getSandbox = vi.fn(() => candidate);
+  it("keeps repository package absence explicit without resolving a standard package", () => {
+    const repositoryOwner: SandboxEntry = { name: "cua-source", agent: "nemocua" };
+    const getSandbox = vi.fn(() => repositoryOwner);
     const resolvePinnedPackage = vi.fn();
     const candidateManifest: RebuildManifest = {
       ...manifest("openclaw"),
       version: 2,
-      sandboxName: "pi-source",
-      agentType: "pi",
+      sandboxName: "cua-source",
+      agentType: "nemocua",
       harnessPackage: null,
     };
 
     const authority = prepareSnapshotPackageAuthority(
       {
         manifest: candidateManifest,
-        sourceSandboxName: "pi-source",
-        targetSandboxName: "pi-source",
+        sourceSandboxName: "cua-source",
+        targetSandboxName: "cua-source",
         targetState: "registered",
       },
       { getSandbox, resolvePinnedPackage: resolvePinnedPackage as never },
@@ -650,14 +645,14 @@ describe("managed rebuild restore authority", () => {
   it.each([
     {
       scenario: "definition drift",
-      resolveCurrent: () => repositoryAgentDefinition("pi", "/repository/package-b"),
+      resolveCurrent: () => repositoryAgentDefinition("/repository/package-b"),
       expectedError: "repository agent definition changed before restore",
     },
     {
       scenario: "same-root definition substitution",
       resolveCurrent: () =>
         Object.freeze({
-          ...repositoryAgentDefinition("pi", "/repository/package-a"),
+          ...repositoryAgentDefinition("/repository/package-a"),
           stateFiles: [{ path: "different.db", strategy: "sqlite_backup" as const }],
         }),
       expectedError: "repository agent definition changed before restore",
@@ -670,10 +665,10 @@ describe("managed rebuild restore authority", () => {
       expectedError: "repository agent qualification is unavailable",
     },
   ])(
-    "rejects candidate $scenario at the final mutation fence",
+    "rejects repository harness $scenario at the final mutation fence",
     ({ resolveCurrent, expectedError }) => {
-      const candidate: SandboxEntry = { name: "pi-source", agent: "pi" };
-      const selectedDefinition = repositoryAgentDefinition("pi", "/repository/package-a");
+      const repositoryOwner: SandboxEntry = { name: "cua-source", agent: "nemocua" };
+      const selectedDefinition = repositoryAgentDefinition("/repository/package-a");
       const resolveAgentDefinition = vi.fn(resolveCurrent);
       const restore = vi.fn(
         (_name: string, _path: string, options: RecreatedSandboxRestoreOptions): RestoreResult => {
@@ -700,19 +695,19 @@ describe("managed rebuild restore authority", () => {
       );
       const candidateManifest: RebuildManifest = {
         ...manifest("openclaw"),
-        sandboxName: "pi-source",
-        agentType: "pi",
+        sandboxName: "cua-source",
+        agentType: "nemocua",
         harnessPackage: null,
         workload: undefined,
         runtimeSnapshot: undefined,
       };
 
       const result = restoreRecreatedSandboxStateWithManagedAuthority(
-        "pi-source",
+        "cua-source",
         candidateManifest,
-        { targetAgentType: "pi", agentDefinition: selectedDefinition },
+        { targetAgentType: "nemocua", agentDefinition: selectedDefinition },
         {
-          getSandbox: () => candidate,
+          getSandbox: () => repositoryOwner,
           captureOpenshell: captureMatchingLiveSandbox,
           resolvePinnedPackage: vi.fn() as never,
           resolveAgentDefinition,
@@ -734,75 +729,73 @@ describe("managed rebuild restore authority", () => {
     },
   );
 
-  it.each(["pi", "nemocua"] as const)(
-    "requalifies and exact-compares a legacy-v1 %s definition at the mutation fence",
-    (agent) => {
-      const sourceName = `${agent}-source`;
-      const source: SandboxEntry = { name: sourceName, agent };
-      const selectedDefinition = repositoryAgentDefinition(agent, "/repository/package-a");
-      const resolveAgentDefinition = vi.fn(() =>
-        Object.freeze({
-          ...selectedDefinition,
-          stateFiles: [{ path: "different.db", strategy: "sqlite_backup" as const }],
+  it("requalifies and exact-compares a legacy-v1 NemoCUA definition at the mutation fence", () => {
+    const agent = "nemocua";
+    const sourceName = `${agent}-source`;
+    const source: SandboxEntry = { name: sourceName, agent };
+    const selectedDefinition = repositoryAgentDefinition("/repository/package-a");
+    const resolveAgentDefinition = vi.fn(() =>
+      Object.freeze({
+        ...selectedDefinition,
+        stateFiles: [{ path: "different.db", strategy: "sqlite_backup" as const }],
+      }),
+    );
+    const restore = vi.fn(
+      (_name: string, _path: string, options: RecreatedSandboxRestoreOptions): RestoreResult => {
+        try {
+          options.validateBeforeMutation?.();
+          return {
+            success: true,
+            restoredDirs: [],
+            failedDirs: [],
+            restoredFiles: [],
+            failedFiles: [],
+          };
+        } catch (error) {
+          return {
+            success: false,
+            restoredDirs: [],
+            failedDirs: ["manifest"],
+            restoredFiles: [],
+            failedFiles: [],
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    );
+    const legacyCandidateManifest: RebuildManifest = {
+      ...legacyManifest("openclaw"),
+      sandboxName: sourceName,
+      agentType: agent,
+      workload: undefined,
+      runtimeSnapshot: undefined,
+    };
+
+    const result = restoreRecreatedSandboxStateWithManagedAuthority(
+      sourceName,
+      legacyCandidateManifest,
+      { targetAgentType: agent, agentDefinition: selectedDefinition },
+      {
+        getSandbox: () => source,
+        captureOpenshell: captureMatchingLiveSandbox,
+        resolvePinnedPackage: vi.fn() as never,
+        resolveAgentDefinition,
+        captureContentAuthority: () => ({
+          schemaVersion: 1,
+          backupPath: "/tmp/alpha",
+          contentSha256: "f".repeat(64),
         }),
-      );
-      const restore = vi.fn(
-        (_name: string, _path: string, options: RecreatedSandboxRestoreOptions): RestoreResult => {
-          try {
-            options.validateBeforeMutation?.();
-            return {
-              success: true,
-              restoredDirs: [],
-              failedDirs: [],
-              restoredFiles: [],
-              failedFiles: [],
-            };
-          } catch (error) {
-            return {
-              success: false,
-              restoredDirs: [],
-              failedDirs: ["manifest"],
-              restoredFiles: [],
-              failedFiles: [],
-              error: error instanceof Error ? error.message : String(error),
-            };
-          }
-        },
-      );
-      const legacyCandidateManifest: RebuildManifest = {
-        ...legacyManifest("openclaw"),
-        sandboxName: sourceName,
-        agentType: agent,
-        workload: undefined,
-        runtimeSnapshot: undefined,
-      };
+        restore,
+      },
+    );
 
-      const result = restoreRecreatedSandboxStateWithManagedAuthority(
-        sourceName,
-        legacyCandidateManifest,
-        { targetAgentType: agent, agentDefinition: selectedDefinition },
-        {
-          getSandbox: () => source,
-          captureOpenshell: captureMatchingLiveSandbox,
-          resolvePinnedPackage: vi.fn() as never,
-          resolveAgentDefinition,
-          captureContentAuthority: () => ({
-            schemaVersion: 1,
-            backupPath: "/tmp/alpha",
-            contentSha256: "f".repeat(64),
-          }),
-          restore,
-        },
-      );
-
-      expect(result).toMatchObject({
-        success: false,
-        error: expect.stringContaining("repository agent definition changed before restore"),
-      });
-      expect(resolveAgentDefinition).toHaveBeenCalledOnce();
-      expect(restore).toHaveBeenCalledOnce();
-    },
-  );
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("repository agent definition changed before restore"),
+    });
+    expect(resolveAgentDefinition).toHaveBeenCalledOnce();
+    expect(restore).toHaveBeenCalledOnce();
+  });
 
   it("rejects same-root package definition drift at the mutation fence", () => {
     const identity = packageIdentity("openclaw");

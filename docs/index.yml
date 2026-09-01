@@ -462,7 +462,7 @@ navigation:
               - page: "CLI Commands Reference"
                 path: reference/pi-commands.mdx
                 slug: commands
-              - page: "Pi Support and Security"
+              - page: "Pi Candidate Qualification and Security"
                 path: reference/pi-support.mdx
                 slug: pi-support
           - section: "Resources"

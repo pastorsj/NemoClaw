@@ -15,7 +15,6 @@ import {
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { isCandidateAgent } from "../../agent/candidate.js";
 import type { AgentDefinition, AgentStateFile } from "../../agent-runtime/manifest-types.js";
 import { isObjectRecord } from "../../core/json-types.js";
 import {
@@ -227,7 +226,7 @@ function isInstanceBackup(value: unknown): value is InstanceBackup {
 }
 
 function isRepositoryQualifiedManifestAgent(agentType: string): boolean {
-  return agentType === "nemocua" || isCandidateAgent(agentType);
+  return agentType === "nemocua";
 }
 
 /** Classify package authority without treating schema omission as candidate null. */
@@ -242,9 +241,13 @@ export function inspectRebuildManifestHarnessPackage(
     return { status: "invalid" };
   }
   if (manifest.harnessPackage === null) {
-    return isRepositoryQualifiedManifestAgent(manifest.agentType)
-      ? { status: "candidate", harnessPackage: null }
-      : { status: "invalid" };
+    if (isRepositoryQualifiedManifestAgent(manifest.agentType)) {
+      return { status: "candidate", harnessPackage: null };
+    }
+    // Pi snapshots written before the package migration carried explicit null
+    // authority. Keep that compatibility exact to Pi so adding another
+    // candidate cannot silently grant it the same legacy restore path.
+    return manifest.agentType === "pi" ? { status: "legacy" } : { status: "invalid" };
   }
   try {
     const harnessPackage = parseHarnessPackageIdentity(manifest.harnessPackage);

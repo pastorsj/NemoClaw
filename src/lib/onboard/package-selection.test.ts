@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,6 +77,59 @@ describe("selectOnboardHarnessPackage", () => {
     expect(result.effectiveDefinition.expectedVersion).toBeNull();
     expect(prompt).not.toHaveBeenCalled();
     expect(fs.existsSync(fixture.executionSentinel)).toBe(false);
+  });
+
+  it("treats an installed but unqualified candidate as unavailable", async () => {
+    fixture.install("pi");
+    const prompt = vi.fn(async () => "1");
+
+    const result = await selectOnboardHarnessPackage(selectionInput({ canPrompt: true, prompt }));
+
+    expect(result).toMatchObject({
+      kind: "install-required",
+      reason: "no-installed-harnesses",
+      command: "nemoclaw harness install",
+    });
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("rejects an explicitly requested installed candidate without qualification", async () => {
+    fixture.install("pi");
+
+    await expect(selectOnboardHarnessPackage(selectionInput({ agentFlag: "pi" }))).rejects.toThrow(
+      "release candidate and is not selectable",
+    );
+  });
+
+  it("selects an installed candidate only with its published qualification", async () => {
+    const installed = fixture.install("pi");
+    const environment = {
+      NEMOCLAW_CANDIDATE_AGENTS: "1",
+      NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT: path.join(
+        process.cwd(),
+        "ci/pi-agent-qualification-v1-linux-amd64.json",
+      ),
+    };
+
+    const result = await selectOnboardHarnessPackage(selectionInput({ environment }));
+
+    assert.equal(result.kind, "package");
+    expect(result.harnessPackage).toEqual(installed.identity);
+    expect(result.effectiveDefinition.name).toBe("pi");
+  });
+
+  it("omits an installed unqualified candidate from the numbered picker", async () => {
+    fixture.installMany(["openclaw", "hermes", "pi"]);
+    const log = vi.fn();
+    const prompt = vi.fn(async () => "2");
+
+    const result = await selectOnboardHarnessPackage(
+      selectionInput({ canPrompt: true, log, prompt }),
+    );
+
+    assert.equal(result.kind, "package");
+    expect(result.recordedAgent).toBe("hermes");
+    expect(log.mock.calls.map(([message]) => message).join("\n")).not.toContain("Pi");
   });
 
   it("uses the established numbered picker for multiple installed packages", async () => {

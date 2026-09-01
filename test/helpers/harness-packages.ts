@@ -37,6 +37,13 @@ const HARNESS_PACKAGE_FIXTURES = Object.freeze([
     aliases: ["nemoclaw", "nemo-claw"],
     defaultChoice: true,
   },
+  {
+    id: "pi",
+    displayName: "Pi",
+    packageVersion: "0.1.0",
+    aliases: [],
+    defaultChoice: false,
+  },
 ] as const);
 
 type HarnessPackageFixtureDeclaration = (typeof HARNESS_PACKAGE_FIXTURES)[number] & {
@@ -99,16 +106,22 @@ function fixtureManifest(
   executionSentinel: string,
   agentExpectedVersion?: string,
 ): string {
-  const terminalRuntime =
+  const terminalCommand =
     declaration.id === "langchain-deepagents-code"
-      ? ["runtime:", "  kind: terminal", "  interactive_command: deepagents"]
-      : ["runtime:", "  kind: gateway"];
+      ? "deepagents"
+      : declaration.id === "pi"
+        ? "pi"
+        : null;
+  const terminalRuntime = terminalCommand
+    ? ["runtime:", "  kind: terminal", `  interactive_command: ${terminalCommand}`]
+    : ["runtime:", "  kind: gateway"];
   return [
     `name: ${declaration.id}`,
     `display_name: ${JSON.stringify(declaration.displayName)}`,
     `description: ${JSON.stringify(`Reviewed ${declaration.displayName} fixture adapter`)}`,
-    "aliases:",
-    ...declaration.aliases.map((alias) => `  - ${alias}`),
+    ...(declaration.aliases.length > 0
+      ? ["aliases:", ...declaration.aliases.map((alias) => `  - ${alias}`)]
+      : []),
     "onboarding:",
     `  default: ${declaration.defaultChoice ? "true" : "false"}`,
     `  sandbox_name: ${declaration.id === "openclaw" ? "my-assistant" : declaration.id}`,

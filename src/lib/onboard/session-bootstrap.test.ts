@@ -274,7 +274,7 @@ describe("prepareOnboardSession", () => {
     expect(getSession()?.sessionId).toBe("old-session");
   });
 
-  it("rejects fabricated package authority for a qualified fresh candidate", async () => {
+  it("rejects fabricated package authority for a qualified fresh repository harness", async () => {
     const existing = createSession({ sessionId: "old-session" });
     const { deps, getSession } = createDeps(existing);
 
@@ -285,7 +285,7 @@ describe("prepareOnboardSession", () => {
           fresh: true,
           freshHarnessBinding: {
             kind: "qualified-agent",
-            recordedAgent: "pi",
+            recordedAgent: "nemocua",
             harnessPackage: OPENCLAW_HARNESS_BINDING.harnessPackage,
           } as never,
           requestedFromDockerfile: null,
@@ -303,7 +303,7 @@ describe("prepareOnboardSession", () => {
     expect(getSession()?.sessionId).toBe("old-session");
   });
 
-  it("rejects a non-canonical qualified fresh candidate name before clearing state", async () => {
+  it("rejects a non-canonical qualified fresh harness name before clearing state", async () => {
     const existing = createSession({ sessionId: "old-session" });
     const { deps, getSession } = createDeps(existing);
 
@@ -314,7 +314,7 @@ describe("prepareOnboardSession", () => {
           fresh: true,
           freshHarnessBinding: {
             kind: "qualified-agent",
-            recordedAgent: "Pi Candidate",
+            recordedAgent: "NemoCUA Candidate",
             harnessPackage: null,
           },
           requestedFromDockerfile: null,
@@ -332,7 +332,7 @@ describe("prepareOnboardSession", () => {
     expect(getSession()?.sessionId).toBe("old-session");
   });
 
-  it.each(["foo", "openclaw", "hermes"])(
+  it.each(["foo", "openclaw", "hermes", "pi"])(
     "rejects non-qualified canonical fresh harness name %s before effects",
     async (recordedAgent) => {
       const existing = createSession({ sessionId: "old-session" });
@@ -421,7 +421,7 @@ describe("prepareOnboardSession", () => {
     expect(getSession()?.sessionId).not.toBe("old-session");
   });
 
-  it("keeps a qualified candidate session package-free", async () => {
+  it("keeps a qualified repository harness session package-free", async () => {
     const { deps } = createDeps();
 
     const result = await prepareOnboardSession(
@@ -430,7 +430,7 @@ describe("prepareOnboardSession", () => {
         fresh: false,
         freshHarnessBinding: {
           kind: "qualified-agent",
-          recordedAgent: "pi",
+          recordedAgent: "nemocua",
           harnessPackage: null,
         },
         requestedFromDockerfile: null,
@@ -442,7 +442,7 @@ describe("prepareOnboardSession", () => {
     );
 
     expect(result.session).toMatchObject({
-      agent: "pi",
+      agent: "nemocua",
       harnessPackage: null,
       harnessPackageMigration: null,
     });

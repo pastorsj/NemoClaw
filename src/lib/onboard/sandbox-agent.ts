@@ -3,7 +3,7 @@
 
 import type { AgentDefinition } from "../agent/defs";
 import { createImmutableAgentDefinition, loadAgent, loadAgentFresh } from "../agent/defs";
-import { isCandidateAgent } from "../agent/candidate";
+import { requireCandidateQualificationEnabled } from "../agent/candidate";
 import { buildAgentDefinition } from "../agent-runtime/manifest-loader";
 import { getVersion } from "../core/version";
 import {
@@ -158,6 +158,7 @@ export interface ResolvedSandboxAgent {
 
 export interface ResolveSandboxAgentOptions extends HarnessPackageStoreOptions {
   readonly env?: NodeJS.ProcessEnv;
+  readonly requireLifecycleEligibility?: boolean;
 }
 
 function sandboxAgentAuthorityError(message: string): Error {
@@ -165,7 +166,7 @@ function sandboxAgentAuthorityError(message: string): Error {
 }
 
 function isRepositoryQualifiedAgent(agentId: string): boolean {
-  return agentId === "nemocua" || isCandidateAgent(agentId);
+  return agentId === "nemocua";
 }
 
 function requireRecordedSandboxAgent(agent: unknown): string | null {
@@ -185,6 +186,9 @@ export function resolveSandboxAgent(
 ): ResolvedSandboxAgent {
   const recordedAgent = requireRecordedSandboxAgent(entry.agent);
   const effectiveAgentId = normalizeSandboxAgentName(recordedAgent);
+  if (options.requireLifecycleEligibility === true) {
+    requireCandidateQualificationEnabled(effectiveAgentId, options.env ?? process.env);
+  }
   const packageState = inspectHarnessPackageState(
     entry.harnessPackage,
     entry.harnessPackageMigration,

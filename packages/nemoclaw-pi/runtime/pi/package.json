@@ -3,7 +3,7 @@
   "name": "nemoclaw-pi-runtime",
   "version": "0.0.0",
   "private": true,
-  "description": "Locked production dependency graph for the Pi runtime",
+  "description": "Package-owned locked production dependency graph for the Pi runtime",
   "license": "Apache-2.0",
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.84.1"

@@ -2,6 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createAgentAliasMap, resolveAgentNameAlias } from "../agent/aliases";
+import {
+  isCandidateAgent,
+  isCandidateAgentSelectable,
+  requireCandidateAgentSelectable,
+} from "../agent/candidate";
 import type { AgentChoice, AgentDefinition } from "../agent-runtime/manifest-types";
 import {
   listHarnessPackageInventory,
@@ -14,7 +19,7 @@ import {
   type InstalledHarnessPackage,
 } from "../agent-runtime/package/store";
 import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
-import { promptForAgentChoice, resolveQualifiedOnboardAgent } from "./agent-selection";
+import { promptForAgentChoice, resolveUnpackagedOnboardAgent } from "./agent-selection";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 import { resolveSandboxAgent } from "./sandbox-agent";
 
@@ -62,7 +67,7 @@ export interface SelectOnboardHarnessPackageDependencies {
   ) => HarnessPackageInventory;
   readonly promptForAgentChoice: typeof promptForAgentChoice;
   readonly resolvePinnedHarnessPackage: typeof resolvePinnedHarnessPackage;
-  readonly resolveQualifiedOnboardAgent: typeof resolveQualifiedOnboardAgent;
+  readonly resolveUnpackagedOnboardAgent: typeof resolveUnpackagedOnboardAgent;
   readonly resolveSandboxAgent: typeof resolveSandboxAgent;
   readonly selectFromNumberedMenu: (
     rawChoice: string,
@@ -75,7 +80,7 @@ const PRODUCTION_SELECTION_DEPENDENCIES: SelectOnboardHarnessPackageDependencies
   listHarnessPackageInventory,
   promptForAgentChoice,
   resolvePinnedHarnessPackage,
-  resolveQualifiedOnboardAgent,
+  resolveUnpackagedOnboardAgent,
   resolveSandboxAgent,
   selectFromNumberedMenu: selectFromNumberedMenuOrExit,
 });
@@ -147,7 +152,11 @@ function resolveExactSelection(
       agent: recordedAgent,
       harnessPackage: resolvedPackage.identity,
     },
-    { storeRoot: input.storeRoot, env: input.environment },
+    {
+      storeRoot: input.storeRoot,
+      env: input.environment,
+      requireLifecycleEligibility: true,
+    },
   );
   if (
     !identityMatches(resolvedPackage.identity, selected.identity) ||
@@ -170,6 +179,7 @@ function explicitInstalledPackage(
   selector: string,
   inventory: HarnessPackageInventory,
   installed: readonly HealthyInstalledHarnessPackageRecord[],
+  environment: NodeJS.ProcessEnv,
 ): HealthyInstalledHarnessPackageRecord {
   const availableIds = inventory.available.map(({ id }) => id);
   const aliases = createAgentAliasMap(
@@ -184,6 +194,7 @@ function explicitInstalledPackage(
       `Unknown harness package '${selector}'. Reviewed harnesses: ${availableIds.join(", ")}.`,
     );
   }
+  requireCandidateAgentSelectable(resolvedId, environment);
   const selected = installed.find(({ id }) => id === resolvedId);
   if (selected) return selected;
   if (inventory.installed.some(({ id, state }) => id === resolvedId && state === "damaged")) {
@@ -199,13 +210,19 @@ async function selectFromInstalledPackages(
 ): Promise<HealthyInstalledHarnessPackageRecord | OnboardHarnessInstallGuidance> {
   const installed = orderInstalledPackages(
     inventory.installed.filter(
-      (record): record is HealthyInstalledHarnessPackageRecord => record.state === "installed",
+      (record): record is HealthyInstalledHarnessPackageRecord =>
+        record.state === "installed" &&
+        (!isCandidateAgent(record.id) || isCandidateAgentSelectable(record.id, input.environment)),
     ),
   );
   const selector = explicitSelector(input);
-  if (selector) return explicitInstalledPackage(selector, inventory, installed);
+  if (selector) return explicitInstalledPackage(selector, inventory, installed, input.environment);
   const damagedIds = inventory.installed
-    .filter(({ state }) => state === "damaged")
+    .filter(
+      ({ id, state }) =>
+        state === "damaged" &&
+        (!isCandidateAgent(id) || isCandidateAgentSelectable(id, input.environment)),
+    )
     .map(({ id }) => id);
   if (damagedIds.length > 0) throw new OnboardHarnessIntegrityError(damagedIds);
   if (installed.length === 0) {
@@ -244,7 +261,7 @@ async function selectFromInstalledPackages(
   return installed.find(({ id }) => id === selectedChoice.name)!;
 }
 
-/** Select one installed standard package or one explicitly qualified repository agent. */
+/** Select one installed package or the remaining explicitly requested unpackaged agent. */
 export async function selectOnboardHarnessPackage(
   input: SelectOnboardHarnessPackageInput,
   dependencyOverrides: Partial<SelectOnboardHarnessPackageDependencies> = {},
@@ -252,14 +269,14 @@ export async function selectOnboardHarnessPackage(
   const dependencies = { ...PRODUCTION_SELECTION_DEPENDENCIES, ...dependencyOverrides };
   const selector = explicitSelector(input);
   if (selector) {
-    const qualifiedAgent = dependencies.resolveQualifiedOnboardAgent(selector, input.environment);
-    if (qualifiedAgent) {
+    const unpackagedAgent = dependencies.resolveUnpackagedOnboardAgent(selector, input.environment);
+    if (unpackagedAgent) {
       return Object.freeze({
         kind: "qualified-agent",
-        recordedAgent: qualifiedAgent.name,
+        recordedAgent: unpackagedAgent.name,
         harnessPackage: null,
         resolvedPackage: null,
-        effectiveDefinition: qualifiedAgent,
+        effectiveDefinition: unpackagedAgent,
       });
     }
   }

@@ -660,15 +660,15 @@ describe("managed snapshot backup authority", () => {
   });
 
   it("preserves explicit null authority for a qualified repository agent", () => {
-    const entry = { name: "alpha", agent: "pi" } satisfies SandboxEntry;
+    const entry = { name: "alpha", agent: "nemocua" } satisfies SandboxEntry;
     const definition = {
-      name: "pi",
+      name: "nemocua",
       packageRoot: "/repository",
-      manifestPath: "/repository/agents/pi/manifest.yaml",
+      manifestPath: "/repository/manifest.yaml",
     };
     const resolveAgent = vi.fn(() => ({
-      recordedAgent: "pi",
-      effectiveAgentId: "pi",
+      recordedAgent: "nemocua",
+      effectiveAgentId: "nemocua",
       definition,
       harnessPackage: null,
       harnessPackageMigration: null,
@@ -695,23 +695,23 @@ describe("managed snapshot backup authority", () => {
     expect(resolvePinnedPackage).not.toHaveBeenCalled();
   });
 
-  it("rejects same-root candidate definition drift before manifest publication", () => {
-    const entry = { name: "alpha", agent: "pi" } satisfies SandboxEntry;
+  it("rejects same-root repository definition drift before manifest publication", () => {
+    const entry = { name: "alpha", agent: "nemocua" } satisfies SandboxEntry;
     const selectedDefinition = {
-      name: "pi",
+      name: "nemocua",
       packageRoot: "/repository",
-      manifestPath: "/repository/agents/pi/manifest.yaml",
+      manifestPath: "/repository/manifest.yaml",
       stateFiles: [{ path: "state.db", strategy: "sqlite_backup" as const }],
     } as never;
     const changedDefinition = {
-      name: "pi",
+      name: "nemocua",
       packageRoot: "/repository",
-      manifestPath: "/repository/agents/pi/manifest.yaml",
+      manifestPath: "/repository/manifest.yaml",
       stateFiles: [{ path: "different.db", strategy: "sqlite_backup" as const }],
     } as never;
     const selectedAgent = {
-      recordedAgent: "pi",
-      effectiveAgentId: "pi",
+      recordedAgent: "nemocua",
+      effectiveAgentId: "nemocua",
       definition: selectedDefinition,
       harnessPackage: null,
       harnessPackageMigration: null,

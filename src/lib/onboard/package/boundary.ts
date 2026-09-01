@@ -26,7 +26,7 @@ import { bindCheckpointHarnessPackageAuthority } from "../../state/onboard-check
 import { type CompareAndSwapSessionResult, type Session } from "../../state/onboard-session";
 import { load as loadRegistry } from "../../state/registry/persistence";
 import type { SandboxRegistry } from "../../state/registry/types";
-import { resolveQualifiedOnboardAgent } from "../agent-selection";
+import { resolveUnpackagedOnboardAgent } from "../agent-selection";
 import {
   prepare as prepareLockedOnboardRuntime,
   type LockedOnboardRuntimePreparation,
@@ -113,7 +113,7 @@ export interface OnboardHarnessPackageBoundaryDependencies {
   readonly getStoreRoot: typeof getHarnessPackageStoreRoot;
   readonly prepareLegacyMigration: typeof prepareLegacyHarnessMigration;
   readonly reconcileLegacyMigration: typeof reconcileLegacyHarnessMigration;
-  readonly resolveQualifiedAgent: typeof resolveQualifiedOnboardAgent;
+  readonly resolveQualifiedAgent: typeof resolveUnpackagedOnboardAgent;
   readonly resolveSandboxAgent: typeof resolveSandboxAgent;
   readonly selectHarnessPackage: typeof selectOnboardHarnessPackage;
 }
@@ -170,7 +170,7 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
   loadRegistry,
   prepareLegacyMigration: prepareLegacyHarnessMigration,
   reconcileLegacyMigration: reconcileLegacyHarnessMigration,
-  resolveQualifiedAgent: resolveQualifiedOnboardAgent,
+  resolveQualifiedAgent: resolveUnpackagedOnboardAgent,
   resolveSandboxAgent,
   selectHarnessPackage: selectOnboardHarnessPackage,
 });
@@ -387,7 +387,11 @@ function bindFreshSelection(
       agent: selection.recordedAgent,
       harnessPackage: selection.harnessPackage,
     },
-    { storeRoot: prepared.storeRoot, env: prepared.environment },
+    {
+      storeRoot: prepared.storeRoot,
+      env: prepared.environment,
+      requireLifecycleEligibility: true,
+    },
   );
   if (
     resolved.recordedAgent !== selection.recordedAgent ||
@@ -503,6 +507,7 @@ function bindBoundary(
       ? deps.resolveSandboxAgent(packageEntry(unchanged), {
           storeRoot: prepared.storeRoot,
           env: prepared.environment,
+          requireLifecycleEligibility: true,
         })
       : null;
     if (resolvedBeforeMutation) {
@@ -518,6 +523,7 @@ function bindBoundary(
       deps.resolveSandboxAgent(packageEntry(owner), {
         storeRoot: prepared.storeRoot,
         env: prepared.environment,
+        requireLifecycleEligibility: true,
       });
     deps.assertOnboardLockOwned();
     return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
@@ -576,7 +582,11 @@ function bindBoundary(
         harnessPackage: prepared.migration.harnessPackage,
         harnessPackageMigration: prepared.migration.harnessPackageMigration,
       },
-      { storeRoot: prepared.storeRoot, env: prepared.environment },
+      {
+        storeRoot: prepared.storeRoot,
+        env: prepared.environment,
+        requireLifecycleEligibility: true,
+      },
     );
     assertPinnedRebuildAuthority(
       resolvedBeforeMutation,
@@ -590,7 +600,11 @@ function bindBoundary(
       harnessPackage: migrated.harnessPackage,
       harnessPackageMigration: migrated.harnessPackageMigration,
     },
-    { storeRoot: prepared.storeRoot, env: prepared.environment },
+    {
+      storeRoot: prepared.storeRoot,
+      env: prepared.environment,
+      requireLifecycleEligibility: true,
+    },
   );
   deps.assertOnboardLockOwned();
   return bindResolvedAgentAuthority(resolved, prepared.authoritativeRebuildAgentAuthority);
@@ -661,7 +675,7 @@ export async function prepareOnboardHarnessOperation(
       requireCurrentSessionHarnessPackageAuthority(
         expected,
         operation,
-        { env: environment },
+        { env: environment, requireLifecycleEligibility: true },
         {
           loadSession: dependencyOverrides.loadSession,
           resolveSandboxAgent:

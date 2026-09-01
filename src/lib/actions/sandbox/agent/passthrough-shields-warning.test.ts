@@ -54,6 +54,19 @@ vi.mock("../../../shields/audit", () => ({
 
 import { type AgentPassthroughDeps, runAgentPassthrough } from "./passthrough";
 
+type ResolvedFixtureAgent = ReturnType<NonNullable<AgentPassthroughDeps["resolveAgent"]>>;
+
+const resolveFixtureAgent: NonNullable<AgentPassthroughDeps["resolveAgent"]> = (entry) => {
+  const effectiveAgentId = entry.agent ?? "openclaw";
+  return {
+    recordedAgent: entry.agent ?? null,
+    effectiveAgentId,
+    definition: loadAgentMock(effectiveAgentId) as ResolvedFixtureAgent["definition"],
+    harnessPackage: null,
+    harnessPackageMigration: null,
+  };
+};
+
 function makeProcMock() {
   const writes: string[] = [];
   return {
@@ -88,6 +101,7 @@ describe("runAgentPassthrough shields-relock warning", () => {
         {
           process: proc,
           execNonJson,
+          resolveAgent: resolveFixtureAgent,
           getRecentShieldsAutoRestore: () => result,
         },
       ),
@@ -187,6 +201,7 @@ describe("runAgentPassthrough shields-relock warning", () => {
           {
             process: processWithStdout,
             execJson,
+            resolveAgent: resolveFixtureAgent,
             getRecentShieldsAutoRestore: (sandboxName) =>
               actualAudit.readRecentShieldsAutoRestore(sandboxName, 10 * 60 * 1000, auditPath),
           },
@@ -223,7 +238,7 @@ describe("runAgentPassthrough shields-relock warning", () => {
     await runAgentPassthrough(
       "alpha",
       { extraArgs: ["--help"] },
-      { process: proc, getRecentShieldsAutoRestore },
+      { process: proc, resolveAgent: resolveFixtureAgent, getRecentShieldsAutoRestore },
     );
 
     expect(execMock).toHaveBeenCalledWith("alpha", ["terminal-agent", "--headless", "--help"], {

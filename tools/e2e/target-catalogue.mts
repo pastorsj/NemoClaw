@@ -1165,7 +1165,8 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     runner: "ubuntu-24.04",
     shard: "linux-amd64",
     owningPaths: [
-      "agents/pi/",
+      "packages/nemoclaw-fabric/",
+      "packages/nemoclaw-pi/",
       "ci/pi-agent-qualification-v1-linux-amd64.json",
       "src/lib/agent/candidate-authority.ts",
       "src/lib/agent/candidate.ts",
@@ -1199,7 +1200,8 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     runner: "ubuntu-24.04-arm",
     shard: "linux-arm64",
     owningPaths: [
-      "agents/pi/",
+      "packages/nemoclaw-fabric/",
+      "packages/nemoclaw-pi/",
       "ci/pi-agent-qualification-v1-linux-arm64.json",
       "src/lib/agent/candidate-authority.ts",
       "src/lib/agent/candidate.ts",

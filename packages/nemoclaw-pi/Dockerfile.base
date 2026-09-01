@@ -91,6 +91,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # hadolint ignore=DL3001,DL4006
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3=3.13.5-1 \
+        python3-pip=25.1.1+dfsg-1 \
+        python3-venv=3.13.5-1 \
         curl=8.14.1-2+deb13u4 \
         git=1:2.47.3-0+deb13u1 \
         ca-certificates=20250419 \
@@ -295,7 +297,7 @@ RUN groupadd -r -g 999 sandbox \
     && test "$(getent passwd sandbox)" = "sandbox:x:999:999::/sandbox:/bin/bash"
 
 # Pre-create shell init files for the sandbox user. The NemoClaw entrypoint
-# (agents/pi/start.sh) writes /tmp/nemoclaw-proxy-env.sh at startup so
+# (packages/nemoclaw-pi/start.sh) writes /tmp/nemoclaw-proxy-env.sh at startup so
 # interactive sessions and Pi share the same proxy, CA, HOME, and Pi offline
 # settings. The umask keeps Pi configuration and session files owner-only in
 # every shell.
@@ -345,8 +347,8 @@ RUN chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && mv /etc/bash.bashrc.new /etc/bash.bashrc \
     && chmod 444 /etc/bash.bashrc
 
-COPY agents/pi/pi-runtime/package.json \
-    agents/pi/pi-runtime/package-lock.json \
+COPY packages/nemoclaw-pi/runtime/pi/package.json \
+    packages/nemoclaw-pi/runtime/pi/package-lock.json \
     /usr/local/lib/nemoclaw/pi-runtime/
 
 # The accepted Pi candidate is one package version and integrity value.

@@ -44,10 +44,12 @@ const REVIEWED_PATH_GLOBS = new Map<string, RegExp>([
   ["agents/**", /^agents\/.+$/u],
   ["packages/nemoclaw-openclaw/**", /^packages\/nemoclaw-openclaw\/.+$/u],
   ["packages/nemoclaw-hermes/**", /^packages\/nemoclaw-hermes\/.+$/u],
+  ["packages/nemoclaw-fabric/**", /^packages\/nemoclaw-fabric\/.+$/u],
   [
     "packages/nemoclaw-langchain-deepagents-code/**",
     /^packages\/nemoclaw-langchain-deepagents-code\/.+$/u,
   ],
+  ["packages/nemoclaw-pi/**", /^packages\/nemoclaw-pi\/.+$/u],
   ["ci/pi-agent-qualification-v1-*.json", /^ci\/pi-agent-qualification-v1-[^/]*[.]json$/u],
   ["nemoclaw-blueprint/**", /^nemoclaw-blueprint\/.+$/u],
   ["scripts/**", /^scripts\/.+$/u],

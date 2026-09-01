@@ -6,7 +6,7 @@
 // The wrapper enforces three host-side mirrors of upstream contracts, one
 // advisory diagnostic, and one best-effort pre-dispatch recovery:
 //
-// 1. Agent-kind guard (registry mirror).
+// 1. Agent-kind and package-authority guard (registry mirror).
 //
 //    - Invalid state: the local registry is the source of truth for which
 //      agent a sandbox runs (openclaw vs hermes vs future variants).
@@ -14,19 +14,20 @@
 //      an in-sandbox binary that does not exist (or exists with incompatible
 //      flags), and would silently bypass the host-side guard intended to
 //      redirect Hermes callers to the sandbox's OpenAI-compatible API port.
-//    - Source boundary: the registry and agent manifest allowlist are
-//      NemoClaw-owned. The in-sandbox invocation, its argv contract, and its
-//      streaming behaviour are owned by the selected upstream agent command.
-//      NemoClaw does not rewrite agent flags here; it forwards them verbatim.
-//      Terminal-runtime dispatch uses the manifest command only when it can
-//      be represented as simple whitespace-delimited argv tokens; shell
-//      quoting/escaping fails closed until manifests expose argv natively.
+//    - Source boundary: the registry and its exact retained package receipt
+//      are NemoClaw-owned. The in-sandbox invocation, its argv contract, and
+//      its streaming behaviour are owned by the selected upstream agent
+//      command. NemoClaw resolves the receipt-pinned manifest, then forwards
+//      agent flags verbatim. Terminal-runtime dispatch uses that manifest
+//      command only when it can be represented as simple whitespace-delimited
+//      argv tokens; shell quoting/escaping fails closed until manifests expose
+//      argv natively.
 //    - Source-fix constraint: NemoClaw cannot prove agent type from anywhere
 //      except the registry, because the OpenShell exec transport has no
 //      pre-execution probe that reveals the sandbox's configured agent. A
-//      registry read failure therefore has to fail closed — silently
-//      degrading to OpenClaw-as-default would let a Hermes-onboarded sandbox
-//      dispatch the wrong binary on transient I/O errors.
+//      registry read or retained-package resolution failure therefore has to
+//      fail closed — silently degrading to a current bundled definition could
+//      dispatch a command that does not belong to the sandbox image.
 //
 // 2. Non-ready phase guard (OpenShell phase mirror).
 //
@@ -90,10 +91,11 @@
 //
 // Regression tests: `passthrough.test.ts` covers the Hermes redirect, the
 // forwarded argv, SIGTERM exit status, the registry-miss fallback to OpenClaw,
-// registry and manifest-resolution fail-closed paths, quoted manifest command
-// rejection, the enforced `--no-tty` argv shape, the non-Ready phase recovery
-// path, the unparseable phase fail-closed path, the OpenClaw no-selector rejection, and
-// the `--flag=value` selector-acceptance branch, plus the OpenClaw JSON
+// registry and package-resolution fail-closed paths, receipt-pinned terminal
+// commands, quoted manifest command rejection, the enforced `--no-tty` argv
+// shape, the non-Ready phase recovery path, the unparseable phase fail-closed
+// path, the OpenClaw no-selector rejection, and the `--flag=value`
+// selector-acceptance branch, plus the OpenClaw JSON
 // captured transport path used to append failure provenance without polluting
 // machine-readable stdout. The focused shields and Ollama modules own their
 // diagnostic and recovery tests.
@@ -111,10 +113,11 @@
 //   - Drop Ollama pre-dispatch recovery when supported daemon restarts preserve
 //     loaded runners or NemoClaw manages and warms the daemon lifecycle.
 
-import { type AgentDefinition, isTerminalAgent, listAgents, loadAgent } from "../../../agent/defs";
+import { type AgentDefinition, isTerminalAgent } from "../../../agent/defs";
 import { CLI_NAME } from "../../../cli/branding";
 import { isStdinTty } from "../../../core/stdin";
 import { resolveSandboxHermesApiPort } from "../../../onboard/hermes-api-port";
+import { resolveLifecycleEligibleSandboxAgent } from "../../../onboard/package/package-authority";
 import type { ShieldsAutoRestoreReadResult } from "../../../shields/audit";
 import * as registry from "../../../state/registry";
 import {
@@ -235,6 +238,7 @@ export interface AgentPassthroughOptions {
 
 export interface AgentPassthroughDeps {
   getSandbox?: typeof registry.getSandbox;
+  resolveAgent?: typeof resolveLifecycleEligibleSandboxAgent;
   ensureLive?: typeof ensureLiveSandboxOrExit;
   exec?: typeof execSandbox;
   execJson?: typeof runAgentJsonPassthrough;
@@ -317,32 +321,6 @@ function rejectAgentResolutionError(
   return proc.exit(2);
 }
 
-function ensureRegisteredAgentIsKnown(
-  sandboxName: string,
-  agent: string,
-  proc: NonNullable<AgentPassthroughDeps["process"]>,
-): void {
-  let knownAgents: string[];
-  try {
-    knownAgents = listAgents();
-  } catch (error) {
-    rejectAgentResolutionError(
-      sandboxName,
-      agent,
-      `Could not read local agent manifest allowlist: ${(error as Error).message}`,
-      proc,
-    );
-  }
-  if (!knownAgents.includes(agent)) {
-    rejectAgentResolutionError(
-      sandboxName,
-      agent,
-      "Registered agent is not present in the local agent manifest allowlist",
-      proc,
-    );
-  }
-}
-
 function splitManifestCommand(command: string): TerminalCommandResult {
   const trimmed = command.trim();
   if (!trimmed) return { kind: "command", argv: [] };
@@ -366,6 +344,7 @@ function getPassthroughCommand(
   lookup: ResolvedRegistryReadResult,
   extraArgs: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
+  resolveAgent: typeof resolveLifecycleEligibleSandboxAgent,
 ): string[] | null {
   if (lookup.kind === "missing") {
     if (hasAgentPassthroughHelpToken(extraArgs)) {
@@ -375,8 +354,32 @@ function getPassthroughCommand(
     return ["openclaw", "agent", ...extraArgs];
   }
 
-  const agentName = lookup.agent;
-  if (agentName === null || agentName === "openclaw") {
+  // Rendering the wrapper's OpenClaw help does not dispatch into a sandbox.
+  // Keep that read-only path available for legacy registry rows that predate
+  // package authority, while executable commands still resolve and validate
+  // the sandbox's exact retained package below.
+  if (
+    (lookup.agent === null || lookup.agent === "openclaw") &&
+    hasAgentPassthroughHelpToken(extraArgs)
+  ) {
+    printAgentPassthroughHelp();
+    return null;
+  }
+
+  let authority: ReturnType<typeof resolveLifecycleEligibleSandboxAgent>;
+  try {
+    authority = resolveAgent(lookup.entry);
+  } catch (error) {
+    rejectAgentResolutionError(
+      sandboxName,
+      lookup.agent ?? "openclaw",
+      (error as Error).message,
+      proc,
+    );
+  }
+
+  const agentName = authority.effectiveAgentId;
+  if (agentName === "openclaw") {
     if (hasAgentPassthroughHelpToken(extraArgs)) {
       printAgentPassthroughHelp();
       return null;
@@ -384,13 +387,7 @@ function getPassthroughCommand(
     return ["openclaw", "agent", ...extraArgs];
   }
 
-  ensureRegisteredAgentIsKnown(sandboxName, agentName, proc);
-  let agent: AgentDefinition;
-  try {
-    agent = loadAgent(agentName);
-  } catch (error) {
-    rejectAgentResolutionError(sandboxName, agentName, (error as Error).message, proc);
-  }
+  const agent: AgentDefinition = authority.definition;
   if (!isTerminalAgent(agent)) {
     rejectNonOpenclawAgent(sandboxName, agentName, proc);
   }
@@ -533,7 +530,13 @@ export async function runAgentPassthrough(
   if (lookup.kind === "error") {
     rejectRegistryReadError(sandboxName, lookup.message, proc);
   }
-  const command = getPassthroughCommand(sandboxName, lookup, extraArgs, proc);
+  const command = getPassthroughCommand(
+    sandboxName,
+    lookup,
+    extraArgs,
+    proc,
+    deps.resolveAgent ?? resolveLifecycleEligibleSandboxAgent,
+  );
   if (!command) return;
   const ensureLive = deps.ensureLive ?? ensureLiveSandboxOrExit;
   const state = await ensureLive(sandboxName, { allowNonReadyPhase: true });

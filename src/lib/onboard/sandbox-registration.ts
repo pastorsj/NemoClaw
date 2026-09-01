@@ -3,7 +3,6 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import { isCandidateAgent } from "../agent/candidate";
 import type { AgentDefinition } from "../agent/defs";
 import type { HarnessPackageAuthority, HarnessPackageIdentity } from "../agent-runtime/package/types";
 import * as harnessPackageStore from "../agent-runtime/package/store";
@@ -183,7 +182,7 @@ function assertFinalHarnessPackageAuthority(
   }
 
   if (routeAuthority.harnessPackage === null) {
-    if (requestedAgentId !== "nemocua" && !isCandidateAgent(requestedAgentId)) {
+    if (requestedAgentId !== "nemocua") {
       throw registrationAuthorityError(
         `standard agent '${requestedAgentId}' has no exact harness package authority`,
       );

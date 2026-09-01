@@ -1098,9 +1098,9 @@ jobs:
             platform: linux/arm64
             runner: ubuntu-24.04-arm
     env: &pi_candidate_env
-      BASE_DOCKERFILE: agents/pi/Dockerfile.base
+      BASE_DOCKERFILE: packages/nemoclaw-pi/Dockerfile.base
       CANDIDATE_IMAGE: nemoclaw-managed-candidate/pi
-      DOCKERFILE: agents/pi/Dockerfile
+      DOCKERFILE: packages/nemoclaw-pi/Dockerfile
       LOCAL_BASE_REFERENCE: nemoclaw-managed-candidate/pi-base:${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       PLATFORM: ${{ matrix.platform }}
       PUBLICATION_COHORT: ghrun-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1168,7 +1168,7 @@ jobs:
         with:
           builder: ${{ steps.buildx.outputs.name }}
           context: .
-          file: agents/pi/Dockerfile
+          file: packages/nemoclaw-pi/Dockerfile
           platforms: ${{ matrix.platform }}
           build-contexts: nemoclaw-pi-base=oci-layout://${{ steps.base.outputs.oci }}
           load: true
@@ -1211,13 +1211,20 @@ jobs:
             exit 1
           fi
           version="$(docker run --rm --entrypoint /usr/local/bin/pi "$IMAGE_REFERENCE" --version)"
-          expected_version="$(node -p 'require("./agents/pi/pi-runtime/package.json").dependencies["@earendil-works/pi-coding-agent"]')"
+          expected_version="$(node -p 'require("./packages/nemoclaw-pi/runtime/pi/package.json").dependencies["@earendil-works/pi-coding-agent"]')"
           grep -Fq "$expected_version" <<< "$version"
           docker run --rm --entrypoint /bin/bash "$IMAGE_REFERENCE" -c '
             set -eu
             test "$(stat -c %a /sandbox/.pi/agent/models.json)" = 600
             test "$(stat -c %U /sandbox/.pi/agent/models.json)" = sandbox
+            test "$(stat -c %a /sandbox/.pi/agent/fabric.json)" = 600
+            test "$(stat -c %U /sandbox/.pi/agent/fabric.json)" = sandbox
             node -e "const c=require(\"/sandbox/.pi/agent/models.json\"); if (!c.defaultModel || !c.providers.openshell.baseUrl) process.exit(1)"
+            node -e "const c=require(\"/sandbox/.pi/agent/fabric.json\"); if (c.harness.adapter_id !== \"nvidia.nemoclaw.pi\" || c.discovery.local_paths[0] !== \"/usr/local/share/nemoclaw/pi.fabric-adapter.json\") process.exit(1)"
+            test "$(stat -c %u:%g:%a /usr/local/share/nemoclaw/pi.fabric-adapter.json)" = 0:0:444
+            test "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)"
+            PI_FABRIC_API_KEY=nemoclaw-managed-inference nemoclaw-fabric doctor --config /sandbox/.pi/agent/fabric.json --json >/tmp/pi-fabric-doctor.json
+            node -e "const c=require(\"/tmp/pi-fabric-doctor.json\"); if (![\"pass\", \"warn\"].includes(c.status)) process.exit(1)"
             test -x /usr/local/bin/nemoclaw-managed-bootstrap
           '
       - name: Log in to GHCR
@@ -1233,7 +1240,7 @@ jobs:
         uses: ./.github/actions/publish-managed-image-digest
         with:
           builder: ${{ steps.buildx.outputs.name }}
-          file: agents/pi/Dockerfile
+          file: packages/nemoclaw-pi/Dockerfile
           platform: ${{ matrix.platform }}
           image: ghcr.io/nvidia/nemoclaw/pi-sandbox
           build-contexts: nemoclaw-pi-base=oci-layout://${{ steps.base.outputs.oci }}
@@ -1281,13 +1288,20 @@ jobs:
             exit 1
           fi
           version="$(docker run --rm --entrypoint /usr/local/bin/pi "$REFERENCE" --version)"
-          expected_version="$(node -p 'require("./agents/pi/pi-runtime/package.json").dependencies["@earendil-works/pi-coding-agent"]')"
+          expected_version="$(node -p 'require("./packages/nemoclaw-pi/runtime/pi/package.json").dependencies["@earendil-works/pi-coding-agent"]')"
           grep -Fq "$expected_version" <<< "$version"
           docker run --rm --entrypoint /bin/bash "$REFERENCE" -c '
             set -eu
             test "$(stat -c %a /sandbox/.pi/agent/models.json)" = 600
             test "$(stat -c %U /sandbox/.pi/agent/models.json)" = sandbox
+            test "$(stat -c %a /sandbox/.pi/agent/fabric.json)" = 600
+            test "$(stat -c %U /sandbox/.pi/agent/fabric.json)" = sandbox
             node -e "const c=require(\"/sandbox/.pi/agent/models.json\"); if (!c.defaultModel || !c.providers.openshell.baseUrl) process.exit(1)"
+            node -e "const c=require(\"/sandbox/.pi/agent/fabric.json\"); if (c.harness.adapter_id !== \"nvidia.nemoclaw.pi\" || c.discovery.local_paths[0] !== \"/usr/local/share/nemoclaw/pi.fabric-adapter.json\") process.exit(1)"
+            test "$(stat -c %u:%g:%a /usr/local/share/nemoclaw/pi.fabric-adapter.json)" = 0:0:444
+            test "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)"
+            PI_FABRIC_API_KEY=nemoclaw-managed-inference nemoclaw-fabric doctor --config /sandbox/.pi/agent/fabric.json --json >/tmp/pi-fabric-doctor.json
+            node -e "const c=require(\"/tmp/pi-fabric-doctor.json\"); if (![\"pass\", \"warn\"].includes(c.status)) process.exit(1)"
             test -x /usr/local/bin/nemoclaw-managed-bootstrap
           '
       - name: Remove Pi anonymous Docker configuration

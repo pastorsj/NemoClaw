@@ -335,7 +335,7 @@ process.exit(0);
     },
   );
 
-  it("rejects schema v2 candidate state before raw compatibility can load it", () => {
+  it("rejects schema v2 repository state before raw compatibility can load it", () => {
     const backupPath = writeBackup({ stateFiles: [] });
     const manifestPath = path.join(backupPath, "rebuild-manifest.json");
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Record<string, unknown>;
@@ -344,13 +344,13 @@ process.exit(0);
       JSON.stringify({
         ...manifest,
         version: 2,
-        agentType: "pi",
+        agentType: "nemocua",
         harnessPackage: null,
       }),
     );
 
     expect(
-      restoreRecreatedSandboxState("alpha", backupPath, { targetAgentType: "pi" }),
+      restoreRecreatedSandboxState("alpha", backupPath, { targetAgentType: "nemocua" }),
     ).toMatchObject({
       success: false,
       error: SCHEMA_V2_SNAPSHOT_RESTORE_AUTHORITY_ERROR,

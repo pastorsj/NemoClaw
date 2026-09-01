@@ -37,6 +37,8 @@ on:
       - "packages/nemoclaw-openclaw/**"
       - "packages/nemoclaw-hermes/**"
       - "packages/nemoclaw-langchain-deepagents-code/**"
+      - "packages/nemoclaw-pi/**"
+      - "packages/nemoclaw-fabric/**"
       - "ci/pi-agent-qualification-v1-*.json"
       - "nemoclaw-blueprint/**"
       - "scripts/**"
@@ -66,10 +68,10 @@ on:
       - "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base"
       - "packages/nemoclaw-langchain-deepagents-code/manifest.yaml"
       - "packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock"
-      - "agents/pi/Dockerfile.base"
-      - "agents/pi/manifest.yaml"
-      - "agents/pi/pi-runtime/package.json"
-      - "agents/pi/pi-runtime/package-lock.json"
+      - "packages/nemoclaw-pi/Dockerfile.base"
+      - "packages/nemoclaw-pi/manifest.yaml"
+      - "packages/nemoclaw-pi/runtime/pi/package.json"
+      - "packages/nemoclaw-pi/runtime/pi/package-lock.json"
       - "packages/nemoclaw-openclaw/runtime/mcporter/package.json"
       - "packages/nemoclaw-openclaw/runtime/mcporter/npm-shrinkwrap.json"
       - "ci/npm-audit-exceptions.json"
@@ -264,7 +266,7 @@ jobs:
       arch: amd64
       platform: linux/amd64
       runner: ubuntu-24.04
-      dockerfile: agents/pi/Dockerfile.base
+      dockerfile: packages/nemoclaw-pi/Dockerfile.base
       image: nvidia/nemoclaw/pi-sandbox-base
     secrets:
       registry_password: ${{ secrets.GITHUB_TOKEN }}
@@ -283,7 +285,7 @@ jobs:
       arch: arm64
       platform: linux/arm64
       runner: ubuntu-24.04-arm
-      dockerfile: agents/pi/Dockerfile.base
+      dockerfile: packages/nemoclaw-pi/Dockerfile.base
       image: nvidia/nemoclaw/pi-sandbox-base
     secrets:
       registry_password: ${{ secrets.GITHUB_TOKEN }}

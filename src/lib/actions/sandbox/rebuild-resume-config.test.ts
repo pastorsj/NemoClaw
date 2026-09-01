@@ -40,7 +40,7 @@ function prepareRebuildResumeConfig(
   bail: (message: string, code?: number) => never,
 ) {
   const effectiveAgentId = recordedAgent ?? "openclaw";
-  const usesRepositoryAuthority = effectiveAgentId === "pi" || effectiveAgentId === "nemocua";
+  const usesRepositoryAuthority = effectiveAgentId === "nemocua";
   const harnessPackage = usesRepositoryAuthority ? null : makePackageIdentity(effectiveAgentId);
   const authority = Object.freeze({
     recordedAgent,
@@ -277,38 +277,36 @@ describe("prepareRebuildResumeConfig", () => {
     expect(config.agentAuthority.definition.packageRoot).toBe("/installed/hermes");
   });
 
-  it.each(["pi", "nemocua"])(
-    "preserves qualified %s authority without a package identity",
-    (agentId) => {
-      vi.spyOn(onboardSession, "loadSession").mockReturnValue(null);
-      const definition = Object.freeze({ name: agentId, packageRoot: "/repository" });
-      const authority = Object.freeze({
-        recordedAgent: agentId,
-        effectiveAgentId: agentId,
-        definition,
-        harnessPackage: null,
-        harnessPackageMigration: null,
-      });
+  it("preserves qualified NemoCUA authority without a package identity", () => {
+    const agentId = "nemocua";
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(null);
+    const definition = Object.freeze({ name: agentId, packageRoot: "/repository" });
+    const authority = Object.freeze({
+      recordedAgent: agentId,
+      effectiveAgentId: agentId,
+      definition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
 
-      const config = preparePinnedRebuildResumeConfig(
-        "alpha",
-        entry({ agent: agentId, provider: "ollama-local", model: "test-model" }),
-        authority,
-        noopLog,
-        throwingBail,
-      );
+    const config = preparePinnedRebuildResumeConfig(
+      "alpha",
+      entry({ agent: agentId, provider: "ollama-local", model: "test-model" }),
+      authority,
+      noopLog,
+      throwingBail,
+    );
 
-      expect(config.agentAuthority).toBe(authority);
-      expect(config.agentAuthority.definition).toBe(definition);
-      expect(config.agent).toBe(agentId);
-      expect(config.agentAuthority).toMatchObject({
-        effectiveAgentId: agentId,
-        harnessPackage: null,
-        harnessPackageMigration: null,
-        definition: { packageRoot: "/repository" },
-      });
-    },
-  );
+    expect(config.agentAuthority).toBe(authority);
+    expect(config.agentAuthority.definition).toBe(definition);
+    expect(config.agent).toBe(agentId);
+    expect(config.agentAuthority).toMatchObject({
+      effectiveAgentId: agentId,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+      definition: { packageRoot: "/repository" },
+    });
+  });
 
   it("rejects a pinned definition whose name differs from the recorded agent", () => {
     const harnessPackage = makePackageIdentity("hermes");

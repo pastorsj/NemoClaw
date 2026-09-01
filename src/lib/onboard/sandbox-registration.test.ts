@@ -770,7 +770,7 @@ describe("registerCreatedSandbox", () => {
     }
   });
 
-  it("refuses a Pi Session being finalized as NemoCUA", () => {
+  it("refuses a NemoCUA Session being finalized as Pi", () => {
     const fixture = verifiedCandidateCreateFixture();
     const registry = requireDist("../state/registry.js") as typeof import("../state/registry");
     const currentEntry = {
@@ -783,7 +783,7 @@ describe("registerCreatedSandbox", () => {
     const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
       sessionId: "session-1",
       sandboxName: "demo",
-      agent: "pi",
+      agent: "nemocua",
       harnessPackage: null,
       harnessPackageMigration: null,
       checkpoint: {
@@ -798,7 +798,7 @@ describe("registerCreatedSandbox", () => {
       expect(() =>
         registerCreatedSandbox({
           ...createdRegistryEntryInput({
-            agent: { name: "nemocua" } as never,
+            agent: { name: "pi" } as never,
             lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
             lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
           }),
@@ -831,7 +831,7 @@ describe("registerCreatedSandbox", () => {
     const loadSession = vi.spyOn(onboardSession, "loadSession").mockReturnValue({
       sessionId: "session-1",
       sandboxName: "demo",
-      agent: "pi",
+      agent: "nemocua",
       harnessPackage: null,
       harnessPackageMigration: null,
       checkpoint: {
@@ -846,7 +846,7 @@ describe("registerCreatedSandbox", () => {
       expect(() =>
         registerCreatedSandbox({
           ...createdRegistryEntryInput({
-            agent: { name: "pi" } as never,
+            agent: { name: "nemocua" } as never,
             lifecycleGeneration: fixture.checkpoint.lifecycleGeneration,
             lifecycleLiveIdentityFingerprint: fixture.checkpoint.sandboxIdentityFingerprint,
           }),

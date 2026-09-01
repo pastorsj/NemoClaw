@@ -62,6 +62,8 @@ const OPAQUE_INPUTS = [
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
+  "packages/nemoclaw-pi/Dockerfile.base",
+  "packages/nemoclaw-pi/config/generate-config.ts",
   "packages/nemoclaw-hermes/policy-additions.yaml",
   "src/lib/messaging/channels/telegram/policy/openclaw.yaml",
   "nemoclaw-blueprint/policies/presets/local-inference.yaml",
@@ -237,6 +239,18 @@ describe("Vitest opaque-input watch triggers", () => {
     ]);
     expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/Dockerfile")).toEqual([
       "src/lib/onboard/managed-startup-profile.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-pi/Dockerfile.base")).toEqual([
+      "packages/nemoclaw-pi/tests/config/generator.test.ts",
+      "packages/nemoclaw-pi/tests/integration/package-discovery.test.ts",
+      "packages/nemoclaw-pi/tests/integration/rlimit-hooks.test.ts",
+      "packages/nemoclaw-pi/tests/runtime/shell-entrypoints.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-pi/config/generate-config.ts")).toEqual([
+      "packages/nemoclaw-pi/tests/config/generator.test.ts",
+      "packages/nemoclaw-pi/tests/integration/package-discovery.test.ts",
+      "packages/nemoclaw-pi/tests/integration/rlimit-hooks.test.ts",
+      "packages/nemoclaw-pi/tests/runtime/shell-entrypoints.test.ts",
     ]);
     expect(triggeredBy("packages/nemoclaw-hermes/policy-additions.yaml")).toEqual([
       "src/lib/onboard/initial-policy-real-policy.test.ts",

@@ -90,6 +90,30 @@ function writeReviewedBundle(): void {
   );
 }
 
+function writePiBundle(): void {
+  const packageRoot = path.join(bundledRoot, "nemoclaw-pi");
+  const manifestPath = "packages/nemoclaw-pi/manifest.yaml";
+  fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
+  writeFixtureFile(
+    packageRoot,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "pi",
+      displayName: "Pi",
+      packageVersion: "0.1.0",
+      manifest: manifestPath,
+    })}\n`,
+  );
+  writeFixtureFile(
+    packageRoot,
+    manifestPath,
+    ["name: pi", "display_name: Pi", "description: Reviewed candidate adapter", ""].join("\n"),
+  );
+  writeFixtureFile(packageRoot, "runtime/payload.txt", "pi\n");
+}
+
 function catalogueOptions() {
   return { bundledRoot, storeRoot } as const;
 }
@@ -171,6 +195,32 @@ describe("harness install oclif command", () => {
     expect(dependencies.resolveSelection).toHaveBeenCalledWith("dcode");
   });
 
+  it("rejects direct Pi installation before changing the store when qualification is unavailable", async () => {
+    writePiBundle();
+    const dependencies = wirePrivateDependencies();
+
+    await expect(HarnessInstallCommand.run(["pi"], process.cwd())).rejects.toThrow(
+      /release candidate.*not selectable/u,
+    );
+
+    expect(dependencies.installPackage).not.toHaveBeenCalled();
+    expect(installedIds()).toEqual([]);
+  });
+
+  it("installs Pi after its candidate qualification gate succeeds", async () => {
+    writePiBundle();
+    const dependencies = wirePrivateDependencies();
+    const requireCandidate = vi
+      .spyOn(harnessInstallCommandDependencies, "requireCandidateAgentSelectable")
+      .mockImplementation(() => undefined);
+
+    await HarnessInstallCommand.run(["pi"], process.cwd());
+
+    expect(requireCandidate).toHaveBeenCalledWith("pi");
+    expect(dependencies.installPackage).toHaveBeenCalledOnce();
+    expect(installedIds()).toEqual(["pi"]);
+  });
+
   it.each(["OpenClaw", "../openclaw", "https://example.invalid/package"])(
     "rejects unreviewed selector %s without changing the store",
     async (selector) => {
@@ -193,6 +243,18 @@ describe("harness install oclif command", () => {
 
     expect(installedIds()).toEqual(["hermes"]);
     expect(dependencies.prompt).toHaveBeenCalledWith("Choose [1]: ");
+  });
+
+  it("omits unqualified Pi from the interactive installation choices", async () => {
+    writePiBundle();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const dependencies = wirePrivateDependencies();
+    dependencies.isStdinTty.mockReturnValue(true);
+
+    await HarnessInstallCommand.run([], process.cwd());
+
+    expect(installedIds()).toEqual(["hermes"]);
+    expect(log.mock.calls.flat().join("\n")).not.toContain("(pi)");
   });
 
   it("leaves state unchanged for operator exit and EOF", async () => {

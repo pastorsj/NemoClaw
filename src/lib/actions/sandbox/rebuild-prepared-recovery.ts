@@ -58,7 +58,9 @@ function rebuildRecoveryManifestOwner(
   candidate: sandboxState.RebuildManifest,
 ): RebuildSandboxEntry | string | null {
   return sandboxState.inspectRebuildManifestHarnessPackage(candidate).status === "legacy"
-    ? resolveLegacyBackupRecoveryOwner(sandboxEntry)
+    ? resolveLegacyBackupRecoveryOwner(sandboxEntry, {
+        requireLifecycleEligibility: true,
+      })
     : sandboxEntry;
 }
 
@@ -106,7 +108,11 @@ function validatePreparedRecoveryCandidate(
   const manifestPackage = sandboxState.inspectRebuildManifestHarnessPackage(candidate);
   try {
     if (manifestPackage.status !== "legacy") {
-      const authority = selectedAuthority ?? resolveSandboxAgent(sandboxEntry);
+      const authority =
+        selectedAuthority ??
+        resolveSandboxAgent(sandboxEntry, {
+          requireLifecycleEligibility: true,
+        });
       const issue = preparedRecoveryAuthorityIssue(sandboxEntry, candidate, authority);
       if (issue) return { ok: false, reason: issue };
     }
@@ -219,7 +225,9 @@ function rereadPreparedRecoveryAuthority(
   try {
     // Re-run candidate qualification and retained-package receipt validation,
     // then compare the complete definition selected before any mutation.
-    currentAuthority = resolveSandboxAgent(currentEntry);
+    currentAuthority = resolveSandboxAgent(currentEntry, {
+      requireLifecycleEligibility: true,
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     const reason = `prepared recovery agent authority could not be resolved: ${detail}`;

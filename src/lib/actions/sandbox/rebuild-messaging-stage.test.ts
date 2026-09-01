@@ -241,28 +241,26 @@ describe("stageRebuildMessagingPlanOrBail agent authority", () => {
     ).rejects.toThrow("Pinned rebuild agent authority does not match messaging registry state.");
   });
 
-  it.each(["pi", "nemocua"] as const)(
-    "preserves qualified %s messaging staging without fabricated package authority",
-    async (agentId) => {
-      const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
-      const result = await stageRebuildMessagingPlanOrBail(
-        `${agentId}-sandbox`,
-        { name: `${agentId}-sandbox`, agent: agentId },
-        {
-          recordedAgent: agentId,
-          effectiveAgentId: agentId,
-          definition: pinnedAgent(agentId),
-          harnessPackage: null,
-          harnessPackageMigration: null,
-        },
-        vi.fn(),
-        (message): never => {
-          throw new Error(message);
-        },
-      );
+  it("preserves qualified NemoCUA messaging staging without fabricated package authority", async () => {
+    const agentId = "nemocua";
+    const clearPlanEnvSpy = vi.spyOn(MessagingSetupApplier, "clearPlanEnv");
+    const result = await stageRebuildMessagingPlanOrBail(
+      `${agentId}-sandbox`,
+      { name: `${agentId}-sandbox`, agent: agentId },
+      {
+        recordedAgent: agentId,
+        effectiveAgentId: agentId,
+        definition: pinnedAgent(agentId),
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      },
+      vi.fn(),
+      (message): never => {
+        throw new Error(message);
+      },
+    );
 
-      expect(result).toBeNull();
-      expect(clearPlanEnvSpy).toHaveBeenCalledOnce();
-    },
-  );
+    expect(result).toBeNull();
+    expect(clearPlanEnvSpy).toHaveBeenCalledOnce();
+  });
 });

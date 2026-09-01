@@ -3,7 +3,6 @@
 
 import path from "node:path";
 
-import { isCandidateAgent } from "../agent/candidate";
 import { inspectHarnessPackageState } from "../agent-runtime/package/identity";
 import { normalizeProcessExitCode } from "../core/process-exit";
 import type { ServingProfileProvenance } from "../inference/serving/types";
@@ -642,7 +641,7 @@ function requireFreshHarnessBinding(
     if (!QUALIFIED_HARNESS_ID_PATTERN.test(binding.recordedAgent)) {
       throw new Error("Qualified fresh harness authority must use a canonical harness name");
     }
-    if (binding.recordedAgent !== "nemocua" && !isCandidateAgent(binding.recordedAgent)) {
+    if (binding.recordedAgent !== "nemocua") {
       throw new Error(
         `Qualified fresh harness '${binding.recordedAgent}' is not a qualified repository harness`,
       );

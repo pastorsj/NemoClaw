@@ -4,7 +4,6 @@
 import type { AgentChoice, AgentDefinition } from "../agent/defs";
 import { getAgentChoices, loadAgent } from "../agent/defs";
 import { normalizeAgentSelector } from "../agent/aliases";
-import { isCandidateAgent } from "../agent/candidate";
 import { resolveAgent } from "../agent/onboard";
 import { selectFromNumberedMenuOrExit } from "./prompt-helpers";
 
@@ -48,13 +47,13 @@ export async function promptForAgentChoice(
   return deps.selectFromNumberedMenu(reply, 1, choices);
 }
 
-/** Resolve only an explicitly requested, separately qualified repository agent. */
-export function resolveQualifiedOnboardAgent(
+/** Resolve the remaining explicitly requested agent that has no package yet. */
+export function resolveUnpackagedOnboardAgent(
   selector: string,
   env: NodeJS.ProcessEnv = process.env,
 ): AgentDefinition | null {
   const agentId = normalizeAgentSelector(selector);
-  if (agentId !== "nemocua" && !isCandidateAgent(agentId)) return null;
+  if (agentId !== "nemocua") return null;
   return loadAgent(agentId, env);
 }
 

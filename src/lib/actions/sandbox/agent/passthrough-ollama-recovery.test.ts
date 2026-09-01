@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import { type AgentPassthroughDeps, runAgentPassthrough } from "./passthrough";
 import { runOllamaRestartRecovery } from "./passthrough-ollama-recovery";
 
+type ResolvedFixtureAgent = ReturnType<NonNullable<AgentPassthroughDeps["resolveAgent"]>>;
+
 function makeProcMock() {
   const writes: string[] = [];
   return {
@@ -147,6 +149,13 @@ function makePassthroughDeps(
     getSandbox: ((name) => ({ name, agent: "openclaw", ...route })) as NonNullable<
       AgentPassthroughDeps["getSandbox"]
     >,
+    resolveAgent: (() => ({
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition: { name: "openclaw" } as ResolvedFixtureAgent["definition"],
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    })) as NonNullable<AgentPassthroughDeps["resolveAgent"]>,
     ensureLive: (async () => ({
       state: "present",
       phase: "Ready",

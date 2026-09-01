@@ -49,7 +49,7 @@ function registryEntry(name: string, agent: string | null): SandboxEntry {
   return { name, agent, createdAt: "2026-08-28T09:00:00.000Z" };
 }
 
-function candidateRegistryEntry(name: string, agent: "pi" | "nemocua"): SandboxEntry {
+function candidateRegistryEntry(name: string, agent: "nemocua"): SandboxEntry {
   return normalizeSandboxPolicyAttribution(registryEntry(name, agent));
 }
 
@@ -357,10 +357,9 @@ describe("reconcileInstallerHarnesses", () => {
     expect(() => reconcile(harness)).toThrow(InstallerHarnessReconciliationError);
   });
 
-  it("accepts explicit Session nulls and normalized registry omission for candidates", () => {
-    const session = legacySession("pi", "pi-owner");
+  it("accepts explicit Session nulls and normalized registry omission for NemoCUA", () => {
+    const session = legacySession("nemocua", "cua-owner");
     const harness = new InstallerStateHarness(session, [
-      candidateRegistryEntry("pi-owner", "pi"),
       candidateRegistryEntry("cua-owner", "nemocua"),
     ]);
 
@@ -368,24 +367,22 @@ describe("reconcileInstallerHarnesses", () => {
 
     expect(result).toMatchObject({
       outcome: "empty-store",
-      candidateOwnerCount: 2,
+      candidateOwnerCount: 1,
       standardOwnerCount: 0,
       migratedOwnerCount: 0,
     });
     expect(harness.prepareCalls).toEqual([]);
     expect(harness.session).toHaveProperty("harnessPackage", null);
     expect(harness.session).toHaveProperty("harnessPackageMigration", null);
-    expect(harness.registry.sandboxes["pi-owner"]).not.toHaveProperty("harnessPackage");
-    expect(harness.registry.sandboxes["pi-owner"]).not.toHaveProperty("harnessPackageMigration");
     expect(harness.registry.sandboxes["cua-owner"]).not.toHaveProperty("harnessPackage");
     expect(harness.registry.sandboxes["cua-owner"]).not.toHaveProperty("harnessPackageMigration");
   });
 
-  it("fails closed without writes when candidate qualification disappears", () => {
+  it("fails closed without writes when repository qualification disappears", () => {
     const harness = new InstallerStateHarness(
       null,
-      [candidateRegistryEntry("pi-owner", "pi")],
-      [legacyRetainedRecord("pi-owner")],
+      [candidateRegistryEntry("cua-owner", "nemocua")],
+      [legacyRetainedRecord("cua-owner")],
     );
     const initialState = structuredClone({
       registry: harness.registry,
@@ -436,11 +433,11 @@ describe("reconcileInstallerHarnesses", () => {
     expect(harness.retained[0]).not.toHaveProperty("migratedAt");
   });
 
-  it("upgrades candidate retained recovery with explicit null authority", () => {
+  it("upgrades NemoCUA retained recovery with explicit null authority", () => {
     const harness = new InstallerStateHarness(
       null,
-      [candidateRegistryEntry("pi-owner", "pi")],
-      [legacyRetainedRecord("pi-owner")],
+      [candidateRegistryEntry("cua-owner", "nemocua")],
+      [legacyRetainedRecord("cua-owner")],
     );
 
     const result = reconcile(harness);

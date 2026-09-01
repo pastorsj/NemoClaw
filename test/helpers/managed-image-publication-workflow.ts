@@ -41,7 +41,7 @@ export const baseImagePublishers = [
   {
     agent: "pi",
     displayName: "Pi",
-    dockerfile: "agents/pi/Dockerfile.base",
+    dockerfile: "packages/nemoclaw-pi/Dockerfile.base",
     image: "nvidia/nemoclaw/pi-sandbox-base",
     job: "build-and-push-pi",
     amd64Job: "build-pi-amd64",

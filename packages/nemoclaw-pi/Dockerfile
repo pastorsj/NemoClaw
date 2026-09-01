@@ -139,6 +139,17 @@ RUN if [ -f /usr/local/share/nemoclaw/corporate-ca.pem ]; then \
     node --experimental-strip-types /scripts/lib/patch-bundled-npm-ip-address.mts \
       --npm-root /usr/local/lib/node_modules/npm
 
+# Keep Fabric and the package-owned adapter in an isolated, hash-locked Python
+# graph. Pi itself remains on its reviewed Node.js dependency graph.
+COPY packages/nemoclaw-pi/fabric/requirements.lock /tmp/nemoclaw-pi-fabric-requirements.lock
+RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-pi-fabric-requirements.lock \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c \
+        "from importlib.metadata import version; expected = {'nemo-fabric': '0.2.0', 'nemo-fabric-adapter-contract': '0.2.0', 'nemo-fabric-adapters-common': '0.2.0', 'nemo-fabric-runtime': '0.2.0'}; actual = {name: version(name) for name in expected}; assert actual == expected, actual" \
+    && rm -f /tmp/nemoclaw-pi-fabric-requirements.lock
+
 ARG PI_VERSION=0.84.1
 
 # hadolint ignore=DL4006
@@ -153,9 +164,16 @@ RUN set -eu; \
     installed_version="$(printf '%s' "$pi_version" | tr -d '[:space:]')"; \
     [ "$installed_version" = "${PI_VERSION}" ]
 
-COPY agents/pi/generate-config.ts /opt/nemoclaw-pi/generate-config.ts
+COPY packages/nemoclaw-pi/config/generate-config.ts /opt/nemoclaw-pi/generate-config.ts
+COPY packages/nemoclaw-pi/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
+COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
+COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
+COPY packages/nemoclaw-fabric/build-requirements.lock /tmp/nemoclaw-fabric-build-requirements.lock
+COPY packages/nemoclaw-pi/fabric/pyproject.toml /opt/nemoclaw-pi-fabric/
+COPY packages/nemoclaw-pi/fabric/src/ /opt/nemoclaw-pi-fabric/src/
+COPY packages/nemoclaw-pi/fabric/pi.fabric-adapter.json /usr/local/share/nemoclaw/pi.fabric-adapter.json
 COPY scripts/lib/entrypoint-env-wrapper.sh /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh
-COPY agents/pi/start.sh /usr/local/bin/nemoclaw-start
+COPY packages/nemoclaw-pi/start.sh /usr/local/bin/nemoclaw-start
 COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hold
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
@@ -167,9 +185,46 @@ RUN test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test -f /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && test ! -L /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
     && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh)" = '0:0:444' \
+    && test -f /usr/local/lib/nemoclaw/generate-config \
+    && test ! -L /usr/local/lib/nemoclaw/generate-config \
+    && chown root:root /usr/local/lib/nemoclaw/generate-config \
+    && chmod 0555 /usr/local/lib/nemoclaw/generate-config \
+    && test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config)" = '0:0:555' \
     && chmod 444 /opt/nemoclaw-pi/generate-config.ts /usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh \
     && chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-managed-startup-hold \
     && chmod -R a+rX /opt/nemoclaw-blueprint
+
+# Build the two small first-party wheels from the reviewed checkout, install
+# them without resolving dependencies, and expose one generic headless command.
+RUN set -eu; \
+    python3 -I -c 'import tomllib; from pathlib import Path; runner = tomllib.loads(Path("/opt/nemoclaw-fabric-runner/pyproject.toml").read_text(encoding="utf-8"))["project"]; adapter = tomllib.loads(Path("/opt/nemoclaw-pi-fabric/pyproject.toml").read_text(encoding="utf-8"))["project"]; assert (runner["name"], runner["version"], runner["dependencies"]) == ("nemoclaw-fabric", "0.1.2", ["nemo-fabric == 0.2.0"]); assert (adapter["name"], adapter["version"], adapter["dependencies"]) == ("nemoclaw-pi-fabric", "0.1.0", ["nemo-fabric-adapter-contract == 0.2.0", "nemo-fabric-adapters-common == 0.2.0"])' \
+    && python3 -m venv --copies /tmp/nemoclaw-fabric-build-venv \
+    && /tmp/nemoclaw-fabric-build-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-fabric-build-requirements.lock \
+    && install -d -o root -g root -m 0755 /tmp/nemoclaw-fabric-wheels \
+    && /tmp/nemoclaw-fabric-build-venv/bin/pip3 wheel --no-index --no-deps --no-build-isolation \
+        --wheel-dir /tmp/nemoclaw-fabric-wheels /opt/nemoclaw-fabric-runner /opt/nemoclaw-pi-fabric \
+    && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_fabric-0.1.2-*.whl \
+    && test "$#" -eq 1 \
+    && runner_wheel="$1" \
+    && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_pi_fabric-0.1.0-*.whl \
+    && test "$#" -eq 1 \
+    && adapter_wheel="$1" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps \
+        "$runner_wheel" "$adapter_wheel" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemoclaw-fabric": "0.1.2", "nemoclaw-pi-fabric": "0.1.0", "nemo-fabric": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; import nemoclaw_pi_fabric.adapter' \
+    && chown root:root /usr/local/share/nemoclaw/pi.fabric-adapter.json \
+    && chmod 0444 /usr/local/share/nemoclaw/pi.fabric-adapter.json \
+    && test "$(stat -c '%u:%g:%a' /usr/local/share/nemoclaw/pi.fabric-adapter.json)" = "0:0:444" \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test -x /usr/local/bin/nemoclaw-fabric \
+    && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
+    && rm -rf /opt/nemoclaw-fabric-runner /opt/nemoclaw-pi-fabric \
+        /tmp/nemoclaw-fabric-build-venv /tmp/nemoclaw-fabric-wheels \
+        /tmp/nemoclaw-fabric-build-requirements.lock
 
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
 ARG NEMOCLAW_INFERENCE_PROVIDER_ID=inference
@@ -227,8 +282,13 @@ USER sandbox
 RUN umask 077 \
     && mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
     && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/ \
-    && node --experimental-strip-types /opt/nemoclaw-pi/generate-config.ts \
-    && test "$(stat -c %a /sandbox/.pi/agent/models.json)" = "600"
+    && /usr/local/lib/nemoclaw/generate-config \
+    && test "$(stat -c %a /sandbox/.pi/agent/models.json)" = "600" \
+    && test "$(stat -c %a /sandbox/.pi/agent/fabric.json)" = "600" \
+    && PI_FABRIC_API_KEY=nemoclaw-managed-inference /usr/local/bin/nemoclaw-fabric doctor \
+        --config /sandbox/.pi/agent/fabric.json --json >/tmp/nemoclaw-pi-fabric-doctor.json \
+    && node -e 'const fs = require("node:fs"); const report = JSON.parse(fs.readFileSync("/tmp/nemoclaw-pi-fabric-doctor.json", "utf8")); if (!["pass", "warn"].includes(report.status)) process.exit(1)' \
+    && rm -f /tmp/nemoclaw-pi-fabric-doctor.json
 
 # hadolint ignore=DL3066
 USER root

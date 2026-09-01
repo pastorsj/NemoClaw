@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Generate the Pi model catalog from NemoClaw build-arg env vars.
+// Generate the package-owned Pi model catalog from NemoClaw build-arg env vars.
 //
 // SECURITY: this file writes credential-free provider and model metadata.
 // OpenShell supplies the managed route credential to the running agent, and the
@@ -14,6 +14,10 @@ import { join } from "node:path";
 const SUPPORTED_INFERENCE_API = "openai-completions";
 const MANAGED_PROVIDER_ID = "openshell";
 const MANAGED_PROVIDER_API_KEY = "nemoclaw-managed-inference";
+const FABRIC_ADAPTER_ID = "nvidia.nemoclaw.pi";
+const FABRIC_API_KEY_ENV = "PI_FABRIC_API_KEY";
+const FABRIC_ARTIFACTS_PATH = "/sandbox/.pi/agent/fabric-artifacts";
+const FABRIC_ADAPTER_PATH = "/usr/local/share/nemoclaw/pi.fabric-adapter.json";
 
 type Settings = {
   model: string;
@@ -28,6 +32,7 @@ type Settings = {
 
 type ManagedPiConfig = {
   text: string;
+  fabricText: string;
   model: string;
   baseUrl: string;
 };
@@ -144,6 +149,45 @@ function buildConfig(settings: Settings): ManagedPiConfig {
   };
   return {
     text: `${JSON.stringify(config, null, 2)}\n`,
+    fabricText: `${JSON.stringify(
+      {
+        schema_version: "fabric.agent/v1alpha1",
+        metadata: {
+          name: "nemoclaw-pi",
+          description: "NemoClaw-managed Pi headless runtime",
+        },
+        harness: {
+          adapter_id: FABRIC_ADAPTER_ID,
+          resolution: "preinstalled",
+        },
+        discovery: {
+          local_paths: [FABRIC_ADAPTER_PATH],
+        },
+        runtime: {
+          input_schema: "text",
+          output_schema: "message",
+          artifacts: FABRIC_ARTIFACTS_PATH,
+          timeout_seconds: 90,
+        },
+        environment: {
+          provider: "local",
+          workspace: "/sandbox",
+          artifacts: FABRIC_ARTIFACTS_PATH,
+          ownership: "caller_owned",
+          control_location: "in_env_control",
+        },
+        models: {
+          default: {
+            provider: MANAGED_PROVIDER_ID,
+            model: settings.model,
+            api_key_env: FABRIC_API_KEY_ENV,
+            base_url: settings.baseUrl,
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
     model: settings.model,
     baseUrl: settings.baseUrl,
   };
@@ -155,11 +199,16 @@ function main(): void {
   mkdirSync(configDir, { recursive: true, mode: 0o700 });
 
   const configPath = join(configDir, "models.json");
+  const fabricConfigPath = join(configDir, "fabric.json");
   const config = buildConfig(settings);
   writeFileSync(configPath, config.text, { mode: 0o600 });
   chmodSync(configPath, 0o600);
+  writeFileSync(fabricConfigPath, config.fabricText, { mode: 0o600 });
+  chmodSync(fabricConfigPath, 0o600);
 
-  console.log(`[config] Wrote ${configPath} (model=${config.model}, base_url=${config.baseUrl})`);
+  console.log(
+    `[config] Wrote ${configPath} and ${fabricConfigPath} (model=${config.model}, base_url=${config.baseUrl})`,
+  );
 }
 
 main();

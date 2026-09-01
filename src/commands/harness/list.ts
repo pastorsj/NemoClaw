@@ -2,15 +2,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
+import { isCandidateAgent, isCandidateAgentSelectable } from "../../lib/agent/candidate";
 import {
   createHarnessInventoryView,
   renderHarnessInventoryText,
+  type HarnessInventoryView,
 } from "../../lib/agent-runtime/package/inventory";
 
 export const harnessListCommandDependencies = {
   createHarnessInventoryView,
+  isCandidateAgent,
+  isCandidateAgentSelectable,
   renderHarnessInventoryText,
 };
+
+function visibleHarnessInventory(view: HarnessInventoryView): HarnessInventoryView {
+  return Object.freeze({
+    ...view,
+    available: Object.freeze(
+      view.available.filter(
+        ({ identity }) =>
+          !harnessListCommandDependencies.isCandidateAgent(identity.id) ||
+          harnessListCommandDependencies.isCandidateAgentSelectable(identity.id),
+      ),
+    ),
+  });
+}
 
 export default class HarnessListCommand extends NemoClawCommand {
   static id = "harness:list";
@@ -25,7 +42,9 @@ export default class HarnessListCommand extends NemoClawCommand {
 
   public async run(): Promise<unknown> {
     await this.parse(HarnessListCommand);
-    const view = harnessListCommandDependencies.createHarnessInventoryView();
+    const view = visibleHarnessInventory(
+      harnessListCommandDependencies.createHarnessInventoryView(),
+    );
     if (this.jsonEnabled()) return view;
     this.log(harnessListCommandDependencies.renderHarnessInventoryText(view));
   }

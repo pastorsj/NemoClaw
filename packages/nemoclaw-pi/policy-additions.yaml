@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sandbox policy additions for Pi. Principle: deny by default, allow only the
+# Package-owned sandbox policy additions for Pi. Deny by default and allow only the
 # managed inference route. Direct provider endpoints, package registries, and
 # code-hosting endpoints are denied here and require explicit preset selection.
 version: 1
@@ -9,6 +9,7 @@ filesystem_policy:
   include_workdir: true
   read_only:
     - /usr
+    - /opt/nemoclaw-fabric-venv
     - /lib
     - /proc
     - /dev/urandom

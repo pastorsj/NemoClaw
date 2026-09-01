@@ -7,7 +7,6 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const isolatedRecoveryState = vi.hoisted(() => ({
-  candidateDigests: [] as string[],
   root: `${process.cwd()}/node_modules/.cache/nemoclaw-upgrade-recovery-${String(process.pid)}`,
 }));
 
@@ -20,18 +19,7 @@ vi.mock("../state/state-root", async (importOriginal) => {
   };
 });
 
-vi.mock("../agent/candidate-authority", () => ({
-  CANDIDATE_QUALIFICATION_RECEIPT_DIGESTS: {
-    pi: isolatedRecoveryState.candidateDigests,
-  },
-  acceptedCandidateReceiptDigests: () => isolatedRecoveryState.candidateDigests,
-}));
-
 import { parseCliOpenShellSandboxInventory } from "../adapters/openshell/sandbox-observer-cli";
-import {
-  type CandidateQualificationFixture,
-  candidateQualificationEnvironment,
-} from "../agent/candidate-test-fixture";
 import * as agentDefinitions from "../agent/defs";
 import * as coreVersion from "../core/version";
 import * as sandboxList from "../openshell-sandbox-list";
@@ -54,7 +42,6 @@ type UpgradeSandboxes = typeof upgradeSandboxes;
 
 type ManifestAgentType = "openclaw" | "hermes";
 
-const candidateQualificationFixtures: CandidateQualificationFixture[] = [];
 const packageFixtures: ReturnType<typeof createHarnessPackageFixture>[] = [];
 
 const MANIFEST_DIR_BY_AGENT: Record<ManifestAgentType, string> = {
@@ -157,7 +144,7 @@ function recoveryOwner(input: {
   } as registry.SandboxEntry;
 }
 
-function installRecoveryPackage(id: "openclaw" | "hermes" = "openclaw") {
+function installRecoveryPackage(id: "openclaw" | "hermes" | "pi" = "openclaw") {
   const fixture = createHarnessPackageFixture({
     storeRoot: path.join(isolatedRecoveryState.root, "harnesses"),
   });
@@ -294,10 +281,6 @@ function createRecoveryHarness(
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
-  isolatedRecoveryState.candidateDigests.splice(0);
-  while (candidateQualificationFixtures.length > 0) {
-    candidateQualificationFixtures.pop()?.cleanup();
-  }
   while (packageFixtures.length > 0) packageFixtures.pop()?.cleanup();
   fs.rmSync(isolatedRecoveryState.root, { recursive: true, force: true });
 });
@@ -371,112 +354,89 @@ describe("upgrade backup recovery authority", () => {
     });
   });
 
-  it("reruns candidate qualification before accepting an on-disk v1 backup", () => {
-    writeRecoveryManifest({ sandboxName: "legacy-pi", agentType: "pi", version: 1 });
-    const qualification = candidateQualificationEnvironment();
-    candidateQualificationFixtures.push(qualification);
-    isolatedRecoveryState.candidateDigests.push(qualification.receiptDigest);
-    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", qualification.env.NEMOCLAW_CANDIDATE_AGENTS!);
-    vi.stubEnv(
-      "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
-      qualification.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT!,
-    );
+  it("reruns repository qualification before accepting an on-disk v1 backup", () => {
+    writeRecoveryManifest({ sandboxName: "legacy-cua", agentType: "nemocua", version: 1 });
+    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "1");
     const owner = recoveryOwner({
-      sandboxName: "legacy-pi",
-      agent: "pi",
+      sandboxName: "legacy-cua",
+      agent: "nemocua",
       harnessPackage: null,
       harnessPackageMigration: null,
     });
 
     expect(prepareBackupRecovery(owner, false)).toMatchObject({
-      manifest: { version: 1, sandboxName: "legacy-pi", agentType: "pi" },
+      manifest: { version: 1, sandboxName: "legacy-cua", agentType: "nemocua" },
     });
 
-    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", "");
-    vi.stubEnv("NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT", "");
+    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "");
     expect(prepareBackupRecovery(owner, false)).toMatchObject({
       reason: expect.stringContaining("backup recovery assessment failed"),
     });
   });
 
-  it("reruns candidate qualification before accepting an on-disk v2 backup", () => {
+  it("reruns repository qualification before accepting an on-disk v2 backup", () => {
     writeRecoveryManifest({
-      sandboxName: "current-pi",
-      agentType: "pi",
+      sandboxName: "current-cua",
+      agentType: "nemocua",
       version: 2,
       harnessPackage: null,
     });
-    const qualification = candidateQualificationEnvironment();
-    candidateQualificationFixtures.push(qualification);
-    isolatedRecoveryState.candidateDigests.push(qualification.receiptDigest);
-    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", qualification.env.NEMOCLAW_CANDIDATE_AGENTS!);
-    vi.stubEnv(
-      "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
-      qualification.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT!,
-    );
+    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "1");
     const owner = recoveryOwner({
-      sandboxName: "current-pi",
-      agent: "pi",
+      sandboxName: "current-cua",
+      agent: "nemocua",
       harnessPackage: null,
       harnessPackageMigration: null,
     });
 
     expect(prepareBackupRecovery(owner, false)).toMatchObject({
-      manifest: { version: 2, sandboxName: "current-pi", agentType: "pi" },
+      manifest: { version: 2, sandboxName: "current-cua", agentType: "nemocua" },
     });
 
-    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", "");
-    vi.stubEnv("NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT", "");
+    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "");
     expect(prepareBackupRecovery(owner, false)).toMatchObject({
       reason: expect.stringContaining("backup recovery assessment failed"),
     });
   });
 
-  it("re-reads the candidate definition instead of trusting its cached manifest", () => {
+  it("re-reads the repository definition instead of trusting its cached manifest", () => {
     writeRecoveryManifest({
-      sandboxName: "fresh-pi",
-      agentType: "pi",
+      sandboxName: "fresh-cua",
+      agentType: "nemocua",
       version: 2,
       harnessPackage: null,
     });
-    const qualification = candidateQualificationEnvironment();
-    candidateQualificationFixtures.push(qualification);
-    isolatedRecoveryState.candidateDigests.push(qualification.receiptDigest);
-    vi.stubEnv("NEMOCLAW_CANDIDATE_AGENTS", qualification.env.NEMOCLAW_CANDIDATE_AGENTS!);
-    vi.stubEnv(
-      "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
-      qualification.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT!,
-    );
+    vi.stubEnv("NEMOCLAW_CUA_ENABLED", "1");
     const owner = recoveryOwner({
-      sandboxName: "fresh-pi",
-      agent: "pi",
+      sandboxName: "fresh-cua",
+      agent: "nemocua",
       harnessPackage: null,
       harnessPackageMigration: null,
     });
-    agentDefinitions.loadAgent("pi");
+    agentDefinitions.loadAgent("nemocua");
     const freshDefinition = vi
       .spyOn(agentDefinitions, "loadAgentFresh")
       .mockImplementationOnce(() => {
-        throw new Error("candidate manifest changed after cache warmup");
+        throw new Error("repository manifest changed after cache warmup");
       });
 
     expect(prepareBackupRecovery(owner, false)).toMatchObject({
-      reason: expect.stringContaining("candidate manifest changed after cache warmup"),
+      reason: expect.stringContaining("repository manifest changed after cache warmup"),
     });
     expect(freshDefinition).toHaveBeenCalledOnce();
   });
 
   it("keeps schema v2 recovery on full-row manifest validation", () => {
-    const installed = installRecoveryPackage();
+    const installed = installRecoveryPackage("pi");
     const exactOwner = recoveryOwner({
-      sandboxName: "current-openclaw",
-      agent: null,
+      sandboxName: "current-pi",
+      agent: "pi",
       harnessPackage: installed.identity,
       harnessPackageMigration: null,
     });
     writeRecoveryManifest({
       sandboxName: exactOwner.name,
-      agentType: "openclaw",
+      agentType: "pi",
       version: 2,
       harnessPackage: installed.identity,
     });
@@ -485,31 +445,31 @@ describe("upgrade backup recovery authority", () => {
     });
 
     const incompleteOwner = recoveryOwner({
-      sandboxName: "incomplete-openclaw",
-      agent: null,
+      sandboxName: "incomplete-pi",
+      agent: "pi",
       harnessPackage: installed.identity,
       harnessPackageMigration: null,
     });
     writeRecoveryManifest({
       sandboxName: incompleteOwner.name,
-      agentType: "openclaw",
+      agentType: "pi",
       version: 2,
       harnessPackage: installed.identity,
       backupComplete: false,
     });
     expect(prepareBackupRecovery(incompleteOwner, false)).toMatchObject({
-      reason: "backup manifest records an incomplete capture",
+      reason: "no validated pre-upgrade backup was found",
     });
 
     const changedPayloadOwner = recoveryOwner({
-      sandboxName: "changed-payload-openclaw",
-      agent: null,
+      sandboxName: "changed-payload-pi",
+      agent: "pi",
       harnessPackage: installed.identity,
       harnessPackageMigration: null,
     });
     const changedPayloadManifest = writeRecoveryManifest({
       sandboxName: changedPayloadOwner.name,
-      agentType: "openclaw",
+      agentType: "pi",
       version: 2,
       harnessPackage: installed.identity,
       payloadFiles: { "workspace/note.txt": "published\n" },
@@ -523,14 +483,14 @@ describe("upgrade backup recovery authority", () => {
     });
 
     const mismatchedOwner = recoveryOwner({
-      sandboxName: "mismatched-openclaw",
-      agent: null,
+      sandboxName: "mismatched-pi",
+      agent: "pi",
       harnessPackage: installed.identity,
       harnessPackageMigration: null,
     });
     writeRecoveryManifest({
       sandboxName: mismatchedOwner.name,
-      agentType: "openclaw",
+      agentType: "pi",
       version: 2,
       harnessPackage: { ...installed.identity, contentDigest: "e".repeat(64) },
     });

@@ -17,7 +17,7 @@ export type {
 export { parseHarnessPackageId } from "./receipt";
 
 const MIGRATION_FIELDS = new Set(["schemaVersion", "source", "legacyAgent", "migratedAt"]);
-const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);
+const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code", "pi"]);
 const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UNSAFE_STRING_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 

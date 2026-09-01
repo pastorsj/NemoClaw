@@ -152,15 +152,15 @@ describe("pre-effect checkpoint package authority", () => {
     expect(() => boundary.bind(prepared)).toThrow("Registry package authority");
   });
 
-  it("upgrades qualified candidate recreate state only after requalification", async () => {
-    let session = checkpointSession(createSession({ agent: "pi", sandboxName: "alpha" }));
-    const resolveQualifiedAgent = vi.fn(() => ({ ...loadAgent("openclaw"), name: "pi" }));
+  it("upgrades repository recreate state only after requalification", async () => {
+    let session = checkpointSession(createSession({ agent: "nemocua", sandboxName: "alpha" }));
+    const resolveQualifiedAgent = vi.fn(() => ({ ...loadAgent("openclaw"), name: "nemocua" }));
     const boundary = boundaryFor(
       () => session,
       (next) => {
         session = next;
       },
-      () => ({ defaultSandbox: null, sandboxes: { alpha: { name: "alpha", agent: "pi" } } }),
+      () => ({ defaultSandbox: null, sandboxes: { alpha: { name: "alpha", agent: "nemocua" } } }),
       resolveQualifiedAgent,
     );
 

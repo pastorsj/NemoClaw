@@ -2,6 +2,7 @@
 .version
 .source-revision
 *.pyc
+*.egg-info/
 *.tsbuildinfo
 .pytest_cache/
 __pycache__/

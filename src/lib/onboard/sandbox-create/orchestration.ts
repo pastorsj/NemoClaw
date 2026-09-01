@@ -175,7 +175,7 @@ export function revalidateSelectedHarnessPackageAuthority(
   const current = requireCurrentSessionHarnessPackageAuthority(
     input.expectedSession,
     input.operation,
-    input.options,
+    { ...input.options, requireLifecycleEligibility: true },
     deps,
   );
   if (

@@ -85,6 +85,23 @@ function managedPrOpenClawMcpDiscovery(workflow: Workflow): Job {
 }
 
 describe("complete managed-image publication workflow", () => {
+  it("supplies Pi's managed route placeholder to both Fabric doctor checks", () => {
+    const workflow = readWorkflow("managed-images.yaml");
+    const candidate = required(
+      workflow.jobs?.["pi-candidate"],
+      "managed-image workflow is missing the Pi candidate lane",
+    );
+    const doctorCommand =
+      "PI_FABRIC_API_KEY=nemoclaw-managed-inference nemoclaw-fabric doctor";
+
+    expect(step(candidate, "Validate the Pi candidate runtime contract").run).toContain(
+      doctorCommand,
+    );
+    expect(step(candidate, "Validate the published Pi candidate digest").run).toContain(
+      doctorCommand,
+    );
+  });
+
   it("rejects managed package paths redirected outside node_modules", () => {
     const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-managed-plugin-"));
     try {

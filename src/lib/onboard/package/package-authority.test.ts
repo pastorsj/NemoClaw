@@ -6,17 +6,6 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const candidateAuthority = vi.hoisted(() => ({ digests: [] as string[] }));
-
-vi.mock("../../agent/candidate-authority", () => ({
-  CANDIDATE_QUALIFICATION_RECEIPT_DIGESTS: { pi: candidateAuthority.digests },
-  acceptedCandidateReceiptDigests: () => candidateAuthority.digests,
-}));
-
-import {
-  candidateQualificationEnvironment,
-  type CandidateQualificationFixture,
-} from "../../agent/candidate-test-fixture";
 import { resolveSandboxAgent } from "../sandbox-agent";
 import { createSession, type Session } from "../../state/onboard-session";
 import {
@@ -33,7 +22,6 @@ const PACKAGE_MIGRATION = {
 };
 
 let harnessFixture: HarnessPackageFixture;
-const candidateFixtures: CandidateQualificationFixture[] = [];
 
 beforeEach(() => {
   harnessFixture = createHarnessPackageFixture();
@@ -41,8 +29,6 @@ beforeEach(() => {
 
 afterEach(() => {
   harnessFixture.cleanup();
-  candidateAuthority.digests.splice(0, candidateAuthority.digests.length);
-  while (candidateFixtures.length > 0) candidateFixtures.pop()?.cleanup();
 });
 
 function revalidateSession(expected: Session, current: Session, env: NodeJS.ProcessEnv = {}) {
@@ -156,6 +142,7 @@ describe("current onboarding session package authority", () => {
     ["OpenClaw", null],
     ["Hermes", "hermes"],
     ["LangChain Deep Agents Code", "langchain-deepagents-code"],
+    ["Pi", "pi"],
   ] as const)("refuses package-free standard agent %s before mutation", (_label, agent) => {
     const session = createSession({
       agent,
@@ -169,31 +156,6 @@ describe("current onboarding session package authority", () => {
       /requires harness package migration/u,
     );
     expect(mutation).not.toHaveBeenCalled();
-  });
-
-  it("accepts explicitly package-free Pi through candidate qualification", () => {
-    const qualification = candidateQualificationEnvironment();
-    candidateFixtures.push(qualification);
-    candidateAuthority.digests.push(qualification.receiptDigest);
-    const session = createSession({
-      agent: "pi",
-      harnessPackage: null,
-      harnessPackageMigration: null,
-      sessionId: "qualified-pi-session",
-    });
-
-    const current = revalidateSession(session, session, qualification.env);
-
-    expect(current.authority).toEqual({
-      harnessPackage: null,
-      harnessPackageMigration: null,
-    });
-    expect(current.resolvedAgent).toMatchObject({
-      recordedAgent: "pi",
-      effectiveAgentId: "pi",
-      harnessPackage: null,
-      harnessPackageMigration: null,
-    });
   });
 
   it("accepts explicitly package-free NemoCUA through its feature gate", () => {

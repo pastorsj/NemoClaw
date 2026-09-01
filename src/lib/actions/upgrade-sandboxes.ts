@@ -96,10 +96,10 @@ type RejectedBackupRecovery = {
   reason: string;
 };
 
-function requireCandidateRecoveryOwner(sandbox: registry.SandboxEntry): void {
+function requireRepositoryRecoveryOwner(sandbox: registry.SandboxEntry): void {
   const authority = resolveSandboxAgent(sandbox);
   if (authority.harnessPackage !== null) {
-    throw new Error("candidate backup owner unexpectedly carries harness package authority");
+    throw new Error("repository backup owner unexpectedly carries harness package authority");
   }
 }
 
@@ -115,10 +115,10 @@ export function prepareBackupRecovery(
 
     const manifestAuthority = sandboxState.inspectRebuildManifestHarnessPackage(latest);
     if (manifestAuthority.status === "candidate") {
-      // Candidate-null is an explicit authority state, not permission to trust
+      // Package-null is an explicit repository authority state, not permission to trust
       // a persisted agent name. Re-read the protected qualification receipt and
       // repository definition before the backup can authorize recovery.
-      requireCandidateRecoveryOwner(sandbox);
+      requireRepositoryRecoveryOwner(sandbox);
     }
     const validation = sandboxState.validateRebuildRecoveryManifest(
       sandbox.name,

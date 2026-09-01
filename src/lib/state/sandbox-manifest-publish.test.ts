@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __test,
   clearRebuildPolicyHandoff,
+  inspectRebuildManifestHarnessPackage,
   readRebuildPolicyHandoff,
   readSandboxStateBackupManifest,
   type RebuildManifest,
@@ -65,24 +66,33 @@ describe("rebuild manifest publication", () => {
     expect(Object.isFrozen(publicManifest)).toBe(true);
   });
 
-  it("keeps legacy omission distinct from explicit candidate authority", () => {
+  it("keeps legacy omission and migrated package-null authority distinct from repository authority", () => {
     const legacyPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-legacy-"));
-    const candidatePath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-candidate-"));
-    tempDirs.push(legacyPath, candidatePath);
+    const migratedPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-migrated-"));
+    const repositoryPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-manifest-repository-"));
+    tempDirs.push(legacyPath, migratedPath, repositoryPath);
 
     const legacy = { ...manifest(legacyPath), version: 1 };
     delete legacy.harnessPackage;
     __test.writeManifest(legacyPath, legacy);
-    __test.writeManifest(candidatePath, {
-      ...manifest(candidatePath),
+    __test.writeManifest(migratedPath, {
+      ...manifest(migratedPath),
       agentType: "pi",
+      harnessPackage: null,
+    });
+    __test.writeManifest(repositoryPath, {
+      ...manifest(repositoryPath),
+      agentType: "nemocua",
       harnessPackage: null,
     });
 
     expect(__test.readManifest(legacyPath)).not.toHaveProperty("harnessPackage");
-    expect(__test.readManifest(candidatePath)).toMatchObject({
+    const migrated = __test.readManifest(migratedPath);
+    expect(migrated).toMatchObject({ version: 2, agentType: "pi", harnessPackage: null });
+    expect(inspectRebuildManifestHarnessPackage(migrated!)).toEqual({ status: "legacy" });
+    expect(__test.readManifest(repositoryPath)).toMatchObject({
       version: 2,
-      agentType: "pi",
+      agentType: "nemocua",
       harnessPackage: null,
     });
   });

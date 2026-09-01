@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import path from "node:path";
-
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -14,7 +12,6 @@ vi.mock("../../onboard/gateway-teardown-authority", async (importOriginal) => ({
   resolveGatewayRebuildAuthority: mocks.resolveGatewayRebuildAuthority,
 }));
 
-import { REPOSITORY_ROOT } from "../../core/repository-root";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
@@ -131,47 +128,30 @@ describe("rebuild package authority selection", () => {
     },
   );
 
-  it.each([
-    ["NemoCUA", "nemocua", { NEMOCLAW_CUA_ENABLED: "1" }],
-    [
-      "Pi",
-      "pi",
-      {
-        NEMOCLAW_CANDIDATE_AGENTS: "1",
-        NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT: path.join(
-          REPOSITORY_ROOT,
-          "ci/pi-agent-qualification-v1-linux-amd64.json",
-        ),
-      },
-    ],
-  ] as const)(
-    "carries the repository-qualified %s definition with explicit null package authority",
-    (_label, agent, env) => {
-      const agentAuthority = resolveSandboxAgent({ agent }, { env });
+  it("carries the repository-qualified NemoCUA definition with explicit null package authority", () => {
+    const agent = "nemocua";
+    const agentAuthority = resolveSandboxAgent({ agent }, { env: { NEMOCLAW_CUA_ENABLED: "1" } });
 
-      const options = buildRebuildRecreateOnboardOpts({
-        sb: { agent, dashboardPort: 18789 },
-        agentAuthority,
-        storedFromDockerfile: null,
-        autoYes: true,
-        usageNoticeAccepted: true,
-      });
+    const options = buildRebuildRecreateOnboardOpts({
+      sb: { agent, dashboardPort: 18789 },
+      agentAuthority,
+      storedFromDockerfile: null,
+      autoYes: true,
+      usageNoticeAccepted: true,
+    });
 
-      expect(agentAuthority.definition).toMatchObject({
-        name: agent,
-        packageRoot: REPOSITORY_ROOT,
-        manifestPath: path.join(REPOSITORY_ROOT, "agents", agent, "manifest.yaml"),
-        runtime: { kind: "terminal" },
-      });
-      expect(Object.isFrozen(agentAuthority.definition)).toBe(true);
-      expect(options).toMatchObject({
-        agent,
-        controlUiPort: null,
-        harnessPackage: null,
-        harnessPackageMigration: null,
-      });
-    },
-  );
+    expect(agentAuthority.definition).toMatchObject({
+      name: agent,
+      runtime: { kind: "terminal" },
+    });
+    expect(Object.isFrozen(agentAuthority.definition)).toBe(true);
+    expect(options).toMatchObject({
+      agent,
+      controlUiPort: null,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+  });
 
   it("carries the exact installed identity and owner migration into recreate options", () => {
     const options = buildRebuildRecreateOnboardOpts({

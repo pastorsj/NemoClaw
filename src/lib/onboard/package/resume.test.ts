@@ -196,7 +196,8 @@ describe("package-managed onboarding resume", () => {
     expect(updateSession).not.toHaveBeenCalled();
   });
 
-  it.each(["pi", "nemocua"] as const)("keeps a qualified %s resume package-free", (agentId) => {
+  it("keeps a qualified NemoCUA resume package-free", () => {
+    const agentId = "nemocua";
     const session = createSession({ agent: agentId });
     const clearAgentScopedResumeState = vi.fn((current: Session) => current);
 

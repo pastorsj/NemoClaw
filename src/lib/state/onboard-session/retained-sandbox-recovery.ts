@@ -6,7 +6,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { isCandidateAgent } from "../../agent/candidate";
 import { openRegularFileNoFollow } from "../../adapters/fs/regular-file";
 import {
   inspectHarnessPackageState,
@@ -130,7 +129,7 @@ export function requireRetainedRecoveryPackage(
     owner.harnessPackage,
     owner.harnessPackageMigration,
   );
-  if (effectiveAgentId === "nemocua" || isCandidateAgent(effectiveAgentId)) {
+  if (effectiveAgentId === "nemocua") {
     if (
       packageState.status !== "absent" ||
       owner.harnessPackage !== null ||

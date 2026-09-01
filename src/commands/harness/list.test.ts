@@ -16,6 +16,12 @@ const IDENTITY = {
   packageVersion: "0.1.0",
   contentDigest: DIGEST,
 } as const;
+const PI_IDENTITY = {
+  kind: "agent-runtime",
+  id: "pi",
+  packageVersion: "0.1.0",
+  contentDigest: "b".repeat(64),
+} as const;
 const EMPTY_VIEW: HarnessInventoryView = {
   schemaVersion: 1,
   installed: [],
@@ -32,6 +38,11 @@ const HEALTHY_VIEW: HarnessInventoryView = {
     { id: "openclaw", displayName: "OpenClaw", health: "healthy", identity: { ...IDENTITY } },
   ],
   available: [{ displayName: "OpenClaw", identity: { ...IDENTITY }, installationState: "active" }],
+};
+const PI_VIEW: HarnessInventoryView = {
+  schemaVersion: 1,
+  installed: [{ id: "pi", displayName: "Pi", health: "healthy", identity: PI_IDENTITY }],
+  available: [{ displayName: "Pi", identity: PI_IDENTITY, installationState: "active" }],
 };
 
 describe("harness inventory oclif commands", () => {
@@ -84,6 +95,30 @@ describe("harness inventory oclif commands", () => {
     expect(result).toEqual(HEALTHY_VIEW);
     expect(output).toEqual(HEALTHY_VIEW);
     expect(renderText).not.toHaveBeenCalled();
+  });
+
+  it("hides an unqualified candidate from available packages but retains its installed row", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(harnessListCommandDependencies, "createHarnessInventoryView").mockReturnValue(PI_VIEW);
+    vi.spyOn(harnessListCommandDependencies, "isCandidateAgent").mockReturnValue(true);
+    vi.spyOn(harnessListCommandDependencies, "isCandidateAgentSelectable").mockReturnValue(false);
+
+    const result = await HarnessListCommand.run(["--json"], rootDir);
+
+    expect(result).toEqual({ ...PI_VIEW, available: [] });
+    expect(JSON.parse(String(log.mock.calls.at(-1)?.[0]))).toEqual({
+      ...PI_VIEW,
+      available: [],
+    });
+  });
+
+  it("lists a qualified candidate as available", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    vi.spyOn(harnessListCommandDependencies, "createHarnessInventoryView").mockReturnValue(PI_VIEW);
+    vi.spyOn(harnessListCommandDependencies, "isCandidateAgent").mockReturnValue(true);
+    vi.spyOn(harnessListCommandDependencies, "isCandidateAgentSelectable").mockReturnValue(true);
+
+    await expect(HarnessListCommand.run(["--json"], rootDir)).resolves.toEqual(PI_VIEW);
   });
 
   it("rejects positional input before reading the catalogue", async () => {

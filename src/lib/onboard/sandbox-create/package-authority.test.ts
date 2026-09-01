@@ -98,6 +98,10 @@ describe("sandbox create package authority", () => {
       ),
     ).toEqual({ harnessPackage: HARNESS_PACKAGE, harnessPackageMigration: null });
     expect(resolveSandboxAgent).toHaveBeenCalledOnce();
+    expect(resolveSandboxAgent).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ requireLifecycleEligibility: true }),
+    );
   });
 
   it("rejects route package drift before sandbox mutation", () => {

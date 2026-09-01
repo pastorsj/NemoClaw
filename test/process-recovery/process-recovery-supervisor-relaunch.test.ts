@@ -275,6 +275,23 @@ describe("checkAndRecoverSandboxProcesses supervisor relaunch", () => {
             readManagedWorkloadAuthority: vi.fn(
               () => ({ agent: "hermes", profile: { dashboard: { agent: "hermes" } } }) as never,
             ),
+            resolveSandboxAgent: vi.fn(() => ({
+              recordedAgent: "hermes",
+              effectiveAgentId: "hermes",
+              definition: {
+                name: "hermes",
+                displayName: "Hermes",
+                forwardPort: 19_189,
+                packageRoot: `/state/harnesses/objects/${"b".repeat(64)}`,
+              },
+              harnessPackage: {
+                kind: "agent-runtime",
+                id: "hermes",
+                packageVersion: "1.2.3",
+                contentDigest: "b".repeat(64),
+              },
+              harnessPackageMigration: null,
+            })) as never,
             recreate,
             resolveContainer,
           },

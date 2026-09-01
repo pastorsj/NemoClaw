@@ -43,7 +43,7 @@ import { withLock } from "./registry/lock";
 import { load as loadRegistry, save as saveRegistry } from "./registry/persistence";
 import type { SandboxEntry, SandboxRegistry } from "./registry/types";
 
-const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);
+const STANDARD_LEGACY_AGENTS = new Set(["openclaw", "hermes", "langchain-deepagents-code", "pi"]);
 
 export type LegacyHarnessMigrationOwner =
   | { readonly kind: "session"; readonly session: Session }

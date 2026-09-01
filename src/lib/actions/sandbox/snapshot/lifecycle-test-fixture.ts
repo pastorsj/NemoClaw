@@ -108,18 +108,18 @@ export function packageManagedSnapshot(harnessPackage: HarnessPackageIdentity = 
   };
 }
 
-export function candidateSandbox(name: string): f.SandboxRecord {
+export function repositorySandbox(name: string): f.SandboxRecord {
   return {
     name,
-    agent: "pi",
-    imageTag: `nemoclaw-${name}:candidate`,
+    agent: "nemocua",
+    imageTag: `nemoclaw-${name}:repository`,
     openshellDriver: "docker",
     provider: "nvidia-nim",
     model: "nvidia/model-a",
   };
 }
 
-export function candidateSnapshot() {
+export function repositorySnapshot() {
   return {
     version: 2,
     backupComplete: true,
@@ -128,7 +128,7 @@ export function candidateSnapshot() {
     timestamp: "2026-08-20T00:00:00.000Z",
     backupPath: "/tmp/backup-alpha",
     sandboxName: "alpha",
-    agentType: "pi",
+    agentType: "nemocua",
     agentVersion: "0.1.0",
     expectedVersion: "0.1.0",
     harnessPackage: null,

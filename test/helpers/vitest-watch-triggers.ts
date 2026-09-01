@@ -156,7 +156,16 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   },
   {
     pattern:
-      /(?:^|\/)(?:agents\/pi\/(?:Dockerfile(?:\.base)?|dependency-review\.md|generate-config\.ts|manifest\.yaml|policy-additions\.yaml|start\.sh|pi-runtime\/package(?:-lock)?\.json)|\.github\/workflows\/(?:managed-images|base-image)\.yaml)$/,
+      /(?:^|\/)packages\/nemoclaw-pi\/(?:Dockerfile(?:\.base)?|compat\/dependencies\.md|config\/generate-config\.ts|manifest\.yaml|policy-additions\.yaml|start\.sh|runtime\/(?:generate-config\.sh|pi\/package(?:-lock)?\.json))$/,
+    testsToRun: runTests(
+      "packages/nemoclaw-pi/tests/config/generator.test.ts",
+      "packages/nemoclaw-pi/tests/integration/package-discovery.test.ts",
+      "packages/nemoclaw-pi/tests/integration/rlimit-hooks.test.ts",
+      "packages/nemoclaw-pi/tests/runtime/shell-entrypoints.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)\.github\/workflows\/(?:managed-images|base-image)\.yaml$/,
     testsToRun: runTests("test/platform/images/pi-candidate.test.ts"),
   },
   {

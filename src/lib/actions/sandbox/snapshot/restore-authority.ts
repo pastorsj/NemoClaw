@@ -5,7 +5,6 @@ import type { RuntimeProviderBundle } from "../../../onboard/runtime-provider/co
 import { isDeepStrictEqual } from "node:util";
 import { captureOpenshell } from "../../../adapters/openshell/runtime";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../../adapters/openshell/timeouts";
-import { isCandidateAgent } from "../../../agent/candidate";
 import type { AgentDefinition } from "../../../agent/defs";
 import {
   harnessPackageIdentitiesEqual,
@@ -18,8 +17,8 @@ import {
   type InstalledHarnessPackage,
 } from "../../../agent-runtime/package/store";
 import { resolveSandboxGatewayName } from "../../../onboard/gateway-binding";
+import { resolveLifecycleEligibleSandboxAgent } from "../../../onboard/package/package-authority";
 import { CURRENT_RUNTIME_PROVIDER_BUNDLES } from "../../../onboard/runtime-provider/current";
-import { resolveSandboxAgent } from "../../../onboard/sandbox-agent";
 import { fingerprintSandboxLiveIdentity } from "../../../onboard/sandbox-recreate-transaction";
 import {
   confirmHostLocalInferenceAuthority,
@@ -66,7 +65,7 @@ const defaultDependencies: Omit<
   "getSandbox" | "captureOpenshell"
 > = {
   resolvePinnedPackage: (identity) => resolvePinnedHarnessPackage(identity),
-  resolveAgentDefinition: (sandbox) => resolveSandboxAgent(sandbox).definition,
+  resolveAgentDefinition: (sandbox) => resolveLifecycleEligibleSandboxAgent(sandbox).definition,
   requireProvider: (sandbox) =>
     requireRuntimeProviderBundleForSandbox(sandbox, CURRENT_RUNTIME_PROVIDER_BUNDLES),
   captureContentAuthority: (...args) => sandboxState.captureSnapshotRestoreAuthority(...args),
@@ -134,7 +133,7 @@ function effectiveRegistryAgent(entry: SandboxEntry): string {
 }
 
 function isRepositoryQualifiedAgent(agentName: string): boolean {
-  return agentName === "nemocua" || isCandidateAgent(agentName);
+  return agentName === "nemocua";
 }
 
 function registryPackageIdentity(
@@ -460,7 +459,7 @@ export function resolveSnapshotSourceAgent(
   sourceEntry: SandboxEntry,
   packageAuthority: SnapshotPackageAuthority,
 ): AgentDefinition {
-  const resolved = resolveSandboxAgent(sourceEntry);
+  const resolved = resolveLifecycleEligibleSandboxAgent(sourceEntry);
   if (
     resolved.effectiveAgentId !== packageAuthority.agentType ||
     resolved.definition.name !== packageAuthority.agentType

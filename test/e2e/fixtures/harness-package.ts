@@ -5,7 +5,12 @@ import { buildAvailabilityProbeEnv } from "./availability-env.ts";
 import type { HostCliClient } from "./clients/host.ts";
 import type { ShellProbeResult } from "./shell-probe.ts";
 
-const STANDARD_HARNESS_IDS = new Set(["openclaw", "hermes", "langchain-deepagents-code"] as const);
+const STANDARD_HARNESS_IDS = new Set([
+  "openclaw",
+  "hermes",
+  "langchain-deepagents-code",
+  "pi",
+] as const);
 const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const PACKAGE_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
@@ -19,7 +24,7 @@ const INSTALLATION_STATES = new Set(["not-installed", "active", "different", "da
 const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const LIST_TIMEOUT_MS = 30_000;
 
-export type StandardHarnessId = "openclaw" | "hermes" | "langchain-deepagents-code";
+export type StandardHarnessId = "openclaw" | "hermes" | "langchain-deepagents-code" | "pi";
 
 export interface HarnessPackageIdentity {
   readonly kind: "agent-runtime";
@@ -236,11 +241,12 @@ function requireCommandSuccess(result: ShellProbeResult, operation: "install" | 
 export async function readInstalledHarnessPackage(
   host: HostCliClient,
   selectedId: StandardHarnessId,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<HarnessInventoryEvidence> {
   const id = requireStandardHarnessId(selectedId);
   const inventoryResult = await host.nemoclaw(["harness", "list", "--json"], {
     artifactName: `harness-list-${id}`,
-    env: buildAvailabilityProbeEnv(),
+    env: buildAvailabilityProbeEnv(environment),
     timeoutMs: LIST_TIMEOUT_MS,
   });
   requireCommandSuccess(inventoryResult, "inventory");
@@ -254,15 +260,16 @@ export async function readInstalledHarnessPackage(
 export async function installHarnessPackage(
   host: HostCliClient,
   selectedId: StandardHarnessId,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<HarnessPackageEvidence> {
   const id = requireStandardHarnessId(selectedId);
   const installResult = await host.nemoclaw(["harness", "install", id], {
     artifactName: `harness-install-${id}`,
-    env: buildAvailabilityProbeEnv(),
+    env: buildAvailabilityProbeEnv(environment),
     timeoutMs: INSTALL_TIMEOUT_MS,
   });
   requireCommandSuccess(installResult, "install");
-  const inventory = await readInstalledHarnessPackage(host, id);
+  const inventory = await readInstalledHarnessPackage(host, id, environment);
   return Object.freeze({
     identity: inventory.identity,
     installResult,

@@ -33,6 +33,7 @@ import {
 import { resolveAgent } from "./onboard";
 
 const tempAgentDirs: string[] = [];
+const PI_MANIFEST_PATH = path.join(AGENT_RUNTIME_PACKAGES_DIR, "nemoclaw-pi", "manifest.yaml");
 
 function writeTempAgentManifest(name: string, contents: string): void {
   const agentDir = path.join(AGENTS_DIR, name);
@@ -116,7 +117,7 @@ describe("agent definitions", () => {
   });
 
   it("keeps the Pi candidate manifest out of agent selection by default (#7925)", () => {
-    expect(fs.existsSync(path.join(AGENTS_DIR, "pi", "manifest.yaml"))).toBe(true);
+    expect(fs.existsSync(PI_MANIFEST_PATH)).toBe(true);
 
     expect(listAgents({})).not.toContain("pi");
     expect(getAgentChoices().map((choice) => choice.name)).not.toContain("pi");
@@ -151,7 +152,7 @@ describe("agent definitions", () => {
     qualificationFixtures.push(fixture);
     authority.digests.push(fixture.receiptDigest);
 
-    const manifestPath = path.join(AGENTS_DIR, "pi", "manifest.yaml");
+    const manifestPath = PI_MANIFEST_PATH;
     const originalManifest = fs.readFileSync(manifestPath, "utf8");
     const updatedManifest = originalManifest.replace(
       'display_name: "Pi"',
@@ -160,19 +161,20 @@ describe("agent definitions", () => {
     expect(updatedManifest).not.toBe(originalManifest);
 
     const readFileSync = fs.readFileSync;
-    let manifestReads = 0;
+    let serveUpdatedManifest = false;
     vi.spyOn(fs, "readFileSync").mockImplementation(((
       target: fs.PathOrFileDescriptor,
       options?: unknown,
     ) => {
       return target === manifestPath && options === "utf8"
-        ? (manifestReads += 1) === 1
-          ? originalManifest
-          : updatedManifest
+        ? serveUpdatedManifest
+          ? updatedManifest
+          : originalManifest
         : Reflect.apply(readFileSync, fs, [target, options]);
     }) as typeof fs.readFileSync);
 
     const first = loadAgentFresh("pi", fixture.env);
+    serveUpdatedManifest = true;
     const second = loadAgentFresh("pi", fixture.env);
 
     expect(first).not.toBe(second);
@@ -201,9 +203,7 @@ describe("agent definitions", () => {
   });
 
   it("keeps the Pi candidate manifest readable without public resolution (#7925)", () => {
-    const manifest = YAML.parse(
-      fs.readFileSync(path.join(AGENTS_DIR, "pi", "manifest.yaml"), "utf8"),
-    ) as {
+    const manifest = YAML.parse(fs.readFileSync(PI_MANIFEST_PATH, "utf8")) as {
       name: string;
       expected_version: string;
       runtime: { kind: string };

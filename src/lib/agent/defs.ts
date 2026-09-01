@@ -132,7 +132,9 @@ export function listAgents(env: NodeJS.ProcessEnv = process.env): string[] {
         .filter((entry) => fs.existsSync(path.join(AGENTS_DIR, entry.name, "manifest.yaml")))
         .map((entry) => entry.name)
     : [];
-  const packageAgents = listAgentRuntimePackageLocations().map(({ name }) => name);
+  const packageAgents = listAgentRuntimePackageLocations()
+    .map(({ name }) => name)
+    .filter((name) => !isCandidateAgent(name) || isCandidateAgentSelectable(name, env));
   return [...new Set([...packageAgents, ...qualifiedAgents])].sort();
 }
 

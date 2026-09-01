@@ -3,7 +3,6 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import { isCandidateAgent } from "../../../agent/candidate";
 import {
   harnessPackageIdentitiesEqual,
   inspectHarnessPackageState,
@@ -92,8 +91,7 @@ export function checkPinnedAgentAuthority(
   if (packageState.status === "invalid") return "invalid-package";
   if (!rebuildPackageAuthorityMatches(owner, authority)) return "package-mismatch";
 
-  const usesRepositoryAuthority =
-    effectiveAgentId === "nemocua" || isCandidateAgent(effectiveAgentId);
+  const usesRepositoryAuthority = effectiveAgentId === "nemocua";
   if (usesRepositoryAuthority) {
     return packageState.status === "absent" &&
       authority.harnessPackage === null &&
@@ -152,7 +150,9 @@ export function verifyRecreatedAgentAuthority(
   try {
     // Both durable owners were proven equal above, so one resolution validates
     // their shared retained package object or qualified repository definition.
-    currentAuthority = resolveSandboxAgent(recreatedEntry);
+    currentAuthority = resolveSandboxAgent(recreatedEntry, {
+      requireLifecycleEligibility: true,
+    });
   } catch {
     return "the recreated agent package receipt or repository definition could not be verified";
   }
