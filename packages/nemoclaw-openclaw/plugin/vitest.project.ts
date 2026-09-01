@@ -4,11 +4,10 @@
 import path from "node:path";
 
 const packageRoot = path.resolve(import.meta.dirname, "..");
-const repositoryRoot = path.resolve(packageRoot, "../..");
-const canonicalBannerBoundary = path.resolve(repositoryRoot, "src/lib/shared/banner-boundary.cts");
+const canonicalBannerBoundary = path.resolve(import.meta.dirname, "src/shared/banner-boundary.cts");
 const canonicalCredentialFilterBoundary = path.resolve(
-  repositoryRoot,
-  "src/lib/shared/credential-filter-boundary.cts",
+  import.meta.dirname,
+  "src/shared/credential-filter-boundary.cts",
 );
 const canonicalOpenShellExternalTargetBoundary = path.resolve(
   import.meta.dirname,
@@ -19,13 +18,13 @@ const canonicalOpenShellPolicyBoundary = path.resolve(
   "src/shared/openshell-policy-boundary.cts",
 );
 const canonicalPrivateNetworksBoundary = path.resolve(
-  repositoryRoot,
-  "src/lib/shared/private-networks-boundary.cts",
+  import.meta.dirname,
+  "src/shared/private-networks-boundary.cts",
 );
-const canonicalSandboxName = path.resolve(repositoryRoot, "src/lib/shared/sandbox-name.cts");
+const canonicalSandboxName = path.resolve(import.meta.dirname, "src/shared/sandbox-name.cts");
 const canonicalSnapshotSanitizerBoundary = path.resolve(
-  repositoryRoot,
-  "src/lib/shared/snapshot-sanitizer-boundary.cts",
+  import.meta.dirname,
+  "src/shared/snapshot-sanitizer-boundary.cts",
 );
 
 type PluginVitestProjectOptions = {
