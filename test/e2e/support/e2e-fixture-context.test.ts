@@ -716,7 +716,7 @@ describe("E2E fixture primitives", () => {
         }),
         {
           artifactName: "process-group-timeout",
-          timeoutMs: 200,
+          timeoutMs: 2_000,
           killGraceMs: 50,
         },
       );

@@ -237,7 +237,13 @@ export default defineConfig({
           name: "e2e-support",
           alias: canonicalSourceAliases,
           env: controlledNonLiveEnv,
-          testTimeout: testTimeout(),
+          // Support fixtures start real shell, Git, PTY, and fake-service
+          // processes. Run them after the ordinary projects and bound file
+          // concurrency without overriding the CLI coverage shard's stricter
+          // one-worker cap.
+          maxWorkers: Math.min(2, cliCoverageShardScheduling.maxWorkers ?? 2),
+          sequence: { groupOrder: 2 },
+          testTimeout: testTimeout(20_000),
           setupFiles: [
             fixtureUmaskSetup,
             isolatedTestStateSetup,
@@ -278,7 +284,12 @@ export default defineConfig({
     ],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts", "bin/**/*.js", "packages/nemoclaw-openclaw/plugin/src/**/*.ts", "packages/nemoclaw-openclaw/plugin/src/**/*.cts"],
+      include: [
+        "src/**/*.ts",
+        "bin/**/*.js",
+        "packages/nemoclaw-openclaw/plugin/src/**/*.ts",
+        "packages/nemoclaw-openclaw/plugin/src/**/*.cts",
+      ],
       exclude: ["**/*.test.ts", "dist/**"],
       reporter: ["text-summary", "json-summary"],
       thresholds: resolveVitestCoverageThresholds(process.argv.slice(2)),
