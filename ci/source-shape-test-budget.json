@@ -138,6 +138,11 @@
     },
     {
       "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
+      "test": "ships the reviewed external dashboard Host compatibility patch",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
       "test": "keeps the sandbox lazy-installer probe offline",
       "category": "security"
     },

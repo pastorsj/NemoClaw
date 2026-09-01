@@ -12,6 +12,9 @@ on:
     paths:
       - ".github/workflows/portable-profile-e2e.yaml"
       - "packages/nemoclaw-hermes/Dockerfile"
+      - "packages/nemoclaw-hermes/compat/dashboard-external-host.patch"
+      - "packages/nemoclaw-hermes/start.sh"
+      - "src/lib/onboard/experimental/hermes-portable-build-context-files.ts"
       - "src/lib/onboard/experimental/hermes-portable-build-context.ts"
       - "src/lib/onboard/experimental/portable-host-preparation.ts"
       - "src/lib/onboard/experimental/portable-profile.ts"

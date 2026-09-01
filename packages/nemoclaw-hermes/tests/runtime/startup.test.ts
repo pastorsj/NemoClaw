@@ -81,6 +81,7 @@ function runHermesDashboardPortBootstrap(env: Record<string, string | undefined>
       "set --",
       extractDashboardPortBootstrap(src),
       'printf "CHAT_UI_URL=%s\\n" "${CHAT_UI_URL:-}"',
+      'printf "HERMES_DASHBOARD_EXTERNAL_HOST=%s\\n" "${HERMES_DASHBOARD_EXTERNAL_HOST:-}"',
       'printf "DASHBOARD_PUBLIC_PORT=%s\\n" "$DASHBOARD_PUBLIC_PORT"',
       'printf "DASHBOARD_INTERNAL_PORT=%s\\n" "$DASHBOARD_INTERNAL_PORT"',
       'printf "PUBLIC_PORT=%s\\n" "$PUBLIC_PORT"',
@@ -829,8 +830,49 @@ describe("packages/nemoclaw-hermes/start.sh port validation", () => {
 
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("CHAT_UI_URL=https://hermes.example.test:29443");
+    expect(run.stdout).toContain("HERMES_DASHBOARD_EXTERNAL_HOST=hermes.example.test");
     expect(run.stdout).toContain("DASHBOARD_PUBLIC_PORT=29443");
     expect(run.stdout).toContain("PUBLIC_PORT=8642");
+  });
+
+  it("normalizes the configured HTTPS dashboard host before launching Hermes", () => {
+    const run = runHermesDashboardPortBootstrap({
+      CHAT_UI_URL: "https://HERMES.EXAMPLE.TEST.:29443/dashboard",
+      NEMOCLAW_DASHBOARD_PORT: undefined,
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("HERMES_DASHBOARD_EXTERNAL_HOST=hermes.example.test");
+    expect(run.stdout).toContain("DASHBOARD_PUBLIC_PORT=29443");
+  });
+
+  it("does not configure an external dashboard host for a loopback URL", () => {
+    const run = runHermesDashboardPortBootstrap({
+      CHAT_UI_URL: "http://127.0.0.1:29443",
+      NEMOCLAW_DASHBOARD_PORT: undefined,
+    });
+
+    expect(run.status).toBe(0);
+    expect(run.stdout).toContain("HERMES_DASHBOARD_EXTERNAL_HOST=\n");
+    expect(run.stdout).toContain("DASHBOARD_PUBLIC_PORT=29443");
+  });
+
+  it.each([
+    "http://dashboard.example.test:29443",
+    "https://0.0.0.0:29443",
+    "https://user:secret@dashboard.example.test:29443",
+    "https://dashboard.example.test:invalid",
+    "https://./",
+    "dashboard.example.test:29443",
+  ])("rejects an unsafe or malformed dashboard browser URL: %s", (chatUiUrl) => {
+    const run = runHermesDashboardPortBootstrap({
+      CHAT_UI_URL: chatUiUrl,
+      NEMOCLAW_DASHBOARD_PORT: undefined,
+    });
+
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("Invalid CHAT_UI_URL for the Hermes dashboard");
+    expect(run.stderr).not.toContain(chatUiUrl);
   });
 
   it("rejects dashboard ports that collide with the API port during bootstrap", () => {

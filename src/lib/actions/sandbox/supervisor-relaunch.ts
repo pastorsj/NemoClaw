@@ -18,6 +18,7 @@ import {
 import { getDockerGpuSupervisorReconnectTimeoutSecs } from "../../onboard/docker-gpu-supervisor-reconnect";
 import { recreateOpenShellDockerSandboxWithStartupCommand } from "../../onboard/docker-startup-command-patch";
 import { buildSandboxRuntimeEnvArgs } from "../../onboard/sandbox-create-launch";
+import { readManagedWorkloadAuthority } from "../../onboard/workload/authority";
 import { resolveDirectSandboxContainer } from "../../sandbox/privileged-exec";
 import { redact, redactFull } from "../../security/redact";
 import * as registry from "../../state/registry";
@@ -53,6 +54,7 @@ export type ManagedSupervisorRelaunch = {
 
 export type ManagedSupervisorRelaunchDeps = {
   getSandbox?: typeof registry.getSandbox;
+  readManagedWorkloadAuthority?: typeof readManagedWorkloadAuthority;
   resolveDashboardPort?: typeof resolveSandboxDashboardPort;
   resolveContainer?: typeof resolveDirectSandboxContainer;
   inspectContainer?: (containerId: string) => DockerContainerInspect;
@@ -94,6 +96,7 @@ function reconstructSupervisorLaunchCommand(
   sandboxName: string,
   entry: NonNullable<ReturnType<typeof registry.getSandbox>>,
   selectedAgent: ResolvedSandboxAgent,
+  quiet: boolean,
   deps: ManagedSupervisorRelaunchDeps,
 ): string[] | null {
   const agent = selectedAgent.definition;
@@ -102,8 +105,21 @@ function reconstructSupervisorLaunchCommand(
   const manageDashboard = shouldManageDashboardForAgent(agent);
   const resolveDashboardPort = deps.resolveDashboardPort ?? resolveSandboxDashboardPort;
   const dashboardPort = String(resolveDashboardPort(sandboxName));
-  const chatUiUrl = manageDashboard ? `http://127.0.0.1:${dashboardPort}` : "";
   const hermesDashboardEnabled = entry.hermesDashboardEnabled === true;
+  const loopbackDashboardUrl = `http://127.0.0.1:${dashboardPort}`;
+  let chatUiUrl = manageDashboard ? loopbackDashboardUrl : "";
+  if (selectedAgent.effectiveAgentId === "hermes" && manageDashboard && hermesDashboardEnabled) {
+    const readWorkloadAuthority = deps.readManagedWorkloadAuthority ?? readManagedWorkloadAuthority;
+    const profile = readWorkloadAuthority(entry)?.profile;
+    if (profile?.dashboard.agent !== "hermes" || profile.dashboard.browserUrl === undefined) {
+      if (!quiet) {
+        console.error("  Trusted container recovery stopped because the Hermes dashboard profile");
+        console.error("  has no recorded browser URL. Rerun onboarding before retrying recovery.");
+      }
+      return null;
+    }
+    chatUiUrl = profile.dashboard.browserUrl;
+  }
   const { envArgs } = buildSandboxRuntimeEnvArgs({
     agent,
     chatUiUrl,
@@ -164,6 +180,7 @@ export function relaunchManagedSupervisorSession(
       sandboxName,
       entry,
       selectedAgent,
+      quiet,
       deps,
     );
     if (startupCommand === null) return null;

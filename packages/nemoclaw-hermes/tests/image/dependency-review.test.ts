@@ -25,6 +25,10 @@ const securityDependenciesPatch = fs.readFileSync(
   path.join(HERMES_PACKAGE_ROOT, "compat", "security-dependencies.patch"),
   "utf8",
 );
+const dashboardExternalHostPatch = fs.readFileSync(
+  path.join(HERMES_PACKAGE_ROOT, "compat", "dashboard-external-host.patch"),
+  "utf8",
+);
 const hindsightProbeRequirementsPath = path.join(
   HERMES_PACKAGE_ROOT,
   "checks",
@@ -314,6 +318,22 @@ describe("Hermes 0.19.0 dependency review", () => {
     expect(review).toContain("`tornado==6.5.7`");
     expect(review).toContain("checksum-pinned Node.js `24.18.1`");
     expect(review).toContain("exact uv `0.11.33`");
+  });
+
+  // source-shape-contract: security -- Exact image instructions bind the reviewed dashboard Host patch to shipped bytes
+  it("ships the reviewed external dashboard Host compatibility patch", () => {
+    expect(dockerfile).toContain(
+      "COPY packages/nemoclaw-hermes/compat/dashboard-external-host.patch /scripts/hermes-dashboard-external-host.patch",
+    );
+    expect(dockerfile).toContain("--include=hermes_cli/web_server.py");
+    expect(dockerfile).toContain("if external_host and host_only == external_host:");
+    expect(dockerfile).toContain("rm /scripts/hermes-dashboard-external-host.patch");
+    expect(dashboardExternalHostPatch).toContain(
+      '_NEMOCLAW_DASHBOARD_EXTERNAL_HOST_ENV = "_NEMOCLAW_HERMES_DASHBOARD_EXTERNAL_HOST"',
+    );
+    expect(dashboardExternalHostPatch).toContain(
+      "if external_host and host_only == external_host:",
+    );
   });
 
   it("rejects an altered Hindsight wheel before the compatibility import", () => {

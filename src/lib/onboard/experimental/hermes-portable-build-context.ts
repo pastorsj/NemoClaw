@@ -320,9 +320,7 @@ function isValidGitReferenceName(reference: string): boolean {
     !reference.includes("@{") &&
     !reference.includes("//") &&
     !CONTROL.test(reference) &&
-    ![" ", "~", "^", ":", "?", "*", "[", "\\"].some((character) =>
-      reference.includes(character),
-    ) &&
+    ![" ", "~", "^", ":", "?", "*", "[", "\\"].some((character) => reference.includes(character)) &&
     components.every(
       (component) =>
         component.length > 0 && !component.startsWith(".") && !component.endsWith(".lock"),

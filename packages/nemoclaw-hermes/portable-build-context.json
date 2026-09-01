@@ -7,6 +7,7 @@
     "packages/nemoclaw-hermes/checks/image-probes.py",
     "packages/nemoclaw-hermes/compat/cron-drain.py",
     "packages/nemoclaw-hermes/compat/cron-execution.py",
+    "packages/nemoclaw-hermes/compat/dashboard-external-host.patch",
     "packages/nemoclaw-hermes/compat/discord-permissions.py",
     "packages/nemoclaw-hermes/compat/env-activation.py",
     "packages/nemoclaw-hermes/compat/gateway-identity.py",
@@ -277,6 +278,10 @@
     {
       "path": "packages/nemoclaw-hermes/compat/cron-execution.py",
       "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/compat/dashboard-external-host.patch",
+      "mode": "100644"
     },
     {
       "path": "packages/nemoclaw-hermes/compat/discord-permissions.py",

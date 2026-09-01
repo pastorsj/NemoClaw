@@ -57,6 +57,9 @@ describe("portable profile rootless runtime workflow", () => {
     expect(workflow.on.pull_request.paths).toEqual(
       expect.arrayContaining([
         "packages/nemoclaw-hermes/Dockerfile",
+        "packages/nemoclaw-hermes/compat/dashboard-external-host.patch",
+        "packages/nemoclaw-hermes/start.sh",
+        "src/lib/onboard/experimental/hermes-portable-build-context-files.ts",
         "src/lib/onboard/experimental/hermes-portable-build-context.ts",
       ]),
     );
