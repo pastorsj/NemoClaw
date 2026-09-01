@@ -14,7 +14,7 @@ created: 2026-08-30
 | Lane | Owner | Required evidence |
 |---|---|---|
 | Runner unit | `packages/nemoclaw-fabric` | Config, prompts, doctor pass/warn/fail, succeeded/failed/cancelled, JSON/plain, redaction, exceptions |
-| Released SDK | `packages/nemoclaw-fabric` | Discovery, plan, doctor, start, two invokes, stop, malformed result, host failure, signals, no orphan |
+| Released SDK | `packages/nemoclaw-fabric` | Discovery, doctor, start, two invokes, stop, malformed result, host failure, signals, no orphan |
 | Agent package | Deep Agents package | Separate exact locks, config, commands, image files, unavailable model settings, fake text and workspace turns |
 | Core contract | NemoClaw | Synthetic artifact validation and generic headless command selection |
 | Composition | Package plus NemoClaw | Install, list, select, stage, onboard, identity receipt, headless invocation |

@@ -37,7 +37,7 @@ nemoclaw harness install langchain-deepagents-code
 
 NemoClaw continues to own package installation, credentials, network policy, image selection,
 OpenShell lifecycle, state, backup, rebuild, and qualification. Fabric owns adapter discovery,
-configuration projection, `plan`, `doctor`, `start`, `invoke`, normalized results, and `stop`.
+configuration projection, `doctor`, `start`, `invoke`, normalized results, and `stop`.
 
 The shared runner accepts a normal Fabric configuration file. It must not contain an adapter-name
 branch. The agent runtime package owns the exact adapter ID and model projection.
@@ -64,7 +64,7 @@ round trip. It does not qualify native DCode behavior.
 
 Package data marks a Fabric invocation unavailable when those model options are required. The
 generic runner rejects that data before adapter discovery. The live round trip uses
-`nvidia/nemotron-3-super-120b-a12b` with no reasoning effort.
+`nvidia/nvidia/nemotron-3-super-v3` with no reasoning effort.
 
 ## Dependency Concerns
 
@@ -81,7 +81,7 @@ generic runner rejects that data before adapter discovery. The live round trip u
 1. Runner unit tests cover configuration, input selection, output modes, redaction, status mapping,
    and exceptions.
 2. Released-SDK integration tests use a deterministic Fabric fixture and verify
-   `plan -> doctor -> start -> invoke -> stop`, two ordered invokes, faults, and process cleanup.
+   `doctor -> start -> invoke -> stop`, two ordered invokes, faults, and process cleanup.
 3. A released Fabric Deep Agents round trip uses a fake OpenAI-compatible server for text and
    confined workspace tool calls.
 4. Package composition verifies artifact conformance, adapter configuration, exact locks, command

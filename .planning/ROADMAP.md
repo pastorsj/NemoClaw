@@ -220,10 +220,11 @@ a control-plane dependency or claiming native agent parity.
 
 **Implementation order:**
 
-1. Pin exact Fabric, adapter, contract, fixture, Python, OS, architecture, and capability identities.
+1. Pin the Fabric SDK, released adapter, adapter contract, Python, fixture identity, and
+   hash-locked dependency graph.
 2. Keep one generic runner and package-owned adapter configuration; native interactive commands stay
    agent-specific.
-3. Run deterministic discovery, plan, doctor, start, ordered invoke, failure, malformed result,
+3. Run deterministic discovery, doctor, start, ordered invoke, failure, malformed result,
    signal, isolation, and stop tests outside a live sandbox.
 4. Exercise one released Deep Agents round trip through a fake endpoint, then one Mac and one Brev
    composition on a model that needs no unsupported request options.

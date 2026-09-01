@@ -143,13 +143,13 @@ while NemoClaw safely composes exact versions without taking ownership away from
 - [ ] **FABRIC-01**: A NeMo Fabric experiment does not replace the agent, runtime-provider, serving,
   platform, OpenShell, or NemoClaw lifecycle contract. Fabric remains an optional sandbox-local
   invocation candidate until a later accepted product decision.
-- [ ] **FABRIC-02**: Deterministic tests pin Fabric and adapter versions and digests, adapter contract,
-  fixture identity, Python, OS, architecture, and capabilities, then prove discovery, planning,
-  doctor, ordered invocation, partial start, malformed results, transport failures, isolation, and
-  stop behavior without a live sandbox.
-- [ ] **FABRIC-02A**: One bounded live test inside an already-created Linux OpenShell sandbox proves
-  exact installation, policy and egress, synthetic canary-secret custody across every output and
-  persisted surface, sandbox isolation, and cleanup.
+- [ ] **FABRIC-02**: Deterministic tests pin the Fabric SDK, released Deep Agents adapter, adapter
+  contract, Python, fixture identity, and hash-locked dependency graph. They prove discovery,
+  doctor, ordered invocation, lifecycle failures, malformed results, transport and process
+  failures, environment isolation, signals, deadlines, and cleanup without a live sandbox.
+- [ ] **FABRIC-02A**: Mac and Brev no-messaging development journeys prove installed-package
+  identity, source-built image composition, the policy route, PONG, one confined `write_file` tool
+  call, bounded credential surfaces, process cleanup, and sandbox, provider, and gateway cleanup.
 - [ ] **FABRIC-03**: A real agent adapter enters qualification only when its agent semantics and exact
   dependency versions match the NemoClaw package. The implementation uses the Fabric SDK, not the
   experimentation CLI. Fabric 0.2 Deep Agents remains evaluation evidence because it does not match
