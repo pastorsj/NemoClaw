@@ -18,17 +18,17 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import * as importedPrivateNetworkBoundary from "#nemoclaw-shared/private-networks-boundary.cjs";
+import * as importedPrivateNetworkBoundary from "../shared/private-networks-boundary.cjs";
 import type {
   NetworkDocument,
   PrivateNetworkMatcher,
-} from "#nemoclaw-shared/private-networks-boundary.cjs";
+} from "../shared/private-networks-boundary.cjs";
 
 export type {
   NameEntry,
   NetworkDocument,
   NetworkEntry,
-} from "#nemoclaw-shared/private-networks-boundary.cjs";
+} from "../shared/private-networks-boundary.cjs";
 
 // The generated module exposes named CommonJS exports. Source-mode tsx maps
 // the .cjs specifier to .cts and exposes the same module as its default.

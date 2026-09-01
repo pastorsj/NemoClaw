@@ -3,6 +3,7 @@
 
 import { spawnSync } from "node:child_process";
 import {
+  cpSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -77,6 +78,53 @@ describe("CLI source-checkout upgrade build", () => {
         "junction",
       );
       symlinkSync(path.join(REPOSITORY_ROOT, "src"), path.join(fixtureRoot, "src"), "junction");
+      const scriptsRoot = path.join(fixtureRoot, "scripts", "lib");
+      mkdirSync(scriptsRoot, { recursive: true });
+      copyFileSync(
+        path.join(REPOSITORY_ROOT, "scripts", "lib", "package-blueprint-runner-runtime.mts"),
+        path.join(scriptsRoot, "package-blueprint-runner-runtime.mts"),
+      );
+
+      const pluginRoot = path.join(
+        fixtureRoot,
+        "packages",
+        "nemoclaw-openclaw",
+        "plugin",
+      );
+      mkdirSync(pluginRoot, { recursive: true });
+      copyFileSync(
+        path.join(REPOSITORY_ROOT, "packages", "nemoclaw-openclaw", "plugin", "package.json"),
+        path.join(pluginRoot, "package.json"),
+      );
+      copyFileSync(
+        path.join(REPOSITORY_ROOT, "packages", "nemoclaw-openclaw", "plugin", "tsconfig.json"),
+        path.join(pluginRoot, "tsconfig.json"),
+      );
+      copyFileSync(
+        path.join(
+          REPOSITORY_ROOT,
+          "packages",
+          "nemoclaw-openclaw",
+          "plugin",
+          "tsconfig.runner.json",
+        ),
+        path.join(pluginRoot, "tsconfig.runner.json"),
+      );
+      copyFileSync(
+        path.join(
+          REPOSITORY_ROOT,
+          "packages",
+          "nemoclaw-openclaw",
+          "plugin",
+          "tsconfig.shared.json",
+        ),
+        path.join(pluginRoot, "tsconfig.shared.json"),
+      );
+      cpSync(
+        path.join(REPOSITORY_ROOT, "packages", "nemoclaw-openclaw", "plugin", "src"),
+        path.join(pluginRoot, "src"),
+        { recursive: true },
+      );
 
       const blueprintRoot = path.join(fixtureRoot, "nemoclaw-blueprint");
       mkdirSync(blueprintRoot);
