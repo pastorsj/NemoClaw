@@ -86,6 +86,80 @@ describe("cleanup resources", () => {
     expect(result.failures).toEqual([]);
   });
 
+  it.each([
+    {
+      diagnostic: [
+        "Error:   × Unknown gateway 'nemoclaw-18133'.",
+        "  │ Register it first: openshell gateway add <endpoint> --name nemoclaw-18133",
+        "  │ Or list available gateways: openshell gateway select",
+      ].join("\n"),
+      title: "unknown gateway registration",
+    },
+    {
+      diagnostic: [
+        "Error:   × No gateway metadata found for 'nemoclaw-18133'.",
+        "  │ List available gateways: openshell gateway select",
+      ].join("\n"),
+      title: "missing gateway metadata",
+    },
+  ])("accepts exact $title while preserving identity-aware cleanup", async ({ diagnostic }) => {
+    const calls: string[] = [];
+    const cleanup = new CleanupRegistry();
+    cleanup.trackDisposable("identity-aware destroy", () => {
+      calls.push("identity-aware-destroy");
+    });
+    trackGuardedSandboxNameDelete(cleanup, "delete OpenShell sandbox e2e-resource", () => {
+      calls.push("mutable-name-delete");
+      throw new Error(`cleanup OpenShell sandbox e2e-resource failed: ${diagnostic}`);
+    });
+
+    const result = await cleanup.runAll();
+    expect(calls).toEqual(["mutable-name-delete", "identity-aware-destroy"]);
+    expect(result).toEqual({
+      passed: ["delete OpenShell sandbox e2e-resource", "identity-aware destroy"],
+      failures: [],
+    });
+  });
+
+  it.each([
+    {
+      diagnostic: "permission denied",
+      sandboxName: "e2e-resource",
+    },
+    {
+      diagnostic: [
+        "Error:   × Unknown gateway 'nemoclaw-18133'.",
+        "  │ Register it first: openshell gateway add <endpoint> --name nemoclaw-18134",
+        "  │ Or list available gateways: openshell gateway select",
+      ].join("\n"),
+      sandboxName: "e2e-resource",
+    },
+    {
+      diagnostic: [
+        "Error:   × Unknown gateway 'nemoclaw-18133'.",
+        "  │ Register it first: openshell gateway add <endpoint> --name nemoclaw-18133",
+        "  │ Or list available gateways: openshell gateway select",
+      ].join("\n"),
+      sandboxName: "another-resource",
+    },
+  ])("keeps noncanonical mutable-name delete failures visible [case %#]", async (testCase) => {
+    const { diagnostic, sandboxName } = testCase;
+    const cleanup = new CleanupRegistry();
+    cleanup.trackDisposable("identity-aware destroy", () => undefined);
+    trackGuardedSandboxNameDelete(cleanup, "delete OpenShell sandbox e2e-resource", () => {
+      throw new Error(`cleanup OpenShell sandbox ${sandboxName} failed: ${diagnostic}`);
+    });
+
+    const result = await cleanup.runAll();
+    expect(result.passed).toEqual(["identity-aware destroy"]);
+    expect(result.failures).toEqual([
+      {
+        name: "delete OpenShell sandbox e2e-resource",
+        message: `cleanup OpenShell sandbox ${sandboxName} failed: ${diagnostic}`,
+      },
+    ]);
+  });
+
   it("passes cleanup run options through tracked resources", async () => {
     const calls: Array<{ resource: string; options: unknown }> = [];
     const host: CleanupHost = {

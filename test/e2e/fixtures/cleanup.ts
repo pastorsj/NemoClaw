@@ -44,6 +44,28 @@ export interface SandboxNameDeleteGuard {
   observeLifecycleResult(result: Pick<ShellProbeResult, "stdout" | "stderr">): void;
 }
 
+function isUnavailableGatewayDelete(error: unknown, cleanupName: string): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const cleanupPrefix = "delete OpenShell sandbox ";
+  if (!cleanupName.startsWith(cleanupPrefix)) return false;
+  const sandboxName = cleanupName.slice(cleanupPrefix.length);
+  if (!/^[a-z][a-z0-9-]{0,18}$/u.test(sandboxName)) return false;
+
+  const prefix = `cleanup OpenShell sandbox ${sandboxName} failed: Error:   × `;
+  if (!message.startsWith(prefix)) return false;
+
+  const diagnostic = message.slice(prefix.length);
+  const unknownGateway =
+    /^Unknown gateway '([^'\r\n]+)'\.\r?\n  │ Register it first: openshell gateway add <endpoint> --name ([^\s\r\n]+)\r?\n  │ Or list available gateways: openshell gateway select$/u.exec(
+      diagnostic,
+    );
+  if (unknownGateway) return unknownGateway[1] === unknownGateway[2];
+
+  return /^No gateway metadata found for '[^'\r\n]+'\.\r?\n  │ List available gateways: openshell gateway select$/u.test(
+    diagnostic,
+  );
+}
+
 export class CleanupRegistry {
   private readonly entries: CleanupEntry[] = [];
   private readonly redact: RedactFn;
@@ -196,17 +218,20 @@ export function trackGuardedSandboxNameDelete(
   deleteByName: CleanupFn,
 ): SandboxNameDeleteGuard {
   let retainedIdentityRequiresRecovery = false;
-  cleanup.trackDisposable(name, () => {
+  cleanup.trackDisposable(name, async () => {
     if (retainedIdentityRequiresRecovery) return;
-    return deleteByName();
+    try {
+      await deleteByName();
+    } catch (error) {
+      if (!isUnavailableGatewayDelete(error, name)) throw error;
+    }
   });
 
   return {
     observeLifecycleResult(result) {
       const output = `${result.stdout}\n${result.stderr}`;
       retainedIdentityRequiresRecovery ||=
-        output.includes(RETAINED_SANDBOX_FAILURE) &&
-        output.includes(MUTABLE_NAME_DELETE_REFUSAL);
+        output.includes(RETAINED_SANDBOX_FAILURE) && output.includes(MUTABLE_NAME_DELETE_REFUSAL);
     },
   };
 }
