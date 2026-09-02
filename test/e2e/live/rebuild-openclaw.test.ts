@@ -5,19 +5,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero as expectExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
-import { expect, test } from "../fixtures/e2e-test.ts";
 import {
-  readJsonFile,
-  readJsonFileOr,
-  restoreFile,
-  snapshotFile,
-  writeJsonFile,
-} from "../fixtures/file-state.ts";
+  createPrivateTestHome,
+  isolatedNemoClawEnvironment,
+  requireIsolatedTestGateway,
+} from "../fixtures/environment-profiles.ts";
+import { expect, test } from "../fixtures/e2e-test.ts";
+import { readJsonFile, readJsonFileOr, writeJsonFile } from "../fixtures/file-state.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
@@ -32,9 +31,6 @@ import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.t
 
 const OLD_OPENCLAW_VERSION = "2026.3.11";
 const MARKER_FILE = "/sandbox/.openclaw/workspace/rebuild-marker.txt";
-const REGISTRY_FILE = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
-const SESSION_FILE = path.join(os.homedir(), ".nemoclaw", "onboard-session.json");
-const BACKUP_ROOT = path.join(os.homedir(), ".nemoclaw", "rebuild-backups");
 const HOSTED_ENDPOINT_URL =
   process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1";
 const DEFAULT_MODEL =
@@ -76,6 +72,17 @@ interface GatewayTokenRotationResult {
   hashValid: boolean;
 }
 
+interface RebuildStatePaths {
+  readonly backupRoot: string;
+  readonly registryFile: string;
+  readonly sessionFile: string;
+}
+
+interface RebuildCommandEnvironments {
+  cli(apiKey: string, extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+  docker(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+}
+
 function isRetryableOnboardEndpointFailure(result: ShellProbeResult): boolean {
   const text = resultText(result);
   return (
@@ -90,17 +97,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function dockerContextEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return {
-    ...buildAvailabilityProbeEnv(),
-    ...extra,
+function createRebuildCommandEnvironments(
+  home: string,
+  gatewayEnvironment: NodeJS.ProcessEnv,
+): RebuildCommandEnvironments {
+  const baseEnvironment = isolatedNemoClawEnvironment(home, {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
-  };
-}
+    NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
+    ...gatewayEnvironment,
+  });
 
-function cliEnv(apiKey: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return dockerContextEnv({
+  return {
+    docker(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+      return { ...baseEnvironment, ...extra };
+    },
+    cli(apiKey: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+      return {
+        ...baseEnvironment,
     COMPATIBLE_API_KEY: apiKey,
     NVIDIA_INFERENCE_API_KEY: apiKey,
     // Keep the recreate resume request aligned with the registry/session this
@@ -112,15 +126,26 @@ function cliEnv(apiKey: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEn
     NEMOCLAW_MODEL: DEFAULT_MODEL,
     NEMOCLAW_PREFERRED_API: "openai-completions",
     NEMOCLAW_PROVIDER: "custom",
-    NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     ...extra,
-  });
+      };
+    },
+  };
+}
+
+function rebuildStatePaths(home: string, gatewayPort: number): RebuildStatePaths {
+  const stateRoot = nemoclawStateRoot(home, gatewayPort);
+  return {
+    backupRoot: path.join(stateRoot, "rebuild-backups"),
+    registryFile: path.join(stateRoot, "sandboxes.json"),
+    sessionFile: path.join(stateRoot, "onboard-session.json"),
+  };
 }
 
 function openshellBestEffort(
   host: HostCliClient,
   args: string[],
   artifactName: string,
+  env: NodeJS.ProcessEnv,
 ): Promise<ShellProbeResult> {
   const quotedArgs = args.map(shellQuote).join(" ");
   return host.command(
@@ -128,16 +153,20 @@ function openshellBestEffort(
     ["-lc", `command -v openshell >/dev/null 2>&1 && openshell ${quotedArgs} || true`],
     {
       artifactName,
-      env: dockerContextEnv(),
+      env,
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     },
   );
 }
 
-async function cleanupRebuiltNemoClawSandbox(host: HostCliClient, apiKey: string): Promise<void> {
+async function cleanupRebuiltNemoClawSandbox(
+  host: HostCliClient,
+  env: NodeJS.ProcessEnv,
+  apiKey: string,
+): Promise<void> {
   const result = await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
     artifactName: "cleanup-nemoclaw-destroy",
-    env: cliEnv(apiKey),
+    env,
     redactionValues: [apiKey],
     timeoutMs: 2 * 60_000,
   });
@@ -148,10 +177,13 @@ async function cleanupRebuiltNemoClawSandbox(host: HostCliClient, apiKey: string
   );
 }
 
-async function cleanupOldOpenClawBaseImage(host: HostCliClient): Promise<void> {
+async function cleanupOldOpenClawBaseImage(
+  host: HostCliClient,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
   const result = await host.command("docker", ["rmi", OLD_BASE_TAG], {
     artifactName: "cleanup-docker-rmi-old-base",
-    env: dockerContextEnv(),
+    env,
     timeoutMs: OPENSHELL_TIMEOUT_MS,
   });
   assertCleanupSucceededOrAbsent(
@@ -165,13 +197,16 @@ function pythonExecArgs(script: string): string[] {
   return ["python3", "-c", script];
 }
 
-async function waitForSandboxReady(sandbox: {
+async function waitForSandboxReady(
+  sandbox: {
   list(options?: object): Promise<ShellProbeResult>;
-}): Promise<void> {
+  },
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     const list = await sandbox.list({
       artifactName: `phase-3-sandbox-list-${attempt}`,
-      env: dockerContextEnv(),
+      env,
       timeoutMs: 30_000,
     });
     if (new RegExp(`${SANDBOX_NAME}.*Ready`).test(list.stdout)) return;
@@ -182,6 +217,7 @@ async function waitForSandboxReady(sandbox: {
 
 async function configureGatewayInferenceRoute(
   host: HostCliClient,
+  env: NodeJS.ProcessEnv,
   apiKey: string,
 ): Promise<ShellProbeResult> {
   const model = shellQuote(DEFAULT_MODEL);
@@ -201,14 +237,19 @@ async function configureGatewayInferenceRoute(
     ],
     {
       artifactName: "phase-4-configure-gateway-inference-route",
-      env: cliEnv(apiKey),
+      env,
       redactionValues: [apiKey],
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     },
   );
 }
 
-function seedRegistryAndSession(dashboardPort: number): void {
+function seedRegistryAndSession(
+  dashboardPort: number,
+  statePaths: RebuildStatePaths,
+  gatewayName: string,
+  gatewayPort: number,
+): void {
   // The legacy rebuild regression requires an intentionally old OpenClaw sandbox
   // that NemoClaw cannot create through the normal onboard path because current
   // blueprints reject versions below min_openclaw_version. Create that sandbox
@@ -219,7 +260,7 @@ function seedRegistryAndSession(dashboardPort: number): void {
   const registry = readJsonFileOr<{
     sandboxes?: Record<string, Record<string, unknown>>;
     defaultSandbox?: string;
-  }>(REGISTRY_FILE, {});
+  }>(statePaths.registryFile, {});
   registry.sandboxes = registry.sandboxes ?? {};
   registry.sandboxes[SANDBOX_NAME] = {
     name: SANDBOX_NAME,
@@ -227,6 +268,8 @@ function seedRegistryAndSession(dashboardPort: number): void {
     model: DEFAULT_MODEL,
     provider: "compatible-endpoint",
     gpuEnabled: false,
+    gatewayName,
+    gatewayPort,
     agent: null,
     agentVersion: OLD_OPENCLAW_VERSION,
     dashboardPort,
@@ -236,12 +279,12 @@ function seedRegistryAndSession(dashboardPort: number): void {
     fromDockerfile: null,
   };
   registry.defaultSandbox = SANDBOX_NAME;
-  writeJsonFile(REGISTRY_FILE, registry);
+  writeJsonFile(statePaths.registryFile, registry);
 
   const now = new Date().toISOString();
   const complete = { status: "complete", startedAt: now, completedAt: now, error: null };
   const pending = { status: "pending", startedAt: null, completedAt: null, error: null };
-  const session = readJsonFileOr<Record<string, unknown>>(SESSION_FILE, {});
+  const session = readJsonFileOr<Record<string, unknown>>(statePaths.sessionFile, {});
   Object.assign(session, {
     sandboxName: SANDBOX_NAME,
     status: "complete",
@@ -252,6 +295,8 @@ function seedRegistryAndSession(dashboardPort: number): void {
     model: DEFAULT_MODEL,
     credentialEnv: "COMPATIBLE_API_KEY",
     endpointUrl: HOSTED_ENDPOINT_URL,
+    gatewayName,
+    gatewayPort,
     agent: null,
     steps: {
       preflight: complete,
@@ -263,12 +308,12 @@ function seedRegistryAndSession(dashboardPort: number): void {
       agent_setup: pending,
     },
   });
-  writeJsonFile(SESSION_FILE, session);
+  writeJsonFile(statePaths.sessionFile, session);
 }
 
-function registrySandbox(): Record<string, unknown> {
+function registrySandbox(statePaths: RebuildStatePaths): Record<string, unknown> {
   const data = readJsonFileOr<{ sandboxes?: Record<string, Record<string, unknown>> }>(
-    REGISTRY_FILE,
+    statePaths.registryFile,
     {},
   );
   const sandbox = data.sandboxes?.[SANDBOX_NAME];
@@ -276,8 +321,8 @@ function registrySandbox(): Record<string, unknown> {
   return sandbox;
 }
 
-function latestRebuildBackupDir(): string {
-  const sandboxBackupRoot = path.join(BACKUP_ROOT, SANDBOX_NAME);
+function latestRebuildBackupDir(statePaths: RebuildStatePaths): string {
+  const sandboxBackupRoot = path.join(statePaths.backupRoot, SANDBOX_NAME);
   expect(fs.existsSync(sandboxBackupRoot), `backup root missing: ${sandboxBackupRoot}`).toBe(true);
   const latest = fs
     .readdirSync(sandboxBackupRoot, { withFileTypes: true })
@@ -352,7 +397,16 @@ test(
     },
   },
   async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+    const gateway = requireIsolatedTestGateway();
+    const gatewayName = gateway.name;
+    const gatewayPort = Number(gateway.environment.NEMOCLAW_GATEWAY_PORT);
     const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const home = createPrivateTestHome(".nemoclaw-rebuild-openclaw-home-");
+    cleanup.trackDisposable(`remove rebuild test home for ${SANDBOX_NAME}`, () => {
+      fs.rmSync(home, { recursive: true, force: true });
+    });
+    const commandEnvironments = createRebuildCommandEnvironments(home, gateway.environment);
+    const statePaths = rebuildStatePaths(home, gatewayPort);
     expect(
       fs.existsSync(CLI_ENTRYPOINT),
       "bin/nemoclaw.js missing — run npm ci && npm run build:cli before live rebuild coverage",
@@ -360,7 +414,7 @@ test(
 
     const dockerInfo = await host.command("docker", ["info"], {
       artifactName: "prereq-docker-info",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: 30_000,
     });
     if (dockerInfo.exitCode !== 0) {
@@ -386,13 +440,12 @@ test(
       ],
     });
 
-    // Pre-clean stale resources for the test-owned sandbox prefix before
-    // registering final cleanup. The prefix guard above keeps a caller-selected
-    // production/local sandbox name from being destroyed accidentally; snapshots
-    // below still restore registry/session files after this generated-name run.
+    // Pre-clean stale resources for the test-owned sandbox and gateway before
+    // registering final resource cleanup. The prefix guard above keeps a
+    // caller-selected production/local sandbox name from being destroyed.
     await host.command("node", [CLI_ENTRYPOINT, SANDBOX_NAME, "destroy", "--yes"], {
       artifactName: "pre-cleanup-nemoclaw-destroy",
-      env: cliEnv(apiKey),
+      env: commandEnvironments.cli(apiKey),
       redactionValues: [apiKey],
       timeoutMs: 2 * 60_000,
     });
@@ -400,43 +453,37 @@ test(
       host,
       ["sandbox", "delete", SANDBOX_NAME],
       "pre-cleanup-openshell-sandbox-delete",
+      commandEnvironments.docker(),
     );
     await openshellBestEffort(
       host,
-      ["gateway", "destroy", "-g", "nemoclaw"],
+      ["gateway", "destroy", "-g", gatewayName],
       "pre-cleanup-openshell-gateway-destroy",
+      commandEnvironments.docker(),
     );
     await host.command("docker", ["rmi", OLD_BASE_TAG], {
       artifactName: "pre-cleanup-docker-rmi-old-base",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     });
 
-    const registrySnapshot = snapshotFile(REGISTRY_FILE);
-    const sessionSnapshot = snapshotFile(SESSION_FILE);
-    const sandboxBackupRoot = path.join(BACKUP_ROOT, SANDBOX_NAME);
-    cleanup.trackDisposable(`restore NemoClaw state files for ${SANDBOX_NAME}`, () => {
-      restoreFile(REGISTRY_FILE, registrySnapshot);
-      restoreFile(SESSION_FILE, sessionSnapshot);
-      fs.rmSync(sandboxBackupRoot, { recursive: true, force: true });
-    });
     cleanup.trackDisposable(`remove old OpenClaw base image ${OLD_BASE_TAG}`, () =>
-      cleanupOldOpenClawBaseImage(host),
+      cleanupOldOpenClawBaseImage(host, commandEnvironments.docker()),
     );
-    cleanup.trackGateway(host, "nemoclaw", {
+    cleanup.trackGateway(host, gatewayName, {
       artifactName: "cleanup-openshell-gateway-destroy",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     });
     cleanup.trackDisposable(`delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`, () =>
       sandbox.cleanupSandbox(SANDBOX_NAME, {
         artifactName: "cleanup-openshell-sandbox-delete",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       }),
     );
     cleanup.trackDisposable(`destroy rebuilt sandbox ${SANDBOX_NAME}`, () =>
-      cleanupRebuiltNemoClawSandbox(host, apiKey),
+      cleanupRebuiltNemoClawSandbox(host, commandEnvironments.cli(apiKey), apiKey),
     );
 
     // Phase 1: create a normal current sandbox first so the real gateway and
@@ -445,7 +492,7 @@ test(
     progress.phase("onboard the current OpenClaw sandbox");
     const onboard = await host.command("node", [CLI_ENTRYPOINT, "onboard", "--non-interactive"], {
       artifactName: "phase-1-onboard-current",
-      env: cliEnv(apiKey, { NEMOCLAW_RECREATE_SANDBOX: "1" }),
+      env: commandEnvironments.cli(apiKey, { NEMOCLAW_RECREATE_SANDBOX: "1" }),
       redactionValues: [apiKey],
       timeoutMs: ONBOARD_TIMEOUT_MS,
     });
@@ -455,7 +502,7 @@ test(
       }
       const gatewayProbe = await sandbox.list({
         artifactName: "phase-1-gateway-after-onboard-endpoint-transient",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       });
       expectExitZero(gatewayProbe, "OpenShell gateway after tolerated onboard endpoint transient");
@@ -465,7 +512,7 @@ test(
       });
     }
 
-    const phase1DashboardPort = registrySandbox().dashboardPort;
+    const phase1DashboardPort = registrySandbox(statePaths).dashboardPort;
     expect(
       typeof phase1DashboardPort === "number" &&
         Number.isInteger(phase1DashboardPort) &&
@@ -478,6 +525,7 @@ test(
       host,
       ["sandbox", "delete", SANDBOX_NAME],
       "phase-1-delete-current-sandbox",
+      commandEnvironments.docker(),
     );
 
     // Phase 2: build the old base image with a temporary build context that
@@ -502,7 +550,7 @@ test(
         ],
         {
           artifactName: "phase-2-docker-build-old-openclaw-base",
-          env: dockerContextEnv(),
+          env: commandEnvironments.docker(),
           timeoutMs: DOCKER_BUILD_TIMEOUT_MS,
         },
       );
@@ -538,7 +586,7 @@ test(
           "--from",
           oldDockerfile,
           "--gateway",
-          "nemoclaw",
+          gatewayName,
           "--policy",
           path.join(REPO_ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
           "--no-tty",
@@ -547,7 +595,7 @@ test(
         ],
         {
           artifactName: "phase-3-create-old-openclaw-sandbox",
-          env: dockerContextEnv(),
+          env: commandEnvironments.docker(),
           timeoutMs: 10 * 60_000,
         },
       );
@@ -555,11 +603,11 @@ test(
     } finally {
       fs.rmSync(oldDockerfileDir, { recursive: true, force: true });
     }
-    await waitForSandboxReady(sandbox);
+    await waitForSandboxReady(sandbox, commandEnvironments.docker());
 
     const oldVersion = await sandbox.exec(SANDBOX_NAME, ["openclaw", "--version"], {
       artifactName: "phase-3-openclaw-old-version",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: 30_000,
     });
     expectExitZero(oldVersion, "old openclaw --version");
@@ -578,7 +626,7 @@ test(
       ],
       {
         artifactName: "phase-4-write-workspace-marker",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: 30_000,
       },
     );
@@ -607,7 +655,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       ],
       {
         artifactName: "phase-4-seed-gateway-token",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         redactionValues: [PRE_REBUILD_GATEWAY_TOKEN],
         timeoutMs: 30_000,
       },
@@ -621,7 +669,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       ["cat", "/sandbox/.openclaw/.config-hash"],
       {
         artifactName: "phase-4-read-pre-rebuild-config-hash",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: 30_000,
       },
     );
@@ -629,10 +677,10 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     const preRebuildConfigHash = preHashResult.stdout.trim();
     expect(preRebuildConfigHash).toContain("openclaw.json");
 
-    seedRegistryAndSession(phase1DashboardPort as number);
-    const sessionAfterSeed = readJsonFileOr<Record<string, unknown>>(SESSION_FILE, {});
+    seedRegistryAndSession(phase1DashboardPort as number, statePaths, gatewayName, gatewayPort);
+    const sessionAfterSeed = readJsonFileOr<Record<string, unknown>>(statePaths.sessionFile, {});
     const seededSteps = sessionAfterSeed.steps as Record<string, { status?: string }> | undefined;
-    const seededSandbox = registrySandbox();
+    const seededSandbox = registrySandbox(statePaths);
     await artifacts.writeJson("phase-4-registry-session-summary.json", {
       registry: {
         name: seededSandbox.name,
@@ -651,7 +699,11 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       },
     });
 
-    const routeResult = await configureGatewayInferenceRoute(host, apiKey);
+    const routeResult = await configureGatewayInferenceRoute(
+      host,
+      commandEnvironments.cli(apiKey),
+      apiKey,
+    );
     expectExitZero(routeResult, "configure gateway inference route before rebuild");
 
     // Phase 4.5: apply policy presets through the public CLI, then verify the
@@ -662,7 +714,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
         [CLI_ENTRYPOINT, "sandbox", "policy", "add", SANDBOX_NAME, preset, "--yes"],
         {
           artifactName: `phase-4-policy-add-${preset}`,
-          env: cliEnv(apiKey),
+          env: commandEnvironments.cli(apiKey),
           redactionValues: [apiKey],
           timeoutMs: OPENSHELL_TIMEOUT_MS,
         },
@@ -672,7 +724,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
 
     const prePolicy = await sandbox.openshell(["policy", "get", "--full", SANDBOX_NAME], {
       artifactName: "phase-4-live-policy-before-rebuild",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     });
     expectExitZero(prePolicy, "openshell policy get before rebuild");
@@ -695,7 +747,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       ],
       {
         artifactName: "phase-4-host-policy-edit-before-rebuild",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       },
     );
@@ -705,7 +757,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       [CLI_ENTRYPOINT, SANDBOX_NAME, "policy-list"],
       {
         artifactName: "phase-4-nemoclaw-policy-list-before-rebuild",
-        env: cliEnv(apiKey),
+        env: commandEnvironments.cli(apiKey),
         redactionValues: [apiKey],
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       },
@@ -727,7 +779,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       ],
       {
         artifactName: "phase-5-docker-build-current-base",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: DOCKER_BUILD_TIMEOUT_MS,
       },
     );
@@ -740,7 +792,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       [CLI_ENTRYPOINT, SANDBOX_NAME, "rebuild", "--yes", "--verbose"],
       {
         artifactName: "phase-6-nemoclaw-rebuild",
-        env: cliEnv(apiKey, { NEMOCLAW_REBUILD_VERBOSE: "1" }),
+        env: commandEnvironments.cli(apiKey, { NEMOCLAW_REBUILD_VERBOSE: "1" }),
         redactionValues: [apiKey, PRE_REBUILD_GATEWAY_TOKEN],
         timeoutMs: REBUILD_TIMEOUT_MS,
       },
@@ -755,7 +807,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     progress.phase("validate upgraded state policy inference and backup hygiene");
     const markerRead = await sandbox.exec(SANDBOX_NAME, ["cat", MARKER_FILE], {
       artifactName: "phase-7-read-workspace-marker",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: 30_000,
     });
     expectExitZero(markerRead, "read workspace marker after rebuild");
@@ -763,20 +815,20 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
 
     const newVersion = await sandbox.exec(SANDBOX_NAME, ["openclaw", "--version"], {
       artifactName: "phase-7-openclaw-new-version",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: 30_000,
     });
     expectExitZero(newVersion, "new openclaw --version");
     expect(resultText(newVersion)).not.toContain(OLD_OPENCLAW_VERSION);
     expect(resultText(newVersion).trim()).not.toBe("");
 
-    const registryVersion = registrySandbox().agentVersion;
+    const registryVersion = registrySandbox(statePaths).agentVersion;
     expect(registryVersion).not.toBe(OLD_OPENCLAW_VERSION);
     expect(registryVersion).toEqual(expect.any(String));
     await runPublicFabricTurn({
       agent: "openclaw",
       artifacts,
-      env: cliEnv(apiKey),
+      env: commandEnvironments.cli(apiKey),
       host,
       lifecyclePhase: "after-rebuild",
       redactionValues: [apiKey, PRE_REBUILD_GATEWAY_TOKEN],
@@ -802,7 +854,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
       ],
       {
         artifactName: "phase-7-gateway-token-rotation-check",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         redactionValues: [PRE_REBUILD_GATEWAY_TOKEN],
         timeoutMs: 30_000,
       },
@@ -819,7 +871,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
       hashValid: true,
     });
 
-    const backupDir = latestRebuildBackupDir();
+    const backupDir = latestRebuildBackupDir(statePaths);
     const manifest = latestRebuildManifest(backupDir);
     await artifacts.writeJson("phase-7-rebuild-manifest-summary.json", {
       backupDir,
@@ -831,7 +883,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
 
     const postPolicy = await sandbox.openshell(["policy", "get", "--full", SANDBOX_NAME], {
       artifactName: "phase-7-live-policy-after-rebuild",
-      env: dockerContextEnv(),
+      env: commandEnvironments.docker(),
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     });
     expectExitZero(postPolicy, "openshell policy get after rebuild");
@@ -846,7 +898,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
       [CLI_ENTRYPOINT, SANDBOX_NAME, "policy-list"],
       {
         artifactName: "phase-7-nemoclaw-policy-list-after-rebuild",
-        env: cliEnv(apiKey),
+        env: commandEnvironments.cli(apiKey),
         redactionValues: [apiKey],
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       },
@@ -867,7 +919,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
       ],
       {
         artifactName: "phase-7-telegram-api-reachability-after-rebuild",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: 30_000,
       },
     );
@@ -892,7 +944,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
       ],
       {
         artifactName: "phase-7-inference-after-rebuild-nonfatal",
-        env: dockerContextEnv(),
+        env: commandEnvironments.docker(),
         timeoutMs: 75_000,
       },
     );

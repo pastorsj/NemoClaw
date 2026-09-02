@@ -10,7 +10,9 @@ import {
   commandEnvironment,
   createPrivateTestHome,
   isolatedNemoClawEnvironment,
+  requireIsolatedTestGateway,
   resolveIsolatedHomeDockerHost,
+  resolveTestGatewayBinding,
   sandboxCommandEnvironment,
   testHomeEnvironment,
 } from "../fixtures/environment-profiles.ts";
@@ -118,9 +120,9 @@ describe("E2E environment profiles", () => {
       HOME: "/Users/tester/.nemoclaw-e2e-home",
       DOCKER_HOST: "unix:///Users/tester/.colima/default/docker.sock",
       XDG_BIN_HOME: "/Users/tester/.local/bin",
-      XDG_CONFIG_HOME: "/Users/tester/.config",
-      XDG_DATA_HOME: "/Users/tester/.local/share",
-      XDG_STATE_HOME: "/Users/tester/.local/state",
+      XDG_CONFIG_HOME: "/Users/tester/.nemoclaw-e2e-home/.config",
+      XDG_DATA_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/share",
+      XDG_STATE_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/state",
     });
     expect(result).not.toHaveProperty("DOCKER_CERT_PATH");
     expect(result).not.toHaveProperty("DOCKER_CONFIG");
@@ -138,7 +140,7 @@ describe("E2E environment profiles", () => {
     });
   });
 
-  it("retains explicit absolute OpenShell authority while rejecting caller overrides", () => {
+  it("retains only explicit OpenShell binary authority while isolating mutable state", () => {
     const source = {
       HOME: "/home/tester",
       PATH: "/usr/bin",
@@ -163,15 +165,16 @@ describe("E2E environment profiles", () => {
     expect(result).toMatchObject({
       HOME: "/home/tester/.nemoclaw-e2e-home",
       XDG_BIN_HOME: "/host/bin",
-      XDG_CONFIG_HOME: "/host/config",
-      XDG_DATA_HOME: "/host/data",
-      XDG_STATE_HOME: "/host/state",
+      XDG_CONFIG_HOME: "/home/tester/.nemoclaw-e2e-home/.config",
+      XDG_DATA_HOME: "/home/tester/.nemoclaw-e2e-home/.local/share",
+      XDG_STATE_HOME: "/home/tester/.nemoclaw-e2e-home/.local/state",
     });
+    expect(result).not.toHaveProperty("XDG_RUNTIME_DIR");
   });
 
   it.each([
     ["HOME", { HOME: "relative-home" }],
-    ["XDG_CONFIG_HOME", { HOME: "/home/tester", XDG_CONFIG_HOME: "relative-config" }],
+    ["XDG_BIN_HOME", { HOME: "/home/tester", XDG_BIN_HOME: "relative-bin" }],
   ])("rejects a non-absolute host %s", (_selector, source) => {
     expect(() =>
       isolatedNemoClawEnvironment(
@@ -182,6 +185,39 @@ describe("E2E environment profiles", () => {
       ),
     ).toThrow(/absolute|must be absolute/);
   });
+
+  it("derives the canonical gateway name from an explicit test port", () => {
+    expect(
+      resolveTestGatewayBinding({
+        NEMOCLAW_GATEWAY_PORT: "18089",
+        OPENSHELL_GATEWAY: "nemoclaw-18089",
+      }),
+    ).toEqual({
+      environment: {
+        NEMOCLAW_GATEWAY_PORT: "18089",
+        OPENSHELL_GATEWAY: "nemoclaw-18089",
+      },
+      name: "nemoclaw-18089",
+    });
+  });
+
+  it("rejects a gateway name that does not match its explicit port", () => {
+    expect(() =>
+      resolveTestGatewayBinding({
+        NEMOCLAW_GATEWAY_PORT: "18089",
+        OPENSHELL_GATEWAY: "nemoclaw",
+      }),
+    ).toThrow("OPENSHELL_GATEWAY must be nemoclaw-18089");
+  });
+
+  it.each([{}, { NEMOCLAW_GATEWAY_PORT: "8080" }])(
+    "requires a non-default gateway for stateful local E2E (%j)",
+    (source) => {
+      expect(() => requireIsolatedTestGateway(source)).toThrow(
+        "requires a non-default NEMOCLAW_GATEWAY_PORT",
+      );
+    },
+  );
 
   it("keeps an explicit safe Docker host without reading context metadata", () => {
     const inspect = vi.fn();

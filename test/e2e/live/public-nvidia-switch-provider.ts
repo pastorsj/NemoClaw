@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
+import { resolveTestGatewayBinding } from "../fixtures/environment-profiles.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 
 export const PUBLIC_NVIDIA_SWITCH_PROVIDER = "nvidia-prod";
@@ -24,12 +26,13 @@ export async function registerPublicNvidiaSwitchProvider(
     NVIDIA_INFERENCE_API_KEY: _inferenceApiKey,
     ...providerEnv
   } = env;
+  const gatewayName = shellQuote(resolveTestGatewayBinding(env).name);
   const script = [
     "set -euo pipefail",
-    `if openshell provider get -g nemoclaw ${PUBLIC_NVIDIA_SWITCH_PROVIDER} >/dev/null 2>&1; then`,
-    `  openshell provider update -g nemoclaw ${PUBLIC_NVIDIA_SWITCH_PROVIDER} --credential NVIDIA_INFERENCE_API_KEY`,
+    `if openshell provider get -g ${gatewayName} ${PUBLIC_NVIDIA_SWITCH_PROVIDER} >/dev/null 2>&1; then`,
+    `  openshell provider update -g ${gatewayName} ${PUBLIC_NVIDIA_SWITCH_PROVIDER} --credential NVIDIA_INFERENCE_API_KEY`,
     "else",
-    `  openshell provider create -g nemoclaw --name ${PUBLIC_NVIDIA_SWITCH_PROVIDER} --type nvidia --credential NVIDIA_INFERENCE_API_KEY`,
+    `  openshell provider create -g ${gatewayName} --name ${PUBLIC_NVIDIA_SWITCH_PROVIDER} --type nvidia --credential NVIDIA_INFERENCE_API_KEY`,
     "fi",
   ].join("\n");
   return host.command("bash", ["-lc", script], {

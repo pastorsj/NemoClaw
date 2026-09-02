@@ -7,6 +7,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { isSupportedGatewayDockerHost } from "../../../src/lib/domain/docker-host.ts";
+import { DEFAULT_GATEWAY_PORT } from "../../../src/lib/core/ports.ts";
+import { resolveGatewayName } from "../../../src/lib/onboard/gateway-binding.ts";
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { buildAvailabilityProbeEnv } from "./availability-env.ts";
 
 const DOCKER_CONTEXT_HOST_FORMAT = "{{json .Endpoints.docker.Host}}";
@@ -17,12 +20,59 @@ const ISOLATED_HOME_DOCKER_SELECTORS = [
   "DOCKER_TLS_VERIFY",
 ] as const;
 
-const HOST_OPEN_SHELL_HOME_SELECTORS = {
+const HOST_OPEN_SHELL_BINARY_SELECTORS = {
   XDG_BIN_HOME: [".local", "bin"],
-  XDG_CONFIG_HOME: [".config"],
-  XDG_DATA_HOME: [".local", "share"],
-  XDG_STATE_HOME: [".local", "state"],
 } as const;
+
+export interface TestGatewayBinding {
+  readonly environment: NodeJS.ProcessEnv;
+  readonly name: string;
+}
+
+export interface IsolatedTestRuntime {
+  readonly gatewayEnvironment: NodeJS.ProcessEnv;
+  readonly gatewayName: string;
+  readonly gatewayPort: number;
+  readonly home: string;
+  readonly stateRoot: string;
+  environment(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
+}
+
+/** Bind one test process to the canonical gateway selected by its port. */
+export function resolveTestGatewayBinding(
+  source: NodeJS.ProcessEnv = process.env,
+): TestGatewayBinding {
+  const rawPort = source.NEMOCLAW_GATEWAY_PORT?.trim();
+  if (!rawPort) {
+    const name = source.OPENSHELL_GATEWAY?.trim() || resolveGatewayName(DEFAULT_GATEWAY_PORT);
+    return { environment: { OPENSHELL_GATEWAY: name }, name };
+  }
+
+  const port = Number(rawPort);
+  if (!/^[0-9]+$/u.test(rawPort) || !Number.isSafeInteger(port) || port < 1024 || port > 65_535) {
+    throw new Error("NEMOCLAW_GATEWAY_PORT must be an integer between 1024 and 65535");
+  }
+  const name = resolveGatewayName(port);
+  const requestedName = source.OPENSHELL_GATEWAY?.trim();
+  if (requestedName && requestedName !== name) {
+    throw new Error(`OPENSHELL_GATEWAY must be ${name} when NEMOCLAW_GATEWAY_PORT=${rawPort}`);
+  }
+  return {
+    environment: { NEMOCLAW_GATEWAY_PORT: rawPort, OPENSHELL_GATEWAY: name },
+    name,
+  };
+}
+
+/** Require a standalone per-port gateway so a live test cannot mutate the host default. */
+export function requireIsolatedTestGateway(
+  source: NodeJS.ProcessEnv = process.env,
+): TestGatewayBinding {
+  const rawPort = source.NEMOCLAW_GATEWAY_PORT?.trim();
+  if (!rawPort || Number(rawPort) === DEFAULT_GATEWAY_PORT) {
+    throw new Error("This live E2E target requires a non-default NEMOCLAW_GATEWAY_PORT");
+  }
+  return resolveTestGatewayBinding(source);
+}
 
 export interface DockerContextInspection {
   readonly status: number | null;
@@ -143,14 +193,14 @@ export function testHomeEnvironment(
 }
 
 /** Resolve the host-owned directories that establish OpenShell authority. */
-function hostOpenShellAuthority(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function hostOpenShellBinaryAuthority(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const sourceHome = source.HOME;
   if (!sourceHome || !path.isAbsolute(sourceHome)) {
     throw new Error("An absolute host HOME is required before isolating NemoClaw E2E state");
   }
 
   return Object.fromEntries(
-    Object.entries(HOST_OPEN_SHELL_HOME_SELECTORS).map(([selector, fallbackParts]) => {
+    Object.entries(HOST_OPEN_SHELL_BINARY_SELECTORS).map(([selector, fallbackParts]) => {
       const configured = source[selector];
       if (configured && !path.isAbsolute(configured)) {
         throw new Error(`${selector} must be absolute before isolating NemoClaw E2E state`);
@@ -161,10 +211,9 @@ function hostOpenShellAuthority(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
- * Isolate NemoClaw's HOME-owned state while retaining the reviewed host
- * OpenShell installation, gateway registration, mTLS identity, and runtime
- * data. OpenShell is host infrastructure for this target, not test state.
- * Preserve local Docker access without exposing the account's Docker config.
+ * Isolate NemoClaw and OpenShell state while retaining the reviewed host
+ * OpenShell binary location. Preserve local Docker access without exposing
+ * the account's Docker config or active gateway selection.
  */
 export function isolatedNemoClawEnvironment(
   home: string,
@@ -175,8 +224,12 @@ export function isolatedNemoClawEnvironment(
   const dockerHost = resolveIsolatedHomeDockerHost(source, inspect);
   const environment = testHomeEnvironment(home, extra, source);
   for (const selector of ISOLATED_HOME_DOCKER_SELECTORS) delete environment[selector];
-  Object.assign(environment, hostOpenShellAuthority(source));
+  Object.assign(environment, hostOpenShellBinaryAuthority(source));
   environment.HOME = home;
+  environment.XDG_CONFIG_HOME = path.join(home, ".config");
+  environment.XDG_DATA_HOME = path.join(home, ".local", "share");
+  environment.XDG_STATE_HOME = path.join(home, ".local", "state");
+  delete environment.XDG_RUNTIME_DIR;
   environment.DOCKER_HOST = dockerHost;
   return environment;
 }
@@ -193,6 +246,23 @@ export function createPrivateTestHome(prefix: string, parentHome: string = os.ho
   const testHome = fs.mkdtempSync(path.join(canonicalParent, prefix));
   fs.chmodSync(testHome, 0o700);
   return fs.realpathSync(testHome);
+}
+
+/** Create the private home and per-port authority shared by one live test. */
+export function createIsolatedTestRuntime(prefix: string): IsolatedTestRuntime {
+  const gateway = requireIsolatedTestGateway();
+  const gatewayPort = Number(gateway.environment.NEMOCLAW_GATEWAY_PORT);
+  const home = createPrivateTestHome(prefix);
+  return {
+    gatewayEnvironment: gateway.environment,
+    gatewayName: gateway.name,
+    gatewayPort,
+    home,
+    stateRoot: nemoclawStateRoot(home, gatewayPort),
+    environment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+      return isolatedNemoClawEnvironment(home, { ...extra, ...gateway.environment });
+    },
+  };
 }
 
 export function sandboxCommandEnvironment(

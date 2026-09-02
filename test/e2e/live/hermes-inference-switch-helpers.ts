@@ -4,10 +4,10 @@
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
 import path from "node:path";
 
 import { resolveAgentInferenceApi } from "../../../src/lib/inference/config.ts";
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { resultText } from "../fixtures/clients/index.ts";
@@ -23,6 +23,10 @@ import {
   compatibleAnthropicSwitchEnv,
   requireCompatibleAnthropicProviderAbsent,
 } from "../fixtures/compatible-anthropic-switch.ts";
+import {
+  isolatedNemoClawEnvironment,
+  resolveTestGatewayBinding,
+} from "../fixtures/environment-profiles.ts";
 import { expect } from "../fixtures/e2e-test.ts";
 import type { FakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import {
@@ -166,18 +170,27 @@ export function hostedInstallModel(runtimeEnv: NodeJS.ProcessEnv = process.env):
 }
 
 export function openshellGatewayName(runtimeEnv: NodeJS.ProcessEnv = process.env): string {
-  return runtimeEnv.OPENSHELL_GATEWAY ?? "nemoclaw";
+  return resolveTestGatewayBinding(runtimeEnv).name;
 }
 
-export function env(apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+export function env(
+  apiKey?: string,
+  extra: NodeJS.ProcessEnv = {},
+  home?: string,
+): NodeJS.ProcessEnv {
+  const runtimeEnv = { ...process.env, ...extra };
+  const gateway = resolveTestGatewayBinding(runtimeEnv);
+  const baseEnvironment = home
+    ? isolatedNemoClawEnvironment(home, gateway.environment)
+    : buildAvailabilityProbeEnv(runtimeEnv);
   const out: NodeJS.ProcessEnv = {
-    ...buildAvailabilityProbeEnv(),
+    ...baseEnvironment,
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_AGENT: "hermes",
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: openshellGatewayName(),
+    ...gateway.environment,
   };
   apiKey && Object.assign(out, { NVIDIA_INFERENCE_API_KEY: apiKey });
   USE_COMPATIBLE_HOSTED &&
@@ -187,24 +200,26 @@ export function env(apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.Proc
       NEMOCLAW_MODEL: hostedInstallModel(),
       NEMOCLAW_COMPAT_MODEL: hostedInstallModel(),
       NEMOCLAW_ENDPOINT_URL:
-        process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1",
-      NEMOCLAW_PREFERRED_API: process.env.NEMOCLAW_PREFERRED_API ?? "openai-completions",
+        runtimeEnv.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1",
+      NEMOCLAW_PREFERRED_API: runtimeEnv.NEMOCLAW_PREFERRED_API ?? "openai-completions",
       NEMOCLAW_PROVIDER: "custom",
     });
-  return { ...out, ...extra };
+  return { ...out, ...extra, ...gateway.environment };
 }
 
 export async function expectOpenAiProvider(
   host: HostCliClient,
   providerName: string,
   credentialEnv: string,
+  home?: string,
 ): Promise<void> {
+  const commandEnv = env(undefined, {}, home);
   const provider = await host.command(
     "openshell",
-    ["provider", "get", "-g", "nemoclaw", providerName],
+    ["provider", "get", "-g", openshellGatewayName(commandEnv), providerName],
     {
       artifactName: `${providerName}-openai-provider-metadata`,
-      env: env(),
+      env: commandEnv,
       timeoutMs: 30_000,
     },
   );
@@ -218,12 +233,14 @@ export async function expectOpenAiProvider(
 
 export async function prepareProxyResolutionRoute({
   apiKey,
+  home,
   host,
   mockBaseline,
   publicProvider,
   redactionValues,
 }: {
   apiKey: string;
+  home?: string;
   host: HostCliClient;
   mockBaseline: FakeOpenAiCompatibleServer | undefined;
   publicProvider: ShellProbeResult | null;
@@ -240,13 +257,14 @@ export async function prepareProxyResolutionRoute({
     return { model, requestOffset };
   }
 
+  const providerEnv = env(undefined, { NVIDIA_INFERENCE_API_KEY: apiKey }, home);
   const registered = await host.command(
     "openshell",
     [
       "provider",
       "create",
       "-g",
-      "nemoclaw",
+      openshellGatewayName(providerEnv),
       "--name",
       PROXY_RESOLUTION_PROVIDER,
       "--type",
@@ -258,13 +276,13 @@ export async function prepareProxyResolutionRoute({
     ],
     {
       artifactName: "register-proxy-resolution-provider",
-      env: env(undefined, { NVIDIA_INFERENCE_API_KEY: apiKey }),
+      env: providerEnv,
       redactionValues,
       timeoutMs: 120_000,
     },
   );
   expect(registered.exitCode, resultText(registered)).toBe(0);
-  await expectOpenAiProvider(host, PROXY_RESOLUTION_PROVIDER, "NVIDIA_INFERENCE_API_KEY");
+  await expectOpenAiProvider(host, PROXY_RESOLUTION_PROVIDER, "NVIDIA_INFERENCE_API_KEY", home);
 
   const setRoute = await host.command(
     "node",
@@ -280,7 +298,7 @@ export async function prepareProxyResolutionRoute({
     ],
     {
       artifactName: "set-proxy-resolution-route",
-      env: env(),
+      env: env(undefined, {}, home),
       redactionValues,
       timeoutMs: 180_000,
     },
@@ -454,18 +472,19 @@ export async function runHermesCliPongWithRetry(
 export async function cleanupHermesSwitch(
   host: HostCliClient,
   sandbox: SandboxClient,
+  home?: string,
 ): Promise<void> {
   await preCleanBestEffort(() =>
     host.command("node", [CLI, SANDBOX_NAME, "destroy", "--yes", "--cleanup-gateway"], {
       artifactName: "cleanup-nemoclaw-destroy",
-      env: env(),
+      env: env(undefined, {}, home),
       timeoutMs: 120_000,
     }),
   );
   await preCleanBestEffort(() =>
     sandbox.openshell(["sandbox", "delete", SANDBOX_NAME], {
       artifactName: "cleanup-openshell-delete",
-      env: env(),
+      env: env(undefined, {}, home),
       timeoutMs: 60_000,
     }),
   );
@@ -614,6 +633,7 @@ async function startMockAnthropicProvider(): Promise<MockCompatibleAnthropicProv
 export async function prepareCompatibleAnthropicSwitchBinding(
   host: HostCliClient,
   cleanup: { add(name: string, run: () => Promise<void> | void): void },
+  home?: string,
 ): Promise<CompatibleAnthropicSwitchBinding | null> {
   if (SWITCH_PROVIDER !== "compatible-anthropic-endpoint" || SWITCH_API !== "anthropic-messages")
     return null;
@@ -622,9 +642,11 @@ export async function prepareCompatibleAnthropicSwitchBinding(
   const binding = compatibleAnthropicSwitchBinding(
     process.env.NEMOCLAW_SWITCH_ENDPOINT_URL ?? mock?.endpointUrl ?? "",
   );
+  const commandEnv = env(undefined, {}, home);
   await requireCompatibleAnthropicProviderAbsent(host, {
     artifactName: "compatible-anthropic-provider-absent-before-switch",
-    env: env(),
+    env: commandEnv,
+    gatewayName: openshellGatewayName(commandEnv),
   });
   return { ...binding, endpointUrl: openAiSurfaceEndpointUrl(binding.endpointUrl) };
 }
@@ -633,6 +655,7 @@ export async function installHermes(
   host: HostCliClient,
   apiKey: string,
   installEnv: NodeJS.ProcessEnv = {},
+  home?: string,
 ): Promise<ShellProbeResult> {
   let install: ShellProbeResult | undefined;
   for (let attempt = 1; attempt <= INSTALL_ATTEMPTS; attempt += 1) {
@@ -642,7 +665,7 @@ export async function installHermes(
       {
         artifactName: attempt === 1 ? "install-hermes" : `install-hermes-attempt-${attempt}`,
         cwd: REPO_ROOT,
-        env: env(apiKey, installEnv),
+        env: env(apiKey, installEnv, home),
         redactionValues: [apiKey],
         timeoutMs: 25 * 60_000,
       },
@@ -668,6 +691,7 @@ export async function runHermesInferenceSetWithRetry(
     artifacts?: InferenceSwitchRetryArtifactSink;
     compatibleBinding?: CompatibleAnthropicSwitchBinding | null;
     delay?: (milliseconds: number) => Promise<void>;
+    home?: string;
   } = {},
 ): Promise<ShellProbeResult> {
   const args = [
@@ -693,7 +717,11 @@ export async function runHermesInferenceSetWithRetry(
         artifactName: verify
           ? `hermes-inference-set-${attempt}`
           : "hermes-inference-set-no-verify-after-transient-failures",
-        env: env(undefined, compatibleAnthropicSwitchEnv(options.compatibleBinding ?? null)),
+        env: env(
+          undefined,
+          compatibleAnthropicSwitchEnv(options.compatibleBinding ?? null),
+          options.home,
+        ),
         redactionValues,
         timeoutMs: 180_000,
       }),
@@ -703,23 +731,25 @@ export async function runHermesInferenceSetWithRetry(
 export async function hermesGatewayPid(
   sandbox: SandboxClient,
   artifactName: string,
+  home?: string,
 ): Promise<ShellProbeResult> {
   return await sandbox.execShell(
     SANDBOX_NAME,
     trustedSandboxShellScript(
       "ps -eo pid=,comm=,args= | awk '$0 ~ /hermes/ && $0 ~ /gateway run/ { print $1; exit }'",
     ),
-    { artifactName, env: env(), timeoutMs: 30_000 },
+    { artifactName, env: env(undefined, {}, home), timeoutMs: 30_000 },
   );
 }
 
 export async function envHash(
   sandbox: SandboxClient,
   artifactName: string,
+  home?: string,
 ): Promise<ShellProbeResult> {
   return await sandbox.exec(SANDBOX_NAME, ["sha256sum", "/sandbox/.hermes/.env"], {
     artifactName,
-    env: env(),
+    env: env(undefined, {}, home),
     timeoutMs: 30_000,
   });
 }
@@ -759,10 +789,13 @@ export function apiKeyShapeCommand(): string[] {
   return ["grep", "-Eq", API_KEY_SHAPE_PATTERN, "/sandbox/.hermes/config.yaml"];
 }
 
-export async function apiKeyShape(sandbox: SandboxClient): Promise<ShellProbeResult> {
+export async function apiKeyShape(
+  sandbox: SandboxClient,
+  home?: string,
+): Promise<ShellProbeResult> {
   return await sandbox.exec(SANDBOX_NAME, apiKeyShapeCommand(), {
     artifactName: "hermes-config-api-key-shape",
-    env: env(),
+    env: env(undefined, {}, home),
     timeoutMs: 30_000,
   });
 }
@@ -771,19 +804,31 @@ export async function hashCheck(
   sandbox: SandboxClient,
   file: string,
   artifact: string,
+  home?: string,
 ): Promise<ShellProbeResult> {
   return await sandbox.execShell(
     SANDBOX_NAME,
     trustedSandboxShellScript(`sha256sum -c ${file} --status && echo OK`),
-    { artifactName: `hermes-${artifact}-hash-check`, env: env(), timeoutMs: 30_000 },
+    {
+      artifactName: `hermes-${artifact}-hash-check`,
+      env: env(undefined, {}, home),
+      timeoutMs: 30_000,
+    },
   );
 }
 
-export async function strictHashPerms(sandbox: SandboxClient): Promise<ShellProbeResult> {
+export async function strictHashPerms(
+  sandbox: SandboxClient,
+  home?: string,
+): Promise<ShellProbeResult> {
   return await sandbox.execShell(
     SANDBOX_NAME,
     trustedSandboxShellScript("stat -c '%u %a' /etc/nemoclaw/hermes.config-hash"),
-    { artifactName: "hermes-strict-hash-perms", env: env(), timeoutMs: 30_000 },
+    {
+      artifactName: "hermes-strict-hash-perms",
+      env: env(undefined, {}, home),
+      timeoutMs: 30_000,
+    },
   );
 }
 
@@ -797,14 +842,17 @@ export function maybeAssertEnvHashStable(
   beforeHash && assertStable(afterHash, beforeHash);
 }
 
-export function registryState(): { registry: Record<string, any>; session: Record<string, any> } {
+export function registryState(
+  home: string,
+  gatewayPort: number,
+): {
+  registry: Record<string, any>;
+  session: Record<string, any>;
+} {
+  const stateRoot = nemoclawStateRoot(home, gatewayPort);
   return {
-    registry: JSON.parse(
-      fs.readFileSync(path.join(os.homedir(), ".nemoclaw", "sandboxes.json"), "utf8"),
-    ),
-    session: JSON.parse(
-      fs.readFileSync(path.join(os.homedir(), ".nemoclaw", "onboard-session.json"), "utf8"),
-    ),
+    registry: JSON.parse(fs.readFileSync(path.join(stateRoot, "sandboxes.json"), "utf8")),
+    session: JSON.parse(fs.readFileSync(path.join(stateRoot, "onboard-session.json"), "utf8")),
   };
 }
 

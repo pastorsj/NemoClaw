@@ -14,6 +14,14 @@ import {
 } from "../fixtures/hermes-rebuild-swap.ts";
 import { prepareHermesRebuildSwap } from "../live/rebuild-hermes-swap.ts";
 
+const ISOLATED_TEST_ENV = {
+  HOME: "/home/tester/.nemoclaw-rebuild-hermes-test",
+  PATH: "/usr/bin:/bin",
+  XDG_CONFIG_HOME: "/home/tester/.nemoclaw-rebuild-hermes-test/.config",
+  XDG_DATA_HOME: "/home/tester/.nemoclaw-rebuild-hermes-test/.local/share",
+  XDG_STATE_HOME: "/home/tester/.nemoclaw-rebuild-hermes-test/.local/state",
+};
+
 function result(exitCode = 0, stdout = "", stderr = "") {
   return { exitCode, signal: null, stderr, stdout };
 }
@@ -72,6 +80,7 @@ describe("Hermes rebuild swap", () => {
     await prepareHermesRebuildSwap(
       { command } as unknown as HostCliClient,
       { trackDisposable },
+      ISOLATED_TEST_ENV,
     );
 
     expect(command.mock.calls.map(([commandName]) => commandName)).toEqual([
@@ -109,6 +118,7 @@ describe("Hermes rebuild swap", () => {
           cleanupAction = action;
         },
       },
+      ISOLATED_TEST_ENV,
     );
 
     await expect(cleanupAction?.()).rejects.toThrow("remove Hermes rebuild swap failed");
@@ -136,14 +146,10 @@ describe("Hermes rebuild swap", () => {
       .fn()
       .mockResolvedValueOnce(result(0, "0\n"))
       .mockImplementationOnce(async (_commandName: string, args: string[]) => {
-        const execution = spawnSync(
-          "bash",
-          ["-c", args[2], args[3], swapPath, args[5]],
-          {
+        const execution = spawnSync("bash", ["-c", args[2], args[3], swapPath, args[5]], {
             encoding: "utf8",
             env: { ...process.env, PATH: `${binDirectory}:${process.env.PATH ?? ""}` },
-          },
-        );
+        });
         expect(execution.status).toBe(42);
         expect(fs.existsSync(swapPath)).toBe(false);
         return result(execution.status ?? 1, execution.stdout, execution.stderr);
@@ -154,6 +160,7 @@ describe("Hermes rebuild swap", () => {
         prepareHermesRebuildSwap(
           { command } as unknown as HostCliClient,
           { trackDisposable },
+          ISOLATED_TEST_ENV,
         ),
       ).rejects.toThrow("provision swap for Hermes rebuild failed");
       expect(trackDisposable).not.toHaveBeenCalled();

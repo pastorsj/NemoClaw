@@ -90,6 +90,9 @@ const deterministicDashboardPort = (
 ) =>
   findAvailableDashboardPort(sandboxName, preferredPort, forwardListOutput, () => false, new Map());
 
+const GATEWAY_NAME = "nemoclaw-18125";
+const GATEWAY_PORT = 18125;
+
 describe("rebuild-Hermes direct bootstrap", () => {
   it("resolves the current base without onboarding or constructing a sandbox (#7144)", () => {
     const script = buildRebuildHermesCurrentBaseScript();
@@ -221,12 +224,17 @@ describe("rebuild-Hermes direct bootstrap", () => {
   });
 
   it("starts the product gateway and configures its exact hosted route (#7144)", () => {
-    const script = buildRebuildHermesGatewayBootstrapScript();
+    const script = buildRebuildHermesGatewayBootstrapScript({
+      gatewayName: GATEWAY_NAME,
+      gatewayPort: GATEWAY_PORT,
+    });
 
-    expect(script).toContain('startGatewayForRecovery({ gatewayName: "nemoclaw" })');
+    expect(script).toContain(`const gatewayName = "${GATEWAY_NAME}"`);
+    expect(script).toContain(`const gatewayPort = ${GATEWAY_PORT}`);
+    expect(script).toContain("startGatewayForRecovery({ gatewayName, gatewayPort })");
     expect(script).toContain("setupInference(");
     expect(script).toContain('"compatible-endpoint"');
-    expect(script).toContain('gatewayName: "nemoclaw"');
+    expect(script).toContain("{ gatewayName, preferredInferenceApi");
     expect(script).toContain('preferredInferenceApi: "openai-completions"');
     expect(script).toContain(GATEWAY_BOOTSTRAP_MARKER);
     expect(script).not.toContain("startGateway(null)");
@@ -250,6 +258,8 @@ describe("rebuild-Hermes direct bootstrap", () => {
         artifacts: { writeJson },
         endpointUrl: "https://integrate.api.nvidia.com/v1",
         expectedModel: "nvidia/example-model",
+        gatewayName: GATEWAY_NAME,
+        gatewayPort: GATEWAY_PORT,
         sandboxName: "e2e-rebuild-hermes-markerless",
       }),
     ).rejects.toThrow(/completion marker/);
@@ -275,11 +285,17 @@ describe("rebuild-Hermes direct bootstrap", () => {
           exactHost.host,
           envFactory,
           "secret",
+          GATEWAY_NAME,
           expectedModel,
           "route",
           ["secret"],
         ),
       ).resolves.toEqual({ provider: "compatible-endpoint", model: expectedModel });
+      expect(exactHost.command).toHaveBeenCalledWith(
+        "/opt/openshell",
+        ["inference", "get", "-g", GATEWAY_NAME],
+        expect.any(Object),
+      );
 
       const output = (
         {
@@ -293,6 +309,7 @@ describe("rebuild-Hermes direct bootstrap", () => {
           driftedHost.host,
           envFactory,
           "secret",
+          GATEWAY_NAME,
           expectedModel,
           "route",
           ["secret"],
@@ -305,6 +322,7 @@ describe("rebuild-Hermes direct bootstrap", () => {
           failedHost.host,
           envFactory,
           "secret",
+          GATEWAY_NAME,
           expectedModel,
           "route",
           ["secret"],

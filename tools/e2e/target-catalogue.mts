@@ -215,6 +215,16 @@ const nonInteractive = {
   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
 } as const;
 
+function isolatedGatewayEnvironment(port: number): Readonly<Record<string, string>> {
+  if (!Number.isInteger(port) || port < 1024 || port > 65_535 || port === 8080) {
+    throw new Error("Live E2E gateway ports must be non-default ports from 1024 through 65535");
+  }
+  return {
+    NEMOCLAW_GATEWAY_PORT: String(port),
+    OPENSHELL_GATEWAY: `nemoclaw-${String(port)}`,
+  };
+}
+
 function commonEgressTarget(options: {
   displayName: string;
   environment?: Readonly<Record<string, string>>;
@@ -820,13 +830,13 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     shard: "anthropic",
     environment: {
       ...nonInteractive,
+      ...isolatedGatewayEnvironment(18131),
       NEMOCLAW_AGENT: "hermes",
       NEMOCLAW_SANDBOX_NAME: "e2e-hm-inf-switch",
       NEMOCLAW_SWITCH_PROVIDER: "compatible-anthropic-endpoint",
       NEMOCLAW_SWITCH_MODEL: "mock-anthropic-model",
       NEMOCLAW_SWITCH_INFERENCE_API: "anthropic-messages",
       NEMOCLAW_SWITCH_MOCK_ANTHROPIC: "1",
-      OPENSHELL_GATEWAY: "nemoclaw",
     },
   }),
   target("hermes-shields-config", {
@@ -843,9 +853,9 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     runnerComparison: true,
     environment: {
       ...nonInteractive,
+      ...isolatedGatewayEnvironment(18132),
       NEMOCLAW_AGENT: "hermes",
       NEMOCLAW_SANDBOX_NAME: "e2e-hermes-shields",
-      OPENSHELL_GATEWAY: "nemoclaw",
     },
   }),
   target("hermes-slack", {
@@ -1097,6 +1107,7 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     owningPaths: ["test/e2e/live/openclaw-inference-switch-helpers.ts"],
     environment: {
       ...nonInteractive,
+      ...isolatedGatewayEnvironment(18133),
       NEMOCLAW_AGENT: "openclaw",
       NEMOCLAW_E2E_SHARD: "anthropic",
       NEMOCLAW_SANDBOX_NAME: "e2e-oc-inf-switch",
@@ -1104,7 +1115,6 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
       NEMOCLAW_SWITCH_MODEL: "mock-anthropic-model",
       NEMOCLAW_SWITCH_INFERENCE_API: "anthropic-messages",
       NEMOCLAW_SWITCH_MOCK_ANTHROPIC: "1",
-      OPENSHELL_GATEWAY: "nemoclaw",
     },
   }),
   target("openclaw-tui-chat-correlation", {
@@ -1234,7 +1244,10 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
       "test/e2e/live/rebuild-openclaw-old-base-context.ts",
       "src/lib/core/shell-quote.ts",
     ],
-    environment: hostedInference,
+    environment: {
+      ...hostedInference,
+      ...isolatedGatewayEnvironment(18134),
+    },
   }),
   target("rebuild-hermes", {
     displayName: "Rebuild: preserves Hermes state and recovers cron dispatch",
@@ -1255,6 +1268,7 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     environment: {
       ...hostedInference,
       ...nonInteractive,
+      ...isolatedGatewayEnvironment(18135),
       NEMOCLAW_AGENT: "hermes",
       NEMOCLAW_PROVIDER: "custom",
       NEMOCLAW_ENDPOINT_URL: "https://inference-api.nvidia.com/v1",
@@ -1262,7 +1276,6 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
       NEMOCLAW_COMPAT_MODEL: "nvidia/nvidia/nemotron-3-ultra",
       NEMOCLAW_PREFERRED_API: "openai-completions",
       NEMOCLAW_SANDBOX_NAME: "e2e-rebuild-hermes",
-      OPENSHELL_GATEWAY: "nemoclaw",
     },
   }),
   target("rebuild-hermes-stale-base", {
@@ -1285,6 +1298,7 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     environment: {
       ...hostedInference,
       ...nonInteractive,
+      ...isolatedGatewayEnvironment(18136),
       NEMOCLAW_AGENT: "hermes",
       NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E: "1",
       NEMOCLAW_PROVIDER: "custom",
@@ -1293,7 +1307,6 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
       NEMOCLAW_COMPAT_MODEL: "nvidia/nvidia/nemotron-3-ultra",
       NEMOCLAW_PREFERRED_API: "openai-completions",
       NEMOCLAW_SANDBOX_NAME: "e2e-rebuild-base",
-      OPENSHELL_GATEWAY: "nemoclaw",
     },
   }),
   target("sandbox-survival", {
@@ -1419,8 +1432,8 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
     environment: {
       ...hostedInference,
       ...nonInteractive,
+      ...isolatedGatewayEnvironment(18137),
       NEMOCLAW_SANDBOX_NAME: "e2e-shields",
-      OPENSHELL_GATEWAY: "nemoclaw",
     },
   }),
   target("snapshot-commands", {

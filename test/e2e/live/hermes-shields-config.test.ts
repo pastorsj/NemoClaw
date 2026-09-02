@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+
 import {
   HERMES_SHIELDS_COMMAND_TIMEOUT_MS,
   HERMES_SHIELDS_CONFIG_TEST_TIMEOUT_MS,
 } from "../../../tools/e2e/hermes-timeout-contract.mts";
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
   cleanupWhenCommandAvailable,
   cleanupWhenOpenShellAvailable,
@@ -18,6 +19,10 @@ import {
   validateSandboxName,
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import {
+  createIsolatedTestRuntime,
+  type IsolatedTestRuntime,
+} from "../fixtures/environment-profiles.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
@@ -25,7 +30,6 @@ import { stripAnsi } from "./json-envelope.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-shields";
-const GATEWAY_NAME = process.env.OPENSHELL_GATEWAY ?? "nemoclaw";
 const COMPATIBLE_API_KEY = "hermes-shields-e2e-key";
 const COMPATIBLE_MODEL = "hermes-shields-e2e-model";
 const CONFIG_PATH = "/sandbox/.hermes/config.yaml";
@@ -36,9 +40,25 @@ const SHIELDS_COMMAND_TIMEOUT_MS = HERMES_SHIELDS_COMMAND_TIMEOUT_MS;
 
 validateSandboxName(SANDBOX_NAME);
 
+let activeTestRuntime: IsolatedTestRuntime | undefined;
+
+function initializeTestRuntime(): IsolatedTestRuntime {
+  activeTestRuntime = createIsolatedTestRuntime(".nemoclaw-hermes-shields-home-");
+  return activeTestRuntime;
+}
+
+function testRuntime(): IsolatedTestRuntime {
+  return (
+    activeTestRuntime ??
+    (() => {
+      throw new Error("Hermes Shields live test runtime is not initialized");
+    })()
+  );
+}
+
 function commandEnv(endpointUrl?: string): NodeJS.ProcessEnv {
-  return {
-    ...buildAvailabilityProbeEnv(),
+  const runtime = testRuntime();
+  return runtime.environment({
     COMPATIBLE_API_KEY,
     NVIDIA_INFERENCE_API_KEY: COMPATIBLE_API_KEY,
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
@@ -53,8 +73,7 @@ function commandEnv(endpointUrl?: string): NodeJS.ProcessEnv {
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_GPU: "0",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: GATEWAY_NAME,
-  };
+  });
 }
 
 async function preClean(host: HostCliClient): Promise<void> {
@@ -64,7 +83,7 @@ async function preClean(host: HostCliClient): Promise<void> {
     timeoutMs: 15 * 60_000,
   });
   await host
-    .cleanupGatewayRegistration(GATEWAY_NAME, {
+    .cleanupGatewayRegistration(testRuntime().gatewayName, {
       artifactName: "pre-cleanup-destroy-gateway",
       env: commandEnv(),
       timeoutMs: 60_000,
@@ -276,7 +295,9 @@ async function completeShieldsCycle(
   await expectLockedPosture(sandbox, cycle);
 }
 
-test("hermes-shields-config: stopped Hermes restores under both Shields postures (#6381, #8112)", {
+test(
+  "hermes-shields-config: stopped Hermes restores under both Shields postures (#6381, #8112)",
+  {
   timeout: HERMES_SHIELDS_CONFIG_TEST_TIMEOUT_MS,
   meta: {
     e2ePhases: [
@@ -290,7 +311,13 @@ test("hermes-shields-config: stopped Hermes restores under both Shields postures
       "verify preserved config and ready state",
     ],
   },
-}, async ({ artifacts, cleanup: cleanupRegistry, host, progress, sandbox }) => {
+  },
+  async ({ artifacts, cleanup: cleanupRegistry, host, progress, sandbox }) => {
+    const runtime = initializeTestRuntime();
+    cleanupRegistry.trackDisposable("remove isolated Hermes shields test home", () => {
+      fs.rmSync(runtime.home, { force: true, recursive: true });
+      activeTestRuntime = undefined;
+    });
   await artifacts.target.declare({
     id: "hermes-shields-config",
     boundary:
@@ -311,7 +338,7 @@ test("hermes-shields-config: stopped Hermes restores under both Shields postures
 
   const docker = await host.command("docker", ["info"], {
     artifactName: "prereq-docker-info",
-    env: buildAvailabilityProbeEnv(),
+      env: commandEnv(),
     timeoutMs: 30_000,
   });
   assertExitZero(docker, "Docker prerequisite for Hermes shields E2E");
@@ -351,7 +378,7 @@ test("hermes-shields-config: stopped Hermes restores under both Shields postures
           () => host.cleanupGatewayRegistration(name, gatewayCleanupOptions),
         ),
     },
-    GATEWAY_NAME,
+      runtime.gatewayName,
     gatewayCleanupOptions,
   );
   const sandboxCleanupOptions = {
@@ -498,4 +525,5 @@ test("hermes-shields-config: stopped Hermes restores under both Shields postures
       secondCycle: true,
     },
   });
-});
+  },
+);

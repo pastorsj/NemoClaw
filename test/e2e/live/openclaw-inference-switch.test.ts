@@ -15,8 +15,8 @@ import http, { type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText, shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
@@ -34,6 +34,7 @@ import {
 import {
   createPrivateTestHome,
   isolatedNemoClawEnvironment,
+  requireIsolatedTestGateway,
 } from "../fixtures/environment-profiles.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import {
@@ -79,6 +80,15 @@ const INFERENCE_TIMEOUT_MS = 150_000;
 const AGENT_TIMEOUT_MS = 150_000;
 
 validateSandboxName(SANDBOX_NAME);
+
+function isolatedGatewayName(): string {
+  return requireIsolatedTestGateway().name;
+}
+
+function isolatedStateRoot(home: string): string {
+  const gateway = requireIsolatedTestGateway();
+  return nemoclawStateRoot(home, Number(gateway.environment.NEMOCLAW_GATEWAY_PORT));
+}
 
 interface ChatCompletionResponse {
   choices?: Array<{
@@ -222,12 +232,13 @@ function parsePortEnv(name: string, fallback: number): number {
 }
 
 function commandEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const gateway = requireIsolatedTestGateway();
   return isolatedNemoClawEnvironment(home, {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
     ...extra,
+    ...gateway.environment,
   });
 }
 
@@ -295,7 +306,7 @@ async function resetOpenClawInferenceSwitchState(
     }),
   );
   await bestEffortStateReset(() =>
-    sandbox.openshell(["gateway", "destroy", "-g", "nemoclaw"], {
+    sandbox.openshell(["gateway", "destroy", "-g", isolatedGatewayName()], {
       artifactName: `${artifactPrefix}-openshell-gateway-destroy-openclaw-inference-switch`,
       env: commandEnv(home),
       timeoutMs: 120_000,
@@ -444,6 +455,7 @@ async function prepareCompatibleAnthropicSwitchBinding(
   await requireCompatibleAnthropicProviderAbsent(host, {
     artifactName: "compatible-anthropic-provider-absent-before-switch",
     env: commandEnv(home),
+    gatewayName: isolatedGatewayName(),
   });
   return binding;
 }
@@ -462,9 +474,10 @@ async function openclawGatewayPid(sandbox: SandboxClient, home: string): Promise
 }
 
 async function getRouteOutput(host: HostCliClient, home: string): Promise<ShellProbeResult> {
+  const gatewayName = shellQuote(isolatedGatewayName());
   return host.command(
     "bash",
-    ["-lc", "openshell inference get -g nemoclaw 2>&1 || openshell inference get 2>&1"],
+    ["-lc", `openshell inference get -g ${gatewayName} 2>&1 || openshell inference get 2>&1`],
     {
       artifactName: "openshell-inference-get-after-switch",
       env: commandEnv(home),
@@ -485,7 +498,8 @@ async function assertRegistryAndSession(
   home: string,
   options: { mockProvider?: MockAnthropicProvider },
 ): Promise<void> {
-  const registryPath = path.join(home, ".nemoclaw", "sandboxes.json");
+  const stateRoot = isolatedStateRoot(home);
+  const registryPath = path.join(stateRoot, "sandboxes.json");
   const registry = JSON.parse(fs.readFileSync(registryPath, "utf8")) as SandboxRegistry;
   const sandbox = registry.sandboxes?.[SANDBOX_NAME];
   expect(sandbox, `sandbox ${SANDBOX_NAME} missing from registry`).toBeTruthy();
@@ -511,7 +525,7 @@ async function assertRegistryAndSession(
       expect(sandbox?.preferredInferenceApi).toBeNull();
   }
 
-  const sessionPath = path.join(home, ".nemoclaw", "onboard-session.json");
+  const sessionPath = path.join(stateRoot, "onboard-session.json");
   const session = JSON.parse(fs.readFileSync(sessionPath, "utf8")) as OnboardSession;
   expect(Object.keys(session).length, "onboard session is empty").toBeGreaterThan(0);
   expect(session.sandboxName).toBe(SANDBOX_NAME);
@@ -728,7 +742,6 @@ async function checkSandboxInference(
   throw new Error(`Sandbox inference.local did not work after switch: ${lastFailure}`);
 }
 
-
 async function checkOpenClawAgentTurn(
   host: HostCliClient,
   home: string,
@@ -865,7 +878,9 @@ async function runOpenClawInferenceSetWithRetry(
   });
 }
 
-test("openclaw-inference-switch: switches route and preserves live OpenClaw behavior", {
+test(
+  "openclaw-inference-switch: switches route and preserves live OpenClaw behavior",
+  {
   timeout: TEST_TIMEOUT_MS,
   meta: {
     e2ePhases: [
@@ -879,7 +894,16 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       "apply sandbox retention and record the result",
     ],
   },
-}, async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  },
+  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+    const gatewayName = isolatedGatewayName();
+    const home = createPrivateTestHome(".nemoclaw-openclaw-switch-home-");
+    cleanup.trackDisposable(
+      `remove OpenClaw inference switch test home for ${SANDBOX_NAME}`,
+      () => {
+        fs.rmSync(home, { recursive: true, force: true });
+      },
+    );
   await artifacts.target.declare({
     id: "openclaw-inference-switch",
     boundary: "install-sh-openclaw-inference-set-and-live-agent-turn",
@@ -909,7 +933,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
 
   const docker = await host.command("docker", ["info"], {
     artifactName: "prereq-docker-info-openclaw-inference-switch",
-    env: buildAvailabilityProbeEnv(),
+      env: commandEnv(home),
     timeoutMs: 30_000,
   });
   if (docker.exitCode !== 0) {
@@ -947,18 +971,14 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
     (value): value is string => typeof value === "string",
   );
 
-  const home = createPrivateTestHome(".nemoclaw-openclaw-switch-home-");
   let mockProvider: MockAnthropicProvider | undefined;
-  cleanup.trackDisposable(`remove OpenClaw inference switch test home for ${SANDBOX_NAME}`, () => {
-    fs.rmSync(home, { recursive: true, force: true });
-  });
   cleanup.trackDisposable("close switched Anthropic provider", async () => {
     await mockProvider?.close();
   });
   cleanup.trackDisposable("close baseline inference provider", async () => {
     await baselineProvider?.close();
   });
-  cleanup.trackGateway(host, "nemoclaw", {
+    cleanup.trackGateway(host, gatewayName, {
     artifactName: "cleanup-openshell-gateway-destroy-openclaw-inference-switch",
     env: commandEnv(home),
     timeoutMs: 120_000,
@@ -1103,7 +1123,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
   progress.phase("apply sandbox retention and record the result");
   if (process.env.NEMOCLAW_E2E_KEEP_SANDBOX !== "1") {
     await resetOpenClawInferenceSwitchState(host, sandbox, home, "final");
-    const registryPath = path.join(home, ".nemoclaw", "sandboxes.json");
+      const registryPath = path.join(isolatedStateRoot(home), "sandboxes.json");
     const registryText = fs.existsSync(registryPath) ? fs.readFileSync(registryPath, "utf8") : "";
     expect(registryText).not.toContain(`"${SANDBOX_NAME}"`);
   }
@@ -1126,4 +1146,5 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       publicFabricAgentPongAfterInferenceSwitch: true,
     },
   });
-});
+  },
+);

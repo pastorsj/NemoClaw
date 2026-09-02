@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertExitZero } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/index.ts";
 import { expect } from "../fixtures/e2e-test.ts";
@@ -36,8 +35,10 @@ export async function hermesApiTokenDigest(
   return result.stdout.trim();
 }
 
-export async function ensureRebuildHermesHostTools(host: HostCliClient): Promise<void> {
-  const bootstrapEnv = buildAvailabilityProbeEnv();
+export async function ensureRebuildHermesHostTools(
+  host: HostCliClient,
+  bootstrapEnv: NodeJS.ProcessEnv,
+): Promise<void> {
   if (!fs.existsSync(CLI_DIST_ENTRYPOINT)) {
     const build = await host.command("npm", ["run", "build:cli"], {
       artifactName: "prereq-build-checked-out-cli",

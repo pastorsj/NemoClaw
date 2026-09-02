@@ -44,7 +44,6 @@ describe("Hermes inference switch command shape", () => {
     );
   }
 
-
   it("preserves the requested frontend for other Hermes upstreams (#6289)", () => {
     expect(resolveAgentInferenceApi("hermes", "nvidia-prod", "openai-completions")).toBe(
       "openai-completions",
@@ -462,18 +461,31 @@ describe("Hermes inference switch command shape", () => {
   });
 
   it("passes the configured OpenShell gateway to cleanup", async () => {
-    vi.stubEnv("OPENSHELL_GATEWAY", "alternate-gateway");
+    const home = "/home/tester/.nemoclaw-hermes-switch-home-test";
+    vi.stubEnv("HOME", "/home/tester");
+    vi.stubEnv("DOCKER_HOST", "unix:///run/user/1000/docker.sock");
+    vi.stubEnv("NEMOCLAW_GATEWAY_PORT", "18089");
+    vi.stubEnv("OPENSHELL_GATEWAY", "nemoclaw-18089");
     const command = vi.fn().mockResolvedValue({ exitCode: 0, stderr: "", stdout: "" });
     const openshell = vi.fn().mockResolvedValue({ exitCode: 0, stderr: "", stdout: "" });
 
     await cleanupHermesSwitch(
       { command } as unknown as HostCliClient,
       { openshell } as unknown as SandboxClient,
+      home,
     );
 
-    expect(openshellGatewayName()).toBe("alternate-gateway");
+    expect(openshellGatewayName()).toBe("nemoclaw-18089");
     expect(command.mock.calls[0]?.[2]).toMatchObject({
-      env: { OPENSHELL_GATEWAY: "alternate-gateway" },
+      env: {
+        DOCKER_HOST: "unix:///run/user/1000/docker.sock",
+        HOME: home,
+        NEMOCLAW_GATEWAY_PORT: "18089",
+        OPENSHELL_GATEWAY: "nemoclaw-18089",
+        XDG_CONFIG_HOME: `${home}/.config`,
+        XDG_DATA_HOME: `${home}/.local/share`,
+        XDG_STATE_HOME: `${home}/.local/state`,
+      },
     });
   });
 

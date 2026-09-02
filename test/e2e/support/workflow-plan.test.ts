@@ -86,6 +86,28 @@ function expectExplicitCatalogueCoverage(): void {
 }
 
 describe("E2E workflow plan", () => {
+  it("gives each stateful Fabric qualification target its own standalone gateway", () => {
+    const targetIds = [
+      "openclaw-inference-switch",
+      "hermes-inference-switch",
+      "shields-config",
+      "hermes-shields-config",
+      "rebuild-openclaw",
+      "rebuild-hermes",
+      "rebuild-hermes-stale-base",
+    ];
+    const ports = targetIds.map((id) => {
+      const environment = catalogueTarget(id).environment;
+      const port = environment.NEMOCLAW_GATEWAY_PORT;
+      expect(port).toMatch(/^[0-9]+$/u);
+      expect(port).not.toBe("8080");
+      expect(environment.OPENSHELL_GATEWAY).toBe(`nemoclaw-${port}`);
+      return port;
+    });
+
+    expect(new Set(ports).size).toBe(ports.length);
+  });
+
   it(
     "defaults to every release-required target and tagged credential-free test",
     testTimeoutOptions(15_000),

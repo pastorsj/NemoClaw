@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { parseSandboxBaseImageResolutionLabels } from "../../../src/lib/sandbox-base-image/label-codec";
 import { validateSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image/resolution-metadata";
@@ -216,6 +217,34 @@ export function verifyRebuildHermesOldBaseIsStale(
     oldRef: oldMetadata.ref,
     currentRef: current.ref,
   };
+}
+
+export function verifySeededHermesBaseResolution(
+  staleBaseMode: boolean,
+  seededResolution: SandboxBaseImageResolutionMetadata | null,
+  oldBaseResolution: SandboxBaseImageResolutionMetadata,
+  currentBaseResolution: SandboxBaseImageResolutionMetadata,
+  oldBaseInspectJson: string,
+): ReturnType<typeof verifyRebuildHermesOldBaseIsStale> | null {
+  if (!staleBaseMode) {
+    assert.equal(
+      seededResolution,
+      null,
+      "normal rebuild lane must not manufacture a stale base-resolution hint",
+    );
+    return null;
+  }
+  assert.deepEqual(
+    seededResolution,
+    oldBaseResolution,
+    "synthetic old Hermes sandbox must retain its stale immutable base identity",
+  );
+  assert.ok(seededResolution, "synthetic old Hermes sandbox base identity disappeared");
+  return verifyRebuildHermesOldBaseIsStale(
+    seededResolution,
+    currentBaseResolution,
+    oldBaseInspectJson,
+  );
 }
 
 export function requireRebuildHermesCurrentBaseIdentity(

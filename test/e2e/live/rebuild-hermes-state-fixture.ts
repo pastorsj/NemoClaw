@@ -7,6 +7,25 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { shellQuote } from "../../../src/lib/core/shell-quote";
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
+
+export interface RebuildHermesStatePaths {
+  readonly backupRoot: string;
+  readonly registryFile: string;
+  readonly sessionFile: string;
+}
+
+export function rebuildHermesStatePaths(
+  home: string,
+  gatewayPort: number,
+): RebuildHermesStatePaths {
+  const stateRoot = nemoclawStateRoot(home, gatewayPort);
+  return {
+    backupRoot: path.join(stateRoot, "rebuild-backups"),
+    registryFile: path.join(stateRoot, "sandboxes.json"),
+    sessionFile: path.join(stateRoot, "onboard-session.json"),
+  };
+}
 
 const markerFile = "/sandbox/.hermes/memories/rebuild-marker.txt";
 const markerContent = `REBUILD_HM_E2E_${Date.now()}`;

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { CleanupRegistry } from "../fixtures/cleanup.ts";
 import { assertExitZero } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/index.ts";
@@ -13,12 +12,15 @@ import {
 
 const HERMES_REBUILD_SWAP_FILE = "/mnt/nemoclaw-hermes-rebuild.swap";
 
-async function createHermesRebuildSwap(host: HostCliClient): Promise<boolean> {
+async function createHermesRebuildSwap(
+  host: HostCliClient,
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
   const githubActions = process.env.GITHUB_ACTIONS === "true";
   if (!githubActions) return false;
 
   const probeOptions = {
-    env: buildAvailabilityProbeEnv(),
+    env,
     timeoutMs: 30_000,
   };
   const current = await host.command(
@@ -80,13 +82,13 @@ trap - EXIT`,
   return true;
 }
 
-async function verifyHermesRebuildSwap(host: HostCliClient): Promise<void> {
+async function verifyHermesRebuildSwap(host: HostCliClient, env: NodeJS.ProcessEnv): Promise<void> {
   const verified = await host.command(
     "swapon",
     ["--show", "--bytes", "--noheadings", "--output", "SIZE"],
     {
       artifactName: "prereq-hermes-rebuild-swap-after",
-      env: buildAvailabilityProbeEnv(),
+      env,
       timeoutMs: 30_000,
     },
   );
@@ -96,7 +98,10 @@ async function verifyHermesRebuildSwap(host: HostCliClient): Promise<void> {
   }
 }
 
-async function cleanupHermesRebuildSwap(host: HostCliClient): Promise<void> {
+async function cleanupHermesRebuildSwap(
+  host: HostCliClient,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
   const result = await host.command(
     "sudo",
     [
@@ -117,7 +122,7 @@ exit "$status"`,
     ],
     {
       artifactName: "cleanup-hermes-rebuild-swap",
-      env: buildAvailabilityProbeEnv(),
+      env,
       timeoutMs: 2 * 60_000,
     },
   );
@@ -127,9 +132,10 @@ exit "$status"`,
 export async function prepareHermesRebuildSwap(
   host: HostCliClient,
   cleanup: Pick<CleanupRegistry, "trackDisposable">,
+  env: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const created = await createHermesRebuildSwap(host);
+  const created = await createHermesRebuildSwap(host, env);
   if (!created) return;
-  cleanup.trackDisposable("remove Hermes rebuild swap", () => cleanupHermesRebuildSwap(host));
-  await verifyHermesRebuildSwap(host);
+  cleanup.trackDisposable("remove Hermes rebuild swap", () => cleanupHermesRebuildSwap(host, env));
+  await verifyHermesRebuildSwap(host, env);
 }

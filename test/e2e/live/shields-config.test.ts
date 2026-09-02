@@ -11,9 +11,7 @@
  */
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import {
   cleanupWhenCommandAvailable,
   cleanupWhenOpenShellAvailable,
@@ -26,16 +24,18 @@ import {
   validateSandboxName,
 } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
+import {
+  createIsolatedTestRuntime,
+  type IsolatedTestRuntime,
+} from "../fixtures/environment-profiles.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { pollUntil } from "../fixtures/polling.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
-import {
-  failedStartupProcessControlCommands,
-  resumeSupervisorIfPaused,
-} from "../fixtures/shields-failed-startup.ts";
+import { resumeSupervisorIfPaused } from "../fixtures/shields-failed-startup.ts";
 import { stripAnsi } from "./json-envelope.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
+import { createPolicySetChildlessBoundaryShim } from "./shields-shim.ts";
 
 const CONFIG_PATH = "/sandbox/.openclaw/openclaw.json";
 const CONFIG_DIR = path.dirname(CONFIG_PATH);
@@ -47,11 +47,6 @@ const STARTUP_MARKER_PATHS = [
   "/run/nemoclaw/openclaw-config-ready-v1.capability.json",
   "/run/nemoclaw/openclaw-config-ready.json",
 ] as const;
-const AUDIT_FILE = path.join(os.homedir(), ".nemoclaw", "state", "shields-audit.jsonl");
-const STATE_FILE = (sandboxName: string) =>
-  path.join(os.homedir(), ".nemoclaw", "state", `shields-${sandboxName}.json`);
-const TIMER_FILE = (sandboxName: string) =>
-  path.join(os.homedir(), ".nemoclaw", "state", `shields-timer-${sandboxName}.json`);
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-shields";
 
 const TEST_TIMEOUT_MS = 45 * 60_000;
@@ -62,19 +57,46 @@ const TIMER_POLL_INTERVAL_MS = 5_000;
 
 validateSandboxName(SANDBOX_NAME);
 
+let activeTestRuntime: IsolatedTestRuntime | undefined;
+
+function initializeTestRuntime(): IsolatedTestRuntime {
+  activeTestRuntime = createIsolatedTestRuntime(".nemoclaw-shields-home-");
+  return activeTestRuntime;
+}
+
+function testRuntime(): IsolatedTestRuntime {
+  return (
+    activeTestRuntime ??
+    (() => {
+      throw new Error("Shields live test runtime is not initialized");
+    })()
+  );
+}
+
+function auditFile(): string {
+  return path.join(testRuntime().stateRoot, "state", "shields-audit.jsonl");
+}
+
+function stateFile(sandboxName: string): string {
+  return path.join(testRuntime().stateRoot, "state", `shields-${sandboxName}.json`);
+}
+
+function timerFile(sandboxName: string): string {
+  return path.join(testRuntime().stateRoot, "state", `shields-timer-${sandboxName}.json`);
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function commandEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return {
-    ...buildAvailabilityProbeEnv(),
+  const runtime = testRuntime();
+  return runtime.environment({
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
     ...extra,
-  };
+  });
 }
 
 async function runNemoclaw(
@@ -344,16 +366,16 @@ async function preCleanSandbox(
     })
     .catch(() => undefined);
   await sandbox
-    .openshell(["gateway", "destroy", "-g", "nemoclaw"], {
+    .openshell(["gateway", "destroy", "-g", testRuntime().gatewayName], {
       artifactName: `${artifactPrefix}-openshell-gateway-destroy`,
       env: commandEnv(),
       timeoutMs: 60_000,
     })
     .catch(() => undefined);
-  for (const file of [STATE_FILE(SANDBOX_NAME), TIMER_FILE(SANDBOX_NAME), AUDIT_FILE]) {
+  for (const file of [stateFile(SANDBOX_NAME), timerFile(SANDBOX_NAME), auditFile()]) {
     fs.rmSync(file, { force: true });
   }
-  fs.rmSync(path.join(os.homedir(), ".nemoclaw", "onboard.lock"), {
+  fs.rmSync(path.join(testRuntime().stateRoot, "onboard.lock"), {
     force: true,
   });
 }
@@ -433,86 +455,6 @@ async function waitForChildlessStartup(host: HostCliClient, containerId: string)
   });
 }
 
-function createPolicySetChildlessBoundaryShim(
-  realOpenshellPath: string,
-  containerId: string,
-  startupPid: number,
-): { directory: string; executable: string; receipt: string } {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-shields-openshell-"));
-  const executable = path.join(directory, "openshell-childless-boundary.cjs");
-  const receipt = path.join(directory, "childless-boundary.json");
-  const processControl = failedStartupProcessControlCommands(containerId, startupPid);
-  const childlessCensusScript = [
-    "import runpy, sys, time",
-    `guard = runpy.run_path(${JSON.stringify(CONFIG_GUARD_PATH)})`,
-    "identity = guard['_production_identity']()",
-    "for _ in range(100):",
-    "    census = guard['_openshell_supervised_nonroot_start_census'](identity.root_uid, identity.sandbox_uid)",
-    "    if census is not None and census[0] == 0:",
-    "        sys.exit(0)",
-    "    time.sleep(0.1)",
-    "sys.exit(1)",
-  ].join("\n");
-  const shimSource = `#!${process.execPath}
-const fs = require("node:fs");
-const { spawnSync } = require("node:child_process");
-
-const args = process.argv.slice(2);
-const delegated = spawnSync(${JSON.stringify(realOpenshellPath)}, args, {
-  env: process.env,
-  stdio: "inherit",
-});
-if (delegated.error || delegated.status !== 0) {
-  if (delegated.error) console.error(delegated.error.message);
-  process.exit(delegated.status ?? 1);
-}
-
-const isTargetPolicySet =
-  args[0] === "policy" &&
-  args[1] === "set" &&
-  args.includes("--wait") &&
-  args.at(-1) === ${JSON.stringify(SANDBOX_NAME)};
-if (!isTargetPolicySet || fs.existsSync(${JSON.stringify(receipt)})) process.exit(0);
-
-fs.writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ status: "arming" }), {
-  encoding: "utf8",
-  flag: "wx",
-  mode: 0o600,
-});
-const pause = spawnSync("docker", ${JSON.stringify(processControl.pauseSupervisor)}, {
-  env: process.env,
-  stdio: "inherit",
-});
-if (pause.error || pause.status !== 0) process.exit(pause.status ?? 1);
-const terminate = spawnSync("docker", ${JSON.stringify(processControl.terminateStartupChild)}, {
-  env: process.env,
-  stdio: "inherit",
-});
-if (terminate.error || terminate.status !== 0) process.exit(terminate.status ?? 1);
-const childless = spawnSync(
-  "docker",
-  [
-    "exec",
-    "--user",
-    "0",
-    ${JSON.stringify(containerId)},
-    "python3",
-    "-I",
-    "-c",
-    ${JSON.stringify(childlessCensusScript)},
-  ],
-  { env: process.env, stdio: "inherit" },
-);
-if (childless.error || childless.status !== 0) process.exit(childless.status ?? 1);
-fs.writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ status: "childless" }), {
-  encoding: "utf8",
-  mode: 0o600,
-});
-`;
-  fs.writeFileSync(executable, shimSource, { encoding: "utf8", mode: 0o700 });
-  return { directory, executable, receipt };
-}
-
 async function readOriginalConfig(
   host: HostCliClient,
   containerId: string,
@@ -520,7 +462,13 @@ async function readOriginalConfig(
 ): Promise<void> {
   const result = await host.command(
     "bash",
-    ["-lc", `docker exec -u 0 ${containerId} cat ${CONFIG_PATH} > ${targetFile}`],
+    [
+      "-lc",
+      `umask 077; docker exec -u 0 "$1" cat ${CONFIG_PATH} > "$2"`,
+      "backup-openclaw-config",
+      containerId,
+      targetFile,
+    ],
     {
       artifactName: "phase-5b-backup-original-config",
       env: commandEnv(),
@@ -535,7 +483,7 @@ async function readOriginalConfig(
 
 function readAuditEntries(): unknown[] {
   return fs
-    .readFileSync(AUDIT_FILE, "utf8")
+    .readFileSync(auditFile(), "utf8")
     .trim()
     .split("\n")
     .filter(Boolean)
@@ -547,7 +495,7 @@ function readTimerMarker(sandboxName: string): {
   restoreAt: string;
   snapshotPath: string;
 } {
-  return JSON.parse(fs.readFileSync(TIMER_FILE(sandboxName), "utf8"));
+  return JSON.parse(fs.readFileSync(timerFile(sandboxName), "utf8"));
 }
 
 test(
@@ -572,6 +520,11 @@ test(
     },
   },
   async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+    const runtime = initializeTestRuntime();
+    cleanup.trackDisposable("remove isolated shields test home", () => {
+      fs.rmSync(runtime.home, { force: true, recursive: true });
+      activeTestRuntime = undefined;
+    });
     await artifacts.target.declare({
       id: "shields-config",
       boundary: "live-sandbox-shields-config",
@@ -614,10 +567,10 @@ test(
 
     await preCleanSandbox(host, sandbox, "pre-cleanup");
     cleanup.trackDisposable(`remove shields state for ${SANDBOX_NAME}`, () => {
-      [STATE_FILE(SANDBOX_NAME), TIMER_FILE(SANDBOX_NAME), AUDIT_FILE].forEach((file) => {
+      [stateFile(SANDBOX_NAME), timerFile(SANDBOX_NAME), auditFile()].forEach((file) => {
         fs.rmSync(file, { force: true });
       });
-      fs.rmSync(path.join(os.homedir(), ".nemoclaw", "onboard.lock"), {
+      fs.rmSync(path.join(runtime.stateRoot, "onboard.lock"), {
         force: true,
       });
     });
@@ -641,7 +594,7 @@ test(
             () => host.cleanupGatewayRegistration(name, gatewayCleanupOptions),
           ),
       },
-      "nemoclaw",
+      runtime.gatewayName,
       gatewayCleanupOptions,
     );
     const openshellSandboxCleanupOptions = {
@@ -944,7 +897,7 @@ test(
     await expectCredentialsTraversalBoundary(host, sandbox, containerId);
 
     progress.phase("detect host-root config drift and refuse resealing");
-    const originalConfig = path.join(os.tmpdir(), `nemoclaw-shields-orig-${process.pid}.json`);
+    const originalConfig = path.join(runtime.home, "openclaw-config-backup.json");
     await readOriginalConfig(host, containerId, originalConfig);
     try {
       const tamper = await host.command(
@@ -994,7 +947,10 @@ test(
         "bash",
         [
           "-lc",
-          `docker exec -i -u 0 ${containerId} sh -c 'chattr -i ${CONFIG_PATH} 2>/dev/null || true; chmod 644 ${CONFIG_PATH} && cat > ${CONFIG_PATH} && chmod 444 ${CONFIG_PATH} && chattr +i ${CONFIG_PATH} 2>/dev/null || true' < ${originalConfig}`,
+          `docker exec -i -u 0 "$1" sh -c 'chattr -i ${CONFIG_PATH} 2>/dev/null || true; chmod 644 ${CONFIG_PATH} && cat > ${CONFIG_PATH} && chmod 444 ${CONFIG_PATH} && chattr +i ${CONFIG_PATH} 2>/dev/null || true' < "$2"`,
+          "restore-openclaw-config",
+          containerId,
+          originalConfig,
         ],
         {
           artifactName: "phase-5b-restore-original-config",
@@ -1136,8 +1092,8 @@ test(
     });
     expect(restoreUp.exitCode, resultText(restoreUp)).toBe(0);
 
-    expect(fs.existsSync(AUDIT_FILE), `${AUDIT_FILE} should exist`).toBe(true);
-    const auditText = fs.readFileSync(AUDIT_FILE, "utf8");
+    expect(fs.existsSync(auditFile()), `${auditFile()} should exist`).toBe(true);
+    const auditText = fs.readFileSync(auditFile(), "utf8");
     const auditEntries = readAuditEntries();
     const upCount = auditText.split('"shields_up"').length - 1;
     const downCount = auditText.split('"shields_down"').length - 1;
@@ -1244,7 +1200,7 @@ test(
       configMode: "0444",
       configOwner: "root:root",
     });
-    const stateAfterTimer = JSON.parse(fs.readFileSync(STATE_FILE(SANDBOX_NAME), "utf8"));
+    const stateAfterTimer = JSON.parse(fs.readFileSync(stateFile(SANDBOX_NAME), "utf8"));
     expect(stateAfterTimer.fileHashes).toMatchObject({
       [CONFIG_PATH]: expect.any(String),
       [CONFIG_HASH_PATH]: expect.any(String),
@@ -1341,19 +1297,6 @@ test(
     // and removes the exact live child before the public command reaches its
     // guarded config transition.
     let supervisorPaused = false;
-    const processControl = failedStartupProcessControlCommands(
-      recoveryContainerId,
-      liveCensus.pid ?? 0,
-    );
-    cleanup.trackDisposable(`resume stopped supervisor for ${SANDBOX_NAME}`, async () => {
-      await resumeSupervisorIfPaused(supervisorPaused, async () => {
-        const resume = await docker(host, processControl.resumeSupervisor, {
-          artifactName: "cleanup-phase-12-resume-startup-supervisor",
-          timeoutMs: 30_000,
-        });
-        expect(resume.exitCode, resultText(resume)).toBe(0);
-      });
-    });
     const openshellResolution = await host.command(
       "bash",
       ["-lc", 'command -v "$1"', "resolve-openshell", host.openshellCommandPath],
@@ -1366,13 +1309,25 @@ test(
     expect(openshellResolution.exitCode, resultText(openshellResolution)).toBe(0);
     const realOpenshellPath = openshellResolution.stdout.trim();
     expect(path.isAbsolute(realOpenshellPath), realOpenshellPath).toBe(true);
-    const policyBoundary = createPolicySetChildlessBoundaryShim(
+    const policyBoundary = createPolicySetChildlessBoundaryShim({
+      configGuardPath: CONFIG_GUARD_PATH,
+      containerId: recoveryContainerId,
       realOpenshellPath,
-      recoveryContainerId,
-      liveCensus.pid ?? 0,
-    );
+      sandboxName: SANDBOX_NAME,
+      startupPid: liveCensus.pid ?? 0,
+      tempRoot: runtime.home,
+    });
     cleanup.trackDisposable("remove phase-12 OpenShell boundary shim", () => {
       fs.rmSync(policyBoundary.directory, { force: true, recursive: true });
+    });
+    cleanup.trackDisposable(`resume stopped supervisor for ${SANDBOX_NAME}`, async () => {
+      await resumeSupervisorIfPaused(supervisorPaused, async () => {
+        const resume = await docker(host, policyBoundary.resumeSupervisor, {
+          artifactName: "cleanup-phase-12-resume-startup-supervisor",
+          timeoutMs: 30_000,
+        });
+        expect(resume.exitCode, resultText(resume)).toBe(0);
+      });
     });
 
     // The shim may have paused PID 1 even if a later assertion fails. Arm the
@@ -1426,7 +1381,7 @@ test(
       { mode: "2770", owner: "sandbox:sandbox" },
     ]);
 
-    const resumeSupervisor = await docker(host, processControl.resumeSupervisor, {
+    const resumeSupervisor = await docker(host, policyBoundary.resumeSupervisor, {
       artifactName: "phase-12-resume-startup-supervisor",
       timeoutMs: 30_000,
     });

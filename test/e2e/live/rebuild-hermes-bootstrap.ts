@@ -13,7 +13,6 @@ import {
 } from "../../../src/lib/onboard/dashboard-port";
 import type { SandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image/types";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero, type HostCliClient, resultText } from "../fixtures/clients/index.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
@@ -53,6 +52,8 @@ interface RebuildHermesGatewayBootstrapOptions extends RebuildHermesBootstrapOpt
   artifacts: Pick<ArtifactSink, "writeJson">;
   endpointUrl: string;
   expectedModel: string;
+  gatewayName: string;
+  gatewayPort: number;
   sandboxName: string;
 }
 
@@ -182,17 +183,22 @@ export function requirePublishedRebuildHermesCurrentBase(
   return baseResolution;
 }
 
-export function buildRebuildHermesGatewayBootstrapScript(): string {
+export function buildRebuildHermesGatewayBootstrapScript(options: {
+  gatewayName: string;
+  gatewayPort: number;
+}): string {
   return [
     '"use strict";',
     'const { setupInference, startGatewayForRecovery } = require("./dist/lib/onboard");',
+    `const gatewayName = ${JSON.stringify(options.gatewayName)};`,
+    `const gatewayPort = ${JSON.stringify(options.gatewayPort)};`,
     "const model = process.env.NEMOCLAW_MODEL;",
     "const endpoint = process.env.NEMOCLAW_ENDPOINT_URL;",
     "if (!model || !endpoint || !process.env.COMPATIBLE_API_KEY) {",
     '  throw new Error("Hermes gateway bootstrap is missing model, endpoint, or credential");',
     "}",
     "Promise.resolve()",
-    '  .then(() => startGatewayForRecovery({ gatewayName: "nemoclaw" }))',
+    "  .then(() => startGatewayForRecovery({ gatewayName, gatewayPort }))",
     "  .then(() =>",
     "    setupInference(",
     "      null,",
@@ -202,7 +208,7 @@ export function buildRebuildHermesGatewayBootstrapScript(): string {
     '      "COMPATIBLE_API_KEY",',
     "      null,",
     "      [],",
-    '      { gatewayName: "nemoclaw", preferredInferenceApi: "openai-completions" },',
+    '      { gatewayName, preferredInferenceApi: "openai-completions" },',
     "    ),",
     "  )",
     "  .then((result) => {",
@@ -320,7 +326,7 @@ export async function resolveRebuildHermesCurrentBase(
     ["image", "inspect", "--format", "{{json .}}", baseResolution.ref],
     {
       artifactName: "phase-1-inspect-current-hermes-base-source",
-      env: buildAvailabilityProbeEnv(),
+      env: options.envFactory(),
       redactionValues: options.redactionValues,
       timeoutMs: 2 * 60_000,
     },
@@ -333,13 +339,14 @@ export async function requireRebuildHermesHostedInferenceRoute(
   host: HostCliClient,
   envFactory: RebuildHermesChildEnvFactory,
   apiKey: string,
+  gatewayName: string,
   expectedModel: string,
   artifactName: string,
   redactionValues: string[],
 ): Promise<{ provider: string; model: string }> {
   const routeProbe = await host.command(
     host.openshellCommandPath,
-    ["inference", "get", "-g", "nemoclaw"],
+    ["inference", "get", "-g", gatewayName],
     {
       artifactName,
       env: envFactory(apiKey),
@@ -463,7 +470,13 @@ export async function bootstrapRebuildHermesGateway(
 ): Promise<{ dashboardPort: number; route: { provider: string; model: string } }> {
   const gatewayBootstrap = await options.host.command(
     process.execPath,
-    ["-e", buildRebuildHermesGatewayBootstrapScript()],
+    [
+      "-e",
+      buildRebuildHermesGatewayBootstrapScript({
+        gatewayName: options.gatewayName,
+        gatewayPort: options.gatewayPort,
+      }),
+    ],
     {
       artifactName: "phase-1-bootstrap-hermes-gateway-inference",
       cwd: REPO_ROOT,
@@ -483,7 +496,7 @@ export async function bootstrapRebuildHermesGateway(
 
   const gatewayProbe = await options.host.command(
     options.activeOpenshellBin,
-    ["gateway", "info", "-g", "nemoclaw"],
+    ["gateway", "info", "-g", options.gatewayName],
     {
       artifactName: "phase-1-gateway-probe",
       env: options.envFactory(options.apiKey),
@@ -491,11 +504,15 @@ export async function bootstrapRebuildHermesGateway(
       timeoutMs: 30_000,
     },
   );
-  assertExitZero(gatewayProbe, "product bootstrap must leave a reusable 'nemoclaw' gateway");
+  assertExitZero(
+    gatewayProbe,
+    `product bootstrap must leave reusable gateway '${options.gatewayName}'`,
+  );
   const route = await requireRebuildHermesHostedInferenceRoute(
     options.host,
     options.envFactory,
     options.apiKey,
+    options.gatewayName,
     options.expectedModel,
     "phase-1-inference-route",
     options.redactionValues,
@@ -516,7 +533,8 @@ export async function bootstrapRebuildHermesGateway(
     forwardListOutput: resultText(forwardList),
   });
   await options.artifacts.writeJson("phase-1-gateway-inference-bootstrap.json", {
-    gateway: "nemoclaw",
+    gateway: options.gatewayName,
+    gatewayPort: options.gatewayPort,
     route,
     requestedRoute: {
       provider: "compatible-endpoint",

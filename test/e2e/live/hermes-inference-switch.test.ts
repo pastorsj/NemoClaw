@@ -1,9 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
+import fs from "node:fs";
+
 import { resultText } from "../fixtures/clients/index.ts";
 import { trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
+import {
+  createPrivateTestHome,
+  requireIsolatedTestGateway,
+} from "../fixtures/environment-profiles.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { DEFAULT_HOSTED_INFERENCE_BASE_URL } from "../fixtures/hosted-inference.ts";
@@ -66,7 +71,9 @@ function canonicalEndpoint(value: unknown): string | null {
   return typeof value === "string" ? new URL(value).toString() : null;
 }
 
-test("Hermes inference set updates route/config and preserves live runtime", {
+test(
+  "Hermes inference set updates route/config and preserves live runtime",
+  {
   timeout: TIMEOUT_MS,
   meta: {
     e2ePhases: [
@@ -79,7 +86,15 @@ test("Hermes inference set updates route/config and preserves live runtime", {
       "prove split provider/model credential resolution",
     ],
   },
-}, async ({ artifacts, cleanup, host, progress, sandbox, secrets }) => {
+  },
+  async ({ artifacts, cleanup, host, progress, sandbox, secrets }) => {
+    const testGateway = requireIsolatedTestGateway();
+    const gatewayName = testGateway.name;
+    const gatewayPort = Number(testGateway.environment.NEMOCLAW_GATEWAY_PORT);
+    const home = createPrivateTestHome(".nemoclaw-hermes-switch-home-");
+    cleanup.trackDisposable(`remove Hermes inference switch test home for ${SANDBOX_NAME}`, () => {
+      fs.rmSync(home, { recursive: true, force: true });
+    });
   await artifacts.target.declare({
     id: "hermes-inference-switch",
     boundary:
@@ -91,8 +106,10 @@ test("Hermes inference set updates route/config and preserves live runtime", {
     runtimeSwitchApi: RUNTIME_SWITCH_API,
   });
 
-  const cleanupEnv = env();
-  cleanup.trackGateway(host, "nemoclaw", {
+    const commandEnv = (apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv =>
+      env(apiKey, extra, home);
+    const cleanupEnv = commandEnv();
+    cleanup.trackGateway(host, gatewayName, {
     artifactName: "cleanup-openshell-gateway",
     env: cleanupEnv,
     timeoutMs: 60_000,
@@ -109,11 +126,11 @@ test("Hermes inference set updates route/config and preserves live runtime", {
     env: cleanupEnv,
     timeoutMs: 120_000,
   });
-  await cleanupHermesSwitch(host, sandbox);
+    await cleanupHermesSwitch(host, sandbox, home);
 
   const docker = await host.command("docker", ["info"], {
     artifactName: "docker-info",
-    env: buildAvailabilityProbeEnv(),
+      env: commandEnv(),
     timeoutMs: 30_000,
   });
   expect(docker.exitCode, resultText(docker)).toBe(0);
@@ -165,12 +182,12 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   };
 
   progress.phase("install baseline Hermes runtime");
-  const install = await installHermes(host, apiKey, installEnv);
+    const install = await installHermes(host, apiKey, installEnv, home);
   expect(install.exitCode, resultText(install)).toBe(0);
   expectAuthenticatedBaselineInventoryRequest(mockBaseline);
-  const baselineRoute = await sandbox.openshell(["inference", "get", "-g", "nemoclaw"], {
+    const baselineRoute = await sandbox.openshell(["inference", "get", "-g", gatewayName], {
     artifactName: "openshell-inference-route-before-switch",
-    env: env(),
+      env: commandEnv(),
     timeoutMs: 30_000,
   });
   expect(baselineRoute.exitCode, resultText(baselineRoute)).toBe(0);
@@ -179,15 +196,15 @@ test("Hermes inference set updates route/config and preserves live runtime", {
     model: hostedInstallModel(installEnv),
   });
   const publicProvider = publicApiKey
-    ? await registerPublicNvidiaSwitchProvider(host, publicApiKey, env())
+      ? await registerPublicNvidiaSwitchProvider(host, publicApiKey, commandEnv())
     : null;
   publicProvider && expect(publicProvider.exitCode, resultText(publicProvider)).toBe(0);
-  const switchBinding = await prepareCompatibleAnthropicSwitchBinding(host, cleanup);
+    const switchBinding = await prepareCompatibleAnthropicSwitchBinding(host, cleanup, home);
   const switchEndpointUrl = switchBinding?.endpointUrl ?? null;
   switchBinding && redactionValues.push(switchBinding.credentialValue);
 
-  const pidBefore = await hermesGatewayPid(sandbox, "pid-before");
-  const envHashBefore = await envHash(sandbox, "env-hash-before");
+    const pidBefore = await hermesGatewayPid(sandbox, "pid-before", home);
+    const envHashBefore = await envHash(sandbox, "env-hash-before", home);
 
   progress.phase("switch Hermes inference provider");
   const compatibleMetadataArgs = compatibleAnthropicMetadataArgs(switchEndpointUrl);
@@ -198,6 +215,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
     {
       artifacts,
       compatibleBinding: switchBinding,
+        home,
     },
   );
   expect(switched.exitCode, resultText(switched)).toBe(0);
@@ -208,23 +226,24 @@ test("Hermes inference set updates route/config and preserves live runtime", {
       host,
       "compatible-anthropic-endpoint",
       "COMPATIBLE_ANTHROPIC_API_KEY",
+        home,
     ));
 
   progress.phase("validate switched route and locked config");
-  const pidAfter = await hermesGatewayPid(sandbox, "pid-after");
+    const pidAfter = await hermesGatewayPid(sandbox, "pid-after", home);
   maybeAssertPidStable(pidBefore, pidAfter, (actual, expected) => expect(actual).toBe(expected));
 
   const health = await sandbox.exec(
     SANDBOX_NAME,
     ["curl", "-sf", "--max-time", "10", "http://localhost:8642/health"],
-    { artifactName: "hermes-health-after-switch", env: env(), timeoutMs: 30_000 },
+      { artifactName: "hermes-health-after-switch", env: commandEnv(), timeoutMs: 30_000 },
   );
   expect(health.exitCode, resultText(health)).toBe(0);
   expect(resultText(health)).toMatch(/ok/i);
 
-  const route = await sandbox.openshell(["inference", "get", "-g", "nemoclaw"], {
+    const route = await sandbox.openshell(["inference", "get", "-g", gatewayName], {
     artifactName: "openshell-inference-route",
-    env: env(),
+      env: commandEnv(),
     timeoutMs: 30_000,
   });
   expect(route.exitCode, resultText(route)).toBe(0);
@@ -235,7 +254,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
 
   const config = await sandbox.exec(SANDBOX_NAME, ["cat", "/sandbox/.hermes/config.yaml"], {
     artifactName: "hermes-config-yaml",
-    env: env(),
+      env: commandEnv(),
     redactionValues,
     timeoutMs: 30_000,
   });
@@ -245,21 +264,18 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   expect(model.provider).toBe("custom");
   expect(model.base_url).toBe(expectedBaseUrl());
   expect(model.api_mode).toBe(expectedApiMode());
-  expect((await apiKeyShape(sandbox)).exitCode).toBe(0);
+    expect((await apiKeyShape(sandbox, home)).exitCode).toBe(0);
   expect(config.stdout).not.toMatch(/^models:\s*$/mu);
 
-  const fabricConfig = await sandbox.exec(
-    SANDBOX_NAME,
-    ["cat", "/sandbox/.hermes/fabric.json"],
-    {
+    const fabricConfig = await sandbox.exec(SANDBOX_NAME, ["cat", "/sandbox/.hermes/fabric.json"], {
       artifactName: "hermes-fabric-config-after-switch",
-      env: env(),
+      env: commandEnv(),
       redactionValues,
       timeoutMs: 30_000,
-    },
-  );
+    });
   expect(fabricConfig.exitCode, resultText(fabricConfig)).toBe(0);
-  const fabricModel = (JSON.parse(fabricConfig.stdout) as {
+    const fabricModel = (
+      JSON.parse(fabricConfig.stdout) as {
     models?: {
       default?: {
         api_key_env?: unknown;
@@ -268,7 +284,8 @@ test("Hermes inference set updates route/config and preserves live runtime", {
         provider?: unknown;
       };
     };
-  }).models?.default;
+      }
+    ).models?.default;
   expect(fabricModel).toEqual({
     api_key_env: "HERMES_FABRIC_API_KEY",
     base_url: expectedBaseUrl(),
@@ -281,7 +298,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
     ["cat", "/sandbox/.hermes/profiles/dashboard-home/config.yaml"],
     {
       artifactName: "hermes-dashboard-config-yaml-after-switch",
-      env: env(),
+        env: commandEnv(),
       redactionValues,
       timeoutMs: 30_000,
     },
@@ -292,15 +309,11 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   expect(dashboardModel.provider).toBe(SWITCH_PROVIDER);
   expect(dashboardModel.base_url).toBe(expectedBaseUrl());
   expect(dashboardModel.api_mode).toBe(expectedApiMode());
-  [
-    "approvals",
-    "browser",
-    "session_reset",
-    "display",
-    "updates",
-  ].forEach((reviewedPolicySection) => {
+    ["approvals", "browser", "session_reset", "display", "updates"].forEach(
+      (reviewedPolicySection) => {
     expect(dashboardConfig.stdout).toMatch(new RegExp(`^${reviewedPolicySection}:`, "mu"));
-  });
+      },
+    );
 
   const dashboardModelInfo = await sandbox.exec(
     SANDBOX_NAME,
@@ -313,30 +326,30 @@ test("Hermes inference set updates route/config and preserves live runtime", {
     ],
     {
       artifactName: "hermes-dashboard-model-info-after-switch",
-      env: env(),
+        env: commandEnv(),
       timeoutMs: 30_000,
     },
   );
   expect(dashboardModelInfo.exitCode, resultText(dashboardModelInfo)).toBe(0);
   expect(JSON.parse(dashboardModelInfo.stdout)).toMatchObject({ model: SWITCH_MODEL });
 
-  const strictHash = await hashCheck(sandbox, "/etc/nemoclaw/hermes.config-hash", "strict");
+    const strictHash = await hashCheck(sandbox, "/etc/nemoclaw/hermes.config-hash", "strict", home);
   expect(strictHash.exitCode, resultText(strictHash)).toBe(0);
   expect(strictHash.stdout).toContain("OK");
-  const compatHash = await hashCheck(sandbox, "/sandbox/.hermes/.config-hash", "compat");
+    const compatHash = await hashCheck(sandbox, "/sandbox/.hermes/.config-hash", "compat", home);
   expect(compatHash.exitCode, resultText(compatHash)).toBe(0);
   expect(compatHash.stdout).toContain("OK");
-  const strictPerms = await strictHashPerms(sandbox);
+    const strictPerms = await strictHashPerms(sandbox, home);
   expect(strictPerms.stdout.trim()).toMatch(/^0\s+[0-7]+$/u);
   expect(Number.parseInt(strictPerms.stdout.trim().split(/\s+/u)[1], 8) & 0o222).toBe(0);
 
   maybeAssertEnvHashStable(
     envHashBefore,
-    await envHash(sandbox, "env-hash-after"),
+      await envHash(sandbox, "env-hash-after", home),
     (actual, expected) => expect(actual).toBe(expected),
   );
 
-  const state = registryState();
+    const state = registryState(home, gatewayPort);
   expect(state.registry.sandboxes?.[SANDBOX_NAME]?.agent).toBe("hermes");
   expect(state.registry.sandboxes?.[SANDBOX_NAME]?.provider).toBe(SWITCH_PROVIDER);
   expect(state.registry.sandboxes?.[SANDBOX_NAME]?.model).toBe(SWITCH_MODEL);
@@ -347,7 +360,9 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   const publicSwitch = SWITCH_PROVIDER === PUBLIC_NVIDIA_SWITCH_PROVIDER;
   const durableEndpointUrl = publicSwitch
     ? null
-    : (switchEndpointUrl ?? process.env.NEMOCLAW_ENDPOINT_URL ?? DEFAULT_HOSTED_INFERENCE_BASE_URL);
+      : (switchEndpointUrl ??
+        process.env.NEMOCLAW_ENDPOINT_URL ??
+        DEFAULT_HOSTED_INFERENCE_BASE_URL);
   const durableCredentialEnv = publicSwitch
     ? null
     : switchEndpointUrl
@@ -364,7 +379,9 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   expect(canonicalEndpoint(state.session.endpointUrl)).toBe(
     canonicalEndpoint(publicSwitch ? "https://inference.local/v1" : durableEndpointUrl),
   );
-  expect(state.session.credentialEnv).toBe(publicSwitch ? "OPENAI_API_KEY" : durableCredentialEnv);
+    expect(state.session.credentialEnv).toBe(
+      publicSwitch ? "OPENAI_API_KEY" : durableCredentialEnv,
+    );
   expect(state.session.preferredInferenceApi).toBe(RUNTIME_SWITCH_API);
   expect(state.session.nimContainer).toBeNull();
 
@@ -385,7 +402,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
         trustedSandboxShellScript(inferenceLocalCommand(inferenceLocalPayload)),
         {
           artifactName: `hermes-inference-local-chat-after-switch-${attempt}`,
-          env: env(),
+            env: commandEnv(),
           redactionValues,
           timeoutMs: 120_000,
         },
@@ -411,7 +428,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
         trustedSandboxShellScript(hermesApiCommand(hermesApiPayload)),
         {
           artifactName: `hermes-api-chat-after-switch-${attempt}`,
-          env: env(),
+            env: commandEnv(),
           redactionValues,
           timeoutMs: 150_000,
         },
@@ -424,7 +441,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   await runPublicFabricTurn({
     agent: "hermes",
     artifacts,
-    env: env(),
+      env: commandEnv(),
     host,
     lifecyclePhase: "after-inference-switch",
     redactionValues,
@@ -451,7 +468,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
         ],
         {
           artifactName: `hermes-cli-split-provider-model-after-switch-${attempt}`,
-          env: env(),
+            env: commandEnv(),
           redactionValues,
           timeoutMs: 150_000,
         },
@@ -463,14 +480,15 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   progress.phase("prove split provider/model credential resolution");
   const { model: proxyResolutionModel, requestOffset } = await prepareProxyResolutionRoute({
     apiKey,
+      home,
     host,
     mockBaseline,
     publicProvider,
     redactionValues,
   });
-  const persistedProxyRoute = await sandbox.openshell(["inference", "get", "-g", "nemoclaw"], {
+    const persistedProxyRoute = await sandbox.openshell(["inference", "get", "-g", gatewayName], {
     artifactName: "proxy-resolution-route-after-set",
-    env: env(),
+      env: commandEnv(),
     redactionValues,
     timeoutMs: 30_000,
   });
@@ -502,7 +520,7 @@ test("Hermes inference set updates route/config and preserves live runtime", {
         ],
         {
           artifactName: `hermes-cli-chat-split-provider-namespaced-model-proxy-resolution-${attempt}`,
-          env: env(),
+            env: commandEnv(),
           redactionValues,
           timeoutMs: 150_000,
         },
@@ -512,4 +530,5 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   expect(proxyResolutionCli.stdout).toMatch(/\bPONG\b/iu);
 
   expectAuthenticatedProxyResolutionRequests(mockBaseline, requestOffset, proxyResolutionModel);
-});
+  },
+);

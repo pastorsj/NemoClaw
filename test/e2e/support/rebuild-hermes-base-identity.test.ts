@@ -12,6 +12,7 @@ import {
   verifyRebuildHermesCurrentBaseReuse,
   verifyRebuildHermesFinalBaseIdentity,
   verifyRebuildHermesOldBaseIsStale,
+  verifySeededHermesBaseResolution,
 } from "../live/rebuild-hermes-base-identity.ts";
 import { REBUILD_HERMES_OLD_BASE_FIXTURE } from "../live/rebuild-hermes-old-base-fixture.ts";
 
@@ -164,6 +165,46 @@ describe("rebuild-Hermes base identity", () => {
         imageInspect({ id: old.imageId, repoDigests: [`${old.imageName}@${old.digest}`] }),
       ),
     ).toThrow("was not classified stale by resolution key mismatch");
+  });
+
+  it("accepts no seeded base identity in the normal rebuild lane (#7144)", () => {
+    const old = oldMetadata();
+
+    expect(
+      verifySeededHermesBaseResolution(
+        false,
+        null,
+        old,
+        currentMetadata(),
+        imageInspect({ id: old.imageId, repoDigests: [old.ref] }),
+      ),
+    ).toBeNull();
+    expect(() =>
+      verifySeededHermesBaseResolution(
+        false,
+        old,
+        old,
+        currentMetadata(),
+        imageInspect({ id: old.imageId, repoDigests: [old.ref] }),
+      ),
+    ).toThrow("normal rebuild lane must not manufacture a stale base-resolution hint");
+  });
+
+  it("classifies the seeded historical identity in the stale rebuild lane (#7144)", () => {
+    const old = oldMetadata();
+    const current = currentMetadata();
+    const oldInspect = imageInspect({ id: old.imageId, repoDigests: [old.ref] });
+
+    expect(verifySeededHermesBaseResolution(true, old, old, current, oldInspect)).toEqual({
+      reason: "key_mismatch",
+      oldKey: "old-key",
+      currentKey: "current-key",
+      oldRef: old.ref,
+      currentRef: current.ref,
+    });
+    expect(() =>
+      verifySeededHermesBaseResolution(true, null, old, current, oldInspect),
+    ).toThrow("synthetic old Hermes sandbox must retain its stale immutable base identity");
   });
 
   it.each([

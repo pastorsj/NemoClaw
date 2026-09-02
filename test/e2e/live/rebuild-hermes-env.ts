@@ -8,11 +8,53 @@ const HERMES_BASE_IMAGE_OVERRIDE_ENV = "NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF";
 const OFFICIAL_HERMES_BASE_DIGEST =
   /^ghcr\.io\/nvidia\/nemoclaw\/hermes-sandbox-base@sha256:[0-9a-f]{64}$/;
 const LOCAL_HERMES_BASE = /^nemoclaw-hermes-sandbox-base-local:[^\s]+$/;
+const REBUILD_HERMES_ISOLATION_ENV = [
+  "NEMOCLAW_GATEWAY_PORT",
+  "OPENSHELL_GATEWAY",
+  "XDG_BIN_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+] as const;
 
 export interface RebuildHermesBaseReusePlan {
   sourceRef: string;
   preparedRef: string;
   childEnv: NodeJS.ProcessEnv;
+}
+
+export type RebuildHermesEnvFactory = (
+  apiKey?: string,
+  extra?: NodeJS.ProcessEnv,
+) => NodeJS.ProcessEnv;
+
+export function createRebuildHermesEnvFactory(
+  baseEnvironment: NodeJS.ProcessEnv,
+  options: {
+    endpointUrl: string;
+    model: string;
+    openshellBin?: string;
+    sandboxName: string;
+  },
+): RebuildHermesEnvFactory {
+  const openshellBin = options.openshellBin?.trim();
+  return (apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv =>
+    buildRebuildHermesChildEnv(baseEnvironment, {
+      NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
+      NEMOCLAW_AGENT: "hermes",
+      NEMOCLAW_COMPAT_MODEL: options.model,
+      NEMOCLAW_ENDPOINT_URL: options.endpointUrl,
+      NEMOCLAW_MODEL: options.model,
+      NEMOCLAW_NON_INTERACTIVE: "1",
+      NEMOCLAW_PREFERRED_API: "openai-completions",
+      NEMOCLAW_PROVIDER: "custom",
+      NEMOCLAW_RECREATE_SANDBOX: "1",
+      NEMOCLAW_SANDBOX_NAME: options.sandboxName,
+      ...(openshellBin ? { NEMOCLAW_OPENSHELL_BIN: openshellBin } : {}),
+      ...(apiKey
+        ? { COMPATIBLE_API_KEY: apiKey, NVIDIA_INFERENCE_API_KEY: apiKey }
+        : {}),
+      ...extra,
+    });
 }
 
 /** Supply the current Discord credential when rebuild replaces the legacy provider. */
@@ -82,6 +124,11 @@ export function buildRebuildHermesChildEnv(
   const acceptDevUnverifiedInstall = base.NEMOCLAW_ACCEPT_DEV_UNVERIFIED_INSTALL;
   return {
     ...buildAvailabilityProbeEnv(base),
+    ...Object.fromEntries(
+      REBUILD_HERMES_ISOLATION_ENV.flatMap((key) =>
+        base[key] === undefined ? [] : [[key, base[key]]],
+      ),
+    ),
     ...(acceptDevUnverifiedInstall === undefined
       ? {}
       : { NEMOCLAW_ACCEPT_DEV_UNVERIFIED_INSTALL: acceptDevUnverifiedInstall }),
