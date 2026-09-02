@@ -21,6 +21,10 @@ const ISOLATED_HOME_DOCKER_SELECTORS = [
 ] as const;
 
 const HOST_OPEN_SHELL_BINARY_SELECTORS = ["NEMOCLAW_OPENSHELL_BIN", "OPENSHELL_BIN"] as const;
+const OPEN_SHELL_COMPONENTS =
+  process.platform === "linux"
+    ? (["openshell", "openshell-gateway", "openshell-sandbox"] as const)
+    : (["openshell", "openshell-gateway"] as const);
 
 export interface TestGatewayBinding {
   readonly environment: NodeJS.ProcessEnv;
@@ -225,13 +229,33 @@ function resolveHostOpenShellBinary(source: NodeJS.ProcessEnv): string {
   throw new Error("Could not resolve an absolute executable OpenShell CLI from the host PATH");
 }
 
-/** Resolve immutable host OpenShell authority without reusing its mutable install directory. */
-function hostOpenShellBinaryAuthority(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/** Put the validated host components at private paths that an in-run repair replaces. */
+function stageHostOpenShellFallback(home: string, source: NodeJS.ProcessEnv): void {
   const sourceHome = source.HOME;
   if (!sourceHome || !path.isAbsolute(sourceHome)) {
     throw new Error("An absolute host HOME is required before isolating NemoClaw E2E state");
   }
-  return { NEMOCLAW_OPENSHELL_BIN: resolveHostOpenShellBinary(source) };
+  const hostOpenShellBinary = resolveHostOpenShellBinary(source);
+  if (!fs.existsSync(home)) return;
+  const privateBinDirectory = path.join(home, ".local", "bin");
+  const hostBinDirectory = path.dirname(hostOpenShellBinary);
+  fs.mkdirSync(privateBinDirectory, { mode: 0o700, recursive: true });
+  for (const component of OPEN_SHELL_COMPONENTS) {
+    const privateComponent = path.join(privateBinDirectory, component);
+    if (fs.existsSync(privateComponent)) {
+      if (!executableFile(privateComponent)) {
+        throw new Error(
+          `The private OpenShell ${component} path must remain executable during E2E isolation`,
+        );
+      }
+      continue;
+    }
+    const hostComponent =
+      component === "openshell"
+        ? hostOpenShellBinary
+        : executableFile(path.join(hostBinDirectory, component));
+    if (hostComponent) fs.symlinkSync(hostComponent, privateComponent);
+  }
 }
 
 /** Read only executable plugin locations from the host Docker CLI config. */
@@ -300,8 +324,8 @@ function createPrivateDockerCliConfig(home: string, source: NodeJS.ProcessEnv): 
 
 /**
  * Isolate NemoClaw and OpenShell state while retaining the reviewed host
- * OpenShell binary location. Preserve local Docker access without exposing
- * the account's Docker config or active gateway selection.
+ * OpenShell CLI as a replaceable private-path fallback. Preserve local Docker
+ * access without exposing the account's Docker config or active gateway.
  */
 export function isolatedNemoClawEnvironment(
   home: string,
@@ -312,8 +336,10 @@ export function isolatedNemoClawEnvironment(
   const dockerHost = resolveIsolatedHomeDockerHost(source, inspect);
   const environment = testHomeEnvironment(home, extra, source);
   for (const selector of ISOLATED_HOME_DOCKER_SELECTORS) delete environment[selector];
-  Object.assign(environment, hostOpenShellBinaryAuthority(source));
+  stageHostOpenShellFallback(home, source);
+  for (const selector of HOST_OPEN_SHELL_BINARY_SELECTORS) delete environment[selector];
   environment.HOME = home;
+  environment.PATH = withInstalledCliPath(environment, home).PATH;
   environment.XDG_BIN_HOME = path.join(home, ".local", "bin");
   environment.XDG_CONFIG_HOME = path.join(home, ".config");
   environment.XDG_DATA_HOME = path.join(home, ".local", "share");

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -142,7 +143,6 @@ describe("E2E environment profiles", () => {
     expect(result).toMatchObject({
       HOME: "/Users/tester/.nemoclaw-e2e-home",
       DOCKER_HOST: "unix:///Users/tester/.colima/default/docker.sock",
-      NEMOCLAW_OPENSHELL_BIN: fs.realpathSync(process.execPath),
       XDG_BIN_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/bin",
       XDG_CONFIG_HOME: "/Users/tester/.nemoclaw-e2e-home/.config",
       XDG_DATA_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/share",
@@ -152,6 +152,7 @@ describe("E2E environment profiles", () => {
     expect(result).not.toHaveProperty("DOCKER_CERT_PATH");
     expect(result).not.toHaveProperty("DOCKER_CONTEXT");
     expect(result).not.toHaveProperty("DOCKER_TLS_VERIFY");
+    expect(result).not.toHaveProperty("NEMOCLAW_OPENSHELL_BIN");
     expect(result).not.toHaveProperty("REGISTRY_AUTH_TOKEN");
     expect(source).toEqual({
       PATH: "/usr/bin",
@@ -165,7 +166,7 @@ describe("E2E environment profiles", () => {
     });
   });
 
-  it("separates explicit host OpenShell authority from the private install directory", () => {
+  it("removes fixed OpenShell overrides from the isolated child", () => {
     const source = {
       HOME: "/home/tester",
       PATH: "/usr/bin",
@@ -182,6 +183,8 @@ describe("E2E environment profiles", () => {
       {
         HOME: "/untrusted/home",
         NEMOCLAW_OPENSHELL_BIN: "/untrusted/openshell",
+        OPENSHELL_BIN: "/untrusted/openshell",
+        PATH: "/untrusted/bin",
         XDG_BIN_HOME: "/untrusted/bin",
         XDG_CONFIG_HOME: "/untrusted/config",
       },
@@ -191,12 +194,18 @@ describe("E2E environment profiles", () => {
 
     expect(result).toMatchObject({
       HOME: "/home/tester/.nemoclaw-e2e-home",
-      NEMOCLAW_OPENSHELL_BIN: fs.realpathSync(process.execPath),
       XDG_BIN_HOME: "/home/tester/.nemoclaw-e2e-home/.local/bin",
       XDG_CONFIG_HOME: "/home/tester/.nemoclaw-e2e-home/.config",
       XDG_DATA_HOME: "/home/tester/.nemoclaw-e2e-home/.local/share",
       XDG_STATE_HOME: "/home/tester/.nemoclaw-e2e-home/.local/state",
     });
+    expect(result).not.toHaveProperty("NEMOCLAW_OPENSHELL_BIN");
+    expect(result).not.toHaveProperty("OPENSHELL_BIN");
+    expect(result.PATH?.split(path.delimiter)).toEqual([
+      "/home/tester/.nemoclaw-e2e-home/.local/bin",
+      "/home/tester/.nemoclaw-e2e-home/.npm-global/bin",
+      "/untrusted/bin",
+    ]);
     expect(result).not.toHaveProperty("XDG_RUNTIME_DIR");
   });
 
@@ -237,7 +246,7 @@ describe("E2E environment profiles", () => {
         vi.fn(),
       );
 
-      expect(result.NEMOCLAW_OPENSHELL_BIN).toBe(fs.realpathSync(openshellPath));
+      expect(result).not.toHaveProperty("NEMOCLAW_OPENSHELL_BIN");
       expect(result.XDG_BIN_HOME).toBe(path.join(home, ".local", "bin"));
       expect(result.PATH?.split(path.delimiter)).toEqual([
         path.join(home, ".local", "bin"),
@@ -245,6 +254,58 @@ describe("E2E environment profiles", () => {
         fixtureRoot,
         "/usr/bin",
       ]);
+    } finally {
+      fs.rmSync(fixtureRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("lets an in-run repair replace the validated host OpenShell fallback", () => {
+    const fixtureParent = path.join(process.cwd(), "node_modules/.cache");
+    fs.mkdirSync(fixtureParent, { recursive: true });
+    const fixtureRoot = fs.mkdtempSync(path.join(fixtureParent, "nemoclaw-openshell-repair-"));
+    const hostBin = path.join(fixtureRoot, "host-bin");
+    const home = path.join(fixtureRoot, "private-home");
+    const privateBin = path.join(home, ".local", "bin");
+    const hostOpenShell = path.join(hostBin, "openshell");
+    fs.mkdirSync(hostBin);
+    fs.writeFileSync(hostOpenShell, "#!/bin/sh\nprintf 'host\\n'\n", { mode: 0o755 });
+    const source = {
+      HOME: "/home/tester",
+      PATH: `${hostBin}${path.delimiter}/usr/bin`,
+      DOCKER_HOST: "unix:///run/user/1000/docker.sock",
+    };
+
+    try {
+      fs.mkdirSync(home);
+      const initialEnvironment = isolatedNemoClawEnvironment(home, {}, source, vi.fn());
+      const selectedOpenShell = path.join(privateBin, "openshell");
+      expect(initialEnvironment).not.toHaveProperty("NEMOCLAW_OPENSHELL_BIN");
+      expect(fs.realpathSync(selectedOpenShell)).toBe(fs.realpathSync(hostOpenShell));
+      expect(initialEnvironment.PATH?.split(path.delimiter).slice(0, 2)).toEqual([
+        privateBin,
+        path.join(home, ".npm-global", "bin"),
+      ]);
+      expect(
+        spawnSync("openshell", [], { encoding: "utf8", env: initialEnvironment }).stdout.trim(),
+      ).toBe("host");
+
+      fs.unlinkSync(selectedOpenShell);
+      fs.writeFileSync(selectedOpenShell, "#!/bin/sh\nprintf 'private\\n'\n", { mode: 0o755 });
+      fs.writeFileSync(path.join(privateBin, "openshell-gateway"), "#!/bin/sh\nexit 0\n", {
+        mode: 0o755,
+      });
+      fs.writeFileSync(path.join(privateBin, "openshell-sandbox"), "#!/bin/sh\nexit 0\n", {
+        mode: 0o755,
+      });
+
+      const repairedEnvironment = isolatedNemoClawEnvironment(home, {}, source, vi.fn());
+      expect(repairedEnvironment).not.toHaveProperty("NEMOCLAW_OPENSHELL_BIN");
+      expect(fs.realpathSync(selectedOpenShell)).toBe(selectedOpenShell);
+      expect(repairedEnvironment.XDG_BIN_HOME).toBe(privateBin);
+      expect(repairedEnvironment.PATH?.split(path.delimiter)[0]).toBe(privateBin);
+      expect(
+        spawnSync("openshell", [], { encoding: "utf8", env: initialEnvironment }).stdout.trim(),
+      ).toBe("private");
     } finally {
       fs.rmSync(fixtureRoot, { force: true, recursive: true });
     }
