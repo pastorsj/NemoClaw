@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 // The ready summary resolves the sandbox's API port from the registry. Stub the
 // lookup so these unit tests never read the developer's real state file.
 const getSandboxMock = vi.hoisted(() =>
-  vi.fn((): { hermesApiPort?: number | null } | null => null),
+  vi.fn((): { dashboardPort?: number | null; hermesApiPort?: number | null } | null => null),
 );
 vi.mock("../state/registry", () => ({ getSandbox: getSandboxMock }));
 
@@ -611,7 +611,7 @@ describe("agent setup session boundaries", () => {
   }
 
   it("probes the sandbox's own Hermes API port instead of the manifest default (#9739)", async () => {
-    getSandboxMock.mockReturnValue({ hermesApiPort: 8643 });
+    getSandboxMock.mockReturnValue({ dashboardPort: 18791, hermesApiPort: 8643 });
     const runCaptureOpenshell = vi
       .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
       .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok");
@@ -658,7 +658,7 @@ describe("agent setup session boundaries", () => {
   });
 
   it("leaves a non-Hermes probe URL on its manifest port when the registry records a Hermes API port (#9739)", async () => {
-    getSandboxMock.mockReturnValue({ hermesApiPort: 8643 });
+    getSandboxMock.mockReturnValue({ dashboardPort: 18791, hermesApiPort: 8643 });
     const runCaptureOpenshell = vi
       .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
       .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok");
@@ -678,6 +678,49 @@ describe("agent setup session boundaries", () => {
 
     expect(probeUrlsFrom(runCaptureOpenshell)).toEqual(["http://localhost:8642/health"]);
     expect(context.recordStepFailed).not.toHaveBeenCalled();
+  });
+
+  async function proveAllocatedPrimaryPortProbe(
+    resume: boolean,
+    runCaptureOpenshell: ReturnType<typeof vi.fn<OnboardContext["runCaptureOpenshell"]>>,
+  ): Promise<void> {
+    getSandboxMock.mockReturnValue({ dashboardPort: 18791 });
+    const { context } = createAgentSetupContext(runCaptureOpenshell);
+
+    await handleAgentSetup(
+      "openclaw-port-shift",
+      "model-x",
+      "provider-x",
+      makeAgent({
+        name: "openclaw",
+        forwardPort: 18789,
+        healthProbe: {
+          url: "http://127.0.0.1:18789/health",
+          port: 18789,
+          timeout_seconds: 1,
+        },
+      }),
+      resume,
+      null,
+      context,
+    );
+
+    expect(probeUrlsFrom(runCaptureOpenshell)).toEqual(["http://127.0.0.1:18791/health"]);
+    expect(context.recordStepFailed).not.toHaveBeenCalled();
+  }
+
+  it("probes the sandbox's allocated primary dashboard port during fresh setup", async () => {
+    const runCaptureOpenshell = vi
+      .fn<OnboardContext["runCaptureOpenshell"]>(() => '{"ok":true,"status":"live"}')
+      .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok");
+    await proveAllocatedPrimaryPortProbe(false, runCaptureOpenshell);
+  });
+
+  it("probes the sandbox's allocated primary dashboard port during resumed setup", async () => {
+    const runCaptureOpenshell = vi.fn<OnboardContext["runCaptureOpenshell"]>(
+      () => '{"ok":true,"status":"live"}',
+    );
+    await proveAllocatedPrimaryPortProbe(true, runCaptureOpenshell);
   });
 
   it("retargets the resume health probe at the sandbox's own API port (#9739)", async () => {

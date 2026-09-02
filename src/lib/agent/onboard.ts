@@ -297,11 +297,38 @@ function resolveAgentHealthProbeUrl(
   sandboxName: string,
   probeUrl: string,
 ): string {
-  if (agent.name !== "hermes") return probeUrl;
-  return retargetHermesApiPortInUrl(
-    probeUrl,
-    resolveSandboxHermesApiPort(registry.getSandbox(sandboxName) ?? {}),
-  );
+  const sandbox = registry.getSandbox(sandboxName);
+  if (agent.name === "hermes") {
+    return retargetHermesApiPortInUrl(probeUrl, resolveSandboxHermesApiPort(sandbox ?? {}));
+  }
+
+  const declaredPort = agent.healthProbe?.port;
+  if (declaredPort !== agent.forwardPort) return probeUrl;
+  return retargetHealthProbePort(probeUrl, declaredPort, sandbox?.dashboardPort);
+}
+
+/** Retarget a manifest probe only when its declared listener received a new port. */
+function retargetHealthProbePort(
+  probeUrl: string,
+  declaredPort: unknown,
+  effectivePort: unknown,
+): string {
+  if (
+    !isValidForwardPort(declaredPort) ||
+    !isValidForwardPort(effectivePort) ||
+    declaredPort === effectivePort
+  ) {
+    return probeUrl;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(probeUrl);
+  } catch {
+    return probeUrl;
+  }
+  if (parsed.port !== String(declaredPort)) return probeUrl;
+  parsed.port = String(effectivePort);
+  return parsed.toString();
 }
 
 const AGENT_BINARY_OBSERVATION_ATTEMPTS = 31;
