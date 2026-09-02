@@ -240,7 +240,7 @@ class HermesProxyTests(unittest.TestCase):
             adapter_python.chmod(0o700)
             runner_bin = str(Path(sys.executable).parent)
             environment = {
-                "ADAPTER_PYTHON": str(adapter_python),
+                "NEMOCLAW_HERMES_ADAPTER_PYTHON": str(adapter_python),
                 "HERMES_FABRIC_API_KEY": "preserved-credential",
                 "PATH": os.pathsep.join(
                     [runner_bin, str(adapter_bin), "/usr/bin", str(adapter_bin)]
@@ -276,7 +276,7 @@ class HermesProxyTests(unittest.TestCase):
         )
 
     def test_missing_adapter_interpreter_fails_before_process_creation(self) -> None:
-        for environment in ({}, {"ADAPTER_PYTHON": ""}):
+        for environment in ({}, {"NEMOCLAW_HERMES_ADAPTER_PYTHON": ""}):
             with self.subTest(environment=environment):
                 with (
                     patch.dict(os.environ, environment, clear=True),
@@ -304,7 +304,9 @@ class HermesProxyTests(unittest.TestCase):
                 with self.subTest(candidate=candidate):
                     with (
                         patch.dict(
-                            os.environ, {"ADAPTER_PYTHON": candidate}, clear=True
+                            os.environ,
+                            {"NEMOCLAW_HERMES_ADAPTER_PYTHON": candidate},
+                            clear=True,
                         ),
                         patch.object(
                             proxy_adapter.subprocess, "Popen"
@@ -312,7 +314,7 @@ class HermesProxyTests(unittest.TestCase):
                     ):
                         with self.assertRaisesRegex(
                             FileNotFoundError,
-                            proxy_adapter.ADAPTER_PYTHON_UNAVAILABLE,
+                            proxy_adapter.HERMES_ADAPTER_PYTHON_UNAVAILABLE,
                         ):
                             proxy_adapter._start_supervisor()
                     start_process.assert_not_called()
@@ -456,7 +458,7 @@ class ComposedFabricTests(unittest.TestCase):
         self.closed_marker = self.base_dir / "hermes-closed.txt"
         self.secret = "nvapi-hermes-composed-redaction-sentinel"
         self.environment = {
-            "ADAPTER_PYTHON": sys.executable,
+            "NEMOCLAW_HERMES_ADAPTER_PYTHON": sys.executable,
             "HERMES_FABRIC_API_KEY": self.secret,
             "NEMOCLAW_FAKE_HERMES_INVOCATION": str(self.invocation_marker),
             "NEMOCLAW_FAKE_HERMES_CLOSED": str(self.closed_marker),

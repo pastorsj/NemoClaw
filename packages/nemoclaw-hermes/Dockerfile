@@ -902,7 +902,7 @@ RUN if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
 
 # Keep Fabric's orchestration graph separate from Hermes' native environment.
 # The released Hermes adapter runs with Hermes' interpreter through
-# ADAPTER_PYTHON, while the generic NemoClaw runner stays independently pinned.
+# NEMOCLAW_HERMES_ADAPTER_PYTHON, while the generic runner stays independently pinned.
 COPY packages/nemoclaw-hermes/fabric/runtime-requirements.lock /tmp/nemoclaw-hermes-fabric-runtime.lock
 RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
     && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
@@ -961,7 +961,7 @@ RUN set -eu; \
         /tmp/nemoclaw-fabric-wheels /tmp/nemoclaw-fabric-build-requirements.lock \
         /tmp/nemoclaw-hermes-fabric-adapter.lock
 
-ENV ADAPTER_PYTHON=/opt/hermes/.venv/bin/python
+ENV NEMOCLAW_HERMES_ADAPTER_PYTHON=/opt/hermes/.venv/bin/python
 
 WORKDIR /sandbox
 RUN test "$(id -u sandbox):$(id -g sandbox):$(pwd)" = "998:999:/sandbox"

@@ -21,7 +21,8 @@ Hermes' native gateway and interactive command remain unchanged. The package ins
 `nemoclaw-fabric==0.1.2` runner with `nemo-fabric==0.2.0` and
 `nemo-fabric-runtime==0.2.0` in a separate Python 3.13 environment. It installs the released
 `nemo-fabric-adapters-hermes==0.2.0` adapter, its contract, and common support packages into the
-native Hermes environment. `ADAPTER_PYTHON` makes that interpreter boundary explicit.
+native Hermes environment. `NEMOCLAW_HERMES_ADAPTER_PYTHON` makes that interpreter boundary
+explicit without overriding NeMo Fabric's `ADAPTER_PYTHON` runner selection.
 
 `fabric/runtime-requirements.lock` and `fabric/adapter-requirements.lock` hash lock the two graphs.
 Package tests validate the released descriptor and project NemoClaw's managed configuration

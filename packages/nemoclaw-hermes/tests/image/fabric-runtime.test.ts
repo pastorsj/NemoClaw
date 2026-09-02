@@ -33,7 +33,8 @@ describe("Hermes Fabric runtime entrypoint", () => {
       '        "$runner_wheel" "$proxy_wheel"',
     ].join("\n");
 
-    expect(dockerfile).toContain("ENV ADAPTER_PYTHON=/opt/hermes/.venv/bin/python");
+    expect(dockerfile).toContain("ENV NEMOCLAW_HERMES_ADAPTER_PYTHON=/opt/hermes/.venv/bin/python");
+    expect(dockerfile).not.toContain("ENV ADAPTER_PYTHON=");
     expect(dockerfile).toContain(proxyInstall);
     expect(dockerfile).toContain(
       'expected = {"nemoclaw-fabric": "0.1.2", "nemoclaw-hermes-fabric": "0.1.0",',

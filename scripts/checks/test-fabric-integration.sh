@@ -138,7 +138,7 @@ PY
 
 # Reproduce the managed Hermes image's intentional two-environment boundary.
 # The generic runner must import the package proxy, while the released adapter
-# and Hermes SDK remain behind the ADAPTER_PYTHON process boundary.
+# and Hermes SDK remain behind the package-owned interpreter boundary.
 "${python_command}" -m venv "${hermes_runner_venv}"
 "${python_command}" -m venv "${hermes_adapter_venv}"
 hermes_runner_python="${hermes_runner_venv}/bin/python"
@@ -162,10 +162,11 @@ hermes_adapter_python="${hermes_adapter_venv}/bin/python"
   "${hermes_proxy_wheel}"
 "${hermes_runner_python}" -m pip check
 "${hermes_adapter_python}" -m pip check
-ADAPTER_PYTHON="${hermes_adapter_python}" "${hermes_runner_python}" -I - <<'PY'
+NEMOCLAW_HERMES_ADAPTER_PYTHON="${hermes_adapter_python}" "${hermes_runner_python}" -I - <<'PY'
 import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from unittest.mock import patch
 
 from nemoclaw_hermes_fabric import adapter
@@ -186,13 +187,14 @@ with patch.object(adapter.subprocess, "Popen") as start_process:
     adapter._start_supervisor()
 command = start_process.call_args.args[0]
 child_environment = start_process.call_args.kwargs["env"]
-adapter_bin = os.path.dirname(os.environ["ADAPTER_PYTHON"])
-assert command[0] == sys.executable
+adapter_python = str(Path(os.environ["NEMOCLAW_HERMES_ADAPTER_PYTHON"]))
+adapter_bin = str(Path(adapter_python).parent)
+assert command[0] == sys.executable, (command, sys.executable)
 assert command[-3:] == [
-    os.environ["ADAPTER_PYTHON"],
+    adapter_python,
     "-m",
     adapter.OFFICIAL_ADAPTER_MODULE,
-]
+], command
 assert child_environment["VIRTUAL_ENV"] == os.path.dirname(adapter_bin)
 assert child_environment["PATH"].split(os.pathsep)[0] == adapter_bin
 assert "PYTHONHOME" not in child_environment
@@ -216,6 +218,102 @@ assert version("nemo-fabric-adapters-common") == "0.2.0"
 assert version("nemo-fabric-adapters-hermes") == "0.2.0"
 assert_missing("nemoclaw-fabric")
 assert_missing("nemoclaw-hermes-fabric")
+PY
+
+hermes_lifecycle_dir="${work_dir}/hermes-split-lifecycle"
+hermes_stub_dir="${hermes_lifecycle_dir}/stubs"
+"${python_command}" - \
+  "${hermes_lifecycle_dir}" \
+  "${hermes_stub_dir}" \
+  "${hermes_proxy_source}/hermes.fabric-adapter.json" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+case_dir = Path(sys.argv[1])
+stub_dir = Path(sys.argv[2])
+for relative, source in {
+    "hermes_cli/__init__.py": "",
+    "hermes_cli/config.py": "def load_config():\n    return {}\n",
+    "hermes_cli/plugins.py": "def discover_plugins(force=False):\n    return []\n",
+    "hermes_state.py": "class SessionDB:\n    def close(self):\n        pass\n",
+    "run_agent.py": (
+        "class AIAgent:\n"
+        "    def __init__(self, session_id=None, **kwargs):\n"
+        "        self.session_id = session_id or 'fixture-session'\n"
+        "    def run_conversation(self, user_message, **kwargs):\n"
+        "        return {'response': 'split-venv-ok', 'completed': True, "
+        "'messages': [], 'api_calls': 1}\n"
+        "    def close(self):\n"
+        "        pass\n"
+    ),
+}.items():
+    path = stub_dir / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+(case_dir / "workspace").mkdir(parents=True)
+(case_dir / "artifacts").mkdir()
+shutil.copyfile(sys.argv[3], case_dir / "hermes.fabric-adapter.json")
+config = {
+    "schema_version": "fabric.agent/v1alpha1",
+    "metadata": {"name": "hermes-split-venv"},
+    "harness": {
+        "adapter_id": "nvidia.nemoclaw.hermes",
+        "resolution": "preinstalled",
+    },
+    "discovery": {"local_paths": ["hermes.fabric-adapter.json"]},
+    "runtime": {
+        "input_schema": "chat",
+        "output_schema": "message",
+        "artifacts": "./artifacts",
+        "timeout_seconds": 5,
+    },
+    "environment": {
+        "provider": "local",
+        "workspace": "./workspace",
+        "artifacts": "./artifacts",
+        "ownership": "caller_owned",
+        "control_location": "in_env_control",
+    },
+    "models": {
+        "default": {
+            "provider": "custom",
+            "model": "fixture",
+            "api_key_env": "HERMES_FABRIC_API_KEY",
+            "base_url": "http://127.0.0.1:9/v1",
+        }
+    },
+    "tools": {"enabled": [], "blocked": []},
+}
+(case_dir / "fabric.json").write_text(json.dumps(config), encoding="utf-8")
+PY
+hermes_lifecycle_output="$(
+  env -u ADAPTER_PYTHON -u PYTHONHOME \
+    PYTHONDONTWRITEBYTECODE=1 \
+    NEMOCLAW_HERMES_ADAPTER_PYTHON="${hermes_adapter_python}" \
+    PYTHONPATH="${hermes_stub_dir}" \
+    HERMES_FABRIC_API_KEY=fixture-only-value \
+    "${hermes_runner_venv}/bin/nemoclaw-fabric-run" \
+    --deadline-seconds 10 --kill-grace-seconds 2 \
+    --config "${hermes_lifecycle_dir}/fabric.json" \
+    -m split-venv-check --json
+)"
+HERMES_LIFECYCLE_OUTPUT="${hermes_lifecycle_output}" \
+  HERMES_RUNNER_PYTHON="${hermes_runner_python}" \
+  "${hermes_runner_python}" -I - <<'PY'
+import json
+import os
+import shlex
+from pathlib import Path
+
+raw = os.environ["HERMES_LIFECYCLE_OUTPUT"]
+result = json.loads(raw)
+assert result["status"] == "succeeded", result
+assert result["output"]["response"] == "split-venv-ok", result
+host_python = shlex.split(result["metadata"]["host_command"])[0]
+assert Path(host_python).resolve() == Path(os.environ["HERMES_RUNNER_PYTHON"]).resolve()
+assert "fixture-only-value" not in raw
 PY
 
 for installed_command in nemoclaw-fabric nemoclaw-fabric-run; do

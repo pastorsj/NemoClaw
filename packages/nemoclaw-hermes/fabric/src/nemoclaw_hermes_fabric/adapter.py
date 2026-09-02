@@ -20,7 +20,7 @@ PROCESS_RESPONSE_LIMIT_BYTES = 1024 * 1024
 PROCESS_STOP_GRACE_SECONDS = 2.0
 OUTPUT_LIMIT_EXIT = 74
 PROCESS_UNAVAILABLE_EXIT = 127
-ADAPTER_PYTHON_UNAVAILABLE = "Hermes adapter interpreter is unavailable"
+HERMES_ADAPTER_PYTHON_UNAVAILABLE = "Hermes adapter interpreter is unavailable"
 
 
 class _ResponseLimitExceeded(RuntimeError):
@@ -30,12 +30,12 @@ class _ResponseLimitExceeded(RuntimeError):
 def _hermes_adapter_python() -> str:
     """Return the interpreter that contains Hermes and its released adapter."""
 
-    value = os.environ.get("ADAPTER_PYTHON")
+    value = os.environ.get("NEMOCLAW_HERMES_ADAPTER_PYTHON")
     if not value:
-        raise FileNotFoundError(ADAPTER_PYTHON_UNAVAILABLE)
+        raise FileNotFoundError(HERMES_ADAPTER_PYTHON_UNAVAILABLE)
     path = Path(value)
     if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
-        raise FileNotFoundError(ADAPTER_PYTHON_UNAVAILABLE)
+        raise FileNotFoundError(HERMES_ADAPTER_PYTHON_UNAVAILABLE)
     return str(path)
 
 
