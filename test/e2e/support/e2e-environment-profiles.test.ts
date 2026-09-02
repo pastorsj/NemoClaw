@@ -67,15 +67,37 @@ describe("E2E environment profiles", () => {
     fs.chmodSync(fixtureParent, 0o700);
     const fixtureRoot = fs.mkdtempSync(path.join(fixtureParent, "fixture-"));
     const aliasPath = path.join(fixtureParent, `alias-${path.basename(fixtureRoot)}`);
+    const hostDockerConfig = path.join(fixtureRoot, "host-docker");
+    const pluginDirectory = path.join(fixtureRoot, "docker-plugins");
     fs.chmodSync(fixtureRoot, 0o700);
+    fs.mkdirSync(hostDockerConfig, { mode: 0o700 });
+    fs.mkdirSync(pluginDirectory, { mode: 0o700 });
+    fs.writeFileSync(
+      path.join(hostDockerConfig, "config.json"),
+      JSON.stringify({
+        auths: { "registry.example.test": { auth: "must-not-pass" } },
+        cliPluginsExtraDirs: [pluginDirectory],
+        credsStore: "must-not-pass",
+      }),
+      { mode: 0o600 },
+    );
     fs.symlinkSync(fixtureRoot, aliasPath, "dir");
 
     try {
-      const testHome = createPrivateTestHome("e2e-home-", aliasPath);
+      const testHome = createPrivateTestHome("e2e-home-", aliasPath, {
+        DOCKER_CONFIG: hostDockerConfig,
+        HOME: aliasPath,
+      });
+      const privateDockerConfigPath = path.join(testHome, ".docker", "config.json");
 
       expect(testHome.startsWith(`${fs.realpathSync(fixtureRoot)}${path.sep}`)).toBe(true);
       expect(fs.realpathSync(testHome)).toBe(testHome);
       expect(fs.statSync(testHome).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(path.dirname(privateDockerConfigPath)).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(privateDockerConfigPath).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(fs.readFileSync(privateDockerConfigPath, "utf8"))).toEqual({
+        cliPluginsExtraDirs: [fs.realpathSync(pluginDirectory)],
+      });
     } finally {
       fs.unlinkSync(aliasPath);
       fs.rmSync(fixtureRoot, { force: true, recursive: true });
@@ -123,9 +145,9 @@ describe("E2E environment profiles", () => {
       XDG_CONFIG_HOME: "/Users/tester/.nemoclaw-e2e-home/.config",
       XDG_DATA_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/share",
       XDG_STATE_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/state",
+      DOCKER_CONFIG: "/Users/tester/.nemoclaw-e2e-home/.docker",
     });
     expect(result).not.toHaveProperty("DOCKER_CERT_PATH");
-    expect(result).not.toHaveProperty("DOCKER_CONFIG");
     expect(result).not.toHaveProperty("DOCKER_CONTEXT");
     expect(result).not.toHaveProperty("DOCKER_TLS_VERIFY");
     expect(result).not.toHaveProperty("REGISTRY_AUTH_TOKEN");
