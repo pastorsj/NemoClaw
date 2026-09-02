@@ -76,7 +76,9 @@ def _process_failure(return_code: int, stderr: bytes) -> AgentRunResult:
         marker in normalized_stderr
         for marker in (
             b"gatewaycredentialsrequirederror",
+            b"gatewayexplicitauthrequirederror",
             b"gateway agent requires credentials",
+            b"gateway url override requires explicit credentials",
             b"device pairing required",
         )
     ):
@@ -181,6 +183,20 @@ def _write_prompt(workspace: Path, prompt: str) -> Path:
         path.unlink(missing_ok=True)
         raise
     return path
+
+
+def _managed_gateway_environment() -> dict[str, str]:
+    """Use the package-managed gateway config without caller auth overrides."""
+
+    environment = dict(os.environ)
+    for name in (
+        "OPENCLAW_GATEWAY_URL",
+        "OPENCLAW_GATEWAY_TOKEN",
+        "OPENCLAW_GATEWAY_PASSWORD",
+        "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
+    ):
+        environment.pop(name, None)
+    return environment
 
 
 async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
@@ -379,6 +395,7 @@ class OpenClawRuntime:
                 "--",
                 *self._command(prompt_path),
                 cwd=workspace,
+                env=_managed_gateway_environment(),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

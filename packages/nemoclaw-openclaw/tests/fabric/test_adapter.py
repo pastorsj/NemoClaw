@@ -74,6 +74,20 @@ mode = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_MODE", "success")
 args_marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_ARGS")
 if args_marker:
     Path(args_marker).write_text(json.dumps(args), encoding="utf-8")
+environment_marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_ENV")
+if environment_marker:
+    names = [
+        "OPENCLAW_GATEWAY_URL",
+        "OPENCLAW_GATEWAY_TOKEN",
+        "OPENCLAW_GATEWAY_PASSWORD",
+        "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
+        "OPENCLAW_GATEWAY_PORT",
+        "NEMOCLAW_OPENCLAW_GATEWAY_URL",
+    ]
+    Path(environment_marker).write_text(
+        json.dumps({name: name in os.environ for name in names}),
+        encoding="utf-8",
+    )
 
 try:
     prompt_path = Path(args[args.index("--message-file") + 1])
@@ -287,11 +301,13 @@ class OpenClawFixtureMixin:
         self.args_marker = self.base_dir / "openclaw-args.json"
         self.prompt_marker = self.base_dir / "openclaw-prompt.json"
         self.pid_marker = self.base_dir / "openclaw-pids.json"
+        self.environment_marker = self.base_dir / "openclaw-environment.json"
         self.environment = {
             "PATH": f"{self.fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
             "NEMOCLAW_FAKE_OPENCLAW_ARGS": str(self.args_marker),
             "NEMOCLAW_FAKE_OPENCLAW_PROMPT": str(self.prompt_marker),
             "NEMOCLAW_FAKE_OPENCLAW_PIDS": str(self.pid_marker),
+            "NEMOCLAW_FAKE_OPENCLAW_ENV": str(self.environment_marker),
         }
 
     async def start_runtime(self) -> OpenClawRuntime:
@@ -366,6 +382,37 @@ class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCas
             await runtime.stop()
 
         self.assertEqual(len(set(session_ids)), 2)
+
+    async def test_managed_gateway_config_ignores_caller_auth_overrides(self) -> None:
+        environment = {
+            **self.environment,
+            "OPENCLAW_GATEWAY_URL": "ws://untrusted.example.test:18789",
+            "OPENCLAW_GATEWAY_TOKEN": "untrusted-token",
+            "OPENCLAW_GATEWAY_PASSWORD": "untrusted-password",
+            "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS": "1",
+            "OPENCLAW_GATEWAY_PORT": "18791",
+            "NEMOCLAW_OPENCLAW_GATEWAY_URL": "ws://172.20.0.2:18791",
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        recorded = json.loads(self.environment_marker.read_text(encoding="utf-8"))
+        self.assertEqual(
+            recorded,
+            {
+                "OPENCLAW_GATEWAY_URL": False,
+                "OPENCLAW_GATEWAY_TOKEN": False,
+                "OPENCLAW_GATEWAY_PASSWORD": False,
+                "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS": False,
+                "OPENCLAW_GATEWAY_PORT": True,
+                "NEMOCLAW_OPENCLAW_GATEWAY_URL": True,
+            },
+        )
 
     async def test_option_and_file_shaped_requests_remain_literal_text(self) -> None:
         secret_file = self.workspace / "secret"
