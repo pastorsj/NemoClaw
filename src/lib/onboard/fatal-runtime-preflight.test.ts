@@ -603,6 +603,36 @@ describe("readiness-gated runtime preflight", () => {
     expect(validateGpu).toHaveBeenCalledOnce();
   });
 
+  it("refreshes the host after each slow paired gateway collection (#7411)", async () => {
+    let currentTime = Date.parse("2026-08-07T12:00:00.000Z");
+    const assessHost = vi.fn(() => hostWithRuntime("docker"));
+    const gatewayCollectionDelays = [0, 0, 30_001, 30_001];
+
+    const result = await runReadinessGatedRuntimePreflight(
+      {},
+      {
+        nonInteractive: true,
+        now: () => new Date(currentTime),
+        collectGatewayReadiness: async () => {
+          currentTime += gatewayCollectionDelays.shift() ?? 0;
+          return collectedGatewayReadiness(
+            managedGatewayReadiness(),
+            new Date(currentTime).toISOString(),
+          );
+        },
+        assessHost,
+        detectGpu: () => null,
+        assertDockerBridgeAndContainerDnsHealthy: vi.fn(),
+        validateSandboxGpuPreflight: vi.fn(),
+      },
+    );
+
+    expect(assessHost).toHaveBeenCalledTimes(4);
+    expect(result.readinessReport.evidence).not.toContainEqual(
+      expect.objectContaining({ id: "host.probe.stale" }),
+    );
+  });
+
   it("recollects gateway facts when refreshing the host expires the paired snapshot (#7411)", async () => {
     let currentTime = Date.parse("2026-08-07T12:00:00.000Z");
     const bridge = vi.fn();

@@ -135,6 +135,17 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         fs.writeFileSync(file, "# fixture\n", { mode: 0o600 });
         fs.chmodSync(file, 0o600);
       });
+      for (const directory of [
+        path.join(tmp, "packages"),
+        localPackageRoot,
+        path.join(localPackageRoot, "config"),
+        path.join(localPackageRoot, "host"),
+        localSrc,
+        path.join(localSrc, "lib"),
+      ]) {
+        fs.mkdirSync(directory, { recursive: true });
+        fs.chmodSync(directory, 0o700);
+      }
 
       const messagingPermissionCommand = dockerRunCommandBetween(
         dockerfile,
@@ -150,13 +161,25 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         .replaceAll("/usr/local/bin", localBin)
         .replaceAll("/usr/local/lib/nemoclaw", localLib)
         .replaceAll("/usr/local/share/nemoclaw", localShare)
-        .replaceAll("/packages/nemoclaw-openclaw", localPackageRoot)
+        .replaceAll("/packages/nemoclaw-openclaw", "__OPENCLAW_PACKAGE__")
+        .replaceAll("/packages", path.join(tmp, "packages"))
+        .replaceAll("__OPENCLAW_PACKAGE__", localPackageRoot)
         .replaceAll("/src", localSrc)
         .replaceAll("/scripts", localScripts);
       const { result } = runLoggedDockerShell(command, tmp, ["chown() { :; }"]);
 
       expect(result.status, result.stderr).toBe(0);
       expect((fs.statSync(generatorPath).mode & 0o777).toString(8)).toBe("755");
+      for (const directory of [
+        path.join(tmp, "packages"),
+        localPackageRoot,
+        path.join(localPackageRoot, "config"),
+        path.join(localPackageRoot, "host"),
+        localSrc,
+        path.join(localSrc, "lib"),
+      ]) {
+        expect((fs.statSync(directory).mode & 0o777).toString(8)).toBe("755");
+      }
       expect((fs.statSync(toolSearchValidatorPath).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(toolDisclosurePath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(applierPath).mode & 0o777).toString(8)).toBe("755");

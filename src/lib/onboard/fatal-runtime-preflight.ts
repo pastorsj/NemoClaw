@@ -110,6 +110,7 @@ const JETSON_INAPPLICABLE_CDI_ADVISORY_IDS = new Set([
   "refresh_nvidia_cdi_spec",
   "install_nvidia_container_toolkit",
 ]);
+const MAX_PAIRED_READINESS_REFRESHES = 4;
 
 export interface OnboardHostReadinessOptions {
   explicitlyOptedOutGpuPassthrough: boolean;
@@ -347,6 +348,10 @@ function hasStaleHostEvidence(report: SystemReadinessReport): boolean {
   return report.evidence.some(({ id }) => id === "host.probe.stale");
 }
 
+function hasStaleGatewayEvidence(report: GatewayReadinessProjection): boolean {
+  return report.evidence.some(({ id }) => id === "gateway.probe.stale");
+}
+
 async function collectAdmittedReadinessPair(
   collectedHost: CollectedOnboardHostReadiness,
   options: FatalRuntimePreflightOptions,
@@ -364,24 +369,34 @@ async function collectAdmittedReadinessPair(
 
   let evaluatedAt = now();
   let gateway = projectGatewayReadiness(collectedGateway.snapshot, { now: () => evaluatedAt });
-  assertOnboardGatewayReadiness(gateway, exitProcess);
   let host = projectCollectedHostReadiness(collectedHost, evaluatedAt);
 
-  if (hasStaleHostEvidence(host.result.readinessReport)) {
-    host = collectOnboardHostReadiness(
-      options,
-      context,
-      isManagedGatewayReadiness(gateway),
-      runtimeGpu,
-    );
-    collectedGateway = await context.collectGatewayReadiness();
-    assertOnboardGatewayReadiness(collectedGateway.projection, exitProcess);
+  // Host and gateway collection have independent bounded probes. Refresh only
+  // the stale side until both completed snapshots overlap the same freshness
+  // window. This keeps a slow gateway probe from repeatedly expiring a newly
+  // collected host snapshot while still failing closed after bounded work.
+  for (let refreshes = 0; refreshes < MAX_PAIRED_READINESS_REFRESHES; refreshes += 1) {
+    const hostIsStale = hasStaleHostEvidence(host.result.readinessReport);
+    const gatewayIsStale = hasStaleGatewayEvidence(gateway);
+    if (!hostIsStale && !gatewayIsStale) break;
+
+    if (hostIsStale) {
+      host = collectOnboardHostReadiness(
+        options,
+        context,
+        isManagedGatewayReadiness(gateway),
+        runtimeGpu,
+      );
+    } else {
+      collectedGateway = await context.collectGatewayReadiness();
+      assertOnboardGatewayReadiness(collectedGateway.projection, exitProcess);
+    }
     evaluatedAt = now();
     gateway = projectGatewayReadiness(collectedGateway.snapshot, { now: () => evaluatedAt });
-    assertOnboardGatewayReadiness(gateway, exitProcess);
     host = projectCollectedHostReadiness(host, evaluatedAt);
   }
 
+  assertOnboardGatewayReadiness(gateway, exitProcess);
   const report = composeSystemReadinessReport(host.result.readinessReport, gateway);
   assertOnboardSystemReadiness(report, host.result.host, {
     explicitlyOptedOutGpuPassthrough:

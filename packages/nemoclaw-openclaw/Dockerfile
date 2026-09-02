@@ -1544,7 +1544,13 @@ COPY packages/nemoclaw-openclaw/checks/tool-search.mts /scripts/validate-opencla
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts
 COPY packages/nemoclaw-openclaw/openclaw-plugins/ /usr/local/share/nemoclaw/openclaw-plugins/
 
-RUN chmod 755 /packages/nemoclaw-openclaw/config/generate-config.mts \
+RUN chmod 755 /packages \
+        /packages/nemoclaw-openclaw \
+        /packages/nemoclaw-openclaw/config \
+        /packages/nemoclaw-openclaw/host \
+        /src \
+        /src/lib \
+        /packages/nemoclaw-openclaw/config/generate-config.mts \
         /scripts/validate-openclaw-tool-search.mts \
     && chmod 444 /src/lib/tool-disclosure.ts \
     && chmod 755 /usr/local/share/nemoclaw \
@@ -2015,7 +2021,13 @@ RUN managed_runtime_assertion_failed() { \
     && install -d -o root -g root -m 0755 /run/nemoclaw
 
 # Copy startup script and shared sandbox initialisation library.
-RUN chmod 755 /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
+RUN chmod 755 /packages \
+        /packages/nemoclaw-openclaw \
+        /packages/nemoclaw-openclaw/config \
+        /packages/nemoclaw-openclaw/host \
+        /src \
+        /src/lib \
+        /usr/local/bin/nemoclaw-start /usr/local/bin/nemoclaw-codex-acp \
         /usr/local/bin/nemoclaw-managed-bootstrap \
         /usr/local/bin/nemoclaw-managed-startup-hold \
         /usr/local/lib/nemoclaw/sandbox-init.sh \
