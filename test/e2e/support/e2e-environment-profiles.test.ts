@@ -112,6 +112,7 @@ describe("E2E environment profiles", () => {
       DOCKER_CONFIG: "/Users/tester/.docker",
       DOCKER_CONTEXT: "colima",
       DOCKER_TLS_VERIFY: "1",
+      NEMOCLAW_OPENSHELL_BIN: process.execPath,
       REGISTRY_AUTH_TOKEN: "must-not-pass",
     };
     const inspect = vi.fn((_args: readonly string[], env: NodeJS.ProcessEnv) => {
@@ -141,7 +142,8 @@ describe("E2E environment profiles", () => {
     expect(result).toMatchObject({
       HOME: "/Users/tester/.nemoclaw-e2e-home",
       DOCKER_HOST: "unix:///Users/tester/.colima/default/docker.sock",
-      XDG_BIN_HOME: "/Users/tester/.local/bin",
+      NEMOCLAW_OPENSHELL_BIN: fs.realpathSync(process.execPath),
+      XDG_BIN_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/bin",
       XDG_CONFIG_HOME: "/Users/tester/.nemoclaw-e2e-home/.config",
       XDG_DATA_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/share",
       XDG_STATE_HOME: "/Users/tester/.nemoclaw-e2e-home/.local/state",
@@ -158,15 +160,17 @@ describe("E2E environment profiles", () => {
       DOCKER_CONFIG: "/Users/tester/.docker",
       DOCKER_CONTEXT: "colima",
       DOCKER_TLS_VERIFY: "1",
+      NEMOCLAW_OPENSHELL_BIN: process.execPath,
       REGISTRY_AUTH_TOKEN: "must-not-pass",
     });
   });
 
-  it("retains only explicit OpenShell binary authority while isolating mutable state", () => {
+  it("separates explicit host OpenShell authority from the private install directory", () => {
     const source = {
       HOME: "/home/tester",
       PATH: "/usr/bin",
       DOCKER_HOST: "unix:///run/user/1000/docker.sock",
+      NEMOCLAW_OPENSHELL_BIN: process.execPath,
       XDG_BIN_HOME: "/host/bin",
       XDG_CONFIG_HOME: "/host/config",
       XDG_DATA_HOME: "/host/data",
@@ -177,6 +181,7 @@ describe("E2E environment profiles", () => {
       "/home/tester/.nemoclaw-e2e-home",
       {
         HOME: "/untrusted/home",
+        NEMOCLAW_OPENSHELL_BIN: "/untrusted/openshell",
         XDG_BIN_HOME: "/untrusted/bin",
         XDG_CONFIG_HOME: "/untrusted/config",
       },
@@ -186,7 +191,8 @@ describe("E2E environment profiles", () => {
 
     expect(result).toMatchObject({
       HOME: "/home/tester/.nemoclaw-e2e-home",
-      XDG_BIN_HOME: "/host/bin",
+      NEMOCLAW_OPENSHELL_BIN: fs.realpathSync(process.execPath),
+      XDG_BIN_HOME: "/home/tester/.nemoclaw-e2e-home/.local/bin",
       XDG_CONFIG_HOME: "/home/tester/.nemoclaw-e2e-home/.config",
       XDG_DATA_HOME: "/home/tester/.nemoclaw-e2e-home/.local/share",
       XDG_STATE_HOME: "/home/tester/.nemoclaw-e2e-home/.local/state",
@@ -195,8 +201,11 @@ describe("E2E environment profiles", () => {
   });
 
   it.each([
-    ["HOME", { HOME: "relative-home" }],
-    ["XDG_BIN_HOME", { HOME: "/home/tester", XDG_BIN_HOME: "relative-bin" }],
+    ["HOME", { HOME: "relative-home", NEMOCLAW_OPENSHELL_BIN: process.execPath }],
+    [
+      "NEMOCLAW_OPENSHELL_BIN",
+      { HOME: "/home/tester", NEMOCLAW_OPENSHELL_BIN: "relative-openshell" },
+    ],
   ])("rejects a non-absolute host %s", (_selector, source) => {
     expect(() =>
       isolatedNemoClawEnvironment(
@@ -206,6 +215,39 @@ describe("E2E environment profiles", () => {
         vi.fn(),
       ),
     ).toThrow(/absolute|must be absolute/);
+  });
+
+  it("resolves OpenShell from the outer PATH while keeping private install paths first", () => {
+    const fixtureParent = path.join(process.cwd(), "node_modules/.cache");
+    fs.mkdirSync(fixtureParent, { recursive: true });
+    const fixtureRoot = fs.mkdtempSync(path.join(fixtureParent, "nemoclaw-openshell-path-"));
+    const openshellPath = path.join(fixtureRoot, "openshell");
+    fs.writeFileSync(openshellPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+    try {
+      const home = "/home/tester/.nemoclaw-e2e-home";
+      const result = isolatedNemoClawEnvironment(
+        home,
+        {},
+        {
+          HOME: "/home/tester",
+          PATH: `${fixtureRoot}${path.delimiter}/usr/bin`,
+          DOCKER_HOST: "unix:///run/user/1000/docker.sock",
+        },
+        vi.fn(),
+      );
+
+      expect(result.NEMOCLAW_OPENSHELL_BIN).toBe(fs.realpathSync(openshellPath));
+      expect(result.XDG_BIN_HOME).toBe(path.join(home, ".local", "bin"));
+      expect(result.PATH?.split(path.delimiter)).toEqual([
+        path.join(home, ".local", "bin"),
+        path.join(home, ".npm-global", "bin"),
+        fixtureRoot,
+        "/usr/bin",
+      ]);
+    } finally {
+      fs.rmSync(fixtureRoot, { force: true, recursive: true });
+    }
   });
 
   it("derives the canonical gateway name from an explicit test port", () => {

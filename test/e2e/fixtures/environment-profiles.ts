@@ -20,9 +20,7 @@ const ISOLATED_HOME_DOCKER_SELECTORS = [
   "DOCKER_TLS_VERIFY",
 ] as const;
 
-const HOST_OPEN_SHELL_BINARY_SELECTORS = {
-  XDG_BIN_HOME: [".local", "bin"],
-} as const;
+const HOST_OPEN_SHELL_BINARY_SELECTORS = ["NEMOCLAW_OPENSHELL_BIN", "OPENSHELL_BIN"] as const;
 
 export interface TestGatewayBinding {
   readonly environment: NodeJS.ProcessEnv;
@@ -192,22 +190,48 @@ export function testHomeEnvironment(
   return installedCommandEnvironment(extra, home, source);
 }
 
-/** Resolve the host-owned directories that establish OpenShell authority. */
+function executableFile(candidate: string): string | null {
+  try {
+    const canonicalPath = fs.realpathSync(candidate);
+    if (!fs.statSync(canonicalPath).isFile()) return null;
+    fs.accessSync(canonicalPath, fs.constants.X_OK);
+    return canonicalPath;
+  } catch {
+    return null;
+  }
+}
+
+function resolveHostOpenShellBinary(source: NodeJS.ProcessEnv): string {
+  for (const selector of HOST_OPEN_SHELL_BINARY_SELECTORS) {
+    const configured = source[selector]?.trim();
+    if (!configured) continue;
+    if (!path.isAbsolute(configured)) {
+      throw new Error(`${selector} must be an absolute executable path before isolating E2E state`);
+    }
+    const executable = executableFile(configured);
+    if (!executable) {
+      throw new Error(
+        `${selector} must identify an executable OpenShell CLI before isolating E2E state`,
+      );
+    }
+    return executable;
+  }
+
+  for (const directory of source.PATH?.split(path.delimiter) ?? []) {
+    if (!path.isAbsolute(directory)) continue;
+    const executable = executableFile(path.join(directory, "openshell"));
+    if (executable) return executable;
+  }
+  throw new Error("Could not resolve an absolute executable OpenShell CLI from the host PATH");
+}
+
+/** Resolve immutable host OpenShell authority without reusing its mutable install directory. */
 function hostOpenShellBinaryAuthority(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const sourceHome = source.HOME;
   if (!sourceHome || !path.isAbsolute(sourceHome)) {
     throw new Error("An absolute host HOME is required before isolating NemoClaw E2E state");
   }
-
-  return Object.fromEntries(
-    Object.entries(HOST_OPEN_SHELL_BINARY_SELECTORS).map(([selector, fallbackParts]) => {
-      const configured = source[selector];
-      if (configured && !path.isAbsolute(configured)) {
-        throw new Error(`${selector} must be absolute before isolating NemoClaw E2E state`);
-      }
-      return [selector, configured ?? path.join(sourceHome, ...fallbackParts)];
-    }),
-  );
+  return { NEMOCLAW_OPENSHELL_BIN: resolveHostOpenShellBinary(source) };
 }
 
 /** Read only executable plugin locations from the host Docker CLI config. */
@@ -290,6 +314,7 @@ export function isolatedNemoClawEnvironment(
   for (const selector of ISOLATED_HOME_DOCKER_SELECTORS) delete environment[selector];
   Object.assign(environment, hostOpenShellBinaryAuthority(source));
   environment.HOME = home;
+  environment.XDG_BIN_HOME = path.join(home, ".local", "bin");
   environment.XDG_CONFIG_HOME = path.join(home, ".config");
   environment.XDG_DATA_HOME = path.join(home, ".local", "share");
   environment.XDG_STATE_HOME = path.join(home, ".local", "state");
