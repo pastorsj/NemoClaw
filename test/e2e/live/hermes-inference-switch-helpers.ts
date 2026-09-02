@@ -210,7 +210,15 @@ export function env(
       NEMOCLAW_PREFERRED_API: runtimeEnv.NEMOCLAW_PREFERRED_API ?? "openai-completions",
       NEMOCLAW_PROVIDER: "custom",
     });
-  return { ...out, ...extra, ...gateway.environment };
+  const commandEnv = { ...out, ...extra, ...gateway.environment };
+  if (trustedPrivateHosts) commandEnv.NEMOCLAW_TRUSTED_PRIVATE_HOSTS = trustedPrivateHosts;
+  else delete commandEnv.NEMOCLAW_TRUSTED_PRIVATE_HOSTS;
+  if (trustedPrivateInferenceHosts) {
+    commandEnv.NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS = trustedPrivateInferenceHosts;
+  } else {
+    delete commandEnv.NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS;
+  }
+  return commandEnv;
 }
 
 export async function expectOpenAiProvider(

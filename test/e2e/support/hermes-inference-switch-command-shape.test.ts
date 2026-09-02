@@ -112,6 +112,13 @@ describe("Hermes inference switch command shape", () => {
       NEMOCLAW_TRUSTED_PRIVATE_HOSTS: "llm.corp.example",
       NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: "10.20.30.40",
     });
+
+    const explicit = hermesCommandEnvironment(undefined, {
+      NEMOCLAW_TRUSTED_PRIVATE_HOSTS: " private.example.test ",
+      NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: " ",
+    });
+    expect(explicit.NEMOCLAW_TRUSTED_PRIVATE_HOSTS).toBe("private.example.test");
+    expect(explicit).not.toHaveProperty("NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS");
   });
 
   it("uses authenticated model inventory as baseline readiness evidence", () => {
