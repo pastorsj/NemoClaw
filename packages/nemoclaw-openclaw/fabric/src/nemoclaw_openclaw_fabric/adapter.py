@@ -139,8 +139,10 @@ def _completed_response(stdout: bytes) -> str | None:
     incomplete = (
         metadata.get("aborted") is True
         or metadata.get("error") is not None
+        or bool(metadata.get("fallbackFrom"))
         or metadata.get("replayInvalid") is True
         or _normalized(metadata.get("livenessState")) == "abandoned"
+        or _normalized(metadata.get("transport")) == "embedded"
         or _normalized(metadata.get("stopReason")) in {"error", "timeout", "aborted"}
         or (
             isinstance(metadata.get("timeoutPhase"), str)
@@ -439,6 +441,11 @@ class OpenClawRuntime:
                 "openclaw_output_limit_exceeded",
                 "OpenClaw output exceeded the "
                 f"{PROCESS_STREAM_CAPTURE_LIMIT_BYTES}-byte stream capture limit",
+            )
+        if b"embedded fallback:" in stderr.lower():
+            return _failed(
+                "openclaw_gateway_fallback_rejected",
+                "OpenClaw did not remain on its managed gateway",
             )
         if process.returncode != 0:
             return _process_failure(process.returncode, stderr)
