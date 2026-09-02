@@ -109,6 +109,13 @@ if mode == "failure":
     print(f"fake OpenClaw stdout failed with {secret}")
     print(f"fake OpenClaw stderr failed with {secret}", file=sys.stderr)
     raise SystemExit(23)
+if mode == "gateway_auth_failure":
+    secret = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_SECRET", "missing-secret")
+    print(
+        f"GatewayCredentialsRequiredError: gateway agent requires credentials {secret}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
 if mode == "hang":
     child = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(300)"],
@@ -508,8 +515,34 @@ class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCas
 
         self.assertIs(result.status, AgentRunStatus.FAILED)
         self.assertEqual(result.error.code, "openclaw_process_failed")
+        self.assertEqual(
+            result.error.message,
+            "OpenClaw could not complete the request (exit 23)",
+        )
         self.assertNotIn(secret, json.dumps(result.to_mapping()))
         self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
+
+    async def test_gateway_auth_failure_is_classified_without_forwarding_stderr(self) -> None:
+        secret = "nvapi-openclaw-gateway-auth-sentinel"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "gateway_auth_failure",
+            "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "openclaw_gateway_auth_unavailable")
+        self.assertEqual(
+            result.error.message,
+            "OpenClaw could not authenticate to its managed gateway",
+        )
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
 
     async def test_invalid_stdout_never_becomes_a_fabric_diagnostic(self) -> None:
         secret = "invalid-openclaw-stdout-secret"
@@ -735,6 +768,30 @@ class ProcessWrapperTests(unittest.TestCase):
 
     def test_invalid_arguments_return_the_private_usage_status(self) -> None:
         self.assertEqual(run_process_wrapper([]), INVALID_USAGE_EXIT)
+
+    def test_private_wrapper_failures_have_distinct_safe_errors(self) -> None:
+        cases = {
+            125: (
+                "openclaw_adapter_host_lost",
+                "OpenClaw's process owner lost its Fabric adapter host",
+            ),
+            127: (
+                "openclaw_process_unavailable",
+                "OpenClaw's process owner could not start the command",
+            ),
+            -15: (
+                "openclaw_process_signaled",
+                "OpenClaw was terminated by signal 15",
+            ),
+        }
+        for return_code, expected in cases.items():
+            with self.subTest(return_code=return_code):
+                result = openclaw_adapter._process_failure(
+                    return_code,
+                    b"untrusted diagnostic with nvapi-private-sentinel",
+                )
+                self.assertEqual((result.error.code, result.error.message), expected)
+                self.assertNotIn("nvapi-private-sentinel", json.dumps(result.to_mapping()))
 
 
 class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):

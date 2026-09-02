@@ -24,6 +24,9 @@ from nemo_fabric_adapter_contract.models import AgentRunStatus
 from nemo_fabric_adapter_contract.models import RuntimeContext
 from nemo_fabric_adapters.common import lifecycle
 
+from nemoclaw_openclaw_fabric.process import PARENT_LOST_EXIT
+from nemoclaw_openclaw_fabric.process import PROCESS_UNAVAILABLE_EXIT
+
 
 ADAPTER_ID = "nvidia.nemoclaw.openclaw"
 OPENCLAW_COMMAND = "openclaw"
@@ -46,6 +49,56 @@ def _failed(code: str, message: str) -> AgentRunResult:
         status=AgentRunStatus.FAILED,
         output=None,
         error=AgentRunError(code=code, message=message, retryable=False),
+    )
+
+
+def _process_failure(return_code: int, stderr: bytes) -> AgentRunResult:
+    """Classify a failed child without exposing its untrusted diagnostics."""
+
+    if return_code == PARENT_LOST_EXIT:
+        return _failed(
+            "openclaw_adapter_host_lost",
+            "OpenClaw's process owner lost its Fabric adapter host",
+        )
+    if return_code == PROCESS_UNAVAILABLE_EXIT:
+        return _failed(
+            "openclaw_process_unavailable",
+            "OpenClaw's process owner could not start the command",
+        )
+    if return_code < 0:
+        return _failed(
+            "openclaw_process_signaled",
+            f"OpenClaw was terminated by signal {-return_code}",
+        )
+
+    normalized_stderr = stderr.lower()
+    if any(
+        marker in normalized_stderr
+        for marker in (
+            b"gatewaycredentialsrequirederror",
+            b"gateway agent requires credentials",
+            b"device pairing required",
+        )
+    ):
+        return _failed(
+            "openclaw_gateway_auth_unavailable",
+            "OpenClaw could not authenticate to its managed gateway",
+        )
+    if any(
+        marker in normalized_stderr
+        for marker in (
+            b"gateway connect failed",
+            b"gateway timeout",
+            b"econnrefused",
+        )
+    ):
+        return _failed(
+            "openclaw_gateway_unavailable",
+            "OpenClaw could not reach its managed gateway",
+        )
+    return _failed(
+        "openclaw_process_failed",
+        f"OpenClaw could not complete the request (exit {return_code})",
     )
 
 
@@ -343,8 +396,9 @@ class OpenClawRuntime:
         self._process = process
         output_limit_exceeded = False
         stdout = b""
+        stderr = b""
         try:
-            stdout, _stderr = await _capture_bounded_output(process)
+            stdout, stderr = await _capture_bounded_output(process)
         except _OutputCaptureLimitExceeded:
             output_limit_exceeded = True
             await asyncio.shield(_stop_process_group(process))
@@ -370,10 +424,7 @@ class OpenClawRuntime:
                 f"{PROCESS_STREAM_CAPTURE_LIMIT_BYTES}-byte stream capture limit",
             )
         if process.returncode != 0:
-            return _failed(
-                "openclaw_process_failed",
-                "OpenClaw could not complete the request",
-            )
+            return _process_failure(process.returncode, stderr)
         response = _completed_response(stdout)
         if response is None:
             return _failed(
