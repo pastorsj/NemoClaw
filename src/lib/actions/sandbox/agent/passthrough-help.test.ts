@@ -32,7 +32,7 @@ describe("hasAgentPassthroughHelpToken", () => {
 });
 
 describe("printAgentPassthroughHelp", () => {
-  it("describes both OpenClaw and terminal-runtime passthroughs (#5790)", () => {
+  it("describes private Fabric prompts and native package command routing", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     let output = "";
     try {
@@ -42,12 +42,21 @@ describe("printAgentPassthroughHelp", () => {
       logSpy.mockRestore();
     }
 
-    expect(output).toContain("[agent-flags...]");
-    expect(output).toContain("registered agent command");
-    expect(output).toContain("OpenClaw sandboxes run `openclaw agent ...`");
-    expect(output).toContain("terminal-runtime sandboxes run");
-    expect(output).toContain("`dcode ...`");
-    expect(output).not.toContain("OpenClaw sandboxes only");
+    expect(output).toContain("[prompt-or-agent-flags...]");
+    expect(output).toContain("For non-OpenClaw packages with a Fabric command");
+    expect(output).toContain("-m/--message with optional --json uses private standard input");
+    expect(output).toContain(
+      "OpenClaw plain positional prompts can use Fabric and private standard input",
+    );
+    expect(output).toContain("Except for -h/--help, OpenClaw selector and option calls");
+    expect(output).toContain("OpenClaw -h/--help prints this wrapper summary locally");
+    expect(output).toContain("exec -- openclaw agent --help");
+    expect(output).toContain("Hermes package with a Fabric headless command accepts");
+    expect(output).not.toContain(
+      "For a package-managed Fabric command, a plain prompt or -m/--message",
+    );
+    expect(output).not.toContain("All flags accepted");
+    expect(output).not.toContain("Hermes sandboxes are rejected");
   });
 });
 

@@ -700,7 +700,7 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertIn("<redacted>", stdout)
 
     def test_output_byte_limit_accepts_limit_and_rejects_limit_plus_one(self) -> None:
-        exact_response = "a" * MAX_OUTPUT_BYTES
+        exact_response = "a" * (MAX_OUTPUT_BYTES - 1)
         exit_code, stdout, stderr, _selected = self.invoke(
             self.run_arguments("-m", "prompt"),
             client=StubFabricClient(
@@ -719,7 +719,7 @@ class FabricCommandTests(unittest.TestCase):
                     client=StubFabricClient(
                         result=StubResult(
                             "succeeded",
-                            output={"response": f"{exact_response}a"},
+                            output={"response": f"{exact_response}aa"},
                         )
                     ),
                 )

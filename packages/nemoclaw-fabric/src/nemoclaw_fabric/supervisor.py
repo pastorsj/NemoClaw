@@ -93,35 +93,41 @@ def _enable_linux_child_subreaper() -> None:
         raise OSError(error_number, os.strerror(error_number))
 
 
-def _direct_linux_children(worker_process_id: int) -> set[int]:
-    """Find adopted children without treating the supervised worker as detached."""
+def _direct_linux_children(worker_process_id: int) -> tuple[set[int], bool]:
+    """Return adopted children and whether `/proc` discovery was complete."""
 
     if sys.platform != "linux":
-        return set()
+        return set(), True
     children: set[int] = set()
+    discovery_complete = True
     try:
-        entries = os.scandir("/proc")
-    except OSError:
-        return children
-    with entries:
-        for entry in entries:
-            if not entry.name.isdecimal():
-                continue
-            try:
-                process_id = int(entry.name)
-                process_stat = Path(f"/proc/{entry.name}/stat").read_text(
-                    encoding="ascii"
-                )
-                closing = process_stat.rfind(")")
-                if closing == -1:
+        with os.scandir("/proc") as entries:
+            for entry in entries:
+                if not entry.name.isdecimal():
                     continue
-                fields = process_stat[closing + 2 :].split()
-                if len(fields) >= 2 and int(fields[1]) == os.getpid():
-                    if process_id != worker_process_id:
-                        children.add(process_id)
-            except (FileNotFoundError, PermissionError, ValueError, OSError):
-                continue
-    return children
+                try:
+                    process_id = int(entry.name)
+                    process_stat = Path(f"/proc/{entry.name}/stat").read_text(
+                        encoding="ascii"
+                    )
+                    closing = process_stat.rfind(")")
+                    if closing == -1:
+                        discovery_complete = False
+                        continue
+                    fields = process_stat[closing + 2 :].split()
+                    if len(fields) < 2:
+                        discovery_complete = False
+                        continue
+                    if int(fields[1]) == os.getpid():
+                        if process_id != worker_process_id:
+                            children.add(process_id)
+                except FileNotFoundError:
+                    continue
+                except (UnicodeError, ValueError, OSError):
+                    discovery_complete = False
+    except OSError:
+        return children, False
+    return children, discovery_complete
 
 
 def _reap_linux_children(process_ids: set[int]) -> None:
@@ -169,23 +175,30 @@ def _wait_for_process_tree(
     while time.monotonic() < deadline:
         worker_stopped = process.poll() is not None
         process_group_stopped = not _process_group_exists(process.pid)
-        adopted_children = _direct_linux_children(process.pid)
+        adopted_children, _discovery_complete = _direct_linux_children(process.pid)
         _signal_linux_children(adopted_children, adopted_signal)
         _reap_linux_children(adopted_children)
-        adopted_children = _direct_linux_children(process.pid)
-        if worker_stopped and process_group_stopped and not adopted_children:
+        adopted_children, discovery_complete = _direct_linux_children(process.pid)
+        if (
+            worker_stopped
+            and process_group_stopped
+            and discovery_complete
+            and not adopted_children
+        ):
             return True
         time.sleep(PROCESS_CHECK_SECONDS)
 
     worker_stopped = process.poll() is not None
     process_group_stopped = not _process_group_exists(process.pid)
-    adopted_children = _direct_linux_children(process.pid)
+    adopted_children, _discovery_complete = _direct_linux_children(process.pid)
     _signal_linux_children(adopted_children, adopted_signal)
     _reap_linux_children(adopted_children)
+    adopted_children, discovery_complete = _direct_linux_children(process.pid)
     return (
         worker_stopped
         and process_group_stopped
-        and not _direct_linux_children(process.pid)
+        and discovery_complete
+        and not adopted_children
     )
 
 

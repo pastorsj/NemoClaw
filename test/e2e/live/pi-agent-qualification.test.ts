@@ -415,6 +415,41 @@ async function runSandboxDoctor(
   };
 }
 
+type PiConfigPosture = {
+  readonly config: string;
+  readonly directory: string;
+  readonly fabric: string;
+  readonly hash: string;
+  readonly sandbox: string;
+};
+
+async function readPiConfigPosture(
+  sandbox: SandboxClient,
+  env: NodeJS.ProcessEnv,
+  phase: string,
+): Promise<PiConfigPosture> {
+  const result = await execPiShell(
+    sandbox,
+    trustedSandboxShellScript(
+      "stat -c '%a %U:%G' /sandbox /sandbox/.pi/agent /sandbox/.pi/agent/models.json /sandbox/.pi/agent/fabric.json /sandbox/.pi/agent/.config-hash",
+    ),
+    { artifactName: `pi-${phase}-config-posture`, env, timeoutMs: 30_000 },
+  );
+  expect(result.exitCode, resultText(result)).toBe(0);
+  const [sandboxParent, directory, config, fabric, hash, ...extra] = result.stdout
+    .trim()
+    .split(/\r?\n/u);
+  expect(extra).toEqual([]);
+  expect(sandboxParent && directory && config && fabric && hash).toBeTruthy();
+  return {
+    config: config!,
+    directory: directory!,
+    fabric: fabric!,
+    hash: hash!,
+    sandbox: sandboxParent!,
+  };
+}
+
 async function sessionInventory(sandbox: SandboxClient, env: NodeJS.ProcessEnv, phase: string) {
   const result = await execPiShell(
     sandbox,
@@ -477,6 +512,7 @@ test(
         "install Pi and validate its exact package and image receipts",
         "onboard Pi without a Dockerfile build",
         "prove Pi status, Fabric doctor, native and Fabric headless, and interactive tasks",
+        "run Pi Fabric across Shields postures",
         "rebuild Pi, preserve session state, and reprove status, doctor, and Fabric",
         "recover Pi after a gateway restart and reprove status, doctor, and Fabric",
         "prove Pi policy and credential boundaries",
@@ -521,7 +557,7 @@ test(
       platform,
       taskVersion: TASK_VERSION,
       contract:
-        "receipt-backed package installation, exact candidate image onboarding, native and Fabric tool execution, lifecycle recovery, policy denial, and credential isolation",
+        "receipt-backed package installation, exact candidate image onboarding, native and Fabric tool execution across Shields postures, lifecycle recovery, policy denial, and credential isolation",
     });
 
     progress.phase("install Pi and validate its exact package and image receipts");
@@ -647,6 +683,83 @@ test(
     );
     await runInteractiveTask(artifacts, host, progress, env);
     const sessionsBeforeRebuild = await sessionInventory(sandbox, env, "before-rebuild");
+
+    progress.phase("run Pi Fabric across Shields postures");
+    const shieldsUp = await host.nemoclaw([SANDBOX_NAME, "shields", "up"], {
+      artifactName: "pi-shields-up",
+      env,
+      redactionValues: inference.redactionValues(),
+      timeoutMs: 5 * 60_000,
+    });
+    expect(shieldsUp.exitCode, resultText(shieldsUp)).toBe(0);
+    let restoreShieldsAfterFailure = (): Promise<void> => Promise.resolve();
+    cleanup.trackDisposable(`restore shields for ${SANDBOX_NAME} before destroy`, () =>
+      restoreShieldsAfterFailure(),
+    );
+    const restoreShields = async (): Promise<void> => {
+      const restore = await host.nemoclaw([SANDBOX_NAME, "shields", "up"], {
+        artifactName: "cleanup-pi-shields-up-before-destroy",
+        env,
+        redactionValues: inference.redactionValues(),
+        timeoutMs: 5 * 60_000,
+      });
+      expect(restore.exitCode, resultText(restore)).toBe(0);
+      expect(resultText(restore)).toMatch(/Lockdown (?:is already )?active/u);
+    };
+    const shieldsUpPosture = await readPiConfigPosture(sandbox, env, "shields-up");
+    expect(shieldsUpPosture).toEqual({
+      config: "444 root:root",
+      directory: "755 root:root",
+      fabric: "444 root:root",
+      hash: "444 root:root",
+      sandbox: "1775 root:sandbox",
+    });
+    const fabricWithShieldsUp = await runFabricTask(
+      artifacts,
+      host,
+      sandbox,
+      env,
+      "shields-up",
+      inference.redactionValues(),
+    );
+
+    restoreShieldsAfterFailure = restoreShields;
+    const shieldsDown = await host.nemoclaw(
+      [SANDBOX_NAME, "shields", "down", "--timeout", "15m", "--reason", "Pi Fabric qualification"],
+      {
+        artifactName: "pi-shields-down",
+        env,
+        redactionValues: inference.redactionValues(),
+        timeoutMs: 5 * 60_000,
+      },
+    );
+    expect(shieldsDown.exitCode, resultText(shieldsDown)).toBe(0);
+    const shieldsDownPosture = await readPiConfigPosture(sandbox, env, "shields-down");
+    expect(shieldsDownPosture).toEqual({
+      config: "600 sandbox:sandbox",
+      directory: "700 sandbox:sandbox",
+      fabric: "600 sandbox:sandbox",
+      hash: "600 sandbox:sandbox",
+      sandbox: "755 sandbox:sandbox",
+    });
+    const fabricWithShieldsDown = await runFabricTask(
+      artifacts,
+      host,
+      sandbox,
+      env,
+      "shields-down",
+      inference.redactionValues(),
+    );
+    const shieldsRestored = await host.nemoclaw([SANDBOX_NAME, "shields", "up"], {
+      artifactName: "pi-shields-restored",
+      env,
+      redactionValues: inference.redactionValues(),
+      timeoutMs: 5 * 60_000,
+    });
+    expect(shieldsRestored.exitCode, resultText(shieldsRestored)).toBe(0);
+    restoreShieldsAfterFailure = () => Promise.resolve();
+    const shieldsRestoredPosture = await readPiConfigPosture(sandbox, env, "shields-restored");
+    expect(shieldsRestoredPosture).toEqual(shieldsUpPosture);
 
     progress.phase("rebuild Pi, preserve session state, and reprove status, doctor, and Fabric");
     const rebuild = await host.nemoclaw([SANDBOX_NAME, "rebuild", "--yes"], {
@@ -835,6 +948,8 @@ test(
         headlessAfterRebuild: rebuildProof,
         headlessAfterRecovery: recoveryProof,
         fabricHeadlessBeforeRebuild: fabricBeforeRebuildProof,
+        fabricHeadlessWithShieldsDown: fabricWithShieldsDown,
+        fabricHeadlessWithShieldsUp: fabricWithShieldsUp,
         fabricHeadlessAfterRebuild: fabricAfterRebuildProof,
         fabricHeadlessAfterRecovery: fabricAfterRecoveryProof,
         interactive: true,
@@ -857,7 +972,21 @@ test(
           fabricDoctor: doctorAfterRecovery,
         },
       },
-      lifecycle: ["onboard", "interactive", "rebuild", "gateway-recovery", "destroy"],
+      shields: {
+        down: shieldsDownPosture,
+        restored: shieldsRestoredPosture,
+        up: shieldsUpPosture,
+      },
+      lifecycle: [
+        "onboard",
+        "interactive",
+        "shields-up",
+        "shields-down",
+        "shields-restored",
+        "rebuild",
+        "gateway-recovery",
+        "destroy",
+      ],
       buildCommands: 0,
     });
     await artifacts.target.complete({

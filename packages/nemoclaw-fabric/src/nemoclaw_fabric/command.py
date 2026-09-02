@@ -176,7 +176,7 @@ def _write_line(stream: TextIO, text: str) -> None:
 
 
 def _require_bounded_output(text: str) -> str:
-    if len(text.encode("utf-8")) > MAX_OUTPUT_BYTES:
+    if len(text.encode("utf-8")) + 1 > MAX_OUTPUT_BYTES:
         raise FabricOutputLimitError(
             f"the Fabric result exceeds the {MAX_OUTPUT_BYTES}-byte output limit"
         )
@@ -302,7 +302,7 @@ def _write_command_error(
             ),
             hidden_values,
         )
-        if len(rendered.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        if len(rendered.encode("utf-8")) + 1 > MAX_OUTPUT_BYTES:
             rendered = serialize_json_output(
                 error_payload(
                     stage="output",
@@ -316,7 +316,7 @@ def _write_command_error(
         _write_line(stdout, rendered)
     else:
         rendered = f"nemoclaw-fabric: {stage} failed [{code}]: {message}"
-        if len(rendered.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        if len(rendered.encode("utf-8")) + 1 > MAX_OUTPUT_BYTES:
             rendered = (
                 "nemoclaw-fabric: output failed [output_limit_exceeded]: "
                 f"the Fabric result exceeds the {MAX_OUTPUT_BYTES}-byte output limit"

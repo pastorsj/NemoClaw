@@ -14,8 +14,10 @@ import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Iterator
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from nemoclaw_fabric import supervisor
 
@@ -80,6 +82,19 @@ class FabricRunSupervisorTests(unittest.TestCase):
 
         load_libc.assert_not_called()
 
+    def test_non_linux_child_discovery_does_not_read_proc(self) -> None:
+        with (
+            patch.object(supervisor.sys, "platform", "darwin"),
+            patch.object(supervisor.os, "scandir") as scandir,
+        ):
+            process_ids, discovery_complete = supervisor._direct_linux_children(
+                worker_process_id=41
+            )
+
+        self.assertEqual(process_ids, set())
+        self.assertTrue(discovery_complete)
+        scandir.assert_not_called()
+
     def test_linux_subreaper_failure_prevents_an_unowned_worker(self) -> None:
         with (
             patch.object(
@@ -93,6 +108,68 @@ class FabricRunSupervisorTests(unittest.TestCase):
 
         self.assertEqual(exit_code, supervisor.EXIT_UNAVAILABLE)
         popen.assert_not_called()
+
+    def test_linux_proc_scan_failure_is_not_treated_as_no_children(self) -> None:
+        with (
+            patch.object(supervisor.sys, "platform", "linux"),
+            patch.object(
+                supervisor.os,
+                "scandir",
+                side_effect=PermissionError("proc unavailable"),
+            ),
+        ):
+            process_ids, discovery_complete = supervisor._direct_linux_children(
+                worker_process_id=41
+            )
+
+        self.assertEqual(process_ids, set())
+        self.assertFalse(discovery_complete)
+
+    def test_unreadable_linux_proc_stat_is_not_treated_as_no_children(self) -> None:
+        class ProcessEntries:
+            def __enter__(self) -> ProcessEntries:
+                return self
+
+            def __exit__(self, *_args: object) -> None:
+                return None
+
+            def __iter__(self) -> Iterator[SimpleNamespace]:
+                return iter([SimpleNamespace(name="42")])
+
+        with (
+            patch.object(supervisor.sys, "platform", "linux"),
+            patch.object(supervisor.os, "scandir", return_value=ProcessEntries()),
+            patch.object(
+                supervisor.Path,
+                "read_text",
+                side_effect=PermissionError("stat unavailable"),
+            ),
+        ):
+            process_ids, discovery_complete = supervisor._direct_linux_children(
+                worker_process_id=41
+            )
+
+        self.assertEqual(process_ids, set())
+        self.assertFalse(discovery_complete)
+
+    def test_incomplete_linux_child_discovery_cannot_report_a_stopped_tree(self) -> None:
+        process = Mock(pid=41)
+        process.poll.return_value = 0
+        with (
+            patch.object(supervisor, "_process_group_exists", return_value=False),
+            patch.object(
+                supervisor,
+                "_direct_linux_children",
+                return_value=(set(), False),
+            ),
+        ):
+            stopped = supervisor._wait_for_process_tree(
+                process,
+                deadline=time.monotonic(),
+                adopted_signal=signal.SIGKILL,
+            )
+
+        self.assertFalse(stopped)
 
     def test_help_succeeds_without_starting_a_worker(self) -> None:
         for argument in ("-h", "--help"):
