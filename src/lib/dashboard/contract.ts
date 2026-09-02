@@ -15,6 +15,8 @@ export interface PlatformHints {
   isWsl?: boolean;
   wslHostAddress?: string | null;
   dashboardHealthEndpoint?: string;
+  /** Port the agent health endpoint listens on inside the sandbox. */
+  sandboxHealthPort?: number;
   gatewayPort?: number;
   gatewayHealthEndpoint?: string;
   /**
@@ -41,6 +43,8 @@ export interface DashboardDeliveryChain {
   forwardTarget: string;
   healthEndpoint: string;
   dashboardHealthEndpoint: string;
+  /** Port used only by the in-sandbox agent health probe. */
+  sandboxHealthPort: number;
   gatewayPort: number;
   gatewayHealthEndpoint: string;
   port: number;
@@ -135,6 +139,12 @@ export function buildChain(hints?: PlatformHints): DashboardDeliveryChain {
 
   const shouldDisableDeviceAuth = hasNonLoopbackUrl || (h.isWsl ?? false) || remoteBindOptIn;
   const dashboardHealthEndpoint = normalizeEndpointPath(h.dashboardHealthEndpoint, "/health");
+  const sandboxHealthPort =
+    Number.isFinite(h.sandboxHealthPort) &&
+    h.sandboxHealthPort! >= 1 &&
+    h.sandboxHealthPort! <= 65535
+      ? Number(h.sandboxHealthPort)
+      : DASHBOARD_PORT;
   const gatewayPort =
     Number.isFinite(h.gatewayPort) && h.gatewayPort! >= 1 && h.gatewayPort! <= 65535
       ? Number(h.gatewayPort)
@@ -151,6 +161,7 @@ export function buildChain(hints?: PlatformHints): DashboardDeliveryChain {
     forwardTarget,
     healthEndpoint: dashboardHealthEndpoint,
     dashboardHealthEndpoint,
+    sandboxHealthPort,
     gatewayPort,
     gatewayHealthEndpoint,
     port,

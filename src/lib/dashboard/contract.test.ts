@@ -15,6 +15,7 @@ describe("buildChain", () => {
       port: 18789,
       bindAddress: "127.0.0.1",
       dashboardHealthEndpoint: "/health",
+      sandboxHealthPort: 18789,
       gatewayPort: 18789,
       gatewayHealthEndpoint: "/health",
     });
@@ -26,6 +27,7 @@ describe("buildChain", () => {
     const c = buildChain({ chatUiUrl: "http://127.0.0.1:19000" });
     expect(c.port).toBe(19000);
     expect(c.forwardTarget).toBe("19000");
+    expect(c.sandboxHealthPort).toBe(18789);
   });
 
   it("binds to 0.0.0.0 for non-loopback URL and includes both CORS origins", () => {
@@ -72,12 +74,14 @@ describe("buildChain", () => {
     const c = buildChain({
       chatUiUrl: "http://127.0.0.1:18789",
       dashboardHealthEndpoint: "api/status",
+      sandboxHealthPort: 8642,
       gatewayPort: 8642,
       gatewayHealthEndpoint: "/health",
     });
     expect(c.port).toBe(18789);
     expect(c.dashboardHealthEndpoint).toBe("/api/status");
     expect(c.healthEndpoint).toBe("/api/status");
+    expect(c.sandboxHealthPort).toBe(8642);
     expect(c.gatewayPort).toBe(8642);
     expect(c.gatewayHealthEndpoint).toBe("/health");
   });

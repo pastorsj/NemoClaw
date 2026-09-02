@@ -137,10 +137,40 @@ describe("onboard dashboard helpers", () => {
     ).toMatchObject({
       port: 18789,
       dashboardHealthEndpoint: "/api/status",
+      sandboxHealthPort: 8643,
       gatewayPort: 8643,
       gatewayHealthEndpoint: "/health",
     });
     expect(getSandbox).toHaveBeenCalledWith("my-hermes");
+  });
+
+  it.each([
+    ["default", null],
+    ["explicit", loadAgent("openclaw")],
+  ])("keeps %s OpenClaw host forward separate from sandbox health", (_selection, agent) => {
+    const helpers = createOnboardDashboardHelpers({
+      runOpenshell: vi.fn(() => ({ status: 0 })),
+      runCaptureOpenshell: vi.fn(() => ""),
+      openshellArgv: (args: string[]) => [process.execPath, "-e", "", ...args],
+      cliName: () => "nemoclaw",
+      agentProductName: () => "OpenClaw",
+      getProviderLabel: (provider: string) => provider,
+      note: vi.fn(),
+      isWsl: () => false,
+      redact: (value: unknown) => String(value),
+      sleep: vi.fn(),
+      printAgentDashboardUi: vi.fn(),
+      listSandboxes: () => ({ sandboxes: [] }),
+    });
+
+    expect(
+      helpers.buildAgentVerifyChain("http://127.0.0.1:18791", "my-openclaw", agent),
+    ).toMatchObject({
+      port: 18791,
+      sandboxHealthPort: 18789,
+      gatewayPort: 18791,
+      gatewayHealthEndpoint: "/health",
+    });
   });
 
   it("prints platform-appropriate service hints for port conflicts", () => {

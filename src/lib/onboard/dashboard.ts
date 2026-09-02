@@ -97,8 +97,21 @@ export interface OnboardDashboardDeps {
 export type VerifyChainAgent = {
   name?: string;
   dashboard?: { healthPath?: string } | null;
+  forwardPort?: number | null;
+  forward_ports?: number[] | null;
   healthProbe?: { url?: string; port?: number } | null;
 };
+
+function resolveHostAgentApiPort(
+  agent: VerifyChainAgent | null | undefined,
+  sandboxHealthPort: number | undefined,
+): number | undefined {
+  const primaryForwardPort = agent?.forwardPort ?? agent?.forward_ports?.[0];
+  if (!Number.isInteger(primaryForwardPort) || !Number.isInteger(sandboxHealthPort)) {
+    return undefined;
+  }
+  return primaryForwardPort === sandboxHealthPort ? undefined : sandboxHealthPort;
+}
 
 export interface OnboardDashboardHelpers {
   buildChain: typeof buildChain;
@@ -277,14 +290,16 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
     // Resolve WSL once: `buildChain` and the host-address lookup must agree, or
     // the chain can claim WSL while dropping the fallback URL that pairs with it.
     const isWsl = deps.isWsl();
+    const sandboxHealthPort = resolveVerifyAgentApiPort(sandboxName, agent, {
+      getSandbox: deps.getSandbox,
+    });
     return buildChain({
       chatUiUrl,
       isWsl,
       wslHostAddress: getWslHostAddress({ isWsl }),
       dashboardHealthEndpoint: agent?.dashboard?.healthPath,
-      gatewayPort: resolveVerifyAgentApiPort(sandboxName, agent, {
-        getSandbox: deps.getSandbox,
-      }),
+      sandboxHealthPort,
+      gatewayPort: resolveHostAgentApiPort(agent, sandboxHealthPort),
       gatewayHealthEndpoint: agent?.healthProbe?.url,
     });
   }

@@ -197,7 +197,7 @@ function probeGatewayInSandboxOnce(
   chain: DashboardDeliveryChain,
   deps: VerifyDeploymentDeps,
 ): { reachable: boolean; httpCode: number; detail: string } {
-  const port = chain.gatewayPort ?? chain.port;
+  const port = chain.sandboxHealthPort;
   const endpoint = chain.gatewayHealthEndpoint ?? chain.healthEndpoint;
   const script =
     `curl -so /dev/null -w '%{http_code}' --max-time 3 ` +

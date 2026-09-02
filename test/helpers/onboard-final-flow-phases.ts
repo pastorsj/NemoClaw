@@ -285,6 +285,7 @@ export function createPhases(
         forwardTarget: "45123",
         healthEndpoint: "/health",
         dashboardHealthEndpoint: "/health",
+        sandboxHealthPort: 45124,
         gatewayPort: 45124,
         gatewayHealthEndpoint: "/health",
         port: 45123,

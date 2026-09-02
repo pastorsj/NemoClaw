@@ -85,6 +85,29 @@ describe("verifyDeployment", () => {
     expect(result.verification.dashboardReachable).toBe(true);
   });
 
+  it("probes the sandbox health port when the host dashboard port was reallocated", async () => {
+    const scripts: string[] = [];
+    const dynamicPortChain = buildChain({
+      chatUiUrl: "http://127.0.0.1:18791",
+      sandboxHealthPort: 18789,
+    });
+    const result = await verifyDeployment(
+      "my-sandbox",
+      dynamicPortChain,
+      makeDeps({
+        executeSandboxCommand: (_name: string, script: string) => {
+          scripts.push(script);
+          return { status: 0, stdout: "200", stderr: "" };
+        },
+      }),
+      NO_RETRY,
+    );
+
+    expect(result.healthy).toBe(true);
+    expect(scripts[0]).toContain("http://127.0.0.1:18789/health");
+    expect(scripts[0]).not.toContain("18791");
+  });
+
   it("treats HTTP 401 as a live gateway with device auth enabled (#2342)", async () => {
     const deps = makeDeps({
       executeSandboxCommand: () => ({ status: 0, stdout: "401", stderr: "" }),
