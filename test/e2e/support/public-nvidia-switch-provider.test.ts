@@ -34,12 +34,12 @@ describe("public NVIDIA inference switch provider", () => {
 
     const [program, args, options] = command.mock.calls[0]!;
     expect(program).toBe("bash");
-    expect(args[1]).toContain("provider get -g nemoclaw nvidia-prod");
+    expect(args[1]).toContain("provider get -g 'nemoclaw' nvidia-prod");
     expect(args[1]).toContain(
-      "provider create -g nemoclaw --name nvidia-prod --type nvidia --credential NVIDIA_INFERENCE_API_KEY",
+      "provider create -g 'nemoclaw' --name nvidia-prod --type nvidia --credential NVIDIA_INFERENCE_API_KEY",
     );
     expect(args[1]).toContain(
-      "provider update -g nemoclaw nvidia-prod --credential NVIDIA_INFERENCE_API_KEY",
+      "provider update -g 'nemoclaw' nvidia-prod --credential NVIDIA_INFERENCE_API_KEY",
     );
     expect(options).toMatchObject({
       env: {
