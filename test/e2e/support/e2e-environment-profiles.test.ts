@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   commandEnvironment,
   createPrivateTestHome,
-  isolatedHomeEnvironment,
+  isolatedNemoClawEnvironment,
   resolveIsolatedHomeDockerHost,
   sandboxCommandEnvironment,
   testHomeEnvironment,
@@ -99,7 +99,7 @@ describe("E2E environment profiles", () => {
       };
     });
 
-    const result = isolatedHomeEnvironment(
+    const result = isolatedNemoClawEnvironment(
       "/Users/tester/.nemoclaw-e2e-home",
       {
         DOCKER_CONFIG: "/tmp/untrusted-docker-config",
@@ -117,6 +117,10 @@ describe("E2E environment profiles", () => {
     expect(result).toMatchObject({
       HOME: "/Users/tester/.nemoclaw-e2e-home",
       DOCKER_HOST: "unix:///Users/tester/.colima/default/docker.sock",
+      XDG_BIN_HOME: "/Users/tester/.local/bin",
+      XDG_CONFIG_HOME: "/Users/tester/.config",
+      XDG_DATA_HOME: "/Users/tester/.local/share",
+      XDG_STATE_HOME: "/Users/tester/.local/state",
     });
     expect(result).not.toHaveProperty("DOCKER_CERT_PATH");
     expect(result).not.toHaveProperty("DOCKER_CONFIG");
@@ -132,6 +136,51 @@ describe("E2E environment profiles", () => {
       DOCKER_TLS_VERIFY: "1",
       REGISTRY_AUTH_TOKEN: "must-not-pass",
     });
+  });
+
+  it("retains explicit absolute OpenShell authority while rejecting caller overrides", () => {
+    const source = {
+      HOME: "/home/tester",
+      PATH: "/usr/bin",
+      DOCKER_HOST: "unix:///run/user/1000/docker.sock",
+      XDG_BIN_HOME: "/host/bin",
+      XDG_CONFIG_HOME: "/host/config",
+      XDG_DATA_HOME: "/host/data",
+      XDG_STATE_HOME: "/host/state",
+    };
+
+    const result = isolatedNemoClawEnvironment(
+      "/home/tester/.nemoclaw-e2e-home",
+      {
+        HOME: "/untrusted/home",
+        XDG_BIN_HOME: "/untrusted/bin",
+        XDG_CONFIG_HOME: "/untrusted/config",
+      },
+      source,
+      vi.fn(),
+    );
+
+    expect(result).toMatchObject({
+      HOME: "/home/tester/.nemoclaw-e2e-home",
+      XDG_BIN_HOME: "/host/bin",
+      XDG_CONFIG_HOME: "/host/config",
+      XDG_DATA_HOME: "/host/data",
+      XDG_STATE_HOME: "/host/state",
+    });
+  });
+
+  it.each([
+    ["HOME", { HOME: "relative-home" }],
+    ["XDG_CONFIG_HOME", { HOME: "/home/tester", XDG_CONFIG_HOME: "relative-config" }],
+  ])("rejects a non-absolute host %s", (_selector, source) => {
+    expect(() =>
+      isolatedNemoClawEnvironment(
+        "/home/tester/.nemoclaw-e2e-home",
+        {},
+        { PATH: "/usr/bin", DOCKER_HOST: "unix:///run/docker.sock", ...source },
+        vi.fn(),
+      ),
+    ).toThrow(/absolute|must be absolute/);
   });
 
   it("keeps an explicit safe Docker host without reading context metadata", () => {

@@ -33,7 +33,7 @@ import {
 } from "../fixtures/compatible-anthropic-switch.ts";
 import {
   createPrivateTestHome,
-  isolatedHomeEnvironment,
+  isolatedNemoClawEnvironment,
 } from "../fixtures/environment-profiles.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import {
@@ -222,7 +222,7 @@ function parsePortEnv(name: string, fallback: number): number {
 }
 
 function commandEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return isolatedHomeEnvironment(home, {
+  return isolatedNemoClawEnvironment(home, {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,

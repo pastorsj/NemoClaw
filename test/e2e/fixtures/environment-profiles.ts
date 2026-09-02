@@ -17,6 +17,13 @@ const ISOLATED_HOME_DOCKER_SELECTORS = [
   "DOCKER_TLS_VERIFY",
 ] as const;
 
+const HOST_OPEN_SHELL_HOME_SELECTORS = {
+  XDG_BIN_HOME: [".local", "bin"],
+  XDG_CONFIG_HOME: [".config"],
+  XDG_DATA_HOME: [".local", "share"],
+  XDG_STATE_HOME: [".local", "state"],
+} as const;
+
 export interface DockerContextInspection {
   readonly status: number | null;
   readonly stdout: string;
@@ -135,8 +142,31 @@ export function testHomeEnvironment(
   return installedCommandEnvironment(extra, home, source);
 }
 
-/** Preserve local Docker access without exposing the account's Docker configuration. */
-export function isolatedHomeEnvironment(
+/** Resolve the host-owned directories that establish OpenShell authority. */
+function hostOpenShellAuthority(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const sourceHome = source.HOME;
+  if (!sourceHome || !path.isAbsolute(sourceHome)) {
+    throw new Error("An absolute host HOME is required before isolating NemoClaw E2E state");
+  }
+
+  return Object.fromEntries(
+    Object.entries(HOST_OPEN_SHELL_HOME_SELECTORS).map(([selector, fallbackParts]) => {
+      const configured = source[selector];
+      if (configured && !path.isAbsolute(configured)) {
+        throw new Error(`${selector} must be absolute before isolating NemoClaw E2E state`);
+      }
+      return [selector, configured ?? path.join(sourceHome, ...fallbackParts)];
+    }),
+  );
+}
+
+/**
+ * Isolate NemoClaw's HOME-owned state while retaining the reviewed host
+ * OpenShell installation, gateway registration, mTLS identity, and runtime
+ * data. OpenShell is host infrastructure for this target, not test state.
+ * Preserve local Docker access without exposing the account's Docker config.
+ */
+export function isolatedNemoClawEnvironment(
   home: string,
   extra: NodeJS.ProcessEnv = {},
   source: NodeJS.ProcessEnv = process.env,
@@ -145,6 +175,8 @@ export function isolatedHomeEnvironment(
   const dockerHost = resolveIsolatedHomeDockerHost(source, inspect);
   const environment = testHomeEnvironment(home, extra, source);
   for (const selector of ISOLATED_HOME_DOCKER_SELECTORS) delete environment[selector];
+  Object.assign(environment, hostOpenShellAuthority(source));
+  environment.HOME = home;
   environment.DOCKER_HOST = dockerHost;
   return environment;
 }
