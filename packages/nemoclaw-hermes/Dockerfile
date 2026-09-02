@@ -608,7 +608,7 @@ RUN /usr/bin/python3 -I \
 # Hermes only accepts `hermes`/`hermes.exe` as the entry token, which defeats
 # both the PID-file liveness re-check and the process-table fallback, so
 # `hermes status` reports a running foreground gateway as stopped (#7804).
-ARG NEMOCLAW_HERMES_GATEWAY_PROCESS_IDENTITY_PATCHER_SHA256=1720f557e57c4755b9de47eece2c9c8ad182e1196c40d2783f1768fc5a426681
+ARG NEMOCLAW_HERMES_GATEWAY_PROCESS_IDENTITY_PATCHER_SHA256=141df7f1574dff51d9b95e1609dde33ba20465b717f79cbb598cd34358308bf0
 # hadolint ignore=DL4006
 RUN printf '%s  %s\n' \
         "$NEMOCLAW_HERMES_GATEWAY_PROCESS_IDENTITY_PATCHER_SHA256" /opt/nemoclaw-hermes-config/patch-gateway-process-identity.py \
