@@ -751,8 +751,8 @@ const { getSandboxReuseState, getSandboxRecreateObservation, waitForSandboxRecre
     waitUntil,
   });
 const {
-  executeSandboxCommandForVerification,
-}: typeof import("./onboard/sandbox-verification-exec") = require("./onboard/sandbox-verification-exec");
+  createDeploymentVerificationCommandExecutor,
+}: typeof import("./onboard/workload/deployment-exec") = require("./onboard/workload/deployment-exec");
 
 // URL/string utilities — delegated to src/lib/core/url-utils.ts
 const {
@@ -3356,8 +3356,7 @@ async function runOnboard(opts: OnboardOptions = {}): Promise<void> {
               name,
               chain,
               {
-                executeSandboxCommand: (sandbox: string, script: string) =>
-                  executeSandboxCommandForVerification(sandbox, script),
+                executeSandboxCommand: createDeploymentVerificationCommandExecutor(GATEWAY_NAME),
                 probeHostPort: (port: number, probePath: string) => {
                   const result = runCapture(
                     [

@@ -226,6 +226,62 @@ describe("sandbox command transport privileged execution lease", () => {
     expect(deps.dockerSpawnSync).not.toHaveBeenCalled();
   });
 
+  it("recovers a stale OpenShell phase through the identity-pinned container", () => {
+    const deps = createDependencies({
+      dockerSpawnSync: vi.fn(() => spawnResult("fallback-output")),
+      extractSandboxExecCommandStdout: vi.fn((output: string) =>
+        output === "fallback-output" ? "200" : null,
+      ),
+    });
+    mocks.spawnSync.mockReturnValue(
+      spawnResult("", {
+        status: 1,
+        stderr:
+          "Error: sandbox 'alpha' is not ready (phase: Error); wait for it to reach Ready state.",
+      }),
+    );
+
+    expect(
+      executeSandboxExecCommandTransport(deps, "alpha", "probe", 9000, {
+        allowLocalDockerFallback: true,
+        gatewayName: "nemoclaw-18133",
+      }),
+    ).toEqual({ status: 0, stdout: "200", stderr: "" });
+    expect(mocks.spawnSync.mock.calls[0]?.[1]).toEqual([
+      "sandbox",
+      "exec",
+      "--name",
+      "alpha",
+      "-g",
+      "nemoclaw-18133",
+      "--",
+      "sh",
+      "-c",
+      "marked:probe",
+    ]);
+    expect(deps.privilegedSandboxExecArgv).toHaveBeenCalledExactlyOnceWith("alpha", [
+      "sh",
+      "-c",
+      "marked:probe",
+    ]);
+    expect(deps.dockerSpawnSync).toHaveBeenCalledOnce();
+  });
+
+  it("does not replay a probe that starts and fails inside the sandbox", () => {
+    const deps = createDependencies();
+    mocks.spawnSync.mockReturnValue(
+      spawnResult("probe-failed", { status: 1, stderr: "expected probe failure" }),
+    );
+
+    expect(
+      executeSandboxExecCommandTransport(deps, "alpha", "probe", 9000, {
+        allowLocalDockerFallback: true,
+      }),
+    ).toEqual({ status: 1, stdout: "probe-failed", stderr: "expected probe failure" });
+    expect(deps.privilegedSandboxExecArgv).not.toHaveBeenCalled();
+    expect(deps.dockerSpawnSync).not.toHaveBeenCalled();
+  });
+
   it("holds one lease across OpenShell failure and the complete local fallback", () => {
     const events: string[] = [];
     let leaseHeld = false;
