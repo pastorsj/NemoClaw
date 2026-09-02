@@ -11,6 +11,7 @@ import { readManagedWorkloadAuthority } from "../../../src/lib/onboard/workload/
 import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
 import type { SandboxEntry } from "../../../src/lib/state/registry/types.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
+import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
 import { type HostCliClient, resultText } from "../fixtures/clients/index.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -678,13 +679,16 @@ test(
     cleanup.trackDisposable(`destroy Hermes rebuild sandbox ${SANDBOX_NAME}`, () =>
       cleanupHermesNemoClawSandbox(host, testEnv, apiKey),
     );
-    cleanup.trackDisposable(`delete Hermes rebuild OpenShell sandbox ${SANDBOX_NAME}`, () =>
-      sandbox.cleanupSandbox(SANDBOX_NAME, {
-        artifactName: "cleanup-hermes-rebuild-resources-openshell-sandbox-delete",
-        env: hermesCleanupEnv(testEnv, apiKey),
-        redactionValues: hermesCleanupRedactions(apiKey),
-        timeoutMs: 3 * 60_000,
-      }),
+    const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
+      cleanup,
+      `delete Hermes rebuild OpenShell sandbox ${SANDBOX_NAME}`,
+      () =>
+        sandbox.cleanupSandbox(SANDBOX_NAME, {
+          artifactName: "cleanup-hermes-rebuild-resources-openshell-sandbox-delete",
+          env: hermesCleanupEnv(testEnv, apiKey),
+          redactionValues: hermesCleanupRedactions(apiKey),
+          timeoutMs: 3 * 60_000,
+        }),
     );
 
     progress.phase("prepare trusted gateway inference and the current Hermes base");
@@ -1148,6 +1152,7 @@ test(
       captureLimitBytes: LONG_COMMAND_CAPTURE_LIMIT_BYTES,
       onOutput: progress.onOutput,
     });
+    sandboxDeleteGuard.observeLifecycleResult(rebuild);
     cleanupRegistryDashboardPort = readJsonFileOr<RegistryData>(statePaths.registryFile, {})
       .sandboxes?.[SANDBOX_NAME]?.dashboardPort;
     expectExitZero(rebuild, "nemoclaw rebuild Hermes sandbox");

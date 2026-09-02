@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { TestProgress } from "./progress.ts";
-import type { ShellProbeRunOptions } from "./shell-probe.ts";
+import type { ShellProbeResult, ShellProbeRunOptions } from "./shell-probe.ts";
 
 export interface CleanupFailure {
   name: string;
@@ -18,6 +18,9 @@ type CleanupFn = () => Promise<void> | void;
 type RedactFn = (text: string) => string;
 type CleanupProgress = Pick<TestProgress, "activity" | "event">;
 const MAX_PROGRESS_CLEANUP_NAME_LENGTH = 120;
+const RETAINED_SANDBOX_FAILURE =
+  "Sandbox post-create verification or finalization failed; automatic sandbox cleanup was not safe.";
+const MUTABLE_NAME_DELETE_REFUSAL = "Do not delete the sandbox by mutable sandbox name.";
 export const DEFAULT_CLEANUP_TIMEOUT_MS = 10 * 60_000;
 
 export interface CleanupRegistryOptions {
@@ -35,6 +38,10 @@ export interface CleanupHost {
 interface CleanupEntry {
   name: string;
   run: CleanupFn;
+}
+
+export interface SandboxNameDeleteGuard {
+  observeLifecycleResult(result: Pick<ShellProbeResult, "stdout" | "stderr">): void;
 }
 
 export class CleanupRegistry {
@@ -177,6 +184,31 @@ export class CleanupRegistry {
       this.entries.length = 0;
     }
   }
+}
+
+/**
+ * Register an OpenShell mutable-name delete while preserving NemoClaw's
+ * identity-bound recovery path when sandbox finalization refuses that delete.
+ */
+export function trackGuardedSandboxNameDelete(
+  cleanup: Pick<CleanupRegistry, "trackDisposable">,
+  name: string,
+  deleteByName: CleanupFn,
+): SandboxNameDeleteGuard {
+  let retainedIdentityRequiresRecovery = false;
+  cleanup.trackDisposable(name, () => {
+    if (retainedIdentityRequiresRecovery) return;
+    return deleteByName();
+  });
+
+  return {
+    observeLifecycleResult(result) {
+      const output = `${result.stdout}\n${result.stderr}`;
+      retainedIdentityRequiresRecovery ||=
+        output.includes(RETAINED_SANDBOX_FAILURE) &&
+        output.includes(MUTABLE_NAME_DELETE_REFUSAL);
+    },
+  };
 }
 
 export function assertCleanupPassed(result: CleanupResult): void {

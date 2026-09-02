@@ -16,6 +16,7 @@ import {
   cleanupWhenCommandAvailable,
   cleanupWhenOpenShellAvailable,
 } from "../fixtures/cleanup-resources.ts";
+import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
@@ -617,17 +618,20 @@ test(
       redactionValues: [apiKey],
       timeoutMs: 60_000,
     };
-    cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
-      cleanupWhenOpenShellAvailable(
-        host,
-        {
-          artifactName: "cleanup-probe-openshell-sandbox",
-          env: openshellSandboxCleanupOptions.env,
-          redactionValues: openshellSandboxCleanupOptions.redactionValues,
-          timeoutMs: 30_000,
-        },
-        () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
-      ),
+    const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
+      cleanup,
+      `delete OpenShell sandbox ${SANDBOX_NAME}`,
+      () =>
+        cleanupWhenOpenShellAvailable(
+          host,
+          {
+            artifactName: "cleanup-probe-openshell-sandbox",
+            env: openshellSandboxCleanupOptions.env,
+            redactionValues: openshellSandboxCleanupOptions.redactionValues,
+            timeoutMs: 30_000,
+          },
+          () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
+        ),
     );
 
     const install = await installedShellCommand(
@@ -643,6 +647,7 @@ test(
         timeoutMs: INSTALL_TIMEOUT_MS,
       },
     );
+    sandboxDeleteGuard.observeLifecycleResult(install);
     expect(install.exitCode, resultText(install)).toBe(0);
 
     const cliVersion = await installedShellCommand(

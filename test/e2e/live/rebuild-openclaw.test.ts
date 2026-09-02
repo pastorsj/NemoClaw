@@ -7,6 +7,7 @@ import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
+import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { assertExitZero as expectExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
@@ -481,12 +482,15 @@ test(
     cleanup.trackDisposable(`destroy rebuilt sandbox ${SANDBOX_NAME}`, () =>
       cleanupRebuiltNemoClawSandbox(host, commandEnvironments.cli(apiKey), apiKey),
     );
-    cleanup.trackDisposable(`delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`, () =>
-      sandbox.cleanupSandbox(SANDBOX_NAME, {
-        artifactName: "cleanup-openshell-sandbox-delete",
-        env: commandEnvironments.docker(),
-        timeoutMs: OPENSHELL_TIMEOUT_MS,
-      }),
+    const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
+      cleanup,
+      `delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`,
+      () =>
+        sandbox.cleanupSandbox(SANDBOX_NAME, {
+          artifactName: "cleanup-openshell-sandbox-delete",
+          env: commandEnvironments.docker(),
+          timeoutMs: OPENSHELL_TIMEOUT_MS,
+        }),
     );
 
     // Phase 1: create a normal current sandbox first so the real gateway and
@@ -499,6 +503,7 @@ test(
       redactionValues: [apiKey],
       timeoutMs: ONBOARD_TIMEOUT_MS,
     });
+    sandboxDeleteGuard.observeLifecycleResult(onboard);
     if (onboard.exitCode !== 0) {
       if (!isRetryableOnboardEndpointFailure(onboard)) {
         expectExitZero(onboard, "initial current onboard");
@@ -800,6 +805,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
         timeoutMs: REBUILD_TIMEOUT_MS,
       },
     );
+    sandboxDeleteGuard.observeLifecycleResult(rebuild);
     expectExitZero(rebuild, "nemoclaw rebuild");
     const rebuildText = resultText(rebuild);
     expect(rebuildText).toContain(`Sandbox '${SANDBOX_NAME}' rebuild completed`);

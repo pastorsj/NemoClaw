@@ -17,6 +17,7 @@ import path from "node:path";
 
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
+import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { resultText, shellQuote } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
@@ -989,12 +990,15 @@ test(
     env: commandEnv(home),
     timeoutMs: 120_000,
   });
-  cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
-    sandbox.cleanupSandbox(SANDBOX_NAME, {
-      artifactName: "cleanup-openshell-sandbox-delete-openclaw-inference-switch",
-      env: commandEnv(home),
-      timeoutMs: 60_000,
-    }),
+  const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
+    cleanup,
+    `delete OpenShell sandbox ${SANDBOX_NAME}`,
+    () =>
+      sandbox.cleanupSandbox(SANDBOX_NAME, {
+        artifactName: "cleanup-openshell-sandbox-delete-openclaw-inference-switch",
+        env: commandEnv(home),
+        timeoutMs: 60_000,
+      }),
   );
 
   progress.phase("clear existing inference-switch state");
@@ -1015,6 +1019,7 @@ test(
       timeoutMs: INSTALL_TIMEOUT_MS,
     },
   );
+  sandboxDeleteGuard.observeLifecycleResult(install);
   const installText = resultText(install);
   if (install.exitCode !== 0 && isExternalProviderValidationFailure(installText)) {
     await artifacts.target.complete({

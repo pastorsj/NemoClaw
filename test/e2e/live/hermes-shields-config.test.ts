@@ -9,6 +9,7 @@ import {
   cleanupWhenCommandAvailable,
   cleanupWhenOpenShellAvailable,
 } from "../fixtures/cleanup-resources.ts";
+import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { assertExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
@@ -397,17 +398,20 @@ test(
     redactionValues: [COMPATIBLE_API_KEY],
     timeoutMs: 60_000,
   };
-  cleanupRegistry.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
-    cleanupWhenOpenShellAvailable(
-      host,
-      {
-        artifactName: "cleanup-probe-openshell-sandbox",
-        env: openshellSandboxCleanupOptions.env,
-        redactionValues: openshellSandboxCleanupOptions.redactionValues,
-        timeoutMs: 30_000,
-      },
-      () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
-    ),
+  const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
+    cleanupRegistry,
+    `delete OpenShell sandbox ${SANDBOX_NAME}`,
+    () =>
+      cleanupWhenOpenShellAvailable(
+        host,
+        {
+          artifactName: "cleanup-probe-openshell-sandbox",
+          env: openshellSandboxCleanupOptions.env,
+          redactionValues: openshellSandboxCleanupOptions.redactionValues,
+          timeoutMs: 30_000,
+        },
+        () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
+      ),
   );
   await preClean(host);
 
@@ -420,6 +424,7 @@ test(
     redactionValues: [COMPATIBLE_API_KEY],
     timeoutMs: 30 * 60_000,
   });
+  sandboxDeleteGuard.observeLifecycleResult(install);
   assertExitZero(install, "fresh CPU-only Hermes onboard");
 
   const status = await host.command("nemoclaw", [SANDBOX_NAME, "status"], {

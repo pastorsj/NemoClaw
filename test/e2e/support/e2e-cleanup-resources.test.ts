@@ -7,7 +7,11 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { type CleanupHost, CleanupRegistry } from "../fixtures/cleanup.ts";
+import {
+  type CleanupHost,
+  CleanupRegistry,
+  trackGuardedSandboxNameDelete,
+} from "../fixtures/cleanup.ts";
 import {
   assertCleanupSucceededOrAbsent,
   cleanupAcquiredResource,
@@ -40,6 +44,45 @@ describe("cleanup resources", () => {
 
     const result = await cleanup.runAll();
     expect(calls).toEqual(["forward:18789", "sandbox:e2e-resource", "gateway:nemoclaw"]);
+    expect(result.failures).toEqual([]);
+  });
+
+  it.each([
+    {
+      expectedCalls: ["mutable-name-delete", "identity-aware-destroy"],
+      lifecycleResult: {
+        stdout: "",
+        stderr: "OpenShell gateway was unavailable before sandbox registration",
+      },
+      title: "keeps mutable-name cleanup for an ordinary early failure",
+    },
+    {
+      expectedCalls: ["identity-aware-destroy"],
+      lifecycleResult: {
+        stdout: "",
+        stderr: [
+          "Sandbox post-create verification or finalization failed; automatic sandbox cleanup was not safe.",
+          "Do not delete the sandbox by mutable sandbox name.",
+        ].join(" "),
+      },
+      title: "preserves retained identity after mutable-name cleanup is refused",
+    },
+  ])("$title", async ({ expectedCalls, lifecycleResult }) => {
+    const calls: string[] = [];
+    const cleanup = new CleanupRegistry();
+    cleanup.trackDisposable("identity-aware destroy", () => {
+      calls.push("identity-aware-destroy");
+    });
+    const guard = trackGuardedSandboxNameDelete(cleanup, "mutable-name delete", () => {
+      calls.push("mutable-name-delete");
+    });
+
+    guard.observeLifecycleResult(lifecycleResult);
+    // A later successful probe must not erase an earlier identity-safety refusal.
+    guard.observeLifecycleResult({ stdout: "later command succeeded", stderr: "" });
+
+    const result = await cleanup.runAll();
+    expect(calls).toEqual(expectedCalls);
     expect(result.failures).toEqual([]);
   });
 

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { resultText } from "../fixtures/clients/index.ts";
 import { trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import {
@@ -119,12 +120,15 @@ test(
     env: cleanupEnv,
     timeoutMs: 120_000,
   });
-  cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
-    sandbox.cleanupSandbox(SANDBOX_NAME, {
-      artifactName: "cleanup-openshell-delete",
-      env: cleanupEnv,
-      timeoutMs: 60_000,
-    }),
+  const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
+    cleanup,
+    `delete OpenShell sandbox ${SANDBOX_NAME}`,
+    () =>
+      sandbox.cleanupSandbox(SANDBOX_NAME, {
+        artifactName: "cleanup-openshell-delete",
+        env: cleanupEnv,
+        timeoutMs: 60_000,
+      }),
   );
     await cleanupHermesSwitch(host, sandbox, home);
 
@@ -183,6 +187,7 @@ test(
 
   progress.phase("install baseline Hermes runtime");
     const install = await installHermes(host, apiKey, installEnv, home);
+  sandboxDeleteGuard.observeLifecycleResult(install);
   expect(install.exitCode, resultText(install)).toBe(0);
   expectAuthenticatedBaselineInventoryRequest(mockBaseline);
     const baselineRoute = await sandbox.openshell(["inference", "get", "-g", gatewayName], {
