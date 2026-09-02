@@ -814,6 +814,9 @@ describe("packages/nemoclaw-hermes/start.sh runtime shell env", () => {
     expect(run.envFileContent).toContain(
       'export HERMES_FABRIC_API_KEY="nemoclaw-managed-inference"',
     );
+    expect(run.envFileContent).toContain(
+      'export NEMOCLAW_HERMES_ADAPTER_PYTHON="/opt/hermes/.venv/bin/python"',
+    );
     expect(run.envFileContent).toContain('export HERMES_TUI_DIR="/opt/hermes/ui-tui"');
     expect(run.envFileContent).not.toContain("AWS_EC2_METADATA_DISABLED");
     expect(run.envFileContent).not.toContain('HERMES_TUI_DIR="${HERMES_TUI_DIR:-');
