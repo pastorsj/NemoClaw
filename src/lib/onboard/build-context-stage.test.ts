@@ -20,6 +20,13 @@ function makeTmpDir(prefix: string): string {
   return dir;
 }
 
+function makePackageIdentityTmpDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(process.cwd(), `.${prefix}`));
+  fs.chmodSync(dir, 0o700);
+  tmpDirs.push(dir);
+  return dir;
+}
+
 function throwingExit(code?: number): never {
   throw new Error(`exit ${code ?? 0}`);
 }
@@ -45,8 +52,8 @@ function createManagedPackageIdentityFixture(): {
   installedPackageRoot: string;
   sourceDockerfile: string;
 } {
-  const repositoryRoot = fs.realpathSync(makeTmpDir("nemoclaw-repository-package-"));
-  const installedParent = fs.realpathSync(makeTmpDir("nemoclaw-installed-package-"));
+  const repositoryRoot = fs.realpathSync(makePackageIdentityTmpDir("nemoclaw-repository-package-"));
+  const installedParent = fs.realpathSync(makePackageIdentityTmpDir("nemoclaw-installed-package-"));
   const packageDirectoryName = "nemoclaw-hermes";
   const dockerfile = "FROM scratch\nCOPY tools/ /opt/tools/\n";
   const sourceDockerfile = path.join(
