@@ -614,7 +614,7 @@ COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
 COPY packages/nemoclaw-openclaw/runtime/preloads/*.js /usr/local/lib/nemoclaw/preloads/
 COPY --from=runtime-preload-builder /opt/nemoclaw-root/dist/lib/messaging/channels/ /usr/local/lib/nemoclaw/preloads-compiled-channels/
 COPY packages/nemoclaw-openclaw/runtime/codex-acp.sh /usr/local/bin/nemoclaw-codex-acp
-COPY packages/nemoclaw-openclaw/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/generate-config.mts /packages/nemoclaw-openclaw/config/generate-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/agent-config.mts /packages/nemoclaw-openclaw/config/agent-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/model-setup.mts /packages/nemoclaw-openclaw/config/model-setup.mts
