@@ -343,6 +343,7 @@ RUN chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
 
 COPY packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock /tmp/deepagents-code-requirements.lock
 COPY packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock /tmp/nemoclaw-fabric-requirements.lock
+COPY --chmod=0555 packages/nemoclaw-langchain-deepagents-code/checks/fabric-runtime.py /usr/local/lib/nemoclaw/checks/fabric-runtime.py
 
 RUN python3 -m venv --copies "$VIRTUAL_ENV" \
     && "$VIRTUAL_ENV/bin/pip3" install --no-cache-dir --require-hashes \
@@ -363,8 +364,7 @@ RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
     && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
         -r /tmp/nemoclaw-fabric-requirements.lock \
     && /opt/nemoclaw-fabric-venv/bin/pip3 check \
-    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c \
-        "from importlib.metadata import version; expected = {'deepagents': '0.6.12', 'langchain-mcp-adapters': '0.2.2', 'nemo-fabric': '0.2.0', 'nemo-fabric-adapter-contract': '0.2.0', 'nemo-fabric-adapters-common': '0.2.0', 'nemo-fabric-adapters-deepagents': '0.2.0', 'nemo-fabric-runtime': '0.2.0'}; actual = {name: version(name) for name in expected}; assert actual == expected, actual" \
+    && /usr/local/lib/nemoclaw/checks/fabric-runtime.py >/dev/null \
     && test -x /opt/nemoclaw-fabric-venv/bin/python3 \
     && test -x /opt/venv/bin/dcode \
     && rm -f /tmp/nemoclaw-fabric-requirements.lock

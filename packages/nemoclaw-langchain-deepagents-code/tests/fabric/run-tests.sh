@@ -33,6 +33,7 @@ test_args=(
   python3 -m unittest
   tests.fabric.test_turn.ReleasedDeepAgentsAdapterTests
   tests.fabric.test_image_order.FabricImageOrderTests
+  tests.fabric.test_runtime_probe.FabricRuntimeProbeTests
 )
 
 if [ "${test_mode}" = "composed" ]; then

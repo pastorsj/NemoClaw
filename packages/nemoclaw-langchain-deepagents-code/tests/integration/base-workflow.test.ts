@@ -16,7 +16,7 @@ type Step = {
 
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
 const baseDockerfiles = [
-  "Dockerfile.base",
+  "packages/nemoclaw-openclaw/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
 ] as const;

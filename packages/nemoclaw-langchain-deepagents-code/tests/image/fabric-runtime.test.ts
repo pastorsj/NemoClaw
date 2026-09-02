@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const FABRIC_RUNNER_SOURCE = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run";
 const FABRIC_RUNNER_COMMAND = "/usr/local/bin/nemoclaw-fabric-run";
+const FABRIC_BASE_CHECK = "/usr/local/lib/nemoclaw/checks/fabric-runtime.py";
 
 describe("Deep Agents Code Fabric runtime entrypoint", () => {
   it("exposes and probes the command declared by the package manifest", () => {
@@ -24,5 +25,14 @@ describe("Deep Agents Code Fabric runtime entrypoint", () => {
     expect(manifest).toContain(
       `${FABRIC_RUNNER_COMMAND} --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK`,
     );
+  });
+
+  it("installs the package-owned Fabric base-image check", () => {
+    const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile.base"), "utf8");
+
+    expect(dockerfile).toContain(
+      `COPY --chmod=0555 packages/nemoclaw-langchain-deepagents-code/checks/fabric-runtime.py ${FABRIC_BASE_CHECK}`,
+    );
+    expect(dockerfile).toContain(`&& ${FABRIC_BASE_CHECK} >/dev/null`);
   });
 });
