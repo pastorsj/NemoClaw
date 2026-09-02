@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
-import { execFile as execFileCallback, spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,8 +20,6 @@ import {
   PUBLIC_FABRIC_TURN_RESPONSE,
   runPublicFabricTurn,
 } from "../live/public-fabric-turn.ts";
-
-const execFile = promisify(execFileCallback);
 
 const CONTRACTS = {
   hermes: {
@@ -97,27 +93,13 @@ function configProbe(
 }
 
 function processProbe(overrides: Record<string, unknown> = {}): ShellProbeResult {
-  const record: Record<string, unknown> = {
-    inspectionComplete: true,
-    matchingPids: [],
-    newPids: [],
-    processIdentities: [{ pid: 7, startTime: "100" }],
-    unreadablePids: [],
-    ...overrides,
-  };
-  record.observations =
-    "observations" in overrides
-      ? overrides.observations
-      : [
-          {
-            attempt: 1,
-            matchingCount: (record.matchingPids as unknown[]).length,
-            newCount: (record.newPids as unknown[]).length,
-            unreadableCount: (record.unreadablePids as unknown[]).length,
-          },
-        ];
   return shellResult({
-    stdout: `${JSON.stringify(record)}\n`,
+    stdout: `${JSON.stringify({
+      inspectionComplete: true,
+      matchingPids: [],
+      unreadablePids: [],
+      ...overrides,
+    })}\n`,
   });
 }
 
@@ -216,10 +198,8 @@ describe("public Fabric live turn", () => {
           "-I",
           "-c",
           expect.any(String),
-          "baseline",
           agent,
           PUBLIC_FABRIC_TURN_PROMPT,
-          "[]",
         ],
         expect.objectContaining({
           artifactName: `fabric-${agent}-before-gateway-restart-process-baseline`,
@@ -265,10 +245,8 @@ describe("public Fabric live turn", () => {
         "-I",
         "-c",
         expect.any(String),
-        "verify",
         agent,
         PUBLIC_FABRIC_TURN_PROMPT,
-        JSON.stringify([{ pid: 7, startTime: "100" }]),
       ]);
       expect(harness.writeJson).toHaveBeenCalledWith(
         `fabric-${agent}-before-gateway-restart-proof.json`,
@@ -411,116 +389,50 @@ describe("public Fabric live turn", () => {
   });
 
   it.runIf(process.platform === "linux")(
-    "detects a detached harness process that appears after the Fabric turn",
+    "reports a detached Hermes process without treating transport as harness state",
     async () => {
       const harness = fixture({ sandboxResults: successfulSandboxResults("hermes") });
       await runTurn("hermes", harness);
       const processScript = harness.sandboxExec.mock.calls[4]![1][3]!;
-      const baseline = spawnSync(
-        "python3",
-        ["-I", "-c", processScript, "baseline", "hermes", PUBLIC_FABRIC_TURN_PROMPT, "[]"],
-        { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
-      );
-      expect(baseline.status, baseline.stderr).toBe(0);
-      const baselineRecord = JSON.parse(baseline.stdout) as {
-        processIdentities: Array<{ pid: number; startTime: string }>;
-      };
       const leaked = spawn(
         "python3",
-        ["-c", "import time; time.sleep(30)", "arbitrary-detached-hermes-tool"],
+        ["-c", "import time; time.sleep(30)", "nemoclaw_hermes_fabric-detached-child"],
+        { stdio: "ignore" },
+      );
+      const transport = spawn(
+        "python3",
+        ["-c", "import time; time.sleep(30)", "unrelated-openshell-exec-session"],
         { stdio: "ignore" },
       );
       try {
-        await new Promise<void>((resolve, reject) => {
-          leaked.once("spawn", resolve);
-          leaked.once("error", reject);
-        });
+        await Promise.all(
+          [leaked, transport].map(
+            (child) =>
+              new Promise<void>((resolve, reject) => {
+                child.once("spawn", resolve);
+                child.once("error", reject);
+              }),
+          ),
+        );
         const processProbeResult = spawnSync(
           "python3",
-          [
-            "-I",
-            "-c",
-            processScript,
-            "verify",
-            "hermes",
-            PUBLIC_FABRIC_TURN_PROMPT,
-            JSON.stringify(baselineRecord.processIdentities),
-          ],
+          ["-I", "-c", processScript, "hermes", PUBLIC_FABRIC_TURN_PROMPT],
           { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
         );
         expect(processProbeResult.status, processProbeResult.stderr).toBe(0);
         const processRecord = JSON.parse(processProbeResult.stdout) as {
-          newPids: number[];
-          observations: Array<{ newCount: number }>;
+          matchingPids: number[];
         };
-        expect(processRecord.newPids).toContain(leaked.pid);
-        expect(processRecord.observations).toHaveLength(3);
-        expect(processRecord.observations.every((observation) => observation.newCount > 0)).toBe(
-          true,
-        );
+        expect(processRecord.matchingPids).toContain(leaked.pid);
+        expect(processRecord.matchingPids).not.toContain(transport.pid);
       } finally {
         leaked.kill("SIGKILL");
-        await new Promise<void>((resolve) => leaked.once("close", () => resolve()));
-      }
-    },
-  );
-
-  it.runIf(process.platform === "linux")(
-    "drops a short-lived exec process from the final observation",
-    async () => {
-      const harness = fixture({ sandboxResults: successfulSandboxResults("openclaw") });
-      await runTurn("openclaw", harness);
-      const processScript = harness.sandboxExec.mock.calls[4]![1][3]!;
-      const baseline = spawnSync(
-        "python3",
-        ["-I", "-c", processScript, "baseline", "openclaw", PUBLIC_FABRIC_TURN_PROMPT, "[]"],
-        { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
-      );
-      expect(baseline.status, baseline.stderr).toBe(0);
-      const baselineRecord = JSON.parse(baseline.stdout) as {
-        processIdentities: Array<{ pid: number; startTime: string }>;
-      };
-      const transient = spawn(
-        "python3",
-        [
-          "-u",
-          "-c",
-          "import time; print('ready', flush=True); time.sleep(0.5)",
-          "transient-openshell-exec-session",
-        ],
-        { stdio: ["ignore", "pipe", "ignore"] },
-      );
-      try {
-        await once(transient.stdout!, "data");
-        const processProbeResult = await execFile(
-          "python3",
-          [
-            "-I",
-            "-c",
-            processScript,
-            "verify",
-            "openclaw",
-            PUBLIC_FABRIC_TURN_PROMPT,
-            JSON.stringify(baselineRecord.processIdentities),
-          ],
-          { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
+        transport.kill("SIGKILL");
+        await Promise.all(
+          [leaked, transport].map(
+            (child) => new Promise<void>((resolve) => child.once("close", () => resolve())),
+          ),
         );
-        const processRecord = JSON.parse(processProbeResult.stdout) as {
-          newPids: number[];
-          observations: Array<{ newCount: number }>;
-        };
-        expect(processRecord.observations.length).toBeGreaterThanOrEqual(2);
-        expect(processRecord.observations.length).toBeLessThanOrEqual(3);
-        expect(processRecord.observations[0]!.newCount).toBeGreaterThan(0);
-        expect(transient.pid).toBeTypeOf("number");
-        expect(processRecord.newPids).not.toContain(transient.pid);
-      } finally {
-        await (transient.exitCode === null && transient.signalCode === null
-          ? new Promise<void>((resolve) => {
-              transient.once("close", () => resolve());
-              transient.kill("SIGKILL");
-            })
-          : Promise.resolve());
       }
     },
   );
@@ -621,15 +533,15 @@ describe("public Fabric live turn", () => {
         ...successfulSandboxResults("hermes").slice(0, 4),
         processProbe({ matchingPids: [321] }),
       ],
-      message: "left a runner, adapter, or agent child process",
+      message: "left a known runner, adapter, or harness process",
     },
     {
-      label: "a malformed cleanup observation ledger",
+      label: "an unreadable process during cleanup inspection",
       results: [
         ...successfulSandboxResults("hermes").slice(0, 4),
-        processProbe({ observations: [] }),
+        processProbe({ inspectionComplete: false, unreadablePids: [321] }),
       ],
-      message: "left a runner, adapter, or agent child process",
+      message: "left a known runner, adapter, or harness process",
     },
   ])("rejects $label without writing a success proof", async ({ results, message }) => {
     const harness = fixture({ sandboxResults: results });

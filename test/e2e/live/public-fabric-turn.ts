@@ -160,22 +160,12 @@ print(json.dumps({
 }, sort_keys=True))
 `;
 
-const PROCESS_CLEANUP_MAX_INSPECTIONS = 3;
-const PROCESS_CLEANUP_SETTLE_SECONDS = 1;
-
 const PROCESS_PROBE_SCRIPT = String.raw`
 import json
 import os
 import sys
-import time
 
-mode, agent, prompt_marker, baseline_json = sys.argv[1:]
-if mode not in {"baseline", "verify"}:
-    raise RuntimeError("invalid Fabric process probe mode")
-baseline = {
-    (int(item["pid"]), str(item["startTime"]))
-    for item in json.loads(baseline_json)
-}
+agent, prompt_marker = sys.argv[1:]
 tokens = [
     "nemoclaw-fabric",
     "nemoclaw_fabric",
@@ -195,70 +185,46 @@ else:
         "hermes.fabric-adapter.json",
     ))
 
-def process_record(process_id):
+def parent_process_id(process_id):
     text = open(f"/proc/{process_id}/stat", "r", encoding="ascii").read()
     fields = text[text.rfind(")") + 2:].split()
-    if len(fields) < 20:
+    if len(fields) < 2:
         raise ValueError("incomplete process stat")
-    return int(fields[1]), fields[19]
+    return int(fields[1])
 
 excluded = set()
 current = os.getpid()
 while current > 0 and current not in excluded:
     excluded.add(current)
     try:
-        current, _start_time = process_record(current)
+        current = parent_process_id(current)
     except (FileNotFoundError, PermissionError, ValueError, OSError):
         break
 
-def inspect_processes():
-    matches = []
-    new_processes = []
-    process_identities = []
-    unreadable = []
-    for entry in os.scandir("/proc"):
-        if not entry.name.isdecimal():
-            continue
-        process_id = int(entry.name)
-        if process_id in excluded:
-            continue
-        try:
-            _parent, start_time = process_record(process_id)
-            command = open(f"/proc/{process_id}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
-        except FileNotFoundError:
-            continue
-        except (PermissionError, OSError):
-            unreadable.append(process_id)
-            continue
-        identity = {"pid": process_id, "startTime": start_time}
-        process_identities.append(identity)
-        if mode == "verify" and (process_id, start_time) not in baseline:
-            new_processes.append(process_id)
-        if command and any(token in command for token in tokens):
-            matches.append(process_id)
-    return matches, new_processes, process_identities, unreadable
-
-observations = []
-inspection_limit = ${PROCESS_CLEANUP_MAX_INSPECTIONS} if mode == "verify" else 1
-for attempt in range(1, inspection_limit + 1):
-    matches, new_processes, process_identities, unreadable = inspect_processes()
-    observations.append({
-        "attempt": attempt,
-        "matchingCount": len(matches),
-        "newCount": len(new_processes),
-        "unreadableCount": len(unreadable),
-    })
-    should_settle = not matches and not unreadable and bool(new_processes)
-    if not should_settle or attempt == inspection_limit:
-        break
-    time.sleep(${PROCESS_CLEANUP_SETTLE_SECONDS})
+# The runner's deterministic process-group tests own arbitrary child cleanup. This live
+# boundary owns only named Fabric and harness processes; OpenShell transport processes
+# can legitimately appear between independent sandbox exec calls.
+matches = []
+unreadable = []
+for entry in os.scandir("/proc"):
+    if not entry.name.isdecimal():
+        continue
+    process_id = int(entry.name)
+    if process_id in excluded:
+        continue
+    try:
+        command = open(f"/proc/{process_id}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
+    except FileNotFoundError:
+        continue
+    except (PermissionError, OSError):
+        unreadable.append(process_id)
+        continue
+    if command and any(token in command for token in tokens):
+        matches.append(process_id)
 
 print(json.dumps({
     "inspectionComplete": not unreadable,
     "matchingPids": sorted(matches),
-    "newPids": sorted(new_processes),
-    "observations": observations,
-    "processIdentities": sorted(process_identities, key=lambda item: item["pid"]),
     "unreadablePids": sorted(unreadable),
 }, sort_keys=True))
 `;
@@ -290,14 +256,6 @@ interface FabricConfigProbe {
 interface FabricProcessProbe {
   readonly inspectionComplete: boolean;
   readonly matchingPids: number[];
-  readonly newPids: number[];
-  readonly observations: Array<{
-    readonly attempt: number;
-    readonly matchingCount: number;
-    readonly newCount: number;
-    readonly unreadableCount: number;
-  }>;
-  readonly processIdentities: Array<{ readonly pid: number; readonly startTime: string }>;
   readonly unreadablePids: number[];
 }
 
@@ -426,79 +384,20 @@ function requireProcessProbe(
   value: Record<string, unknown>,
   phase: "baseline" | "verify",
 ): FabricProcessProbe {
-  const processIdentitiesAreValid =
-    Array.isArray(value.processIdentities) &&
-    value.processIdentities.every(
-      (item) =>
-        item !== null &&
-        typeof item === "object" &&
-        Number.isSafeInteger((item as Record<string, unknown>).pid) &&
-        typeof (item as Record<string, unknown>).startTime === "string" &&
-        /^\d+$/.test((item as Record<string, unknown>).startTime as string),
-    );
-  const observationsAreValid =
-    Array.isArray(value.observations) &&
-    value.observations.length >= 1 &&
-    value.observations.length <= (phase === "baseline" ? 1 : PROCESS_CLEANUP_MAX_INSPECTIONS) &&
-    value.observations.every((item, index) => {
-      if (item === null || typeof item !== "object") {
-        return false;
-      }
-      const record = item as Record<string, unknown>;
-      return (
-        record.attempt === index + 1 &&
-        Number.isSafeInteger(record.matchingCount) &&
-        Number(record.matchingCount) >= 0 &&
-        Number.isSafeInteger(record.newCount) &&
-        Number(record.newCount) >= 0 &&
-        Number.isSafeInteger(record.unreadableCount) &&
-        Number(record.unreadableCount) >= 0
-      );
-    });
-  const observations = observationsAreValid
-    ? (value.observations as FabricProcessProbe["observations"])
-    : [];
-  const finalObservation = observations.at(-1);
-  const finalObservationMatches =
-    finalObservation !== undefined &&
-    Array.isArray(value.matchingPids) &&
-    finalObservation.matchingCount === value.matchingPids.length &&
-    Array.isArray(value.newPids) &&
-    finalObservation.newCount === value.newPids.length &&
-    Array.isArray(value.unreadablePids) &&
-    finalObservation.unreadableCount === value.unreadablePids.length;
-  const intermediateObservationsAreRetryable = observations
-    .slice(0, -1)
-    .every(
-      (observation) =>
-        observation.matchingCount === 0 &&
-        observation.newCount > 0 &&
-        observation.unreadableCount === 0,
-    );
-  const finalObservationRequiredAnotherInspection =
-    phase === "verify" &&
-    observations.length < PROCESS_CLEANUP_MAX_INSPECTIONS &&
-    finalObservation?.matchingCount === 0 &&
-    Number(finalObservation?.newCount) > 0 &&
-    finalObservation?.unreadableCount === 0;
+  const validPidList = (candidate: unknown): candidate is number[] =>
+    Array.isArray(candidate) &&
+    candidate.every((processId) => Number.isSafeInteger(processId) && processId > 0);
   if (
     value.inspectionComplete !== true ||
-    !Array.isArray(value.matchingPids) ||
+    !validPidList(value.matchingPids) ||
     value.matchingPids.length !== 0 ||
-    !Array.isArray(value.newPids) ||
-    value.newPids.length !== 0 ||
-    !processIdentitiesAreValid ||
-    !Array.isArray(value.unreadablePids) ||
-    value.unreadablePids.length !== 0 ||
-    !observationsAreValid ||
-    !finalObservationMatches ||
-    !intermediateObservationsAreRetryable ||
-    finalObservationRequiredAnotherInspection
+    !validPidList(value.unreadablePids) ||
+    value.unreadablePids.length !== 0
   ) {
     throw new Error(
       phase === "baseline"
         ? "public Fabric process baseline was not clean"
-        : "public Fabric turn left a runner, adapter, or agent child process",
+        : "public Fabric turn left a known runner, adapter, or harness process",
     );
   }
   return value as unknown as FabricProcessProbe;
@@ -523,10 +422,8 @@ export async function runPublicFabricTurn({
       "-I",
       "-c",
       PROCESS_PROBE_SCRIPT,
-      "baseline",
       agent,
       PUBLIC_FABRIC_TURN_PROMPT,
-      "[]",
     ],
     {
       artifactName: `fabric-${agent}-${lifecyclePhase}-process-baseline`,
@@ -540,7 +437,7 @@ export async function runPublicFabricTurn({
     `public ${agent} Fabric process baseline`,
     redactionValues,
   );
-  const processBaseline = requireProcessProbe(
+  requireProcessProbe(
     parseProbeRecord(baselineResult, `public ${agent} Fabric process baseline`),
     "baseline",
   );
@@ -624,10 +521,8 @@ export async function runPublicFabricTurn({
       "-I",
       "-c",
       PROCESS_PROBE_SCRIPT,
-      "verify",
       agent,
       PUBLIC_FABRIC_TURN_PROMPT,
-      JSON.stringify(processBaseline.processIdentities),
     ],
     {
       artifactName: `fabric-${agent}-${lifecyclePhase}-process-cleanup`,
