@@ -79,7 +79,7 @@ describe("handleSandboxState live DCode selection", () => {
       agent: { name: "langchain-deepagents-code" },
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
       resolved: expect.any(Object),
       recreate: false,
       toolDisclosure: "progressive",
@@ -101,7 +101,7 @@ describe("handleSandboxState live DCode selection", () => {
       requestedDcodeAutoApprovalMode: "thread-opt-in",
     });
 
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toMatchObject({
+    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
       dcodeAutoApprovalMode: "thread-opt-in",
     });
   });
@@ -130,7 +130,7 @@ describe("handleSandboxState live DCode selection", () => {
       requestedDcodeAutoApprovalMode: "thread-opt-in",
     });
 
-    expect(journal.completeCreate.mock.calls[0]?.at(-1)).toMatchObject({
+    expect((journal.completeCreate.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
       recreate: true,
       recreateTransaction: expect.any(Object),
       dcodeAutoApprovalMode: "thread-opt-in",
@@ -172,7 +172,7 @@ describe("handleSandboxState live DCode selection", () => {
       state: "sandbox",
       metadata: { repair: "recorded-sandbox-cleanup", sandboxName: "saved" },
     });
-    expect(journal.completeCreate.mock.calls[0]?.at(-1)).toMatchObject({
+    expect((journal.completeCreate.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
       recreate: true,
       recreateTransaction: expect.any(Object),
       dcodeAutoApprovalMode: "thread-opt-in",
@@ -218,7 +218,7 @@ describe("handleSandboxState live DCode selection", () => {
       "openai-completions",
       null,
     );
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toEqual({
+    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toEqual({
       resolved: expect.any(Object),
       recreate: true,
       toolDisclosure: "progressive",
@@ -241,7 +241,7 @@ describe("handleSandboxState live DCode selection", () => {
     await handleSandboxState(dcodeOptions(deps));
 
     expect(calls.removeSandbox).not.toHaveBeenCalled();
-    expect(calls.createSandbox.mock.calls[0]?.at(-1)).toEqual({
+    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toEqual({
       resolved: expect.any(Object),
       recreate: true,
       toolDisclosure: "progressive",

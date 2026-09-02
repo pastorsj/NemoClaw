@@ -16,7 +16,8 @@ it("keeps sandbox creation arguments aligned when verified effects are absent", 
   await handleSandboxState({ ...baseOptions(deps), fresh: true });
 
   expect(calls.createSandbox).toHaveBeenCalledOnce();
-  const createCall = calls.createSandbox.mock.calls[0] ?? [];
-  expect(createCall).toHaveLength(16);
-  expect(createCall.at(-1)).toMatchObject({ recreate: false });
+  const createCall = (calls.createSandbox.mock.calls[0] ?? []) as unknown[];
+  expect(createCall).toHaveLength(17);
+  expect(createCall[15]).toMatchObject({ recreate: false });
+  expect(createCall[16]).toBeNull();
 });
