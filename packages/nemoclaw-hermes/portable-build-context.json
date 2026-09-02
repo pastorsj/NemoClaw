@@ -569,6 +569,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/supervisor.py",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/fabric/adapter-requirements.lock",
       "mode": "100644"
     },

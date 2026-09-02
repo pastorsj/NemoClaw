@@ -103,6 +103,7 @@ export default defineConfig({
     include: [
       ...deepAgentsPackageTestMoves.map(({ destination }) => destination),
       ...deepAgentsPackageSplitTests,
+      "tests/image/fabric-runtime.test.ts",
     ],
   },
 });

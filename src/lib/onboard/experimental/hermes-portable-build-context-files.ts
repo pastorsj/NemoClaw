@@ -226,6 +226,7 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "packages/nemoclaw-fabric/src/nemoclaw_fabric/config.py", mode: "100644" },
   { path: "packages/nemoclaw-fabric/src/nemoclaw_fabric/output.py", mode: "100644" },
   { path: "packages/nemoclaw-fabric/src/nemoclaw_fabric/runner.py", mode: "100644" },
+  { path: "packages/nemoclaw-fabric/src/nemoclaw_fabric/supervisor.py", mode: "100644" },
   { path: "packages/nemoclaw-hermes/fabric/adapter-requirements.lock", mode: "100644" },
   { path: "packages/nemoclaw-hermes/fabric/hermes.fabric-adapter.json", mode: "100644" },
   { path: "packages/nemoclaw-hermes/fabric/pyproject.toml", mode: "100644" },

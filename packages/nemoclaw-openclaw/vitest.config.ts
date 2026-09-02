@@ -28,6 +28,7 @@ export default defineConfig({
     include: [
       ...openclawPackageTestMoves.map(({ destination }) => destination),
       ...openclawPackageSplitTests,
+      "tests/image/fabric-runtime.test.ts",
     ],
   },
 });

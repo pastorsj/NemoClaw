@@ -287,10 +287,16 @@ RUN set -eu; \
     && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import metadata, requires, version; expected = {"nemoclaw-fabric": "0.1.2", "nemo-fabric": "0.2.0", "nemo-fabric-adapters-deepagents": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; assert metadata("nemoclaw-fabric")["Requires-Python"] == "<3.14,>=3.13"; declared = [item.replace(" ", "") for item in (requires("nemoclaw-fabric") or [])]; runtime = [item for item in declared if ";extra==" not in item]; assert runtime == ["nemo-fabric==0.2.0"], declared' \
     && /opt/nemoclaw-fabric-venv/bin/pip3 check \
     && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run /usr/local/bin/nemoclaw-fabric-run \
     && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric-run \
     && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric-run)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run" \
     && test "$(stat -c '%u:%g:%a' /usr/local/bin/nemoclaw-fabric)" = "0:0:777" \
+    && test "$(stat -c '%u:%g:%a' /usr/local/bin/nemoclaw-fabric-run)" = "0:0:777" \
     && test -x /usr/local/bin/nemoclaw-fabric \
+    && test -x /usr/local/bin/nemoclaw-fabric-run \
+    && /usr/local/bin/nemoclaw-fabric-run --help >/dev/null \
     && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
     && /opt/venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"deepagents-code": "0.1.55", "deepagents": "0.7.5", "langchain-mcp-adapters": "0.3.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual' \
     && rm -rf /opt/nemoclaw-fabric-runner /tmp/nemoclaw-fabric-wheel

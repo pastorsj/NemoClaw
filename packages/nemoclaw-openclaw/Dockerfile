@@ -1942,9 +1942,14 @@ RUN set -eu; \
     && chmod 0444 /usr/local/share/nemoclaw/openclaw.fabric-adapter.json \
     && test "$(stat -c '%u:%g:%a' /usr/local/share/nemoclaw/openclaw.fabric-adapter.json)" = "0:0:444" \
     && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run /usr/local/bin/nemoclaw-fabric-run \
     && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric-run \
     && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric-run)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run" \
     && test -x /usr/local/bin/nemoclaw-fabric \
+    && test -x /usr/local/bin/nemoclaw-fabric-run \
+    && /usr/local/bin/nemoclaw-fabric-run --help >/dev/null \
     && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
     && /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
         env HOME=/sandbox /usr/local/bin/nemoclaw-fabric doctor \

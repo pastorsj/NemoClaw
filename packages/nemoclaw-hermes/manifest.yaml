@@ -38,6 +38,7 @@ runtime:
   smoke_commands:
     - "hermes --version"
     - "nemoclaw-fabric --version"
+    - "/usr/local/bin/nemoclaw-fabric-run --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK"
     - "test -s /sandbox/.hermes/fabric.json && echo NEMOCLAW_HERMES_FABRIC_OK"
     - 'test "$(stat -c %a /sandbox/.hermes/fabric.json)" = 600 && echo NEMOCLAW_HERMES_FABRIC_MODE_OK'
 

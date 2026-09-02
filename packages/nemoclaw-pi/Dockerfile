@@ -218,9 +218,14 @@ RUN set -eu; \
     && chmod 0444 /usr/local/share/nemoclaw/pi.fabric-adapter.json \
     && test "$(stat -c '%u:%g:%a' /usr/local/share/nemoclaw/pi.fabric-adapter.json)" = "0:0:444" \
     && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run /usr/local/bin/nemoclaw-fabric-run \
     && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric-run \
     && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric-run)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run" \
     && test -x /usr/local/bin/nemoclaw-fabric \
+    && test -x /usr/local/bin/nemoclaw-fabric-run \
+    && /usr/local/bin/nemoclaw-fabric-run --help >/dev/null \
     && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
     && rm -rf /opt/nemoclaw-fabric-runner /opt/nemoclaw-pi-fabric \
         /tmp/nemoclaw-fabric-build-venv /tmp/nemoclaw-fabric-wheels \

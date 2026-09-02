@@ -944,12 +944,17 @@ RUN set -eu; \
     && /opt/nemoclaw-fabric-venv/bin/pip3 check \
     && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemoclaw-fabric": "0.1.2", "nemo-fabric": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual' \
     && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run /usr/local/bin/nemoclaw-fabric-run \
     && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric-run \
     && chown root:root /usr/local/share/nemoclaw/hermes.fabric-adapter.json \
     && chmod 0444 /usr/local/share/nemoclaw/hermes.fabric-adapter.json \
     && test "$(stat -c '%u:%g:%a' /usr/local/share/nemoclaw/hermes.fabric-adapter.json)" = "0:0:444" \
     && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric-run)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run" \
     && test -x /usr/local/bin/nemoclaw-fabric \
+    && test -x /usr/local/bin/nemoclaw-fabric-run \
+    && /usr/local/bin/nemoclaw-fabric-run --help >/dev/null \
     && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
     && rm -rf /opt/nemoclaw-fabric-runner /opt/nemoclaw-hermes-fabric-proxy \
         /tmp/nemoclaw-fabric-build-venv \

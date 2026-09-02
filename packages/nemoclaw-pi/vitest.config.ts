@@ -21,6 +21,10 @@ export default defineConfig({
     unstubGlobals: true,
     testTimeout: 15_000,
     maxWorkers: 4,
-    include: ["tests/config/**/*.test.ts", "tests/runtime/**/*.test.ts"],
+    include: [
+      "tests/config/**/*.test.ts",
+      "tests/image/**/*.test.ts",
+      "tests/runtime/**/*.test.ts",
+    ],
   },
 });

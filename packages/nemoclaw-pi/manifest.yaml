@@ -25,6 +25,7 @@ runtime:
   smoke_commands:
     - "pi --version"
     - "nemoclaw-fabric --version"
+    - "/usr/local/bin/nemoclaw-fabric-run --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK"
     - "test -s /sandbox/.pi/agent/models.json && echo NEMOCLAW_PI_MODELS_OK"
     - "test -s /sandbox/.pi/agent/fabric.json && echo NEMOCLAW_PI_FABRIC_OK"
     - 'test "$(stat -c %a /sandbox/.pi/agent/models.json)" = 600 && echo NEMOCLAW_PI_MODE_OK'
