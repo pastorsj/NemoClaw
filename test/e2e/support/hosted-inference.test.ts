@@ -283,6 +283,21 @@ describe("hosted inference E2E config", () => {
     expect(cfg.credentialEnv).toBe("COMPATIBLE_API_KEY");
   });
 
+  it("passes exact private endpoint trust declarations to hosted inference children", () => {
+    const cfg = requireHostedInferenceConfig(
+      secrets({ NVIDIA_INFERENCE_API_KEY: "private-endpoint-key" }),
+      {
+        NEMOCLAW_TRUSTED_PRIVATE_HOSTS: " llm.corp.example ",
+        NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: "10.20.30.40",
+      },
+    );
+
+    expect(cfg.env).toMatchObject({
+      NEMOCLAW_TRUSTED_PRIVATE_HOSTS: "llm.corp.example",
+      NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: "10.20.30.40",
+    });
+  });
+
   it("stages the Portable NVIDIA inference descriptor before provider selection or network activity (#9200)", async () => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-portable-hosted-"));
     const filePath = path.join(directory, "portable-inference.json");
