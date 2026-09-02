@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { AgentDefinition } from "../agent/defs";
+import { validateHarnessPackage } from "../agent-runtime/package/validation";
 import { isErrnoException } from "../core/errno";
 import {
   collectBuildContextStats,
@@ -59,6 +60,82 @@ function isSameFile(leftPath: string, rightPath: string): boolean {
   }
 }
 
+function isCanonicalFile(filePath: string, expectedPath: string): boolean {
+  try {
+    return path.resolve(filePath) === expectedPath && fs.realpathSync(filePath) === expectedPath;
+  } catch {
+    return false;
+  }
+}
+
+function isMatchingRepositoryDockerfile(
+  selectedDockerfile: string,
+  agent: AgentDefinition,
+): boolean {
+  if (
+    !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(agent.name) ||
+    typeof agent.packageRoot !== "string" ||
+    !agent.dockerfilePath
+  ) {
+    return false;
+  }
+
+  const packageDirectoryName = `nemoclaw-${agent.name}`;
+  const sourcePackageRoot = path.dirname(selectedDockerfile);
+  const sourcePackagesRoot = path.dirname(sourcePackageRoot);
+  if (
+    path.basename(selectedDockerfile) !== "Dockerfile" ||
+    path.basename(sourcePackageRoot) !== packageDirectoryName ||
+    path.basename(sourcePackagesRoot) !== "packages"
+  ) {
+    return false;
+  }
+
+  const repositoryRoot = path.dirname(sourcePackagesRoot);
+  const installedPackageRoot = path.resolve(agent.packageRoot);
+  const expectedSourceDockerfile = path.join(
+    repositoryRoot,
+    "packages",
+    packageDirectoryName,
+    "Dockerfile",
+  );
+  const expectedInstalledDockerfile = path.join(
+    installedPackageRoot,
+    "packages",
+    packageDirectoryName,
+    "Dockerfile",
+  );
+  if (
+    !isCanonicalFile(selectedDockerfile, expectedSourceDockerfile) ||
+    !isCanonicalFile(agent.dockerfilePath, expectedInstalledDockerfile)
+  ) {
+    return false;
+  }
+
+  try {
+    // The caller revalidates the selected package authority before staging.
+    // This boundary separately proves that source, built, and installed bytes
+    // still describe that same package before treating --from as managed.
+    if (!fs.readFileSync(selectedDockerfile).equals(fs.readFileSync(agent.dockerfilePath))) {
+      return false;
+    }
+    const bundledIdentity = validateHarnessPackage(
+      path.join(repositoryRoot, "dist", "harnesses", packageDirectoryName),
+    ).identity;
+    const installedIdentity = validateHarnessPackage(installedPackageRoot).identity;
+    return (
+      bundledIdentity.id === agent.name &&
+      installedIdentity.id === agent.name &&
+      bundledIdentity.kind === installedIdentity.kind &&
+      bundledIdentity.id === installedIdentity.id &&
+      bundledIdentity.packageVersion === installedIdentity.packageVersion &&
+      bundledIdentity.contentDigest === installedIdentity.contentDigest
+    );
+  } catch {
+    return false;
+  }
+}
+
 function createCleanupBuildContext(buildCtx: string): () => boolean {
   return () => {
     try {
@@ -96,9 +173,16 @@ export function stageCreateSandboxBuildContext(
     // never satisfy it. Stage it exactly like the managed build instead of
     // failing at the first COPY (#7205).
     const agentDockerfile = input.agent?.dockerfilePath ?? null;
-    if (input.agent && agentDockerfile && isSameFile(fromResolved, agentDockerfile)) {
+    const isSelectedAgentDockerfile =
+      input.agent &&
+      agentDockerfile &&
+      (isSameFile(fromResolved, agentDockerfile) ||
+        isMatchingRepositoryDockerfile(fromResolved, input.agent));
+    if (input.agent && isSelectedAgentDockerfile) {
       log(`  Using trusted ${input.agent.displayName} Dockerfile: ${fromResolved}`);
-      log(`  Staging the repository root as the managed ${input.agent.displayName} build context.`);
+      log(
+        `  Staging the selected ${input.agent.displayName} package as the managed build context.`,
+      );
       try {
         build = input.createAgentSandbox(input.agent);
       } catch (err) {

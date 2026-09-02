@@ -18,6 +18,7 @@ import {
   compatibleAnthropicMetadataArgs,
   expectAuthenticatedBaselineInventoryRequest,
   expectAuthenticatedProxyResolutionRequests,
+  env as hermesCommandEnvironment,
   hasAuthenticatedProxyResolutionRequest,
   hostedInstallModel,
   inferenceLocalMaxTokens,
@@ -101,6 +102,16 @@ describe("Hermes inference switch command shape", () => {
         NEMOCLAW_SWITCH_MODEL: "target-switch-model",
       }),
     ).toBe("initial-hosted-model");
+  });
+
+  it("passes exact private inference trust to isolated Hermes commands", () => {
+    vi.stubEnv("NEMOCLAW_TRUSTED_PRIVATE_HOSTS", " llm.corp.example ");
+    vi.stubEnv("NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS", "10.20.30.40");
+
+    expect(hermesCommandEnvironment()).toMatchObject({
+      NEMOCLAW_TRUSTED_PRIVATE_HOSTS: "llm.corp.example",
+      NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: "10.20.30.40",
+    });
   });
 
   it("uses authenticated model inventory as baseline readiness evidence", () => {

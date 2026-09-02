@@ -180,6 +180,8 @@ export function env(
 ): NodeJS.ProcessEnv {
   const runtimeEnv = { ...process.env, ...extra };
   const gateway = resolveTestGatewayBinding(runtimeEnv);
+  const trustedPrivateHosts = runtimeEnv.NEMOCLAW_TRUSTED_PRIVATE_HOSTS?.trim();
+  const trustedPrivateInferenceHosts = runtimeEnv.NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS?.trim();
   const baseEnvironment = home
     ? isolatedNemoClawEnvironment(home, gateway.environment)
     : buildAvailabilityProbeEnv(runtimeEnv);
@@ -191,6 +193,10 @@ export function env(
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     ...gateway.environment,
+    ...(trustedPrivateHosts ? { NEMOCLAW_TRUSTED_PRIVATE_HOSTS: trustedPrivateHosts } : {}),
+    ...(trustedPrivateInferenceHosts
+      ? { NEMOCLAW_TRUSTED_PRIVATE_INFERENCE_HOSTS: trustedPrivateInferenceHosts }
+      : {}),
   };
   apiKey && Object.assign(out, { NVIDIA_INFERENCE_API_KEY: apiKey });
   USE_COMPATIBLE_HOSTED &&

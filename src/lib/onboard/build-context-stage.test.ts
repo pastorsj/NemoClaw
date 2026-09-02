@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAgentSandbox as createManagedAgentSandbox } from "../agent/base-image";
+import type { AgentDefinition } from "../agent/defs";
 import { SandboxBaseImageResolutionError } from "../sandbox-base-image";
 import { stageCreateSandboxBuildContext } from "./build-context-stage";
 import { CUSTOM_BUILD_CONTEXT_WARN_BYTES } from "./custom-build-context";
@@ -36,6 +37,63 @@ function readStagedBytes(root: string): string {
     .filter((entryPath) => fs.statSync(entryPath).isFile())
     .map((entryPath) => fs.readFileSync(entryPath, "utf8"))
     .join("\n");
+}
+
+function createManagedPackageIdentityFixture(): {
+  agent: AgentDefinition;
+  bundledPackageRoot: string;
+  installedPackageRoot: string;
+  sourceDockerfile: string;
+} {
+  const repositoryRoot = fs.realpathSync(makeTmpDir("nemoclaw-repository-package-"));
+  const installedParent = fs.realpathSync(makeTmpDir("nemoclaw-installed-package-"));
+  const packageDirectoryName = "nemoclaw-hermes";
+  const dockerfile = "FROM scratch\nCOPY tools/ /opt/tools/\n";
+  const sourceDockerfile = path.join(
+    repositoryRoot,
+    "packages",
+    packageDirectoryName,
+    "Dockerfile",
+  );
+  const bundledPackageRoot = path.join(repositoryRoot, "dist", "harnesses", packageDirectoryName);
+  const installedPackageRoot = path.join(installedParent, "object");
+  writeFixtureFile(repositoryRoot, `packages/${packageDirectoryName}/Dockerfile`, dockerfile);
+  writeFixtureFile(
+    bundledPackageRoot,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "hermes",
+      displayName: "Hermes",
+      packageVersion: "1.0.0",
+      manifest: `packages/${packageDirectoryName}/manifest.yaml`,
+    })}\n`,
+  );
+  writeFixtureFile(
+    bundledPackageRoot,
+    `packages/${packageDirectoryName}/manifest.yaml`,
+    "name: hermes\ndisplay_name: Hermes\ndescription: Managed package identity fixture\n",
+  );
+  writeFixtureFile(bundledPackageRoot, `packages/${packageDirectoryName}/Dockerfile`, dockerfile);
+  writeFixtureFile(
+    bundledPackageRoot,
+    "tools/mcp-tool-discovery-runtime/registry/BUNDLED_PACKAGES.json",
+    "{}\n",
+  );
+  fs.cpSync(bundledPackageRoot, installedPackageRoot, { recursive: true });
+  const agent = {
+    name: "hermes",
+    displayName: "Hermes",
+    packageRoot: installedPackageRoot,
+    dockerfilePath: path.join(installedPackageRoot, "packages", packageDirectoryName, "Dockerfile"),
+  } as AgentDefinition;
+  return {
+    agent,
+    bundledPackageRoot,
+    installedPackageRoot,
+    sourceDockerfile,
+  };
 }
 
 describe("stageCreateSandboxBuildContext", () => {
@@ -82,7 +140,10 @@ describe("stageCreateSandboxBuildContext", () => {
     const agentDir = path.join(repoRoot, "agents", "hermes");
     fs.mkdirSync(agentDir, { recursive: true });
     const agentDockerfile = path.join(agentDir, "Dockerfile");
-    fs.writeFileSync(agentDockerfile, "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\n");
+    fs.writeFileSync(
+      agentDockerfile,
+      "FROM scratch\nCOPY packages/nemoclaw-hermes/plugin/ /opt/plugin/\n",
+    );
     const agentBuild = {
       buildCtx: makeTmpDir("nemoclaw-agent-staged-"),
       stagedDockerfile: path.join(makeTmpDir("nemoclaw-agent-staged-df-"), "agent.Dockerfile"),
@@ -105,8 +166,79 @@ describe("stageCreateSandboxBuildContext", () => {
     expect(result.origin).toBe("generated");
     expect(logs).toEqual([
       `  Using trusted Hermes Dockerfile: ${agentDockerfile}`,
-      "  Staging the repository root as the managed Hermes build context.",
+      "  Staging the selected Hermes package as the managed build context.",
     ]);
+  });
+
+  it("stages the installed package when its identity matches the repository Dockerfile", () => {
+    const fixture = createManagedPackageIdentityFixture();
+    const agentBuild = {
+      buildCtx: makeTmpDir("nemoclaw-matching-package-staged-"),
+      stagedDockerfile: path.join(
+        makeTmpDir("nemoclaw-matching-package-dockerfile-"),
+        "Dockerfile",
+      ),
+    };
+    const createAgentSandbox = vi.fn(() => agentBuild);
+
+    const result = stageCreateSandboxBuildContext({
+      root: fixture.installedPackageRoot,
+      fromDockerfile: fixture.sourceDockerfile,
+      agent: fixture.agent,
+      createAgentSandbox,
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+
+    expect(createAgentSandbox).toHaveBeenCalledExactlyOnceWith(fixture.agent);
+    expect(result.buildCtx).toBe(agentBuild.buildCtx);
+    expect(result.origin).toBe("generated");
+    expect(
+      fs.existsSync(
+        path.join(
+          fixture.agent.packageRoot,
+          "tools/mcp-tool-discovery-runtime/registry/BUNDLED_PACKAGES.json",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "has different source Dockerfile bytes",
+      (fixture: ReturnType<typeof createManagedPackageIdentityFixture>) =>
+        fs.writeFileSync(fixture.sourceDockerfile, "FROM changed-source\n"),
+    ],
+    [
+      "has a different built content identity",
+      (fixture: ReturnType<typeof createManagedPackageIdentityFixture>) =>
+        writeFixtureFile(fixture.bundledPackageRoot, "runtime/divergence.txt", "changed\n"),
+    ],
+    [
+      "has an invalid built package",
+      (fixture: ReturnType<typeof createManagedPackageIdentityFixture>) =>
+        fs.rmSync(path.join(fixture.bundledPackageRoot, "nemoclaw-package.json")),
+    ],
+  ])("keeps the repository Dockerfile custom when it %s", (_label, mutate) => {
+    const fixture = createManagedPackageIdentityFixture();
+    mutate(fixture);
+    const createAgentSandbox = vi.fn();
+
+    const result = stageCreateSandboxBuildContext({
+      root: fixture.installedPackageRoot,
+      fromDockerfile: fixture.sourceDockerfile,
+      agent: fixture.agent,
+      createAgentSandbox,
+      log: vi.fn(),
+      exit: throwingExit,
+    });
+    tmpDirs.push(result.buildCtx);
+
+    expect(createAgentSandbox).not.toHaveBeenCalled();
+    expect(result.origin).toBe("custom");
+    expect(fs.readFileSync(result.stagedDockerfile, "utf8")).toBe(
+      fs.readFileSync(fixture.sourceDockerfile, "utf8"),
+    );
   });
 
   it("filters checkout credentials from the staged managed repository-root context (#7205)", () => {
