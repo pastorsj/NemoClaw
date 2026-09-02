@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
+import { execFile as execFileCallback, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -20,6 +22,8 @@ import {
   PUBLIC_FABRIC_TURN_RESPONSE,
   runPublicFabricTurn,
 } from "../live/public-fabric-turn.ts";
+
+const execFile = promisify(execFileCallback);
 
 const CONTRACTS = {
   hermes: {
@@ -478,15 +482,17 @@ describe("public Fabric live turn", () => {
       };
       const transient = spawn(
         "python3",
-        ["-c", "import time; time.sleep(0.25)", "transient-openshell-exec-session"],
-        { stdio: "ignore" },
+        [
+          "-u",
+          "-c",
+          "import time; print('ready', flush=True); time.sleep(0.5)",
+          "transient-openshell-exec-session",
+        ],
+        { stdio: ["ignore", "pipe", "ignore"] },
       );
       try {
-        await new Promise<void>((resolve, reject) => {
-          transient.once("spawn", resolve);
-          transient.once("error", reject);
-        });
-        const processProbeResult = spawnSync(
+        await once(transient.stdout!, "data");
+        const processProbeResult = await execFile(
           "python3",
           [
             "-I",
@@ -499,7 +505,6 @@ describe("public Fabric live turn", () => {
           ],
           { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
         );
-        expect(processProbeResult.status, processProbeResult.stderr).toBe(0);
         const processRecord = JSON.parse(processProbeResult.stdout) as {
           newPids: number[];
           observations: Array<{ newCount: number }>;
