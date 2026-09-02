@@ -48,6 +48,8 @@ const { DEFAULT_OPENCLAW_MAX_TOKENS } = createRequire(import.meta.url)(
 ) as OpenClawReplyBudgetRuntime;
 
 const DEFAULT_DASHBOARD_PORT = 18789;
+const FABRIC_ADAPTER_PATH = "/usr/local/share/nemoclaw/openclaw.fabric-adapter.json";
+const FABRIC_ARTIFACTS_PATH = "/sandbox/.openclaw/fabric-artifacts";
 const MIN_DASHBOARD_PORT = 1024;
 const MAX_DASHBOARD_PORT = 65535;
 const REMOTE_DASHBOARD_BIND_VALUES = new Set(["0.0.0.0"]);
@@ -797,6 +799,38 @@ export function buildConfig(env: Env = process.env): JsonObject {
   return config;
 }
 
+/** Select OpenClaw's package-owned adapter without duplicating native agent configuration. */
+export function buildOpenClawFabricConfig(): JsonObject {
+  return {
+    schema_version: "fabric.agent/v1alpha1",
+    metadata: {
+      name: "nemoclaw-openclaw",
+      description: "NemoClaw-managed OpenClaw headless runtime",
+    },
+    harness: {
+      adapter_id: "nvidia.nemoclaw.openclaw",
+      resolution: "preinstalled",
+    },
+    discovery: {
+      local_paths: [FABRIC_ADAPTER_PATH],
+    },
+    runtime: {
+      input_schema: "text",
+      output_schema: "message",
+      artifacts: FABRIC_ARTIFACTS_PATH,
+      timeout_seconds: 90,
+    },
+    environment: {
+      provider: "local",
+      workspace: "/sandbox",
+      artifacts: FABRIC_ARTIFACTS_PATH,
+      ownership: "caller_owned",
+      control_location: "in_env_control",
+    },
+    models: {},
+  };
+}
+
 function boundedOpenClawMetadataText(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -873,10 +907,13 @@ function preserveExistingOpenClawState(config: JsonObject, configPath: string): 
 export function writeOpenClawConfig(): void {
   const config = buildConfig();
   const configPath = expandUser("~/.openclaw/openclaw.json");
+  const fabricConfigPath = expandUser("~/.openclaw/fabric.json");
   preserveExistingOpenClawState(config, configPath);
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   chmodSync(configPath, 0o600);
+  writeFileSync(fabricConfigPath, `${JSON.stringify(buildOpenClawFabricConfig(), null, 2)}\n`);
+  chmodSync(fabricConfigPath, 0o600);
 }
 
 export function main(): void {

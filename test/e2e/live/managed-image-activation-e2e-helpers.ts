@@ -33,6 +33,7 @@ import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compati
 import { captureIssue4462FailureDiagnostics } from "../fixtures/issue-4462-diagnostics.ts";
 import type { LifecyclePhaseFixture } from "../fixtures/phases/lifecycle.ts";
 import type { TestProgress } from "../fixtures/progress.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const API_KEY = "nemoclaw-managed-activation-e2e-key";
 const MODEL = "nemoclaw-managed-activation-model";
@@ -460,6 +461,18 @@ async function qualifyAgent(
   await host.expectStatus(sandboxName, { env, timeoutMs: 120_000 });
   await sandbox.expectListed(sandboxName, { env });
   await runAgentTurn(sandbox, agent, sandboxName, "before", env);
+  if (agent === "openclaw" || agent === "hermes") {
+    await runPublicFabricTurn({
+      agent,
+      artifacts,
+      env,
+      host,
+      lifecyclePhase: "before-gateway-restart",
+      redactionValues: [API_KEY],
+      sandbox,
+      sandboxName,
+    });
+  }
   const marker = `managed-activation-${agent}-${Date.now()}`;
   const writeMarker = await sandbox.execShell(
     sandboxName,
@@ -494,6 +507,18 @@ async function qualifyAgent(
   expect(readMarker.exitCode, resultText(readMarker)).toBe(0);
   expect(readMarker.stdout.trim()).toBe(marker);
   await runAgentTurn(sandbox, agent, sandboxName, "after", env);
+  if (agent === "openclaw" || agent === "hermes") {
+    await runPublicFabricTurn({
+      agent,
+      artifacts,
+      env,
+      host,
+      lifecyclePhase: "after-gateway-restart",
+      redactionValues: [API_KEY],
+      sandbox,
+      sandboxName,
+    });
+  }
 
   enterCleanupPhase(progress, agent);
   const destroy = await host.nemoclaw([sandboxName, "destroy", "--yes", "--no-cleanup-gateway"], {
@@ -551,14 +576,18 @@ export async function qualifyManagedImageActivation(fixtures: RuntimeFixtures): 
   const chatRequests = inference
     .requests()
     .filter((request) => request.method === "POST" && request.path === "/v1/chat/completions");
-  expect(chatRequests.length).toBeGreaterThanOrEqual(SHIPPED_MANAGED_IMAGE_AGENTS.length * 2);
+  const nativeAgentTurns = SHIPPED_MANAGED_IMAGE_AGENTS.length * 2;
+  const publicFabricTurns = 4;
+  expect(chatRequests.length).toBeGreaterThanOrEqual(nativeAgentTurns + publicFabricTurns);
   expect(chatRequests.every((request) => request.auth === "ok" && request.model === MODEL)).toBe(
     true,
   );
   await artifacts.writeText("docker-argv.log", trace);
   await artifacts.writeJson("managed-image-activation-summary.json", {
     agents: SHIPPED_MANAGED_IMAGE_AGENTS,
-    agentTurns: chatRequests.length,
+    nativeAgentTurns,
+    publicFabricTurns,
+    observedInferenceRequests: chatRequests.length,
     buildCommands: 0,
     catalog: [...contracts.values()].map((contract) => ({
       agent: contract.agent,
@@ -566,12 +595,22 @@ export async function qualifyManagedImageActivation(fixtures: RuntimeFixtures): 
       revision: contract.source.revision,
       cohort: contract.source.cohort,
     })),
-    lifecycle: ["onboard", "agent-turn", "gateway-restart", "reconcile", "agent-turn", "destroy"],
+    lifecycle: [
+      "onboard",
+      "native-agent-turn",
+      "public-fabric-turn",
+      "gateway-restart",
+      "reconcile",
+      "native-agent-turn",
+      "public-fabric-turn",
+      "destroy",
+    ],
   });
   await artifacts.target.complete({
     id: "managed-image-activation",
     agents: SHIPPED_MANAGED_IMAGE_AGENTS,
     buildCommands: 0,
     exactPublishedDigests: [...contracts.values()].map((contract) => contract.reference),
+    publicFabricTurns,
   });
 }

@@ -19,6 +19,7 @@ export type { AgentConfigTarget } from "./agent-config";
 
 const {
   DEFAULT_AGENT_CONFIG,
+  getProtectedConfigFileNames,
   resolveAgentConfig: resolveAgentConfigTarget,
 }: typeof import("./agent-config") = require("./agent-config");
 const {
@@ -625,6 +626,7 @@ function writeSandboxConfig(
       {
         expectedConfigSha256,
         input: content,
+        protectedFiles: getProtectedConfigFileNames(target),
       },
     );
     if (result.issues.length > 0) {

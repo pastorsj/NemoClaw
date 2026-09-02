@@ -62,11 +62,13 @@ export interface RestartFixture {
   hermesDir: string;
   configPath: string;
   envPath: string;
+  fabricPath: string;
   hashPath: string;
   compatHashPath: string;
   statePath: string;
   trustedConfig: string;
   trustedEnv: string;
+  trustedFabric: string;
 }
 
 export function mode(pathname: string): number {
@@ -86,8 +88,26 @@ export function readTextFileSnapshot(pathname: string): string {
   return readFileSnapshot(pathname).toString("utf8");
 }
 
-export function hashInputs(configPath: string, envPath: string): string {
-  const result = spawnSync("sha256sum", [configPath, envPath], {
+export function renderManagedHermesConfig(
+  model: string,
+  baseUrl = "https://inference.local/v1",
+): string {
+  return [
+    "_nemoclaw_upstream:",
+    "  provider: trusted-provider",
+    "  provider_key: trusted-provider",
+    `  model: ${model}`,
+    "model:",
+    `  default: ${model}`,
+    "  provider: custom",
+    `  base_url: ${baseUrl}`,
+    "  api_key: sk-OPENSHELL-PROXY-REWRITE",
+    "",
+  ].join("\n");
+}
+
+export function hashInputs(configPath: string, envPath: string, fabricPath: string): string {
+  const result = spawnSync("sha256sum", [configPath, envPath, fabricPath], {
     encoding: "utf-8",
     timeout: 5000,
   });
@@ -102,11 +122,31 @@ export function createRestartFixture(): RestartFixture {
   const hermesDir = path.join(sandboxDir, ".hermes");
   const configPath = path.join(hermesDir, "config.yaml");
   const envPath = path.join(hermesDir, ".env");
+  const fabricPath = path.join(hermesDir, "fabric.json");
   const hashPath = path.join(root, "hermes.config-hash");
   const compatHashPath = path.join(hermesDir, ".config-hash");
   const statePath = path.join(root, "hermes-restart-seal.json");
-  const trustedConfig = "model:\n  default: trusted-model\n";
+  const trustedConfig = renderManagedHermesConfig("trusted-model");
   const trustedEnv = "API_SERVER_PORT=18642\nSAFE_SETTING=trusted\n";
+  const trustedFabric = `${JSON.stringify(
+    {
+      schema_version: "fabric.agent/v1alpha1",
+      harness: {
+        adapter_id: "nvidia.nemoclaw.hermes",
+        resolution: "preinstalled",
+      },
+      models: {
+        default: {
+          provider: "custom",
+          model: "trusted-model",
+          api_key_env: "HERMES_FABRIC_API_KEY",
+          base_url: "https://inference.local/v1",
+        },
+      },
+    },
+    null,
+    2,
+  )}\n`;
 
   fs.mkdirSync(hermesDir, { recursive: true });
   fs.chmodSync(sandboxDir, 0o770);
@@ -115,8 +155,10 @@ export function createRestartFixture(): RestartFixture {
   fs.chmodSync(configPath, 0o640);
   fs.writeFileSync(envPath, trustedEnv, { mode: 0o600 });
   fs.chmodSync(envPath, 0o600);
+  fs.writeFileSync(fabricPath, trustedFabric, { mode: 0o600 });
+  fs.chmodSync(fabricPath, 0o600);
 
-  const hash = hashInputs(configPath, envPath);
+  const hash = hashInputs(configPath, envPath, fabricPath);
   fs.writeFileSync(hashPath, hash, { mode: 0o600 });
   fs.writeFileSync(compatHashPath, hash, { mode: 0o600 });
   writeGatewayConfigStub(root);
@@ -127,11 +169,13 @@ export function createRestartFixture(): RestartFixture {
     hermesDir,
     configPath,
     envPath,
+    fabricPath,
     hashPath,
     compatHashPath,
     statePath,
     trustedConfig,
     trustedEnv,
+    trustedFabric,
   };
 }
 

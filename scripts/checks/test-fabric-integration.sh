@@ -10,6 +10,9 @@ fabric_lock="${repository_root}/packages/nemoclaw-langchain-deepagents-code/fabr
 runner_source="${repository_root}/packages/nemoclaw-fabric"
 runner_build_lock="${runner_source}/build-requirements.lock"
 pi_adapter_source="${repository_root}/packages/nemoclaw-pi/fabric"
+openclaw_adapter_source="${repository_root}/packages/nemoclaw-openclaw/fabric"
+hermes_proxy_source="${repository_root}/packages/nemoclaw-hermes/fabric"
+hermes_adapter_lock="${repository_root}/packages/nemoclaw-hermes/fabric/adapter-requirements.lock"
 
 if ! command -v "${python_command}" >/dev/null 2>&1; then
   echo "Python 3.13 is required. Set PYTHON_313 to its executable path." >&2
@@ -37,14 +40,22 @@ venv_dir="${work_dir}/venv"
 wheel_dir="${work_dir}/wheels"
 runner_build_source="${work_dir}/runner-source"
 pi_adapter_build_source="${work_dir}/pi-adapter-source"
+openclaw_adapter_build_source="${work_dir}/openclaw-adapter-source"
+hermes_proxy_build_source="${work_dir}/hermes-proxy-source"
 "${python_command}" -m venv "${venv_dir}"
 mkdir -p "${wheel_dir}"
 mkdir -p "${runner_build_source}"
 mkdir -p "${pi_adapter_build_source}"
+mkdir -p "${openclaw_adapter_build_source}"
+mkdir -p "${hermes_proxy_build_source}"
 cp "${runner_source}/README.md" "${runner_source}/pyproject.toml" "${runner_build_source}/"
 cp -R "${runner_source}/src" "${runner_build_source}/src"
 cp "${pi_adapter_source}/pyproject.toml" "${pi_adapter_build_source}/"
 cp -R "${pi_adapter_source}/src" "${pi_adapter_build_source}/src"
+cp "${openclaw_adapter_source}/pyproject.toml" "${openclaw_adapter_build_source}/"
+cp -R "${openclaw_adapter_source}/src" "${openclaw_adapter_build_source}/src"
+cp "${hermes_proxy_source}/pyproject.toml" "${hermes_proxy_build_source}/"
+cp -R "${hermes_proxy_source}/src" "${hermes_proxy_build_source}/src"
 venv_python="${venv_dir}/bin/python"
 
 "${venv_python}" -m pip install \
@@ -60,12 +71,19 @@ venv_python="${venv_dir}/bin/python"
   --no-index \
   --wheel-dir "${wheel_dir}" \
   "${runner_build_source}" \
-  "${pi_adapter_build_source}"
+  "${pi_adapter_build_source}" \
+  "${openclaw_adapter_build_source}" \
+  "${hermes_proxy_build_source}"
 "${venv_python}" -m pip install \
   --disable-pip-version-check \
   --quiet \
   --require-hashes \
   --requirement "${fabric_lock}"
+"${venv_python}" -m pip install \
+  --disable-pip-version-check \
+  --quiet \
+  --require-hashes \
+  --requirement "${hermes_adapter_lock}"
 
 runner_wheel="$(find "${wheel_dir}" -maxdepth 1 -type f -name 'nemoclaw_fabric-*.whl' -print)"
 if [[ -z "${runner_wheel}" || "${runner_wheel}" == *$'\n'* ]]; then
@@ -77,18 +95,33 @@ if [[ -z "${pi_adapter_wheel}" || "${pi_adapter_wheel}" == *$'\n'* ]]; then
   echo "Expected one nemoclaw-pi-fabric wheel in ${wheel_dir}." >&2
   exit 1
 fi
+openclaw_adapter_wheel="$(find "${wheel_dir}" -maxdepth 1 -type f -name 'nemoclaw_openclaw_fabric-*.whl' -print)"
+if [[ -z "${openclaw_adapter_wheel}" || "${openclaw_adapter_wheel}" == *$'\n'* ]]; then
+  echo "Expected one nemoclaw-openclaw-fabric wheel in ${wheel_dir}." >&2
+  exit 1
+fi
+hermes_proxy_wheel="$(find "${wheel_dir}" -maxdepth 1 -type f -name 'nemoclaw_hermes_fabric-*.whl' -print)"
+if [[ -z "${hermes_proxy_wheel}" || "${hermes_proxy_wheel}" == *$'\n'* ]]; then
+  echo "Expected one nemoclaw-hermes-fabric wheel in ${wheel_dir}." >&2
+  exit 1
+fi
 "${venv_python}" -m pip install \
   --disable-pip-version-check \
   --quiet \
   --no-index \
   --no-deps \
   "${runner_wheel}" \
-  "${pi_adapter_wheel}"
+  "${pi_adapter_wheel}" \
+  "${openclaw_adapter_wheel}" \
+  "${hermes_proxy_wheel}"
 "${venv_python}" -I - <<'PY'
 from importlib.metadata import metadata, requires, version
 
 assert version("nemoclaw-fabric") == "0.1.2"
 assert version("nemoclaw-pi-fabric") == "0.1.0"
+assert version("nemoclaw-openclaw-fabric") == "0.1.0"
+assert version("nemoclaw-hermes-fabric") == "0.1.0"
+assert version("nemo-fabric-adapters-hermes") == "0.2.0"
 assert metadata("nemoclaw-fabric")["Requires-Python"] == "<3.14,>=3.13"
 declared = [item.replace(" ", "") for item in (requires("nemoclaw-fabric") or [])]
 runtime = [item for item in declared if ";extra==" not in item]
@@ -117,4 +150,12 @@ env -u PYTHONHOME -u PYTHONPATH \
   PYTHONDONTWRITEBYTECODE=1 VIRTUAL_ENV="${venv_dir}" PATH="${venv_dir}/bin:${PATH}" \
   "${venv_python}" -m unittest discover \
   -s packages/nemoclaw-pi/tests/fabric -p 'test_*.py' -v
+env -u PYTHONHOME -u PYTHONPATH \
+  PYTHONDONTWRITEBYTECODE=1 VIRTUAL_ENV="${venv_dir}" PATH="${venv_dir}/bin:${PATH}" \
+  "${venv_python}" -m unittest discover \
+  -s packages/nemoclaw-openclaw/tests/fabric -p 'test_*.py' -v
+env -u PYTHONHOME -u PYTHONPATH \
+  PYTHONDONTWRITEBYTECODE=1 VIRTUAL_ENV="${venv_dir}" PATH="${venv_dir}/bin:${PATH}" \
+  "${venv_python}" -m unittest discover \
+  -s packages/nemoclaw-hermes/tests/fabric -p 'test_*.py' -v
 "${venv_python}" -m pip check

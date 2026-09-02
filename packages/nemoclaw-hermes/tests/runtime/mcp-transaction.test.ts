@@ -529,6 +529,7 @@ TRANSACTION_PATH = sys.argv[1]
 GUARD_PATH = sys.argv[2]
 CONFIG_TEXT = "model: test\\n"
 ENV_TEXT = "HERMES_TEST=1\\n"
+FABRIC_TEXT = "{}\\n"
 PAYLOAD = {
     "server": "safe",
     "url": "https://mcp.example.test/mcp",
@@ -549,8 +550,13 @@ def fixture(name):
     os.mkdir(hermes_dir, 0o700)
     config_path = os.path.join(hermes_dir, "config.yaml")
     env_path = os.path.join(hermes_dir, ".env")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     hash_path = os.path.join(hermes_dir, ".config-hash")
-    for path, text in ((config_path, CONFIG_TEXT), (env_path, ENV_TEXT)):
+    for path, text in (
+        (config_path, CONFIG_TEXT),
+        (env_path, ENV_TEXT),
+        (fabric_path, FABRIC_TEXT),
+    ):
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(text)
         os.chmod(path, 0o600)
@@ -558,6 +564,7 @@ def fixture(name):
     hash_text = (
         hashlib.sha256(CONFIG_TEXT.encode()).hexdigest() + "  " + config_path + "\\n"
         + hashlib.sha256(ENV_TEXT.encode()).hexdigest() + "  " + env_path + "\\n"
+        + hashlib.sha256(FABRIC_TEXT.encode()).hexdigest() + "  " + fabric_path + "\\n"
         + "# nemoclaw-hermes-mcp-state-v1 intended=" + empty_mcp
         + " applied=" + empty_mcp + "\\n"
     )
@@ -1208,6 +1215,7 @@ print(json.dumps(observed, sort_keys=True))
     const hermesDir = path.join(temp, ".hermes");
     const configPath = path.join(hermesDir, "config.yaml");
     const envPath = path.join(hermesDir, ".env");
+    const fabricPath = path.join(hermesDir, "fabric.json");
     const strictHash = path.join(temp, "hermes.config-hash");
     const compatHash = path.join(hermesDir, ".config-hash");
     fs.mkdirSync(hermesDir);
@@ -1226,6 +1234,7 @@ mcp_servers:
 `;
     fs.writeFileSync(configPath, config, { mode: 0o600 });
     fs.writeFileSync(envPath, "HERMES_TEST=1\n", { mode: 0o600 });
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
     fs.writeFileSync(strictHash, "stale\n", { mode: 0o600 });
     fs.writeFileSync(compatHash, "different-stale\n", { mode: 0o600 });
 
@@ -1245,7 +1254,7 @@ module.os.geteuid = lambda: 0
 module._require_lifecycle_identity = lambda: None
 module._assert_mutable_snapshot = lambda snapshot: None
 guard = module._load_guard()
-hash_text, _config_snapshot, _env_snapshot = guard._hash_text(
+hash_text, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(
     module.CONFIG_PATH, os.path.join(module.HERMES_DIR, ".env")
 )
 guard._write_hash(sys.argv[4], hash_text)
@@ -1400,15 +1409,18 @@ print(json.dumps(result, sort_keys=True))
     const hermesDir = path.join(temp, ".hermes");
     const configPath = path.join(hermesDir, "config.yaml");
     const envPath = path.join(hermesDir, ".env");
+    const fabricPath = path.join(hermesDir, "fabric.json");
     const compatHash = path.join(hermesDir, ".config-hash");
     const strictHash = path.join(temp, "strict-hash");
     const config = "model: test\n";
     const env = "HERMES_TEST=1\n";
+    const fabric = "{}\n";
     const emptyMcp = crypto.createHash("sha256").update("{}").digest("hex");
-    const originalHash = `${crypto.createHash("sha256").update(config).digest("hex")}  ${configPath}\n${crypto.createHash("sha256").update(env).digest("hex")}  ${envPath}\n# nemoclaw-hermes-mcp-state-v1 intended=${emptyMcp} applied=${emptyMcp}\n`;
+    const originalHash = `${crypto.createHash("sha256").update(config).digest("hex")}  ${configPath}\n${crypto.createHash("sha256").update(env).digest("hex")}  ${envPath}\n${crypto.createHash("sha256").update(fabric).digest("hex")}  ${fabricPath}\n# nemoclaw-hermes-mcp-state-v1 intended=${emptyMcp} applied=${emptyMcp}\n`;
     fs.mkdirSync(hermesDir);
     fs.writeFileSync(configPath, config, { mode: 0o600 });
     fs.writeFileSync(envPath, env, { mode: 0o600 });
+    fs.writeFileSync(fabricPath, fabric, { mode: 0o600 });
     fs.writeFileSync(compatHash, originalHash, { mode: 0o600 });
     fs.writeFileSync(strictHash, originalHash, { mode: 0o600 });
 

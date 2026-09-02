@@ -72,7 +72,16 @@
     "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/managed-startup-image-runtime.bundle",
     "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/BUNDLED_PACKAGES.json",
     "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/THIRD_PARTY_LICENSES.txt",
-    "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle"
+    "tools/mcp-tool-discovery-runtime/reviewed-runtime-bundle/mcp-tool-discovery/mcp-tool-discovery.bundle",
+    "packages/nemoclaw-hermes/fabric/runtime-requirements.lock",
+    "packages/nemoclaw-hermes/fabric/adapter-requirements.lock",
+    "packages/nemoclaw-fabric/pyproject.toml",
+    "packages/nemoclaw-fabric/README.md",
+    "packages/nemoclaw-fabric/src/",
+    "packages/nemoclaw-hermes/fabric/pyproject.toml",
+    "packages/nemoclaw-hermes/fabric/src/",
+    "packages/nemoclaw-hermes/fabric/hermes.fabric-adapter.json",
+    "packages/nemoclaw-fabric/build-requirements.lock"
   ],
   "trackedFiles": [
     {
@@ -324,6 +333,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/config/fabric-config.ts",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/config/generate-config.ts",
       "mode": "100644"
     },
@@ -518,6 +531,70 @@
     {
       "path": "packages/nemoclaw-hermes/start.sh",
       "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/README.md",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/build-requirements.lock",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/pyproject.toml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/__init__.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/__main__.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/command.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/config.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/output.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-fabric/src/nemoclaw_fabric/runner.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/adapter-requirements.lock",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/hermes.fabric-adapter.json",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/pyproject.toml",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/runtime-requirements.lock",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/src/nemoclaw_hermes_fabric/__init__.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/src/nemoclaw_hermes_fabric/adapter.py",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/fabric/src/nemoclaw_hermes_fabric/process.py",
+      "mode": "100644"
     },
     {
       "path": "packages/nemoclaw-openclaw/compat/npm-remediation.mts",

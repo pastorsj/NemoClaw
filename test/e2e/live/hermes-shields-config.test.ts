@@ -22,6 +22,7 @@ import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compati
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { stripAnsi } from "./json-envelope.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-hermes-shields";
 const GATEWAY_NAME = process.env.OPENSHELL_GATEWAY ?? "nemoclaw";
@@ -201,7 +202,7 @@ async function expectStopStartRecovery(
 async function expectMutablePosture(sandbox: SandboxClient, cycle: number): Promise<void> {
   const result = await sandboxShell(
     sandbox,
-    `stat -c '%a %U:%G %n' /sandbox ${HERMES_DIR} ${CONFIG_PATH} ${HERMES_DIR}/.env ${HERMES_DIR}/.config-hash`,
+    `stat -c '%a %U:%G %n' /sandbox ${HERMES_DIR} ${CONFIG_PATH} ${HERMES_DIR}/.env ${HERMES_DIR}/fabric.json ${HERMES_DIR}/.config-hash`,
     `cycle-${cycle}-mutable-posture`,
   );
   assertExitZero(result, `inspect Hermes mutable posture after cycle ${cycle}`);
@@ -211,13 +212,14 @@ async function expectMutablePosture(sandbox: SandboxClient, cycle: number): Prom
   );
   expect(result.stdout).toContain(`640 sandbox:sandbox ${CONFIG_PATH}`);
   expect(result.stdout).toContain(`640 sandbox:sandbox ${HERMES_DIR}/.env`);
+  expect(result.stdout).toContain(`600 sandbox:sandbox ${HERMES_DIR}/fabric.json`);
   expect(result.stdout).toContain(`640 sandbox:sandbox ${HERMES_DIR}/.config-hash`);
 }
 
 async function expectLockedPosture(sandbox: SandboxClient, cycle: number): Promise<void> {
   const result = await sandboxShell(
     sandbox,
-    `stat -c '%a %U:%G %n' /sandbox ${HERMES_DIR} ${CONFIG_PATH} ${HERMES_DIR}/.env ${HERMES_DIR}/.config-hash`,
+    `stat -c '%a %U:%G %n' /sandbox ${HERMES_DIR} ${CONFIG_PATH} ${HERMES_DIR}/.env ${HERMES_DIR}/fabric.json ${HERMES_DIR}/.config-hash`,
     `cycle-${cycle}-locked-posture`,
   );
   assertExitZero(result, `inspect Hermes locked posture after cycle ${cycle}`);
@@ -225,6 +227,7 @@ async function expectLockedPosture(sandbox: SandboxClient, cycle: number): Promi
   expect(result.stdout).toContain(`3770 root:sandbox ${HERMES_DIR}`);
   expect(result.stdout).toContain(`444 root:root ${CONFIG_PATH}`);
   expect(result.stdout).toContain(`444 root:root ${HERMES_DIR}/.env`);
+  expect(result.stdout).toContain(`444 root:root ${HERMES_DIR}/fabric.json`);
   expect(result.stdout).toContain(`444 root:root ${HERMES_DIR}/.config-hash`);
 }
 
@@ -419,6 +422,16 @@ test("hermes-shields-config: stopped Hermes restores under both Shields postures
 
   progress.phase("complete first shields cycle");
   await completeShieldsCycle(host, sandbox, 1);
+  await runPublicFabricTurn({
+    agent: "hermes",
+    artifacts,
+    env,
+    host,
+    lifecyclePhase: "after-shields-up",
+    redactionValues: [COMPATIBLE_API_KEY],
+    sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
 
   progress.phase("restart Hermes with shields up");
   await expectStopStartRecovery(host, sandbox, "UP", "cycle-1-shields-up-start-recovery");
@@ -434,6 +447,16 @@ test("hermes-shields-config: stopped Hermes restores under both Shields postures
   await expectImmediateInferenceRoute(sandbox, 2);
   await expectShieldsStatus(host, "DOWN", "cycle-2-status-down");
   await expectMutablePosture(sandbox, 2);
+  await runPublicFabricTurn({
+    agent: "hermes",
+    artifacts,
+    env,
+    host,
+    lifecyclePhase: "after-shields-down",
+    redactionValues: [COMPATIBLE_API_KEY],
+    sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
   await expectStopStartRecovery(host, sandbox, "DOWN", "cycle-2-shields-down-start-recovery");
   await expectMutablePosture(sandbox, 2);
 

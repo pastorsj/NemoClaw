@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenClaw has no released Fabric adapter. Install Fabric's released SDK with
+# the package-owned adapter from this directory.
+nemo-fabric==0.2.0
+nemo-fabric-adapter-contract==0.2.0
+nemo-fabric-adapters-common==0.2.0

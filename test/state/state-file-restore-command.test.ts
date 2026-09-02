@@ -17,7 +17,12 @@ const spec = { path: "openclaw.json", strategy: "copy" } as const;
 
 describe("buildStateFileRestoreCommand (#5202)", () => {
   it("refreshes the OpenClaw .last-good anchor before swapping the live config", () => {
-    const cmd = sandboxState.buildStateFileRestoreCommand("/sandbox/.openclaw", spec, true);
+    const cmd = sandboxState.buildStateFileRestoreCommand(
+      "/sandbox/.openclaw",
+      spec,
+      true,
+      ["openclaw.json", "fabric.json"],
+    );
 
     // The anchor write targets openclaw.json.last-good and rejects symlinks.
     expect(cmd).toContain('last_good="${dst}.last-good"');
@@ -37,8 +42,50 @@ describe("buildStateFileRestoreCommand (#5202)", () => {
     expect(swapIdx).toBeGreaterThan(anchorIdx);
 
     // The .config-hash is still refreshed after the swap.
-    expect(cmd).toContain("sha256sum");
+    expect(cmd).toContain("sha256sum -- 'openclaw.json' 'fabric.json'");
     expect(cmd).toContain('chmod 660 "$tmp"');
+
+    // Fabric is validated before either recovery anchor or live config moves.
+    const fabricCheckIdx = cmd.indexOf("protected config is not a regular file");
+    expect(fabricCheckIdx).toBeGreaterThanOrEqual(0);
+    expect(anchorIdx).toBeGreaterThan(fabricCheckIdx);
+  });
+
+  it("rejects unsafe supplemental integrity inputs before changing OpenClaw state", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-restore-protected-"));
+    try {
+      const configPath = path.join(root, "openclaw.json");
+      const lastGoodPath = `${configPath}.last-good`;
+      const fabricTarget = path.join(root, "fabric-target.json");
+      fs.writeFileSync(configPath, '{"state":"live"}\n');
+      fs.writeFileSync(lastGoodPath, '{"state":"anchor"}\n');
+      fs.writeFileSync(fabricTarget, "{}\n");
+      fs.symlinkSync(fabricTarget, path.join(root, "fabric.json"));
+
+      const cmd = sandboxState.buildStateFileRestoreCommand(root, spec, true, [
+        "openclaw.json",
+        "fabric.json",
+      ]);
+      const result = spawnSync("bash", ["-c", cmd], {
+        input: Buffer.from('{"state":"restored"}\n'),
+      });
+
+      expect(result.status).toBe(19);
+      expect(result.stderr.toString()).toContain("refusing symlinked protected config");
+      expect(fs.readFileSync(configPath, "utf8")).toBe('{"state":"live"}\n');
+      expect(fs.readFileSync(lastGoodPath, "utf8")).toBe('{"state":"anchor"}\n');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects non-canonical integrity input paths", () => {
+    expect(() =>
+      sandboxState.buildStateFileRestoreCommand("/sandbox/.openclaw", spec, true, [
+        "openclaw.json",
+        "../fabric.json",
+      ]),
+    ).toThrow("Config hash inputs must be unique canonical relative paths");
   });
 
   it("does not touch the .last-good anchor for non-OpenClaw state restores", () => {

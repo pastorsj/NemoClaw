@@ -29,15 +29,28 @@ from nemo_fabric_adapter_contract.models import AgentRunRequest  # noqa: E402
 from nemo_fabric_adapter_contract.models import AgentRunStatus  # noqa: E402
 from nemo_fabric_adapter_contract.models import RuntimeContext  # noqa: E402
 from nemo_fabric_adapters.common.lifecycle import LifecycleError  # noqa: E402
-from nemoclaw_fabric.command import EXIT_FAILURE  # noqa: E402
-from nemoclaw_fabric.command import EXIT_SUCCESS  # noqa: E402
-from nemoclaw_fabric.command import run_cli  # noqa: E402
+from nemoclaw_pi_fabric import adapter as pi_adapter  # noqa: E402
 from nemoclaw_pi_fabric.adapter import ADAPTER_ID  # noqa: E402
 from nemoclaw_pi_fabric.adapter import PiRuntime  # noqa: E402
+from nemoclaw_pi_fabric.adapter import (  # noqa: E402
+    PROCESS_STREAM_CAPTURE_LIMIT_BYTES,
+)
 
 
 CREDENTIAL_NAME = "PI_NEMOCLAW_INFERENCE_API_KEY"
 CREDENTIAL_VALUE = "nemoclaw-managed-inference"
+
+
+def _generic_runner() -> tuple[int, int, object]:
+    """Load the NemoClaw-owned runner only in the composed test lane."""
+
+    from nemoclaw_fabric.command import EXIT_FAILURE
+    from nemoclaw_fabric.command import EXIT_SUCCESS
+    from nemoclaw_fabric.command import run_cli
+
+    return EXIT_FAILURE, EXIT_SUCCESS, run_cli
+
+
 FAKE_PI_SOURCE = r'''#!/usr/bin/env python3
 import json
 import os
@@ -103,6 +116,34 @@ if mode == "background":
         )
     print("deterministic Pi response")
     raise SystemExit(0)
+if mode in {"oversized_stdout", "oversized_stderr"}:
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=sys.platform.startswith("linux"),
+    )
+    marker = os.environ.get("NEMOCLAW_FAKE_PI_PIDS")
+    if marker:
+        Path(marker).write_text(
+            json.dumps({
+                "parent": os.getpid(),
+                "parent_group": os.getpgrp(),
+                "child": child.pid,
+                "child_group": os.getpgid(child.pid),
+            }),
+            encoding="utf-8",
+        )
+    secret = os.environ.get("NEMOCLAW_FAKE_PI_SECRET", "missing-secret")
+    output_bytes = int(os.environ["NEMOCLAW_FAKE_PI_OUTPUT_BYTES"])
+    encoded_secret = secret.encode("utf-8")
+    payload = encoded_secret + (b"x" * (output_bytes - len(encoded_secret)))
+    stream = sys.stdout.buffer if mode == "oversized_stdout" else sys.stderr.buffer
+    stream.write(payload)
+    stream.flush()
+    while True:
+        time.sleep(60)
 raise SystemExit(64)
 '''
 
@@ -317,6 +358,140 @@ class PiRuntimeTests(PiFixtureMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error.code, "pi_unsupported_input")
         self.assertFalse(self.args_marker.exists())
 
+    async def test_stdout_limit_stops_pi_and_its_detached_tool(self) -> None:
+        secret = "oversized-pi-stdout-secret"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_PI_MODE": "oversized_stdout",
+            "NEMOCLAW_FAKE_PI_OUTPUT_BYTES": str(
+                PROCESS_STREAM_CAPTURE_LIMIT_BYTES + 1
+            ),
+            "NEMOCLAW_FAKE_PI_SECRET": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await asyncio.wait_for(
+                runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                ),
+                timeout=5,
+            )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "pi_output_limit_exceeded")
+        self.assertEqual(
+            result.error.message,
+            "Pi output exceeded the 1048576-byte stream capture limit",
+        )
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
+
+    async def test_stderr_limit_stops_pi_and_its_detached_tool(self) -> None:
+        secret = "oversized-pi-stderr-secret"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_PI_MODE": "oversized_stderr",
+            "NEMOCLAW_FAKE_PI_OUTPUT_BYTES": str(
+                PROCESS_STREAM_CAPTURE_LIMIT_BYTES + 1
+            ),
+            "NEMOCLAW_FAKE_PI_SECRET": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await asyncio.wait_for(
+                runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                ),
+                timeout=5,
+            )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "pi_output_limit_exceeded")
+        self.assertEqual(
+            result.error.message,
+            "Pi output exceeded the 1048576-byte stream capture limit",
+        )
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
+
+    async def test_stream_read_failure_stops_pi_and_its_detached_tool(self) -> None:
+        injected_error = "injected Pi stream read failure"
+        read_stream = pi_adapter._read_bounded_stream
+        failure_assigned = False
+
+        async def fail_after_process_tree_started(
+            stream: asyncio.StreamReader,
+        ) -> bytes:
+            nonlocal failure_assigned
+            if failure_assigned:
+                return await read_stream(stream)
+            failure_assigned = True
+            await self.wait_for_pid_marker()
+            raise OSError(injected_error)
+
+        environment = {**self.environment, "NEMOCLAW_FAKE_PI_MODE": "hang"}
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            with patch.object(
+                pi_adapter,
+                "_read_bounded_stream",
+                fail_after_process_tree_started,
+            ):
+                with self.assertRaisesRegex(OSError, injected_error):
+                    await asyncio.wait_for(
+                        runtime.invoke(
+                            _request(),
+                            _runtime_context(self.workspace, self.artifacts),
+                        ),
+                        timeout=5,
+                    )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+
+    async def test_stdin_write_failure_stops_pi_and_its_detached_tool(self) -> None:
+        injected_error = "injected Pi stdin write failure"
+
+        async def fail_after_process_tree_started(
+            stream: asyncio.StreamWriter,
+            payload: bytes,
+        ) -> None:
+            stream.write(payload)
+            await stream.drain()
+            stream.close()
+            await stream.wait_closed()
+            await self.wait_for_pid_marker()
+            raise OSError(injected_error)
+
+        environment = {**self.environment, "NEMOCLAW_FAKE_PI_MODE": "hang"}
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            with patch.object(
+                pi_adapter,
+                "_write_process_input",
+                fail_after_process_tree_started,
+            ):
+                with self.assertRaisesRegex(OSError, injected_error):
+                    await asyncio.wait_for(
+                        runtime.invoke(
+                            _request(),
+                            _runtime_context(self.workspace, self.artifacts),
+                        ),
+                        timeout=5,
+                    )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        self.assertEqual(
+            self.input_marker.read_text(encoding="utf-8"), "Review the workspace"
+        )
+
     async def test_timeout_cancels_pi_and_its_detached_tool(self) -> None:
         environment = {**self.environment, "NEMOCLAW_FAKE_PI_MODE": "hang"}
         with patch.dict(os.environ, environment):
@@ -446,6 +621,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
         return self.config_path
 
     def invoke_cli(self, arguments: list[str]) -> tuple[int, str, str]:
+        _exit_failure, _exit_success, run_cli = _generic_runner()
         stdout = io.StringIO()
         stderr = io.StringIO()
         virtual_env = str(Path(sys.executable).parent.parent)
@@ -462,6 +638,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
     def test_doctor_and_run_use_the_real_released_fabric_lifecycle(self) -> None:
+        _exit_failure, exit_success, _run_cli = _generic_runner()
         config = self.write_config()
         doctor_exit, doctor_stdout, doctor_stderr = self.invoke_cli(
             ["doctor", "--config", str(config), "--json"]
@@ -470,10 +647,10 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
             ["run", "--config", str(config), "-m", "hello from Fabric", "--json"]
         )
 
-        self.assertEqual(doctor_exit, EXIT_SUCCESS, doctor_stdout + doctor_stderr)
+        self.assertEqual(doctor_exit, exit_success, doctor_stdout + doctor_stderr)
         self.assertEqual(doctor_stderr, "")
         self.assertIn(json.loads(doctor_stdout)["status"], {"pass", "warn"})
-        self.assertEqual(run_exit, EXIT_SUCCESS, run_stdout + run_stderr)
+        self.assertEqual(run_exit, exit_success, run_stdout + run_stderr)
         self.assertEqual(run_stderr, "")
         result = json.loads(run_stdout)
         self.assertEqual(result["status"], "succeeded")
@@ -482,6 +659,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
         self.assertEqual(result["output"], {"response": "deterministic Pi response"})
 
     def test_runner_failure_never_returns_pi_stderr_or_credential(self) -> None:
+        exit_failure, _exit_success, _run_cli = _generic_runner()
         secret = "nvapi-runner-redaction-sentinel"
         config = self.write_config()
         self.environment.update(
@@ -494,7 +672,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
             ["run", "--config", str(config), "-m", secret, "--json"]
         )
 
-        self.assertEqual(exit_code, EXIT_FAILURE, stdout + stderr)
+        self.assertEqual(exit_code, exit_failure, stdout + stderr)
         self.assertEqual(stderr, "")
         self.assertNotIn(secret, stdout)
         result = json.loads(stdout)
@@ -502,13 +680,14 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
         self.assertEqual(result["error"]["code"], "pi_process_failed")
 
     def test_runner_timeout_stops_pi_and_its_detached_tool(self) -> None:
+        exit_failure, _exit_success, _run_cli = _generic_runner()
         config = self.write_config(timeout_seconds=0.1)
         self.environment["NEMOCLAW_FAKE_PI_MODE"] = "hang"
         exit_code, stdout, stderr = self.invoke_cli(
             ["run", "--config", str(config), "-m", "bounded request", "--json"]
         )
 
-        self.assertEqual(exit_code, EXIT_FAILURE, stdout + stderr)
+        self.assertEqual(exit_code, exit_failure, stdout + stderr)
         self.assertEqual(stderr, "")
         result = json.loads(stdout)
         self.assertEqual(result["status"], "failed")

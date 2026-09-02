@@ -43,11 +43,14 @@ describe("agent identity reconciliation with provider (#3175)", () => {
     const openclawDir = path.join(root, ".openclaw");
     fs.mkdirSync(openclawDir, { recursive: true });
     const configPath = path.join(openclawDir, "openclaw.json");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const hashPath = path.join(openclawDir, ".config-hash");
     fs.writeFileSync(configPath, JSON.stringify(initialConfig));
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
     fs.writeFileSync(hashPath, "oldhash\n");
     fs.chmodSync(openclawDir, 0o2770);
     fs.chmodSync(configPath, 0o660);
+    fs.chmodSync(fabricPath, 0o600);
     fs.chmodSync(hashPath, 0o660);
 
     const binDir = path.join(root, "bin");

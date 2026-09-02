@@ -15,11 +15,15 @@ import {
 } from "../helpers/config-seal.ts";
 
 describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal", () => {
-  it.each(["config.yaml", ".env"] as const)(
+  it.each(["config.yaml", ".env", "fabric.json"] as const)(
     "contains an oversized sparse %s without reading its logical payload",
     (oversizedName) => {
       const fixture = createRestartFixture();
-      const oversizedPath = oversizedName === "config.yaml" ? fixture.configPath : fixture.envPath;
+      const oversizedPath = {
+        "config.yaml": fixture.configPath,
+        ".env": fixture.envPath,
+        "fabric.json": fixture.fabricPath,
+      }[oversizedName];
       fs.truncateSync(
         oversizedPath,
         oversizedName === "config.yaml" ? 16 * 1024 * 1024 + 1 : 4 * 1024 * 1024 + 1,

@@ -327,6 +327,7 @@ describe("setup_auth_profile_as_sandbox", () => {
 
 describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
   const src = readOpenClawStartupSource();
+  const configHashRecord = /^[0-9a-f]{64}\s+openclaw\.json\n[0-9a-f]{64}\s+fabric\.json$/;
 
   function runHashRefresh(opts: { asRoot: boolean; preexistingHash?: string }) {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hash-refresh-"));
@@ -335,6 +336,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
     const configPath = path.join(configDir, "openclaw.json");
     const hashPath = path.join(configDir, ".config-hash");
     fs.writeFileSync(configPath, "{}\n");
+    fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n");
     if (opts.preexistingHash !== undefined) {
       fs.writeFileSync(hashPath, opts.preexistingHash);
     }
@@ -372,7 +374,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
     try {
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(stepDownInvocations).toBe(1);
-      expect(hashAfter).toMatch(/^[0-9a-f]{64}\s+openclaw\.json$/);
+      expect(hashAfter).toMatch(configHashRecord);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -383,7 +385,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
     try {
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(stepDownInvocations).toBe(0);
-      expect(hashAfter).toMatch(/^[0-9a-f]{64}\s+openclaw\.json$/);
+      expect(hashAfter).toMatch(configHashRecord);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -397,7 +399,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
     try {
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(hashAfter).not.toContain("stale-content");
-      expect(hashAfter).toMatch(/^[0-9a-f]{64}\s+openclaw\.json$/);
+      expect(hashAfter).toMatch(configHashRecord);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -420,6 +422,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
       const configPath = path.join(configDir, "openclaw.json");
       const hashPath = path.join(configDir, ".config-hash");
       fs.writeFileSync(configPath, "{}\n");
+      fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n");
       fs.writeFileSync(hashPath, "placeholder\n");
       fs.chmodSync(hashPath, 0o444);
 
@@ -473,7 +476,7 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
       expect(fs.readFileSync(stepDownLog, "utf-8").trim().split("\n").filter(Boolean)).toHaveLength(
         1,
       );
-      expect(fs.readFileSync(hashPath, "utf-8").trim()).toMatch(/^[0-9a-f]{64}\s+openclaw\.json$/);
+      expect(fs.readFileSync(hashPath, "utf-8").trim()).toMatch(configHashRecord);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -497,6 +500,7 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
       configPath,
       JSON.stringify({ gateway: { port: 18789, auth: {} } }, null, 2) + "\n",
     );
+    fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n");
     fs.writeFileSync(hashPath, "placeholder\n");
     fs.chmodSync(hashPath, 0o444);
 
@@ -603,7 +607,7 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
       expect(result.stderr).not.toMatch(/syntax error near unexpected token .?fi/);
 
       const hashContents = fs.readFileSync(hashPath, "utf-8").trim();
-      expect(hashContents).toMatch(/^[0-9a-f]{64}\s+openclaw\.json$/);
+      expect(hashContents).toMatch(/^[0-9a-f]{64}\s+openclaw\.json\n[0-9a-f]{64}\s+fabric\.json$/);
       expect((fs.statSync(hashPath).mode & 0o777).toString(8)).toBe("660");
 
       expect(fs.existsSync(proxyEnvFile)).toBe(true);

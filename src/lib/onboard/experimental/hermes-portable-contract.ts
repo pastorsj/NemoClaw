@@ -10,6 +10,7 @@ import type { AgentDefinition, ManifestRecord } from "../../agent-runtime/manife
 import {
   parseManifestRecord,
   readBoolean,
+  readConfigMutableAccess,
   readConfigShieldsFiles,
   readHealthProbe,
   readObject,
@@ -147,6 +148,7 @@ function manifestConfigPaths(config: ManifestRecord | undefined) {
     envFile: readString(config ?? {}, "env_file") ?? null,
     format: readString(config ?? {}, "format") ?? "json",
     shieldsFiles: readConfigShieldsFiles(config),
+    mutableAccess: readConfigMutableAccess(config),
   };
 }
 
@@ -179,7 +181,10 @@ function agentProjection(agent: AgentDefinition): ReturnType<typeof manifestProj
     healthProbe: agent.healthProbe,
     devicePairing: agent.device_pairing,
     webAuth: agent.webAuth,
-    configPaths: agent.configPaths,
+    configPaths: {
+      ...agent.configPaths,
+      mutableAccess: agent.configPaths.mutableAccess ?? null,
+    },
     stateDirectories: agent.stateDirectories,
     stateFiles: agent.stateFiles,
     stateLockPlan: agent.stateLockPlan,

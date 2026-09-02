@@ -73,9 +73,11 @@ const {
   readShieldsTimerRecoveryCandidate,
   verifyTimerMarkerIdentity,
   killTimer,
+  resolveShieldsTimerProtectedFilePaths,
 } = require("./timer-control");
 const { appendAuditEntry } = require("./audit");
 const {
+  getProtectedConfigFileNames,
   resolveAgentConfig,
   resolveRegisteredSandboxAgentAuthority,
   resolveAgentStateLockContract,
@@ -1565,6 +1567,7 @@ type AgentConfigTarget = {
   configPath: string;
   configDir: string;
   sensitiveFiles?: string[];
+  mutableAccess?: "private" | "shared" | null;
   stateLockPlan?: AgentStateLockPlan;
   stateLockPlanInImage: boolean;
 };
@@ -1583,6 +1586,7 @@ const DEEP_AGENTS_NAME = "langchain-deepagents-code";
 const DEEP_AGENTS_CONFIG_DIR = "/sandbox/.deepagents";
 const DEEP_AGENTS_CONFIG_PATH = `${DEEP_AGENTS_CONFIG_DIR}/config.toml`;
 const DEEP_AGENTS_CONFIG_HASH_PATH = `${DEEP_AGENTS_CONFIG_DIR}/.config-hash`;
+const DEEP_AGENTS_FABRIC_CONFIG_PATH = `${DEEP_AGENTS_CONFIG_DIR}/fabric.json`;
 
 function isDeepAgentsTarget(target: AgentConfigTarget): boolean {
   return target.agentName === DEEP_AGENTS_NAME;
@@ -1591,12 +1595,12 @@ function isDeepAgentsTarget(target: AgentConfigTarget): boolean {
 function assertCanonicalDeepAgentsTarget(target: AgentConfigTarget): void {
   if (!isDeepAgentsTarget(target)) return;
   const files = [target.configPath, ...(target.sensitiveFiles || [])];
+  const nativeFiles = [DEEP_AGENTS_CONFIG_PATH, DEEP_AGENTS_CONFIG_HASH_PATH];
+  const fabricFiles = [...nativeFiles, DEEP_AGENTS_FABRIC_CONFIG_PATH];
   if (
     target.configDir !== DEEP_AGENTS_CONFIG_DIR ||
     target.configPath !== DEEP_AGENTS_CONFIG_PATH ||
-    files.length !== 2 ||
-    files[0] !== DEEP_AGENTS_CONFIG_PATH ||
-    files[1] !== DEEP_AGENTS_CONFIG_HASH_PATH
+    (!isDeepStrictEqual(files, nativeFiles) && !isDeepStrictEqual(files, fabricFiles))
   ) {
     throw new Error(
       `Deep Agents shields require the canonical protected-file set under ${DEEP_AGENTS_CONFIG_DIR}`,
@@ -1607,10 +1611,19 @@ function assertCanonicalDeepAgentsTarget(target: AgentConfigTarget): void {
 function requiresProtectedSandboxParent(target: AgentConfigTarget): boolean {
   return (
     target.configDir.startsWith("/sandbox/") &&
-    (target.agentName === "openclaw" ||
+    (target.mutableAccess !== undefined ||
+      target.agentName === "openclaw" ||
       target.agentName === "hermes" ||
       target.agentName === "langchain-deepagents-code")
   );
+}
+
+function mutableConfigModes(target: AgentConfigTarget): { file: string; directory: string } {
+  if (target.mutableAccess === "private") return { file: "600", directory: "700" };
+  if (target.mutableAccess === "shared") return { file: "660", directory: "2770" };
+  return target.agentName === "hermes"
+    ? { file: "640", directory: "3770" }
+    : { file: "660", directory: "2770" };
 }
 
 function configHashPath(configDir: string): string {
@@ -1638,27 +1651,46 @@ function loadMarkerAgentStateLockPlan(
 
 function resolvePersistedAutoRestoreTarget(
   sandboxName: string,
-  marker: { agentName?: string; configPath?: string; configDir?: string },
+  marker: {
+    agentName?: string;
+    configPath?: string;
+    configDir?: string;
+    protectedFiles?: readonly string[];
+    mutableAccess?: "private" | "shared";
+  },
   resolveConfig: (sandboxName: string) => AgentConfigTarget = resolveAgentConfig,
 ): AgentConfigTarget | undefined {
   if (!marker.configPath || !marker.configDir) return undefined;
+  const protectedFilePaths =
+    marker.protectedFiles === undefined ? null : resolveShieldsTimerProtectedFilePaths(marker);
+  if (marker.protectedFiles !== undefined && protectedFilePaths === null) return undefined;
 
   const persistedTarget: AgentConfigTarget = {
     ...(marker.agentName ? { agentName: marker.agentName } : {}),
     configPath: marker.configPath,
     configDir: marker.configDir,
-    sensitiveFiles: [
+    sensitiveFiles: protectedFilePaths?.slice(1) ?? [
       configHashPath(marker.configDir),
       ...(marker.agentName === "hermes" ? [`${marker.configDir.replace(/\/+$/, "")}/.env`] : []),
     ],
+    ...(marker.mutableAccess ? { mutableAccess: marker.mutableAccess } : {}),
     ...loadMarkerAgentStateLockPlan(marker.agentName),
   };
 
   try {
     const resolved = ensureConfigHashSensitiveFile(resolveConfig(sandboxName));
+    const protectedFilesMatch =
+      marker.protectedFiles === undefined ||
+      isDeepStrictEqual(getProtectedConfigFileNames(resolved), marker.protectedFiles);
+    const mutableAccessMatches =
+      marker.protectedFiles !== undefined
+        ? resolved.mutableAccess === marker.mutableAccess
+        : marker.mutableAccess === undefined || resolved.mutableAccess === marker.mutableAccess;
     return (!marker.agentName || resolved.agentName === marker.agentName) &&
       resolved.configPath === marker.configPath &&
-      resolved.configDir === marker.configDir
+      resolved.configDir === marker.configDir &&
+      protectedFilesMatch &&
+      mutableAccessMatches
       ? resolved
       : persistedTarget;
   } catch {
@@ -2522,13 +2554,14 @@ function openClawConfigGuardExec(sandboxName: string) {
 
 function assertCanonicalOpenClawConfigTarget(target: AgentConfigTarget): void {
   if (target.agentName !== "openclaw") return;
-  const files = [target.configPath, ...(target.sensitiveFiles || [])];
+  const fileNames = getProtectedConfigFileNames(target);
   if (
     target.configDir !== OPENCLAW_CONFIG_DIR ||
     target.configPath !== OPENCLAW_CONFIG_PATH ||
-    files.length !== 2 ||
-    files[0] !== OPENCLAW_CONFIG_PATH ||
-    files[1] !== OPENCLAW_CONFIG_HASH_PATH
+    fileNames.length < 2 ||
+    fileNames[0] !== path.posix.basename(OPENCLAW_CONFIG_PATH) ||
+    fileNames[1] !== path.posix.basename(OPENCLAW_CONFIG_HASH_PATH) ||
+    fileNames.some((fileName: string) => fileName !== path.posix.basename(fileName))
   ) {
     throw new Error(
       `OpenClaw shields require the canonical protected-file set under ${OPENCLAW_CONFIG_DIR}`,
@@ -2542,7 +2575,9 @@ function transitionOpenClawTopConfig(
   action: "preflight" | "lock" | "unlock",
 ): boolean {
   assertCanonicalOpenClawConfigTarget(target);
-  const result = runOpenClawConfigGuard(openClawConfigGuardExec(sandboxName), action);
+  const result = runOpenClawConfigGuard(openClawConfigGuardExec(sandboxName), action, {
+    protectedFiles: getProtectedConfigFileNames(target),
+  });
   if (result.issues.length > 0) {
     const issueCodes = result.issueCodes?.length === result.issues.length ? result.issueCodes : [];
     throw new OpenClawConfigGuardFailure(
@@ -3260,7 +3295,10 @@ function recoverOpenClawFailedStartupShields(
   const result = runOpenClawConfigGuard(
     openClawConfigGuardExec(sandboxName),
     "unlock-failed-startup",
-    { planJson: JSON.stringify(requireStateLockPlan(target)) },
+    {
+      planJson: JSON.stringify(requireStateLockPlan(target)),
+      protectedFiles: getProtectedConfigFileNames(target),
+    },
   );
   if (result.issues.length === 0) return true;
   // Only "not a failed startup" falls back. A transition, rollback, contract,
@@ -3276,11 +3314,15 @@ function recoverOpenClawFailedStartupShields(
 function openClawMutablePostureIssues(sandboxName: string, target: AgentConfigTarget): string[] {
   assertCanonicalOpenClawConfigTarget(target);
   const issues: string[] = [];
-  for (const file of [target.configPath, ...(target.sensitiveFiles || [])]) {
+  const protectedFiles = [target.configPath, ...(target.sensitiveFiles || [])];
+  for (const [index, file] of protectedFiles.entries()) {
+    const expectedMode = index < 2 ? "660" : "600";
     try {
       const perms = privilegedSandboxExecCapture(sandboxName, ["stat", "-c", "%a %U:%G", file]);
       const [mode, owner] = perms.split(" ");
-      if (mode !== "660") issues.push(`${file} mode=${mode} (expected 660)`);
+      if (mode !== expectedMode) {
+        issues.push(`${file} mode=${mode} (expected ${expectedMode})`);
+      }
       if (owner !== "sandbox:sandbox") {
         issues.push(`${file} owner=${owner} (expected sandbox:sandbox)`);
       }
@@ -3378,8 +3420,9 @@ function unlockAgentConfigUnderMutationLock(
   // the gateway as a separate UID in the sandbox group. The config root stays
   // group-writable + sticky so Hermes can create top-level runtime state while
   // the gateway UID cannot remove sandbox-owned config files.
-  const fileMode = target.agentName === "hermes" ? "640" : "660";
-  const dirMode = target.agentName === "hermes" ? "3770" : "2770";
+  const mutableModes = mutableConfigModes(target);
+  const fileMode = mutableModes.file;
+  const dirMode = mutableModes.directory;
   let transaction: {
     token: string;
     originalLocked: boolean;
@@ -3702,12 +3745,17 @@ function repairMutableConfigPerms(sandboxName: string): MutableConfigRepairResul
     "repair mutable config permissions",
     (allowInlineRecovery) => {
       const target = ensureConfigHashSensitiveFile(resolveAgentConfig(sandboxName));
+      const postureMode = mutableConfigPostureMode(
+        getShieldsPostureWithoutHostLock(sandboxName, allowInlineRecovery).mode,
+      );
       return repairMutableConfigPermsCore(
         target,
-        mutableConfigPostureMode(
-          getShieldsPostureWithoutHostLock(sandboxName, allowInlineRecovery).mode,
-        ),
-        () => normalizeMutableOpenClawConfig(sandboxName, target.configDir),
+        postureMode,
+        () => normalizeMutableOpenClawConfig(sandboxName, target),
+        () =>
+          inspectMutableConfigPermsCore(target, postureMode, (configPath) =>
+            privilegedSandboxExecCapture(sandboxName, ["stat", "-c", "%a %U:%G", configPath]),
+          ),
       );
     },
   );
@@ -5086,6 +5134,8 @@ function startFreshShieldsDownTimer(input: {
       agentName: target.agentName,
       configPath: target.configPath,
       configDir: target.configDir,
+      protectedFiles: getProtectedConfigFileNames(target),
+      ...(target.mutableAccess ? { mutableAccess: target.mutableAccess } : {}),
       ...(leaseOwnerPid !== null && leaseOwnerStartIdentity
         ? { leaseOwnerPid, leaseOwnerStartIdentity }
         : {}),

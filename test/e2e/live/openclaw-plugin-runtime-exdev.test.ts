@@ -226,7 +226,8 @@ RUN HOME=/sandbox openclaw plugins install /opt/weather-plugin \
 USER root
 RUN chown sandbox:sandbox /sandbox/.openclaw/openclaw.json \
     && chmod 660 /sandbox/.openclaw/openclaw.json \
-    && sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash \
+    && cd /sandbox/.openclaw \
+    && sha256sum openclaw.json fabric.json > .config-hash \
     && chown sandbox:sandbox /sandbox/.openclaw/.config-hash \
     && chmod 660 /sandbox/.openclaw/.config-hash
 `;
@@ -297,7 +298,7 @@ if [ "$source_device" = "$target_device" ]; then
   exit 2
 fi
 HOME=/sandbox openclaw plugins install ${EXDEV_TMPFS_SOURCE} --force
-(cd /sandbox/.openclaw && sha256sum openclaw.json > .config-hash)`;
+(cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json > .config-hash)`;
 
 const crossDevicePluginInstall = trustedSandboxShellScript(crossDevicePluginInstallSource);
 

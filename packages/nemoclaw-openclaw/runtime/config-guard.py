@@ -6,8 +6,10 @@
 
 This helper is deliberately self-contained so the host can invoke the installed
 root-only copy or inject the same source through ``python3 -`` into an older
-container.  It mutates only ``openclaw.json`` and ``.config-hash``.  All path
-resolution is rooted in directory descriptors and uses ``O_NOFOLLOW``.
+container. It mutates only ``openclaw.json``, ``fabric.json``, and
+``.config-hash``. An injected helper can retain the native two-file contract of
+a pre-Fabric package. All path resolution is rooted in directory descriptors
+and uses ``O_NOFOLLOW``.
 
 ``write-config`` accepts the replacement document on stdin. NemoClaw's current
 writers serialize strict JSON, so the helper intentionally uses Python's
@@ -57,11 +59,14 @@ StartupIdentity = tuple[int, str, int]
 # multi-step host sequence can never mutate state on stale evidence (#8304).
 STARTUP_FAILURE_RECOVERY_ACTIONS = frozenset({"unlock-failed-startup"})
 INSTALLED_STATE_DIR_GUARD = "/usr/local/lib/nemoclaw/state-dir-guard.py"
-CONFIG_FILES = ("openclaw.json", ".config-hash")
+NATIVE_CONFIG_FILES = ("openclaw.json", ".config-hash")
+FABRIC_CONFIG_FILES = (*NATIVE_CONFIG_FILES, "fabric.json")
+CONFIG_FILES = FABRIC_CONFIG_FILES
 PRODUCTION_CONFIG_DIR = "/sandbox/.openclaw"
 MAX_FILE_BYTES = {
     "openclaw.json": 16 * 1024 * 1024,
     ".config-hash": 64 * 1024,
+    "fabric.json": 4 * 1024 * 1024,
 }
 JOURNAL_PATH = "/etc/nemoclaw/openclaw-config-transaction.json"
 PERSISTENT_JOURNAL_NAME = ".nemoclaw-config-transaction.json"
@@ -97,7 +102,7 @@ FS_IMMUTABLE_FL = 0x00000010
 FS_APPEND_FL = 0x00000020
 FS_IOC_GETFLAGS = 0x80086601
 FS_IOC_SETFLAGS = 0x40086602
-SHA256_RECORD = re.compile(r"([0-9a-fA-F]{64}) ([ *])([^\r\n]+)\n?\Z")
+SHA256_RECORD = re.compile(r"([0-9a-fA-F]{64}) ([ *])([^\r\n]+)\n\Z")
 
 
 @dataclass(frozen=True)
@@ -170,6 +175,18 @@ class GuardError(RuntimeError):
 
 class MutableHandoffError(GuardError):
     """A failure after sandbox write access has become irreversible."""
+
+
+def _protects_fabric_config() -> bool:
+    return CONFIG_FILES == FABRIC_CONFIG_FILES
+
+
+def _mutable_file_mode(name: str) -> int:
+    if name not in CONFIG_FILES:
+        raise GuardError("invalid-config-file", name, "config file name is not protected")
+    # The gateway needs group write access to OpenClaw's native config and
+    # sidecar. Fabric's adapter selection has no gateway writer.
+    return 0o600 if name == "fabric.json" else 0o660
 
 
 def _stored_file(
@@ -1875,12 +1892,14 @@ def _open_config_for_lock(config_path: str, identity: Identity) -> OpenConfig:
         )
         if created:
             placeholder = b"{}\n"
-            digest = hashlib.sha256(placeholder).hexdigest()
             _force_replace_bytes(opened, "openclaw.json", placeholder, identity)
+            fabric_placeholder = b"{}\n" if _protects_fabric_config() else None
+            if fabric_placeholder is not None:
+                _force_replace_bytes(opened, "fabric.json", fabric_placeholder, identity)
             _force_replace_bytes(
                 opened,
                 ".config-hash",
-                f"{digest}  openclaw.json\n".encode("ascii"),
+                _canonical_hash_record(placeholder, fabric_placeholder),
                 identity,
             )
             _commit_locked_dirs(opened, identity)
@@ -2351,8 +2370,24 @@ def _snapshot_is_current(opened: OpenConfig, snapshot: FileSnapshot) -> bool:
     )
 
 
+def _canonical_hash_record(config_data: bytes, fabric_data: bytes | None) -> bytes:
+    record = f"{hashlib.sha256(config_data).hexdigest()}  openclaw.json\n"
+    if _protects_fabric_config():
+        if fabric_data is None:
+            raise GuardError(
+                "missing-fabric-config",
+                "fabric.json",
+                "the Fabric config is required by this package",
+            )
+        record += f"{hashlib.sha256(fabric_data).hexdigest()}  fabric.json\n"
+    return record.encode("ascii")
+
+
 def _validate_hash_record(
-    opened: OpenConfig, config: FileSnapshot, hash_file: FileSnapshot
+    opened: OpenConfig,
+    config: FileSnapshot,
+    hash_file: FileSnapshot,
+    fabric_config: FileSnapshot | None,
 ) -> None:
     display = posixpath.join(opened.config_path, hash_file.name)
     try:
@@ -2361,49 +2396,78 @@ def _validate_hash_record(
         raise GuardError(
             "invalid-config-hash", display, "hash record must be ASCII"
         ) from exc
-    match = SHA256_RECORD.fullmatch(record)
-    if not match:
+    records = record.splitlines(keepends=True)
+    expected_snapshots = (config, fabric_config) if fabric_config is not None else (config,)
+    if len(records) != len(expected_snapshots):
         raise GuardError(
             "invalid-config-hash",
             display,
-            "expected one canonical sha256sum record",
+            f"expected {len(expected_snapshots)} canonical sha256sum record(s)",
         )
-    digest, _marker, recorded_path = match.groups()
-    allowed_paths = {
-        "openclaw.json",
-        posixpath.join(opened.config_path, "openclaw.json"),
-    }
-    if recorded_path not in allowed_paths:
-        raise GuardError(
-            "invalid-config-hash-path",
-            display,
-            f"hash record path {recorded_path!r} is not an allowed OpenClaw config path",
-        )
-    actual = hashlib.sha256(config.data).hexdigest()
-    if not secrets.compare_digest(digest.lower(), actual):
-        raise GuardError(
-            "config-hash-mismatch",
-            display,
-            "hash record does not match the captured openclaw.json bytes",
-        )
+    for record_line, snapshot in zip(records, expected_snapshots, strict=True):
+        if snapshot is None:
+            raise GuardError("invalid-config-hash", display, "missing protected config")
+        match = SHA256_RECORD.fullmatch(record_line)
+        if not match:
+            raise GuardError(
+                "invalid-config-hash",
+                display,
+                "expected canonical sha256sum records",
+            )
+        digest, _marker, recorded_path = match.groups()
+        allowed_paths = {
+            snapshot.name,
+            posixpath.join(opened.config_path, snapshot.name),
+        }
+        if recorded_path not in allowed_paths:
+            raise GuardError(
+                "invalid-config-hash-path",
+                display,
+                f"hash record path {recorded_path!r} is not an allowed OpenClaw config path",
+            )
+        actual = hashlib.sha256(snapshot.data).hexdigest()
+        if not secrets.compare_digest(digest.lower(), actual):
+            raise GuardError(
+                "config-hash-mismatch",
+                display,
+                f"hash record does not match the captured {snapshot.name} bytes",
+            )
 
 
-def _snapshot_pair(opened: OpenConfig) -> tuple[FileSnapshot, FileSnapshot]:
+def _snapshot_pair(
+    opened: OpenConfig,
+) -> tuple[FileSnapshot, ...]:
     last_error: GuardError | None = None
     for _attempt in range(STABLE_READ_ATTEMPTS):
         try:
             config = _snapshot_file(opened, "openclaw.json")
             hash_file = _snapshot_file(opened, ".config-hash")
-            if not _snapshot_is_current(opened, config) or not _snapshot_is_current(
-                opened, hash_file
+            fabric_config = (
+                _snapshot_file(opened, "fabric.json")
+                if _protects_fabric_config()
+                else None
+            )
+            snapshots = (
+                (config, hash_file, fabric_config)
+                if fabric_config is not None
+                else (config, hash_file)
+            )
+            if not all(
+                _snapshot_is_current(opened, snapshot)
+                for snapshot in snapshots
             ):
                 raise GuardError(
                     "config-pair-raced",
                     opened.config_path,
                     "OpenClaw config/hash pair changed while it was captured",
                 )
-            _validate_hash_record(opened, config, hash_file)
-            return config, hash_file
+            _validate_hash_record(opened, config, hash_file, fabric_config)
+            if fabric_config is not None:
+                _validate_config_json(
+                    fabric_config.data,
+                    posixpath.join(opened.config_path, fabric_config.name),
+                )
+            return snapshots
         except GuardError as exc:
             last_error = exc
     if last_error is not None:
@@ -2415,21 +2479,34 @@ def _snapshot_pair(opened: OpenConfig) -> tuple[FileSnapshot, FileSnapshot]:
     raise GuardError("config-pair-raced", opened.config_path, "pair capture failed")
 
 
-def _snapshot_raw_pair(opened: OpenConfig) -> tuple[FileSnapshot, FileSnapshot]:
+def _snapshot_raw_pair(
+    opened: OpenConfig,
+) -> tuple[FileSnapshot, ...]:
     last_error: GuardError | None = None
     for _attempt in range(STABLE_READ_ATTEMPTS):
         try:
             config = _snapshot_file(opened, "openclaw.json")
             hash_file = _snapshot_file(opened, ".config-hash")
-            if not _snapshot_is_current(opened, config) or not _snapshot_is_current(
-                opened, hash_file
+            fabric_config = (
+                _snapshot_file(opened, "fabric.json")
+                if _protects_fabric_config()
+                else None
+            )
+            snapshots = (
+                (config, hash_file, fabric_config)
+                if fabric_config is not None
+                else (config, hash_file)
+            )
+            if not all(
+                _snapshot_is_current(opened, snapshot)
+                for snapshot in snapshots
             ):
                 raise GuardError(
                     "config-pair-raced",
                     opened.config_path,
                     "OpenClaw config/hash pair changed while it was captured",
                 )
-            return config, hash_file
+            return snapshots
         except GuardError as exc:
             last_error = exc
     if last_error is not None:
@@ -2563,7 +2640,7 @@ def _read_replacement_config() -> bytes:
 
 def _verify_mutable_files(
     opened: OpenConfig,
-    snapshots: tuple[FileSnapshot, FileSnapshot],
+    snapshots: tuple[FileSnapshot, ...],
     identity: Identity,
     *,
     allow_blocking_flags: bool = False,
@@ -2572,7 +2649,7 @@ def _verify_mutable_files(
         if (
             snapshot.uid != identity.sandbox_uid
             or snapshot.gid != identity.sandbox_gid
-            or snapshot.mode != 0o660
+            or snapshot.mode != _mutable_file_mode(snapshot.name)
             or (
                 not allow_blocking_flags
                 and snapshot.inode_flags is not None
@@ -2582,12 +2659,12 @@ def _verify_mutable_files(
             raise GuardError(
                 "config-not-mutable",
                 posixpath.join(opened.config_path, snapshot.name),
-                "write-config requires sandbox:sandbox 0660 without immutable/append flags",
+                "config files require their sandbox-owned mutable modes without immutable/append flags",
             )
 
 
 def _verify_mutable_posture(
-    opened: OpenConfig, snapshots: tuple[FileSnapshot, FileSnapshot], identity: Identity
+    opened: OpenConfig, snapshots: tuple[FileSnapshot, ...], identity: Identity
 ) -> None:
     try:
         _verify_dir_posture(
@@ -2626,16 +2703,21 @@ def _verify_expected_config(
 
 
 def _replacement_records(
-    originals: tuple[FileSnapshot, FileSnapshot],
+    originals: tuple[FileSnapshot, ...],
     replacement_config: bytes,
     identity: Identity,
     commit_time_ns: int,
 ) -> tuple[list[dict[str, object]], str]:
     new_digest = hashlib.sha256(replacement_config).hexdigest()
+    fabric_config = next(
+        (item.data for item in originals if item.name == "fabric.json"), None
+    )
     replacement_by_name = {
         "openclaw.json": replacement_config,
-        ".config-hash": f"{new_digest}  openclaw.json\n".encode("ascii"),
+        ".config-hash": _canonical_hash_record(replacement_config, fabric_config),
     }
+    if fabric_config is not None:
+        replacement_by_name["fabric.json"] = fabric_config
     records: list[dict[str, object]] = []
     for snapshot in originals:
         desired_inode_flags = (
@@ -2649,7 +2731,7 @@ def _replacement_records(
                 data=replacement_by_name[snapshot.name],
                 uid=identity.sandbox_uid,
                 gid=identity.sandbox_gid,
-                mode=0o660,
+                mode=_mutable_file_mode(snapshot.name),
                 mtime_ns=commit_time_ns,
                 inode_flags=desired_inode_flags,
             )
@@ -2658,19 +2740,21 @@ def _replacement_records(
 
 
 def _canonical_targets(
-    source: tuple[FileSnapshot, FileSnapshot],
+    source: tuple[FileSnapshot, ...],
     identity: Identity,
     *,
     locked: bool,
-) -> tuple[tuple[FileSnapshot, FileSnapshot], str]:
+) -> tuple[tuple[FileSnapshot, ...], str]:
     digest = hashlib.sha256(source[0].data).hexdigest()
+    fabric_config = next((item.data for item in source if item.name == "fabric.json"), None)
     data_by_name = {
         "openclaw.json": source[0].data,
-        ".config-hash": f"{digest}  openclaw.json\n".encode("ascii"),
+        ".config-hash": _canonical_hash_record(source[0].data, fabric_config),
     }
+    if fabric_config is not None:
+        data_by_name["fabric.json"] = fabric_config
     uid = identity.root_uid if locked else identity.sandbox_uid
     gid = identity.root_gid if locked else identity.sandbox_gid
-    mode = 0o444 if locked else 0o660
     targets: list[FileSnapshot] = []
     for snapshot in source:
         desired_flags = (
@@ -2685,17 +2769,17 @@ def _canonical_targets(
                     data=data_by_name[snapshot.name],
                     uid=uid,
                     gid=gid,
-                    mode=mode,
+                    mode=0o444 if locked else _mutable_file_mode(snapshot.name),
                     inode_flags=desired_flags,
                 )
             )
         )
-    return (targets[0], targets[1]), digest
+    return tuple(targets), digest
 
 
 def _journal_record(
     phase: Literal["prepared", "applying", "committed"],
-    originals: tuple[FileSnapshot, FileSnapshot],
+    originals: tuple[FileSnapshot, ...],
     replacements: list[dict[str, object]],
     expected_sha256: str,
     new_digest: str,
@@ -2715,7 +2799,7 @@ def _journal_record(
 def _decode_journal(
     record: dict[str, object],
 ) -> tuple[
-    str, tuple[FileSnapshot, FileSnapshot], tuple[FileSnapshot, FileSnapshot], str
+    str, tuple[FileSnapshot, ...], tuple[FileSnapshot, ...], str
 ]:
     if (
         record.get("version") != 1
@@ -2730,8 +2814,8 @@ def _decode_journal(
     if (
         not isinstance(original_raw, list)
         or not isinstance(replacement_raw, list)
-        or len(original_raw) != 2
-        or len(replacement_raw) != 2
+        or len(original_raw) != len(CONFIG_FILES)
+        or len(replacement_raw) != len(CONFIG_FILES)
         or not isinstance(digest, str)
         or not re.fullmatch(r"[0-9a-f]{64}", digest)
     ):
@@ -2745,6 +2829,7 @@ def _decode_journal(
         raise GuardError("invalid-journal", JOURNAL_PATH, "journal file set is invalid")
     replacement_config = replacements[0]
     replacement_hash = replacements[1]
+    replacement_fabric = replacements[2] if _protects_fabric_config() else None
     actual_digest = hashlib.sha256(replacement_config.data).hexdigest()
     if not secrets.compare_digest(actual_digest, digest):
         raise GuardError(
@@ -2752,14 +2837,16 @@ def _decode_journal(
         )
     # Reuse the strict record parser against a minimal trusted context later;
     # here the canonical bytes are deterministic and can be checked directly.
-    if replacement_hash.data != f"{digest}  openclaw.json\n".encode("ascii"):
+    if replacement_hash.data != _canonical_hash_record(
+        replacement_config.data, replacement_fabric.data
+    ):
         raise GuardError(
             "invalid-journal", JOURNAL_PATH, "replacement hash record is invalid"
         )
     return (
         str(record["phase"]),
-        (originals[0], originals[1]),
-        (replacements[0], replacements[1]),
+        originals,
+        replacements,
         digest,
     )
 
@@ -2776,7 +2863,7 @@ RESTART_PHASES = {
 def _restart_journal_record(
     phase: str,
     original_locked: bool,
-    originals: tuple[FileSnapshot, FileSnapshot],
+    originals: tuple[FileSnapshot, ...],
     digest: str,
 ) -> dict[str, object]:
     if phase not in RESTART_PHASES:
@@ -2797,9 +2884,9 @@ def _decode_restart_journal(
 ) -> tuple[
     str,
     bool,
-    tuple[FileSnapshot, FileSnapshot],
-    tuple[FileSnapshot, FileSnapshot],
-    tuple[FileSnapshot, FileSnapshot],
+    tuple[FileSnapshot, ...],
+    tuple[FileSnapshot, ...],
+    tuple[FileSnapshot, ...],
     str,
 ]:
     phase = record.get("phase")
@@ -2819,7 +2906,7 @@ def _decode_restart_journal(
         )
 
     raw = record.get("original")
-    if not isinstance(raw, list) or len(raw) != 2:
+    if not isinstance(raw, list) or len(raw) != len(CONFIG_FILES):
         raise GuardError(
             "invalid-journal", JOURNAL_PATH, "restart journal original pair is invalid"
         )
@@ -2828,12 +2915,14 @@ def _decode_restart_journal(
         raise GuardError(
             "invalid-journal", JOURNAL_PATH, "restart journal file set is invalid"
         )
-    originals = (items[0], items[1])
+    originals = items
     if hashlib.sha256(originals[0].data).hexdigest() != digest:
         raise GuardError(
             "invalid-journal", JOURNAL_PATH, "restart config digest is invalid"
         )
     _validate_runtime_config_json5(originals[0].data, JOURNAL_PATH, identity)
+    if _protects_fabric_config():
+        _validate_config_json(originals[2].data, JOURNAL_PATH)
     if original_locked:
         for item in originals:
             if (
@@ -3120,7 +3209,7 @@ def _has_clamped_locked_dir_posture(opened: OpenConfig, identity: Identity) -> b
 
 def _verify_locked_files(
     opened: OpenConfig,
-    snapshots: tuple[FileSnapshot, FileSnapshot],
+    snapshots: tuple[FileSnapshot, ...],
     identity: Identity,
     *,
     allow_blocking_flags: bool = False,
@@ -3144,9 +3233,9 @@ def _verify_locked_files(
 
 
 def _is_resealable_config_hash_permissions_drift(
-    snapshots: tuple[FileSnapshot, FileSnapshot], identity: Identity
+    snapshots: tuple[FileSnapshot, ...], identity: Identity
 ) -> bool:
-    config, hash_record = snapshots
+    config, hash_record = snapshots[:2]
     blocking_flags = FS_IMMUTABLE_FL | FS_APPEND_FL
     config_stays_locked = (
         config.uid == identity.root_uid
@@ -3166,12 +3255,24 @@ def _is_resealable_config_hash_permissions_drift(
             and hash_record.inode_flags & blocking_flags
         )
     )
-    return config_stays_locked and hash_has_known_reconciler_posture
+    fabric_stays_locked = True
+    if _protects_fabric_config():
+        fabric_config = snapshots[2]
+        fabric_stays_locked = (
+            fabric_config.uid == identity.root_uid
+            and fabric_config.gid == identity.root_gid
+            and fabric_config.mode == 0o444
+            and not (
+                fabric_config.inode_flags is not None
+                and fabric_config.inode_flags & blocking_flags
+            )
+        )
+    return config_stays_locked and hash_has_known_reconciler_posture and fabric_stays_locked
 
 
 def _verify_locked_posture(
     opened: OpenConfig,
-    snapshots: tuple[FileSnapshot, FileSnapshot],
+    snapshots: tuple[FileSnapshot, ...],
     identity: Identity,
     *,
     allow_blocking_flags: bool = False,
@@ -3231,7 +3332,7 @@ def _is_partial_frozen_mutable_posture(opened: OpenConfig, identity: Identity) -
 
 def _capture_orphan_frozen_mutable(
     opened: OpenConfig, identity: Identity
-) -> tuple[FileSnapshot, FileSnapshot] | None:
+) -> tuple[FileSnapshot, ...] | None:
     if not _is_partial_frozen_mutable_posture(opened, identity):
         return None
     current = _snapshot_raw_pair(opened)
@@ -3473,11 +3574,11 @@ def _preflight(opened: OpenConfig) -> None:
 def _preflight_restart(opened: OpenConfig, identity: Identity) -> None:
     _assert_config_binding(opened)
     if _is_mutable_dir_posture(opened, identity):
-        config, hash_file = _snapshot_raw_pair(opened)
-        _verify_mutable_files(opened, (config, hash_file), identity)
+        files = _snapshot_raw_pair(opened)
+        _verify_mutable_files(opened, files, identity)
     elif _has_locked_dir_posture(opened, identity):
-        config, hash_file = _snapshot_pair(opened)
-        _verify_locked_files(opened, (config, hash_file), identity)
+        files = _snapshot_pair(opened)
+        _verify_locked_files(opened, files, identity)
     else:
         raise GuardError(
             "invalid-restart-posture",
@@ -3485,10 +3586,15 @@ def _preflight_restart(opened: OpenConfig, identity: Identity) -> None:
             "restart preflight requires an exact mutable or shields-locked posture",
         )
     _validate_runtime_config_json5(
-        config.data,
+        files[0].data,
         posixpath.join(opened.config_path, "openclaw.json"),
         identity,
     )
+    if _protects_fabric_config():
+        _validate_config_json(
+            files[2].data,
+            posixpath.join(opened.config_path, "fabric.json"),
+        )
     _assert_config_binding(opened)
 
 
@@ -3501,12 +3607,16 @@ _hash_synthesized = False
 _resealed_drift = False
 
 
-def _write_hash_record(opened: OpenConfig, config_data: bytes, identity: Identity) -> None:
-    digest = hashlib.sha256(config_data).hexdigest()
+def _write_hash_record(
+    opened: OpenConfig,
+    config_data: bytes,
+    fabric_data: bytes | None,
+    identity: Identity,
+) -> None:
     _force_replace_bytes(
         opened,
         ".config-hash",
-        f"{digest}  openclaw.json\n".encode("ascii"),
+        _canonical_hash_record(config_data, fabric_data),
         identity,
     )
 
@@ -3536,13 +3646,21 @@ def _repair_absent_hash_for_lock(opened: OpenConfig, identity: Identity) -> None
         0o700,
     )
     config = _snapshot_file(opened, "openclaw.json")
-    _write_hash_record(opened, config.data, identity)
+    fabric_config = (
+        _snapshot_file(opened, "fabric.json") if _protects_fabric_config() else None
+    )
+    _write_hash_record(
+        opened,
+        config.data,
+        fabric_config.data if fabric_config is not None else None,
+        identity,
+    )
     _hash_synthesized = True
 
 
 def _force_fail_closed_lock(opened: OpenConfig, identity: Identity) -> list[str]:
     errors: list[str] = []
-    targets: tuple[FileSnapshot, FileSnapshot] | None = None
+    targets: tuple[FileSnapshot, ...] | None = None
     try:
         current = _snapshot_raw_pair(opened)
         targets, _digest = _canonical_targets(current, identity, locked=True)
@@ -3570,8 +3688,22 @@ def _force_fail_closed_lock(opened: OpenConfig, identity: Identity) -> list[str]
             published = False
             try:
                 config = _snapshot_file(opened, "openclaw.json")
+                fabric_config = (
+                    _snapshot_file(opened, "fabric.json")
+                    if _protects_fabric_config()
+                    else None
+                )
                 _force_replace_bytes(opened, "openclaw.json", config.data, identity)
-                _write_hash_record(opened, config.data, identity)
+                if fabric_config is not None:
+                    _force_replace_bytes(
+                        opened, "fabric.json", fabric_config.data, identity
+                    )
+                _write_hash_record(
+                    opened,
+                    config.data,
+                    fabric_config.data if fabric_config is not None else None,
+                    identity,
+                )
                 _snapshot_pair(opened)
                 published = True
             except Exception as publish_exc:
@@ -3740,6 +3872,11 @@ def _transition(
             posixpath.join(opened.config_path, "openclaw.json"),
             identity,
         )
+        if _protects_fabric_config():
+            _validate_config_json(
+                pair[2].data,
+                posixpath.join(opened.config_path, "fabric.json"),
+            )
         _assert_config_binding(opened)
         return
     pair = _snapshot_pair(opened)
@@ -3752,9 +3889,7 @@ def _transition(
             quarantine_reserved=quarantine_untrusted,
         )
         snapshots.extend(_snapshot_pair(opened))
-        targets, _digest = _canonical_targets(
-            (snapshots[0], snapshots[1]), identity, locked=False
-        )
+        targets, _digest = _canonical_targets(tuple(snapshots), identity, locked=False)
         _install_stored_pair(opened, targets)
         _snapshot_pair(opened)
         _commit_mutable_dirs(opened, identity)
@@ -3773,7 +3908,7 @@ def _transition(
 
 
 def _install_stored_pair(
-    opened: OpenConfig, targets: tuple[FileSnapshot, FileSnapshot]
+    opened: OpenConfig, targets: tuple[FileSnapshot, ...]
 ) -> None:
     current_pair = _snapshot_raw_pair(opened)
     normalized_targets: list[FileSnapshot] = []
@@ -3817,13 +3952,13 @@ def _install_stored_pair(
 
 
 def _validate_recovery_posture(
-    files: tuple[FileSnapshot, FileSnapshot], identity: Identity
+    files: tuple[FileSnapshot, ...], identity: Identity
 ) -> None:
     for stored in files:
         if (
             stored.uid != identity.sandbox_uid
             or stored.gid != identity.sandbox_gid
-            or stored.mode != 0o660
+            or stored.mode != _mutable_file_mode(stored.name)
             or (
                 stored.inode_flags is not None
                 and stored.inode_flags & (FS_IMMUTABLE_FL | FS_APPEND_FL)
@@ -4080,7 +4215,7 @@ def _recover_write_config(
 def _rollback_write_config_frozen(
     opened: OpenConfig,
     identity: Identity,
-    originals: tuple[FileSnapshot, FileSnapshot],
+    originals: tuple[FileSnapshot, ...],
 ) -> None:
     """Restore a failed write without exposing an applying-journal replay gap."""
 
@@ -4195,7 +4330,7 @@ def _write_config(
                 expected.name,
                 identity.sandbox_uid,
                 identity.sandbox_gid,
-                0o660,
+                _mutable_file_mode(expected.name),
                 expected,
             )
         # Validate the exact pair that will become visible before returning
@@ -4219,9 +4354,7 @@ def _write_config(
         rollback_allowed = not isinstance(exc, MutableHandoffError)
         rollback_errors: list[str] = []
         if rollback_allowed:
-            rollback_targets = (
-                (snapshots[0], snapshots[1]) if len(snapshots) == 2 else initial
-            )
+            rollback_targets = tuple(snapshots) if len(snapshots) == len(CONFIG_FILES) else initial
             try:
                 _rollback_write_config_frozen(opened, identity, rollback_targets)
             except Exception as rollback_exc:
@@ -4254,7 +4387,7 @@ def _recover_any_transaction(
             mutable_files = all(
                 item.uid == identity.sandbox_uid
                 and item.gid == identity.sandbox_gid
-                and item.mode == 0o660
+                and item.mode == _mutable_file_mode(item.name)
                 for item in partial
             )
             if mutable_files:
@@ -4347,11 +4480,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-config-sha256", default="")
     parser.add_argument("--startup-owner", action="store_true")
     parser.add_argument("--plan-json", default=None)
+    parser.add_argument(
+        "--config-file-set",
+        choices=("fabric", "native"),
+        default="fabric",
+        help="protect the current Fabric file set or a pre-Fabric native file set",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    global CONFIG_FILES
     args = _parser().parse_args(argv)
+    CONFIG_FILES = (
+        FABRIC_CONFIG_FILES if args.config_file_set == "fabric" else NATIVE_CONFIG_FILES
+    )
     action: Action = args.action
     if os.geteuid() != 0:
         error = GuardError("root-required", args.config_dir, "helper must run as root")

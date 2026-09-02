@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Install the released adapter into Hermes' existing Python environment. The
+# adapter imports the Hermes SDK directly and does not install the harness.
+nemo-fabric-adapters-hermes==0.2.0

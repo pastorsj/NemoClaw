@@ -46,6 +46,9 @@ function writeFakeSandboxBins(
   fakeRoot: string,
   options: { denyConfigSshRead?: boolean } = {},
 ): void {
+  const configDir = path.join(fakeRoot, ".openclaw");
+  const fabricPath = path.join(configDir, "fabric.json");
+  if (!fs.existsSync(fabricPath)) fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
   const configReadDenial = options.denyConfigSshRead === true ? "process.exit(1);" : "";
   writeExecutable(
     path.join(binDir, "openshell"),
@@ -96,8 +99,10 @@ if (cmd.includes(".nemoclaw-restore") && cmd.includes("openclaw.json")) {
   }
   fs.writeFileSync(configPath, restored);
   if (cmd.includes("sha256sum") && cmd.includes(".config-hash")) {
-    const digest = require("crypto").createHash("sha256").update(fs.readFileSync(configPath)).digest("hex");
-    fs.writeFileSync(path.join(dir, ".config-hash"), digest + "  openclaw.json\\n");
+    const crypto = require("crypto");
+    const configDigest = crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex");
+    const fabricDigest = crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, "fabric.json"))).digest("hex");
+    fs.writeFileSync(path.join(dir, ".config-hash"), configDigest + "  openclaw.json\\n" + fabricDigest + "  fabric.json\\n");
   }
   process.exit(0);
 }
@@ -295,13 +300,15 @@ describe("OpenClaw durable config file (#5027)", () => {
       expect(after.channels.slack).toBeUndefined();
       expect(after.mcpServers.filesystem.command).toBe("npx");
       expect(after.customAgents.researcher.prompt).toBe("be thorough");
-      const expectedHash = await import("node:crypto").then(({ createHash }) =>
-        createHash("sha256")
-          .update(fs.readFileSync(path.join(openclawDir, "openclaw.json")))
-          .digest("hex"),
-      );
+      const { createHash } = await import("node:crypto");
+      const expectedConfigHash = createHash("sha256")
+        .update(fs.readFileSync(path.join(openclawDir, "openclaw.json")))
+        .digest("hex");
+      const expectedFabricHash = createHash("sha256")
+        .update(fs.readFileSync(path.join(openclawDir, "fabric.json")))
+        .digest("hex");
       expect(fs.readFileSync(path.join(openclawDir, ".config-hash"), "utf-8")).toBe(
-        `${expectedHash}  openclaw.json\n`,
+        `${expectedConfigHash}  openclaw.json\n${expectedFabricHash}  fabric.json\n`,
       );
     } finally {
       if (oldOpenshell === undefined) {

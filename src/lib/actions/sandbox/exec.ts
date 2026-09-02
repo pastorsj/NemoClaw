@@ -25,6 +25,8 @@ export type SandboxExecOptions = {
   tty?: boolean | null;
   timeoutSeconds?: number;
   stdin?: boolean;
+  /** Private bytes written to OpenShell stdin without placing them in argv. */
+  stdinInput?: string | Buffer;
   subprocessEnv?: NodeJS.ProcessEnv;
 };
 
@@ -52,6 +54,11 @@ export type SandboxExecRunner = (
 export type SandboxExecChild = {
   exitCode: number | null;
   signalCode: NodeJS.Signals | null;
+  stdin?: {
+    end(input: string | Buffer): void;
+    once(event: "error", listener: (error: Error) => void): unknown;
+    removeListener(event: "error", listener: (error: Error) => void): unknown;
+  } | null;
   kill: (signal: NodeJS.Signals) => boolean;
   once: {
     (event: "error", listener: (error: Error) => void): unknown;
@@ -273,6 +280,11 @@ export async function runSandboxExecChild(
 
   return new Promise((resolve) => {
     let spawnError: Error | undefined;
+    const stdinStream = child.stdin;
+    const recordStdinError = (error: Error) => {
+      spawnError ??= new Error(`failed to deliver private sandbox stdin: ${error.message}`);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    };
     const forwardTerm = () => {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     };
@@ -288,7 +300,20 @@ export async function runSandboxExecChild(
     child.once("error", (error) => {
       spawnError = error;
     });
+    if (options.stdinInput !== undefined) {
+      if (!stdinStream) {
+        recordStdinError(new Error("OpenShell stdin pipe is unavailable"));
+      } else {
+        stdinStream.once("error", recordStdinError);
+        try {
+          stdinStream.end(options.stdinInput);
+        } catch (error) {
+          recordStdinError(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    }
     child.once("close", (status, signal) => {
+      stdinStream?.removeListener("error", recordStdinError);
       resolve({
         status,
         signal,

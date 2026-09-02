@@ -6,11 +6,13 @@
   "license": "Apache-2.0",
   "scripts": {
     "test:package": "vitest run --config vitest.config.ts",
-    "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm --prefix plugin test",
+    "test:fabric": "bash tests/fabric/run-tests.sh",
+    "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
+    "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm --prefix plugin test && npm run test:fabric:composed",
     "test:coverage": "vitest run --config vitest.coverage.mts --coverage && node --experimental-strip-types --no-warnings tests/helpers/coverage-ratchet.mts",
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree && npm --prefix plugin test -- --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
-    "test": "npm run test:package && npm run test:nemoclaw",
+    "test": "npm run test:package && npm run test:fabric && npm run test:nemoclaw",
     "typecheck": "tsc -p tsconfig.test.json && tsc -p jsconfig.json && npm --prefix plugin run typecheck"
   },
   "files": [

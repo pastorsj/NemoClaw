@@ -81,6 +81,8 @@ executable. Packages can also include these optional paths:
 Use these responsibility directories when the package needs them:
 
 - `config/` contains build-time native configuration code.
+- `fabric/` contains the Fabric dependency lock and package-owned adapter when the agent runtime
+  does not use a released adapter.
 - `runtime/` contains commands and helpers that run inside the sandbox.
 - `host/` contains receipt-verified transition helpers that NemoClaw core still executes.
 - `compat/` contains patches and workarounds bound to an upstream agent runtime version.
@@ -115,6 +117,7 @@ nemoclaw-<id>/
 ├── start.sh               sandbox process entry point
 ├── policy-additions.yaml  baseline network policy
 ├── config/                native configuration translation
+├── fabric/                Fabric adapter or released-adapter dependency lock
 ├── runtime/               commands and guards used inside the sandbox
 ├── host/                  bounded receipt-verified transition helpers
 ├── compat/                version-bound upstream adaptations
@@ -132,8 +135,10 @@ Each package root exposes the same contributor commands:
 | Command | Scope |
 | --- | --- |
 | `npm run test:package` | Runs tests that need only the package checkout. |
+| `npm run test:fabric` | Runs the package's Fabric adapter or released-adapter contract tests. |
+| `npm run test:fabric:composed` | When declared, composes the package adapter with this exact NemoClaw runner checkout. |
 | `npm run test:nemoclaw` | Runs package-owned tests that need an exact NemoClaw checkout. |
-| `npm test` | Runs both test lanes. |
+| `npm test` | Runs every test lane the package owns. |
 | `npm run test:watch` | Watches checkout-independent TypeScript tests. |
 | `npm run typecheck` | Type-checks package `.ts` and `.mts` source plus TypeScript tests. |
 
@@ -158,17 +163,55 @@ npm --prefix packages/nemoclaw-openclaw test
 
 The exact-NemoClaw lane uses the package inside a checkout at an immutable commit SHA or release
 tag. It can use recorded core production or test support that the package-only lane cannot use.
+For package-owned adapters, `test:fabric` remains checkout independent while
+`test:fabric:composed` exercises the NemoClaw-owned runner and therefore belongs to the composed
+lane.
 Neither lane runs during `nemoclaw harness install`, and an agent manifest does not declare a test
 command.
+
+## Headless Fabric path
+
+A terminal agent runtime can declare both `runtime.interactive_command` and
+`runtime.headless_command`. NemoClaw preserves the native interactive command. For a plain prompt,
+`nemoclaw sandbox agent <sandbox> "<prompt>"` invokes the receipt-pinned headless command. The
+bundled Fabric packages point that command at the generic `nemoclaw-fabric` runner and a
+package-owned `fabric.json`. NemoClaw adds `--stdin` and writes the prompt through a private pipe;
+prompt text is never appended to the host OpenShell process arguments.
+
+Every package lists generated sidecars such as `fabric.json` under `config.shields_files`, so the
+same Shields transition protects the native config, its hash, and the adapter configuration. A
+package whose mutable config is single-user declares `config.mutable_access: private`; the generic
+transition then restores its config directory to `0700` and every protected file to `0600`.
+Packages that need a shared gateway writer use their package-owned guard or declare `shared`.
+
+The package owns the remaining choices: whether to consume a released Fabric adapter or ship a
+small adapter, how managed configuration is projected into `fabric.json`, and how the image pins
+the runner and adapter dependency graphs. NemoClaw core resolves the receipt-pinned manifest
+command without importing a Fabric harness adapter. Native option and selector invocations continue
+to use the native command so the existing command surface is preserved.
+
+Fabric qualification follows the same layers for every package:
+
+1. `test:fabric` checks the adapter or released-adapter projection without NemoClaw core.
+2. `test:fabric:composed`, when declared, checks the exact adapter and generic runner together.
+3. Image smoke checks prove the pinned runner, descriptor, configuration, and permissions.
+4. Existing live targets prove a real native turn and a Fabric turn after fresh onboarding,
+   gateway restart, inference switching, Shields transitions, and rebuild where those lifecycle
+   operations apply.
+
+The deterministic package and composed lanes are the per-change gate. Live lifecycle targets are
+the environment qualification gate; messaging-provider tests remain separate because they require
+service credentials.
 
 ### In-tree overlay rehearsal
 
 `scripts/packages/checkout.mts` rehearses the two lanes without changing the source checkout. The
 package-only mode copies one package authoring tree into a private temporary workspace, omits local
 dependencies and build output, installs its package-owned locks with lifecycle scripts disabled,
-and runs only `test:package`. For OpenClaw, those locks are the package-root lock and the nested
-plugin lock. The copied package has no NemoClaw `src/lib` or root test helpers around it, and every
-command receives a temporary home and a credential-free allowlisted environment.
+and runs `test:package` plus `test:fabric` when the package declares it. For OpenClaw, those locks
+are the package-root lock and the nested plugin lock. The copied package has no NemoClaw `src/lib`
+or root test helpers around it, and every command receives a temporary home and a credential-free
+allowlisted environment.
 This contributor rehearsal runs reviewed package candidates. It narrows their environment and
 working tree, but it is not a sandbox for untrusted code.
 
@@ -201,9 +244,10 @@ node --experimental-strip-types --no-warnings scripts/packages/checkout.mts comp
   --nemoclaw-commit "$NEMOCLAW_COMMIT"
 ```
 
-A future package repository keeps `npm ci --ignore-scripts` and `npm run test:package` as its local
-lane. Its composed lane can call this script from an exact NemoClaw checkout and pass the package
-repository as `--candidate`. This is an in-tree overlay rehearsal. It does not prove external
+A future package repository keeps `npm ci --ignore-scripts`, `npm run test:package`, and its
+optional `npm run test:fabric` as the local lane. Its composed lane can call this script from an
+exact NemoClaw checkout and pass the package repository as `--candidate`. This is an in-tree
+overlay rehearsal. It does not prove external
 artifact installation or distribution, and it does not add an install-by-path command. If a locked
 dependency cannot install while lifecycle scripts are disabled, stop and make that dependency an
 explicit security decision instead of enabling scripts in this workflow.

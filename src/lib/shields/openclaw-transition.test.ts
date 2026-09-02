@@ -9,12 +9,6 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import {
-  createHermesUnsafeConfigHarness,
-  expectHermesShieldsUpRecord,
-  failHermesInferenceConvergence,
-  type HermesUnsafeConfigHarness,
-} from "../../../test/helpers/hermes-unsafe-config-shields-harness";
-import {
   createShieldsFlowHarness,
   type ShieldsFlowHarnessOptions,
 } from "../../../test/helpers/shields-flow-harness";
@@ -54,6 +48,13 @@ function openClawTarget() {
     sensitiveFiles: ["/sandbox/.openclaw/.config-hash"],
     stateLockPlan: STATE_LOCK_PLAN,
     stateLockPlanInImage: true,
+  };
+}
+
+function openClawTargetWithSupplementalConfig() {
+  return {
+    ...openClawTarget(),
+    sensitiveFiles: ["/sandbox/.openclaw/.config-hash", "/sandbox/.openclaw/runtime-adapter.json"],
   };
 }
 
@@ -139,6 +140,7 @@ describe("OpenClaw shields top-config transaction", () => {
   let applyStateSpy: MockInstance;
   let restoreStateSpy: MockInstance;
   let compatibilitySpy: MockInstance;
+  let resolveAgentConfigSpy: MockInstance;
   let events: string[];
 
   beforeEach(() => {
@@ -197,10 +199,13 @@ describe("OpenClaw shields top-config transaction", () => {
       .spyOn(stateDirLock, "stateLockPlanCompatibilityIssues")
       .mockReturnValue([]);
 
+    resolveAgentConfigSpy = vi
+      .spyOn(agentConfig, "resolveAgentConfig")
+      .mockImplementation(() => openClawTarget());
     spies.push(
       vi.spyOn(runner, "run").mockReturnValue({ status: 0 }),
       vi.spyOn(runner, "runCapture").mockReturnValue(""),
-      vi.spyOn(agentConfig, "resolveAgentConfig").mockImplementation(() => openClawTarget()),
+      resolveAgentConfigSpy,
       privilegedExecSpy,
       dockerExecSpy,
       compatibilitySpy,
@@ -230,7 +235,9 @@ describe("OpenClaw shields top-config transaction", () => {
             ? "755 sandbox:sandbox"
             : argv.at(-1) === "/sandbox/.openclaw"
               ? "2770 sandbox:sandbox"
-              : "660 sandbox:sandbox";
+              : argv.at(-1) === "/sandbox/.openclaw/runtime-adapter.json"
+                ? "600 sandbox:sandbox"
+                : "660 sandbox:sandbox";
         case "lsattr":
           return `---------------- ${String(argv.at(-1))}`;
         default:
@@ -256,6 +263,16 @@ describe("OpenClaw shields top-config transaction", () => {
     const commands = dockerExecSpy.mock.calls.map((call) => call[0] as string[]);
     expect(commands.some((cmd) => ["chmod", "chown", "chattr"].includes(cmd[0]))).toBe(false);
     expect(commands.some((cmd) => cmd[0] === "stat" && cmd.at(-1) === "/sandbox")).toBe(true);
+  });
+
+  it("passes every manifest-declared protected file to the descriptor guard", () => {
+    const target = openClawTargetWithSupplementalConfig();
+
+    expect(() => shields.lockAgentConfig("openclaw", target, false)).not.toThrow();
+
+    expect(guardSpy).toHaveBeenCalledWith(expect.anything(), "lock", {
+      protectedFiles: ["openclaw.json", ".config-hash", "runtime-adapter.json"],
+    });
   });
 
   it("rejects an incompatible runtime plan before mutating the config tree", () => {
@@ -287,6 +304,7 @@ describe("OpenClaw shields top-config transaction", () => {
   });
 
   it("repairs doctor-tightened permissions without starting a shields transition (#6047)", () => {
+    resolveAgentConfigSpy.mockReturnValue(openClawTargetWithSupplementalConfig());
     dockerExecSpy.mockImplementation((cmd) => {
       const argv = cmd as string[];
       switch (argv[0]) {
@@ -294,6 +312,12 @@ describe("OpenClaw shields top-config transaction", () => {
           return "1000\n";
         case "/usr/bin/timeout":
           return "";
+        case "stat":
+          return argv.at(-1) === "/sandbox/.openclaw"
+            ? "2770 sandbox:sandbox"
+            : argv.at(-1) === "/sandbox/.openclaw/runtime-adapter.json"
+              ? "600 sandbox:sandbox"
+              : "660 sandbox:sandbox";
         default:
           throw new Error(`unexpected privileged command: ${argv.join(" ")}`);
       }
@@ -320,7 +344,18 @@ describe("OpenClaw shields top-config transaction", () => {
         "/sandbox/.openclaw",
         "1000",
         "1000",
+        "normalize-protected",
+        "openclaw.json",
+        "660",
+        ".config-hash",
+        "660",
+        "runtime-adapter.json",
+        "600",
       ],
+      ["stat", "-c", "%a %U:%G", "/sandbox/.openclaw"],
+      ["stat", "-c", "%a %U:%G", "/sandbox/.openclaw/openclaw.json"],
+      ["stat", "-c", "%a %U:%G", "/sandbox/.openclaw/.config-hash"],
+      ["stat", "-c", "%a %U:%G", "/sandbox/.openclaw/runtime-adapter.json"],
     ]);
     expect(guardSpy).not.toHaveBeenCalled();
     expect(applyStateSpy).not.toHaveBeenCalled();
@@ -346,6 +381,24 @@ describe("OpenClaw shields top-config transaction", () => {
     expect(() => shields.unlockAgentConfig("openclaw", openClawTarget(), true)).not.toThrow();
 
     expect(events.slice(0, 3)).toEqual(["top:preflight", "state:unlock", "top:unlock"]);
+  });
+
+  it("verifies supplemental protected files stay private after unlock", () => {
+    useMutablePosture();
+    const target = openClawTargetWithSupplementalConfig();
+
+    expect(() => shields.unlockAgentConfig("openclaw", target, true)).not.toThrow();
+
+    expect(guardSpy).toHaveBeenCalledWith(expect.anything(), "unlock", {
+      protectedFiles: ["openclaw.json", ".config-hash", "runtime-adapter.json"],
+    });
+    expect(
+      dockerExecSpy.mock.calls.some(
+        (call) =>
+          (call[0] as string[])[0] === "stat" &&
+          (call[0] as string[]).at(-1) === "/sandbox/.openclaw/runtime-adapter.json",
+      ),
+    ).toBe(true);
   });
 
   it("uses structured readiness diagnostics and verifies recovered mutable posture (#8304)", () => {
@@ -1315,153 +1368,5 @@ describe("OpenClaw shields flow rollback and recovery", () => {
     expect(fs.existsSync(before.timerPath)).toBe(true);
     expect(killSpy).not.toHaveBeenCalled();
     expect(JSON.parse(fs.readFileSync(before.statePath, "utf-8")).shieldsDown).toBe(true);
-  });
-});
-
-describe("Hermes Shields down unsafe config path (#8804)", () => {
-  const harnessFactory = createHermesUnsafeConfigHarness(requireSource, INDEX_MODULE);
-  let harness: HermesUnsafeConfigHarness;
-
-  beforeEach(() => {
-    harness = harnessFactory.beforeEachHook();
-  });
-
-  afterEach(() => {
-    harnessFactory.afterEachHook();
-  });
-
-  it("rejects a Hermes config symlink before Shields down weakens posture (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("preflight-symlink");
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
-    ).toThrow(/refusing symlink path: .*config\.yaml/);
-
-    expect(harness.runSpy).not.toHaveBeenCalled();
-    expect(harness.auditSpy).not.toHaveBeenCalled();
-    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
-    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
-      locked: true,
-      mutable: false,
-    });
-  });
-
-  it("rejects a replaced Hermes config directory before Shields down weakens posture (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("preflight-dir-symlink");
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
-    ).toThrow(/refusing symlink path: .*\.hermes/);
-
-    expect(harness.runSpy).not.toHaveBeenCalled();
-    expect(harness.auditSpy).not.toHaveBeenCalled();
-    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
-    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
-      locked: true,
-      mutable: false,
-    });
-  });
-
-  it("rejects a missing Hermes config before Shields down weakens posture (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("preflight-missing-config");
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", {
-        reason: "missing-config",
-        throwOnError: true,
-      }),
-    ).toThrow(/missing config path: .*config\.yaml/);
-
-    expect(harness.runSpy).not.toHaveBeenCalled();
-    expect(harness.auditSpy).not.toHaveBeenCalled();
-    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
-    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
-      locked: true,
-      mutable: false,
-    });
-  });
-
-  it("rejects a Hermes sensitive-file symlink before Shields down weakens posture (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("preflight-sensitive-file-symlink");
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
-    ).toThrow(/refusing symlink path: .*\.env/);
-
-    expect(harness.runSpy).not.toHaveBeenCalled();
-    expect(harness.auditSpy).not.toHaveBeenCalled();
-    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
-    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
-      locked: true,
-      mutable: false,
-    });
-  });
-
-  it("keeps DOWN when unlock fails and unsafe re-lock cannot verify protection (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("unlock-symlink");
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", {
-        reason: "unsafe-path",
-        timeout: "15m",
-        throwOnError: true,
-      }),
-    ).toThrow(/refusing to follow symlink: \/sandbox\/\.hermes\/config\.yaml/);
-
-    expect(
-      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
-    ).toMatchObject({ shieldsDown: true });
-    expect(harness.auditSpy).not.toHaveBeenCalled();
-    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
-    expect(errors).toContain("Manual intervention is required");
-    expect(errors).not.toContain("provisional Shields down cleared");
-  });
-
-  it("keeps DOWN when unsafe replacement breaks rollback after mutation begins (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("unlock-partial-rollback-symlink");
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", {
-        reason: "unsafe-path-during-unlock",
-        timeout: "15m",
-        throwOnError: true,
-      }),
-    ).toThrow(/refusing to follow symlink: \/sandbox\/\.hermes\/config\.yaml/);
-
-    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
-    expect(
-      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
-    ).toMatchObject({ shieldsDown: true });
-    expect(harness.shields.isShieldsDown("hermes-shields")).toBe(true);
-    expect(errors).toContain("Hermes shields rollback preparation failed");
-    expect(errors).toContain("Manual intervention is required");
-    expect(errors).not.toContain("provisional Shields down cleared");
-  });
-
-  it("keeps DOWN when unlock succeeded and unsafe re-lock cannot verify protection (#8804)", () => {
-    const stateDir = harness.seedLockedState("hermes-shields");
-    harness.setScenario("unlock-ok-relock-symlink");
-    failHermesInferenceConvergence(requireSource);
-
-    expect(() =>
-      harness.shields.shieldsDown("hermes-shields", {
-        reason: "unsafe-path-after-unlock",
-        timeout: "15m",
-        throwOnError: true,
-      }),
-    ).toThrow(/Hermes inference route did not converge/);
-
-    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
-    expect(
-      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
-    ).toMatchObject({ shieldsDown: true });
-    expect(errors).toContain("Manual intervention is required");
-    expect(errors).not.toContain("provisional Shields down cleared");
   });
 });

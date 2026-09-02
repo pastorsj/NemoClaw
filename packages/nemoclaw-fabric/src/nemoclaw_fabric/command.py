@@ -72,6 +72,22 @@ class RedactingArgumentParser(argparse.ArgumentParser):
         raise CommandArgumentError(message)
 
 
+class SingleConfigPathAction(argparse.Action):
+    """Reject a caller attempt to replace a package-pinned Fabric config."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        if getattr(namespace, "_nemoclaw_config_seen", False):
+            parser.error(f"{option_string or '--config'} may be specified only once")
+        setattr(namespace, "_nemoclaw_config_seen", True)
+        setattr(namespace, self.dest, values)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the complete public command grammar."""
 
@@ -98,6 +114,7 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
         "--config",
         type=Path,
         default=DEFAULT_CONFIG_PATH,
+        action=SingleConfigPathAction,
         help=f"Fabric configuration file (default: {DEFAULT_CONFIG_PATH})",
     )
     parser.add_argument("--json", action="store_true", help="print one JSON object")

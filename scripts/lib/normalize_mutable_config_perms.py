@@ -24,7 +24,12 @@ READY_NORMAL = b"NEMOCLAW_CONFIG_FD_READY:0"
 READY_CAPTURE_EMPTY = b"NEMOCLAW_CONFIG_FD_READY:1"
 READY_CAPTURE_SOURCE = b"NEMOCLAW_CONFIG_FD_READY:2"
 READY_MESSAGE_SIZE = len(READY_NORMAL)
-FIXED_FILES = ("openclaw.json", ".config-hash")
+DEFAULT_FIXED_FILE_MUTABLE_MODES = {
+    "openclaw.json": 0o660,
+    ".config-hash": 0o660,
+}
+FIXED_FILE_MUTABLE_MODES = dict(DEFAULT_FIXED_FILE_MUTABLE_MODES)
+FIXED_FILES = tuple(FIXED_FILE_MUTABLE_MODES)
 BASELINE_NAME = "openclaw.json.nemoclaw-baseline"
 CONFIG_NAME = "openclaw.json"
 HASH_NAME = ".config-hash"
@@ -51,6 +56,42 @@ try {
 
 class UnsafeTree(Exception):
     """The mutable tree changed identity or violated its ownership contract."""
+
+
+def activate_fixed_file_mutable_modes(arguments: list[str]) -> None:
+    """Install one validated host-authorized protected-file mode contract."""
+
+    if not arguments or len(arguments) % 2 != 0:
+        raise UnsafeTree()
+    modes: dict[str, int] = {}
+    for index in range(0, len(arguments), 2):
+        name = arguments[index]
+        mode_text = arguments[index + 1]
+        if (
+            not name
+            or name in (".", "..")
+            or "/" in name
+            or "\\" in name
+            or any(ord(character) < 0x20 or ord(character) == 0x7F for character in name)
+            or mode_text not in ("600", "660")
+            or name in modes
+        ):
+            raise UnsafeTree()
+        modes[name] = int(mode_text, 8)
+    if modes.get(CONFIG_NAME) != 0o660 or modes.get(HASH_NAME) != 0o660:
+        raise UnsafeTree()
+
+    global FIXED_FILE_MUTABLE_MODES, FIXED_FILES
+    FIXED_FILE_MUTABLE_MODES = modes
+    FIXED_FILES = tuple(modes)
+
+
+def expected_fixed_file_mode(name: str, base_mode: int) -> int:
+    """Apply a protected file's declared mode in the mutable posture."""
+
+    if base_mode == 0o660:
+        return FIXED_FILE_MUTABLE_MODES[name]
+    return base_mode
 
 
 def inode_key(metadata: os.stat_result) -> tuple[int, int, int]:
@@ -164,7 +205,7 @@ def normalize_dir(directory_fd: int, *, top_level: bool = False) -> None:
                     or opened.st_nlink != 1
                 ):
                     raise UnsafeTree()
-                set_mode(child_fd, 0o660, required=True)
+                set_mode(child_fd, FIXED_FILE_MUTABLE_MODES[name], required=True)
             elif top_level and name == BASELINE_NAME:
                 if opened.st_uid == os.geteuid():
                     # Root promotes multiply-linked content through a fresh
@@ -227,12 +268,13 @@ def open_fixed_files(
     try:
         for name in FIXED_FILES:
             before = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+            expected_mode = expected_fixed_file_mode(name, mode)
             if (
                 not stat.S_ISREG(before.st_mode)
                 or before.st_dev != root_metadata.st_dev
                 or before.st_uid != uid
                 or before.st_gid != gid
-                or stat.S_IMODE(before.st_mode) != mode
+                or stat.S_IMODE(before.st_mode) != expected_mode
                 or before.st_nlink != 1
             ):
                 raise UnsafeTree()
@@ -380,13 +422,14 @@ def reclaim_fixed_files(
     sandbox_gid: int,
 ) -> None:
     for name, child_fd, opened in opened_files:
+        expected_mode = FIXED_FILE_MUTABLE_MODES[name]
         os.fchown(child_fd, sandbox_uid, sandbox_gid)
-        os.fchmod(child_fd, 0o660)
+        os.fchmod(child_fd, expected_mode)
         current = os.fstat(child_fd)
         if (
             current.st_uid != sandbox_uid
             or current.st_gid != sandbox_gid
-            or stat.S_IMODE(current.st_mode) != 0o660
+            or stat.S_IMODE(current.st_mode) != expected_mode
             or current.st_nlink != 1
         ):
             raise UnsafeTree()
@@ -491,14 +534,19 @@ def verify_fixed_files(
             continue
         except OSError as exc:
             raise UnsafeTree() from exc
+        file_mode = (
+            expected_fixed_file_mode(name, expected_mode)
+            if expected_mode is not None
+            else None
+        )
         if (
             not stat.S_ISREG(before.st_mode)
             or before.st_dev != root_metadata.st_dev
             or before.st_uid != expected_uid
             or before.st_gid != expected_gid
             or (
-                expected_mode is not None
-                and stat.S_IMODE(before.st_mode) != expected_mode
+                file_mode is not None
+                and stat.S_IMODE(before.st_mode) != file_mode
             )
             or before.st_nlink != 1
         ):
@@ -1831,7 +1879,8 @@ def main() -> int:
             return 1
         return reclaim_if_unsealed(config_dir, sandbox_uid, sandbox_gid)
 
-    if len(sys.argv) not in {4, 5, 7}:
+    normalize_protected = len(sys.argv) >= 5 and sys.argv[4] == "normalize-protected"
+    if not normalize_protected and len(sys.argv) not in {4, 5, 7}:
         return 1
     config_dir = sys.argv[1]
     try:
@@ -1839,9 +1888,16 @@ def main() -> int:
         expected_gid = int(sys.argv[3])
     except ValueError:
         return 1
-    capture_baseline = len(sys.argv) == 7
-    recover_config = len(sys.argv) == 5
-    if capture_baseline:
+    capture_baseline = not normalize_protected and len(sys.argv) == 7
+    recover_config = not normalize_protected and len(sys.argv) == 5
+    if normalize_protected:
+        try:
+            activate_fixed_file_mutable_modes(sys.argv[5:])
+        except UnsafeTree:
+            return 1
+        node_binary = ""
+        json5_module = ""
+    elif capture_baseline:
         if sys.argv[4] != "capture":
             return 1
         node_binary = sys.argv[5]

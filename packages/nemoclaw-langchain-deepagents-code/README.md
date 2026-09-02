@@ -98,12 +98,16 @@ Install the package lock and run the checkout-independent lane:
 ```bash
 npm ci --ignore-scripts
 npm run test:package
+npm run test:fabric
 ```
 
-Tests that exercise the composed build and current NemoClaw boundaries run through
-`npm run test:nemoclaw`. To prove both lanes from a separate candidate checkout, run the
-`package-only` and `composed` in-tree overlay rehearsals documented in
-[`packages/README.md`](../README.md) with package ID `langchain-deepagents-code`. The composed
-rehearsal builds an exact temporary NemoClaw revision, overlays only this package, runs the complete
-package command, and verifies `nemoclaw harness install langchain-deepagents-code`,
-the human inventory, and the receipt-verified digest from `nemoclaw harness list --json`.
+`npm run test:fabric` validates the generated configuration directly against the released Deep
+Agents adapter. It does not read a sibling NemoClaw checkout. Tests that exercise the composed
+build and current NemoClaw boundaries run through `npm run test:nemoclaw`; that command also runs
+`test:fabric:composed` with the generic runner at `../nemoclaw-fabric`. To prove both lanes from a
+separate candidate checkout, run the `package-only` and `composed` in-tree overlay rehearsals
+documented in [`packages/README.md`](../README.md) with package ID
+`langchain-deepagents-code`. The composed rehearsal builds an exact temporary NemoClaw revision,
+overlays only this package, runs the complete package command, and verifies
+`nemoclaw harness install langchain-deepagents-code`, the human inventory, and the receipt-verified
+digest from `nemoclaw harness list --json`.

@@ -69,6 +69,9 @@ config:
   dir: /sandbox/.deepagents
   config_file: config.toml
   env_file: .env
+  mutable_access: private
+  shields_files:
+    - fabric.json
   format: toml
 
 # ── State directories ──────────────────────────────────────────

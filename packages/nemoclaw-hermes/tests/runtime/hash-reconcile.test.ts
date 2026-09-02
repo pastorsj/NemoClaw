@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { renderManagedHermesConfig } from "../helpers/config-seal.ts";
 import { gatewayConfigStubRoot } from "../helpers/gateway-config";
 const RUNTIME_CONFIG_GUARD = path.join(import.meta.dirname, "../..", "runtime", "config-guard.py");
 
@@ -17,15 +18,17 @@ interface ReconciliationFixture {
   hermesDir: string;
   configPath: string;
   envPath: string;
+  fabricPath: string;
   hashPath: string;
   compatHashPath: string;
   statePath: string;
   trustedConfig: string;
   trustedEnv: string;
+  trustedFabric: string;
 }
 
 function hashInputs(fixture: ReconciliationFixture): string {
-  const result = spawnSync("sha256sum", [fixture.configPath, fixture.envPath], {
+  const result = spawnSync("sha256sum", [fixture.configPath, fixture.envPath, fixture.fabricPath], {
     encoding: "utf-8",
     timeout: 5000,
   });
@@ -44,17 +47,38 @@ function createFixture(hermesMode = 0o3770): ReconciliationFixture {
     hermesDir,
     configPath: path.join(hermesDir, "config.yaml"),
     envPath: path.join(hermesDir, ".env"),
+    fabricPath: path.join(hermesDir, "fabric.json"),
     hashPath: path.join(root, "hermes.config-hash"),
     compatHashPath: path.join(hermesDir, ".config-hash"),
     statePath: path.join(root, "hermes-restart-seal.json"),
-    trustedConfig: "model:\n  default: trusted-model\n",
+    trustedConfig: renderManagedHermesConfig("trusted-model"),
     trustedEnv: "API_SERVER_PORT=18642\nSAFE_SETTING=trusted\n",
+    trustedFabric: `${JSON.stringify(
+      {
+        schema_version: "fabric.agent/v1alpha1",
+        harness: {
+          adapter_id: "nvidia.nemoclaw.hermes",
+          resolution: "preinstalled",
+        },
+        models: {
+          default: {
+            provider: "custom",
+            model: "trusted-model",
+            api_key_env: "HERMES_FABRIC_API_KEY",
+            base_url: "https://inference.local/v1",
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`,
   };
   fs.mkdirSync(hermesDir, { recursive: true });
   fs.chmodSync(sandboxDir, 0o770);
   fs.chmodSync(hermesDir, hermesMode);
   fs.writeFileSync(fixture.configPath, fixture.trustedConfig, { mode: 0o640 });
   fs.writeFileSync(fixture.envPath, fixture.trustedEnv, { mode: 0o600 });
+  fs.writeFileSync(fixture.fabricPath, fixture.trustedFabric, { mode: 0o600 });
   const trustedHash = hashInputs(fixture);
   fs.writeFileSync(fixture.hashPath, trustedHash, { mode: 0o600 });
   fs.writeFileSync(fixture.compatHashPath, trustedHash, { mode: 0o600 });
@@ -261,10 +285,13 @@ spec.loader.exec_module(module)
 module._sandbox_identity = lambda: (1234, 1234)
 
 def files(mode=0o640, uid=1234, gid=1234):
-    return {
+    entries = {
         name: {"original": {"mode": mode, "uid": uid, "gid": gid}}
-        for name in ("config.yaml", ".env", ".config-hash")
+        for name in ("config.yaml", ".env", ".config-hash", "fabric.json")
     }
+    if mode == 0o640:
+        entries["fabric.json"]["original"]["mode"] = 0o600
+    return entries
 
 allowed = module._mutable_nonroot_reconciliation_posture_is_allowed
 private_live = allowed({"mode": 0o700, "uid": 1234, "gid": 1234}, files())
@@ -310,7 +337,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
 
         try {
           expect(strictHashIsValid(fixture)).toBe(false);
-          const updatedConfig = "model:\n  default: trusted-model-v2\n";
+          const updatedConfig = renderManagedHermesConfig("trusted-model-v2");
           const result = runManagedNonrootWrite(
             fixture,
             expectedConfigDigest(fixture),
@@ -318,6 +345,9 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
           );
           expect(result.status, result.stderr).toBe(0);
           expect(fs.readFileSync(fixture.configPath, "utf-8")).toBe(updatedConfig);
+          expect(
+            JSON.parse(fs.readFileSync(fixture.fabricPath, "utf-8")).models.default.model,
+          ).toBe("trusted-model-v2");
           expect(fs.readFileSync(fixture.envPath, "utf-8")).toBe(
             `${fixture.trustedEnv}API_SERVER_KEY=${generatedKey}\n`,
           );
@@ -360,6 +390,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
       fs.chmodSync(fixture.hermesDir, 0o755);
       fs.chmodSync(fixture.configPath, 0o444);
       fs.chmodSync(fixture.envPath, 0o444);
+      fs.chmodSync(fixture.fabricPath, 0o444);
       fs.chmodSync(fixture.compatHashPath, 0o444);
       const strictBefore = fs.readFileSync(fixture.hashPath, "utf-8");
 
@@ -367,7 +398,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("outside mutable Hermes posture");
@@ -383,6 +414,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
       fs.chmodSync(fixture.hermesDir, 0o755);
       fs.chmodSync(fixture.configPath, 0o444);
       fs.chmodSync(fixture.envPath, 0o444);
+      fs.chmodSync(fixture.fabricPath, 0o444);
       fs.chmodSync(fixture.compatHashPath, 0o444);
       const strictBefore = fs.readFileSync(fixture.hashPath, "utf-8");
 
@@ -390,7 +422,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("config writes are unavailable while shields are up");
@@ -410,7 +442,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runSourceWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("outside managed non-root startup");
@@ -436,7 +468,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toMatch(/API_SERVER_KEY change/u);
@@ -454,7 +486,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("compat hash does not match frozen Hermes inputs");
@@ -477,7 +509,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("malformed Hermes config hash");
@@ -505,7 +537,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
           const result = runManagedNonrootWrite(
             fixture,
             expectedConfigDigest(fixture),
-            "model:\n  default: must-not-apply\n",
+            renderManagedHermesConfig("must-not-apply"),
           );
           expect(result.status).not.toBe(0);
           expect(result.stderr).toContain("malformed Hermes config hash");
@@ -528,7 +560,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           expectedConfigDigest(fixture),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("non-API-key env drift");
@@ -541,7 +573,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
 
     it("refuses config drift even when compat and the host read match it", () => {
       const fixture = createFixture();
-      const driftedConfig = "model:\n  default: attacker-model\n";
+      const driftedConfig = renderManagedHermesConfig("attacker-model");
       fs.writeFileSync(fixture.configPath, driftedConfig);
       fs.appendFileSync(fixture.envPath, `API_SERVER_KEY=${"6".repeat(64)}\n`);
       refreshCompatOnly(fixture);
@@ -550,7 +582,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           createHash("sha256").update(driftedConfig).digest("hex"),
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("refusing config drift");
@@ -571,7 +603,7 @@ print(json.dumps([private_live, canonical_mutable, foreign_private, unexpected_m
         const result = runManagedNonrootWrite(
           fixture,
           staleHostDigest,
-          "model:\n  default: must-not-apply\n",
+          renderManagedHermesConfig("must-not-apply"),
         );
         expect(result.status).not.toBe(0);
         expect(result.stderr).toContain("config changed after the host read");

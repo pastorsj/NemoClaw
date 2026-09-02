@@ -900,6 +900,64 @@ RUN if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
         "from importlib.metadata import version; expected = {'aiohttp': '3.14.3', 'cryptography': '50.0.0'}; actual = {name: version(name) for name in expected}; assert actual == expected, actual" \
     && rm -rf /opt/nemoclaw-hermes-teams-wheels
 
+# Keep Fabric's orchestration graph separate from Hermes' native environment.
+# The released Hermes adapter runs with Hermes' interpreter through
+# ADAPTER_PYTHON, while the generic NemoClaw runner stays independently pinned.
+COPY packages/nemoclaw-hermes/fabric/runtime-requirements.lock /tmp/nemoclaw-hermes-fabric-runtime.lock
+RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-hermes-fabric-runtime.lock \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && rm -f /tmp/nemoclaw-hermes-fabric-runtime.lock
+
+COPY packages/nemoclaw-hermes/fabric/adapter-requirements.lock /tmp/nemoclaw-hermes-fabric-adapter.lock
+COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
+COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
+COPY packages/nemoclaw-hermes/fabric/pyproject.toml /opt/nemoclaw-hermes-fabric-proxy/
+COPY packages/nemoclaw-hermes/fabric/src/ /opt/nemoclaw-hermes-fabric-proxy/src/
+COPY packages/nemoclaw-hermes/fabric/hermes.fabric-adapter.json /usr/local/share/nemoclaw/hermes.fabric-adapter.json
+COPY packages/nemoclaw-fabric/build-requirements.lock /tmp/nemoclaw-fabric-build-requirements.lock
+
+# hadolint ignore=DL3059
+RUN set -eu; \
+    UV_NO_CACHE=1 uv pip install --python /opt/hermes/.venv/bin/python \
+        --require-hashes -r /tmp/nemoclaw-hermes-fabric-adapter.lock \
+    && uv pip check --python /opt/hermes/.venv/bin/python \
+    && /opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import distribution, version; expected = {"nemo-fabric-adapter-contract": "0.2.0", "nemo-fabric-adapters-common": "0.2.0", "nemo-fabric-adapters-hermes": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; package = distribution("nemo-fabric-adapters-hermes"); descriptors = [path for path in package.files or () if str(path).endswith("hermes/hermes.fabric-adapter.json")]; assert len(descriptors) == 1, descriptors; import nemo_fabric_adapters.hermes.adapter' \
+    && python3 -I -c 'import tomllib; from pathlib import Path; runner = tomllib.loads(Path("/opt/nemoclaw-fabric-runner/pyproject.toml").read_text(encoding="utf-8"))["project"]; assert (runner["name"], runner["version"], runner["dependencies"]) == ("nemoclaw-fabric", "0.1.2", ["nemo-fabric == 0.2.0"])' \
+    && python3 -I -c 'import json, tomllib; from pathlib import Path; package = tomllib.loads(Path("/opt/nemoclaw-hermes-fabric-proxy/pyproject.toml").read_text(encoding="utf-8"))["project"]; descriptor = json.loads(Path("/usr/local/share/nemoclaw/hermes.fabric-adapter.json").read_text(encoding="utf-8")); assert (package["name"], package["version"], package["dependencies"]) == ("nemoclaw-hermes-fabric", "0.1.0", ["nemo-fabric-adapters-hermes == 0.2.0"]); assert descriptor["adapter_id"] == "nvidia.nemoclaw.hermes"; assert descriptor["runner"]["module"] == "nemoclaw_hermes_fabric.adapter"' \
+    && python3 -m venv --copies /tmp/nemoclaw-fabric-build-venv \
+    && /tmp/nemoclaw-fabric-build-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-fabric-build-requirements.lock \
+    && install -d -o root -g root -m 0755 /tmp/nemoclaw-fabric-wheels \
+    && /tmp/nemoclaw-fabric-build-venv/bin/pip3 wheel --no-index --no-deps --no-build-isolation \
+        --wheel-dir /tmp/nemoclaw-fabric-wheels /opt/nemoclaw-fabric-runner \
+        /opt/nemoclaw-hermes-fabric-proxy \
+    && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_hermes_fabric-0.1.0-*.whl \
+    && test "$#" -eq 1 \
+    && UV_NO_CACHE=1 uv pip install --python /opt/hermes/.venv/bin/python --no-deps "$1" \
+    && uv pip check --python /opt/hermes/.venv/bin/python \
+    && /opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import version; assert version("nemoclaw-hermes-fabric") == "0.1.0"; import nemoclaw_hermes_fabric.adapter' \
+    && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_fabric-0.1.2-*.whl \
+    && test "$#" -eq 1 \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps "$1" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemoclaw-fabric": "0.1.2", "nemo-fabric": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual' \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && chown root:root /usr/local/share/nemoclaw/hermes.fabric-adapter.json \
+    && chmod 0444 /usr/local/share/nemoclaw/hermes.fabric-adapter.json \
+    && test "$(stat -c '%u:%g:%a' /usr/local/share/nemoclaw/hermes.fabric-adapter.json)" = "0:0:444" \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test -x /usr/local/bin/nemoclaw-fabric \
+    && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
+    && rm -rf /opt/nemoclaw-fabric-runner /opt/nemoclaw-hermes-fabric-proxy \
+        /tmp/nemoclaw-fabric-build-venv \
+        /tmp/nemoclaw-fabric-wheels /tmp/nemoclaw-fabric-build-requirements.lock \
+        /tmp/nemoclaw-hermes-fabric-adapter.lock
+
+ENV ADAPTER_PYTHON=/opt/hermes/.venv/bin/python
+
 WORKDIR /sandbox
 RUN test "$(id -u sandbox):$(id -g sandbox):$(pwd)" = "998:999:/sandbox"
 USER sandbox
@@ -918,6 +976,11 @@ RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
 # code injection via build-arg interpolation (same concern as OpenClaw C-2).
 RUN HERMES_HOME=/sandbox/.hermes /usr/local/bin/hermes doctor --fix \
     && node --experimental-strip-types /opt/nemoclaw-hermes-config/config/generate-config.ts \
+    && test "$(stat -c %a /sandbox/.hermes/fabric.json)" = "600" \
+    && HERMES_FABRIC_API_KEY=nemoclaw-managed-inference /usr/local/bin/nemoclaw-fabric doctor \
+        --config /sandbox/.hermes/fabric.json --json > /tmp/nemoclaw-hermes-fabric-doctor.json \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'import json; from pathlib import Path; report = json.loads(Path("/tmp/nemoclaw-hermes-fabric-doctor.json").read_text(encoding="utf-8")); assert report["status"] in {"pass", "warn"}, report' \
+    && rm -f /tmp/nemoclaw-hermes-fabric-doctor.json \
     && if [ "$NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION" = "1" ]; then \
         /opt/hermes/.venv/bin/python -I -c 'import importlib.metadata as m, pathlib, yaml; config=yaml.safe_load(pathlib.Path("/sandbox/.hermes/config.yaml").read_text()); neutral={name: value for name, value in config["platforms"].items() if name != "api_server"}; assert len(neutral) == 30; assert all(value == {"enabled": False} for value in neutral.values()); assert m.version("microsoft-teams-apps") == "2.0.13.4"; assert m.version("aiohttp") == "3.14.3"'; \
     fi \
@@ -1130,6 +1193,7 @@ RUN set -eu; \
         "$config_dir/hooks" \
         "$config_dir/image_cache" \
         "$config_dir/audio_cache" \
+        "$config_dir/fabric-artifacts" \
         "$config_dir/pairing" \
         "$config_dir/platforms" \
         "$config_dir/platforms/whatsapp" \
@@ -1184,6 +1248,7 @@ RUN set -eu; \
         /sandbox/.hermes/hooks \
         /sandbox/.hermes/image_cache \
         /sandbox/.hermes/audio_cache \
+        /sandbox/.hermes/fabric-artifacts \
         /sandbox/.hermes/pairing \
         /sandbox/.hermes/platforms \
         /sandbox/.hermes/platforms/whatsapp \
@@ -1200,6 +1265,7 @@ RUN set -eu; \
         /sandbox/.hermes/platforms \
         /sandbox/.hermes/platforms/whatsapp \
         /sandbox/.hermes/platforms/whatsapp/session \
+        /sandbox/.hermes/fabric-artifacts \
         /sandbox/.hermes/cron \
         /sandbox/.hermes/gateway \
         /sandbox/.hermes/runtime \
@@ -1384,7 +1450,7 @@ RUN test "$(stat -c '%U:%G %a' /sandbox/.hermes/gateway/discord_message_recovery
 # image sealing and runtime verification cannot drift onto different JSON
 # canonicalization contracts.
 RUN mkdir -p /etc/nemoclaw \
-    && sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env \
+    && sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json \
     > /etc/nemoclaw/hermes.config-hash \
     && mcp_digest="$(/opt/hermes/.venv/bin/python -I /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py --guard /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py --config /sandbox/.hermes/config.yaml)" \
     && printf '# nemoclaw-hermes-mcp-state-v1 intended=%s applied=%s\n' "$mcp_digest" "$mcp_digest" \

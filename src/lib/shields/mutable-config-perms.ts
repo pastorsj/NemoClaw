@@ -22,6 +22,7 @@
 // the pre-doctor state baked into the sandbox image.
 export const MUTABLE_OPENCLAW_DIR_MODE = "2770";
 export const MUTABLE_OPENCLAW_FILE_MODE = "660";
+export const MUTABLE_OPENCLAW_PRIVATE_FILE_MODE = "600";
 export const MUTABLE_OPENCLAW_OWNER = "sandbox:sandbox";
 
 export type MutableConfigPostureMode =
@@ -92,6 +93,13 @@ export function fileSatisfiesMutableContract(mode: string): boolean {
   return (
     /^[0-7]{3,4}$/.test(mode) &&
     mode.padStart(4, "0") === MUTABLE_OPENCLAW_FILE_MODE.padStart(4, "0")
+  );
+}
+
+function privateFileSatisfiesMutableContract(mode: string): boolean {
+  return (
+    /^[0-7]{3,4}$/.test(mode) &&
+    mode.padStart(4, "0") === MUTABLE_OPENCLAW_PRIVATE_FILE_MODE.padStart(4, "0")
   );
 }
 
@@ -175,9 +183,18 @@ export function inspectMutableConfigPerms(
     } catch {
       continue;
     }
-    if (!fileSatisfiesMutableContract(sensitive.mode)) {
+    // .config-hash remains group-writable with the native config. Additional
+    // manifest-declared protected files are private to the sandbox owner.
+    const isConfigHash = sensitivePath === `${target.configDir}/.config-hash`;
+    const expectedMode = isConfigHash
+      ? MUTABLE_OPENCLAW_FILE_MODE
+      : MUTABLE_OPENCLAW_PRIVATE_FILE_MODE;
+    const modeMatches = isConfigHash
+      ? fileSatisfiesMutableContract(sensitive.mode)
+      : privateFileSatisfiesMutableContract(sensitive.mode);
+    if (!modeMatches) {
       issues.push(
-        `${sensitivePath} mode ${sensitive.mode} (expected ${MUTABLE_OPENCLAW_FILE_MODE} group-writable)`,
+        `${sensitivePath} mode ${sensitive.mode} (expected ${expectedMode}${isConfigHash ? " group-writable" : " private"})`,
       );
     }
     if (sensitive.owner !== MUTABLE_OPENCLAW_OWNER) {
@@ -209,6 +226,7 @@ export function repairMutableConfigPerms(
   target: MutableConfigTarget,
   postureMode: MutableConfigPostureMode,
   applyMutableContract: () => void,
+  inspectAppliedContract: () => MutableConfigPermsInspection,
 ): MutableConfigRepairResult {
   if (target.agentName !== "openclaw") {
     return {
@@ -233,6 +251,21 @@ export function repairMutableConfigPerms(
   }
   try {
     applyMutableContract();
+    const inspection = inspectAppliedContract();
+    if (!inspection.applies) {
+      return {
+        applied: true,
+        verified: false,
+        errors: [`Mutable config permission verification did not apply: ${inspection.reason}`],
+      };
+    }
+    if (!inspection.ok) {
+      return {
+        applied: true,
+        verified: false,
+        errors: inspection.issues,
+      };
+    }
     return { applied: true, verified: true, errors: [] };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

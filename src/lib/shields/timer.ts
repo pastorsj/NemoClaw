@@ -56,6 +56,8 @@ interface TimerArgs {
   configPath?: string;
   configDir?: string;
   agentName?: string;
+  authorizedProtectedFiles?: readonly string[] | null;
+  authorizedMutableAccess?: "private" | "shared" | null;
   processToken?: string;
   allowLegacyHermesProtocol: boolean;
   leaseOwnerPid?: number;
@@ -206,6 +208,21 @@ function markerRecordMatchesCurrentTimer(
   args: TimerArgs,
 ): boolean {
   if (!marker) return false;
+  const authorizedProtectedFiles = args.authorizedProtectedFiles;
+  const protectedFilesMatch =
+    authorizedProtectedFiles === undefined ||
+    (authorizedProtectedFiles === null
+      ? marker.protectedFiles === undefined
+      : marker.protectedFiles !== undefined &&
+        marker.protectedFiles.length === authorizedProtectedFiles.length &&
+        marker.protectedFiles.every(
+          (protectedFile, index) => protectedFile === authorizedProtectedFiles[index],
+        ));
+  const mutableAccessMatches =
+    args.authorizedMutableAccess === undefined ||
+    (args.authorizedMutableAccess === null
+      ? marker.mutableAccess === undefined
+      : marker.mutableAccess === args.authorizedMutableAccess);
   return (
     marker.pid === process.pid &&
     marker.sandboxName === args.sandboxName &&
@@ -219,19 +236,16 @@ function markerRecordMatchesCurrentTimer(
     marker.leaseOwnerStartIdentity === args.leaseOwnerStartIdentity &&
     marker.agentName === args.agentName &&
     (marker.configPath === undefined || marker.configPath === args.configPath) &&
-    (marker.configDir === undefined || marker.configDir === args.configDir)
+    (marker.configDir === undefined || marker.configDir === args.configDir) &&
+    protectedFilesMatch &&
+    mutableAccessMatches
   );
 }
 
 function cleanupOwnedTimerMarker(args: TimerArgs): boolean {
   const marker = readTimerMarker(args.markerPath);
   if (!marker || !markerRecordMatchesCurrentTimer(marker, args)) return false;
-  const result = clearTimerMarkerGeneration(
-    args.sandboxName,
-    marker,
-    STATE_DIR,
-    args.markerPath,
-  );
+  const result = clearTimerMarkerGeneration(args.sandboxName, marker, STATE_DIR, args.markerPath);
   if (result.status === "removed") return true;
   if (result.status === "missing" || result.status === "changed") return false;
   throw new Error(result.warning ?? "Failed to retire the owned Shields timer marker");
@@ -411,7 +425,19 @@ async function runRestoreTimerWithBudget(
           let lockedChattr: boolean | null = null;
           let lockedHashes: { [path: string]: string } | null = null;
           if (args.configPath) {
-            const lockTarget = shields.resolvePersistedAutoRestoreTarget(args.sandboxName, args);
+            const persistedMarker = readTimerMarker(args.markerPath);
+            const persistedAuthority = persistedMarker
+              ? {
+                  ...persistedMarker,
+                  configPath: persistedMarker.configPath ?? args.configPath,
+                  configDir: persistedMarker.configDir ?? args.configDir,
+                  agentName: persistedMarker.agentName ?? args.agentName,
+                }
+              : null;
+            const lockTarget =
+              persistedAuthority && markerRecordMatchesCurrentTimer(persistedMarker, args)
+                ? shields.resolvePersistedAutoRestoreTarget(args.sandboxName, persistedAuthority)
+                : undefined;
             if (!lockTarget) {
               lockVerified = false;
               appendAudit({
@@ -669,7 +695,9 @@ function main(): void {
   const authorize = (): boolean => {
     if (scheduled) return true;
     const marker = readTimerMarker(args.markerPath);
-    if (!markerRecordMatchesCurrentTimer(marker, args)) return false;
+    if (!marker || !markerRecordMatchesCurrentTimer(marker, args)) return false;
+    args.authorizedProtectedFiles = marker.protectedFiles ? [...marker.protectedFiles] : null;
+    args.authorizedMutableAccess = marker.mutableAccess ?? null;
     const restoreTimeout = setTimeout(
       () => {
         clearInterval(authorityPoll);

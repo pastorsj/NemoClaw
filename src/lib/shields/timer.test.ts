@@ -46,10 +46,8 @@ vi.mock("./index", () => ({
     return shieldsIndexMock.resolveHermesShieldsProtocol;
   },
 }));
-
 describe("shields timer authorization", () => {
   let tmpHome: string;
-
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "shields-timer-"));
     vi.stubEnv("HOME", tmpHome);
@@ -60,19 +58,33 @@ describe("shields timer authorization", () => {
     shieldsIndexMock.resolvePersistedAutoRestoreTarget = vi.fn(
       (
         _sandboxName: string,
-        marker: { agentName?: string; configPath?: string; configDir?: string },
+        marker: {
+          agentName?: string;
+          configPath?: string;
+          configDir?: string;
+          protectedFiles?: readonly string[];
+          mutableAccess?: "private" | "shared";
+        },
       ) =>
         marker.configPath && marker.configDir
           ? {
               ...(marker.agentName ? { agentName: marker.agentName } : {}),
               configPath: marker.configPath,
               configDir: marker.configDir,
-              sensitiveFiles: [
-                `${marker.configDir.replace(/\/+$/, "")}/.config-hash`,
-                ...(marker.agentName === "hermes"
-                  ? [`${marker.configDir.replace(/\/+$/, "")}/.env`]
-                  : []),
-              ],
+              ...(marker.mutableAccess ? { mutableAccess: marker.mutableAccess } : {}),
+              sensitiveFiles: marker.protectedFiles
+                ? marker.protectedFiles
+                    .slice(1)
+                    .map(
+                      (protectedFile) =>
+                        `${marker.configDir!.replace(/\/+$/, "")}/${protectedFile}`,
+                    )
+                : [
+                    `${marker.configDir.replace(/\/+$/, "")}/.config-hash`,
+                    ...(marker.agentName === "hermes"
+                      ? [`${marker.configDir.replace(/\/+$/, "")}/.env`]
+                      : []),
+                  ],
               stateLockPlanInImage: false,
             }
           : undefined,
@@ -80,12 +92,10 @@ describe("shields timer authorization", () => {
     vi.resetModules();
     vi.clearAllMocks();
   });
-
   afterEach(() => {
     vi.unstubAllEnvs();
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
-
   async function invokeTimerAndCaptureExit(
     runRestoreTimer: (args: any, options?: TimerTestOptions) => Promise<void>,
     args: unknown,
@@ -1123,12 +1133,12 @@ describe("shields timer authorization", () => {
     }));
     const indexModule = await import("./index");
     (indexModule.lockAgentConfig as ReturnType<typeof vi.fn>).mockImplementation(lockMock);
-    (
-      indexModule.resolveHermesShieldsProtocol as ReturnType<typeof vi.fn>
-    ).mockReturnValue("provider-state-mutation-v2");
-    (
-      indexModule.hermesProviderLockConfirmation as ReturnType<typeof vi.fn>
-    ).mockReturnValue(confirmMock);
+    (indexModule.resolveHermesShieldsProtocol as ReturnType<typeof vi.fn>).mockReturnValue(
+      "provider-state-mutation-v2",
+    );
+    (indexModule.hermesProviderLockConfirmation as ReturnType<typeof vi.fn>).mockReturnValue(
+      confirmMock,
+    );
 
     const timer = await import("./timer");
     const args = timer.parseTimerArgs([
@@ -1176,6 +1186,7 @@ describe("shields timer authorization", () => {
     const configPath = "/sandbox/.deepagents/config.toml";
     const configDir = "/sandbox/.deepagents";
     const sensitiveHashPath = `${configDir}/.config-hash`;
+    const fabricConfigPath = `${configDir}/fabric.json`;
     const snapshotPath = path.join(stateDir, "snapshot.yaml");
     const restoreAtIso = new Date(Date.now() + 60_000).toISOString();
     const markerPath = path.join(stateDir, `shields-timer-${sandboxName}.json`);
@@ -1190,6 +1201,10 @@ describe("shields timer authorization", () => {
         restoreAt: restoreAtIso,
         processToken: PROCESS_TOKEN,
         agentName,
+        configPath,
+        configDir,
+        protectedFiles: ["config.toml", ".config-hash", "fabric.json"],
+        mutableAccess: "private",
       }),
     );
 
@@ -1223,13 +1238,20 @@ describe("shields timer authorization", () => {
       agentName,
       configPath,
       configDir,
-      sensitiveFiles: [sensitiveHashPath],
+      sensitiveFiles: [sensitiveHashPath, fabricConfigPath],
+      mutableAccess: "private",
       stateLockPlanInImage: false,
     };
 
     expect(shieldsIndexMock.resolvePersistedAutoRestoreTarget).toHaveBeenCalledWith(
       sandboxName,
-      args,
+      expect.objectContaining({
+        agentName,
+        configPath,
+        configDir,
+        protectedFiles: ["config.toml", ".config-hash", "fabric.json"],
+        mutableAccess: "private",
+      }),
     );
     expect(exitCode).toBe(0);
     expect(lockMock).toHaveBeenCalledTimes(2);

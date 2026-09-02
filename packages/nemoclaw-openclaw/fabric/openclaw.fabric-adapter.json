@@ -1,0 +1,32 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "nvidia.nemoclaw.openclaw",
+  "adapter_kind": "python",
+  "runner": {
+    "module": "nemoclaw_openclaw_fabric.adapter"
+  },
+  "requirements": {
+    "binaries": ["openclaw"]
+  },
+  "model_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": true
+  },
+  "settings_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "config": {
+    "accepts": ["models"]
+  },
+  "capabilities": {
+    "streaming": false,
+    "cancellation": false,
+    "updates": false,
+    "service": false
+  }
+}

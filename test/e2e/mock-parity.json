@@ -62,9 +62,14 @@
     },
     {
       "live": "test/e2e/live/managed-image-activation-e2e.test.ts",
+      "liveSources": [
+        "test/e2e/live/managed-image-activation-e2e-helpers.ts",
+        "test/e2e/live/public-fabric-turn.ts"
+      ],
       "fast": [
         "src/lib/onboard/command.test.ts",
         "src/lib/onboard/sandbox-workload-preparation.test.ts",
+        "test/e2e/support/public-fabric-turn.test.ts",
         "test/inference/managed/managed-image-publication-workflow.test.ts",
         "test/onboarding/onboard-managed-image-buildless-e2e.test.ts"
       ]
@@ -688,11 +693,15 @@
     },
     {
       "live": "test/e2e/live/rebuild-hermes.test.ts",
-      "liveSources": ["test/e2e/live/rebuild-hermes-host-policy.ts"],
+      "liveSources": [
+        "test/e2e/live/public-fabric-turn.ts",
+        "test/e2e/live/rebuild-hermes-host-policy.ts"
+      ],
       "fast": [
         "src/lib/actions/sandbox/rebuild-flow-lifecycle.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
         "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/public-fabric-turn.test.ts",
         "test/e2e/support/rebuild-hermes-env.test.ts",
         "test/e2e/support/rebuild-hermes-base-identity.test.ts",
         "test/e2e/support/rebuild-hermes-image-state.test.ts",
@@ -702,10 +711,12 @@
     },
     {
       "live": "test/e2e/live/rebuild-openclaw.test.ts",
+      "liveSources": ["test/e2e/live/public-fabric-turn.ts"],
       "fast": [
         "src/lib/actions/sandbox/rebuild-flow-lifecycle.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
-        "test/e2e/support/e2e-clients.test.ts"
+        "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/public-fabric-turn.test.ts"
       ]
     },
     {

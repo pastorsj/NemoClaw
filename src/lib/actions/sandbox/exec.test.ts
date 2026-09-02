@@ -97,6 +97,31 @@ describe("runSandboxExecChild spawn options", () => {
     });
     expect(spawnMock.mock.calls[0]?.[2]).not.toHaveProperty("env");
   });
+
+  it("delivers private stdin byte-exact without adding it to the child argv", async () => {
+    const secretPrompt = "private prompt value";
+    const child = completedSpawnChild();
+    const stdin = {
+      end: vi.fn(),
+      once: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    child.stdin = stdin;
+    spawnMock.mockReturnValueOnce(child);
+
+    const result = await runSandboxExecChild(
+      "/usr/bin/openshell",
+      ["sandbox", "exec", "--name", "alpha", "--", "nemoclaw-fabric", "run", "--stdin"],
+      { stdinInput: secretPrompt },
+      undefined,
+      signalSource,
+    );
+    result.releaseSignals?.();
+
+    expect(spawnMock.mock.calls[0]?.[1]).not.toContain(secretPrompt);
+    expect(spawnMock.mock.calls[0]?.[2]?.stdio).toEqual(["pipe", "inherit", "inherit"]);
+    expect(stdin.end).toHaveBeenCalledWith(secretPrompt);
+  });
 });
 
 describe("buildOpenshellExecArgs", () => {

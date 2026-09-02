@@ -445,12 +445,17 @@ NODETOKEN
 
 ensure_gateway_token() {
   local config_file="/sandbox/.openclaw/openclaw.json"
+  local fabric_file="/sandbox/.openclaw/fabric.json"
   local hash_file="/sandbox/.openclaw/.config-hash"
   local config_dir
   config_dir="$(dirname "$config_file")"
 
-  if [ -L "$config_dir" ] || [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing gateway token generation — config or hash path is a symlink\n' >&2
+  if [ -L "$config_dir" ] || [ -L "$config_file" ] || [ -L "$fabric_file" ] || [ -L "$hash_file" ]; then
+    printf '[SECURITY] Refusing gateway token generation — protected config path is a symlink\n' >&2
+    return 1
+  fi
+  if [ ! -f "$config_file" ] || [ ! -f "$fabric_file" ]; then
+    printf '[SECURITY] Refusing gateway token generation — protected config file is missing or not regular\n' >&2
     return 1
   fi
 
@@ -565,8 +570,8 @@ try {
 }
 NODETOKEN
 
-  if [ "$_write_rc" -eq 0 ] && [ -f "$hash_file" ]; then
-    (cd "$(dirname "$config_file")" && sha256sum "$(basename "$config_file")" >"$hash_file") || _write_rc=$?
+  if [ "$_write_rc" -eq 0 ]; then
+    (cd "$config_dir" && sha256sum openclaw.json fabric.json >"$hash_file") || _write_rc=$?
   fi
 
   if [ "$(id -u)" -eq 0 ]; then

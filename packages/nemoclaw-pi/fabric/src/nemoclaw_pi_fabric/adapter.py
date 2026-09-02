@@ -27,6 +27,12 @@ PI_COMMAND = "pi"
 MANAGED_PROVIDER = "openshell"
 MANAGED_BASE_URL = "https://inference.local/v1"
 PROCESS_STOP_GRACE_SECONDS = 2.0
+PROCESS_STREAM_CAPTURE_LIMIT_BYTES = 1024 * 1024
+PROCESS_STREAM_READ_BYTES = 64 * 1024
+
+
+class _OutputCaptureLimitExceeded(Exception):
+    """Mark subprocess output that cannot fit inside the adapter's capture bound."""
 
 
 def _failed(code: str, message: str) -> AgentRunResult:
@@ -83,7 +89,7 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     process_group = process.pid
     try:
         os.killpg(process_group, signal.SIGTERM)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
 
     deadline = asyncio.get_running_loop().time() + PROCESS_STOP_GRACE_SECONDS
@@ -99,16 +105,67 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     while asyncio.get_running_loop().time() < deadline:
         try:
             os.killpg(process_group, 0)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             return
         await asyncio.sleep(0.025)
 
     try:
         os.killpg(process_group, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return
     if process.returncode is None:
         await process.wait()
+
+
+async def _read_bounded_stream(stream: asyncio.StreamReader) -> bytes:
+    """Read one child stream without retaining bytes beyond its capture limit."""
+
+    captured = bytearray()
+    while chunk := await stream.read(PROCESS_STREAM_READ_BYTES):
+        if len(captured) + len(chunk) > PROCESS_STREAM_CAPTURE_LIMIT_BYTES:
+            raise _OutputCaptureLimitExceeded
+        captured.extend(chunk)
+    return bytes(captured)
+
+
+async def _write_process_input(stream: asyncio.StreamWriter, payload: bytes) -> None:
+    """Send one literal request while output readers keep both pipes draining."""
+
+    try:
+        stream.write(payload)
+        await stream.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+    finally:
+        stream.close()
+
+
+async def _capture_bounded_output(
+    process: asyncio.subprocess.Process, process_input: bytes
+) -> tuple[bytes, bytes]:
+    """Exchange input while bounding both child output streams independently."""
+
+    assert process.stdin is not None
+    assert process.stdout is not None
+    assert process.stderr is not None
+    stdout_task = asyncio.create_task(_read_bounded_stream(process.stdout))
+    stderr_task = asyncio.create_task(_read_bounded_stream(process.stderr))
+    input_task = asyncio.create_task(_write_process_input(process.stdin, process_input))
+    tasks = (stdout_task, stderr_task, input_task)
+    try:
+        completed, _pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+        for task in completed:
+            if error := task.exception():
+                raise error
+        return stdout_task.result(), stderr_task.result()
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 class PiRuntime:
@@ -217,9 +274,21 @@ class PiRuntime:
             return _failed("pi_process_unavailable", "Pi could not be started")
 
         self._process = process
+        output_limit_exceeded = False
+        stdout = b""
         try:
-            stdout, _stderr = await process.communicate(request.input.encode("utf-8"))
+            stdout, _stderr = await _capture_bounded_output(
+                process, request.input.encode("utf-8")
+            )
+        except _OutputCaptureLimitExceeded:
+            output_limit_exceeded = True
+            await asyncio.shield(_stop_process_group(process))
         except asyncio.CancelledError:
+            await asyncio.shield(_stop_process_group(process))
+            raise
+        except BaseException:
+            # Reader and stdin-writer failures must not detach the process
+            # from stop() before the wrapper has reaped every Pi tool.
             await asyncio.shield(_stop_process_group(process))
             raise
         else:
@@ -230,6 +299,12 @@ class PiRuntime:
             if self._process is process:
                 self._process = None
 
+        if output_limit_exceeded:
+            return _failed(
+                "pi_output_limit_exceeded",
+                "Pi output exceeded the "
+                f"{PROCESS_STREAM_CAPTURE_LIMIT_BYTES}-byte stream capture limit",
+            )
         if process.returncode != 0:
             return _failed("pi_process_failed", "Pi could not complete the request")
         response = stdout.decode("utf-8", errors="replace").strip()

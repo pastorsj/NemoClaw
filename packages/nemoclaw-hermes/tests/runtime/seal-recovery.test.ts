@@ -180,6 +180,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     fs.chmodSync(fixture.hermesDir, 0o755);
     fs.chmodSync(fixture.configPath, 0o444);
     fs.chmodSync(fixture.envPath, 0o444);
+    fs.chmodSync(fixture.fabricPath, 0o444);
     fs.chmodSync(fixture.compatHashPath, 0o444);
     let mutableFd: number | undefined;
 
@@ -255,6 +256,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(mode(fixture.hermesDir)).toBe(0o3770);
       expect(mode(fixture.configPath)).toBe(0o640);
       expect(mode(fixture.envPath)).toBe(0o640);
+      expect(mode(fixture.fabricPath)).toBe(0o600);
       expect(strictHashIsValid(fixture)).toBe(true);
       expect(fs.existsSync(fixture.statePath)).toBe(false);
     } finally {
@@ -288,6 +290,27 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(mode(fixture.hermesDir)).toBe(0o3770);
       expect(mode(fixture.configPath)).toBe(0o640);
       expect(mode(fixture.envPath)).toBe(0o600);
+      expect(mode(fixture.fabricPath)).toBe(0o600);
+      expect(fs.existsSync(fixture.statePath)).toBe(false);
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to seal a Fabric adapter selection that differs from the strict anchor", () => {
+    const fixture = createRestartFixture();
+    const fabricBefore = fs.statSync(fixture.fabricPath);
+    fs.writeFileSync(fixture.fabricPath, '{"adapter":{"id":"attacker.adapter"}}\n', {
+      mode: 0o600,
+    });
+
+    try {
+      const sealed = runGuard("seal-restart", fixture);
+
+      expect(sealed.status).not.toBe(0);
+      expect(sealed.stderr).toContain("strict hash verification failed");
+      expect(fs.statSync(fixture.fabricPath).ino).toBe(fabricBefore.ino);
+      expect(mode(fixture.fabricPath)).toBe(0o600);
       expect(fs.existsSync(fixture.statePath)).toBe(false);
     } finally {
       fs.rmSync(fixture.root, { recursive: true, force: true });
@@ -327,6 +350,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     fs.chmodSync(fixture.hermesDir, 0o755);
     fs.chmodSync(fixture.configPath, 0o444);
     fs.chmodSync(fixture.envPath, 0o444);
+    fs.chmodSync(fixture.fabricPath, 0o444);
     const configBefore = fs.statSync(fixture.configPath);
     const envBefore = fs.statSync(fixture.envPath);
 

@@ -17,6 +17,7 @@ export function buildSandboxExecStdio(
   options: SandboxExecOptions = {},
   stdinIsTty: boolean | undefined = isStdinTty(),
 ): StdioOptions {
+  if (options.stdinInput !== undefined) return ["pipe", "inherit", "inherit"];
   return shouldInheritSandboxExecStdin(options.stdin, stdinIsTty)
     ? "inherit"
     : ["ignore", "inherit", "inherit"];

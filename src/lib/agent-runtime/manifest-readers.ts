@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import path from "node:path";
 import { isPlainObject } from "../core/json-types";
 import { isSafeModelId } from "../validation";
 import type {
   AgentDashboard,
   AgentDashboardKind,
   AgentHealthProbe,
+  AgentConfigMutableAccess,
   AgentInference,
   AgentMcpCapability,
   AgentMcpSupport,
@@ -85,8 +87,24 @@ export function readConfigShieldsFiles(config: ManifestRecord | undefined): stri
         `Agent manifest field 'config.shields_files[${String(index)}]' must be a string`,
       );
     }
+    if (entry.length === 0 || path.posix.basename(entry) !== entry) {
+      throw new Error(
+        `Agent manifest field 'config.shields_files[${String(index)}]' must be a direct file name`,
+      );
+    }
     return entry;
   });
+}
+
+export function readConfigMutableAccess(
+  config: ManifestRecord | undefined,
+): AgentConfigMutableAccess | null {
+  const value = config?.mutable_access;
+  if (value === undefined) return null;
+  if (value !== "private" && value !== "shared") {
+    throw new Error("Agent manifest field 'config.mutable_access' must be 'private' or 'shared'");
+  }
+  return value;
 }
 
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;

@@ -81,6 +81,20 @@ function stageOpenClawPackage(rootDir: string, buildCtx: string): void {
   normalizeReadModesForDockerCopy(stagedPackageDir);
 }
 
+function stageFabricRunnerPackage(rootDir: string, buildCtx: string): void {
+  const sourcePackageDir = path.join(rootDir, "packages", "nemoclaw-fabric");
+  const stagedPackageDir = path.join(buildCtx, "packages", "nemoclaw-fabric");
+
+  fs.mkdirSync(stagedPackageDir, { recursive: true });
+  for (const fileName of ["README.md", "build-requirements.lock", "pyproject.toml"]) {
+    fs.copyFileSync(path.join(sourcePackageDir, fileName), path.join(stagedPackageDir, fileName));
+  }
+  fs.cpSync(path.join(sourcePackageDir, "src"), path.join(stagedPackageDir, "src"), {
+    recursive: true,
+  });
+  normalizeReadModesForDockerCopy(stagedPackageDir);
+}
+
 function stageMcpToolDiscoveryRuntime(rootDir: string, buildCtx: string): void {
   const sourceDir = path.join(rootDir, "tools", "mcp-tool-discovery-runtime");
   const stagedDir = path.join(buildCtx, "tools", "mcp-tool-discovery-runtime");
@@ -153,6 +167,7 @@ function stageLegacySandboxBuildContext(
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
   stageOpenClawPackage(rootDir, buildCtx);
+  stageFabricRunnerPackage(rootDir, buildCtx);
   stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
   fs.cpSync(path.join(rootDir, "nemoclaw-blueprint"), path.join(buildCtx, "nemoclaw-blueprint"), {
     recursive: true,
@@ -196,6 +211,7 @@ function stageOptimizedSandboxBuildContext(
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
   );
   stageOpenClawPackage(rootDir, buildCtx);
+  stageFabricRunnerPackage(rootDir, buildCtx);
   stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
 
   fs.mkdirSync(stagedCiDir, { recursive: true });

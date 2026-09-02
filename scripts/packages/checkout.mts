@@ -81,6 +81,11 @@ interface CredentialFreeEnvironmentOptions {
   readonly npmCache: string;
   readonly toolDirectory: string;
   readonly excludedPathRoots?: readonly string[];
+  readonly includeUv?: boolean;
+}
+
+interface CandidatePackageMetadata {
+  readonly hasFabricTestScript: boolean;
 }
 
 /** Restore write access only within the generated agent runtime artifact tree. */
@@ -175,7 +180,10 @@ function readBoundedRegularFile(filePath: string, label: string, maxBytes: numbe
   }
 }
 
-function assertCandidatePackageMetadata(candidatePackageDir: string, packageId: string): void {
+function assertCandidatePackageMetadata(
+  candidatePackageDir: string,
+  packageId: string,
+): CandidatePackageMetadata {
   assertRegularDirectory(candidatePackageDir, "Candidate package checkout");
   const packageJsonPath = path.join(candidatePackageDir, "package.json");
   const packageJsonSource = readBoundedRegularFile(
@@ -219,6 +227,14 @@ function assertCandidatePackageMetadata(candidatePackageDir: string, packageId: 
   if (!new RegExp(`^name:\\s*["']?${escapedId}["']?\\s*$`, "mu").test(manifest)) {
     throw new Error(`Candidate manifest must identify '${packageId}': ${manifestPath}`);
   }
+  const scripts = metadata.scripts;
+  return {
+    hasFabricTestScript:
+      scripts !== null &&
+      typeof scripts === "object" &&
+      !Array.isArray(scripts) &&
+      typeof (scripts as Record<string, unknown>)["test:fabric"] === "string",
+  };
 }
 
 function isOmittedCandidatePath(sourceRoot: string, sourcePath: string): boolean {
@@ -312,9 +328,11 @@ function createPrivateToolDirectory(
   toolDirectory: string,
   sourcePath: string | undefined,
   excludedPathRoots: readonly string[],
+  includeUv: boolean,
 ): void {
   createPrivateDirectory(toolDirectory);
-  for (const commandName of PRIVATE_TOOL_NAMES) {
+  const privateToolNames = includeUv ? [...PRIVATE_TOOL_NAMES, "uv"] : PRIVATE_TOOL_NAMES;
+  for (const commandName of privateToolNames) {
     const target =
       commandName === "node" &&
       !excludedPathRoots.some((root) => isPathInsideRoot(process.execPath, path.resolve(root)))
@@ -370,6 +388,7 @@ export function createCredentialFreeEnvironment(
     options.toolDirectory,
     options.parentEnvironment.PATH,
     excludedPathRoots,
+    options.includeUv ?? false,
   );
   for (const name of ["SystemRoot", "ComSpec", "PATHEXT", "WINDIR"] as const) {
     const value = options.parentEnvironment[name];
@@ -589,6 +608,7 @@ function runPackageOnlyRehearsal(
   rehearsalRoot: string,
   env: NodeJS.ProcessEnv,
   runCommand: CheckoutCommandRunner,
+  hasFabricTestScript: boolean,
 ): PackageCheckoutResult {
   const packageRoot = path.join(rehearsalRoot, "package");
   copyCandidatePackage(candidatePackageDir, packageRoot);
@@ -596,6 +616,9 @@ function runPackageOnlyRehearsal(
   runCommand(
     npmCommand(packageRoot, env, "run candidate package-only tests", ["run", "test:package"]),
   );
+  if (hasFabricTestScript) {
+    runCommand(npmCommand(packageRoot, env, "run candidate Fabric tests", ["run", "test:fabric"]));
+  }
   return { mode: "package-only", packageId };
 }
 
@@ -704,7 +727,7 @@ export function runPackageCheckoutRehearsal(
   }
 
   const candidatePackageDir = path.resolve(options.candidatePackageDir);
-  assertCandidatePackageMetadata(candidatePackageDir, options.packageId);
+  const candidateMetadata = assertCandidatePackageMetadata(candidatePackageDir, options.packageId);
   const selectedTemporaryParentDir = path.resolve(options.temporaryParentDir ?? os.tmpdir());
   assertRegularDirectory(selectedTemporaryParentDir, "Temporary parent directory");
   const temporaryParentDir = fs.realpathSync.native(selectedTemporaryParentDir);
@@ -732,6 +755,7 @@ export function runPackageCheckoutRehearsal(
         candidatePackageDir,
         ...(options.coreCheckoutDir ? [path.resolve(options.coreCheckoutDir)] : []),
       ],
+      includeUv: candidateMetadata.hasFabricTestScript,
     });
     const runCommand = dependencies.runCommand ?? executeCheckoutCommand;
 
@@ -742,6 +766,7 @@ export function runPackageCheckoutRehearsal(
         rehearsalRoot,
         env,
         runCommand,
+        candidateMetadata.hasFabricTestScript,
       );
     }
     return runComposedRehearsal(options, rehearsalRoot, env, runCommand);

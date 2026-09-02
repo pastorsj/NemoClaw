@@ -1,0 +1,851 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Exercise the OpenClaw adapter through direct and generic Fabric boundaries."""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+
+OPENCLAW_ROOT = Path(__file__).resolve().parents[2]
+FABRIC_SOURCE = OPENCLAW_ROOT / "fabric" / "src"
+sys.path.insert(0, str(FABRIC_SOURCE))
+
+from nemo_fabric_adapter_contract.models import AgentConfig  # noqa: E402
+from nemo_fabric_adapter_contract.models import AgentRunRequest  # noqa: E402
+from nemo_fabric_adapter_contract.models import AgentRunStatus  # noqa: E402
+from nemo_fabric_adapter_contract.models import RuntimeContext  # noqa: E402
+from nemoclaw_openclaw_fabric import adapter as openclaw_adapter  # noqa: E402
+from nemoclaw_openclaw_fabric.adapter import ADAPTER_ID  # noqa: E402
+from nemoclaw_openclaw_fabric.adapter import OpenClawRuntime  # noqa: E402
+from nemoclaw_openclaw_fabric.adapter import (  # noqa: E402
+    PROCESS_STREAM_CAPTURE_LIMIT_BYTES,
+)
+from nemoclaw_openclaw_fabric.adapter import SESSION_PREFIX  # noqa: E402
+from nemoclaw_openclaw_fabric.process import INVALID_USAGE_EXIT  # noqa: E402
+from nemoclaw_openclaw_fabric.process import run as run_process_wrapper  # noqa: E402
+
+
+DEFAULT_RESPONSE = {
+    "runId": "fixture-openclaw-run",
+    "status": "ok",
+    "summary": "completed",
+    "result": {
+        "payloads": [{"text": "deterministic OpenClaw response"}],
+        "meta": {"livenessState": "working"},
+    },
+}
+
+
+def _generic_runner() -> tuple[int, int, object]:
+    """Load the NemoClaw-owned runner only in the composed test lane."""
+
+    from nemoclaw_fabric.command import EXIT_FAILURE
+    from nemoclaw_fabric.command import EXIT_SUCCESS
+    from nemoclaw_fabric.command import run_cli
+
+    return EXIT_FAILURE, EXIT_SUCCESS, run_cli
+FAKE_OPENCLAW_SOURCE = r'''#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import time
+
+args = sys.argv[1:]
+mode = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_MODE", "success")
+args_marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_ARGS")
+if args_marker:
+    Path(args_marker).write_text(json.dumps(args), encoding="utf-8")
+
+try:
+    prompt_path = Path(args[args.index("--message-file") + 1])
+except (ValueError, IndexError):
+    raise SystemExit(65)
+prompt = prompt_path.read_text(encoding="utf-8")
+prompt_marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_PROMPT")
+if prompt_marker:
+    Path(prompt_marker).write_text(
+        json.dumps({
+            "mode": stat.S_IMODE(prompt_path.stat().st_mode),
+            "path": str(prompt_path),
+            "text": prompt,
+        }),
+        encoding="utf-8",
+    )
+
+default_response = {
+    "runId": "fixture-openclaw-run",
+    "status": "ok",
+    "summary": "completed",
+    "result": {
+        "payloads": [{"text": "deterministic OpenClaw response"}],
+        "meta": {"livenessState": "working"},
+    },
+}
+
+if mode == "success":
+    print(os.environ.get("NEMOCLAW_FAKE_OPENCLAW_RESPONSE", json.dumps(default_response)))
+    raise SystemExit(0)
+if mode == "failure":
+    secret = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_SECRET", "missing-secret")
+    print(f"fake OpenClaw stdout failed with {secret}")
+    print(f"fake OpenClaw stderr failed with {secret}", file=sys.stderr)
+    raise SystemExit(23)
+if mode == "hang":
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        start_new_session=sys.platform.startswith("linux"),
+    )
+    marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_PIDS")
+    if marker:
+        Path(marker).write_text(
+            json.dumps({
+                "parent": os.getpid(),
+                "parent_group": os.getpgrp(),
+                "child": child.pid,
+                "child_group": os.getpgid(child.pid),
+            }),
+            encoding="utf-8",
+        )
+    while True:
+        time.sleep(60)
+if mode == "background":
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=sys.platform.startswith("linux"),
+    )
+    marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_PIDS")
+    if marker:
+        Path(marker).write_text(
+            json.dumps({
+                "parent": os.getpid(),
+                "parent_group": os.getpgrp(),
+                "child": child.pid,
+                "child_group": os.getpgid(child.pid),
+            }),
+            encoding="utf-8",
+        )
+    print(json.dumps(default_response))
+    raise SystemExit(0)
+if mode in {"oversized_stdout", "oversized_stderr"}:
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(300)"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=sys.platform.startswith("linux"),
+    )
+    marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_PIDS")
+    if marker:
+        Path(marker).write_text(
+            json.dumps({
+                "parent": os.getpid(),
+                "parent_group": os.getpgrp(),
+                "child": child.pid,
+                "child_group": os.getpgid(child.pid),
+            }),
+            encoding="utf-8",
+        )
+    secret = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_SECRET", "missing-secret")
+    output_bytes = int(os.environ["NEMOCLAW_FAKE_OPENCLAW_OUTPUT_BYTES"])
+    encoded_secret = secret.encode("utf-8")
+    payload = encoded_secret + (b"x" * (output_bytes - len(encoded_secret)))
+    stream = sys.stdout.buffer if mode == "oversized_stdout" else sys.stderr.buffer
+    stream.write(payload)
+    stream.flush()
+    while True:
+        time.sleep(60)
+raise SystemExit(64)
+'''
+
+
+def _agent_config() -> AgentConfig:
+    return AgentConfig.from_mapping({"models": {}})
+
+
+def _runtime_context(workspace: Path, artifacts: Path) -> RuntimeContext:
+    return RuntimeContext.from_mapping(
+        {
+            "runtime_id": "openclaw-runtime",
+            "invocation_id": "openclaw-invocation",
+            "request_id": "openclaw-request",
+            "environment": {
+                "environment_id": "openclaw-local",
+                "provider": "local",
+                "control_location": "in_env_control",
+                "workspace": str(workspace),
+                "artifacts": str(artifacts),
+                "ownership": "caller_owned",
+            },
+            "artifacts": {"root": str(artifacts), "artifacts": []},
+        }
+    )
+
+
+def _request(value: object = "Review the workspace") -> AgentRunRequest:
+    return AgentRunRequest.from_mapping({"input": value, "context": {}})
+
+
+def _process_is_active(process_id: int) -> bool:
+    if sys.platform.startswith("linux"):
+        try:
+            suffix = Path(f"/proc/{process_id}/stat").read_text(
+                encoding="ascii"
+            ).rsplit(")", 1)[1].strip()
+        except (IndexError, OSError):
+            return False
+        return bool(suffix) and suffix.split(maxsplit=1)[0] != "Z"
+    result = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(process_id)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    state = result.stdout.strip()
+    return result.returncode == 0 and bool(state) and not state.startswith("Z")
+
+
+def _wait_for_stopped(process_ids: list[int]) -> None:
+    for _attempt in range(200):
+        if all(not _process_is_active(process_id) for process_id in process_ids):
+            return
+        time.sleep(0.025)
+    active = [process_id for process_id in process_ids if _process_is_active(process_id)]
+    raise AssertionError(f"OpenClaw fixture processes remain active: {active}")
+
+
+def _wait_for_removed(path: Path) -> None:
+    for _attempt in range(200):
+        if not path.exists():
+            return
+        time.sleep(0.025)
+    raise AssertionError(f"OpenClaw private prompt remains: {path}")
+
+
+class OpenClawFixtureMixin:
+    """Create one fake OpenClaw executable and normalized Fabric inputs."""
+
+    def setUp(self) -> None:
+        super().setUp()  # type: ignore[misc]
+        self._temporary_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temporary_directory.cleanup)
+        self.base_dir = Path(self._temporary_directory.name)
+        self.workspace = self.base_dir / "workspace"
+        self.artifacts = self.base_dir / "artifacts"
+        self.fake_bin = self.base_dir / "bin"
+        self.workspace.mkdir()
+        self.artifacts.mkdir()
+        self.fake_bin.mkdir()
+        self.fake_openclaw = self.fake_bin / "openclaw"
+        self.fake_openclaw.write_text(FAKE_OPENCLAW_SOURCE, encoding="utf-8")
+        self.fake_openclaw.chmod(
+            self.fake_openclaw.stat().st_mode
+            | stat.S_IXUSR
+            | stat.S_IXGRP
+            | stat.S_IXOTH
+        )
+        self.args_marker = self.base_dir / "openclaw-args.json"
+        self.prompt_marker = self.base_dir / "openclaw-prompt.json"
+        self.pid_marker = self.base_dir / "openclaw-pids.json"
+        self.environment = {
+            "PATH": f"{self.fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            "NEMOCLAW_FAKE_OPENCLAW_ARGS": str(self.args_marker),
+            "NEMOCLAW_FAKE_OPENCLAW_PROMPT": str(self.prompt_marker),
+            "NEMOCLAW_FAKE_OPENCLAW_PIDS": str(self.pid_marker),
+        }
+
+    async def start_runtime(self) -> OpenClawRuntime:
+        runtime = OpenClawRuntime()
+        await runtime.start(
+            {
+                "agent_name": "openclaw-test",
+                "base_dir": str(self.base_dir),
+                "config": _agent_config(),
+                "runtime_context": _runtime_context(self.workspace, self.artifacts),
+            }
+        )
+        return runtime
+
+    async def wait_for_pid_marker(self) -> list[int]:
+        for _attempt in range(200):
+            if self.pid_marker.exists():
+                payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+                if sys.platform.startswith("linux"):
+                    self.assertEqual(payload["child_group"], payload["child"])
+                    self.assertNotEqual(
+                        payload["child_group"], payload["parent_group"]
+                    )
+                return [payload["parent"], payload["child"]]
+            await asyncio.sleep(0.025)
+        self.fail("fake OpenClaw did not record its process group")  # type: ignore[attr-defined]
+
+    def recorded_prompt(self) -> dict[str, object]:
+        return json.loads(self.prompt_marker.read_text(encoding="utf-8"))
+
+
+class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCase):
+    """Verify gateway translation, response validation, and process ownership."""
+
+    async def test_success_uses_private_prompt_file_and_gateway_options(self) -> None:
+        with patch.dict(os.environ, self.environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        self.assertEqual(result.output, {"response": "deterministic OpenClaw response"})
+        arguments = json.loads(self.args_marker.read_text(encoding="utf-8"))
+        prompt = self.recorded_prompt()
+        self.assertEqual(
+            arguments[:7],
+            ["agent", "--agent", "main", "--json", "--thinking", "off", "--session-id"],
+        )
+        self.assertTrue(arguments[7].startswith(SESSION_PREFIX))
+        self.assertEqual(arguments[8:10], ["--timeout", "80"])
+        self.assertEqual(arguments[10], "--message-file")
+        self.assertEqual(arguments[11], prompt["path"])
+        self.assertEqual(prompt["text"], "Review the workspace")
+        self.assertEqual(prompt["mode"], 0o600)
+        self.assertNotIn("Review the workspace", arguments)
+        self.assertFalse(Path(str(prompt["path"])).exists())
+
+    async def test_each_request_uses_a_new_session(self) -> None:
+        session_ids: list[str] = []
+        with patch.dict(os.environ, self.environment):
+            runtime = await self.start_runtime()
+            for prompt in ("first", "second"):
+                result = await runtime.invoke(
+                    _request(prompt), _runtime_context(self.workspace, self.artifacts)
+                )
+                self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+                arguments = json.loads(self.args_marker.read_text(encoding="utf-8"))
+                session_ids.append(arguments[arguments.index("--session-id") + 1])
+            await runtime.stop()
+
+        self.assertEqual(len(set(session_ids)), 2)
+
+    async def test_option_and_file_shaped_requests_remain_literal_text(self) -> None:
+        secret_file = self.workspace / "secret"
+        secret_file.write_text("must-not-be-expanded", encoding="utf-8")
+        for request_text in ("--version", "@workspace/secret"):
+            with self.subTest(request_text=request_text):
+                with patch.dict(os.environ, self.environment):
+                    runtime = await self.start_runtime()
+                    result = await runtime.invoke(
+                        _request(request_text),
+                        _runtime_context(self.workspace, self.artifacts),
+                    )
+                    await runtime.stop()
+
+                self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+                self.assertEqual(self.recorded_prompt()["text"], request_text)
+                arguments = json.loads(self.args_marker.read_text(encoding="utf-8"))
+                self.assertNotIn(request_text, arguments)
+                self.assertNotIn("must-not-be-expanded", json.dumps(result.to_mapping()))
+
+    async def test_response_joins_direct_text_payloads(self) -> None:
+        response = {
+            **DEFAULT_RESPONSE,
+            "result": {
+                "payloads": [
+                    {"text": " first response "},
+                    {"mediaUrl": "file:///ignored"},
+                    {"text": "second response"},
+                ],
+                "meta": {},
+            },
+        }
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_RESPONSE": json.dumps(response),
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        self.assertEqual(result.output, {"response": "first response\nsecond response"})
+
+    async def test_non_text_and_empty_inputs_do_not_start_openclaw(self) -> None:
+        with patch.dict(os.environ, self.environment):
+            runtime = await self.start_runtime()
+            non_text = await runtime.invoke(
+                _request({"messages": []}),
+                _runtime_context(self.workspace, self.artifacts),
+            )
+            empty = await runtime.invoke(
+                _request("   "), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertEqual(non_text.error.code, "openclaw_unsupported_input")
+        self.assertEqual(empty.error.code, "openclaw_empty_input")
+        self.assertFalse(self.args_marker.exists())
+
+    async def test_unfinished_or_malformed_envelopes_fail_closed(self) -> None:
+        cases = {
+            "local response": {
+                "payloads": [{"text": "unbound"}],
+                "meta": {},
+            },
+            "in flight": {
+                **DEFAULT_RESPONSE,
+                "status": "in_flight",
+            },
+            "aborted summary": {
+                **DEFAULT_RESPONSE,
+                "summary": "aborted",
+            },
+            "missing metadata": {
+                **DEFAULT_RESPONSE,
+                "result": {"payloads": [{"text": "unbound"}]},
+            },
+            "replay invalid": {
+                **DEFAULT_RESPONSE,
+                "result": {
+                    "payloads": [{"text": "unbound"}],
+                    "meta": {"replayInvalid": True},
+                },
+            },
+            "abandoned": {
+                **DEFAULT_RESPONSE,
+                "result": {
+                    "payloads": [{"text": "unbound"}],
+                    "meta": {"livenessState": "abandoned"},
+                },
+            },
+            "timeout": {
+                **DEFAULT_RESPONSE,
+                "result": {
+                    "payloads": [{"text": "unbound"}],
+                    "meta": {"timeoutPhase": "provider"},
+                },
+            },
+            "incomplete turn": {
+                **DEFAULT_RESPONSE,
+                "result": {
+                    "payloads": [{"text": "unbound"}],
+                    "meta": {"error": {"kind": "incomplete_turn"}},
+                },
+            },
+            "error payload": {
+                **DEFAULT_RESPONSE,
+                "result": {
+                    "payloads": [{"text": "unbound", "isError": True}],
+                    "meta": {},
+                },
+            },
+        }
+        for label, response in cases.items():
+            with self.subTest(label=label):
+                environment = {
+                    **self.environment,
+                    "NEMOCLAW_FAKE_OPENCLAW_RESPONSE": json.dumps(response),
+                }
+                with patch.dict(os.environ, environment):
+                    runtime = await self.start_runtime()
+                    result = await runtime.invoke(
+                        _request(), _runtime_context(self.workspace, self.artifacts)
+                    )
+                    await runtime.stop()
+
+                self.assertIs(result.status, AgentRunStatus.FAILED)
+                self.assertEqual(result.error.code, "openclaw_response_invalid")
+                self.assertNotIn("unbound", json.dumps(result.to_mapping()))
+
+    async def test_failure_discards_stdout_stderr_and_removes_prompt(self) -> None:
+        secret = "nvapi-openclaw-adapter-redaction-sentinel"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "failure",
+            "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "openclaw_process_failed")
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
+        self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
+
+    async def test_invalid_stdout_never_becomes_a_fabric_diagnostic(self) -> None:
+        secret = "invalid-openclaw-stdout-secret"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_RESPONSE": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            await runtime.stop()
+
+        self.assertEqual(result.error.code, "openclaw_response_invalid")
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
+
+    async def test_stdout_limit_stops_openclaw_and_its_detached_child(self) -> None:
+        secret = "oversized-openclaw-stdout-secret"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "oversized_stdout",
+            "NEMOCLAW_FAKE_OPENCLAW_OUTPUT_BYTES": str(
+                PROCESS_STREAM_CAPTURE_LIMIT_BYTES + 1
+            ),
+            "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await asyncio.wait_for(
+                runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                ),
+                timeout=5,
+            )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "openclaw_output_limit_exceeded")
+        self.assertEqual(
+            result.error.message,
+            "OpenClaw output exceeded the 1048576-byte stream capture limit",
+        )
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
+        self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
+
+    async def test_stderr_limit_stops_openclaw_and_its_detached_child(self) -> None:
+        secret = "oversized-openclaw-stderr-secret"
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "oversized_stderr",
+            "NEMOCLAW_FAKE_OPENCLAW_OUTPUT_BYTES": str(
+                PROCESS_STREAM_CAPTURE_LIMIT_BYTES + 1
+            ),
+            "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await asyncio.wait_for(
+                runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                ),
+                timeout=5,
+            )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "openclaw_output_limit_exceeded")
+        self.assertEqual(
+            result.error.message,
+            "OpenClaw output exceeded the 1048576-byte stream capture limit",
+        )
+        self.assertNotIn(secret, json.dumps(result.to_mapping()))
+        self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
+
+    async def test_stream_read_failure_stops_process_tree_and_removes_prompt(self) -> None:
+        injected_error = "injected OpenClaw stream read failure"
+        read_stream = openclaw_adapter._read_bounded_stream
+        failure_assigned = False
+
+        async def fail_after_process_tree_started(
+            stream: asyncio.StreamReader,
+        ) -> bytes:
+            nonlocal failure_assigned
+            if failure_assigned:
+                return await read_stream(stream)
+            failure_assigned = True
+            await self.wait_for_pid_marker()
+            raise OSError(injected_error)
+
+        environment = {**self.environment, "NEMOCLAW_FAKE_OPENCLAW_MODE": "hang"}
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            with patch.object(
+                openclaw_adapter,
+                "_read_bounded_stream",
+                fail_after_process_tree_started,
+            ):
+                with self.assertRaisesRegex(OSError, injected_error):
+                    await asyncio.wait_for(
+                        runtime.invoke(
+                            _request(),
+                            _runtime_context(self.workspace, self.artifacts),
+                        ),
+                        timeout=5,
+                    )
+            await runtime.stop()
+
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        prompt_path = Path(str(self.recorded_prompt()["path"]))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        _wait_for_removed(prompt_path)
+
+    async def test_spawn_cancellation_removes_the_private_prompt(self) -> None:
+        spawn_started = asyncio.Event()
+
+        async def wait_until_cancelled(*_args: object, **_kwargs: object) -> object:
+            spawn_started.set()
+            await asyncio.Future()
+            raise AssertionError("unreachable")
+
+        with patch.object(
+            asyncio,
+            "create_subprocess_exec",
+            wait_until_cancelled,
+        ):
+            runtime = await self.start_runtime()
+            task = asyncio.create_task(
+                runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                )
+            )
+            await asyncio.wait_for(spawn_started.wait(), timeout=5)
+            prompt_paths = list(
+                self.workspace.glob(".nemoclaw-openclaw-prompt-*.txt")
+            )
+            self.assertEqual(len(prompt_paths), 1)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            await runtime.stop()
+
+        self.assertFalse(prompt_paths[0].exists())
+
+    async def test_timeout_cancels_openclaw_and_its_detached_child(self) -> None:
+        environment = {**self.environment, "NEMOCLAW_FAKE_OPENCLAW_MODE": "hang"}
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            task = asyncio.create_task(
+                runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                )
+            )
+            process_ids = await self.wait_for_pid_marker()
+            with self.assertRaises(TimeoutError):
+                await asyncio.wait_for(task, timeout=0.05)
+            await runtime.stop()
+
+        _wait_for_stopped(process_ids)
+        self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
+
+    async def test_success_reaps_a_detached_child(self) -> None:
+        environment = {
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "background",
+        }
+        with patch.dict(os.environ, environment):
+            runtime = await self.start_runtime()
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+            process_ids = await self.wait_for_pid_marker()
+            await runtime.stop()
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        _wait_for_stopped(process_ids)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "OpenClaw sandboxes run on Linux")
+    async def test_adapter_host_loss_reaps_openclaw_and_its_detached_child(self) -> None:
+        wrapper_marker = self.base_dir / "wrapper-pid"
+        host_source = "\n".join(
+            [
+                "import os, subprocess, sys, time",
+                "from pathlib import Path",
+                f"prompt = Path({str(self.workspace / 'host-prompt.txt')!r})",
+                "prompt.write_text('host loss', encoding='utf-8')",
+                "wrapper = subprocess.Popen([",
+                "    sys.executable, '-m', 'nemoclaw_openclaw_fabric.process',",
+                "    '--parent-pid', str(os.getpid()), '--cleanup-path', str(prompt),",
+                "    '--', 'openclaw', 'agent',",
+                "    '--message-file', str(prompt),",
+                "], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)",
+                f"Path({str(wrapper_marker)!r}).write_text(str(wrapper.pid), encoding='ascii')",
+                f"marker = Path({str(self.pid_marker)!r})",
+                "deadline = time.monotonic() + 5",
+                "while not marker.exists() and time.monotonic() < deadline:",
+                "    time.sleep(0.025)",
+                "os._exit(0)",
+            ]
+        )
+        environment = {
+            **os.environ,
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "hang",
+            "PYTHONPATH": f"{FABRIC_SOURCE}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
+        }
+        host = subprocess.Popen([sys.executable, "-c", host_source], env=environment)
+        self.assertEqual(host.wait(timeout=10), 0)
+        self.assertTrue(wrapper_marker.exists())
+        process_ids = await self.wait_for_pid_marker()
+        process_ids.append(int(wrapper_marker.read_text(encoding="ascii")))
+
+        _wait_for_stopped(process_ids)
+        _wait_for_removed(self.workspace / "host-prompt.txt")
+
+
+class ProcessWrapperTests(unittest.TestCase):
+    """Reject malformed private wrapper calls without masking the exit status."""
+
+    def test_invalid_arguments_return_the_private_usage_status(self) -> None:
+        self.assertEqual(run_process_wrapper([]), INVALID_USAGE_EXIT)
+
+
+class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
+    """Run doctor and invoke through the real generic NemoClaw Fabric runner."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.descriptor = self.base_dir / "openclaw.fabric-adapter.json"
+        shutil.copyfile(OPENCLAW_ROOT / "fabric" / self.descriptor.name, self.descriptor)
+        self.config_path = self.base_dir / "fabric.json"
+
+    def write_config(self, *, timeout_seconds: float = 5) -> Path:
+        payload = {
+            "schema_version": "fabric.agent/v1alpha1",
+            "metadata": {"name": "nemoclaw-openclaw-fixture"},
+            "harness": {"adapter_id": ADAPTER_ID, "resolution": "preinstalled"},
+            "discovery": {"local_paths": [self.descriptor.name]},
+            "runtime": {
+                "input_schema": "text",
+                "output_schema": "message",
+                "artifacts": "./artifacts",
+                "timeout_seconds": timeout_seconds,
+            },
+            "environment": {
+                "provider": "local",
+                "workspace": "./workspace",
+                "artifacts": "./artifacts",
+            },
+            "models": {},
+        }
+        self.config_path.write_text(json.dumps(payload), encoding="utf-8")
+        return self.config_path
+
+    def invoke_cli(self, arguments: list[str]) -> tuple[int, str, str]:
+        _exit_failure, _exit_success, run_cli = _generic_runner()
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        virtual_env = str(Path(sys.executable).parent.parent)
+        with patch.dict(
+            os.environ,
+            {**self.environment, "VIRTUAL_ENV": virtual_env},
+        ):
+            exit_code = run_cli(
+                arguments,
+                stdin=io.StringIO(),
+                stdout=stdout,
+                stderr=stderr,
+            )
+        return exit_code, stdout.getvalue(), stderr.getvalue()
+
+    def invoke_doctor_process(self, config: Path) -> subprocess.CompletedProcess[str]:
+        command = shutil.which("nemoclaw-fabric")
+        self.assertIsNotNone(command)
+        virtual_env = str(Path(sys.executable).parent.parent)
+        return subprocess.run(
+            [str(command), "doctor", "--config", str(config), "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                **self.environment,
+                "VIRTUAL_ENV": virtual_env,
+            },
+            timeout=10,
+        )
+
+    def test_doctor_accepts_openclaws_empty_model_catalogue_before_run(self) -> None:
+        _exit_failure, exit_success, _run_cli = _generic_runner()
+        config = self.write_config()
+        doctor = self.invoke_doctor_process(config)
+        run_exit, run_stdout, run_stderr = self.invoke_cli(
+            ["run", "--config", str(config), "-m", "hello from Fabric", "--json"]
+        )
+
+        self.assertEqual(doctor.returncode, exit_success, doctor.stdout + doctor.stderr)
+        self.assertEqual(doctor.stderr, "")
+        self.assertIn(json.loads(doctor.stdout)["status"], {"pass", "warn"})
+        self.assertEqual(run_exit, exit_success, run_stdout + run_stderr)
+        self.assertEqual(run_stderr, "")
+        result = json.loads(run_stdout)
+        self.assertEqual(result["status"], "succeeded")
+        self.assertEqual(result["harness"], ADAPTER_ID)
+        self.assertEqual(result["adapter_kind"], "python")
+        self.assertEqual(
+            result["output"], {"response": "deterministic OpenClaw response"}
+        )
+        self.assertEqual(self.recorded_prompt()["text"], "hello from Fabric")
+
+    def test_runner_failure_never_returns_openclaw_output_or_prompt(self) -> None:
+        exit_failure, _exit_success, _run_cli = _generic_runner()
+        secret = "nvapi-openclaw-runner-redaction-sentinel"
+        config = self.write_config()
+        self.environment.update(
+            {
+                "NEMOCLAW_FAKE_OPENCLAW_MODE": "failure",
+                "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
+            }
+        )
+        exit_code, stdout, stderr = self.invoke_cli(
+            ["run", "--config", str(config), "-m", secret, "--json"]
+        )
+
+        self.assertEqual(exit_code, exit_failure, stdout + stderr)
+        self.assertEqual(stderr, "")
+        self.assertNotIn(secret, stdout)
+        result = json.loads(stdout)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"]["code"], "openclaw_process_failed")
+        _wait_for_removed(Path(str(self.recorded_prompt()["path"])))
+
+    def test_runner_timeout_stops_openclaw_and_removes_prompt(self) -> None:
+        exit_failure, _exit_success, _run_cli = _generic_runner()
+        config = self.write_config(timeout_seconds=0.1)
+        self.environment["NEMOCLAW_FAKE_OPENCLAW_MODE"] = "hang"
+        exit_code, stdout, stderr = self.invoke_cli(
+            ["run", "--config", str(config), "-m", "bounded request", "--json"]
+        )
+
+        self.assertEqual(exit_code, exit_failure, stdout + stderr)
+        self.assertEqual(stderr, "")
+        self.assertEqual(json.loads(stdout)["status"], "failed")
+        payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+        _wait_for_stopped([payload["parent"], payload["child"]])
+        _wait_for_removed(Path(str(self.recorded_prompt()["path"])))
+
+
+if __name__ == "__main__":
+    unittest.main()

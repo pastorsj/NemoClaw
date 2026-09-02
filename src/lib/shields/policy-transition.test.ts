@@ -11,6 +11,12 @@ import {
   createShieldsFlowHarness,
   type ShieldsFlowHarnessOptions,
 } from "../../../test/helpers/shields-flow-harness";
+import {
+  createHermesUnsafeConfigHarness,
+  expectHermesShieldsUpRecord,
+  failHermesInferenceConvergence,
+  type HermesUnsafeConfigHarness,
+} from "../../../test/helpers/hermes-unsafe-config-shields-harness";
 
 const requireSource = createRequire(import.meta.url);
 const SHIELDS_MODULE = "./index.js";
@@ -143,6 +149,154 @@ describe("shields policy transition", () => {
     expect(stateFiles.filter((name) => /^(policy-snapshot-|shields-openclaw)/.test(name))).toEqual(
       [],
     );
+  });
+});
+
+describe("Hermes Shields down unsafe config path (#8804)", () => {
+  const harnessFactory = createHermesUnsafeConfigHarness(requireSource, SHIELDS_MODULE);
+  let harness: HermesUnsafeConfigHarness;
+
+  beforeEach(() => {
+    harness = harnessFactory.beforeEachHook();
+  });
+
+  afterEach(() => {
+    harnessFactory.afterEachHook();
+  });
+
+  it("rejects a Hermes config symlink before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
+    ).toThrow(/refusing symlink path: .*config\.yaml/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("rejects a replaced Hermes config directory before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-dir-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
+    ).toThrow(/refusing symlink path: .*\.hermes/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("rejects a missing Hermes config before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-missing-config");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "missing-config",
+        throwOnError: true,
+      }),
+    ).toThrow(/missing config path: .*config\.yaml/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("rejects a Hermes sensitive-file symlink before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-sensitive-file-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
+    ).toThrow(/refusing symlink path: .*\.env/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("keeps DOWN when unlock fails and unsafe re-lock cannot verify protection (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("unlock-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "unsafe-path",
+        timeout: "15m",
+        throwOnError: true,
+      }),
+    ).toThrow(/refusing to follow symlink: \/sandbox\/\.hermes\/config\.yaml/);
+
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
+    ).toMatchObject({ shieldsDown: true });
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(errors).toContain("Manual intervention is required");
+    expect(errors).not.toContain("provisional Shields down cleared");
+  });
+
+  it("keeps DOWN when unsafe replacement breaks rollback after mutation begins (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("unlock-partial-rollback-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "unsafe-path-during-unlock",
+        timeout: "15m",
+        throwOnError: true,
+      }),
+    ).toThrow(/refusing to follow symlink: \/sandbox\/\.hermes\/config\.yaml/);
+
+    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
+    ).toMatchObject({ shieldsDown: true });
+    expect(harness.shields.isShieldsDown("hermes-shields")).toBe(true);
+    expect(errors).toContain("Hermes shields rollback preparation failed");
+    expect(errors).toContain("Manual intervention is required");
+    expect(errors).not.toContain("provisional Shields down cleared");
+  });
+
+  it("keeps DOWN when unlock succeeded and unsafe re-lock cannot verify protection (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("unlock-ok-relock-symlink");
+    failHermesInferenceConvergence(requireSource);
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "unsafe-path-after-unlock",
+        timeout: "15m",
+        throwOnError: true,
+      }),
+    ).toThrow(/Hermes inference route did not converge/);
+
+    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
+    ).toMatchObject({ shieldsDown: true });
+    expect(errors).toContain("Manual intervention is required");
+    expect(errors).not.toContain("provisional Shields down cleared");
   });
 });
 
@@ -361,6 +515,7 @@ describe("shields config lock without a shipped config hash", () => {
   const CONFIG_DIR = "/sandbox/.deepagents";
   const CONFIG_PATH = `${CONFIG_DIR}/config.toml`;
   const HASH_PATH = `${CONFIG_DIR}/.config-hash`;
+  const FABRIC_PATH = `${CONFIG_DIR}/fabric.json`;
   const LOCK_COMMAND_KEY = [CONFIG_DIR, CONFIG_PATH].join("\0");
 
   type SandboxEntry = { mode: string; owner: string };
@@ -427,10 +582,12 @@ describe("shields config lock without a shipped config hash", () => {
 
   function runConfigUnlock(command: string[]): string {
     unlockCalls.push(command);
+    const fileMode = String(command[4]);
+    const dirMode = String(command[5]);
     entries.set("/sandbox", { mode: "755", owner: "sandbox:sandbox" });
-    entries.set(CONFIG_DIR, { mode: "2770", owner: "sandbox:sandbox" });
+    entries.set(CONFIG_DIR, { mode: dirMode, owner: "sandbox:sandbox" });
     for (const pathname of command.slice(9)) {
-      entries.set(pathname, { mode: "660", owner: "sandbox:sandbox" });
+      entries.set(pathname, { mode: fileMode, owner: "sandbox:sandbox" });
       immutablePaths.delete(pathname);
     }
     return "";
@@ -441,6 +598,7 @@ describe("shields config lock without a shipped config hash", () => {
   ]);
   const leadingPythonFixtureHandlers = new Map<string, (command: string[]) => string>([
     ["660", runConfigUnlock],
+    ["600", runConfigUnlock],
   ]);
 
   function runPythonFixtureCommand(_args: string[], command: string[]): string {
@@ -649,6 +807,22 @@ describe("shields config lock without a shipped config hash", () => {
     expect(Object.keys(result.fileHashes)).toEqual([CONFIG_PATH, HASH_PATH]);
   });
 
+  it("seals a package-declared Fabric sidecar with the Deep Agents config", () => {
+    const fabricTarget = {
+      ...target(),
+      mutableAccess: "private" as const,
+      sensitiveFiles: [HASH_PATH, FABRIC_PATH],
+    };
+    entries.set(FABRIC_PATH, { mode: "600", owner: "sandbox:sandbox" });
+
+    const result = shields.lockAgentConfig("dcode-safety", fabricTarget, false);
+
+    expect(entries.get(CONFIG_PATH)).toEqual({ mode: "444", owner: "root:root" });
+    expect(entries.get(HASH_PATH)).toEqual({ mode: "444", owner: "root:root" });
+    expect(entries.get(FABRIC_PATH)).toEqual({ mode: "444", owner: "root:root" });
+    expect(Object.keys(result.fileHashes)).toEqual([CONFIG_PATH, HASH_PATH, FABRIC_PATH]);
+  });
+
   it.each([
     [
       "config-root",
@@ -801,6 +975,33 @@ describe("shields config lock without a shipped config hash", () => {
 
     expect(entries.get("/sandbox")).toEqual({ mode: "755", owner: "sandbox:sandbox" });
     expect(entries.get(CONFIG_DIR)).toEqual({ mode: "2770", owner: "sandbox:sandbox" });
+  });
+
+  it("keeps every package-declared private config file at 0600 after shields down", () => {
+    const privateTarget = {
+      ...target(),
+      mutableAccess: "private" as const,
+      sensitiveFiles: [HASH_PATH, FABRIC_PATH],
+    };
+    entries.set(CONFIG_DIR, { mode: "755", owner: "root:root" });
+    entries.set(CONFIG_PATH, { mode: "444", owner: "root:root" });
+    entries.set(HASH_PATH, { mode: "444", owner: "root:root" });
+    entries.set(FABRIC_PATH, { mode: "444", owner: "root:root" });
+    commandHandlers.set("lsattr", () => "----------------------");
+
+    shields.unlockAgentConfig("dcode-safety", privateTarget, true);
+
+    expect(unlockCalls.at(-1)?.slice(4, 9)).toEqual([
+      "600",
+      "700",
+      "sandbox:sandbox",
+      "1",
+      CONFIG_DIR,
+    ]);
+    expect(entries.get(CONFIG_DIR)).toEqual({ mode: "700", owner: "sandbox:sandbox" });
+    expect(entries.get(CONFIG_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
+    expect(entries.get(HASH_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
+    expect(entries.get(FABRIC_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
   });
 });
 

@@ -11,14 +11,21 @@ which points to commit `810189732befa2a5a7feb139c935bbd4dfc400a2`
 
 ## Decision
 
+### Execution update — 2026-09-01
+
+The initial research below rejected Fabric's unreleased Pi adapter. The implementation did not use
+that artifact. Pi now supplies a package-owned adapter against the pinned stable Fabric 0.2.0
+contract. OpenClaw follows the same package-owned pattern. Hermes uses the released Hermes 0.2.0
+adapter. This remains local-fork development work, and common live qualification is pending.
+
 Use Fabric as a generic sandbox-local headless invocation layer. Do not make Fabric a fourth
 component axis or a user-facing agent runtime. The existing LangChain Deep Agents Code package is
 the first consumer because its Fabric adapter is released with Fabric 0.2.0. Its native `dcode`
 interactive command remains unchanged.
 
-Pi is not the first consumer. Its adapter is present on Fabric's unreleased 0.3 development line,
-while public package metadata does not provide a reproducible released Pi adapter. A later Pi
-package must use the same runner contract after those artifacts are released.
+At research time, Pi was not the first consumer. Its upstream adapter was present only on Fabric's
+unreleased 0.3 development line, while public package metadata did not provide a reproducible
+released Pi adapter. The execution update above records the later package-owned decision.
 
 This is a local-fork product experiment. It does not establish a supported NemoClaw integration.
 An upstream contribution still needs an accepted product decision with named ownership, lifecycle,

@@ -4,6 +4,7 @@
 import { chmodSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { HermesFabricConfig } from "./fabric-config.ts";
 import type { HermesManagedPolicyV1 } from "./managed-policy.ts";
 import { buildHermesUpstreamHeader } from "./upstream-header.ts";
 import { toYaml } from "./yaml.ts";
@@ -13,12 +14,14 @@ export type WrittenHermesConfig = {
   envPath: string;
   envEntryCount: number;
   policyPath: string;
+  fabricPath: string;
 };
 
 export function writeHermesConfigFiles(
   config: Record<string, unknown>,
   envLines: string[],
   policy: HermesManagedPolicyV1,
+  fabricConfig: HermesFabricConfig,
   homeDir: string = homedir(),
 ): WrittenHermesConfig {
   const configPath = join(homeDir, ".hermes", "config.yaml");
@@ -33,10 +36,15 @@ export function writeHermesConfigFiles(
   writeFileSync(policyPath, `${JSON.stringify(policy, null, 2)}\n`);
   chmodSync(policyPath, 0o600);
 
+  const fabricPath = join(homeDir, ".hermes", "fabric.json");
+  writeFileSync(fabricPath, `${JSON.stringify(fabricConfig, null, 2)}\n`);
+  chmodSync(fabricPath, 0o600);
+
   return {
     configPath,
     envPath,
     envEntryCount: envLines.length,
     policyPath,
+    fabricPath,
   };
 }

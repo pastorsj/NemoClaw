@@ -65,8 +65,10 @@ it("rejects malformed JSON without mutating the idempotent mutable unlock postur
   const configDir = path.join(root, ".openclaw");
   const configPath = path.join(configDir, "openclaw.json");
   const hashPath = path.join(configDir, ".config-hash");
+  const fabricPath = path.join(configDir, "fabric.json");
   const nodePath = path.join(root, ".nemoclaw-test-node");
   const malformedConfig = Buffer.from('{"gateway":\n');
+  const fabricConfig = Buffer.from('{"schema":"fabric.agent/v1alpha1"}\n');
   fs.mkdirSync(configDir);
   fs.writeFileSync(nodePath, `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`, {
     mode: 0o500,
@@ -74,14 +76,20 @@ it("rejects malformed JSON without mutating the idempotent mutable unlock postur
   fs.writeFileSync(configPath, malformedConfig, { mode: 0o660 });
   fs.writeFileSync(
     hashPath,
-    `${createHash("sha256").update(malformedConfig).digest("hex")}  openclaw.json\n`,
+    [
+      `${createHash("sha256").update(malformedConfig).digest("hex")}  openclaw.json`,
+      `${createHash("sha256").update(fabricConfig).digest("hex")}  fabric.json`,
+      "",
+    ].join("\n"),
     { mode: 0o660 },
   );
+  fs.writeFileSync(fabricPath, fabricConfig, { mode: 0o600 });
   fs.chmodSync(configPath, 0o660);
   fs.chmodSync(hashPath, 0o660);
+  fs.chmodSync(fabricPath, 0o600);
   fs.chmodSync(configDir, 0o2770);
   fs.chmodSync(root, 0o755);
-  const fileIdentities = [configPath, hashPath].map(fileIdentity);
+  const fileIdentities = [configPath, hashPath, fabricPath].map(fileIdentity);
 
   const result = spawnSync("python3", ["-c", RUN_UNLOCK_AS_CURRENT_USER, GUARD_PATH, configDir], {
     encoding: "utf-8",
@@ -104,8 +112,8 @@ it("rejects malformed JSON without mutating the idempotent mutable unlock postur
   expect(lines).toContainEqual(
     expect.objectContaining({ type: "issue", code: "invalid-config-json5" }),
   );
-  expect([mode(root), mode(configDir), mode(configPath), mode(hashPath)]).toEqual([
-    0o755, 0o2770, 0o660, 0o660,
-  ]);
-  expect([configPath, hashPath].map(fileIdentity)).toEqual(fileIdentities);
+  expect([mode(root), mode(configDir), mode(configPath), mode(hashPath), mode(fabricPath)]).toEqual(
+    [0o755, 0o2770, 0o660, 0o660, 0o600],
+  );
+  expect([configPath, hashPath, fabricPath].map(fileIdentity)).toEqual(fileIdentities);
 });

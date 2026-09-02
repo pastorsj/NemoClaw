@@ -2532,32 +2532,32 @@ function getRecordedMessagingChannelsForResume(
     isNonInteractive,
   });
 }
-
 const setupMessagingChannels = messagingChannelSetup.createSetupMessagingChannels({
   step,
   note,
   isNonInteractive,
   prompt,
 });
-
 // ── Step 7: OpenClaw ─────────────────────────────────────────────
 const syncNemoClawConfigInSandbox = createNemoClawConfigSync({
   getProviderSelectionConfig,
   run,
   openshellArgv,
 });
-
 const configureOpenclawSandbox = openclawSetup.createConfigureOpenclawSandbox({
   syncNemoClawConfigInSandbox,
   reconcileWebSearch: openclawSetup.reconcileOpenClawWebSearchForReuse,
+  verifyPackageRuntime: agentOnboard.createAgentSmokeCommandVerifier(
+    agentDefs.loadAgent("openclaw"),
+    runCaptureOpenshell,
+    () => GATEWAY_NAME,
+  ),
 });
-
 const setupOpenclaw = openclawSetup.createOpenclawSetup({
   step,
   agentProductName,
   configureOpenclawSandbox,
 });
-
 const {
   buildChain,
   buildAgentVerifyChain,

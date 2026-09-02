@@ -33,6 +33,12 @@ gateway_command: "openclaw gateway run"
 # command so NemoClaw stops hardcoding it.
 runtime:
   interactive_command: "openclaw tui"
+  headless_command: "timeout --signal=TERM --kill-after=15s 120s nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json"
+  smoke_commands:
+    - "openclaw --version"
+    - "nemoclaw-fabric --version"
+    - "test -s /sandbox/.openclaw/fabric.json && echo NEMOCLAW_OPENCLAW_FABRIC_OK"
+    - 'test "$(stat -c %a /sandbox/.openclaw/fabric.json)" = 600 && echo NEMOCLAW_OPENCLAW_FABRIC_MODE_OK'
 
 # ── Health probe ────────────────────────────────────────────────
 health_probe:
@@ -48,6 +54,8 @@ forward_ports:
 config:
   dir: /sandbox/.openclaw
   config_file: openclaw.json
+  shields_files:
+    - fabric.json
   format: json
 
 # ── State directories ──────────────────────────────────────────

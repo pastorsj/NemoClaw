@@ -18,7 +18,8 @@ The workflow reads from top to bottom:
 2. `Dockerfile.base` builds the pinned Hermes base and applies reviewed dependency patches.
 3. `Dockerfile` assembles the NemoClaw image from package-owned configuration, runtime, plugin,
    policy, and compatibility files.
-4. `config/generate-config.ts` translates managed startup inputs into Hermes configuration.
+4. `config/generate-config.ts` translates managed startup inputs into native Hermes configuration
+   and the credential-free Fabric launch configuration.
 5. `start.sh` reads as the startup workflow: admit startup, load the package modules, configure the
    proxy boundary, and execute the root or non-root launch path.
 6. The shell modules in `runtime/` define each startup responsibility without hiding orchestration
@@ -34,6 +35,7 @@ The workflow reads from top to bottom:
 | Path | Responsibility |
 | --- | --- |
 | `config/` | Builds Hermes `config.yaml`, `.env`, managed policy, model setup, and tool-gateway settings. |
+| `fabric/` | Selects the released Hermes adapter through a bounded package-owned process boundary and pins both Fabric dependency graphs. |
 | `runtime/` | Provides startup modules, commands, and guards installed into the sandbox. `runtime/state/` is the bounded state-mutation subsystem. |
 | `host/` | Provides integrity-verified helpers that NemoClaw core loads for managed routes, MCP, image qualification, and the tool gateway. |
 | `compat/` | Contains version-bound patches for the pinned Hermes release. |
@@ -50,7 +52,8 @@ that exact metadata location.
 ## Runtime flow
 
 Managed startup invokes the fixed `/usr/local/lib/nemoclaw/generate-config` command. The package
-wrapper runs `config/generate-config.ts`, which writes Hermes-native configuration. `start.sh` then
+wrapper runs `config/generate-config.ts`, which writes Hermes-native configuration and
+`.hermes/fabric.json`. `start.sh` then
 loads five package-owned modules in execution order:
 
 | Module | Startup responsibility |
@@ -70,6 +73,15 @@ The CLI wrapper and adapter preserve the managed Hermes command surface. The con
 MCP transaction, cron control, and state-mutation subsystem reconcile mutable state without moving
 those protocols into NemoClaw core. Host helpers remain data- and integrity-bound entry points for
 the core operations that still need them.
+
+The native TUI and gateway continue to invoke Hermes directly. A plain prompt through
+`nemoclaw sandbox agent` uses the manifest's headless command and the generic `nemoclaw-fabric`
+runner. Fabric loads its released Hermes adapter with the native Hermes Python environment. The
+package-owned descriptor selects a thin lifecycle proxy, which preserves the released adapter's
+contract while bounding protocol output and owning every adapter and tool process until shutdown.
+The package projects the managed model route into `fabric.json` and passes only a sandbox-route
+credential through the protected startup environment. NemoClaw core resolves the package command
+without importing Hermes-specific code.
 
 The host broker reads as one process workflow:
 
@@ -125,6 +137,7 @@ Install the package lock and run the checkout-independent TypeScript and Python 
 ```bash
 npm ci --ignore-scripts
 npm run test:package
+npm run test:fabric
 ```
 
 Tests that exercise the composed build and current NemoClaw boundaries run through

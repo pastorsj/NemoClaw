@@ -19,6 +19,14 @@ describe("buildSandboxExecStdio", () => {
     expect(buildSandboxExecStdio({ stdin: true }, undefined)).toBe("inherit");
     expect(buildSandboxExecStdio({ stdin: false }, true)).toEqual(["ignore", "inherit", "inherit"]);
   });
+
+  it("creates a private pipe when the caller supplies stdin bytes", () => {
+    expect(buildSandboxExecStdio({ stdinInput: "private prompt" }, true)).toEqual([
+      "pipe",
+      "inherit",
+      "inherit",
+    ]);
+  });
 });
 
 describe("shouldInheritSandboxExecStdin", () => {

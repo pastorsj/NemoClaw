@@ -311,6 +311,55 @@ afterEach(() => {
 });
 
 describe("packages/nemoclaw-hermes/config/generate-config.ts", () => {
+  it("projects the managed route into the released Hermes Fabric adapter", () => {
+    const credentialSentinel = "sk-test-hermes-fabric-must-not-be-written";
+    generateBaseConfig({
+      NEMOCLAW_MODEL: "nvidia/nemotron-3-super-120b-a12b",
+      NEMOCLAW_INFERENCE_BASE_URL: "https://inference.local/v1",
+      HERMES_FABRIC_API_KEY: credentialSentinel,
+    });
+
+    const fabricPath = path.join(tmpDir, ".hermes", "fabric.json");
+    const fabricText = fs.readFileSync(fabricPath, "utf8");
+    expect(JSON.parse(fabricText)).toEqual({
+      schema_version: "fabric.agent/v1alpha1",
+      metadata: {
+        name: "nemoclaw-hermes",
+        description: "NemoClaw-managed Hermes headless runtime",
+      },
+      harness: {
+        adapter_id: "nvidia.nemoclaw.hermes",
+        resolution: "preinstalled",
+      },
+      discovery: {
+        local_paths: ["/usr/local/share/nemoclaw/hermes.fabric-adapter.json"],
+      },
+      runtime: {
+        input_schema: "chat",
+        output_schema: "message",
+        artifacts: "/sandbox/.hermes/fabric-artifacts",
+        timeout_seconds: 90,
+      },
+      environment: {
+        provider: "local",
+        workspace: "/sandbox",
+        artifacts: "/sandbox/.hermes/fabric-artifacts",
+        ownership: "caller_owned",
+        control_location: "in_env_control",
+      },
+      models: {
+        default: {
+          provider: "custom",
+          model: "nvidia/nemotron-3-super-120b-a12b",
+          api_key_env: "HERMES_FABRIC_API_KEY",
+          base_url: "https://inference.local/v1",
+        },
+      },
+    });
+    expect(fabricText).not.toContain(credentialSentinel);
+    expect(fs.statSync(fabricPath).mode & 0o777).toBe(0o600);
+  });
+
   it(
     "matches direct generation as a strip-types executable with an explicit gateway matrix",
     async () => {

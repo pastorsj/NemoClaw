@@ -19,6 +19,7 @@ import os
 import sys
 import time
 guard_path, action, config_dir, failure, expected_sha256 = sys.argv[1:6]
+config_file_set = sys.argv[6] if len(sys.argv) > 6 else "fabric"
 spec = importlib.util.spec_from_file_location("nemoclaw_openclaw_config_guard", guard_path)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
@@ -237,6 +238,7 @@ if failure == "kill-unseal-after-visible":
         os._exit(111)
     module._commit_mutable_dirs = kill_after_unseal_visible
 arguments = [action, "--config-dir", config_dir]
+arguments.extend(["--config-file-set", config_file_set])
 if expected_sha256:
     arguments.extend(["--expected-config-sha256", expected_sha256])
 if failure == "startup-owner":
@@ -263,6 +265,21 @@ function shellQuote(value: string): string {
 function trustedNodePath(configDir: string): string {
   return path.join(path.dirname(configDir), ".nemoclaw-test-node");
 }
+
+function configHashRecord(configBytes: Buffer, fabricBytes: Buffer): string {
+  return (
+    `${createHash("sha256").update(configBytes).digest("hex")}  openclaw.json\n` +
+    `${createHash("sha256").update(fabricBytes).digest("hex")}  fabric.json\n`
+  );
+}
+
+function configHashRecordWithConfigDigest(configDigest: string, fabricBytes: Buffer): string {
+  return (
+    `${configDigest}  openclaw.json\n` +
+    `${createHash("sha256").update(fabricBytes).digest("hex")}  fabric.json\n`
+  );
+}
+
 function fixture() {
   const created = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-config-guard-"));
   const root = fs.realpathSync(created);
@@ -270,23 +287,23 @@ function fixture() {
   const configDir = path.join(root, ".openclaw");
   const configPath = path.join(configDir, "openclaw.json");
   const hashPath = path.join(configDir, ".config-hash");
+  const fabricPath = path.join(configDir, "fabric.json");
   const nodePath = trustedNodePath(configDir);
   const configBytes = Buffer.from('{"gateway":{"port":18789}}\n');
+  const fabricBytes = Buffer.from('{"schema":"fabric.agent/v1alpha1"}\n');
   fs.mkdirSync(configDir);
   fs.writeFileSync(nodePath, `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`, {
     mode: 0o500,
   });
   fs.writeFileSync(configPath, configBytes, { mode: 0o660 });
-  fs.writeFileSync(
-    hashPath,
-    `${createHash("sha256").update(configBytes).digest("hex")}  openclaw.json\n`,
-    { mode: 0o660 },
-  );
+  fs.writeFileSync(fabricPath, fabricBytes, { mode: 0o600 });
+  fs.writeFileSync(hashPath, configHashRecord(configBytes, fabricBytes), { mode: 0o660 });
   fs.chmodSync(configPath, 0o660);
   fs.chmodSync(hashPath, 0o660);
+  fs.chmodSync(fabricPath, 0o600);
   fs.chmodSync(configDir, 0o2770);
   fs.chmodSync(root, 0o755);
-  return { root, configDir, configPath, hashPath };
+  return { root, configDir, configPath, hashPath, fabricPath };
 }
 type GuardAction =
   | "preflight"
@@ -306,10 +323,20 @@ function runGuard(
   env: NodeJS.ProcessEnv = {},
   expectedSha256 = "",
   input?: string | Buffer,
+  configFileSet: "fabric" | "native" = "fabric",
 ) {
   const result = spawnSync(
     "python3",
-    ["-c", RUN_AS_CURRENT_USER, GUARD_PATH, action, configDir, failure, expectedSha256],
+    [
+      "-c",
+      RUN_AS_CURRENT_USER,
+      GUARD_PATH,
+      action,
+      configDir,
+      failure,
+      expectedSha256,
+      configFileSet,
+    ],
     {
       encoding: "utf-8",
       timeout: 15_000,
@@ -382,7 +409,7 @@ afterEach(() => {
         ? [configDir]
         : []) {
         fs.chmodSync(existingConfigDir, 0o700);
-        for (const name of ["openclaw.json", ".config-hash"]) {
+        for (const name of ["openclaw.json", ".config-hash", "fabric.json"]) {
           const filePath = path.join(existingConfigDir, name);
           for (const existingFilePath of fs.existsSync(filePath) && fs.lstatSync(filePath).isFile()
             ? [filePath]
@@ -399,11 +426,37 @@ afterEach(() => {
 });
 
 describe("openclaw-config-guard", () => {
-  it("keeps an exact locked parent and pair unchanged across idempotent relock", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+  it("preserves the exact native config contract when injected into a pre-Fabric image", () => {
+    const { configDir, configPath, hashPath, fabricPath } = fixture();
+    const configBytes = fs.readFileSync(configPath);
+    fs.rmSync(fabricPath);
+    fs.writeFileSync(
+      hashPath,
+      `${createHash("sha256").update(configBytes).digest("hex")}  openclaw.json\n`,
+      { mode: 0o660 },
+    );
+
+    const locked = runGuard("lock", configDir, "none", {}, "", undefined, "native");
+    expect(locked.status, JSON.stringify(locked.lines)).toBe(0);
+    expect(locked.lines.at(-1)).toMatchObject({
+      type: "result",
+      status: "ok",
+      files: ["openclaw.json", ".config-hash"],
+    });
+    expect(fs.existsSync(fabricPath)).toBe(false);
+
+    const unlocked = runGuard("unlock", configDir, "none", {}, "", undefined, "native");
+    expect(unlocked.status, JSON.stringify(unlocked.lines)).toBe(0);
+    expect([mode(configPath), mode(hashPath)]).toEqual([0o660, 0o660]);
+    expect(fs.existsSync(fabricPath)).toBe(false);
+  });
+
+  it("keeps every protected file unchanged across idempotent relock", () => {
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const first = runGuard("lock", configDir);
     expect(first.status, JSON.stringify(first.lines)).toBe(0);
-    const fileIdentities = [configPath, hashPath].map(fileIdentity);
+    const protectedPaths = [configPath, hashPath, fabricPath];
+    const fileIdentities = protectedPaths.map(fileIdentity);
     expect(mode(root)).toBe(0o1775);
     const second = runGuard("lock", configDir);
     expect(second.status, JSON.stringify(second.lines)).toBe(0);
@@ -411,44 +464,56 @@ describe("openclaw-config-guard", () => {
     expect(mode(configDir)).toBe(0o755);
     expect(mode(configPath)).toBe(0o444);
     expect(mode(hashPath)).toBe(0o444);
-    expect([configPath, hashPath].map(fileIdentity)).toEqual(fileIdentities);
+    expect(mode(fabricPath)).toBe(0o444);
+    expect(protectedPaths.map(fileIdentity)).toEqual(fileIdentities);
   });
   it("unlocks idempotently when the config already holds the mutable posture (#7430)", () => {
-    const { configDir, configPath, hashPath } = fixture();
-    const fileIdentities = [configPath, hashPath].map(fileIdentity);
+    const { configDir, configPath, hashPath, fabricPath } = fixture();
+    const protectedPaths = [configPath, hashPath, fabricPath];
+    const fileIdentities = protectedPaths.map(fileIdentity);
     const r = runGuard("unlock", configDir);
     expect(r.status, JSON.stringify(r.lines)).toBe(0);
-    expect([mode(configDir), mode(configPath), mode(hashPath)]).toEqual([0o2770, 0o660, 0o660]);
-    expect([configPath, hashPath].map(fileIdentity)).toEqual(fileIdentities);
-    for (const invalidPath of [configPath, hashPath]) {
-      fs.chmodSync(invalidPath, 0o600);
+    expect([mode(configDir), mode(configPath), mode(hashPath), mode(fabricPath)]).toEqual([
+      0o2770, 0o660, 0o660, 0o600,
+    ]);
+    expect(protectedPaths.map(fileIdentity)).toEqual(fileIdentities);
+    for (const [invalidPath, invalidMode, expectedMode] of [
+      [configPath, 0o600, 0o660],
+      [hashPath, 0o600, 0o660],
+      [fabricPath, 0o660, 0o600],
+    ] as const) {
+      fs.chmodSync(invalidPath, invalidMode);
       try {
         const invalid = runGuard("unlock", configDir);
         expect(invalid.status).not.toBe(0);
         expect(invalid.lines).toContainEqual(
           expect.objectContaining({ code: "config-not-mutable" }),
         );
-        expect(mode(invalidPath)).toBe(0o600);
-        expect([configPath, hashPath].map(fileIdentity)).toEqual(fileIdentities);
+        expect(mode(invalidPath)).toBe(invalidMode);
+        expect(protectedPaths.map(fileIdentity)).toEqual(fileIdentities);
       } finally {
-        fs.chmodSync(invalidPath, 0o660);
+        fs.chmodSync(invalidPath, expectedMode);
       }
     }
     const drift = runGuard("unlock", configDir, "mutable-dir-drift");
     expect(drift.lines).toContainEqual(expect.objectContaining({ code: "config-not-mutable" }));
   });
-  it("fresh-replaces both files on lock and unlock while preserving bytes, times, and xattrs", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+  it("fresh-replaces every protected file while preserving bytes, times, and xattrs", () => {
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const preservedTime = new Date("2025-01-02T03:04:05.000Z");
     fs.utimesSync(configPath, preservedTime, preservedTime);
     fs.utimesSync(hashPath, preservedTime, preservedTime);
+    fs.utimesSync(fabricPath, preservedTime, preservedTime);
     const hasXattrs = setUserXattr(configPath, "trusted-metadata");
     const initialConfig = fs.readFileSync(configPath);
     const initialHash = fs.readFileSync(hashPath);
+    const initialFabric = fs.readFileSync(fabricPath);
     const initialConfigStat = fs.statSync(configPath);
     const initialHashStat = fs.statSync(hashPath);
+    const initialFabricStat = fs.statSync(fabricPath);
     const staleConfigFd = fs.openSync(configPath, "r+");
     const staleHashFd = fs.openSync(hashPath, "r+");
+    const staleFabricFd = fs.openSync(fabricPath, "r+");
 
     try {
       const locked = runGuard("lock", configDir);
@@ -463,35 +528,46 @@ describe("openclaw-config-guard", () => {
       expect(mode(configDir)).toBe(0o755);
       expect(mode(configPath)).toBe(0o444);
       expect(mode(hashPath)).toBe(0o444);
+      expect(mode(fabricPath)).toBe(0o444);
       expect(fs.statSync(configPath).ino).not.toBe(initialConfigStat.ino);
       expect(fs.statSync(hashPath).ino).not.toBe(initialHashStat.ino);
+      expect(fs.statSync(fabricPath).ino).not.toBe(initialFabricStat.ino);
       expect(fs.statSync(configPath).mtimeMs).toBe(initialConfigStat.mtimeMs);
       expect(fs.statSync(hashPath).mtimeMs).toBe(initialHashStat.mtimeMs);
+      expect(fs.statSync(fabricPath).mtimeMs).toBe(initialFabricStat.mtimeMs);
       expect(hasXattrs ? getUserXattr(configPath) : "trusted-metadata").toBe("trusted-metadata");
 
       fs.writeSync(staleConfigFd, Buffer.from("MUTATED"), 0, 7, 0);
       fs.writeSync(staleHashFd, Buffer.from("MUTATED"), 0, 7, 0);
+      fs.writeSync(staleFabricFd, Buffer.from("MUTATED"), 0, 7, 0);
       fs.fsyncSync(staleConfigFd);
       fs.fsyncSync(staleHashFd);
+      fs.fsyncSync(staleFabricFd);
       expect(fs.readFileSync(configPath)).toEqual(initialConfig);
       expect(fs.readFileSync(hashPath)).toEqual(initialHash);
+      expect(fs.readFileSync(fabricPath)).toEqual(initialFabric);
 
       const lockedConfigInode = fs.statSync(configPath).ino;
       const lockedHashInode = fs.statSync(hashPath).ino;
+      const lockedFabricInode = fs.statSync(fabricPath).ino;
       const unlocked = runGuard("unlock", configDir);
       expect(unlocked.status).toBe(0);
       expect(mode(root)).toBe(0o755);
       expect(mode(configDir)).toBe(0o2770);
       expect(mode(configPath)).toBe(0o660);
       expect(mode(hashPath)).toBe(0o660);
+      expect(mode(fabricPath)).toBe(0o600);
       expect(fs.statSync(configPath).ino).not.toBe(lockedConfigInode);
       expect(fs.statSync(hashPath).ino).not.toBe(lockedHashInode);
+      expect(fs.statSync(fabricPath).ino).not.toBe(lockedFabricInode);
       expect(fs.readFileSync(configPath)).toEqual(initialConfig);
       expect(fs.readFileSync(hashPath)).toEqual(initialHash);
+      expect(fs.readFileSync(fabricPath)).toEqual(initialFabric);
       expect(hasXattrs ? getUserXattr(configPath) : "trusted-metadata").toBe("trusted-metadata");
     } finally {
       fs.closeSync(staleConfigFd);
       fs.closeSync(staleHashFd);
+      fs.closeSync(staleFabricFd);
     }
   });
   it.each(["symlink", "hardlink", "fifo"] as const)("rejects external %s config", (attack) => {
@@ -541,20 +617,29 @@ describe("openclaw-config-guard", () => {
   it("canonicalizes a stale mutable hash while strict preflight rejects a bad record path", () => {
     const mismatch = fixture();
     const mismatchBytes = fs.readFileSync(mismatch.configPath);
-    fs.writeFileSync(mismatch.hashPath, `${"0".repeat(64)}  openclaw.json\n`, { mode: 0o660 });
+    const mismatchFabric = fs.readFileSync(mismatch.fabricPath);
+    fs.writeFileSync(
+      mismatch.hashPath,
+      configHashRecordWithConfigDigest("0".repeat(64), mismatchFabric),
+      { mode: 0o660 },
+    );
 
     const mismatched = runGuard("lock", mismatch.configDir);
 
     expect(mismatched.status).toBe(0);
     expect(fs.readFileSync(mismatch.hashPath, "utf-8")).toBe(
-      `${createHash("sha256").update(mismatchBytes).digest("hex")}  openclaw.json\n`,
+      configHashRecord(mismatchBytes, mismatchFabric),
     );
     expect(fs.readFileSync(mismatch.configPath)).toEqual(mismatchBytes);
     expect(mode(mismatch.configDir)).toBe(0o755);
 
     const wrongPath = fixture();
     const digest = createHash("sha256").update(fs.readFileSync(wrongPath.configPath)).digest("hex");
-    fs.writeFileSync(wrongPath.hashPath, `${digest}  ../openclaw.json\n`);
+    const wrongFabric = fs.readFileSync(wrongPath.fabricPath);
+    fs.writeFileSync(
+      wrongPath.hashPath,
+      `${digest}  ../openclaw.json\n${createHash("sha256").update(wrongFabric).digest("hex")}  fabric.json\n`,
+    );
     const nonCanonical = runGuard("preflight", wrongPath.configDir);
     expect(nonCanonical.status).toBe(1);
     expect(nonCanonical.lines).toEqual(
@@ -567,26 +652,34 @@ describe("openclaw-config-guard", () => {
     const absoluteDigest = createHash("sha256")
       .update(fs.readFileSync(absolute.configPath))
       .digest("hex");
-    fs.writeFileSync(absolute.hashPath, `${absoluteDigest}  ${absolute.configPath}\n`, {
-      mode: 0o660,
-    });
+    const absoluteFabricDigest = createHash("sha256")
+      .update(fs.readFileSync(absolute.fabricPath))
+      .digest("hex");
+    fs.writeFileSync(
+      absolute.hashPath,
+      `${absoluteDigest}  ${absolute.configPath}\n${absoluteFabricDigest}  ${absolute.fabricPath}\n`,
+      { mode: 0o660 },
+    );
     expect(runGuard("preflight", absolute.configDir).status).toBe(0);
   });
   it("retries config and hash as one pair when a writer interleaves their capture", () => {
-    const { configDir, configPath, hashPath } = fixture();
+    const { configDir, configPath, hashPath, fabricPath } = fixture();
     const result = runGuard("lock", configDir, "pair-race");
     expect(result.status).toBe(0);
     const updated = Buffer.from('{"gateway":{"port":19001}}\n');
     expect(fs.readFileSync(configPath)).toEqual(updated);
     expect(fs.readFileSync(hashPath, "utf-8")).toBe(
-      `${createHash("sha256").update(updated).digest("hex")}  openclaw.json\n`,
+      configHashRecord(updated, fs.readFileSync(fabricPath)),
     );
     expect(mode(configPath)).toBe(0o444);
     expect(mode(hashPath)).toBe(0o444);
   });
   it("restart preflight accepts a stable parseable config with a stale mutable hash", () => {
-    const { configDir, hashPath } = fixture();
-    fs.writeFileSync(hashPath, `${"0".repeat(64)}  openclaw.json\n`);
+    const { configDir, hashPath, fabricPath } = fixture();
+    fs.writeFileSync(
+      hashPath,
+      configHashRecordWithConfigDigest("0".repeat(64), fs.readFileSync(fabricPath)),
+    );
     fs.chmodSync(hashPath, 0o660);
 
     expect(runGuard("preflight-restart", configDir).status).toBe(0);
@@ -595,6 +688,44 @@ describe("openclaw-config-guard", () => {
     expect(strict.lines).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "issue", code: "config-hash-mismatch" }),
+      ]),
+    );
+  });
+  it("rejects Fabric bytes that do not match the locked hash record", () => {
+    const { configDir, fabricPath } = fixture();
+    expect(runGuard("lock", configDir).status).toBe(0);
+    fs.chmodSync(fabricPath, 0o600);
+    fs.writeFileSync(fabricPath, '{"schema":"tampered"}\n');
+    fs.chmodSync(fabricPath, 0o444);
+
+    const result = runGuard("preflight", configDir);
+
+    expect(result.status).toBe(1);
+    expect(result.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "issue",
+          code: "config-hash-mismatch",
+          path: path.join(configDir, ".config-hash"),
+          detail: expect.stringContaining("fabric.json"),
+        }),
+      ]),
+    );
+  });
+  it("rejects malformed mutable Fabric config before restart", () => {
+    const { configDir, fabricPath } = fixture();
+    fs.writeFileSync(fabricPath, "{ trailing: true, }\n");
+
+    const result = runGuard("preflight-restart", configDir);
+
+    expect(result.status).toBe(1);
+    expect(result.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "issue",
+          code: "invalid-config-json",
+          path: fabricPath,
+        }),
       ]),
     );
   });
@@ -668,7 +799,7 @@ describe("openclaw-config-guard", () => {
     );
   });
   it("CAS-writes a fresh mutable config/hash pair and revokes stale descriptors", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const oldConfig = fs.readFileSync(configPath);
     const expected = createHash("sha256").update(oldConfig).digest("hex");
     const replacement = Buffer.from(
@@ -698,14 +829,15 @@ describe("openclaw-config-guard", () => {
       expect(fs.statSync(configPath).ino).not.toBe(oldConfigInode);
       expect(fs.statSync(hashPath).ino).not.toBe(oldHashInode);
       expect(fs.readFileSync(configPath)).toEqual(replacement);
-      expect(fs.readFileSync(hashPath, "utf-8")).toBe(`${replacementDigest}  openclaw.json\n`);
+      const replacementHash = configHashRecord(replacement, fs.readFileSync(fabricPath));
+      expect(fs.readFileSync(hashPath, "utf-8")).toBe(replacementHash);
 
       fs.writeSync(staleConfigFd, Buffer.from("STALE!!"), 0, 7, 0);
       fs.writeSync(staleHashFd, Buffer.from("STALE!!"), 0, 7, 0);
       fs.fsyncSync(staleConfigFd);
       fs.fsyncSync(staleHashFd);
       expect(fs.readFileSync(configPath)).toEqual(replacement);
-      expect(fs.readFileSync(hashPath, "utf-8")).toBe(`${replacementDigest}  openclaw.json\n`);
+      expect(fs.readFileSync(hashPath, "utf-8")).toBe(replacementHash);
     } finally {
       fs.closeSync(staleConfigFd);
       fs.closeSync(staleHashFd);
@@ -783,7 +915,7 @@ describe("openclaw-config-guard", () => {
   });
 
   it("rolls back both mutable files when the second write-config replacement fails", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const beforeConfig = fs.readFileSync(configPath);
     const beforeHash = fs.readFileSync(hashPath);
     const expected = createHash("sha256").update(beforeConfig).digest("hex");
@@ -809,7 +941,7 @@ describe("openclaw-config-guard", () => {
     ["kill-after-freeze", 88, "orphan-freeze-restored", false],
     ["kill-after-first-replace", 89, "ambiguous-replay-locked", true],
   ] as const)("recovers or fail-closes after %s", (failure, exitCode, recovery, locked) => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const originalConfig = fs.readFileSync(configPath);
     const originalHash = fs.readFileSync(hashPath);
     const expected = createHash("sha256").update(originalConfig).digest("hex");
@@ -846,7 +978,7 @@ describe("openclaw-config-guard", () => {
     expect(fs.readFileSync(configPath)).toEqual(locked ? replacement : originalConfig);
     const replacementDigest = createHash("sha256").update(replacement).digest("hex");
     const expectedHash = locked
-      ? Buffer.from(`${replacementDigest}  openclaw.json\n`)
+      ? Buffer.from(configHashRecord(replacement, fs.readFileSync(fabricPath)))
       : originalHash;
     expect(fs.readFileSync(hashPath)).toEqual(expectedHash);
     expect(mode(root)).toBe(locked ? 0o1775 : 0o755);
@@ -889,7 +1021,7 @@ describe("openclaw-config-guard", () => {
   });
 
   it("uses the frozen posture discriminator when both journals are lost and hash is stale", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const original = fs.readFileSync(configPath);
     const expected = createHash("sha256").update(original).digest("hex");
     const staleHash = Buffer.from(`${"0".repeat(64)}  openclaw.json\n`);
@@ -917,7 +1049,7 @@ describe("openclaw-config-guard", () => {
   });
 
   it("finishes the committed replacement after interruption before mutable-directory commit", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const originalConfig = fs.readFileSync(configPath);
     const expected = createHash("sha256").update(originalConfig).digest("hex");
     const replacement = Buffer.from('{"gateway":{"port":19001}}\n');
@@ -948,7 +1080,9 @@ describe("openclaw-config-guard", () => {
     });
     expect(fs.existsSync(journalPath)).toBe(false);
     expect(fs.readFileSync(configPath)).toEqual(replacement);
-    expect(fs.readFileSync(hashPath, "utf-8")).toBe(`${replacementDigest}  openclaw.json\n`);
+    expect(fs.readFileSync(hashPath, "utf-8")).toBe(
+      configHashRecord(replacement, fs.readFileSync(fabricPath)),
+    );
     expect(mode(root)).toBe(0o1775);
     expect(mode(configDir)).toBe(0o755);
   });
@@ -1036,10 +1170,13 @@ describe("openclaw-config-guard", () => {
   });
 
   it("seals and unseals mutable restart config with stale hash and stale descriptors", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const config = fs.readFileSync(configPath);
+    const fabric = fs.readFileSync(fabricPath);
     const digest = createHash("sha256").update(config).digest("hex");
-    fs.writeFileSync(hashPath, `${"0".repeat(64)}  openclaw.json\n`, { mode: 0o660 });
+    fs.writeFileSync(hashPath, configHashRecordWithConfigDigest("0".repeat(64), fabric), {
+      mode: 0o660,
+    });
     const oldConfigInode = fs.statSync(configPath).ino;
     const oldHashInode = fs.statSync(hashPath).ino;
     const staleConfig = fs.openSync(configPath, "r+");
@@ -1059,12 +1196,12 @@ describe("openclaw-config-guard", () => {
       expect(mode(hashPath)).toBe(0o444);
       expect(fs.statSync(configPath).ino).not.toBe(oldConfigInode);
       expect(fs.statSync(hashPath).ino).not.toBe(oldHashInode);
-      expect(fs.readFileSync(hashPath, "utf-8")).toBe(`${digest}  openclaw.json\n`);
+      expect(fs.readFileSync(hashPath, "utf-8")).toBe(configHashRecord(config, fabric));
 
       fs.writeSync(staleConfig, Buffer.from("STALE!!"), 0, 7, 0);
       fs.writeSync(staleHash, Buffer.from("STALE!!"), 0, 7, 0);
       expect(fs.readFileSync(configPath)).toEqual(config);
-      expect(fs.readFileSync(hashPath, "utf-8")).toBe(`${digest}  openclaw.json\n`);
+      expect(fs.readFileSync(hashPath, "utf-8")).toBe(configHashRecord(config, fabric));
 
       const sealedConfigInode = fs.statSync(configPath).ino;
       const sealedHashInode = fs.statSync(hashPath).ino;
@@ -1113,7 +1250,11 @@ describe("openclaw-config-guard", () => {
     const json5 = fixture();
     const bytes = Buffer.from("{\n  // comment\n  gateway: { port: 18789, },\n}\n");
     fs.writeFileSync(json5.configPath, bytes, { mode: 0o660 });
-    fs.writeFileSync(json5.hashPath, `${"0".repeat(64)}  openclaw.json\n`, { mode: 0o660 });
+    fs.writeFileSync(
+      json5.hashPath,
+      configHashRecordWithConfigDigest("0".repeat(64), fs.readFileSync(json5.fabricPath)),
+      { mode: 0o660 },
+    );
     expect(runGuard("preflight-restart", json5.configDir).status).toBe(0);
     expect(runGuard("seal-restart", json5.configDir).status).toBe(0);
     expect(runGuard("unseal-restart", json5.configDir).status).toBe(0);
@@ -1121,7 +1262,10 @@ describe("openclaw-config-guard", () => {
     const locked = fixture();
     expect(runGuard("lock", locked.configDir).status).toBe(0);
     fs.chmodSync(locked.hashPath, 0o644);
-    fs.writeFileSync(locked.hashPath, `${"0".repeat(64)}  openclaw.json\n`);
+    fs.writeFileSync(
+      locked.hashPath,
+      configHashRecordWithConfigDigest("0".repeat(64), fs.readFileSync(locked.fabricPath)),
+    );
     fs.chmodSync(locked.hashPath, 0o444);
     const rejected = runGuard("preflight-restart", locked.configDir);
     expect(rejected.status).toBe(1);
@@ -1216,9 +1360,9 @@ describe("openclaw-config-guard", () => {
   });
 
   it("fresh-severs stale descriptors even when canonical install raises", () => {
-    const { configDir, configPath, hashPath } = fixture();
+    const { configDir, configPath, hashPath, fabricPath } = fixture();
     const config = fs.readFileSync(configPath);
-    const digest = createHash("sha256").update(config).digest("hex");
+    const fabric = fs.readFileSync(fabricPath);
     const configFd = fs.openSync(configPath, "r+");
     const hashFd = fs.openSync(hashPath, "r+");
     try {
@@ -1229,7 +1373,7 @@ describe("openclaw-config-guard", () => {
       fs.writeSync(configFd, Buffer.from("STALE!!"), 0, 7, 0);
       fs.writeSync(hashFd, Buffer.from("STALE!!"), 0, 7, 0);
       expect(fs.readFileSync(configPath)).toEqual(config);
-      expect(fs.readFileSync(hashPath, "utf-8")).toBe(`${digest}  openclaw.json\n`);
+      expect(fs.readFileSync(hashPath, "utf-8")).toBe(configHashRecord(config, fabric));
     } finally {
       fs.closeSync(configFd);
       fs.closeSync(hashFd);
@@ -1417,7 +1561,7 @@ describe("openclaw-config-guard", () => {
   });
 
   it("keeps restart journal bounded near the maximum config size", () => {
-    const { root, configDir, configPath, hashPath } = fixture();
+    const { root, configDir, configPath, hashPath, fabricPath } = fixture();
     const max = 16 * 1024 * 1024;
     const prefix = Buffer.from('{"first":1,');
     const suffix = Buffer.from('"last":2}\n');
@@ -1428,7 +1572,9 @@ describe("openclaw-config-guard", () => {
     ]);
     const digest = createHash("sha256").update(large).digest("hex");
     fs.writeFileSync(configPath, large, { mode: 0o660 });
-    fs.writeFileSync(hashPath, `${digest}  openclaw.json\n`, { mode: 0o660 });
+    fs.writeFileSync(hashPath, configHashRecord(large, fs.readFileSync(fabricPath)), {
+      mode: 0o660,
+    });
 
     const sealed = runGuard("seal-restart", configDir);
     expect(sealed.status, JSON.stringify(sealed.lines)).toBe(0);

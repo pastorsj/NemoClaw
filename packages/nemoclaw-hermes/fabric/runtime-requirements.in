@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Keep the generic runner isolated from Hermes' native Python environment.
+nemo-fabric==0.2.0

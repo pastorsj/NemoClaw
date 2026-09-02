@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 import {
   HERMES_PROVIDER_CAPABILITY_PATH as CAPABILITY_PATH,
   createFailingCapabilityProbeResponse,
+  createHermesShieldsTarget,
   createHermesShieldsProviderConsumerHarness,
   createRetainedUnlockSimulation,
   createTimerAuthorizationSender,
@@ -57,28 +58,6 @@ const CURRENT_GUARD_HELP = [
 ].join(" ");
 
 type ShieldsModule = typeof import("./index");
-
-const STATE_LOCK_PLAN = {
-  version: 1 as const,
-  readOnlyRoots: ["skills"],
-  confidentialRoots: ["pairing"],
-  readOnlyPrefixes: [],
-  confidentialPrefixes: [],
-  writableSubpaths: [],
-};
-
-function hermesTarget() {
-  return {
-    agentName: "hermes",
-    configPath: "/sandbox/.hermes/config.yaml",
-    configDir: "/sandbox/.hermes",
-    format: "yaml",
-    configFile: "config.yaml",
-    sensitiveFiles: ["/sandbox/.hermes/.env", "/sandbox/.hermes/.config-hash"],
-    stateLockPlan: STATE_LOCK_PLAN,
-    stateLockPlanInImage: true,
-  };
-}
 
 function commandFromCall(call: unknown[]): string[] {
   return call[0] as string[];
@@ -253,7 +232,7 @@ describe("legacy Hermes shields compatibility", () => {
       vi.spyOn(policy, "parseCurrentPolicy").mockImplementation((raw: unknown) => String(raw)),
       vi.spyOn(policy, "resolvePermissivePolicyPath").mockReturnValue(permissivePolicyPath),
       ...shieldsFlow.bindLivePolicyMutationContext(policy),
-      vi.spyOn(agentConfig, "resolveAgentConfig").mockImplementation(() => hermesTarget()),
+      vi.spyOn(agentConfig, "resolveAgentConfig").mockImplementation(createHermesShieldsTarget),
       vi.spyOn(registry, "getSandbox").mockImplementation((name: unknown) => ({
         name: String(name),
         agent: "hermes",
@@ -435,7 +414,7 @@ describe("legacy Hermes shields compatibility", () => {
     installExecResponses(OLD_GUARD_HELP);
 
     expect(() =>
-      shields.unlockAgentConfig("legacy-hermes", hermesTarget(), true, true),
+      shields.unlockAgentConfig("legacy-hermes", createHermesShieldsTarget(), true, true),
     ).not.toThrow();
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
@@ -451,9 +430,9 @@ describe("legacy Hermes shields compatibility", () => {
     installExecResponses(OLD_GUARD_HELP);
     applyStateDirLockModeSpy.mockReturnValueOnce(["recursive unlock failed"]);
 
-    expect(() => shields.unlockAgentConfig("legacy-hermes", hermesTarget(), true, true)).toThrow(
-      /recursive unlock failed/,
-    );
+    expect(() =>
+      shields.unlockAgentConfig("legacy-hermes", createHermesShieldsTarget(), true, true),
+    ).toThrow(/recursive unlock failed/);
 
     const legacyTransitions = dockerExecSpy.mock.calls
       .map(commandFromCall)
@@ -466,7 +445,7 @@ describe("legacy Hermes shields compatibility", () => {
     installExecResponses(CURRENT_GUARD_HELP);
 
     expect(() =>
-      shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true),
+      shields.unlockAgentConfig("current-hermes", createHermesShieldsTarget(), true, true),
     ).not.toThrow();
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
@@ -478,7 +457,7 @@ describe("legacy Hermes shields compatibility", () => {
           cmd.includes("--state-action") &&
           cmd.includes("unlock") &&
           cmd.includes("--state-lock-plan-json") &&
-          cmd.includes(JSON.stringify(STATE_LOCK_PLAN)) &&
+          cmd.includes(JSON.stringify(createHermesShieldsTarget().stateLockPlan)) &&
           cmd.includes(LOCK_TOKEN),
       ),
     ).toBe(true);
@@ -491,7 +470,7 @@ describe("legacy Hermes shields compatibility", () => {
     installExecResponses(PREVIOUS_SEALED_GUARD_HELP);
 
     expect(() =>
-      shields.unlockAgentConfig("previous-hermes", hermesTarget(), true, true),
+      shields.unlockAgentConfig("previous-hermes", createHermesShieldsTarget(), true, true),
     ).not.toThrow();
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
@@ -508,7 +487,7 @@ describe("legacy Hermes shields compatibility", () => {
     installExecResponses(CURRENT_GUARD_HELP, "700");
 
     expect(() =>
-      shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true),
+      shields.unlockAgentConfig("current-hermes", createHermesShieldsTarget(), true, true),
     ).not.toThrow();
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
@@ -522,9 +501,9 @@ describe("legacy Hermes shields compatibility", () => {
       new Error("private mutable .hermes lacks an attested same-UID topology"),
     );
 
-    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
-      /attested same-UID topology/,
-    );
+    expect(() =>
+      shields.unlockAgentConfig("current-hermes", createHermesShieldsTarget(), true, true),
+    ).toThrow(/attested same-UID topology/);
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(true);
@@ -544,9 +523,9 @@ describe("legacy Hermes shields compatibility", () => {
   it("rejects other sandbox-owned Hermes root modes before finishing a sealed unlock", () => {
     installExecResponses(CURRENT_GUARD_HELP, "750");
 
-    expect(() => shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true)).toThrow(
-      /config dir mode/,
-    );
+    expect(() =>
+      shields.unlockAgentConfig("current-hermes", createHermesShieldsTarget(), true, true),
+    ).toThrow(/config dir mode/);
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
     expect(commands.some((cmd) => isGuardAction(cmd, "finish-shields-transition"))).toBe(false);
@@ -556,7 +535,7 @@ describe("legacy Hermes shields compatibility", () => {
     installExecResponses(CURRENT_GUARD_HELP);
 
     expect(() =>
-      shields.unlockAgentConfig("current-hermes", hermesTarget(), true, true),
+      shields.unlockAgentConfig("current-hermes", createHermesShieldsTarget(), true, true),
     ).not.toThrow();
 
     const guardCommands = dockerExecSpy.mock.calls
@@ -651,7 +630,7 @@ describe("legacy Hermes shields compatibility", () => {
     });
 
     expect(() =>
-      shields.lockAgentConfig("legacy-hermes", hermesTarget(), false, true),
+      shields.lockAgentConfig("legacy-hermes", createHermesShieldsTarget(), false, true),
     ).not.toThrow();
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
@@ -692,9 +671,9 @@ describe("legacy Hermes shields compatibility", () => {
       }
     });
 
-    expect(() => shields.lockAgentConfig("legacy-hermes", hermesTarget(), false, true)).toThrow(
-      /parent dir|1775|root:sandbox/i,
-    );
+    expect(() =>
+      shields.lockAgentConfig("legacy-hermes", createHermesShieldsTarget(), false, true),
+    ).toThrow(/parent dir|1775|root:sandbox/i);
   });
 
   it("does not reinterpret a failed capability probe as permission to use the legacy path", () => {
@@ -706,7 +685,7 @@ describe("legacy Hermes shields compatibility", () => {
     );
 
     expect(() =>
-      shields.unlockAgentConfig("unreachable-hermes", hermesTarget(), true, true),
+      shields.unlockAgentConfig("unreachable-hermes", createHermesShieldsTarget(), true, true),
     ).toThrow(/temporary Docker exec failure|capability/i);
 
     const commands = dockerExecSpy.mock.calls.map(commandFromCall);
@@ -810,6 +789,7 @@ describe("legacy Hermes shields compatibility", () => {
         "/sandbox/.hermes/config.yaml": "c".repeat(64),
         "/sandbox/.hermes/.env": "c".repeat(64),
         "/sandbox/.hermes/.config-hash": "c".repeat(64),
+        "/sandbox/.hermes/fabric.json": "c".repeat(64),
       });
       expect(commands.some((command) => command.includes("begin-shields-transition"))).toBe(false);
     });
@@ -831,6 +811,7 @@ describe("legacy Hermes shields compatibility", () => {
         "/sandbox/.hermes/config.yaml": "c".repeat(64),
         "/sandbox/.hermes/.env": "c".repeat(64),
         "/sandbox/.hermes/.config-hash": "c".repeat(64),
+        "/sandbox/.hermes/fabric.json": "c".repeat(64),
       });
     });
 
@@ -858,7 +839,8 @@ describe("legacy Hermes shields compatibility", () => {
           shieldsDownTimeout: 300,
           shieldsDownReason: "crash retry",
           shieldsDownPolicy: "permissive",
-          shieldsPolicySnapshotPath: snapshotPath, shieldsPolicySnapshot: snapshotPolicy,
+          shieldsPolicySnapshotPath: snapshotPath,
+          shieldsPolicySnapshot: snapshotPolicy,
         }),
       );
       fs.writeFileSync(
@@ -886,7 +868,8 @@ describe("legacy Hermes shields compatibility", () => {
           ownerStartIdentity: "dead-provider-owner",
           processToken,
           sandboxName: sandbox.name,
-          snapshotPath, snapshotPolicy,
+          snapshotPath,
+          snapshotPolicy,
           forwardPolicy,
         }),
       );
@@ -994,7 +977,8 @@ describe("legacy Hermes shields compatibility", () => {
           shieldsDownTimeout: 300,
           shieldsDownReason: "post-release crash",
           shieldsDownPolicy: "permissive",
-          shieldsPolicySnapshotPath: snapshotPath, shieldsPolicySnapshot: snapshotPolicy,
+          shieldsPolicySnapshotPath: snapshotPath,
+          shieldsPolicySnapshot: snapshotPolicy,
         }),
       );
       fs.writeFileSync(
@@ -1022,7 +1006,8 @@ describe("legacy Hermes shields compatibility", () => {
           ownerStartIdentity: "dead-post-release-owner",
           processToken,
           sandboxName: sandbox.name,
-          snapshotPath, snapshotPolicy,
+          snapshotPath,
+          snapshotPolicy,
           forwardPolicy,
         }),
       );
@@ -1078,7 +1063,8 @@ describe("legacy Hermes shields compatibility", () => {
             shieldsDownTimeout: 300,
             shieldsDownReason: "invalid forward policy",
             shieldsDownPolicy: "permissive",
-            shieldsPolicySnapshotPath: snapshotPath, shieldsPolicySnapshot: snapshotPolicy,
+            shieldsPolicySnapshotPath: snapshotPath,
+            shieldsPolicySnapshot: snapshotPolicy,
           }),
         );
         const timerPath = path.join(stateDir, `shields-timer-${sandbox.name}.json`);
@@ -1107,7 +1093,8 @@ describe("legacy Hermes shields compatibility", () => {
             ownerStartIdentity: "dead-forward-owner",
             processToken,
             sandboxName: sandbox.name,
-            snapshotPath, snapshotPolicy,
+            snapshotPath,
+            snapshotPolicy,
             forwardPolicy,
           }),
         );
@@ -1291,7 +1278,8 @@ describe("legacy Hermes shields compatibility", () => {
           shieldsDownTimeout: 300,
           shieldsDownReason: "timed mutable status",
           shieldsDownPolicy: "permissive",
-          shieldsPolicySnapshotPath: snapshotPath, shieldsPolicySnapshot: snapshotPolicy,
+          shieldsPolicySnapshotPath: snapshotPath,
+          shieldsPolicySnapshot: snapshotPolicy,
           updatedAt: new Date().toISOString(),
         }),
       );
@@ -1320,7 +1308,8 @@ describe("legacy Hermes shields compatibility", () => {
           ownerStartIdentity: "timed-status-owner",
           processToken,
           sandboxName: sandbox.name,
-          snapshotPath, snapshotPolicy,
+          snapshotPath,
+          snapshotPolicy,
           forwardPolicy,
         }),
       );

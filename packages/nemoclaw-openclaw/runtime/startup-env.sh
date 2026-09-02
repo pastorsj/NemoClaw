@@ -312,7 +312,7 @@ GATEWAYURLENVEOF
 # user), so it is intentionally not attempted here. Kept in sync with the
 # entrypoint's normalize_mutable_config_perms.
 _nemoclaw_restore_mutable_config_perms() {
-  local _nemoclaw_oc_dir _nemoclaw_oc_owner _nemoclaw_oc_dir_mode _nemoclaw_oc_file_mode _nemoclaw_oc_hash_mode
+  local _nemoclaw_oc_dir _nemoclaw_oc_owner _nemoclaw_oc_dir_mode _nemoclaw_oc_file_mode _nemoclaw_oc_hash_mode _nemoclaw_oc_fabric_mode
   _nemoclaw_oc_dir="${OPENCLAW_STATE_DIR:-/sandbox/.openclaw}"
   [ -d "$_nemoclaw_oc_dir" ] || return 0
   _nemoclaw_oc_owner="$(stat -c '%U' "$_nemoclaw_oc_dir" 2>/dev/null || stat -f '%Su' "$_nemoclaw_oc_dir" 2>/dev/null || echo unknown)"
@@ -321,11 +321,16 @@ _nemoclaw_restore_mutable_config_perms() {
   _nemoclaw_oc_dir_mode="$(stat -c '%a' "$_nemoclaw_oc_dir" 2>/dev/null || stat -f '%Lp' "$_nemoclaw_oc_dir" 2>/dev/null || echo '')"
   _nemoclaw_oc_file_mode="$(stat -c '%a' "$_nemoclaw_oc_dir/openclaw.json" 2>/dev/null || stat -f '%Lp' "$_nemoclaw_oc_dir/openclaw.json" 2>/dev/null || echo '')"
   _nemoclaw_oc_hash_mode="$(stat -c '%a' "$_nemoclaw_oc_dir/.config-hash" 2>/dev/null || stat -f '%Lp' "$_nemoclaw_oc_dir/.config-hash" 2>/dev/null || echo '')"
-  # Fast path: contract already intact (2770 dir, 660 config + hash when present).
-  # Check .config-hash too so a doctor run that tightened only it is still fixed.
+  _nemoclaw_oc_fabric_mode="$(stat -c '%a' "$_nemoclaw_oc_dir/fabric.json" 2>/dev/null || stat -f '%Lp' "$_nemoclaw_oc_dir/fabric.json" 2>/dev/null || echo '')"
+  # Fast path: contract already intact (2770 dir, 660 native config + hash,
+  # and 600 Fabric config). All three files are required trust inputs.
   if [ "$_nemoclaw_oc_dir_mode" = "2770" ] &&
-    { [ "$_nemoclaw_oc_file_mode" = "660" ] || [ -z "$_nemoclaw_oc_file_mode" ]; } &&
-    { [ "$_nemoclaw_oc_hash_mode" = "660" ] || [ -z "$_nemoclaw_oc_hash_mode" ]; }; then
+    [ ! -L "$_nemoclaw_oc_dir/openclaw.json" ] &&
+    [ ! -L "$_nemoclaw_oc_dir/.config-hash" ] &&
+    [ ! -L "$_nemoclaw_oc_dir/fabric.json" ] &&
+    [ "$_nemoclaw_oc_file_mode" = "660" ] &&
+    [ "$_nemoclaw_oc_hash_mode" = "660" ] &&
+    [ "$_nemoclaw_oc_fabric_mode" = "600" ]; then
     return 0
   fi
   chmod -R g+rwX,o-rwx "$_nemoclaw_oc_dir" 2>/dev/null || true
@@ -334,10 +339,18 @@ _nemoclaw_restore_mutable_config_perms() {
   if [ ! -L "$_nemoclaw_oc_dir" ] &&
     [ ! -L "$_nemoclaw_oc_dir/openclaw.json" ] &&
     [ ! -L "$_nemoclaw_oc_dir/.config-hash" ] &&
-    [ -f "$_nemoclaw_oc_dir/openclaw.json" ]; then
-    (cd "$_nemoclaw_oc_dir" && sha256sum openclaw.json >.config-hash) 2>/dev/null || true
+    [ ! -L "$_nemoclaw_oc_dir/fabric.json" ] &&
+    [ -f "$_nemoclaw_oc_dir/openclaw.json" ] &&
+    [ -f "$_nemoclaw_oc_dir/fabric.json" ]; then
+    (cd "$_nemoclaw_oc_dir" && sha256sum openclaw.json fabric.json >.config-hash) 2>/dev/null || true
   fi
   chmod 660 "$_nemoclaw_oc_dir/openclaw.json" "$_nemoclaw_oc_dir/.config-hash" 2>/dev/null || true
+  # Fabric may contain adapter credentials or provider endpoints. It remains
+  # owner-only in mutable mode even though the surrounding tree is shared by
+  # the sandbox and gateway identities.
+  if [ ! -L "$_nemoclaw_oc_dir/fabric.json" ] && [ -f "$_nemoclaw_oc_dir/fabric.json" ]; then
+    chmod 600 "$_nemoclaw_oc_dir/fabric.json" 2>/dev/null || true
+  fi
   # Keep the recovery baseline out of the group-writable contract — it is a
   # read-only trust anchor (root:sandbox 0440 when root re-locks it). The
   # recursive chmod above would otherwise loosen it to group-writable in

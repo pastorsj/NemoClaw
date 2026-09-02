@@ -33,6 +33,19 @@ function statFromMap(map: Record<string, string>): (p: string) => string {
   };
 }
 
+function intactOpenClawInspection(target: MutableConfigTarget = OPENCLAW_TARGET) {
+  return inspectMutableConfigPerms(
+    target,
+    "mutable_default",
+    statFromMap({
+      "/sandbox/.openclaw": "2770 sandbox:sandbox",
+      "/sandbox/.openclaw/openclaw.json": "660 sandbox:sandbox",
+      "/sandbox/.openclaw/.config-hash": "660 sandbox:sandbox",
+      "/sandbox/.openclaw/fabric.json": "600 sandbox:sandbox",
+    }),
+  );
+}
+
 describe("mutable-config-perms — contract predicates (#4538)", () => {
   it("accepts the NemoClaw mutable directory contract (setgid + group rwx)", () => {
     expect(dirSatisfiesMutableContract("2770")).toBe(true);
@@ -213,6 +226,43 @@ describe("inspectMutableConfigPerms (#4538)", () => {
     }
   });
 
+  it("keeps additional manifest-protected files private in mutable mode", () => {
+    const target: MutableConfigTarget = {
+      ...OPENCLAW_TARGET,
+      sensitiveFiles: [
+        "/sandbox/.openclaw/.config-hash",
+        "/sandbox/.openclaw/runtime-adapter.json",
+      ],
+    };
+    const intact = inspectMutableConfigPerms(
+      target,
+      "mutable_default",
+      statFromMap({
+        "/sandbox/.openclaw": "2770 sandbox:sandbox",
+        "/sandbox/.openclaw/openclaw.json": "660 sandbox:sandbox",
+        "/sandbox/.openclaw/.config-hash": "660 sandbox:sandbox",
+        "/sandbox/.openclaw/runtime-adapter.json": "600 sandbox:sandbox",
+      }),
+    );
+    const widened = inspectMutableConfigPerms(
+      target,
+      "mutable_default",
+      statFromMap({
+        "/sandbox/.openclaw": "2770 sandbox:sandbox",
+        "/sandbox/.openclaw/openclaw.json": "660 sandbox:sandbox",
+        "/sandbox/.openclaw/.config-hash": "660 sandbox:sandbox",
+        "/sandbox/.openclaw/runtime-adapter.json": "660 sandbox:sandbox",
+      }),
+    );
+
+    expect(intact.applies && intact.ok).toBe(true);
+    expect(widened).toMatchObject({
+      applies: true,
+      ok: false,
+      issues: ["/sandbox/.openclaw/runtime-adapter.json mode 660 (expected 600 private)"],
+    });
+  });
+
   it("tolerates a missing sensitive file (e.g. .config-hash before first lock cycle)", () => {
     const target: MutableConfigTarget = {
       ...OPENCLAW_TARGET,
@@ -238,26 +288,67 @@ describe("inspectMutableConfigPerms (#4538)", () => {
 describe("repairMutableConfigPerms (#4538)", () => {
   it("applies the mutable contract for OpenClaw and reports verified", () => {
     const apply = vi.fn();
-    const result = repairMutableConfigPerms(OPENCLAW_TARGET, "temporarily_unlocked", apply);
+    const inspect = vi.fn(() => intactOpenClawInspection());
+    const result = repairMutableConfigPerms(
+      OPENCLAW_TARGET,
+      "temporarily_unlocked",
+      apply,
+      inspect,
+    );
     expect(apply).toHaveBeenCalledOnce();
+    expect(inspect).toHaveBeenCalledOnce();
     expect(result).toEqual({ applied: true, verified: true, errors: [] });
   });
 
   it("reports unverified (with the error) when the apply step throws", () => {
-    const result = repairMutableConfigPerms(OPENCLAW_TARGET, "mutable_default", () => {
-      throw new Error("Config not unlocked: openclaw.json mode=600");
-    });
+    const inspect = vi.fn(() => intactOpenClawInspection());
+    const result = repairMutableConfigPerms(
+      OPENCLAW_TARGET,
+      "mutable_default",
+      () => {
+        throw new Error("Config not unlocked: openclaw.json mode=600");
+      },
+      inspect,
+    );
     expect(result.applied).toBe(true);
+    expect(inspect).not.toHaveBeenCalled();
     if (result.applied) {
       expect(result.verified).toBe(false);
       expect(result.errors[0]).toContain("mode=600");
     }
   });
 
+  it("reports unverified when a supplemental protected file remains widened", () => {
+    const target: MutableConfigTarget = {
+      ...OPENCLAW_TARGET,
+      sensitiveFiles: ["/sandbox/.openclaw/.config-hash", "/sandbox/.openclaw/fabric.json"],
+    };
+    const result = repairMutableConfigPerms(target, "mutable_default", vi.fn(), () =>
+      inspectMutableConfigPerms(
+        target,
+        "mutable_default",
+        statFromMap({
+          "/sandbox/.openclaw": "2770 sandbox:sandbox",
+          "/sandbox/.openclaw/openclaw.json": "660 sandbox:sandbox",
+          "/sandbox/.openclaw/.config-hash": "660 sandbox:sandbox",
+          "/sandbox/.openclaw/fabric.json": "660 sandbox:sandbox",
+        }),
+      ),
+    );
+
+    expect(result).toEqual({
+      applied: true,
+      verified: false,
+      errors: ["/sandbox/.openclaw/fabric.json mode 660 (expected 600 private)"],
+    });
+  });
+
   it("refuses to weaken a shields-up lock (benign skip) and never applies", () => {
     const apply = vi.fn();
-    const result = repairMutableConfigPerms(OPENCLAW_TARGET, "locked", apply);
+    const inspect = vi.fn(() => intactOpenClawInspection());
+    const result = repairMutableConfigPerms(OPENCLAW_TARGET, "locked", apply, inspect);
     expect(apply).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
     expect(result.applied).toBe(false);
     if (!result.applied) {
       expect(result.skipReason).toBe("locked");
@@ -267,8 +358,10 @@ describe("repairMutableConfigPerms (#4538)", () => {
 
   it("flags corrupt shields state as an unreadable (non-benign) skip", () => {
     const apply = vi.fn();
-    const result = repairMutableConfigPerms(OPENCLAW_TARGET, "error", apply);
+    const inspect = vi.fn(() => intactOpenClawInspection());
+    const result = repairMutableConfigPerms(OPENCLAW_TARGET, "error", apply, inspect);
     expect(apply).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
     expect(result.applied).toBe(false);
     if (!result.applied) {
       expect(result.skipReason).toBe("unreadable");
@@ -278,8 +371,10 @@ describe("repairMutableConfigPerms (#4538)", () => {
 
   it("does not apply to non-OpenClaw agents", () => {
     const apply = vi.fn();
-    const result = repairMutableConfigPerms(HERMES_TARGET, "mutable_default", apply);
+    const inspect = vi.fn(() => intactOpenClawInspection());
+    const result = repairMutableConfigPerms(HERMES_TARGET, "mutable_default", apply, inspect);
     expect(apply).not.toHaveBeenCalled();
+    expect(inspect).not.toHaveBeenCalled();
     expect(result.applied).toBe(false);
     if (!result.applied) expect(result.skipReason).toBe("agent");
   });

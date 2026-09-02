@@ -363,13 +363,16 @@ with tempfile.TemporaryDirectory() as tmp:
     os.mkdir(hermes_dir)
     config_path = os.path.join(hermes_dir, "config.yaml")
     env_path = os.path.join(hermes_dir, ".env")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     hash_path = os.path.join(tmp, "hermes.config-hash")
     with open(config_path, "wb") as handle:
         handle.write(b"model: one\\n")
     with open(env_path, "wb") as handle:
         handle.write(b"API_SERVER_PORT=18642\\n")
+    with open(fabric_path, "wb") as handle:
+        handle.write(b"{}\\n")
 
-    initial_hash, _config_snapshot, _env_snapshot = guard._hash_text(config_path, env_path)
+    initial_hash, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config_path, env_path)
     guard._write_hash(hash_path, initial_hash)
     before = os.stat(config_path)
     original_write_hash = guard._write_hash
@@ -415,7 +418,7 @@ with tempfile.TemporaryDirectory() as tmp:
       same_size: true,
       content: "model: two\n",
     });
-    expect(proof.error).toContain("refusing raced Hermes config/env path before hash refresh");
+    expect(proof.error).toContain("refusing raced Hermes sealed input before hash refresh");
   });
 
   it("writes strict and compatibility hashes from one stable input snapshot", () => {
@@ -431,12 +434,15 @@ with tempfile.TemporaryDirectory() as tmp:
     env_path = os.path.join(hermes_dir, ".env")
     strict_hash_path = os.path.join(tmp, "hermes.config-hash")
     compat_hash_path = os.path.join(hermes_dir, ".config-hash")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     with open(config_path, "w", encoding="utf-8") as handle:
         handle.write("model:\\n  default: test-model\\n")
     with open(env_path, "w", encoding="utf-8") as handle:
         handle.write("API_SERVER_PORT=18642\\n")
+    with open(fabric_path, "w", encoding="utf-8") as handle:
+        handle.write("{}\\n")
 
-    initial_hash, _config_snapshot, _env_snapshot = guard._hash_text(config_path, env_path)
+    initial_hash, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config_path, env_path)
     guard._write_hash(strict_hash_path, initial_hash)
     original_hash_text = guard._hash_text
     original_write_hash = guard._write_hash
@@ -500,12 +506,15 @@ with tempfile.TemporaryDirectory() as tmp:
     env_path = os.path.join(hermes_dir, ".env")
     strict_hash_path = os.path.join(tmp, "hermes.config-hash")
     compat_hash_path = os.path.join(hermes_dir, ".config-hash")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     with open(config_path, "w", encoding="utf-8") as handle:
         handle.write("model:\\n  default: test-model\\n")
     with open(env_path, "w", encoding="utf-8") as handle:
         handle.write(f"API_SERVER_KEY={secret}\\n")
+    with open(fabric_path, "w", encoding="utf-8") as handle:
+        handle.write("{}\\n")
 
-    initial_hash, _config_snapshot, _env_snapshot = guard._hash_text(config_path, env_path)
+    initial_hash, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config_path, env_path)
     guard._write_hash(strict_hash_path, initial_hash)
     guard._write_hash(compat_hash_path, initial_hash)
     with open(config_path, "w", encoding="utf-8") as handle:
@@ -565,12 +574,15 @@ with tempfile.TemporaryDirectory() as tmp:
     env_path = os.path.join(hermes_dir, ".env")
     strict_hash_path = os.path.join(tmp, "hermes.config-hash")
     compat_hash_path = os.path.join(hermes_dir, ".config-hash")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     with open(config_path, "w", encoding="utf-8") as handle:
         handle.write("model:\\n  default: old-model\\n")
     with open(env_path, "w", encoding="utf-8") as handle:
         handle.write("API_SERVER_PORT=18642\\n")
+    with open(fabric_path, "w", encoding="utf-8") as handle:
+        handle.write("{}\\n")
 
-    initial_hash, _config_snapshot, _env_snapshot = guard._hash_text(config_path, env_path)
+    initial_hash, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config_path, env_path)
     guard._write_hash(strict_hash_path, initial_hash)
     guard._write_hash(compat_hash_path, initial_hash)
     with open(strict_hash_path, encoding="utf-8") as handle:

@@ -192,6 +192,10 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("packages", "nemoclaw-openclaw", "node_modules", "excluded.js"));
     writeFixture(path.join("packages", "nemoclaw-openclaw", "coverage", "excluded.json"));
     writeFixture(path.join("packages", "nemoclaw-openclaw", ".e2e", "excluded.json"));
+    writeFixture(path.join("packages", "nemoclaw-fabric", "README.md"));
+    writeFixture(path.join("packages", "nemoclaw-fabric", "build-requirements.lock"));
+    writeFixture(path.join("packages", "nemoclaw-fabric", "pyproject.toml"));
+    writeFixture(path.join("packages", "nemoclaw-fabric", "src", "nemoclaw_fabric", "command.py"));
     fs.chmodSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw"), 0o700);
     fs.chmodSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin"), 0o700);
     fs.chmodSync(path.join(sourceRoot, "packages", "nemoclaw-openclaw", "plugin", "src"), 0o700);
@@ -348,6 +352,26 @@ describe("sandbox build context staging", () => {
     expect((fs.statSync(stagedHttpProxyPreload).mode & 0o777).toString(8)).toBe("644");
     for (const excludedDirectory of [".e2e", "coverage", "node_modules", "tests"]) {
       expect(fs.existsSync(path.join(stagedPackage, excludedDirectory))).toBe(false);
+    }
+  }
+
+  function expectStagedFabricRunnerPackage(buildCtx: string) {
+    const stagedPackage = path.join(buildCtx, "packages", "nemoclaw-fabric");
+    expect(fs.readdirSync(stagedPackage).sort()).toEqual([
+      "README.md",
+      "build-requirements.lock",
+      "pyproject.toml",
+      "src",
+    ]);
+    for (const relativePath of [
+      "README.md",
+      "build-requirements.lock",
+      "pyproject.toml",
+      path.join("src", "nemoclaw_fabric", "command.py"),
+    ]) {
+      expect((fs.statSync(path.join(stagedPackage, relativePath)).mode & 0o777).toString(8)).toBe(
+        "644",
+      );
     }
   }
 
@@ -636,6 +660,7 @@ describe("sandbox build context staging", () => {
       writeBuildContextFixture(sourceRoot);
       const { buildCtx } = stageOptimizedSandboxBuildContext(sourceRoot, tmpDir);
       expectStagedOpenClawPackageModes(buildCtx);
+      expectStagedFabricRunnerPackage(buildCtx);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -669,6 +694,7 @@ describe("sandbox build context staging", () => {
       writeBuildContextFixture(sourceRoot);
       const { buildCtx } = stageLegacySandboxBuildContext(sourceRoot, tmpDir);
       expectStagedOpenClawPackageModes(buildCtx);
+      expectStagedFabricRunnerPackage(buildCtx);
     } finally {
       fs.rmSync(sourceRoot, { recursive: true, force: true });
       fs.rmSync(tmpDir, { recursive: true, force: true });

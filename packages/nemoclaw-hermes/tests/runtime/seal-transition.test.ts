@@ -12,6 +12,7 @@ import {
   overwriteThroughOldFd,
   readFileSnapshot,
   readTextFileSnapshot,
+  renderManagedHermesConfig,
   runGuard,
   runShieldsTransactionAction,
   runShieldsTransition,
@@ -25,8 +26,10 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     const fixture = createRestartFixture();
     const configFd = fs.openSync(fixture.configPath, "r+");
     const envFd = fs.openSync(fixture.envPath, "r+");
+    const fabricFd = fs.openSync(fixture.fabricPath, "r+");
     const configBefore = fs.fstatSync(configFd);
     const envBefore = fs.fstatSync(envFd);
+    const fabricBefore = fs.fstatSync(fabricFd);
 
     try {
       const sealed = runGuard("seal-restart", fixture);
@@ -34,14 +37,17 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
 
       const configSealed = fs.statSync(fixture.configPath);
       const envSealed = fs.statSync(fixture.envPath);
+      const fabricSealed = fs.statSync(fixture.fabricPath);
       expect(configSealed.ino).not.toBe(configBefore.ino);
       expect(envSealed.ino).not.toBe(envBefore.ino);
+      expect(fabricSealed.ino).not.toBe(fabricBefore.ino);
       expect(configSealed.uid).toBe(process.getuid!());
       expect(envSealed.uid).toBe(process.getuid!());
       expect(mode(fixture.sandboxDir)).toBe(0o755);
       expect(mode(fixture.hermesDir)).toBe(0o3770);
       expect(mode(fixture.configPath)).toBe(0o444);
       expect(mode(fixture.envPath)).toBe(0o444);
+      expect(mode(fixture.fabricPath)).toBe(0o444);
       expect(configSealed.uid).toBe(fs.statSync(fixture.hermesDir).uid);
       expect(envSealed.uid).toBe(fs.statSync(fixture.hermesDir).uid);
       expect(mode(fixture.statePath)).toBe(0o600);
@@ -49,12 +55,15 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
 
       overwriteThroughOldFd(configFd, configBefore.size, "X");
       overwriteThroughOldFd(envFd, envBefore.size, "Y");
+      overwriteThroughOldFd(fabricFd, fabricBefore.size, "F");
 
       expect(readTextFileSnapshot(fixture.configPath)).toBe(fixture.trustedConfig);
       expect(readTextFileSnapshot(fixture.envPath)).toBe(fixture.trustedEnv);
+      expect(readTextFileSnapshot(fixture.fabricPath)).toBe(fixture.trustedFabric);
       expect(strictHashIsValid(fixture)).toBe(true);
       expect(fs.statSync(fixture.configPath).ino).toBe(configSealed.ino);
       expect(fs.statSync(fixture.envPath).ino).toBe(envSealed.ino);
+      expect(fs.statSync(fixture.fabricPath).ino).toBe(fabricSealed.ino);
 
       const unsealed = runGuard("unseal-restart", fixture);
       expect(unsealed.status, unsealed.stderr).toBe(0);
@@ -62,6 +71,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(mode(fixture.hermesDir)).toBe(0o3770);
       expect(mode(fixture.configPath)).toBe(0o640);
       expect(mode(fixture.envPath)).toBe(0o600);
+      expect(mode(fixture.fabricPath)).toBe(0o600);
       expect(fs.statSync(fixture.configPath).uid).toBe(configBefore.uid);
       expect(fs.statSync(fixture.configPath).gid).toBe(configBefore.gid);
       expect(fs.statSync(fixture.envPath).uid).toBe(envBefore.uid);
@@ -69,10 +79,12 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(fs.existsSync(fixture.statePath)).toBe(false);
       expect(readTextFileSnapshot(fixture.configPath)).toBe(fixture.trustedConfig);
       expect(readTextFileSnapshot(fixture.envPath)).toBe(fixture.trustedEnv);
+      expect(readTextFileSnapshot(fixture.fabricPath)).toBe(fixture.trustedFabric);
       expect(strictHashIsValid(fixture)).toBe(true);
     } finally {
       fs.closeSync(configFd);
       fs.closeSync(envFd);
+      fs.closeSync(fabricFd);
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
   });
@@ -81,9 +93,11 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     const fixture = createRestartFixture();
     const configFd = fs.openSync(fixture.configPath, "r+");
     const envFd = fs.openSync(fixture.envPath, "r+");
+    const fabricFd = fs.openSync(fixture.fabricPath, "r+");
     const compatFd = fs.openSync(fixture.compatHashPath, "r+");
     const configBefore = fs.fstatSync(configFd);
     const envBefore = fs.fstatSync(envFd);
+    const fabricBefore = fs.fstatSync(fabricFd);
     const compatBefore = fs.fstatSync(compatFd);
 
     try {
@@ -91,18 +105,22 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(locked.status, locked.stderr).toBe(0);
       expect(fs.statSync(fixture.configPath).ino).not.toBe(configBefore.ino);
       expect(fs.statSync(fixture.envPath).ino).not.toBe(envBefore.ino);
+      expect(fs.statSync(fixture.fabricPath).ino).not.toBe(fabricBefore.ino);
       expect(fs.statSync(fixture.compatHashPath).ino).not.toBe(compatBefore.ino);
       expect(mode(fixture.sandboxDir)).toBe(0o1775);
       expect(mode(fixture.hermesDir)).toBe(0o3770);
       expect(mode(fixture.configPath)).toBe(0o444);
       expect(mode(fixture.envPath)).toBe(0o444);
+      expect(mode(fixture.fabricPath)).toBe(0o444);
       expect(mode(fixture.compatHashPath)).toBe(0o444);
 
       overwriteThroughOldFd(configFd, configBefore.size, "X");
       overwriteThroughOldFd(envFd, envBefore.size, "Y");
+      overwriteThroughOldFd(fabricFd, fabricBefore.size, "F");
       overwriteThroughOldFd(compatFd, compatBefore.size, "Z");
       expect(readTextFileSnapshot(fixture.configPath)).toBe(fixture.trustedConfig);
       expect(readTextFileSnapshot(fixture.envPath)).toBe(fixture.trustedEnv);
+      expect(readTextFileSnapshot(fixture.fabricPath)).toBe(fixture.trustedFabric);
       expect(strictHashIsValid(fixture)).toBe(true);
 
       const mutable = runShieldsTransition(fixture, "mutable");
@@ -111,6 +129,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       expect(mode(fixture.hermesDir)).toBe(0o3770);
       expect(mode(fixture.configPath)).toBe(0o640);
       expect(mode(fixture.envPath)).toBe(0o640);
+      expect(mode(fixture.fabricPath)).toBe(0o600);
       expect(mode(fixture.compatHashPath)).toBe(0o640);
       expect(strictHashIsValid(fixture)).toBe(true);
       expect(fs.existsSync(fixture.statePath)).toBe(false);
@@ -121,6 +140,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     } finally {
       fs.closeSync(configFd);
       fs.closeSync(envFd);
+      fs.closeSync(fabricFd);
       fs.closeSync(compatFd);
       fs.rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -156,7 +176,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
       const competingWrite = runWriteConfig(
         fixture,
         expectedDigest,
-        "model:\n  default: must-not-interleave\n",
+        renderManagedHermesConfig("must-not-interleave"),
       );
       expect(competingWrite.status).not.toBe(0);
       expect(competingWrite.stderr).toContain("restart seal is already active");
@@ -320,6 +340,7 @@ describe.skipIf(process.platform === "win32")("Hermes mutable restart input seal
     fs.chmodSync(fixture.hermesDir, 0o755);
     fs.chmodSync(fixture.configPath, 0o444);
     fs.chmodSync(fixture.envPath, 0o444);
+    fs.chmodSync(fixture.fabricPath, 0o444);
     fs.chmodSync(fixture.compatHashPath, 0o444);
     let staleFd: number | undefined;
     try {

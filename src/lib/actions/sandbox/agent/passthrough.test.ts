@@ -215,8 +215,8 @@ describe("runAgentPassthrough", () => {
     expect(loadAgentMock).not.toHaveBeenCalled();
     expect(execMock).toHaveBeenCalledWith(
       "hermes-sandbox",
-      ["nemoclaw-fabric", "run", "--config", "/sandbox/.hermes/fabric.json", "Reply with PONG"],
-      { tty: false },
+      ["nemoclaw-fabric", "run", "--config", "/sandbox/.hermes/fabric.json", "--stdin"],
+      { stdinInput: "Reply with PONG", tty: false },
     );
   });
 
@@ -431,8 +431,8 @@ describe("runAgentPassthrough", () => {
 
     expect(execMock).toHaveBeenCalledWith(
       "openclaw-sandbox",
-      ["nemoclaw-fabric", "run", "--config", "/sandbox/.openclaw/fabric.json", "Reply with PONG"],
-      { tty: false },
+      ["nemoclaw-fabric", "run", "--config", "/sandbox/.openclaw/fabric.json", "--stdin"],
+      { stdinInput: "Reply with PONG", tty: false },
     );
   });
 
@@ -716,10 +716,40 @@ describe("runAgentPassthrough", () => {
         "run",
         "--config",
         "/sandbox/.deepagents/fabric.json",
-        "Reply with PONG",
+        "--stdin",
       ],
-      { tty: false },
+      { stdinInput: "Reply with PONG", tty: false },
     );
+  });
+
+  it("keeps a Fabric prompt out of argv and diagnostics while delivering exact stdin", async () => {
+    const sentinel = "private-prompt-sentinel-83b2f1";
+    const entry = { agent: "hermes" };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "hermes",
+      effectiveAgentId: "hermes",
+      definition: {
+        name: "hermes",
+        runtime: {
+          kind: "gateway",
+          interactive_command: "hermes",
+          headless_command: "nemoclaw-fabric run --config /sandbox/.hermes/fabric.json",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+    const { writes, proc } = makeProcMock();
+
+    await runAgentPassthrough("hermes-private", { extraArgs: [sentinel] }, { process: proc });
+
+    const lastCall = execMock.mock.calls.at(-1) as unknown as
+      | [string, string[], { stdinInput: string; tty: boolean }]
+      | undefined;
+    expect(lastCall?.[1]).not.toContain(sentinel);
+    expect(lastCall?.[2]).toEqual({ stdinInput: sentinel, tty: false });
+    expect(writes.join("\n")).not.toContain(sentinel);
   });
 
   it("propagates a headless terminal command failure from the sandbox exec path", async () => {

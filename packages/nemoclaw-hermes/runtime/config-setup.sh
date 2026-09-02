@@ -451,8 +451,12 @@ ensure_hermes_state_dir() {
 
 ensure_hermes_cross_uid_state_dir() {
   local state_name="${1:?Hermes state directory name required}"
+  # Gateway state defaults to the gateway identity. Callers that provision a
+  # sandbox-owned cross-UID boundary, such as Fabric artifacts, name it here.
+  local owner_name="${2:-gateway}"
   NEMOCLAW_HERMES_CONFIG_ROOT="$HERMES_DIR" \
     NEMOCLAW_HERMES_STATE_DIR_NAME="$state_name" \
+    NEMOCLAW_HERMES_STATE_DIR_OWNER="$owner_name" \
     python3 -I - <<'PYCROSSUIDDIR'
 import errno
 import grp
@@ -463,6 +467,7 @@ import sys
 
 root = os.environ["NEMOCLAW_HERMES_CONFIG_ROOT"]
 name = os.environ["NEMOCLAW_HERMES_STATE_DIR_NAME"]
+owner_name = os.environ["NEMOCLAW_HERMES_STATE_DIR_OWNER"]
 desired_mode = 0o2770
 
 
@@ -487,7 +492,7 @@ if stat.S_ISLNK(root_before.st_mode) or not stat.S_ISDIR(root_before.st_mode):
 open_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 open_flags |= getattr(os, "O_CLOEXEC", 0)
 root_fd = -1
-gateway_fd = -1
+state_fd = -1
 try:
     try:
         root_fd = os.open(root, open_flags)
@@ -501,7 +506,7 @@ try:
         fail(f"{root} changed while it was opened")
 
     try:
-        gateway_fd = os.open(name, open_flags, dir_fd=root_fd)
+        state_fd = os.open(name, open_flags, dir_fd=root_fd)
     except FileNotFoundError:
         try:
             os.mkdir(name, desired_mode, dir_fd=root_fd)
@@ -510,7 +515,7 @@ try:
         except OSError as exc:
             fail(f"{root}/{name} could not be created: {exc.strerror}")
         try:
-            gateway_fd = os.open(name, open_flags, dir_fd=root_fd)
+            state_fd = os.open(name, open_flags, dir_fd=root_fd)
         except OSError as exc:
             fail(f"{root}/{name} could not be opened after creation: {exc.strerror}")
     except OSError as exc:
@@ -527,23 +532,23 @@ try:
 
     if os.geteuid() == 0:
         try:
-            gateway_uid = pwd.getpwnam("gateway").pw_uid
+            owner_uid = pwd.getpwnam(owner_name).pw_uid
             sandbox_gid = grp.getgrnam("sandbox").gr_gid
         except KeyError as exc:
-            fail(f"gateway/sandbox account lookup failed: {exc}")
-        os.fchown(gateway_fd, gateway_uid, sandbox_gid)
-        os.fchmod(gateway_fd, desired_mode)
+            fail(f"{owner_name}/sandbox account lookup failed: {exc}")
+        os.fchown(state_fd, owner_uid, sandbox_gid)
+        os.fchmod(state_fd, desired_mode)
     else:
-        # OpenShell's non-root topology runs the gateway as the current user.
+        # OpenShell's non-root topology runs the workload as the current user.
         # Repair the mode when this user owns the directory. If an ordinary
-        # Linux image still has the root-prepared gateway owner, fchmod is
+        # Linux image still has the root-prepared requested owner, fchmod is
         # expected to fail and the exact existing mode is verified below.
         try:
-            os.fchmod(gateway_fd, desired_mode)
+            os.fchmod(state_fd, desired_mode)
         except PermissionError:
             pass
 
-    current = os.fstat(gateway_fd)
+    current = os.fstat(state_fd)
     if not stat.S_ISDIR(current.st_mode):
         fail(f"{root}/{name} is not a directory")
     if stat.S_IMODE(current.st_mode) != desired_mode:
@@ -553,19 +558,22 @@ try:
         )
 
     if os.geteuid() == 0:
-        allowed_uids = {gateway_uid}
+        allowed_uids = {owner_uid}
         expected_gid = sandbox_gid
     else:
         allowed_uids = {os.geteuid()}
+        expected_gid = os.getegid()
         try:
-            allowed_uids.add(pwd.getpwnam("gateway").pw_uid)
-            expected_gid = grp.getgrnam("sandbox").gr_gid
+            prepared_owner_uid = pwd.getpwnam(owner_name).pw_uid
+            allowed_uids.add(prepared_owner_uid)
+            if current.st_uid == prepared_owner_uid:
+                expected_gid = grp.getgrnam("sandbox").gr_gid
         except KeyError:
             # Host-side unit fixtures need not have the image's account pair.
-            # A deployed image always has both accounts; when the gateway
+            # A deployed image always has both accounts; when the requested
             # account is absent, current-user ownership and exact mode remain
             # the complete non-root topology contract.
-            expected_gid = None
+            pass
     if current.st_uid not in allowed_uids:
         fail(f"{root}/{name} has an unexpected owner uid {current.st_uid}")
     if expected_gid is not None and current.st_gid != expected_gid:
@@ -591,8 +599,8 @@ try:
     ):
         fail(f"{root} changed during repair")
 finally:
-    if gateway_fd >= 0:
-        os.close(gateway_fd)
+    if state_fd >= 0:
+        os.close(state_fd)
     if root_fd >= 0:
         os.close(root_fd)
 PYCROSSUIDDIR
@@ -806,6 +814,13 @@ repair_hermes_startup_layout() {
   # group-writable runtime and gateway parents even when the rest of the config
   # root is locked while Shields up is active or was wiped. The cron directory
   # contains cron job definitions and must remain sealed.
+  # The Fabric adapter writes artifacts as the sandbox identity. Provision its
+  # directory before checking the locked-root posture so the first Fabric turn
+  # after Shields up does not need to create a child beneath root-owned .hermes.
+  if ! ensure_hermes_cross_uid_state_dir fabric-artifacts sandbox; then
+    echo "[gateway] Hermes pre-launch layout repair failed at Fabric artifacts directory" >&2
+    return 1
+  fi
   if ! ensure_hermes_cross_uid_state_dir gateway; then
     echo "[gateway] Hermes pre-launch layout repair failed at gateway state directory" >&2
     return 1

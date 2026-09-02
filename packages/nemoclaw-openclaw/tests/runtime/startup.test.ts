@@ -198,6 +198,7 @@ describe("nemoclaw-start non-root fallback", () => {
       fs.mkdirSync(openclawDir, { recursive: true });
       fs.writeFileSync(path.join(openclawDir, "openclaw.json"), "{}\n", { mode: 0o644 });
       fs.writeFileSync(path.join(openclawDir, ".config-hash"), "hash\n", { mode: 0o644 });
+      fs.writeFileSync(path.join(openclawDir, "fabric.json"), "{}\n", { mode: 0o644 });
       fs.writeFileSync(
         scriptPath,
         ["#!/usr/bin/env bash", "set -euo pipefail", fn, "fix_openclaw_ownership"].join("\n"),
@@ -218,6 +219,9 @@ describe("nemoclaw-start non-root fallback", () => {
         ).toBe("660");
         expect((fs.statSync(path.join(openclawDir, ".config-hash")).mode & 0o777).toString(8)).toBe(
           "660",
+        );
+        expect((fs.statSync(path.join(openclawDir, "fabric.json")).mode & 0o777).toString(8)).toBe(
+          "600",
         );
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });

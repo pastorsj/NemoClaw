@@ -423,21 +423,25 @@ function managedOutputTargets(
   switch (profile.agent) {
     case "openclaw":
       files.add(path.join(root, "openclaw.json"));
+      files.add(path.join(root, "fabric.json"));
       files.add(path.join(root, ".config-hash"));
       break;
     case "hermes":
       files.add(path.join(root, "config.yaml"));
+      files.add(path.join(root, "fabric.json"));
       files.add(path.join(root, ".env"));
       files.add(path.join(root, ".config-hash"));
       break;
     case "langchain-deepagents-code":
       files.add(path.join(root, "config.toml"));
+      files.add(path.join(root, "fabric.json"));
       directories.add(path.join(root, ".state"));
       directories.add(path.join(root, "skills"));
       break;
     case "pi":
       directories.add(path.join(root, "agent"));
       files.add(path.join(root, "agent", "models.json"));
+      files.add(path.join(root, "agent", "fabric.json"));
       break;
   }
 

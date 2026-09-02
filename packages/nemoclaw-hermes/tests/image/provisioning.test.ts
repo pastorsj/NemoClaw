@@ -434,6 +434,7 @@ describe("Hermes sandbox provisioning", () => {
             "hooks",
             "image_cache",
             "audio_cache",
+            "fabric-artifacts",
             "platforms",
           ].every((dir) =>
             Object.is((fs.statSync(path.join(hermesDir, dir)).mode & 0o777).toString(8), "770"),

@@ -340,9 +340,38 @@ describe("agent definitions", () => {
   });
 
   it("derives protected configuration files from each agent manifest (#8006)", () => {
-    expect(loadAgent("hermes").configPaths.shieldsFiles).toEqual([".env"]);
-    expect(loadAgent("openclaw").configPaths.shieldsFiles).toEqual([]);
-    expect(loadAgent("langchain-deepagents-code").configPaths.shieldsFiles).toEqual([]);
+    expect(loadAgent("hermes").configPaths.shieldsFiles).toEqual([".env", "fabric.json"]);
+    expect(loadAgent("openclaw").configPaths.shieldsFiles).toEqual(["fabric.json"]);
+    expect(loadAgent("langchain-deepagents-code").configPaths.shieldsFiles).toEqual([
+      "fabric.json",
+    ]);
+  });
+
+  it("derives the mutable config access contract without naming a harness in core", () => {
+    const fixture = candidateQualificationEnvironment();
+    qualificationFixtures.push(fixture);
+    authority.digests.push(fixture.receiptDigest);
+
+    expect(loadAgent("pi", fixture.env).configPaths.mutableAccess).toBe("private");
+    expect(loadAgent("langchain-deepagents-code").configPaths.mutableAccess).toBe("private");
+    expect(loadAgent("openclaw").configPaths.mutableAccess).toBeNull();
+    expect(loadAgent("hermes").configPaths.mutableAccess).toBeNull();
+  });
+
+  it("rejects an unknown mutable config access contract", () => {
+    const agentName = `invalid-mutable-access-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "config:",
+        "  dir: /sandbox/.invalid",
+        "  config_file: config.json",
+        "  mutable_access: everyone",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/config\.mutable_access.*private.*shared/);
   });
 
   it("derives image state-lock-plan support from each agent manifest (#8006)", () => {
@@ -364,6 +393,7 @@ describe("agent definitions", () => {
   it.each([
     ["a scalar", "  shields_files: .env"],
     ["a non-string entry", "  shields_files:\n    - 42"],
+    ["a nested path", "  shields_files:\n    - runtime/fabric.json"],
   ])("rejects config.shields_files with %s", (_case, declaration) => {
     const agentName = `invalid-shields-files-${String(Date.now())}-${_case.replaceAll(" ", "-")}`;
     writeTempAgentManifest(

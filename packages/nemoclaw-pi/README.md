@@ -63,5 +63,7 @@ npm run test:fabric
 ```
 
 Run `npm run test:nemoclaw` inside an exact NemoClaw checkout to verify that core discovers the Pi
-package. `npm test` runs all three lanes. The in-tree overlay commands in
+package and to exercise the package adapter through that checkout's generic Fabric runner.
+`npm run test:fabric` stays checkout independent, while `npm run test:fabric:composed` names the
+exact-checkout boundary. `npm test` runs all three lanes. The in-tree overlay commands in
 [`packages/README.md`](../README.md) use package ID `pi` to rehearse a separate package checkout.

@@ -56,14 +56,17 @@ def snapshot(name, uid, gid, mode, flags=0):
 locked_pair = (
     snapshot("openclaw.json", 0, 0, 0o444),
     snapshot(".config-hash", 0, 0, 0o444),
+    snapshot("fabric.json", 0, 0, 0o444),
 )
 drifted_hash_pair = (
     locked_pair[0],
     snapshot(".config-hash", 1000, 1000, 0o660),
+    locked_pair[2],
 )
 writable_config_pair = (
     snapshot("openclaw.json", 1000, 1000, 0o660),
     drifted_hash_pair[1],
+    locked_pair[2],
 )
 
 def stub(name, result=None):
@@ -99,8 +102,8 @@ def snapshot_pair(*a, **k):
 g._snapshot_pair = snapshot_pair
 g._freeze = stub("freeze")
 g._repair_absent_hash_for_lock = stub("repair_hash")
-g._snapshot_raw_pair = stub("snapshot_raw", ("raw-a", "raw-b"))
-g._canonical_targets = stub("canonical", (("t-a", "t-b"), "digest"))
+g._snapshot_raw_pair = stub("snapshot_raw", ("raw-a", "raw-b", "raw-c"))
+g._canonical_targets = stub("canonical", (("t-a", "t-b", "t-c"), "digest"))
 g._install_stored_pair = stub("install")
 g._commit_locked_dirs = stub("commit")
 g._force_fail_closed_lock = stub("fail_closed", [])
@@ -131,14 +134,14 @@ elif scenario == "unsafe-file-posture-reraised":
     check(code == "config-not-locked", "expected unsafe posture rejection, got %r" % code)
     check("install" not in ran, "must not re-seal an unsafe file posture")
 elif scenario == "classifies-only-known-hash-drift":
-    locked_config, drifted_hash = drifted_hash_pair
-    check(classify_resealable_drift((locked_config, drifted_hash), identity), "expected known drift")
+    locked_config, drifted_hash, locked_fabric = drifted_hash_pair
+    check(classify_resealable_drift((locked_config, drifted_hash, locked_fabric), identity), "expected known drift")
     writable_config = snapshot("openclaw.json", 1000, 1000, 0o660)
-    check(not classify_resealable_drift((writable_config, drifted_hash), identity), "writable config")
+    check(not classify_resealable_drift((writable_config, drifted_hash, locked_fabric), identity), "writable config")
     unexpected_hash = snapshot(".config-hash", 0, 0, 0o644)
-    check(not classify_resealable_drift((locked_config, unexpected_hash), identity), "unknown hash")
+    check(not classify_resealable_drift((locked_config, unexpected_hash, locked_fabric), identity), "unknown hash")
     flagged_hash = snapshot(".config-hash", 1000, 1000, 0o660, g.FS_IMMUTABLE_FL)
-    check(not classify_resealable_drift((locked_config, flagged_hash), identity), "flagged hash")
+    check(not classify_resealable_drift((locked_config, flagged_hash, locked_fabric), identity), "flagged hash")
 elif scenario == "content-drift-fails-closed":
     g._snapshot_pair = raising("snapshot_pair", "config-hash-mismatch")
     code = None

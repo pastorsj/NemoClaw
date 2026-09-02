@@ -43,6 +43,40 @@ describe("timer authorization proof", () => {
     vi.unstubAllEnvs();
   });
 
+  it("preserves legacy authority digests and binds the protected-file list", () => {
+    const legacyMarker: TimerMarker = {
+      pid: 123,
+      sandboxName: "alpha",
+      snapshotPath: "/tmp/snapshot.yaml",
+      restoreAt: "2026-01-01T00:00:00.000Z",
+      processToken: "f".repeat(32),
+      timerProcessStartIdentity: "timer-start-identity",
+    };
+    const protectedMarker: TimerMarker = {
+      ...legacyMarker,
+      configPath: "/sandbox/.agent/config.json",
+      configDir: "/sandbox/.agent",
+      protectedFiles: ["config.json", ".config-hash", "fabric.json"],
+    };
+
+    expect(timerAuthoritySha256(legacyMarker)).toBe(
+      "c9948a9d3d02ad4ad7d31a0efac14bf9acbb7b671edb7622f0a1c5c2e70f2c0b",
+    );
+    expect(timerAuthoritySha256(protectedMarker)).not.toBe(timerAuthoritySha256(legacyMarker));
+    expect(
+      timerAuthoritySha256({
+        ...protectedMarker,
+        protectedFiles: ["config.json", "fabric.json", ".config-hash"],
+      }),
+    ).not.toBe(timerAuthoritySha256(protectedMarker));
+    expect(timerAuthoritySha256({ ...protectedMarker, mutableAccess: "private" })).not.toBe(
+      timerAuthoritySha256(protectedMarker),
+    );
+    expect(timerAuthoritySha256({ ...protectedMarker, mutableAccess: "shared" })).not.toBe(
+      timerAuthoritySha256({ ...protectedMarker, mutableAccess: "private" }),
+    );
+  });
+
   it("rejects a proof replaced while it is read", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "timer-authorization-race-"));
     vi.stubEnv("HOME", home);

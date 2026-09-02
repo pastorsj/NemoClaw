@@ -35,10 +35,12 @@ import {
   resumeSupervisorIfPaused,
 } from "../fixtures/shields-failed-startup.ts";
 import { stripAnsi } from "./json-envelope.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const CONFIG_PATH = "/sandbox/.openclaw/openclaw.json";
 const CONFIG_DIR = path.dirname(CONFIG_PATH);
 const CONFIG_HASH_PATH = `${CONFIG_DIR}/.config-hash`;
+const FABRIC_CONFIG_PATH = `${CONFIG_DIR}/fabric.json`;
 const CONFIG_GUARD_PATH = "/usr/local/lib/nemoclaw/openclaw-config-guard.py";
 const STATE_LOCK_PLAN_PATH = "/usr/local/share/nemoclaw/state-lock-plan.json";
 const STARTUP_MARKER_PATHS = [
@@ -154,6 +156,19 @@ async function statPath(
   expect(result.exitCode, resultText(result)).toBe(0);
   const parsed = parseModeOwner(result.stdout);
   return { ...parsed, raw: result.stdout.trim() };
+}
+
+async function expectCanonicalProtectedConfigHash(
+  sandbox: SandboxClient,
+  artifactName: string,
+): Promise<void> {
+  const result = await sandboxShell(
+    sandbox,
+    `cd ${CONFIG_DIR} && awk 'NR == 1 { ok = ($2 == "openclaw.json") } NR == 2 { ok = ok && ($2 == "fabric.json") } END { exit !(NR == 2 && ok) }' .config-hash && sha256sum -c .config-hash --status && echo OK`,
+    { artifactName },
+  );
+  expect(result.exitCode, resultText(result)).toBe(0);
+  expect(result.stdout.trim()).toBe("OK");
 }
 
 async function collectStartFailureDockerLogs(
@@ -543,11 +558,11 @@ test(
       e2ePhases: [
         "confirm Docker and onboard the shields sandbox",
         "establish the mutable unified OpenClaw config",
-        "lock config and workspace and inspect redaction",
+        "lock config and workspace, inspect redaction, and run the public Fabric turn",
         "restart OpenClaw with shields up",
         "detect host-root config drift and refuse resealing",
         "re-seal a perms-only .config-hash drift instead of failing closed",
-        "unlock shields and inspect the audit trail",
+        "unlock shields, run the public Fabric turn, and inspect the audit trail",
         "restart OpenClaw with shields down",
         "recover shields after a dead restore timer",
         "reject duplicate shields transitions",
@@ -567,11 +582,13 @@ test(
         "fresh mutable-default shields down preserves the mutable config posture",
         "host policy edits survive interactive and timer Shields restoration",
         "shields up locks config/workspace and config get redacts secrets",
+        "the public Fabric adapter completes a clean agent turn with shields up",
         "start restores a stopped OpenClaw sandbox while shields are up",
         "empty sealed credentials allow traversal but deny sandbox identity access",
         "host-root chmod-write-chmod tamper is detected as content drift",
         "a perms-only .config-hash drift is re-sealed by shields up, not failed closed",
         "shields down restores mutable modes and records audit JSONL",
+        "the public Fabric adapter completes a clean agent turn with shields down",
         "start restores a stopped OpenClaw sandbox while shields are down",
         "dead auto-restore timer inline recovery re-locks config and .config-hash",
         "double shields-up/down operations are rejected",
@@ -698,6 +715,9 @@ test(
     const configDefault = await statPath(sandbox, CONFIG_PATH, "phase-2-config-perms-default");
     expect(configDefault.mode).toBe("660");
     expect(configDefault.owner).toBe("sandbox:sandbox");
+    expect(
+      await statPath(sandbox, FABRIC_CONFIG_PATH, "phase-2-fabric-config-perms-default"),
+    ).toMatchObject({ mode: "600", owner: "sandbox:sandbox" });
     const dirDefault = await statPath(sandbox, CONFIG_DIR, "phase-2-config-dir-perms-default");
     expect(dirDefault.mode).toBe("2770");
     expect(dirDefault.owner).toBe("sandbox:sandbox");
@@ -747,7 +767,7 @@ test(
     expect(gatewayWrite.exitCode, resultText(gatewayWrite)).toBe(0);
     const refreshHash = await sandboxShell(
       sandbox,
-      `cd ${CONFIG_DIR} && sha256sum openclaw.json >.config-hash`,
+      `cd ${CONFIG_DIR} && sha256sum openclaw.json fabric.json >.config-hash`,
       { artifactName: "phase-2b-refresh-hash-after-gateway-write" },
     );
     expect(refreshHash.exitCode, resultText(refreshHash)).toBe(0);
@@ -810,7 +830,7 @@ test(
     expect(layoutProbe.exitCode, resultText(layoutProbe)).toBe(0);
     expect(resultText(layoutProbe).trim()).toBe("");
 
-    progress.phase("lock config and workspace and inspect redaction");
+    progress.phase("lock config and workspace, inspect redaction, and run the public Fabric turn");
     const shieldsUp = await runNemoclaw(host, [SANDBOX_NAME, "shields", "up"], {
       artifactName: "phase-3-shields-up",
     });
@@ -893,6 +913,21 @@ test(
     });
     expect(statusUp.exitCode, resultText(statusUp)).toBe(0);
     expect(statusUp.stdout).toContain("Shields: UP");
+    await expectCanonicalProtectedConfigHash(sandbox, "phase-5-fabric-config-hash-up");
+    const fabricAfterShieldsUp = await runPublicFabricTurn({
+      agent: "openclaw",
+      artifacts,
+      env: commandEnv(),
+      host,
+      lifecyclePhase: "after-shields-up",
+      redactionValues: [apiKey],
+      sandbox,
+      sandboxName: SANDBOX_NAME,
+    });
+    expect(fabricAfterShieldsUp).toMatchObject({
+      configMode: "0444",
+      configOwner: "root:root",
+    });
 
     progress.phase("restart OpenClaw with shields up");
     await expectStopStartRecovery(host, sandbox, "UP", "phase-5a-shields-up-start-recovery", [
@@ -1029,7 +1064,7 @@ test(
     expect(statusResealed.exitCode, resultText(statusResealed)).toBe(0);
     expect(statusResealed.stdout).toContain("Shields: UP (lockdown active)");
 
-    progress.phase("unlock shields and inspect the audit trail");
+    progress.phase("unlock shields, run the public Fabric turn, and inspect the audit trail");
     const shieldsDown = await runNemoclaw(
       host,
       [
@@ -1066,6 +1101,21 @@ test(
     expect(statusDown.stdout).toContain("Shields: DOWN");
     expect(statusDown.stdout).toContain("E2E shields lifecycle test");
     expect(statusDown.stdout).toMatch(/Auto-lockdown in:|remaining/i);
+    await expectCanonicalProtectedConfigHash(sandbox, "phase-7-fabric-config-hash-down");
+    const fabricAfterShieldsDown = await runPublicFabricTurn({
+      agent: "openclaw",
+      artifacts,
+      env: commandEnv(),
+      host,
+      lifecyclePhase: "after-shields-down",
+      redactionValues: [apiKey],
+      sandbox,
+      sandboxName: SANDBOX_NAME,
+    });
+    expect(fabricAfterShieldsDown).toMatchObject({
+      configMode: "0600",
+      configOwner: "sandbox:sandbox",
+    });
 
     progress.phase("restart OpenClaw with shields down");
     await expectStopStartRecovery(host, sandbox, "DOWN", "phase-7a-shields-down-start-recovery", [
@@ -1170,10 +1220,35 @@ test(
       "phase-9-config-hash-perms-after-dead-timer-inline-restore",
     );
     expect(hashTimer).toMatchObject({ mode: "444", owner: "root:root" });
+    const fabricTimer = await statPath(
+      sandbox,
+      FABRIC_CONFIG_PATH,
+      "phase-9-fabric-config-perms-after-dead-timer-inline-restore",
+    );
+    expect(fabricTimer).toMatchObject({ mode: "444", owner: "root:root" });
+    await expectCanonicalProtectedConfigHash(
+      sandbox,
+      "phase-9-fabric-config-hash-after-dead-timer-inline-restore",
+    );
+    const fabricAfterDeadTimerRestore = await runPublicFabricTurn({
+      agent: "openclaw",
+      artifacts,
+      env: commandEnv(),
+      host,
+      lifecyclePhase: "after-shields-up",
+      redactionValues: [apiKey],
+      sandbox,
+      sandboxName: SANDBOX_NAME,
+    });
+    expect(fabricAfterDeadTimerRestore).toMatchObject({
+      configMode: "0444",
+      configOwner: "root:root",
+    });
     const stateAfterTimer = JSON.parse(fs.readFileSync(STATE_FILE(SANDBOX_NAME), "utf8"));
     expect(stateAfterTimer.fileHashes).toMatchObject({
       [CONFIG_PATH]: expect.any(String),
       [CONFIG_HASH_PATH]: expect.any(String),
+      [FABRIC_CONFIG_PATH]: expect.any(String),
     });
     const policyAfterTimerRestore = await sandbox.openshell(
       ["policy", "get", "--full", SANDBOX_NAME],
@@ -1379,10 +1454,12 @@ test(
         mutableDefault: true,
         documentedExecDoctorPreservesGatewayWrites: true,
         shieldsUpLock: true,
+        publicFabricTurnWithShieldsUp: true,
         configGetRedaction: true,
         contentDriftDetection: true,
         permsOnlyDriftReseal: true,
         shieldsDownMutableRestore: true,
+        publicFabricTurnWithShieldsDown: true,
         auditTrail: true,
         deadTimerInlineAutoRestore: true,
         doubleOperationRejection: true,

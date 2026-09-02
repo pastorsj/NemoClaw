@@ -61,6 +61,7 @@ import {
   registerPublicNvidiaSwitchProvider,
   requirePublicNvidiaSwitchKey,
 } from "./public-nvidia-switch-provider.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-oc-inf-switch";
 const SWITCH_PROVIDER = process.env.NEMOCLAW_SWITCH_PROVIDER ?? PUBLIC_NVIDIA_SWITCH_PROVIDER;
@@ -877,7 +878,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       "prepare the switched provider and endpoint",
       "switch the route and verify restart semantics",
       "inspect route configuration and recorded state",
-      "prove inference.local and OpenClaw agent turns",
+      "prove inference.local, OpenClaw, and public Fabric agent turns",
       "apply sandbox retention and record the result",
     ],
   },
@@ -900,6 +901,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       "registry and onboard session record the switched provider/model",
       "sandbox inference.local returns PONG from the switched model",
       "openclaw agent answers through the switched inference route",
+      "the public Fabric adapter answers through the switched inference route and cleans up",
     ],
   });
 
@@ -1067,7 +1069,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
   await assertOpenClawConfig(sandbox, home);
   await assertRegistryAndSession(home, { mockProvider });
 
-  progress.phase("prove inference.local and OpenClaw agent turns");
+  progress.phase("prove inference.local, OpenClaw, and public Fabric agent turns");
   const inference = await checkSandboxInference(sandbox, artifacts, home);
   if (inference !== "ok") {
     await artifacts.target.complete({
@@ -1089,6 +1091,17 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
     });
     skip(agentTurn.skipped);
   }
+
+  await runPublicFabricTurn({
+    agent: "openclaw",
+    artifacts,
+    env: commandEnv(home),
+    host,
+    lifecyclePhase: "after-inference-switch",
+    redactionValues,
+    sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
 
   progress.phase("apply sandbox retention and record the result");
   if (process.env.NEMOCLAW_E2E_KEEP_SANDBOX !== "1") {
@@ -1113,6 +1126,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
       inferenceLocalPong: true,
       inferenceLocalModelMatched: true,
       openClawAgentPong: true,
+      publicFabricAgentPongAfterInferenceSwitch: true,
     },
   });
 });

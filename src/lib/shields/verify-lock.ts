@@ -24,6 +24,7 @@ export type LockTarget = {
   configPath: string;
   configDir: string;
   sensitiveFiles?: string[];
+  mutableAccess?: "private" | "shared" | null;
 };
 
 export type VerifyShieldsLockOptions = {
@@ -106,7 +107,8 @@ export function verifyShieldsLockState(
 
   if (
     options.verifyParentProtection &&
-    (target.agentName === "hermes" ||
+    (target.mutableAccess !== undefined ||
+      target.agentName === "hermes" ||
       target.agentName === "openclaw" ||
       target.agentName === "langchain-deepagents-code")
   ) {

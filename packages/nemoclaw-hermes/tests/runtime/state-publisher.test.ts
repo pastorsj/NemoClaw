@@ -50,8 +50,9 @@ def write_installed_plan(path):
     os.chmod(path, 0o444)
 
 def marker(nonce="d" * 64, selectors=None, provider_id="docker"):
-    expected = ["path:.config-hash", "path:.env", "path:config.yaml", "path:pairing",
-                "path:plugins", "path:workspace", "prefix:profile-", "prefix:secret-"]
+    expected = ["path:.config-hash", "path:.env", "path:config.yaml", "path:fabric.json",
+                "path:pairing", "path:plugins", "path:workspace", "prefix:profile-",
+                "prefix:secret-"]
     expected.sort(key=lambda value: value.encode())
     selected = selectors or [
         ({"kind": "path", "path": value.removeprefix("path:")}
@@ -663,6 +664,7 @@ describe("Hermes runtime state mutation publisher", () => {
           expect.stringMatching(/\/sandbox\/\.hermes\/\.config-hash$/),
           expect.stringMatching(/\/sandbox\/\.hermes\/\.env$/),
           expect.stringMatching(/\/sandbox\/\.hermes\/config\.yaml$/),
+          expect.stringMatching(/\/sandbox\/\.hermes\/fabric\.json$/),
         ],
       },
     };

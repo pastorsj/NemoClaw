@@ -48,10 +48,13 @@ describe("runtime model override (#759)", () => {
       }),
     );
     const configPath = path.join(openclawDir, "openclaw.json");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const hashPath = path.join(openclawDir, ".config-hash");
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
     fs.writeFileSync(hashPath, "oldhash\n");
     fs.chmodSync(openclawDir, 0o2770);
     fs.chmodSync(configPath, 0o660);
+    fs.chmodSync(fabricPath, 0o600);
     fs.chmodSync(hashPath, 0o660);
 
     const helperFns = [
@@ -86,6 +89,7 @@ describe("runtime model override (#759)", () => {
       dir: fs.statSync(openclawDir).mode & 0o7777,
       config: fs.statSync(configPath).mode & 0o777,
       hash: fs.statSync(hashPath).mode & 0o777,
+      fabric: fs.statSync(fabricPath).mode & 0o777,
     };
     fs.rmSync(root, { recursive: true, force: true });
     return { result, config, hash, modes };
@@ -112,6 +116,7 @@ describe("runtime model override (#759)", () => {
       reasoning: true,
     });
     expect(hash).toContain("openclaw.json");
+    expect(hash).toContain("fabric.json");
   });
 
   it("restores mutable config permissions after successful overrides", () => {
@@ -123,6 +128,7 @@ describe("runtime model override (#759)", () => {
     expect(modes.dir).toBe(0o2770);
     expect(modes.config).toBe(0o660);
     expect(modes.hash).toBe(0o660);
+    expect(modes.fabric).toBe(0o600);
   });
 
   it.each([
@@ -191,10 +197,13 @@ describe("runtime CORS origin override (#719)", () => {
       JSON.stringify({ gateway: { controlUi: { allowedOrigins: ["http://127.0.0.1:18789"] } } }),
     );
     const configPath = path.join(openclawDir, "openclaw.json");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const hashPath = path.join(openclawDir, ".config-hash");
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
     fs.writeFileSync(hashPath, "oldhash\n");
     fs.chmodSync(openclawDir, 0o2770);
     fs.chmodSync(configPath, 0o660);
+    fs.chmodSync(fabricPath, 0o600);
     fs.chmodSync(hashPath, 0o660);
 
     const helperFns = [
@@ -237,6 +246,7 @@ describe("runtime CORS origin override (#719)", () => {
     expect(result.status).toBe(0);
     expect(config.gateway.controlUi.allowedOrigins).toContain("https://chat.example.test");
     expect(hash).toContain("openclaw.json");
+    expect(hash).toContain("fabric.json");
   });
 
   it("rejects invalid CORS origins without mutating config", () => {

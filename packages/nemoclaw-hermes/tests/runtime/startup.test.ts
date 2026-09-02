@@ -621,12 +621,12 @@ function runHermesGatewayRuntimeCleanup(opts: {
       return [entry, entryMode];
     };
     const requiredDirs = Object.fromEntries(
-      "gateway runtime cron logs logs/curator hooks image_cache audio_cache"
+      "gateway runtime cron logs logs/curator hooks image_cache audio_cache fabric-artifacts"
         .split(" ")
         .map((entry) => modeEntry(entry, 0o777)),
     );
     const requiredDirFullModes = Object.fromEntries(
-      ["gateway", "runtime", "cron", "logs", "logs/curator"].map((entry) =>
+      ["gateway", "runtime", "cron", "logs", "logs/curator", "fabric-artifacts"].map((entry) =>
         modeEntry(entry, 0o7777),
       ),
     );
@@ -657,6 +657,10 @@ function runHermesGatewayRuntimeCleanup(opts: {
       ? (fs.statSync(envFilePath).mode & 0o777).toString(8)
       : "missing";
     const envFileContent = fs.existsSync(envFilePath) ? fs.readFileSync(envFilePath, "utf-8") : "";
+    const fabricArtifactsPath = path.join(hermesHome, "fabric-artifacts");
+    const fabricArtifactsStat = fs.existsSync(fabricArtifactsPath)
+      ? fs.statSync(fabricArtifactsPath)
+      : null;
     return {
       result,
       killLog: fs.existsSync(killLog) ? fs.readFileSync(killLog, "utf-8") : "",
@@ -678,6 +682,9 @@ function runHermesGatewayRuntimeCleanup(opts: {
       configYamlContent,
       envFileMode,
       envFileContent,
+      fabricArtifactsOwner: fabricArtifactsStat
+        ? { uid: fabricArtifactsStat.uid, gid: fabricArtifactsStat.gid }
+        : null,
     };
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -803,6 +810,9 @@ describe("packages/nemoclaw-hermes/start.sh runtime shell env", () => {
     expect(run.envFileContent).toContain(`export HERMES_HOME="${run.hermesHome}"`);
     expect(run.envFileContent).toContain(
       'export HERMES_LAZY_INSTALL_TARGET="/sandbox/.hermes/lazy-packages"',
+    );
+    expect(run.envFileContent).toContain(
+      'export HERMES_FABRIC_API_KEY="nemoclaw-managed-inference"',
     );
     expect(run.envFileContent).toContain('export HERMES_TUI_DIR="/opt/hermes/ui-tui"');
     expect(run.envFileContent).not.toContain("AWS_EC2_METADATA_DISABLED");
@@ -1233,6 +1243,7 @@ describe("packages/nemoclaw-hermes/start.sh gateway runtime cleanup", () => {
       hooks: "770",
       image_cache: "770",
       audio_cache: "770",
+      "fabric-artifacts": "770",
     });
     expect(run.requiredDirFullModes).toMatchObject({
       gateway: "2770",
@@ -1240,6 +1251,7 @@ describe("packages/nemoclaw-hermes/start.sh gateway runtime cleanup", () => {
       cron: "2770",
       logs: "2770",
       "logs/curator": "2770",
+      "fabric-artifacts": "2770",
     });
     expect(run.agentLogMode).toBe("660");
     expect(run.historyKind).toBe("regular");
@@ -1302,12 +1314,14 @@ describe("packages/nemoclaw-hermes/start.sh gateway runtime cleanup", () => {
       hooks: "missing",
       image_cache: "missing",
       audio_cache: "missing",
+      "fabric-artifacts": "770",
     });
     expect(run.historyKind).toBe("regular");
     expect(run.requiredDirFullModes).toMatchObject({
       gateway: "2770",
       runtime: "2770",
       cron: "755",
+      "fabric-artifacts": "2770",
     });
     expect(run.historyMode).toBe("660");
     expect(run.historyContent).toBe("");
@@ -1317,6 +1331,18 @@ describe("packages/nemoclaw-hermes/start.sh gateway runtime cleanup", () => {
     expect(run.result.stderr).toContain(
       "Hermes layout repair limited to history file because config root is locked",
     );
+  });
+
+  it("provisions sandbox-owned Fabric artifacts before a locked Hermes start", () => {
+    const run = runHermesGatewayRuntimeCleanup({ lockedConfigRoot: true });
+
+    expect(run.result.status).toBe(0);
+    expect(run.requiredDirs["fabric-artifacts"]).toBe("770");
+    expect(run.requiredDirFullModes["fabric-artifacts"]).toBe("2770");
+    expect(run.fabricArtifactsOwner).toEqual({
+      uid: process.getuid?.(),
+      gid: process.getgid?.(),
+    });
   });
 
   it("fails Hermes startup when the locked-root history path is a symlink and does not write through", () => {

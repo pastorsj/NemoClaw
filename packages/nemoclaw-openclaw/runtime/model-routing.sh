@@ -31,10 +31,11 @@ apply_model_override() {
   fi
 
   local config_file="/sandbox/.openclaw/openclaw.json"
+  local fabric_file="/sandbox/.openclaw/fabric.json"
   local hash_file="/sandbox/.openclaw/.config-hash"
 
-  # A shields-up pair is a host-sealed trust anchor. Startup/restart may read
-  # it, but must never temporarily chmod or rewrite it behind the host's
+  # A shields-up protected-config set is a host-sealed trust anchor.
+  # Startup/restart may read it, but must never temporarily chmod or rewrite it behind the host's
   # persisted content seal. Apply host overrides after shields-down instead.
   if [ "$(openclaw_config_dir_owner "$(dirname "$config_file")")" = "root" ]; then
     printf '[config] Shields are up; deferring model/inference overrides until config is mutable\n' >&2
@@ -43,8 +44,12 @@ apply_model_override() {
 
   # SECURITY: Refuse to write through symlinks to prevent symlink-following attacks.
   # Legacy-layout migration rejects symlinked config paths before overrides; guard here too.
-  if [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing model override — config or hash path is a symlink\n' >&2
+  if [ -L "$config_file" ] || [ -L "$fabric_file" ] || [ -L "$hash_file" ]; then
+    printf '[SECURITY] Refusing model override — protected config path is a symlink\n' >&2
+    return 1
+  fi
+  if [ ! -f "$config_file" ] || [ ! -f "$fabric_file" ]; then
+    printf '[SECURITY] Refusing model override — protected config file is missing or not regular\n' >&2
     return 1
   fi
 
@@ -163,7 +168,7 @@ PYOVERRIDE
 
   if [ "$_write_rc" -eq 0 ]; then
     # Recompute config hash so integrity check passes on next startup
-    if (cd /sandbox/.openclaw && sha256sum openclaw.json >"$hash_file"); then
+    if (cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json >"$hash_file"); then
       printf '[SECURITY] Config hash recomputed after model override\n' >&2
     else
       _write_rc=$?
@@ -209,6 +214,7 @@ reconcile_agent_model_with_provider() {
   fi
 
   local config_file="/sandbox/.openclaw/openclaw.json"
+  local fabric_file="/sandbox/.openclaw/fabric.json"
   local hash_file="/sandbox/.openclaw/.config-hash"
 
   [ -f "$config_file" ] || return 0
@@ -218,7 +224,10 @@ reconcile_agent_model_with_provider() {
     return 0
   fi
 
-  if [ -L "$config_file" ] || [ -L "$hash_file" ]; then
+  if [ -L "$config_file" ] || [ -L "$fabric_file" ] || [ -L "$hash_file" ]; then
+    return 0
+  fi
+  if [ ! -f "$fabric_file" ]; then
     return 0
   fi
 
@@ -347,7 +356,7 @@ with open(config_file, "w") as f:
 PYRECONCILE_WRITE
 
   if [ "$_write_rc" -eq 0 ]; then
-    if (cd /sandbox/.openclaw && sha256sum openclaw.json >"$hash_file"); then
+    if (cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json >"$hash_file"); then
       printf '[SECURITY] Config hash recomputed after agent identity reconciliation\n' >&2
     else
       _write_rc=$?
@@ -374,6 +383,7 @@ apply_cors_override() {
   fi
 
   local config_file="/sandbox/.openclaw/openclaw.json"
+  local fabric_file="/sandbox/.openclaw/fabric.json"
   local hash_file="/sandbox/.openclaw/.config-hash"
 
   if [ "$(openclaw_config_dir_owner "$(dirname "$config_file")")" = "root" ]; then
@@ -381,8 +391,12 @@ apply_cors_override() {
     return 0
   fi
 
-  if [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing CORS override — config or hash path is a symlink\n' >&2
+  if [ -L "$config_file" ] || [ -L "$fabric_file" ] || [ -L "$hash_file" ]; then
+    printf '[SECURITY] Refusing CORS override — protected config path is a symlink\n' >&2
+    return 1
+  fi
+  if [ ! -f "$config_file" ] || [ ! -f "$fabric_file" ]; then
+    printf '[SECURITY] Refusing CORS override — protected config file is missing or not regular\n' >&2
     return 1
   fi
 
@@ -425,7 +439,7 @@ with open(config_file, "w") as f:
 PYCORS
 
   if [ "$_write_rc" -eq 0 ]; then
-    if (cd /sandbox/.openclaw && sha256sum openclaw.json >"$hash_file"); then
+    if (cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json >"$hash_file"); then
       printf '[config] Config hash recomputed after CORS override\n' >&2
     else
       _write_rc=$?
@@ -439,6 +453,7 @@ PYCORS
 
 refresh_openclaw_provider_placeholders() {
   local config_file="/sandbox/.openclaw/openclaw.json"
+  local fabric_file="/sandbox/.openclaw/fabric.json"
   local hash_file="/sandbox/.openclaw/.config-hash"
   [ -f "$config_file" ] || return 0
 
@@ -608,8 +623,12 @@ PYPLACEHOLDERKEYS
       "$_extras_accepted" "$_accepted_extra_keys" >&2
   fi
 
-  if [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing provider placeholder refresh — config or hash path is a symlink\n' >&2
+  if [ -L "$config_file" ] || [ -L "$fabric_file" ] || [ -L "$hash_file" ]; then
+    printf '[SECURITY] Refusing provider placeholder refresh — protected config path is a symlink\n' >&2
+    return 1
+  fi
+  if [ ! -f "$fabric_file" ]; then
+    printf '[SECURITY] Refusing provider placeholder refresh — Fabric config is missing or not regular\n' >&2
     return 1
   fi
 
@@ -760,7 +779,7 @@ PYPLACEHOLDERS
     local _refreshed_keys
     _refreshed_keys="$(printf '%s\n' "$_placeholder_report" | sed -n 's/^refreshed=//p' | tail -n 1)"
     if [ -n "$_refreshed_keys" ]; then
-      if (cd /sandbox/.openclaw && sha256sum openclaw.json >"$hash_file"); then
+      if (cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json >"$hash_file"); then
         printf '[config] Refreshed provider placeholders from OpenShell runtime env: %s\n' "$_refreshed_keys" >&2
       else
         _write_rc=$?

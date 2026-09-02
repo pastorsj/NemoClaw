@@ -22,6 +22,8 @@ export interface ShieldsTimerMarker {
   agentName?: string;
   configPath?: string;
   configDir?: string;
+  protectedFiles?: readonly string[];
+  mutableAccess?: "private" | "shared";
   leaseOwnerPid?: number;
   leaseOwnerStartIdentity?: string;
 }
@@ -33,6 +35,80 @@ export interface ShieldsTimerRecoveryCandidate {
 }
 
 const MAX_SHIELDS_TIMER_MARKER_BYTES = 64 * 1024;
+const MAX_SHIELDS_TIMER_PROTECTED_FILES = 128;
+const SANDBOX_CONFIG_ROOT = "/sandbox/";
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/u;
+
+interface ShieldsTimerProtectedFileAuthority {
+  readonly configPath?: unknown;
+  readonly configDir?: unknown;
+  readonly protectedFiles?: unknown;
+}
+
+/** Resolve one marker's canonical config-relative file authority below /sandbox. */
+export function resolveShieldsTimerProtectedFilePaths(
+  marker: ShieldsTimerProtectedFileAuthority,
+): string[] | null {
+  const { configPath, configDir, protectedFiles } = marker;
+  if (
+    typeof configPath !== "string" ||
+    typeof configDir !== "string" ||
+    !Array.isArray(protectedFiles) ||
+    protectedFiles.length === 0 ||
+    protectedFiles.length > MAX_SHIELDS_TIMER_PROTECTED_FILES ||
+    !path.posix.isAbsolute(configDir) ||
+    path.posix.normalize(configDir) !== configDir ||
+    configDir === SANDBOX_CONFIG_ROOT.slice(0, -1) ||
+    !configDir.startsWith(SANDBOX_CONFIG_ROOT) ||
+    CONTROL_CHAR_RE.test(configDir) ||
+    configDir.includes("\\") ||
+    !path.posix.isAbsolute(configPath) ||
+    path.posix.normalize(configPath) !== configPath ||
+    !configPath.startsWith(`${configDir}/`) ||
+    CONTROL_CHAR_RE.test(configPath) ||
+    configPath.includes("\\")
+  ) {
+    return null;
+  }
+
+  const resolvedFiles: string[] = [];
+  const seenFiles = new Set<string>();
+  for (const protectedFile of protectedFiles) {
+    if (typeof protectedFile !== "string") return null;
+    const components = protectedFile.split("/");
+    if (
+      protectedFile.length === 0 ||
+      path.posix.isAbsolute(protectedFile) ||
+      path.posix.normalize(protectedFile) !== protectedFile ||
+      CONTROL_CHAR_RE.test(protectedFile) ||
+      protectedFile.includes("\\") ||
+      components.length !== 1 ||
+      components.some(
+        (component) => component.length === 0 || component === "." || component === "..",
+      ) ||
+      seenFiles.has(protectedFile)
+    ) {
+      return null;
+    }
+    const resolved = path.posix.resolve(configDir, protectedFile);
+    if (!resolved.startsWith(`${configDir}/`)) return null;
+    seenFiles.add(protectedFile);
+    resolvedFiles.push(resolved);
+  }
+
+  return resolvedFiles[0] === configPath ? resolvedFiles : null;
+}
+
+function sameProtectedFileAuthority(
+  current: readonly string[] | undefined,
+  expected: readonly string[] | undefined,
+): boolean {
+  if (current === undefined || expected === undefined) return current === expected;
+  return (
+    current.length === expected.length &&
+    current.every((protectedFile, index) => protectedFile === expected[index])
+  );
+}
 
 function isShieldsTimerMarker(value: unknown): value is ShieldsTimerMarker {
   if (!isObjectRecord(value)) return false;
@@ -55,6 +131,11 @@ function isShieldsTimerMarker(value: unknown): value is ShieldsTimerMarker {
     (value.configDir === undefined || typeof value.configDir === "string") &&
     ((value.configPath === undefined && value.configDir === undefined) ||
       (typeof value.configPath === "string" && typeof value.configDir === "string")) &&
+    (value.protectedFiles === undefined || resolveShieldsTimerProtectedFilePaths(value) !== null) &&
+    (value.mutableAccess === undefined ||
+      ((value.mutableAccess === "private" || value.mutableAccess === "shared") &&
+        typeof value.configPath === "string" &&
+        typeof value.configDir === "string")) &&
     (value.leaseOwnerPid === undefined ||
       (typeof value.leaseOwnerPid === "number" &&
         Number.isInteger(value.leaseOwnerPid) &&
@@ -148,6 +229,8 @@ export function sameShieldsTimerMarkerGeneration(
     current.agentName === expected.agentName &&
     current.configPath === expected.configPath &&
     current.configDir === expected.configDir &&
+    sameProtectedFileAuthority(current.protectedFiles, expected.protectedFiles) &&
+    current.mutableAccess === expected.mutableAccess &&
     current.leaseOwnerPid === expected.leaseOwnerPid &&
     current.leaseOwnerStartIdentity === expected.leaseOwnerStartIdentity
   );

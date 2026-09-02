@@ -69,7 +69,7 @@ PHASES = frozenset(
         "abort-state-applied",
     }
 )
-TOP_SELECTORS = (".config-hash", ".env", "config.yaml")
+TOP_SELECTORS = (".config-hash", ".env", "config.yaml", "fabric.json")
 
 
 class PublisherError(RuntimeError):
@@ -843,12 +843,12 @@ def _verify_top_posture(posture: str) -> None:
         expected_parent = (ROOT_UID, sandbox_gid, 0o1775)
         expected_root_owners = (ROOT_UID, sandbox_gid)
         expected_root_modes = (0o3770,)
-        expected_file = (ROOT_UID, ROOT_GID, 0o444)
+        expected_file_owner = (ROOT_UID, ROOT_GID)
     else:
         expected_parent = (sandbox_uid, sandbox_gid, 0o755)
         expected_root_owners = (sandbox_uid, sandbox_gid)
         expected_root_modes = (0o700, 0o3770)
-        expected_file = (sandbox_uid, sandbox_gid, 0o640)
+        expected_file_owner = (sandbox_uid, sandbox_gid)
     if (parent.st_uid, parent.st_gid, stat.S_IMODE(parent.st_mode)) != expected_parent:
         _fail("publisher-top-posture-invalid")
     if (root.st_uid, root.st_gid) != expected_root_owners or stat.S_IMODE(
@@ -863,11 +863,16 @@ def _verify_top_posture(posture: str) -> None:
             _fail("publisher-top-posture-invalid")
         try:
             metadata = os.fstat(fd)
+            expected_mode = (
+                0o444
+                if posture == "locked"
+                else (0o600 if name == "fabric.json" else 0o640)
+            )
             if (
                 not stat.S_ISREG(metadata.st_mode)
                 or metadata.st_nlink != 1
-                or (metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode))
-                != expected_file
+                or (metadata.st_uid, metadata.st_gid) != expected_file_owner
+                or stat.S_IMODE(metadata.st_mode) != expected_mode
             ):
                 _fail("publisher-top-posture-invalid")
         finally:

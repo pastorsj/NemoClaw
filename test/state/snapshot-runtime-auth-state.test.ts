@@ -46,6 +46,9 @@ function writeExecutable(filePath: string, source: string): void {
  * download/extract, pre-restore cleanup, and usability probes.
  */
 function writeFakeSandboxBins(binDir: string, fakeRoot: string): void {
+  const configDir = path.join(fakeRoot, ".openclaw");
+  const fabricPath = path.join(configDir, "fabric.json");
+  fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
   writeExecutable(
     path.join(binDir, "openshell"),
     `#!/bin/sh
@@ -138,8 +141,10 @@ if (cmd.includes(".nemoclaw-restore") && cmd.includes("openclaw.json")) {
   }
   fs.writeFileSync(configPath, restored);
   if (cmd.includes("sha256sum") && cmd.includes(".config-hash")) {
-    const digest = require("crypto").createHash("sha256").update(fs.readFileSync(configPath)).digest("hex");
-    fs.writeFileSync(path.join(dir, ".config-hash"), digest + "  openclaw.json\\n");
+    const crypto = require("crypto");
+    const configDigest = crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex");
+    const fabricDigest = crypto.createHash("sha256").update(fs.readFileSync(path.join(dir, "fabric.json"))).digest("hex");
+    fs.writeFileSync(path.join(dir, ".config-hash"), configDigest + "  openclaw.json\\n" + fabricDigest + "  fabric.json\\n");
   }
   process.exit(0);
 }

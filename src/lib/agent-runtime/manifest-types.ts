@@ -22,7 +22,10 @@ export interface AgentConfigPaths {
   envFile: string | null;
   format: string;
   shieldsFiles: string[];
+  mutableAccess?: AgentConfigMutableAccess | null;
 }
+
+export type AgentConfigMutableAccess = "private" | "shared";
 
 export type AgentStateDirectoryShields = "read-only" | "confidential";
 

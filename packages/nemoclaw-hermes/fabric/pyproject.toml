@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools == 82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemoclaw-hermes-fabric"
+version = "0.1.0"
+description = "NemoClaw's bounded NeMo Fabric host for the released Hermes adapter"
+requires-python = ">=3.13,<3.14"
+license = "Apache-2.0"
+dependencies = [
+  "nemo-fabric-adapters-hermes == 0.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

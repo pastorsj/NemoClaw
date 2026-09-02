@@ -12,10 +12,12 @@ describe("OpenClaw sandbox setup", () => {
   it("shares config sync before web-search reconciliation", async () => {
     const syncNemoClawConfigInSandbox = vi.fn();
     const reconcileWebSearch = vi.fn(async () => undefined);
+    const verifyPackageRuntime = vi.fn();
     const revalidateSandboxIdentity = vi.fn();
     const configureOpenclawSandbox = createConfigureOpenclawSandbox({
       syncNemoClawConfigInSandbox,
       reconcileWebSearch,
+      verifyPackageRuntime,
     });
 
     await configureOpenclawSandbox(
@@ -39,6 +41,24 @@ describe("OpenClaw sandbox setup", () => {
     );
     expect(syncNemoClawConfigInSandbox.mock.invocationCallOrder[0]).toBeLessThan(
       reconcileWebSearch.mock.invocationCallOrder[0]!,
+    );
+    expect(reconcileWebSearch.mock.invocationCallOrder[0]).toBeLessThan(
+      verifyPackageRuntime.mock.invocationCallOrder[0]!,
+    );
+    expect(verifyPackageRuntime).toHaveBeenCalledExactlyOnceWith("spark-box");
+  });
+
+  it("withholds configuration success when the package runtime smoke fails", async () => {
+    const configureOpenclawSandbox = createConfigureOpenclawSandbox({
+      syncNemoClawConfigInSandbox: vi.fn(),
+      reconcileWebSearch: vi.fn(async () => undefined),
+      verifyPackageRuntime: () => {
+        throw new Error("OpenClaw package smoke command failed");
+      },
+    });
+
+    await expect(configureOpenclawSandbox("spark-box", "model", "provider", null)).rejects.toThrow(
+      "OpenClaw package smoke command failed",
     );
   });
 

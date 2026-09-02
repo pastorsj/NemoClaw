@@ -140,20 +140,22 @@ while NemoClaw safely composes exact versions without taking ownership away from
 
 ### NeMo Fabric
 
-- [ ] **FABRIC-01**: A NeMo Fabric experiment does not replace the agent, runtime-provider, serving,
+- [x] **FABRIC-01**: A NeMo Fabric experiment does not replace the agent, runtime-provider, serving,
   platform, OpenShell, or NemoClaw lifecycle contract. Fabric remains an optional sandbox-local
   invocation candidate until a later accepted product decision.
-- [ ] **FABRIC-02**: Deterministic tests pin the Fabric SDK, released Deep Agents adapter, adapter
+- [x] **FABRIC-02**: Deterministic tests pin the Fabric SDK, released Deep Agents adapter, adapter
   contract, Python, fixture identity, and hash-locked dependency graph. They prove discovery,
   doctor, ordered invocation, lifecycle failures, malformed results, transport and process
   failures, environment isolation, signals, deadlines, and cleanup without a live sandbox.
 - [ ] **FABRIC-02A**: Mac and Brev no-messaging development journeys prove installed-package
   identity, source-built image composition, the policy route, PONG, one confined `write_file` tool
   call, bounded credential surfaces, process cleanup, and sandbox, provider, and gateway cleanup.
-- [ ] **FABRIC-03**: A real agent adapter enters qualification only when its agent semantics and exact
-  dependency versions match the NemoClaw package. The implementation uses the Fabric SDK, not the
-  experimentation CLI. Fabric 0.2 Deep Agents remains evaluation evidence because it does not match
-  native DCode dependencies or model settings. Pi waits for a public adapter release.
+- [ ] **FABRIC-03**: Each real agent integration owns its exact adapter or released-adapter
+  dependency, descriptor, configuration projection, image installation, and package tests. The
+  generic runner has no agent branch. Pi and OpenClaw use package-owned adapters; Hermes uses the
+  released Hermes adapter. Fabric 0.2 Deep Agents remains separate evaluation evidence because it
+  does not match native DCode dependencies or model settings. Final deterministic, Mac, and Brev
+  qualification remains required.
 
 ### Testing and release
 
@@ -219,7 +221,7 @@ while NemoClaw safely composes exact versions without taking ownership away from
 | Shared PKG, RUNTIME, COMP | 4 |
 | SERVE, COMP extension | 5 |
 | HOST | 6 |
-| FABRIC | 7 |
+| FABRIC | 3 for implementation and development evidence; 7 for a separate product decision |
 | TEST-03, TEST-04, TEST-06, TEST-07 | 2 |
 | TEST-01, TEST-02, TEST-08 | 3 |
 | Remaining TEST, DIST, release COMP | 8 |

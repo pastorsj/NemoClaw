@@ -17,19 +17,35 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler
 from http.server import ThreadingHTTPServer
+from importlib.metadata import distribution
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from nemoclaw_fabric.command import EXIT_FAILURE
-from nemoclaw_fabric.command import EXIT_SUCCESS
-from nemoclaw_fabric.command import EXIT_USAGE
-from nemoclaw_fabric.command import run_cli
+from nemo_fabric import FabricConfig
+from nemo_fabric_adapter_contract.models import AgentConfig
+from nemo_fabric_adapter_contract.models import AgentRunRequest
+from nemo_fabric_adapter_contract.models import AgentRunResult
+from nemo_fabric_adapter_contract.models import AgentRunStatus
+from nemo_fabric_adapter_contract.models import RuntimeContext
+from nemo_fabric_adapters.deepagents import adapter as deepagents_adapter
 
 
 AGENT_ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY_ROOT = AGENT_ROOT.parents[1]
 CONFIG_GENERATOR = AGENT_ROOT / "config" / "generate-config.ts"
+
+
+def generic_runner() -> tuple[int, int, int, Any]:
+    """Load the NemoClaw-owned runner only in the composed test lane."""
+
+    from nemoclaw_fabric.command import EXIT_FAILURE
+    from nemoclaw_fabric.command import EXIT_SUCCESS
+    from nemoclaw_fabric.command import EXIT_USAGE
+    from nemoclaw_fabric.command import run_cli
+
+    return EXIT_FAILURE, EXIT_SUCCESS, EXIT_USAGE, run_cli
 
 
 def released_deepagents_descriptor() -> Path:
@@ -87,8 +103,8 @@ class FakeOpenAIHandler(BaseHTTPRequestHandler):
         """Keep deterministic test output quiet."""
 
 
-class ReleasedDeepAgentsTurnTests(unittest.TestCase):
-    """Verify the package projection drives the real released adapter."""
+class DeepAgentsFixtureMixin:
+    """Provide one isolated package projection and inference endpoint."""
 
     def setUp(self) -> None:
         self._temporary_directory = tempfile.TemporaryDirectory()
@@ -237,9 +253,141 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
         config_path.chmod(0o600)
         return config_path
 
+    def _adapter_inputs(
+        self,
+        config_path: Path,
+    ) -> tuple[AgentConfig, RuntimeContext]:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        # Validate the package projection through Fabric's public model before
+        # translating the adapter-owned fields into its lifecycle contract.
+        FabricConfig.from_mapping(payload)
+        agent_config = AgentConfig.from_mapping({"models": payload["models"]})
+        runtime_context = RuntimeContext.from_mapping(
+            {
+                "runtime_id": "dcode-package-runtime",
+                "invocation_id": "dcode-package-invocation",
+                "request_id": "dcode-package-request",
+                "environment": {
+                    "environment_id": "dcode-package-environment",
+                    "provider": "local",
+                    "control_location": "in_env_control",
+                    "workspace": str(self.workspace),
+                    "artifacts": str(self.artifacts),
+                    "env": {},
+                    "ownership": "caller_owned",
+                    "connection": {},
+                    "metadata": {},
+                },
+                "artifacts": {"root": str(self.artifacts), "artifacts": []},
+            }
+        )
+        return agent_config, runtime_context
+
+    async def _run_adapter_turn(
+        self,
+        config_path: Path,
+        prompt: str,
+    ) -> AgentRunResult:
+        agent_config, runtime_context = self._adapter_inputs(config_path)
+        runtime = deepagents_adapter.DeepAgentsRuntime()
+        await runtime.start(
+            {
+                "agent_name": "nemoclaw-langchain-deepagents-code",
+                "base_dir": str(self.base_dir),
+                "config": agent_config,
+                "runtime_context": runtime_context.to_mapping(),
+            }
+        )
+        try:
+            return await runtime.invoke(
+                AgentRunRequest.from_mapping({"input": prompt, "context": {}}),
+                runtime_context,
+            )
+        finally:
+            await runtime.stop()
+
+
+class ReleasedDeepAgentsAdapterTests(
+    DeepAgentsFixtureMixin,
+    unittest.IsolatedAsyncioTestCase,
+):
+    """Verify the package projection directly against the released adapter."""
+
+    def test_pinned_release_exposes_the_expected_adapter(self) -> None:
+        self.assertEqual(version("nemo-fabric"), "0.2.0")
+        self.assertEqual(version("nemo-fabric-adapters-deepagents"), "0.2.0")
+
+        package = distribution("nemo-fabric-adapters-deepagents")
+        descriptors = [
+            file
+            for file in package.files or ()
+            if str(file).endswith("deepagents.fabric-adapter.json")
+        ]
+        self.assertEqual(len(descriptors), 1)
+        descriptor = json.loads(
+            package.locate_file(descriptors[0]).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            descriptor["adapter_id"],
+            "nvidia.fabric.langchain.deepagents",
+        )
+        self.assertEqual(
+            descriptor["runner"]["module"],
+            "nemo_fabric_adapters.deepagents.adapter",
+        )
+        self.assertTrue(callable(deepagents_adapter.main))
+
+    async def test_package_config_completes_one_direct_adapter_turn(self) -> None:
+        credential_name = "FABRIC_DIRECT_FIXTURE_CRED"
+        credential = "fabric-direct-deepagents-secret-sentinel"
+        prompt = "Reply with the deterministic fixture response."
+        config_path = self._generate_test_config(credential_name)
+
+        with patch.dict(os.environ, {credential_name: credential}):
+            result = await self._run_adapter_turn(config_path, prompt)
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        self.assertEqual(result.output["response"], "deterministic Deep Agents reply")
+        self.assertEqual(result.usage.total_tokens, 11)
+        self.assertEqual(self.server.request_count, 1)  # type: ignore[attr-defined]
+        request_body = self.server.request_body  # type: ignore[attr-defined]
+        self.assertEqual(request_body["model"], "fixture-model")
+        self.assertEqual(request_body["messages"][-1]["content"], prompt)
+        self.assertNotIn(credential, json.dumps(result.to_mapping()))
+        retained_bytes = b"".join(
+            path.read_bytes() for path in self.base_dir.rglob("*") if path.is_file()
+        )
+        self.assertNotIn(credential.encode("utf-8"), retained_bytes)
+
+    async def test_missing_credential_stops_before_adapter_request(self) -> None:
+        credential_name = "FABRIC_DIRECT_MISSING_CRED"
+        config_path = self._generate_test_config(credential_name)
+        agent_config, runtime_context = self._adapter_inputs(config_path)
+        runtime = deepagents_adapter.DeepAgentsRuntime()
+
+        with patch.dict(os.environ):
+            os.environ.pop(credential_name, None)
+            with self.assertRaisesRegex(RuntimeError, credential_name):
+                await runtime.start(
+                    {
+                        "agent_name": "nemoclaw-langchain-deepagents-code",
+                        "base_dir": str(self.base_dir),
+                        "config": agent_config,
+                        "runtime_context": runtime_context.to_mapping(),
+                    }
+                )
+
+        await runtime.stop()
+        self.assertEqual(self.server.request_count, 0)  # type: ignore[attr-defined]
+
+
+class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
+    """Verify package config through the generic NemoClaw Fabric runner."""
+
     def test_generated_unsupported_model_options_stop_before_fabric_client_creation(
         self,
     ) -> None:
+        _, _, exit_usage, run_cli = generic_runner()
         cases = (
             (
                 "nemotron-ultra",
@@ -285,7 +433,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
                     client_factory=create_client,
                 )
 
-                self.assertEqual(exit_code, EXIT_USAGE, stderr.getvalue())
+                self.assertEqual(exit_code, exit_usage, stderr.getvalue())
                 self.assertEqual(stderr.getvalue(), "")
                 result = json.loads(stdout.getvalue())
                 self.assertEqual(result["status"], "failed")
@@ -299,6 +447,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
                 self.assertEqual(self.server.request_count, 0)  # type: ignore[attr-defined]
 
     def test_package_config_completes_one_turn_with_the_released_adapter(self) -> None:
+        _, exit_success, _, run_cli = generic_runner()
         credential_name = "FABRIC_FIXTURE_CRED"
         credential = "fabric-deepagents-secret-sentinel"
         prompt = "Reply with the deterministic fixture response."
@@ -326,7 +475,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
                 stderr=stderr,
             )
 
-        self.assertEqual(exit_code, EXIT_SUCCESS, stderr.getvalue())
+        self.assertEqual(exit_code, exit_success, stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "succeeded")
@@ -353,6 +502,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
         self.assertNotIn(credential, stdout.getvalue())
 
     def test_released_adapter_writes_workspace_file_before_final_response(self) -> None:
+        _, exit_success, _, run_cli = generic_runner()
         credential_name = "FABRIC_TOOL_FIXTURE_CRED"
         credential = "fabric-tool-secret-sentinel"
         prompt = "Write the fixture file, then report completion."
@@ -384,7 +534,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
                 stderr=stderr,
             )
 
-        self.assertEqual(exit_code, EXIT_SUCCESS, stderr.getvalue())
+        self.assertEqual(exit_code, exit_success, stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "succeeded")
@@ -456,6 +606,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
         self.assertNotIn(credential.encode("utf-8"), retained_bytes)
 
     def test_missing_credential_fails_before_the_released_adapter_sends_a_request(self) -> None:
+        exit_failure, _, _, run_cli = generic_runner()
         credential_name = "FABRIC_FIXTURE_MISSING_CRED"
         prompt = "This request must not reach the endpoint."
         config_path = self._generate_test_config(credential_name)
@@ -478,7 +629,7 @@ class ReleasedDeepAgentsTurnTests(unittest.TestCase):
                 stderr=stderr,
             )
 
-        self.assertEqual(exit_code, EXIT_FAILURE, stderr.getvalue())
+        self.assertEqual(exit_code, exit_failure, stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         self.assertNotIn(prompt, stdout.getvalue())
         result = json.loads(stdout.getvalue())

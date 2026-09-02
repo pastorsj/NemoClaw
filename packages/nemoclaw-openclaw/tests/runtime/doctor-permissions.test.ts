@@ -71,9 +71,20 @@ function sha256Hex(filePath: string): string {
 
 function openClawConfigHashMatches(configDir: string): boolean {
   const configFile = path.join(configDir, "openclaw.json");
+  const fabricFile = path.join(configDir, "fabric.json");
   const hashFile = path.join(configDir, ".config-hash");
-  const [digest, fileName] = fs.readFileSync(hashFile, "utf-8").trim().split(/\s+/);
-  return digest === sha256Hex(configFile) && fileName === "openclaw.json";
+  const records = fs
+    .readFileSync(hashFile, "utf-8")
+    .trim()
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/));
+  return (
+    records.length === 2 &&
+    records[0]?.[0] === sha256Hex(configFile) &&
+    records[0]?.[1] === "openclaw.json" &&
+    records[1]?.[0] === sha256Hex(fabricFile) &&
+    records[1]?.[1] === "fabric.json"
+  );
 }
 
 // WSL CI can run these snippets as root; force restore-path cases to model a
@@ -108,12 +119,15 @@ function seedTightenedConfigTree(): { tmpDir: string; configDir: string; configF
   const configDir = path.join(tmpDir, ".openclaw");
   const nestedDir = path.join(configDir, "agents", "main");
   const configFile = path.join(configDir, "openclaw.json");
+  const fabricFile = path.join(configDir, "fabric.json");
   const hashFile = path.join(configDir, ".config-hash");
   fs.mkdirSync(nestedDir, { recursive: true });
   fs.writeFileSync(configFile, "{}\n");
+  fs.writeFileSync(fabricFile, "{}\n");
   fs.writeFileSync(hashFile, "deadbeef\n");
   // Simulate the post-`openclaw doctor --fix` single-user layout.
   fs.chmodSync(configFile, 0o600);
+  fs.chmodSync(fabricFile, 0o600);
   fs.chmodSync(hashFile, 0o600);
   fs.chmodSync(nestedDir, 0o700);
   fs.chmodSync(configDir, 0o700);
@@ -145,6 +159,7 @@ describe("raw `openclaw doctor --fix` mutable-perm restore (#4538)", () => {
     const { tmpDir, configDir, configFile } = seedTightenedConfigTree();
     const nestedDir = path.join(configDir, "agents", "main");
     const hashFile = path.join(configDir, ".config-hash");
+    const fabricFile = path.join(configDir, "fabric.json");
     try {
       const result = spawnSync(
         "bash",
@@ -170,6 +185,7 @@ describe("raw `openclaw doctor --fix` mutable-perm restore (#4538)", () => {
       // Config + hash: group-writable so the gateway UID can persist edits.
       expect(modeBits(configFile)).toBe(0o660);
       expect(modeBits(hashFile)).toBe(0o660);
+      expect(modeBits(fabricFile)).toBe(0o600);
       expect(openClawConfigHashMatches(configDir)).toBe(true);
       // Recursive: nested dirs regain setgid + group access too.
       expect(modeBits(nestedDir) & 0o2070).toBe(0o2070);

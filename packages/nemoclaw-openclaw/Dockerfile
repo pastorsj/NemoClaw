@@ -1897,6 +1897,58 @@ RUN --mount=from=openclaw-managed-messaging-npm-cache,source=/out/npm-cache,targ
 
 USER root
 
+# Install the generic Fabric runner and OpenClaw's package-owned adapter in one
+# isolated, hash-locked Python environment. OpenClaw itself stays on its
+# reviewed Node.js graph, and its native gateway/TUI paths remain unchanged.
+COPY packages/nemoclaw-openclaw/fabric/requirements.lock /tmp/nemoclaw-openclaw-fabric-requirements.lock
+RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-openclaw-fabric-requirements.lock \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && rm -f /tmp/nemoclaw-openclaw-fabric-requirements.lock
+
+COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
+COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
+COPY packages/nemoclaw-fabric/build-requirements.lock /tmp/nemoclaw-fabric-build-requirements.lock
+COPY packages/nemoclaw-openclaw/fabric/pyproject.toml /opt/nemoclaw-openclaw-fabric/
+COPY packages/nemoclaw-openclaw/fabric/src/ /opt/nemoclaw-openclaw-fabric/src/
+COPY --chmod=0444 packages/nemoclaw-openclaw/fabric/openclaw.fabric-adapter.json /usr/local/share/nemoclaw/openclaw.fabric-adapter.json
+
+RUN set -eu; \
+    python3 -I -c 'import tomllib; from pathlib import Path; runner = tomllib.loads(Path("/opt/nemoclaw-fabric-runner/pyproject.toml").read_text(encoding="utf-8"))["project"]; adapter = tomllib.loads(Path("/opt/nemoclaw-openclaw-fabric/pyproject.toml").read_text(encoding="utf-8"))["project"]; assert (runner["name"], runner["version"], runner["dependencies"]) == ("nemoclaw-fabric", "0.1.2", ["nemo-fabric == 0.2.0"]); assert (adapter["name"], adapter["version"], adapter["dependencies"]) == ("nemoclaw-openclaw-fabric", "0.1.0", ["nemo-fabric-adapter-contract == 0.2.0", "nemo-fabric-adapters-common == 0.2.0"])' \
+    && python3 -m venv --copies /tmp/nemoclaw-fabric-build-venv \
+    && /tmp/nemoclaw-fabric-build-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/nemoclaw-fabric-build-requirements.lock \
+    && install -d -o root -g root -m 0755 /tmp/nemoclaw-fabric-wheels \
+    && /tmp/nemoclaw-fabric-build-venv/bin/pip3 wheel --no-index --no-deps --no-build-isolation \
+        --wheel-dir /tmp/nemoclaw-fabric-wheels /opt/nemoclaw-fabric-runner /opt/nemoclaw-openclaw-fabric \
+    && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_fabric-0.1.2-*.whl \
+    && test "$#" -eq 1 \
+    && runner_wheel="$1" \
+    && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_openclaw_fabric-0.1.0-*.whl \
+    && test "$#" -eq 1 \
+    && adapter_wheel="$1" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps \
+        "$runner_wheel" "$adapter_wheel" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemoclaw-fabric": "0.1.2", "nemoclaw-openclaw-fabric": "0.1.0", "nemo-fabric": "0.2.0", "nemo-fabric-runtime": "0.2.0", "nemo-fabric-adapter-contract": "0.2.0", "nemo-fabric-adapters-common": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; import nemoclaw_openclaw_fabric.adapter' \
+    && chown root:root /usr/local/share/nemoclaw/openclaw.fabric-adapter.json \
+    && chmod 0444 /usr/local/share/nemoclaw/openclaw.fabric-adapter.json \
+    && test "$(stat -c '%u:%g:%a' /usr/local/share/nemoclaw/openclaw.fabric-adapter.json)" = "0:0:444" \
+    && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
+    && chown -h root:root /usr/local/bin/nemoclaw-fabric \
+    && test "$(readlink /usr/local/bin/nemoclaw-fabric)" = "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric" \
+    && test -x /usr/local/bin/nemoclaw-fabric \
+    && test "$(/usr/local/bin/nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
+    && /usr/bin/setpriv --reuid=sandbox --regid=sandbox --init-groups -- \
+        env HOME=/sandbox /usr/local/bin/nemoclaw-fabric doctor \
+        --config /sandbox/.openclaw/fabric.json --json > /tmp/nemoclaw-openclaw-fabric-doctor.json \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'import json; from pathlib import Path; report = json.loads(Path("/tmp/nemoclaw-openclaw-fabric-doctor.json").read_text(encoding="utf-8")); assert report["status"] in {"pass", "warn"}, report' \
+    && rm -rf /opt/nemoclaw-fabric-runner /opt/nemoclaw-openclaw-fabric \
+        /tmp/nemoclaw-fabric-build-venv /tmp/nemoclaw-fabric-wheels \
+        /tmp/nemoclaw-fabric-build-requirements.lock \
+        /tmp/nemoclaw-openclaw-fabric-doctor.json
+
 # Copy the full candidate runtime payload after the stable offline plugin
 # installs so runtime-only changes do not invalidate those expensive layers.
 # NODE_OPTIONS preload modules use a Landlock-accessible path. OpenShell ≥0.0.36
@@ -2187,6 +2239,7 @@ RUN set -eu; \
         "$config_dir/memory" \
         "$config_dir/logs" \
         "$config_dir/credentials" \
+        "$config_dir/fabric-artifacts" \
         "$config_dir/flows" \
         "$config_dir/sandbox" \
         "$config_dir/state" \
@@ -2261,9 +2314,11 @@ RUN set -eu; \
         chown sandbox:sandbox \
             /sandbox/.openclaw \
             /sandbox/.openclaw/openclaw.json \
+            /sandbox/.openclaw/fabric.json \
             /sandbox/.openclaw/plugin-runtime-deps; \
         chmod 2770 /sandbox/.openclaw /sandbox/.openclaw/plugin-runtime-deps; \
         chmod 660 /sandbox/.openclaw/openclaw.json; \
+        chmod 600 /sandbox/.openclaw/fabric.json; \
     fi
 
 # System-wide shell hooks for shells where ~/.bashrc / ~/.profile aren't
@@ -2306,9 +2361,11 @@ RUN chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && chmod 444 /etc/bash.bashrc
 
 # Pin config hash at build time so the entrypoint can verify integrity.
-RUN sha256sum /sandbox/.openclaw/openclaw.json > /sandbox/.openclaw/.config-hash \
+WORKDIR /sandbox/.openclaw
+RUN sha256sum openclaw.json fabric.json > .config-hash \
     && chmod 660 /sandbox/.openclaw/.config-hash \
     && chown sandbox:sandbox /sandbox/.openclaw/.config-hash
+WORKDIR /sandbox
 
 # DAC-protect .nemoclaw directory: /sandbox/.nemoclaw is Landlock read_write
 # (for plugin state/config), but the parent and blueprints are immutable at

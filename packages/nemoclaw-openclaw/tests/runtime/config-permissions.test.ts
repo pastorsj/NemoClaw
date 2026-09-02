@@ -274,6 +274,7 @@ describe("nemoclaw-start one-shot command lifecycle", () => {
     fs.mkdirSync(configDir);
     fs.writeFileSync(path.join(configDir, "openclaw.json"), "{}\n");
     fs.writeFileSync(path.join(configDir, ".config-hash"), "hash\n");
+    fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n", { mode: 0o666 });
 
     const normalizeFunction = replaceRequired(
       extractShellFunction("normalize_mutable_config_perms"),
@@ -286,7 +287,7 @@ describe("nemoclaw-start one-shot command lifecycle", () => {
       normalizeFunction,
       oneShotFunction,
       "rc=0",
-      `run_oneshot_command bash -c 'chmod 700 "$1"; chmod 600 "$1/openclaw.json" "$1/.config-hash"; exit 42' bash ${JSON.stringify(configDir)} || rc=$?`,
+      `run_oneshot_command bash -c 'chmod 700 "$1"; chmod 600 "$1/openclaw.json" "$1/.config-hash"; chmod 666 "$1/fabric.json"; exit 42' bash ${JSON.stringify(configDir)} || rc=$?`,
       'printf "rc=%s\\n" "$rc"',
     ].join("\n");
 
@@ -297,6 +298,7 @@ describe("nemoclaw-start one-shot command lifecycle", () => {
       expect(mode(configDir)).toBe(0o2770);
       expect(mode(path.join(configDir, "openclaw.json"))).toBe(0o660);
       expect(mode(path.join(configDir, ".config-hash"))).toBe(0o660);
+      expect(mode(path.join(configDir, "fabric.json"))).toBe(0o600);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -670,17 +672,20 @@ describe("nemoclaw-start mutable config seal classification", () => {
   });
 
   it.runIf(runningAsRoot)(
-    "requires both fixed files to match the exact root-owned sealed posture (#6300)",
+    "requires every fixed file to match the exact root-owned sealed posture (#6300)",
     () => {
       const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-seal-owner-"));
       const configDir = path.join(root, ".openclaw");
       fs.mkdirSync(configDir, 0o755);
       const configFile = path.join(configDir, "openclaw.json");
       const hashFile = path.join(configDir, ".config-hash");
+      const fabricFile = path.join(configDir, "fabric.json");
       fs.writeFileSync(configFile, "{}\n");
       fs.writeFileSync(hashFile, "hash\n");
+      fs.writeFileSync(fabricFile, "{}\n");
       fs.chmodSync(configFile, 0o444);
       fs.chmodSync(hashFile, 0o444);
+      fs.chmodSync(fabricFile, 0o444);
       try {
         expect(runClassify(configDir).stdout).toContain("rc=0");
         fs.rmSync(hashFile);
@@ -757,10 +762,13 @@ describe("nemoclaw-start mutable config reclaim", () => {
       fs.chmodSync(configDir, 0o700);
       const configFile = path.join(configDir, "openclaw.json");
       const hashFile = path.join(configDir, ".config-hash");
+      const fabricFile = path.join(configDir, "fabric.json");
       fs.writeFileSync(configFile, "{}\n");
       fs.chmodSync(configFile, 0o600);
       fs.writeFileSync(hashFile, "hash\n");
       fs.chmodSync(hashFile, 0o600);
+      fs.writeFileSync(fabricFile, "{}\n");
+      fs.chmodSync(fabricFile, 0o600);
 
       const normalizeFunction = replaceRequired(
         extractShellFunction("normalize_mutable_config_perms"),
@@ -787,6 +795,7 @@ describe("nemoclaw-start mutable config reclaim", () => {
         expect(mode(configDir)).toBe(0o2770);
         expect(mode(configFile)).toBe(0o660);
         expect(mode(hashFile)).toBe(0o660);
+        expect(mode(fabricFile)).toBe(0o600);
         expect(fs.statSync(configDir).uid.toString()).toBe(nobodyUid);
         expect(fs.statSync(configDir).gid.toString()).toBe(nobodyGid);
 
@@ -830,11 +839,14 @@ describe("nemoclaw-start mutable config reclaim", () => {
       fs.chmodSync(configDir, 0o700);
       const configFile = path.join(configDir, "openclaw.json");
       const hashFile = path.join(configDir, ".config-hash");
+      const fabricFile = path.join(configDir, "fabric.json");
       const baselineFile = path.join(configDir, "openclaw.json.nemoclaw-baseline");
       fs.writeFileSync(configFile, "{}\n");
       fs.chmodSync(configFile, 0o600);
       fs.writeFileSync(hashFile, "hash\n");
       fs.chmodSync(hashFile, 0o600);
+      fs.writeFileSync(fabricFile, "{}\n");
+      fs.chmodSync(fabricFile, 0o600);
       fs.writeFileSync(baselineFile, "{}\n");
       fs.chmodSync(baselineFile, 0o440);
       const beforeBaselineUid = fs.statSync(baselineFile).uid;
@@ -865,12 +877,15 @@ describe("nemoclaw-start mutable config reclaim", () => {
         expect(mode(configDir)).toBe(0o2770);
         expect(mode(configFile)).toBe(0o660);
         expect(mode(hashFile)).toBe(0o660);
+        expect(mode(fabricFile)).toBe(0o600);
         expect(fs.statSync(configDir).uid.toString()).toBe(nobodyUid);
         expect(fs.statSync(configDir).gid.toString()).toBe(nobodyGid);
         expect(fs.statSync(configFile).uid.toString()).toBe(nobodyUid);
         expect(fs.statSync(configFile).gid.toString()).toBe(nobodyGid);
         expect(fs.statSync(hashFile).uid.toString()).toBe(nobodyUid);
         expect(fs.statSync(hashFile).gid.toString()).toBe(nobodyGid);
+        expect(fs.statSync(fabricFile).uid.toString()).toBe(nobodyUid);
+        expect(fs.statSync(fabricFile).gid.toString()).toBe(nobodyGid);
         expect(mode(baselineFile)).toBe(0o440);
         expect(fs.statSync(baselineFile).uid).toBe(beforeBaselineUid);
         expect(fs.statSync(baselineFile).gid).toBe(beforeBaselineGid);

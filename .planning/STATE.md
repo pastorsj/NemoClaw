@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Phase 2 foundation is reconciled with current origin/main; Phase 3 Fabric invocation
-  evaluation is active with one released Deep Agents round trip
-last_updated: "2026-08-30T02:38:32.000Z"
+status: Phase 3 Fabric work is active; the generic foundation is complete, OpenClaw and Hermes
+  deterministic integration is in progress, and Mac and Brev qualification is pending
+last_updated: "2026-09-02T00:32:30.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 24
-  completed_plans: 23
-  percent: 96
+  total_plans: 28
+  completed_plans: 24
+  percent: 86
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -20,17 +20,13 @@ progress:
 
 ## Current Position
 
-Phase: 2 of 8 — Agent Package Foundation
+Phase: 3 of 8 — Agent Runtime Packages and Fabric Headless Integration
 
-Status: Plans 02-05 through 02-22 completed the public harness inventory/install workflow,
-installed-only agent compatibility list, exact registry authority, package-root definitions and
-builds, installed-package selection, writer-locked Session binding, and exact package-managed
-resume through route reservation, policy verification, sandbox creation, recreate journals,
-checkpoint replay, final publication, recovery-only retained records, installer reconciliation,
-exact snapshot backup, restore, clone, and manifest authority, prepared rebuild recovery with one
-pinned target definition, and one immutable definition across all downstream rebuild consumers.
-The existing typed E2E fixture now installs standard packages and proves exact final identity.
-Plan 02-23 is next.
+Status: Phase 2 Plans 02-01 through 02-22 completed the package foundation. Plan 02-23 remains
+pending and shares its no-messaging environment work with Phase 3 Plan 03-04. Phase 3 Plan 03-01
+completed the generic runner, built-artifact conformance, released Deep Agents evaluation, Pi
+adapter, and package-selected headless dispatch. OpenClaw and Hermes implementation is present in
+the working tree. Their final deterministic rerun, Mac work, and Brev work remain open.
 This work does not activate or support an upstream product surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
@@ -114,6 +110,16 @@ tree.
   rebuild consumers retain that definition and revalidate durable authority before mutation.
 - [x] Standard typed E2E profiles install before onboarding and require receipt, Session, and
   registry package identity equality without a parallel target or workflow registry.
+- [x] One generic sandbox-local Fabric runner selects released or package-owned adapters from
+  package data without an agent-name branch.
+- [x] Built artifacts have a public data-only validation command.
+- [x] DCode keeps its native command while the released Deep Agents adapter provides separate
+  evaluation evidence.
+- [x] Pi has a package-owned adapter, exact configuration, and package-owned tests through the same
+  runner.
+- [ ] OpenClaw final deterministic gates and common live qualification are pending.
+- [ ] Hermes final deterministic gates and common live qualification are pending.
+- [ ] Mac and Brev non-messaging evidence is pending and must not be reported as release evidence.
 
 ## Architecture Recommendations
 
@@ -134,10 +140,10 @@ tree.
 
 ## Next Execution
 
-Execute `.planning/phases/NCC-03-fabric-headless/03-01-PLAN.md`. Keep arbitrary installed host code,
-remote package discovery, product activation, and support claims outside this work. Complete the
-remaining Phase 2 no-messaging qualification as part of the combined Mac and Brev evidence. An
-upstream contribution still requires its own accepted NVIDIA/NemoClaw product decision.
+Finish Plans 03-02 and 03-03, then execute Plan 03-04. Record only rerun deterministic results and
+bounded Mac and Brev evidence in `03-QUALIFICATION.md`. Keep arbitrary installed host code, remote
+package discovery, product activation, and support claims outside this work. An upstream
+contribution still requires its own accepted NVIDIA/NemoClaw product decision.
 
 ## Preserved Local State
 

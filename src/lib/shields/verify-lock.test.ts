@@ -203,6 +203,22 @@ describe("verifyShieldsLockState", () => {
       }),
     ).toEqual({ ok: true, issues: [] });
 
+    const packageDeclaredTarget = {
+      ...customTarget,
+      mutableAccess: "private" as const,
+    };
+    expect(
+      verifyShieldsLockState("dcode", packageDeclaredTarget, {
+        exec: customExec,
+        verifyParentProtection: true,
+      }).issues,
+    ).toEqual(
+      expect.arrayContaining([
+        "parent dir mode=755 (expected 1775)",
+        "parent dir owner=sandbox:sandbox (expected root:sandbox)",
+      ]),
+    );
+
     const deepAgentsTarget = {
       agentName: "langchain-deepagents-code",
       configPath: "/sandbox/.deepagents/config.toml",
@@ -236,19 +252,24 @@ describe("verifyShieldsLockState", () => {
     ["404", "missing group read"],
     ["644", "owner-writable file"],
     ["445", "world-execute file"],
-  ])("rejects mode %s (%s) so writable perms cannot masquerade as locked", async (mode, _description) => {
-    const { verifyShieldsLockState } = await loadVerifier();
-    const exec = makeExec({
-      "/sandbox/.openclaw/openclaw.json": `${mode} root:root`,
-      "/sandbox/.openclaw/.config-hash": "444 root:root",
-      "/sandbox/.openclaw": "755 root:root",
-    });
+  ])(
+    "rejects mode %s (%s) so writable perms cannot masquerade as locked",
+    async (mode, _description) => {
+      const { verifyShieldsLockState } = await loadVerifier();
+      const exec = makeExec({
+        "/sandbox/.openclaw/openclaw.json": `${mode} root:root`,
+        "/sandbox/.openclaw/.config-hash": "444 root:root",
+        "/sandbox/.openclaw": "755 root:root",
+      });
 
-    const result = verifyShieldsLockState("openclaw", target, { exec });
+      const result = verifyShieldsLockState("openclaw", target, { exec });
 
-    expect(result.ok).toBe(false);
-    expect(result.issues).toContain(`/sandbox/.openclaw/openclaw.json mode=${mode} (expected 444)`);
-  });
+      expect(result.ok).toBe(false);
+      expect(result.issues).toContain(
+        `/sandbox/.openclaw/openclaw.json mode=${mode} (expected 444)`,
+      );
+    },
+  );
 
   it("rejects any non-755 dir mode even when the file modes are clean", async () => {
     const { verifyShieldsLockState } = await loadVerifier();

@@ -78,6 +78,7 @@ function runRestoreScenario(options: {
     fs.mkdirSync(backupPath, { recursive: true });
     fs.writeFileSync(path.join(backupPath, "openclaw.json"), JSON.stringify(options.backupConfig));
     fs.writeFileSync(path.join(openclawDir, "openclaw.json"), JSON.stringify(options.freshConfig));
+    fs.writeFileSync(path.join(openclawDir, "fabric.json"), "{}\n", { mode: 0o600 });
     const manifest: Record<string, unknown> = {
       version: 1,
       sandboxName: "alpha",
@@ -148,7 +149,13 @@ if (cmd.includes("openclaw.json") && cmd.includes("cat --")) {
   process.exit(0);
 }
 if (cmd.includes("openclaw.json") && cmd.includes(".nemoclaw-restore")) {
-  fs.writeFileSync(path.join(openclawDir, "openclaw.json"), readStdin());
+  const crypto = require("node:crypto");
+  const configPath = path.join(openclawDir, "openclaw.json");
+  const fabricPath = path.join(openclawDir, "fabric.json");
+  fs.writeFileSync(configPath, readStdin());
+  const configDigest = crypto.createHash("sha256").update(fs.readFileSync(configPath)).digest("hex");
+  const fabricDigest = crypto.createHash("sha256").update(fs.readFileSync(fabricPath)).digest("hex");
+  fs.writeFileSync(path.join(openclawDir, ".config-hash"), configDigest + "  openclaw.json\\n" + fabricDigest + "  fabric.json\\n");
   process.exit(0);
 }
 process.exit(1);

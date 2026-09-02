@@ -75,7 +75,7 @@ import { REBUILD_HERMES_PHASES } from "./rebuild-hermes-phases.ts";
 import { prepareHermesRebuildSwap } from "./rebuild-hermes-swap.ts";
 import { REBUILD_HERMES_STATE } from "./rebuild-hermes-state-fixture.ts";
 import { buildRebuildHermesTimingSummary, describeRunnerClass } from "./rebuild-hermes-timing.ts";
-
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 // Protected PR E2E checks out the PR commit while the trusted controller runs
 // the base workflow. Older controller revisions therefore cannot provide the
 // newly introduced CLI build and OpenShell install steps. Keep the test pinned
@@ -599,6 +599,7 @@ test(
         "OpenShell provider create/update and sandbox create/exec/list",
         "curated local ~/.nemoclaw registry and onboard-session rebuild metadata",
         "real nemoclaw <sandbox> rebuild --yes --verbose without host inference credentials",
+        "public nemoclaw sandbox agent Fabric turn after rebuild",
         "a direct OpenShell policy edit survives the rebuild transaction",
         "Hermes messaging placeholders plus script-backed cron restore and dispatch gating",
         "backup credential leak scan under ~/.nemoclaw/rebuild-backups",
@@ -1426,6 +1427,16 @@ test(
       rebuiltDashboardPort,
       resolutionMetadata: readSandboxBaseImageResolutionMetadata(rebuiltImageRef),
       ...finalBaseEvidence,
+    });
+    await runPublicFabricTurn({
+      agent: "hermes",
+      artifacts,
+      env: testEnv(apiKey),
+      host,
+      lifecyclePhase: "after-rebuild",
+      redactionValues,
+      sandbox,
+      sandboxName: SANDBOX_NAME,
     });
 
     const inferencePayload = JSON.stringify({

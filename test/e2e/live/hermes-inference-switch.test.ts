@@ -54,6 +54,7 @@ import {
   registerPublicNvidiaSwitchProvider,
   requirePublicNvidiaSwitchKey,
 } from "./public-nvidia-switch-provider.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const TIMEOUT_MS = 45 * 60_000;
 const MOCK_BASELINE_API_KEY = "hermes-inference-switch-baseline-credential";
@@ -247,6 +248,34 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   expect((await apiKeyShape(sandbox)).exitCode).toBe(0);
   expect(config.stdout).not.toMatch(/^models:\s*$/mu);
 
+  const fabricConfig = await sandbox.exec(
+    SANDBOX_NAME,
+    ["cat", "/sandbox/.hermes/fabric.json"],
+    {
+      artifactName: "hermes-fabric-config-after-switch",
+      env: env(),
+      redactionValues,
+      timeoutMs: 30_000,
+    },
+  );
+  expect(fabricConfig.exitCode, resultText(fabricConfig)).toBe(0);
+  const fabricModel = (JSON.parse(fabricConfig.stdout) as {
+    models?: {
+      default?: {
+        api_key_env?: unknown;
+        base_url?: unknown;
+        model?: unknown;
+        provider?: unknown;
+      };
+    };
+  }).models?.default;
+  expect(fabricModel).toEqual({
+    api_key_env: "HERMES_FABRIC_API_KEY",
+    base_url: expectedBaseUrl(),
+    model: SWITCH_MODEL,
+    provider: "custom",
+  });
+
   const dashboardConfig = await sandbox.exec(
     SANDBOX_NAME,
     ["cat", "/sandbox/.hermes/profiles/dashboard-home/config.yaml"],
@@ -391,6 +420,17 @@ test("Hermes inference set updates route/config and preserves live runtime", {
   expect(chat.exitCode, resultText(chat)).toBe(0);
   expect(chatContent(chat.stdout)).toMatch(/PONG/i);
   expect(inferenceResponseModel(chat.stdout)).toBe(SWITCH_MODEL);
+
+  await runPublicFabricTurn({
+    agent: "hermes",
+    artifacts,
+    env: env(),
+    host,
+    lifecyclePhase: "after-inference-switch",
+    redactionValues,
+    sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
 
   progress.phase("run Hermes CLI adapter forms against switched provider");
   const hermesCli = await runHermesCliPongWithRetry({

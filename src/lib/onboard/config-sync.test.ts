@@ -108,11 +108,13 @@ describe("sandbox config sync helpers", () => {
       const nestedOpenclawDir = path.join(openclawDir, "nested");
       const openclawConfig = path.join(openclawDir, "openclaw.json");
       const openclawHash = path.join(openclawDir, ".config-hash");
+      const fabricConfig = path.join(openclawDir, "fabric.json");
       fs.mkdirSync(nemoclawDir, { mode: 0o755 });
       fs.chmodSync(nemoclawDir, 0o755);
       fs.mkdirSync(nestedOpenclawDir, { recursive: true, mode: 0o755 });
       fs.writeFileSync(openclawConfig, "existing OpenClaw config\n", { mode: 0o644 });
       fs.writeFileSync(openclawHash, "existing hash\n", { mode: 0o644 });
+      fs.writeFileSync(fabricConfig, "existing Fabric config\n", { mode: 0o666 });
       const selection = {
         endpointType: "custom",
         endpointUrl: "https://inference.local/v1",
@@ -134,10 +136,12 @@ describe("sandbox config sync helpers", () => {
       expect(modeBits(path.join(nemoclawDir, "config.json"))).toBe(0o600);
       expect(fs.readFileSync(openclawConfig, "utf8")).toBe("existing OpenClaw config\n");
       expect(fs.readFileSync(openclawHash, "utf8")).toBe("existing hash\n");
+      expect(fs.readFileSync(fabricConfig, "utf8")).toBe("existing Fabric config\n");
       expect(fs.statSync(openclawDir).mode & 0o7777).toBe(0o2770);
       expect(fs.statSync(nestedOpenclawDir).mode & 0o7777).toBe(0o2770);
       expect(modeBits(openclawConfig)).toBe(0o660);
       expect(modeBits(openclawHash)).toBe(0o660);
+      expect(modeBits(fabricConfig)).toBe(0o600);
     } finally {
       fs.rmSync(homeDir, { recursive: true, force: true });
     }

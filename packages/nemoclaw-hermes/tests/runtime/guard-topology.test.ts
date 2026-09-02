@@ -532,6 +532,7 @@ with tempfile.TemporaryDirectory() as tmp:
     os.makedirs(hermes)
     config = os.path.join(hermes, "config.yaml")
     env = os.path.join(hermes, ".env")
+    fabric = os.path.join(hermes, "fabric.json")
     strict = os.path.join(tmp, "hermes.config-hash")
     state = os.path.join(tmp, "restart-state.json")
     lock = os.path.join(tmp, "hermes-config-mutation.lock")
@@ -549,10 +550,12 @@ with tempfile.TemporaryDirectory() as tmp:
         handle.write(b"model: test\\n")
     with open(env, "wb") as handle:
         handle.write(b"SAFE=1\\n")
-    initial_hash, _config_snapshot, _env_snapshot = guard._hash_text(config, env)
+    with open(fabric, "wb") as handle:
+        handle.write(b"{}\\n")
+    initial_hash, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config, env)
     guard._write_hash(strict, initial_hash)
     guard.refresh_hashes(hermes, strict, "both")
-    for name in (config, env, os.path.join(hermes, ".config-hash")):
+    for name in (config, env, fabric, os.path.join(hermes, ".config-hash")):
         os.chmod(name, 0o444)
     os.chmod(hermes, 0o755)
     os.chmod(sandbox, 0o755)
@@ -719,6 +722,7 @@ with tempfile.TemporaryDirectory() as tmp:
     os.makedirs(hermes)
     config = os.path.join(hermes, "config.yaml")
     env = os.path.join(hermes, ".env")
+    fabric = os.path.join(hermes, "fabric.json")
     strict = os.path.join(tmp, "hermes.config-hash")
     state = os.path.join(tmp, "restart-state.json")
 
@@ -726,7 +730,9 @@ with tempfile.TemporaryDirectory() as tmp:
         handle.write(b"model: test\\n")
     with open(env, "wb") as handle:
         handle.write(b"SAFE=1\\n")
-    initial_hash, _config_snapshot, _env_snapshot = guard._hash_text(config, env)
+    with open(fabric, "wb") as handle:
+        handle.write(b"{}\\n")
+    initial_hash, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config, env)
     guard._write_hash(strict, initial_hash)
     guard.refresh_hashes(hermes, strict, "both")
 

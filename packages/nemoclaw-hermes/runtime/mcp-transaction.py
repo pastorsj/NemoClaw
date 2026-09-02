@@ -695,12 +695,12 @@ def _refresh_and_verify_hashes(
         mcp_transition=mcp_transition,
     )
     compat_text, _ = guard._read_text(os.path.join(HERMES_DIR, ".config-hash"))
-    _config_digest, _env_digest, mcp_state = guard._parse_config_hash(
+    _config_digest, _env_digest, _fabric_digest, mcp_state = guard._parse_config_hash(
         compat_text,
         os.path.join(HERMES_DIR, "config.yaml"),
         os.path.join(HERMES_DIR, ".env"),
     )
-    expected_text, _, _ = guard._hash_text(
+    expected_text, _, _, _ = guard._hash_text(
         os.path.join(HERMES_DIR, "config.yaml"),
         os.path.join(HERMES_DIR, ".env"),
         mcp_state,

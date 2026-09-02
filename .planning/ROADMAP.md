@@ -21,7 +21,7 @@ its own rollback point. This is intentionally smaller than the preserved 57-plan
 | Runtime provider | 4 | Current Docker and external-gateway parity with unchanged activation authority | Keep current static registration |
 | Serving | 5 | Current catalogue parity and one real backend lifecycle | Keep current serving implementation |
 | Platform | 6 | Readiness and claim parity plus accepted host-preparer boundary | Keep host preparation in core |
-| Fabric | 7 | Deterministic contract evidence plus bounded live policy, canary-secret, isolation, and cleanup evidence | Keep Fabric outside NemoClaw |
+| Fabric | 3 and 7 | Phase 3 deterministic and bounded live evidence, followed by a separate product decision | Keep Fabric as a local-fork experiment |
 | External handoff | 8 | Exact artifacts, compatibility edges, supported live profiles, provenance, rollback | Keep qualified packages in-tree |
 
 ## Phases
@@ -31,8 +31,8 @@ its own rollback point. This is intentionally smaller than the preserved 57-plan
 - [ ] **Phase 2: Agent Package Foundation** — Accept product scope, port the safe agent package store
   and harness CLI, and bind exact agent package identity into current onboarding state without
   changing execution paths.
-- [ ] **Phase 3: Agent Runtime Packages** — Make current supported agent integrations self-contained,
-  remove named-agent generic dispatch, and move native tests to their package owners.
+- [ ] **Phase 3: Agent Runtime Packages** — Make agent integrations self-contained and connect
+  compatible headless commands through one package-selected Fabric runner.
 - [ ] **Phase 4: Runtime Provider Packages** — Wrap current Docker and the Kubernetes-named
   external-gateway bundle behind build-time in-tree package identities while preserving
   registration, activation, qualification, and current support claims.
@@ -40,8 +40,8 @@ its own rollback point. This is intentionally smaller than the preserved 57-plan
   adapters, starting with one backend and removing substrate assumptions through existing surfaces.
 - [ ] **Phase 6: Platform and Host Boundaries** — Consolidate declarative platform profiles and
   isolate only justified privileged host preparation.
-- [ ] **Phase 7: NeMo Fabric Pilot** — Evaluate a shared sandbox-local invocation runner without
-  changing onboarding or always-on lifecycle behavior.
+- [ ] **Phase 7: NeMo Fabric Product Gate** — Evaluate Phase 3 evidence without changing onboarding,
+  always-on lifecycle behavior, or support status.
 - [ ] **Phase 8: Qualification and Repository Handoff** — Prove compatibility edges, exact selected
   artifacts, updates, rollback, named platform journeys, and unchanged external package trees.
 
@@ -90,7 +90,7 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
    no-messaging Linux/Brev development journey. Neither development run replaces exact staging
    Launchable release evidence.
 
-**Plans:** 20/23 plans executed
+**Plans:** 22/23 plans executed
 
 - [x] `02-01` — Obtain the accepted product-scope decision.
 - [x] `02-02` — Define and validate the agent package envelope and hostile package tree.
@@ -155,21 +155,29 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 
 **Depends on:** Phase 2
 
-**Requirements:** PKG-06, PKG-07, AGENT-02, AGENT-03, AGENT-05, TEST-01, TEST-02,
-TEST-08
+**Requirements:** PKG-06, PKG-07, AGENT-02, AGENT-03, AGENT-05, FABRIC-01, FABRIC-02,
+FABRIC-02A, FABRIC-03, TEST-01, TEST-02, TEST-04, TEST-06, TEST-07, TEST-08
+
+**Plans:** 1/4 plans executed
+
+- [x] `03-01` — Add the generic Fabric runner, artifact validation, and DCode and Pi connections.
+- [ ] `03-02` — Connect OpenClaw through a package-owned adapter and shared config integrity.
+- [ ] `03-03` — Connect Hermes through the released adapter and atomic route projection.
+- [ ] `03-04` — Run common deterministic, Mac, and Brev non-messaging qualification.
 
 **Implementation order:**
 
-1. Establish package-local build and test commands, root aggregate discovery, publication paths,
-   and exactly-once suite membership before moving a harness test.
-2. LangChain Deep Agents Code proves the terminal-agent path.
-3. Hermes proves the gateway, dashboard, state, MCP, and messaging-projection path.
-4. Freeze only the shared operations proven by both.
-5. OpenClaw moves from `_legacy_paths` and remains the default.
-6. Delete the temporary bundled-source adapter once every standard package is authored at its
+1. Keep package-local build and test commands, root aggregate discovery, publication paths, and
+   exactly-once suite membership.
+2. Use one generic Fabric runner with adapter selection in package data.
+3. Keep DCode, Pi, OpenClaw, and Hermes native commands unchanged.
+4. Make OpenClaw own its adapter and make Hermes own its released-adapter integration.
+5. Run adapter-only, composed, package, core, E2E-support, Mac, and Brev non-messaging gates.
+6. Continue moving native behavior and tests to package owners without adding a universal host
+   callback.
+7. Delete the temporary bundled-source adapter once every standard package is authored at its
    canonical package root and the installed object is the real execution asset root.
-7. Pi and NemoCUA remain legacy built-in candidates until separately accepted and packaged. Their
-   existing qualification gates remain reachable without making them standard installed harnesses.
+8. NemoCUA remains a legacy built-in candidate until separately accepted and packaged.
 
 ### Phase 4: Runtime Provider Packages
 
@@ -213,24 +221,17 @@ ownership.
 3. Define a host-preparer contract only if DGX Station and a second real preparer prove it.
 4. Keep platform support claims tied to physical evidence.
 
-### Phase 7: NeMo Fabric Pilot
+### Phase 7: NeMo Fabric Product Gate
 
-**Goal:** Evaluate Fabric as a generic invocation layer inside NemoClaw sandboxes without making it
-a control-plane dependency or claiming native agent parity.
+**Goal:** Decide whether Phase 3's sandbox-local Fabric experiment merits a separate supported
+capability proposal. Fabric remains outside the control plane.
 
 **Implementation order:**
 
-1. Pin the Fabric SDK, released adapter, adapter contract, Python, fixture identity, and
-   hash-locked dependency graph.
-2. Keep one generic runner and package-owned adapter configuration; native interactive commands stay
-   agent-specific.
-3. Run deterministic discovery, doctor, start, ordered invoke, failure, malformed result,
-   signal, isolation, and stop tests outside a live sandbox.
-4. Exercise one released Deep Agents round trip through a fake endpoint, then one Mac and one Brev
-   composition on a model that needs no unsupported request options.
-5. Keep native DCode qualification separate until the released adapter matches its dependencies and
-   model settings.
-6. Add Pi through the same contract only after its Fabric adapter has a public release.
+1. Review the exact adapter, dependency, lifecycle, security, and live evidence from Phase 3.
+2. Keep native DCode qualification separate from the released Deep Agents adapter evidence.
+3. Record ownership, compatibility, rollback, and release validation before any support proposal.
+4. Make no product claim unless a separate recorded decision has status `Accept`.
 
 ### Phase 8: Qualification and Repository Handoff
 

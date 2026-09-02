@@ -521,6 +521,78 @@ describe("agent setup session boundaries", () => {
     expect(context.recordStepComplete).not.toHaveBeenCalled();
   });
 
+  it("rejects a healthy gateway when its package smoke command fails", async () => {
+    const smokeCommand = "nemoclaw-fabric doctor --config /sandbox/.hermes/fabric.json --json";
+    const runCaptureOpenshell = vi
+      .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
+      .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok")
+      .mockReturnValueOnce("NEMOCLAW_AGENT_SMOKE_EXIT:127");
+    const { context } = createAgentSetupContext(runCaptureOpenshell);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${String(code)}`);
+    }) as typeof process.exit);
+
+    await expect(
+      handleAgentSetup(
+        "sandbox-x",
+        "model-x",
+        "provider-x",
+        makeAgent({
+          runtime: { kind: "gateway", smoke_commands: [smokeCommand] },
+        }),
+        false,
+        null,
+        context,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(runCaptureOpenshell.mock.calls.some(([args]) => args.includes("curl"))).toBe(false);
+    expect(context.recordStepFailed).toHaveBeenCalledWith(
+      "agent_setup",
+      `Agent package smoke command failed: ${smokeCommand}\nNEMOCLAW_AGENT_SMOKE_EXIT:127`,
+    );
+    expect(context.recordStepComplete).not.toHaveBeenCalled();
+  });
+
+  it("rechecks package smoke before accepting a healthy resumed gateway", async () => {
+    const smokeCommand = "nemoclaw-fabric doctor --config /sandbox/.hermes/fabric.json --json";
+    const runCaptureOpenshell = vi
+      .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
+      .mockReturnValueOnce("ok")
+      .mockReturnValueOnce("NEMOCLAW_AGENT_SMOKE_EXIT:127")
+      .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok")
+      .mockReturnValueOnce("NEMOCLAW_AGENT_SMOKE_EXIT:127");
+    const { context } = createAgentSetupContext(runCaptureOpenshell);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+      throw new Error(`process.exit:${String(code)}`);
+    }) as typeof process.exit);
+
+    await expect(
+      handleAgentSetup(
+        "sandbox-x",
+        "model-x",
+        "provider-x",
+        makeAgent({
+          runtime: { kind: "gateway", smoke_commands: [smokeCommand] },
+        }),
+        true,
+        null,
+        context,
+      ),
+    ).rejects.toThrow("process.exit:1");
+
+    expect(context.skippedStepMessage).not.toHaveBeenCalled();
+    expect(context.startRecordedStep).toHaveBeenCalledWith("agent_setup", {
+      sandboxName: "sandbox-x",
+      provider: "provider-x",
+      model: "model-x",
+    });
+    expect(context.recordStepFailed).toHaveBeenCalled();
+    expect(context.recordStepComplete).not.toHaveBeenCalled();
+  });
+
   // The manifest names 8642; a second sandbox is allocated its own port (#9739).
   const hermesProbeAgent = makeAgent({
     name: "hermes",

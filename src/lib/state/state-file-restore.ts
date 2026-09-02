@@ -46,11 +46,40 @@ function stateFileRemotePath(dir: string, filePath: string): string {
   return `${dir.replace(/\/+$/, "")}/${filePath}`;
 }
 
+function requireConfigHashFiles(
+  specPath: string,
+  configHashFiles: readonly string[],
+): readonly string[] {
+  if (configHashFiles.length === 0 || configHashFiles[0] !== specPath) {
+    throw new Error("Config hash inputs must begin with the restored state file");
+  }
+  const seen = new Set<string>();
+  for (const file of configHashFiles) {
+    const parts = file.split("/");
+    if (
+      file.length === 0 ||
+      file.startsWith("/") ||
+      file.includes("\\") ||
+      /[\x00-\x1f\x7f]/u.test(file) ||
+      parts.some((part) => part === "" || part === "." || part === "..") ||
+      seen.has(file)
+    ) {
+      throw new Error("Config hash inputs must be unique canonical relative paths");
+    }
+    seen.add(file);
+  }
+  return configHashFiles;
+}
+
 export function buildStateFileRestoreCommand(
   dir: string,
   spec: StateFileRestoreSpec,
-  refreshOpenClawConfigHash = false,
+  refreshConfigRecoveryAnchors = false,
+  configHashFiles: readonly string[] = [spec.path],
 ): string {
+  const protectedFiles = refreshConfigRecoveryAnchors
+    ? requireConfigHashFiles(spec.path, configHashFiles)
+    : [];
   const remotePath = stateFileRemotePath(dir, spec.path);
   const quotedRemotePath = shellQuote(remotePath);
   if (spec.strategy === "sqlite_backup") {
@@ -104,10 +133,22 @@ export function buildStateFileRestoreCommand(
     // staged inode before the atomic swap so the gateway and its trusted
     // controller never observe the restored config with the generic 0640
     // state-file mode.
-    refreshOpenClawConfigHash ? 'chmod 660 "$tmp"' : 'chmod 640 "$tmp"',
+    refreshConfigRecoveryAnchors ? 'chmod 660 "$tmp"' : 'chmod 640 "$tmp"',
   ];
 
-  if (refreshOpenClawConfigHash) {
+  if (refreshConfigRecoveryAnchors) {
+    // Validate every companion integrity input before changing either the
+    // recovery anchor or the live configuration. A missing or redirected
+    // Fabric configuration must leave the previous protected pair intact.
+    for (const [index, file] of protectedFiles.slice(1).entries()) {
+      const variable = `protected_${String(index)}`;
+      steps.push(
+        `${variable}=${shellQuote(stateFileRemotePath(dir, file))}`,
+        `[ ! -L "$${variable}" ] || { echo "refusing symlinked protected config: $${variable}" >&2; exit 19; }`,
+        `[ -f "$${variable}" ] || { echo "protected config is not a regular file: $${variable}" >&2; exit 20; }`,
+      );
+    }
+
     // Stage the OpenClaw recovery anchor before swapping the live config so
     // the integrity watcher can never observe a restored config paired with a
     // stale `.last-good` recovery target.
@@ -123,11 +164,12 @@ export function buildStateFileRestoreCommand(
 
   steps.push('mv -f "$tmp" "$dst"');
 
-  if (refreshOpenClawConfigHash) {
+  if (refreshConfigRecoveryAnchors) {
+    const hashArguments = protectedFiles.map(shellQuote).join(" ");
     steps.push(
       'hash_file="${parent}/.config-hash"',
       '[ ! -L "$hash_file" ] || { echo "refusing symlinked config hash target: $hash_file" >&2; exit 12; }',
-      '(cd "$parent" && sha256sum "$(basename "$dst")" > .config-hash)',
+      `(cd "$parent" && sha256sum -- ${hashArguments} > .config-hash)`,
       'chmod 660 "$hash_file" 2>/dev/null || true',
     );
   }
@@ -145,13 +187,14 @@ export function restoreStateFile(
   log: (message: string) => void,
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
+  configHashFiles?: readonly string[],
 ): boolean {
   log(`Restoring state file ${spec.path} (${spec.strategy})`);
 
   let command: string;
   let input: Buffer | null;
   if (ownership?.merge === "openclaw-config") {
-    command = buildStateFileRestoreCommand(dir, spec, true);
+    command = buildStateFileRestoreCommand(dir, spec, true, configHashFiles ?? [spec.path]);
     const result = buildOpenClawConfigRestoreInputFromSandbox({
       backupContents,
       dir,

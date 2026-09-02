@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import path from "node:path";
-import type { AgentDefinition, AgentStateLockPlan } from "../agent-runtime/manifest-types";
+import type {
+  AgentConfigMutableAccess,
+  AgentDefinition,
+  AgentStateLockPlan,
+} from "../agent-runtime/manifest-types";
 import type { SandboxEntry } from "../state/registry/types";
 
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
@@ -15,6 +19,7 @@ export interface AgentConfigTarget {
   format: string;
   configFile: string;
   sensitiveFiles?: string[];
+  mutableAccess?: AgentConfigMutableAccess | null;
   stateLockPlan?: AgentStateLockPlan;
   stateLockPlanInImage: boolean;
 }
@@ -28,6 +33,7 @@ export interface AgentConfigDependencies {
       envFile?: string | null;
       format?: string;
       shieldsFiles: readonly string[];
+      mutableAccess?: AgentConfigMutableAccess | null;
     };
     stateLockPlan: AgentStateLockPlan;
     stateLockPlanInImage: boolean;
@@ -43,6 +49,19 @@ export const DEFAULT_AGENT_CONFIG: AgentConfigTarget = {
   sensitiveFiles: ["/sandbox/.openclaw/.config-hash"],
   stateLockPlanInImage: true,
 };
+
+/** Return the config-relative names protected by one agent's Shields contract. */
+export function getProtectedConfigFileNames(
+  target: Pick<AgentConfigTarget, "configDir" | "configPath" | "sensitiveFiles">,
+): string[] {
+  return [target.configPath, ...(target.sensitiveFiles || [])].map((file) => {
+    const relative = path.posix.relative(target.configDir, file);
+    if (!relative || path.posix.isAbsolute(relative) || relative.startsWith("../")) {
+      throw new Error(`Protected config file '${file}' must stay below '${target.configDir}'`);
+    }
+    return relative;
+  });
+}
 
 function defaultDependencies(): AgentConfigDependencies {
   const registry = require("../state/registry");
@@ -151,13 +170,13 @@ export function resolveAgentConfig(
   ) {
     throw new Error("Agent manifest field 'config.shields_files' must be a string array");
   }
-  if (agentName !== "hermes" && cfg.shieldsFiles.length > 0) {
-    throw new Error(
-      `Agent '${agentName}' declares config.shields_files, but protected top-level config files are currently supported only for Hermes`,
-    );
-  }
   for (const [index, shieldsFile] of cfg.shieldsFiles.entries()) {
     const resolved = resolveConfigFile(dir, shieldsFile, `shields_files[${String(index)}]`);
+    if (shieldsFile.length === 0 || path.posix.basename(shieldsFile) !== shieldsFile) {
+      throw new Error(
+        `Agent config field 'shields_files[${String(index)}]' must be a direct file name`,
+      );
+    }
     if (resolved === configPath || sensitiveFiles.includes(resolved)) {
       throw new Error(
         `Agent config field 'shields_files[${String(index)}]' duplicates a protected config file`,
@@ -173,6 +192,7 @@ export function resolveAgentConfig(
     format: cfg.format || "json",
     configFile: cfg.configFile,
     sensitiveFiles,
+    ...(cfg.mutableAccess ? { mutableAccess: cfg.mutableAccess } : {}),
     stateLockPlan: agent.stateLockPlan,
     stateLockPlanInImage: agent.stateLockPlanInImage,
   };

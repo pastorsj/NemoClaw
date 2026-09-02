@@ -32,6 +32,7 @@ runtime:
 config:
   dir: /sandbox/.pi/agent
   config_file: models.json
+  mutable_access: private
   shields_files:
     - fabric.json
   format: json

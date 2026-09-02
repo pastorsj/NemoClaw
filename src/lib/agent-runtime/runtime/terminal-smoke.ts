@@ -129,3 +129,16 @@ export function runAgentSmokeCommands(
   }
   return { ok: true };
 }
+
+/** Build the fail-closed verifier used after an onboarded package is configured. */
+export function createAgentSmokeCommandVerifier(
+  agent: AgentDefinition,
+  runCaptureOpenshell: RunCaptureOpenshell,
+  getGatewayName: () => string,
+): (sandboxName: string) => void {
+  return (sandboxName) => {
+    const result = runAgentSmokeCommands(sandboxName, agent, runCaptureOpenshell, getGatewayName());
+    if (result.ok) return;
+    throw new Error(`${agent.displayName} package smoke command failed: ${result.command}`);
+  };
+}

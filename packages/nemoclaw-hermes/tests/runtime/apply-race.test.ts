@@ -32,13 +32,15 @@ with tempfile.TemporaryDirectory(prefix="hermes-mcp-apply-race-") as root:
     os.mkdir(hermes)
     config = os.path.join(hermes, "config.yaml")
     env_path = os.path.join(hermes, ".env")
+    fabric = os.path.join(hermes, "fabric.json")
     strict = os.path.join(root, "hermes.config-hash")
     compat = os.path.join(hermes, ".config-hash")
 
     original_config = "model: test\n"
     open(config, "w", encoding="utf-8").write(original_config)
     open(env_path, "w", encoding="utf-8").write("SAFE=1\n")
-    initial_hash, _, _ = guard._hash_text(config, env_path)
+    open(fabric, "w", encoding="utf-8").write("{}\n")
+    initial_hash, _, _, _ = guard._hash_text(config, env_path)
     guard._write_hash(strict, initial_hash)
     guard._write_hash(compat, initial_hash)
 
@@ -190,13 +192,15 @@ with tempfile.TemporaryDirectory(prefix="hermes-mcp-partial-apply-race-") as roo
     os.mkdir(hermes)
     config = os.path.join(hermes, "config.yaml")
     env_path = os.path.join(hermes, ".env")
+    fabric = os.path.join(hermes, "fabric.json")
     strict = os.path.join(root, "hermes.config-hash")
     compat = os.path.join(hermes, ".config-hash")
 
     original_config = "model: test\n"
     open(config, "w", encoding="utf-8").write(original_config)
     open(env_path, "w", encoding="utf-8").write("SAFE=1\n")
-    initial_hash, _, _ = guard._hash_text(config, env_path)
+    open(fabric, "w", encoding="utf-8").write("{}\n")
+    initial_hash, _, _, _ = guard._hash_text(config, env_path)
     guard._write_hash(strict, initial_hash)
     guard._write_hash(compat, initial_hash)
 
@@ -390,13 +394,15 @@ with tempfile.TemporaryDirectory(prefix="hermes-mcp-failed-reload-race-") as roo
     os.mkdir(hermes)
     config = os.path.join(hermes, "config.yaml")
     env_path = os.path.join(hermes, ".env")
+    fabric = os.path.join(hermes, "fabric.json")
     strict = os.path.join(root, "hermes.config-hash")
     compat = os.path.join(hermes, ".config-hash")
 
     original_config = "model: test\n"
     open(config, "w", encoding="utf-8").write(original_config)
     open(env_path, "w", encoding="utf-8").write("SAFE=1\n")
-    initial_hash, _, _ = guard._hash_text(config, env_path)
+    open(fabric, "w", encoding="utf-8").write("{}\n")
+    initial_hash, _, _, _ = guard._hash_text(config, env_path)
     guard._write_hash(strict, initial_hash)
     guard._write_hash(compat, initial_hash)
 

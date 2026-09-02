@@ -243,10 +243,12 @@ describe("provider placeholder refresh (#4251)", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-provider-placeholders-"));
     const openclawDir = path.join(tmpDir, ".openclaw");
     const configPath = path.join(openclawDir, "openclaw.json");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const hashPath = path.join(openclawDir, ".config-hash");
     const scriptPath = path.join(tmpDir, "run.sh");
     fs.mkdirSync(openclawDir, { recursive: true });
     fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
     const fn = extractShellFunctionFromSource(
       src,
       "refresh_openclaw_provider_placeholders",
@@ -256,6 +258,7 @@ describe("provider placeholder refresh (#4251)", () => {
       [
         "#!/usr/bin/env bash",
         "set -euo pipefail\nrefresh_openclaw_wechat_account_placeholder() { :; }",
+        "openclaw_config_dir_owner() { echo sandbox; }",
         "prepare_openclaw_config_for_write() { :; }",
         "restore_openclaw_config_after_write() { :; }",
         fn,
@@ -302,6 +305,7 @@ describe("provider placeholder refresh (#4251)", () => {
     expect(run.result.status, run.result.stderr).toBe(0);
     expect(run.config.channels.telegram.accounts.default.botToken).toBe(scoped);
     expect(run.hash).toContain("openclaw.json");
+    expect(run.hash).toContain("fabric.json");
     expect(run.result.stderr).toContain(
       "Refreshed provider placeholders from OpenShell runtime env: TELEGRAM_BOT_TOKEN",
     );

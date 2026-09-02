@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentDefinition, AgentStateLockPlan } from "../agent-runtime/manifest-types";
 import {
   type AgentConfigDependencies,
+  getProtectedConfigFileNames,
   resolveAgentConfig,
   resolveAgentStateLockContract,
 } from "./agent-config";
@@ -215,6 +216,7 @@ describe("agent config resolution", () => {
   it.each([
     ["a traversing Shields file", ["../secrets"], /shields_files\[0\].*canonical relative path/],
     ["an absolute Shields file", ["/etc/shadow"], /shields_files\[0\].*canonical relative path/],
+    ["a nested Shields file", ["runtime/fabric.json"], /shields_files\[0\].*direct file name/],
     ["a control character in a Shields file", ["secret\0file"], /canonical relative path/],
     ["the primary config file", ["config.yaml"], /duplicates a protected config file/],
     ["the config hash twice", [".config-hash"], /duplicates a protected config file/],
@@ -260,7 +262,7 @@ describe("agent config resolution", () => {
     expect(() => resolveAgentConfig("alpha", deps)).toThrow(/config\.shields_files.*string array/);
   });
 
-  it("rejects protected top-level files for agents without a descriptor-safe transaction", () => {
+  it("resolves declared protected files without coupling the contract to an agent name", () => {
     const deps = dependencies({
       getSandbox: vi.fn(() => ({ agent: "langchain-deepagents-code" })),
       loadAgent: vi.fn(() => ({
@@ -270,12 +272,20 @@ describe("agent config resolution", () => {
           envFile: ".env",
           format: "toml",
           shieldsFiles: [".env"],
+          mutableAccess: "private" as const,
         },
         stateLockPlan: PLAN,
         stateLockPlanInImage: false,
       })),
     });
 
-    expect(() => resolveAgentConfig("alpha", deps)).toThrow(/supported only for Hermes/);
+    const target = resolveAgentConfig("alpha", deps);
+
+    expect(target.sensitiveFiles).toEqual([
+      "/sandbox/.deepagents/.config-hash",
+      "/sandbox/.deepagents/.env",
+    ]);
+    expect(target.mutableAccess).toBe("private");
+    expect(getProtectedConfigFileNames(target)).toEqual(["config.toml", ".config-hash", ".env"]);
   });
 });

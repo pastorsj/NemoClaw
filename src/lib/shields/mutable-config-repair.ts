@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import path from "node:path";
+import type { AgentConfigTarget } from "../sandbox/agent-config";
+
 const dockerExec: typeof import("../adapters/docker/exec") = require("../adapters/docker/exec");
 const privilegedExecModule: typeof import("../sandbox/privileged-exec") = require("../sandbox/privileged-exec");
 
@@ -12,6 +15,45 @@ const MUTABLE_CONFIG_NORMALIZER_WATCHDOG = [
   "--kill-after=5s",
   "15s",
 ] as const;
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
+
+type MutableProtectedFileMode = "600" | "660";
+
+function directProtectedFileName(configDir: string, filePath: string): string {
+  const relative = path.posix.relative(configDir, filePath);
+  if (
+    !relative ||
+    path.posix.isAbsolute(relative) ||
+    path.posix.basename(relative) !== relative ||
+    relative === "." ||
+    relative === ".." ||
+    relative.includes("\\") ||
+    CONTROL_CHAR_RE.test(relative)
+  ) {
+    throw new Error(`Mutable config protected file '${filePath}' must be a direct canonical file`);
+  }
+  return relative;
+}
+
+function mutableProtectedFileModes(
+  target: AgentConfigTarget,
+): Array<readonly [string, MutableProtectedFileMode]> {
+  const entries: Array<readonly [string, MutableProtectedFileMode]> = [
+    [directProtectedFileName(target.configDir, target.configPath), "660"],
+  ];
+  for (const sensitivePath of target.sensitiveFiles || []) {
+    const name = directProtectedFileName(target.configDir, sensitivePath);
+    entries.push([name, name === ".config-hash" ? "660" : "600"]);
+  }
+  const names = new Set<string>();
+  for (const [name] of entries) {
+    if (names.has(name)) {
+      throw new Error(`Mutable config protected file '${name}' is declared more than once`);
+    }
+    names.add(name);
+  }
+  return entries;
+}
 
 function runPrivileged(sandboxName: string, cmd: string[], timeout = 15000): void {
   privilegedExecModule.withPrivilegedSandboxExecutionLease(
@@ -58,7 +100,11 @@ function sandboxIdentityId(sandboxName: string, flag: "-u" | "-g"): string {
 }
 
 /** Apply the mutable OpenClaw contract through the image's trusted helper. */
-export function normalizeMutableOpenClawConfig(sandboxName: string, configDir: string): void {
+export function normalizeMutableOpenClawConfig(
+  sandboxName: string,
+  target: AgentConfigTarget,
+): void {
+  const protectedFileModes = mutableProtectedFileModes(target);
   const sandboxUid = sandboxIdentityId(sandboxName, "-u");
   const sandboxGid = sandboxIdentityId(sandboxName, "-g");
   // The in-sandbox watchdog signals the Python process group and reaps its
@@ -71,9 +117,11 @@ export function normalizeMutableOpenClawConfig(sandboxName: string, configDir: s
       "/usr/bin/python3",
       "-I",
       MUTABLE_CONFIG_NORMALIZER,
-      configDir,
+      target.configDir,
       sandboxUid,
       sandboxGid,
+      "normalize-protected",
+      ...protectedFileModes.flatMap(([name, mode]) => [name, mode]),
     ],
     MUTABLE_CONFIG_NORMALIZER_HOST_TIMEOUT_MS,
   );

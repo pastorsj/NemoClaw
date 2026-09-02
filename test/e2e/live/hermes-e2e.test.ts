@@ -823,12 +823,12 @@ test(
           trustedSandboxShellScript(
             [
               "set -eu",
-              'for path in /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash; do chattr -i "$path" 2>/dev/null || true; done',
+              'for path in /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash; do chattr -i "$path" 2>/dev/null || true; done',
               "chmod u+w /sandbox/.hermes/.env",
               'printf "\\nNEMOCLAW_E2E_LOCKED_DRIFT_MARKER=1\\n" >> /sandbox/.hermes/.env',
-              "chown root:root /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
+              "chown root:root /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
               "chmod 755 /sandbox/.hermes",
-              "chmod 444 /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
+              "chmod 444 /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
             ].join("; "),
           ),
           {
@@ -866,15 +866,17 @@ test(
           trustedSandboxShellScript(
             [
               "set -eu",
-              'for path in /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash; do chattr -i "$path" 2>/dev/null || true; done',
+              'for path in /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash; do chattr -i "$path" 2>/dev/null || true; done',
               "chmod u+w /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
               'python3 -c \'from pathlib import Path; p=Path("/sandbox/.hermes/.env"); lines=[line for line in p.read_text(encoding="utf-8").splitlines() if not line.startswith("NEMOCLAW_E2E_LOCKED_DRIFT_MARKER=")]; p.write_text("\\n".join(lines).rstrip()+"\\n", encoding="utf-8")\'',
-              "sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env > /etc/nemoclaw/hermes.config-hash",
-              "sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env > /sandbox/.hermes/.config-hash",
-              "chown root:root /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
+              'mcp_state="$(tail -n 1 /etc/nemoclaw/hermes.config-hash)"',
+              'printf "%s\\n" "$mcp_state" | grep -Eq "^# nemoclaw-hermes-mcp-state-v1 intended=[0-9a-f]{64} applied=[0-9a-f]{64}$"',
+              '{ sha256sum /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json; printf "%s\\n" "$mcp_state"; } > /etc/nemoclaw/hermes.config-hash',
+              "cp /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
+              "chown root:root /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
               "chmod 755 /sandbox/.hermes",
-              "chmod 444 /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
-              'for path in /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash; do chattr +i "$path" 2>/dev/null || true; done',
+              "chmod 444 /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash",
+              'for path in /sandbox/.hermes /sandbox/.hermes/config.yaml /sandbox/.hermes/.env /sandbox/.hermes/fabric.json /etc/nemoclaw/hermes.config-hash /sandbox/.hermes/.config-hash; do chattr +i "$path" 2>/dev/null || true; done',
             ].join("; "),
           ),
           {

@@ -4,6 +4,7 @@
 export interface HermesManagedStartupIntegrityPaths {
   configPath: string;
   envPath: string;
+  fabricPath: string;
   strictHashPath: string;
   compatHashPath: string;
   startupLogPath: string;
@@ -14,6 +15,7 @@ export interface HermesManagedStartupIntegrityPaths {
 const DEFAULT_PATHS: HermesManagedStartupIntegrityPaths = {
   configPath: "/sandbox/.hermes/config.yaml",
   envPath: "/sandbox/.hermes/.env",
+  fabricPath: "/sandbox/.hermes/fabric.json",
   strictHashPath: "/etc/nemoclaw/hermes.config-hash",
   compatHashPath: "/sandbox/.hermes/.config-hash",
   startupLogPath: "/tmp/nemoclaw-start.log",
@@ -44,6 +46,7 @@ import stat
 
 config_path = Path(${pythonLiteral(paths.configPath)})
 env_path = Path(${pythonLiteral(paths.envPath)})
+fabric_path = Path(${pythonLiteral(paths.fabricPath)})
 strict_hash_path = Path(${pythonLiteral(paths.strictHashPath)})
 compat_hash_path = Path(${pythonLiteral(paths.compatHashPath)})
 startup_log_path = Path(${pythonLiteral(paths.startupLogPath)})
@@ -77,10 +80,10 @@ def parse_hash(data, label):
     except UnicodeDecodeError:
         fail(f"{label} is not ASCII")
     parts = text.split("\\n")
-    if len(parts) != 4 or parts[-1] != "":
-        fail(f"{label} does not contain exactly three records")
-    lines = parts[:2]
-    expected_paths = (str(config_path), str(env_path))
+    if len(parts) != 5 or parts[-1] != "":
+        fail(f"{label} does not contain exactly four records")
+    lines = parts[:3]
+    expected_paths = (str(config_path), str(env_path), str(fabric_path))
     digests = []
     for line, expected_path in zip(lines, expected_paths):
         match = re.fullmatch(r"([0-9a-f]{64})  (.+)", line)
@@ -89,7 +92,7 @@ def parse_hash(data, label):
         digests.append(match.group(1))
     state_match = re.fullmatch(
         r"# nemoclaw-hermes-mcp-state-v1 intended=([0-9a-f]{64}) applied=([0-9a-f]{64})",
-        parts[2],
+        parts[3],
     )
     if state_match is None:
         fail(f"{label} contains an unexpected MCP state record")
@@ -100,6 +103,9 @@ def digest(data):
 
 config_bytes, _config_metadata = read_regular(config_path, "Hermes config", 4 * 1024 * 1024)
 env_bytes, _env_metadata = read_regular(env_path, "Hermes environment", 1024 * 1024)
+fabric_bytes, _fabric_metadata = read_regular(
+    fabric_path, "Hermes Fabric config", 4 * 1024 * 1024
+)
 strict_hash_bytes, strict_hash_metadata = read_regular(
     strict_hash_path, "Hermes strict hash", 4096
 )
@@ -142,8 +148,8 @@ strict_digests, strict_mcp_state = parse_hash(strict_hash_bytes, "Hermes strict 
 compat_digests, compat_mcp_state = parse_hash(
     compat_hash_bytes, "Hermes compatibility hash"
 )
-strict_config_digest, strict_env_digest = strict_digests
-compat_config_digest, compat_env_digest = compat_digests
+strict_config_digest, strict_env_digest, strict_fabric_digest = strict_digests
+compat_config_digest, compat_env_digest, compat_fabric_digest = compat_digests
 if strict_mcp_state[0] != strict_mcp_state[1]:
     fail("Hermes strict hash contains pending MCP state")
 if compat_mcp_state != strict_mcp_state:
@@ -156,6 +162,10 @@ if not secrets.compare_digest(compat_config_digest, digest(config_bytes)):
     fail("Hermes compatibility hash does not match the current config")
 if not secrets.compare_digest(compat_env_digest, digest(env_bytes)):
     fail("Hermes compatibility hash does not match the current environment")
+if not secrets.compare_digest(strict_fabric_digest, digest(fabric_bytes)):
+    fail("Hermes Fabric config differs from the strict startup base")
+if not secrets.compare_digest(compat_fabric_digest, digest(fabric_bytes)):
+    fail("Hermes compatibility hash does not match the current Fabric config")
 
 startup_log = startup_log_bytes.decode("utf-8", "replace")
 if (

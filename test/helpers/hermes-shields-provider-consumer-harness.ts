@@ -30,8 +30,13 @@ export const hermesProviderConsumerTarget = {
   agentName: "hermes",
   configPath: "/sandbox/.hermes/config.yaml",
   configDir: "/sandbox/.hermes",
+  format: "yaml" as const,
   configFile: "config.yaml",
-  sensitiveFiles: ["/sandbox/.hermes/.config-hash", "/sandbox/.hermes/.env"],
+  sensitiveFiles: [
+    "/sandbox/.hermes/.config-hash",
+    "/sandbox/.hermes/.env",
+    "/sandbox/.hermes/fabric.json",
+  ],
   stateLockPlan: {
     version: 1 as const,
     readOnlyRoots: ["skills"],
@@ -42,6 +47,14 @@ export const hermesProviderConsumerTarget = {
   },
   stateLockPlanInImage: true,
 };
+
+export function createHermesShieldsTarget() {
+  return {
+    ...hermesProviderConsumerTarget,
+    sensitiveFiles: [...hermesProviderConsumerTarget.sensitiveFiles],
+    stateLockPlan: { ...hermesProviderConsumerTarget.stateLockPlan },
+  };
+}
 
 export const hermesProviderConsumerSandbox: SandboxEntry = {
   name: "current-hermes",

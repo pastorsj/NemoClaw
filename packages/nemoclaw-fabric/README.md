@@ -7,10 +7,10 @@
 NeMo Fabric adapter. The runner reads a normal Fabric configuration. It does
 not select or install adapters.
 
-This path is an experimental fork evaluation. It is not canonical NemoClaw
-behavior. For LangChain Deep Agents Code, this path invokes the released
-Fabric Deep Agents adapter in a separate dependency graph. It does not replace
-or emulate native `dcode -n`, its plugins, or its model request settings.
+This path is a local product-scope candidate, not an approved support or distribution policy.
+LangChain Deep Agents Code and Hermes use released Fabric adapters. Pi and OpenClaw use small
+package-owned adapters around stable native headless commands. The Fabric path does not replace
+their native interactive or gateway commands.
 
 ```bash
 nemoclaw-fabric --version
@@ -79,6 +79,8 @@ offline, installs it without dependency resolution, and runs:
 - Generic runner unit tests.
 - Generic released-SDK lifecycle tests.
 - The Deep Agents package's real adapter test against a loopback endpoint.
+- The Pi and OpenClaw adapters through both direct and generic-runner lifecycle boundaries.
+- The Hermes package projection against the released Hermes adapter.
 - `pip check` for the installed dependency graph.
 
 The generic tests can also run from an environment that has the `test` extra:

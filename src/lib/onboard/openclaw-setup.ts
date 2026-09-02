@@ -62,6 +62,7 @@ export interface ConfigureOpenclawSandboxDeps {
     webSearchConfig: WebSearchSelection,
     revalidateSandboxIdentity?: (operation: string) => void,
   ): Promise<void>;
+  verifyPackageRuntime(sandboxName: string): void;
 }
 
 export function createConfigureOpenclawSandbox(deps: ConfigureOpenclawSandboxDeps) {
@@ -74,6 +75,8 @@ export function createConfigureOpenclawSandbox(deps: ConfigureOpenclawSandboxDep
   ): Promise<void> {
     deps.syncNemoClawConfigInSandbox(sandboxName, provider, model, revalidateSandboxIdentity);
     await deps.reconcileWebSearch(sandboxName, webSearchConfig, revalidateSandboxIdentity);
+    revalidateSandboxIdentity?.(`verify OpenClaw package runtime in sandbox '${sandboxName}'`);
+    deps.verifyPackageRuntime(sandboxName);
   };
 }
 

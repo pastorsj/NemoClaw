@@ -109,4 +109,231 @@ describe("persisted auto-restore target resolution", () => {
       stateLockPlanInImage: false,
     });
   });
+
+  it("keeps a pre-Fabric OpenClaw marker when the current registry protects another file", () => {
+    const registryTarget = {
+      agentName: "openclaw",
+      configPath: "/sandbox/.openclaw/openclaw.json",
+      configDir: "/sandbox/.openclaw",
+      configFile: "openclaw.json",
+      format: "json" as const,
+      sensitiveFiles: [
+        "/sandbox/.openclaw/.config-hash",
+        "/sandbox/.openclaw/fabric.json",
+      ],
+      stateLockPlanInImage: true,
+    };
+
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "openclaw",
+        {
+          agentName: "openclaw",
+          configPath: registryTarget.configPath,
+          configDir: registryTarget.configDir,
+          protectedFiles: ["openclaw.json", ".config-hash"],
+        },
+        () => registryTarget,
+      ),
+    ).toEqual({
+      agentName: "openclaw",
+      configPath: registryTarget.configPath,
+      configDir: registryTarget.configDir,
+      sensitiveFiles: ["/sandbox/.openclaw/.config-hash"],
+      stateLockPlan: expect.any(Object),
+      stateLockPlanInImage: true,
+    });
+  });
+
+  it("keeps marker mutable access when the current registry contract differs", () => {
+    const registryTarget = {
+      agentName: "pi",
+      configPath: "/sandbox/.pi/agent/models.json",
+      configDir: "/sandbox/.pi/agent",
+      configFile: "models.json",
+      format: "json" as const,
+      sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutableAccess: "shared" as const,
+      stateLockPlanInImage: false,
+    };
+
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "pi",
+        {
+          agentName: "pi",
+          configPath: registryTarget.configPath,
+          configDir: registryTarget.configDir,
+          protectedFiles: ["models.json", ".config-hash", "fabric.json"],
+          mutableAccess: "private",
+        },
+        () => registryTarget,
+      ),
+    ).toEqual({
+      agentName: "pi",
+      configPath: registryTarget.configPath,
+      configDir: registryTarget.configDir,
+      sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutableAccess: "private",
+      stateLockPlanInImage: false,
+    });
+  });
+
+  it("does not adopt registry mutable access omitted by a current marker", () => {
+    const registryTarget = {
+      agentName: "pi",
+      configPath: "/sandbox/.pi/agent/models.json",
+      configDir: "/sandbox/.pi/agent",
+      configFile: "models.json",
+      format: "json" as const,
+      sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutableAccess: "private" as const,
+      stateLockPlanInImage: false,
+    };
+
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "pi",
+        {
+          agentName: "pi",
+          configPath: registryTarget.configPath,
+          configDir: registryTarget.configDir,
+          protectedFiles: ["models.json", ".config-hash", "fabric.json"],
+        },
+        () => registryTarget,
+      ),
+    ).toEqual({
+      agentName: "pi",
+      configPath: registryTarget.configPath,
+      configDir: registryTarget.configDir,
+      sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      stateLockPlanInImage: false,
+    });
+  });
+
+  it.each([
+    {
+      agentName: "openclaw",
+      configDir: "/sandbox/.openclaw",
+      configPath: "/sandbox/.openclaw/openclaw.json",
+      protectedFiles: ["openclaw.json", ".config-hash", "fabric.json"],
+      sensitiveFiles: ["/sandbox/.openclaw/.config-hash", "/sandbox/.openclaw/fabric.json"],
+      stateLockPlanAvailable: true,
+      stateLockPlanInImage: true,
+    },
+    {
+      agentName: "hermes",
+      configDir: "/sandbox/.hermes",
+      configPath: "/sandbox/.hermes/config.yaml",
+      protectedFiles: ["config.yaml", ".config-hash", ".env", "fabric.json"],
+      sensitiveFiles: [
+        "/sandbox/.hermes/.config-hash",
+        "/sandbox/.hermes/.env",
+        "/sandbox/.hermes/fabric.json",
+      ],
+      stateLockPlanAvailable: true,
+      stateLockPlanInImage: true,
+    },
+    {
+      agentName: "pi",
+      configDir: "/sandbox/.pi/agent",
+      configPath: "/sandbox/.pi/agent/models.json",
+      protectedFiles: ["models.json", ".config-hash", "fabric.json"],
+      sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutableAccess: "private" as const,
+      stateLockPlanAvailable: false,
+      stateLockPlanInImage: false,
+    },
+    {
+      agentName: "langchain-deepagents-code",
+      configDir: "/sandbox/.deepagents",
+      configPath: "/sandbox/.deepagents/config.toml",
+      protectedFiles: ["config.toml", ".config-hash", "fabric.json"],
+      sensitiveFiles: ["/sandbox/.deepagents/.config-hash", "/sandbox/.deepagents/fabric.json"],
+      mutableAccess: "private" as const,
+      stateLockPlanAvailable: true,
+      stateLockPlanInImage: false,
+    },
+  ])(
+    "reconstructs $agentName protected files when registry resolution fails",
+    ({
+      agentName,
+      configDir,
+      configPath,
+      protectedFiles,
+      sensitiveFiles,
+      mutableAccess,
+      stateLockPlanAvailable,
+      stateLockPlanInImage,
+    }) => {
+      expect(
+        resolvePersistedAutoRestoreTarget(
+          agentName,
+          {
+            agentName,
+            configDir,
+            configPath,
+            protectedFiles,
+            ...(mutableAccess ? { mutableAccess } : {}),
+          },
+          () => {
+            throw new Error("registry unavailable");
+          },
+        ),
+      ).toEqual({
+        agentName,
+        configDir,
+        configPath,
+        sensitiveFiles,
+        ...(mutableAccess ? { mutableAccess } : {}),
+        ...(stateLockPlanAvailable ? { stateLockPlan: expect.any(Object) } : {}),
+        stateLockPlanInImage,
+      });
+    },
+  );
+
+  it("reconstructs protected files while withholding state mutation for a removed definition", () => {
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "removed-agent",
+        {
+          agentName: "removed-agent",
+          configDir: "/sandbox/.removed-agent",
+          configPath: "/sandbox/.removed-agent/config.json",
+          protectedFiles: ["config.json", ".config-hash", "fabric.json"],
+          mutableAccess: "shared",
+        },
+        () => {
+          throw new Error("registry unavailable");
+        },
+      ),
+    ).toEqual({
+      agentName: "removed-agent",
+      configDir: "/sandbox/.removed-agent",
+      configPath: "/sandbox/.removed-agent/config.json",
+      sensitiveFiles: [
+        "/sandbox/.removed-agent/.config-hash",
+        "/sandbox/.removed-agent/fabric.json",
+      ],
+      mutableAccess: "shared",
+      stateLockPlanInImage: false,
+    });
+  });
+
+  it("fails safely when direct fallback input contains an unsafe protected path", () => {
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "unsafe-agent",
+        {
+          agentName: "unsafe-agent",
+          configDir: "/sandbox/.unsafe-agent",
+          configPath: "/sandbox/.unsafe-agent/config.json",
+          protectedFiles: ["config.json", "../outside.json"],
+        },
+        () => {
+          throw new Error("registry unavailable");
+        },
+      ),
+    ).toBeUndefined();
+  });
 });

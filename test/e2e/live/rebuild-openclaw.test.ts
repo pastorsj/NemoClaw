@@ -20,6 +20,7 @@ import {
 } from "../fixtures/file-state.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.ts";
 
 // The contract stays intentionally local to this live test: build an older
@@ -62,7 +63,7 @@ const OPENSHELL_TIMEOUT_MS = 2 * 60_000;
 
 interface SeedGatewayTokenResult {
   seeded: boolean;
-  hashReferencesConfig: boolean;
+  hashFiles: string[];
 }
 
 interface GatewayTokenRotationResult {
@@ -70,7 +71,7 @@ interface GatewayTokenRotationResult {
   tokenRotated: boolean;
   runtimeMatchesConfig: boolean;
   runtimeStillOld: boolean;
-  hashReferencesConfig: boolean;
+  hashFiles: string[];
   hashChanged: boolean;
   hashValid: boolean;
 }
@@ -380,6 +381,7 @@ test(
         "docker build Dockerfile.base with old OPENCLAW_VERSION",
         "openshell sandbox create/exec/policy",
         "real nemoclaw onboard and rebuild CLI",
+        "public nemoclaw sandbox agent Fabric turn after rebuild",
         "workspace marker, registry/session files, backup manifest, config hash",
       ],
     });
@@ -597,10 +599,11 @@ cfg.setdefault('gateway', {}).setdefault('auth', {})['token']=os.environ['PRE_RE
 with open(path, 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\\n')
-subprocess.check_call(['bash','-lc','cd /sandbox/.openclaw && sha256sum openclaw.json > .config-hash'])
+subprocess.check_call(['bash','-lc','cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json > .config-hash'])
 saved=json.load(open(path)).get('gateway',{}).get('auth',{}).get('token','')
 hash_text=open('/sandbox/.openclaw/.config-hash').read()
-print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'hashReferencesConfig': 'openclaw.json' in hash_text}))`),
+hash_files=[line.split(maxsplit=1)[1] for line in hash_text.splitlines()]
+print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'hashFiles': hash_files}))`),
       ],
       {
         artifactName: "phase-4-seed-gateway-token",
@@ -611,7 +614,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     );
     expectExitZero(seedGateway, "seed old gateway token");
     const seedResult = JSON.parse(seedGateway.stdout.trim()) as SeedGatewayTokenResult;
-    expect(seedResult).toEqual({ seeded: true, hashReferencesConfig: true });
+    expect(seedResult).toEqual({ seeded: true, hashFiles: ["openclaw.json", "fabric.json"] });
 
     const preHashResult = await sandbox.exec(
       SANDBOX_NAME,
@@ -770,6 +773,16 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     const registryVersion = registrySandbox().agentVersion;
     expect(registryVersion).not.toBe(OLD_OPENCLAW_VERSION);
     expect(registryVersion).toEqual(expect.any(String));
+    await runPublicFabricTurn({
+      agent: "openclaw",
+      artifacts,
+      env: cliEnv(apiKey),
+      host,
+      lifecyclePhase: "after-rebuild",
+      redactionValues: [apiKey, PRE_REBUILD_GATEWAY_TOKEN],
+      sandbox,
+      sandboxName: SANDBOX_NAME,
+    });
 
     const tokenCheck = await sandbox.exec(
       SANDBOX_NAME,
@@ -783,8 +796,9 @@ token=cfg.get('gateway',{}).get('auth',{}).get('token','')
 runtime=subprocess.check_output(['bash','-lc','. /tmp/nemoclaw-proxy-env.sh >/dev/null 2>&1 || exit 1; printf "%s" "\${OPENCLAW_GATEWAY_TOKEN:-}"'], text=True)
 hash_text=open('/sandbox/.openclaw/.config-hash').read()
 hash_ok=subprocess.call(['bash','-lc','cd /sandbox/.openclaw && sha256sum -c .config-hash --status']) == 0
+hash_files=[line.split(maxsplit=1)[1] for line in hash_text.splitlines()]
 old=os.environ['PRE_REBUILD_GATEWAY_TOKEN']
-print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'runtimeMatchesConfig': runtime == token, 'runtimeStillOld': runtime == old, 'hashReferencesConfig': 'openclaw.json' in hash_text, 'hashChanged': hash_text != os.environ['PRE_REBUILD_CONFIG_HASH'], 'hashValid': hash_ok}))`),
+print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'runtimeMatchesConfig': runtime == token, 'runtimeStillOld': runtime == old, 'hashFiles': hash_files, 'hashChanged': hash_text != os.environ['PRE_REBUILD_CONFIG_HASH'], 'hashValid': hash_ok}))`),
       ],
       {
         artifactName: "phase-7-gateway-token-rotation-check",
@@ -800,7 +814,7 @@ print(json.dumps({'tokenPresent': bool(token), 'tokenRotated': token != old, 'ru
       tokenRotated: true,
       runtimeMatchesConfig: true,
       runtimeStillOld: false,
-      hashReferencesConfig: true,
+      hashFiles: ["openclaw.json", "fabric.json"],
       hashChanged: true,
       hashValid: true,
     });

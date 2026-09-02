@@ -126,7 +126,11 @@ function modeBits(filePath: string): number {
   return fs.statSync(filePath).mode;
 }
 
-function runMutableConfigNormalizer(configDir: string, ownedPaths: string[]) {
+function runMutableConfigNormalizer(
+  configDir: string,
+  ownedPaths: string[],
+  protectedFiles?: ReadonlyArray<readonly [string, "600" | "660"]>,
+) {
   const testRoot = path.dirname(configDir);
   const normalizerPath = path.join(testRoot, "normalize_mutable_config_perms.py");
   fs.copyFileSync(MUTABLE_CONFIG_NORMALIZER, normalizerPath);
@@ -141,29 +145,45 @@ function runMutableConfigNormalizer(configDir: string, ownedPaths: string[]) {
     },
     timeout: 5000,
   };
+  const expectedUid =
+    process.getuid?.() === 0 ? 65534 : (process.getuid?.() ?? fs.statSync(configDir).uid);
+  const expectedGid =
+    process.getgid?.() === 0 ? 65534 : (process.getgid?.() ?? fs.statSync(configDir).gid);
   switch (process.getuid?.()) {
     case 0: {
-      const unprivilegedId = 65534;
       for (const ownedPath of [...ownedPaths, normalizerPath]) {
-        fs.chownSync(ownedPath, unprivilegedId, unprivilegedId);
+        fs.chownSync(ownedPath, expectedUid, expectedGid);
       }
-      spawnOptions.uid = unprivilegedId;
-      spawnOptions.gid = unprivilegedId;
+      spawnOptions.uid = expectedUid;
+      spawnOptions.gid = expectedGid;
       break;
     }
   }
-  return spawnSync(
-    "bash",
-    [
-      "-c",
-      [
-        "set -euo pipefail",
-        normalizeMutableConfigPermsFor(configDir),
-        "normalize_mutable_config_perms",
-      ].join("\n"),
-    ],
-    spawnOptions,
-  );
+  const command = protectedFiles
+    ? {
+        executable: "python3",
+        arguments: [
+          "-I",
+          normalizerPath,
+          configDir,
+          String(expectedUid),
+          String(expectedGid),
+          "normalize-protected",
+          ...protectedFiles.flatMap(([name, mode]) => [name, mode]),
+        ],
+      }
+    : {
+        executable: "bash",
+        arguments: [
+          "-c",
+          [
+            "set -euo pipefail",
+            normalizeMutableConfigPermsFor(configDir),
+            "normalize_mutable_config_perms",
+          ].join("\n"),
+        ],
+      };
+  return spawnSync(command.executable, command.arguments, spawnOptions);
 }
 
 function withMockedDockerExecFileSync<T>(
@@ -495,6 +515,70 @@ describe("mutable agent config permissions", () => {
     }
   });
 
+  it("keeps a manifest-protected Fabric config private during descriptor-safe repair", () => {
+    const tmpDir = mkdtempOnPosixFs("nemoclaw-fabric-perms-");
+    const configDir = path.join(tmpDir, ".openclaw");
+    const configFile = path.join(configDir, "openclaw.json");
+    const hashFile = path.join(configDir, ".config-hash");
+    const fabricFile = path.join(configDir, "fabric.json");
+
+    try {
+      fs.mkdirSync(configDir, { mode: 0o700 });
+      fs.writeFileSync(configFile, "{}\n", { mode: 0o600 });
+      fs.writeFileSync(hashFile, "deadbeef\n", { mode: 0o600 });
+      fs.writeFileSync(fabricFile, "{}\n", { mode: 0o600 });
+      [configFile, hashFile, fabricFile].forEach((file) => fs.chmodSync(file, 0o600));
+
+      const result = runMutableConfigNormalizer(
+        configDir,
+        [tmpDir, configDir, configFile, hashFile, fabricFile],
+        [
+          ["openclaw.json", "660"],
+          [".config-hash", "660"],
+          ["fabric.json", "600"],
+        ],
+      );
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(modeBits(configDir) & 0o7777).toBe(0o2770);
+      expect(modeBits(configFile) & 0o7777).toBe(0o660);
+      expect(modeBits(hashFile) & 0o7777).toBe(0o660);
+      expect(modeBits(fabricFile) & 0o7777).toBe(0o600);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unsafe protected filename before descriptor-safe repair", () => {
+    const tmpDir = mkdtempOnPosixFs("nemoclaw-protected-name-");
+    const configDir = path.join(tmpDir, ".openclaw");
+    const configFile = path.join(configDir, "openclaw.json");
+    const hashFile = path.join(configDir, ".config-hash");
+
+    try {
+      fs.mkdirSync(configDir, { mode: 0o700 });
+      fs.writeFileSync(configFile, "{}\n", { mode: 0o600 });
+      fs.writeFileSync(hashFile, "deadbeef\n", { mode: 0o600 });
+
+      const result = runMutableConfigNormalizer(
+        configDir,
+        [tmpDir, configDir, configFile, hashFile],
+        [
+          ["openclaw.json", "660"],
+          [".config-hash", "660"],
+          ["../fabric.json", "600"],
+        ],
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(modeBits(configDir) & 0o7777).toBe(0o700);
+      expect(modeBits(configFile) & 0o7777).toBe(0o600);
+      expect(modeBits(hashFile) & 0o7777).toBe(0o600);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a hardlinked fixed config before changing either alias mode", () => {
     const tmpDir = mkdtempOnPosixFs("nemoclaw-6047-hardlink-");
     const configDir = path.join(tmpDir, ".openclaw");
@@ -637,9 +721,7 @@ describe("mutable agent config permissions", () => {
     ).toBe(false);
   });
 
-  it.each(
-    ["run-state-dir-transition", "apply-shields-transition", "finish-shields-transition"],
-  )(
+  it.each(["run-state-dir-transition", "apply-shields-transition", "finish-shields-transition"])(
     "shields-down restores Hermes sticky group-writable config root without group-writable config files [%s]",
     (action) => {
       const commands: string[][] = [];

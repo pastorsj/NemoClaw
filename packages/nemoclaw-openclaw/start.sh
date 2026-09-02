@@ -273,10 +273,17 @@ GATEWAY_WATCHDOG_KILL_FILE="${_NEMOCLAW_GATEWAY_WATCHDOG_KILL_FILE:-/tmp/nemocla
 # only so the shell helpers remain testable on non-Linux developer hosts;
 # production containers always use the strict `/proc` identity.
 GATEWAY_PID_START_IDENTITY=""
+# The sourced runtime modules assign and consume these identities. ShellCheck
+# analyzes this entrypoint without following those package-owned modules.
+# shellcheck disable=SC2034
 AUTO_PAIR_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
 GATEWAY_LOG_TAIL_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
 GATEWAY_LOG_PERSIST_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
 PLUGIN_REFRESH_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
 GATEWAY_WATCHDOG_PID_START_IDENTITY=""
 
 # Best-effort: a marker write failure must never block startup.
@@ -395,6 +402,8 @@ if [ -n "${NEMOCLAW_DASHBOARD_PORT:-}" ]; then
 else
   CHAT_UI_URL="${CHAT_UI_URL:-http://127.0.0.1:${_DASHBOARD_PORT}}"
 fi
+# Read by the sourced gateway setup module.
+# shellcheck disable=SC2034
 PUBLIC_PORT="$_DASHBOARD_PORT"
 export OPENCLAW_GATEWAY_PORT="$_DASHBOARD_PORT"
 # Gateway WebSocket URL host. Default to the sandbox's own primary interface
@@ -606,6 +615,7 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
     chmod 2770 "$openclaw_dir" 2>/dev/null || true
     chmod 660 "$openclaw_dir/openclaw.json" "$openclaw_dir/.config-hash" 2>/dev/null || true
+    chmod 600 "$openclaw_dir/fabric.json" 2>/dev/null || true
   }
   fix_openclaw_ownership
   normalize_mutable_config_perms

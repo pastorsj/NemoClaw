@@ -41,7 +41,7 @@ export function sandboxConfigSyncArgs(sandboxName: string): string[] {
   return ["sandbox", "exec", "-n", sandboxName, "--no-tty", "--", "/bin/bash", "-s"];
 }
 
-// Write `~/.nemoclaw/config.json` and normalize OpenClaw config-dir perms
+// Write `~/.nemoclaw/config.json` and normalize OpenClaw config-dir permissions
 // inside the sandbox. Idempotent — safe to invoke from the rebuild resume
 // path where the Dockerfile leaves config.json as a zero-byte placeholder
 // that crashes the OpenClaw nemoclaw plugin's loadOnboardConfig. Fixes #3999.
@@ -83,6 +83,9 @@ if [ -d "$config_dir" ]; then
     find "$config_dir" -type d -exec chmod g+s {} + 2>/dev/null || true
     chmod 2770 "$config_dir" 2>/dev/null || true
     chmod 660 "$config_dir/openclaw.json" "$config_dir/.config-hash" 2>/dev/null || true
+    if [ -f "$config_dir/fabric.json" ] && [ ! -L "$config_dir/fabric.json" ]; then
+      chmod 600 "$config_dir/fabric.json" 2>/dev/null || true
+    fi
   fi
 fi
 exit

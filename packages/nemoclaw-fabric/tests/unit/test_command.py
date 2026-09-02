@@ -179,6 +179,23 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertEqual(len(client.run_calls), 1)
                 self.assertEqual(client.run_calls[0][2].input, expected)
 
+    def test_duplicate_config_cannot_replace_the_package_pinned_path(self) -> None:
+        replacement = self.base_dir / "caller-selected.json"
+        replacement.write_text(self.config_path.read_text(encoding="utf-8"), encoding="utf-8")
+        cases = (
+            self.run_arguments("--config", str(replacement), "prompt"),
+            self.doctor_arguments("--config", str(replacement)),
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                exit_code, stdout, stderr, client = self.invoke(arguments)
+
+                self.assertEqual(exit_code, EXIT_USAGE)
+                self.assertEqual(stdout, "")
+                self.assertIn("--config may be specified only once", stderr)
+                self.assertEqual(client.doctor_calls, [])
+                self.assertEqual(client.run_calls, [])
+
     def test_zero_multiple_and_empty_prompt_sources_are_usage_errors(self) -> None:
         cases = (
             (self.run_arguments(), ""),

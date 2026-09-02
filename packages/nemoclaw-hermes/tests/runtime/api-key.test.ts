@@ -34,7 +34,8 @@ function extractShellFunctionFromSource(src: string, name: string): string {
 }
 
 function writeHermesHash(hashPath: string, configPath: string, envPath: string): void {
-  const result = spawnSync("sha256sum", [configPath, envPath], {
+  const fabricPath = path.join(path.dirname(configPath), "fabric.json");
+  const result = spawnSync("sha256sum", [configPath, envPath, fabricPath], {
     encoding: "utf-8",
     timeout: 5000,
   });
@@ -74,6 +75,7 @@ function runHermesRuntimeApiServerKeyMint(
   const hermesHome = path.join(tmpDir, ".hermes");
   const configPath = path.join(hermesHome, "config.yaml");
   const envPath = path.join(hermesHome, ".env");
+  const fabricPath = path.join(hermesHome, "fabric.json");
   const configTarget = path.join(tmpDir, "config-target.yaml");
   const envTarget = path.join(tmpDir, "env-target");
   const hashPath = path.join(tmpDir, "hermes.config-hash");
@@ -101,12 +103,14 @@ function runHermesRuntimeApiServerKeyMint(
     },
   } satisfies Record<NonNullable<typeof opts.envPathKind>, () => void>;
   writeEnvPath[opts.envPathKind ?? "regular"]();
+  fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
   writeHermesHash(hashPath, configPath, envPath);
   writeHermesHash(compatHashPath, configPath, envPath);
   for (const _locked of opts.locked ? [true] : []) {
     fs.chmodSync(hermesHome, 0o755);
     fs.chmodSync(configPath, 0o444);
     fs.chmodSync(envPath, 0o444);
+    fs.chmodSync(fabricPath, 0o444);
     fs.chmodSync(compatHashPath, 0o444);
   }
 
@@ -292,6 +296,7 @@ function runHermesRuntimeProviderPlaceholderRefresh(opts: {
   const hermesHome = path.join(tmpDir, ".hermes");
   const configPath = path.join(hermesHome, "config.yaml");
   const envPath = path.join(hermesHome, ".env");
+  const fabricPath = path.join(hermesHome, "fabric.json");
   const hashPath = path.join(tmpDir, "hermes.config-hash");
   const runtimePlanPath = path.join(tmpDir, "messaging-runtime-plan.json");
   const runtimePlanTargetPath = path.join(tmpDir, "messaging-runtime-plan-target.json");
@@ -299,6 +304,7 @@ function runHermesRuntimeProviderPlaceholderRefresh(opts: {
   fs.mkdirSync(hermesHome, { recursive: true });
   fs.writeFileSync(configPath, "model:\n  default: test-model\n");
   fs.writeFileSync(envPath, opts.envFile, { mode: 0o640 });
+  fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
   opts.hashFileContent === undefined
     ? writeHermesHash(hashPath, configPath, envPath)
     : fs.writeFileSync(hashPath, opts.hashFileContent);

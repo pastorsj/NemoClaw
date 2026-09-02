@@ -12,7 +12,8 @@ The package follows one sequence:
 1. `package.json` identifies the package; `manifest.yaml` identifies the agent runtime and declares its data-only capabilities.
 2. `Dockerfile.base` installs the pinned OpenClaw and Model Context Protocol (MCP) dependency graphs.
 3. `Dockerfile` adds package configuration, runtime helpers, plugins, policies, and compatibility patches.
-4. `config/generate-config.mts` translates managed startup settings into `openclaw.json`.
+4. `config/generate-config.mts` translates managed startup settings into `openclaw.json` and the
+   credential-free Fabric launch configuration.
 5. `start.sh` prepares protected state and starts the OpenClaw agent gateway.
 6. Files in `runtime/` support the running sandbox.
 7. Files in `compat/` adapt the pinned OpenClaw release where its native behavior is not sufficient.
@@ -27,6 +28,7 @@ Nested production projects use `npm-shrinkwrap.json`. npm publishes that standar
 | Path | Responsibility |
 | --- | --- |
 | `config/` | Generates native OpenClaw configuration and holds the plugin manifest schema. |
+| `fabric/` | Implements the small OpenClaw adapter and pins its Fabric dependency graph. |
 | `host/` | Holds receipt-verified CommonJS helpers that NemoClaw core loads during transitions. |
 | `runtime/` | Holds in-sandbox commands, protection helpers, preloads, state plans, and locked dependency graphs. |
 | `compat/` | Holds upstream-version patches, legacy cleanup, and reviewed npm remediation. |
@@ -40,7 +42,17 @@ The package root contains the files that NemoClaw and package tools discover dir
 
 ## Runtime flow
 
-`Dockerfile` copies `config/generate-config.mts` into the image and invokes it with managed startup settings. The generator writes OpenClaw's native configuration. Managed startup can invoke `/usr/local/lib/nemoclaw/generate-config` again through the same package-owned generator.
+`Dockerfile` copies `config/generate-config.mts` into the image and invokes it with managed startup
+settings. The generator writes OpenClaw's native configuration and `.openclaw/fabric.json`.
+Managed startup can invoke `/usr/local/lib/nemoclaw/generate-config` again through the same
+package-owned generator.
+
+The native gateway and TUI continue to use OpenClaw directly. A plain prompt through
+`nemoclaw sandbox agent` uses the manifest's headless command, the generic `nemoclaw-fabric`
+runner, and `fabric/openclaw.fabric-adapter.json`. The package-owned adapter translates one Fabric
+request into OpenClaw's stable headless command, validates the response envelope, and contains the
+child process on cancellation or timeout. NemoClaw core selects the receipt-pinned headless command
+without importing the OpenClaw Fabric adapter.
 
 `start.sh` is the readable process entry point. It loads package-owned modules from `runtime/`, then prepares state, applies provider routing, configures the gateway, and supervises the OpenClaw process. The modules keep each startup responsibility visible without adding callbacks to NemoClaw core:
 
@@ -95,6 +107,11 @@ Install the package and nested plugin locks, then run the checkout-independent l
 npm ci --ignore-scripts
 npm --prefix plugin ci --ignore-scripts
 npm run test:package
+npm run test:fabric
 ```
 
 The complete OpenClaw command also needs an exact NemoClaw checkout because the composed tests and plugin still consume named NemoClaw boundaries. To prove that layout from a separate candidate checkout, run the `package-only` and `composed` in-tree overlay rehearsals documented in [`packages/README.md`](../README.md) with package ID `openclaw`. The composed rehearsal installs the nested plugin lock, builds the temporary CLI and plugin, runs both package lanes, and verifies `nemoclaw harness install openclaw`, the human inventory, and the receipt-verified digest from `nemoclaw harness list --json`.
+
+`npm run test:fabric` tests the adapter without a NemoClaw source checkout.
+`npm run test:fabric:composed` additionally runs the same adapter through the generic runner from
+the exact surrounding NemoClaw checkout; `npm run test:nemoclaw` includes that composed proof.

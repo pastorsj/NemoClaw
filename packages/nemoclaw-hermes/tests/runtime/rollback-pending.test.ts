@@ -31,12 +31,14 @@ with tempfile.TemporaryDirectory(prefix="hermes-mcp-rollback-pending-") as root:
     os.mkdir(hermes)
     config = os.path.join(hermes, "config.yaml")
     env = os.path.join(hermes, ".env")
+    fabric = os.path.join(hermes, "fabric.json")
     strict = os.path.join(root, "hermes.config-hash")
     compat = os.path.join(hermes, ".config-hash")
     original_config = "model: test\n"
     open(config, "w", encoding="utf-8").write(original_config)
     open(env, "w", encoding="utf-8").write("SAFE=1\n")
-    initial, _config_snapshot, _env_snapshot = guard._hash_text(config, env)
+    open(fabric, "w", encoding="utf-8").write("{}\n")
+    initial, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config, env)
     guard._write_hash(strict, initial)
     guard._write_hash(compat, initial)
 
@@ -65,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix="hermes-mcp-rollback-pending-") as root:
 
     strict_pending = open(strict, encoding="utf-8").read()
     compat_pending = open(compat, encoding="utf-8").read()
-    _config_digest, _env_digest, pending_marker = guard._parse_config_hash(
+    _config_digest, _env_digest, _fabric_digest, pending_marker = guard._parse_config_hash(
         strict_pending, config, env
     )
     pending_state = guard.inspect_mcp_integrity(hermes, strict)

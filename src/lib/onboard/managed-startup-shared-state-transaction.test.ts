@@ -225,6 +225,51 @@ describe("managed startup shared-state transaction", () => {
     },
   );
 
+  it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
+    "restores the preexisting %s Fabric sidecar after startup rollback",
+    (agent) => {
+      const root = agentRoot(agent);
+      const sidecar = path.join(
+        root,
+        ...(agent === "pi" ? ["agent", "fabric.json"] : ["fabric.json"]),
+      );
+      fs.mkdirSync(path.dirname(sidecar), { recursive: true, mode: 0o750 });
+      fs.writeFileSync(sidecar, "fabric-before\n");
+      fs.chmodSync(sidecar, 0o640);
+
+      beginManagedStartupSharedStateTransaction(managedStartupE2eProfile(agent), options);
+      fs.writeFileSync(sidecar, "fabric-after\n");
+      fs.chmodSync(sidecar, 0o600);
+
+      expect(rollbackManagedStartupSharedStateTransaction(agent, options)).toBe(true);
+      expect(fs.readFileSync(sidecar, "utf8")).toBe("fabric-before\n");
+      expect(mode(sidecar)).toBe(0o640);
+      expect(fs.lstatSync(sidecar).uid).toBe(effectiveUid());
+      expect(fs.lstatSync(sidecar).gid).toBe(effectiveGid());
+      expect(fs.existsSync(transactionDirectory)).toBe(false);
+    },
+  );
+
+  it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
+    "removes the newly created %s Fabric sidecar after startup rollback",
+    (agent) => {
+      const root = agentRoot(agent);
+      const sidecar = path.join(
+        root,
+        ...(agent === "pi" ? ["agent", "fabric.json"] : ["fabric.json"]),
+      );
+      fs.mkdirSync(path.dirname(sidecar), { recursive: true, mode: 0o750 });
+
+      beginManagedStartupSharedStateTransaction(managedStartupE2eProfile(agent), options);
+      fs.writeFileSync(sidecar, "fabric-after\n");
+      fs.chmodSync(sidecar, 0o600);
+
+      expect(rollbackManagedStartupSharedStateTransaction(agent, options)).toBe(true);
+      expect(fs.existsSync(sidecar)).toBe(false);
+      expect(fs.existsSync(transactionDirectory)).toBe(false);
+    },
+  );
+
   it("preserves transaction rollback when the exact Hermes root is a named-volume mount", () => {
     const root = agentRoot("hermes");
     fs.mkdirSync(root, { mode: 0o770 });

@@ -200,16 +200,21 @@ describe("Hermes cross-UID ledger permissions", () => {
     expect(dockerfile).toContain(`discord_message_recovery.db)" = "sandbox:sandbox 660"`);
   });
 
-  it("requires descriptor-relative, no-follow repair for both writable parents", () => {
+  it("requires descriptor-relative, no-follow repair for each cross-UID state directory", () => {
     expect(startScript).toContain("ensure_hermes_cross_uid_state_dir() {");
     expect(startScript).toContain('name = os.environ["NEMOCLAW_HERMES_STATE_DIR_NAME"]');
+    expect(startScript).toContain('owner_name = os.environ["NEMOCLAW_HERMES_STATE_DIR_OWNER"]');
     expect(startScript).toContain("os.O_DIRECTORY | os.O_NOFOLLOW");
     expect(startScript).toContain("os.open(name, open_flags, dir_fd=root_fd)");
     expect(startScript).toContain("os.mkdir(name, desired_mode, dir_fd=root_fd)");
-    expect(startScript).toContain("os.fchown(gateway_fd, gateway_uid, sandbox_gid)");
-    expect(startScript).toContain("os.fchmod(gateway_fd, desired_mode)");
+    expect(startScript).toContain("os.fchown(state_fd, owner_uid, sandbox_gid)");
+    expect(startScript).toContain("os.fchmod(state_fd, desired_mode)");
     const repairStart = startScript.indexOf("repair_hermes_startup_layout() {");
     const lockedBranch = startScript.indexOf("if hermes_config_root_is_locked; then", repairStart);
+    const fabricRepair = startScript.indexOf(
+      "if ! ensure_hermes_cross_uid_state_dir fabric-artifacts sandbox; then",
+      repairStart,
+    );
     const gatewayRepair = startScript.indexOf(
       "if ! ensure_hermes_cross_uid_state_dir gateway; then",
       repairStart,
@@ -220,7 +225,8 @@ describe("Hermes cross-UID ledger permissions", () => {
     );
     expect(repairStart).toBeGreaterThanOrEqual(0);
     expect(lockedBranch).toBeGreaterThan(repairStart);
-    expect(gatewayRepair).toBeGreaterThan(repairStart);
+    expect(fabricRepair).toBeGreaterThan(repairStart);
+    expect(gatewayRepair).toBeGreaterThan(fabricRepair);
     expect(gatewayRepair).toBeLessThan(
       startScript.indexOf("if hermes_config_root_is_locked; then", repairStart),
     );

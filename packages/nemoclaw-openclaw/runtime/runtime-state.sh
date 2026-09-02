@@ -513,18 +513,20 @@ recover_openclaw_config_if_empty() {
   normalize_mutable_config_perms recover
 }
 
-# Refresh the mutable-default .config-hash so it matches the current
-# openclaw.json. Independent of the #3118 recovery above — this runs on
+# Refresh the mutable-default .config-hash so it matches the current native
+# and Fabric configs. Independent of the #3118 recovery above — this runs on
 # every start after the override pipeline to keep the hash in sync with
 # any in-flight config edits (model override, CORS override, provider
 # placeholder refresh).
 ensure_mutable_openclaw_config_hash() {
   local config_dir="/sandbox/.openclaw"
   local config_file="${config_dir}/openclaw.json"
+  local fabric_file="${config_dir}/fabric.json"
   local hash_file="${config_dir}/.config-hash"
 
   [ -f "$config_file" ] || return 0
-  if [ -L "$config_dir" ] || [ -L "$config_file" ] || [ -L "$hash_file" ]; then
+  [ -f "$fabric_file" ] || return 1
+  if [ -L "$config_dir" ] || [ -L "$config_file" ] || [ -L "$fabric_file" ] || [ -L "$hash_file" ]; then
     printf '[SECURITY] Refusing mutable config hash refresh — config directory or file path is a symlink\n' >&2
     return 1
   fi
@@ -544,7 +546,7 @@ ensure_mutable_openclaw_config_hash() {
   if [ "$(id -u)" -eq 0 ]; then
     if ! "${STEP_DOWN_PREFIX_SANDBOX[@]}" sh -c '
       cd "$1" || exit 1
-      sha256sum openclaw.json >".config-hash" || exit 1
+      sha256sum openclaw.json fabric.json >".config-hash" || exit 1
       chmod 660 ".config-hash" 2>/dev/null || true
     ' _ "$config_dir"; then
       printf '[SECURITY] Failed to refresh mutable OpenClaw config hash\n' >&2
@@ -552,7 +554,7 @@ ensure_mutable_openclaw_config_hash() {
     fi
   elif ! sh -c '
     cd "$1" || exit 1
-    sha256sum openclaw.json >".config-hash" || exit 1
+    sha256sum openclaw.json fabric.json >".config-hash" || exit 1
     chmod 660 ".config-hash" 2>/dev/null || true
   ' _ "$config_dir"; then
     printf '[SECURITY] Failed to refresh mutable OpenClaw config hash\n' >&2

@@ -19,7 +19,7 @@ const SAFE_VALIDATION_GENERATOR_RE =
 const PASSIVE_FINAL_STAGE_INSTRUCTION_RE = /^(?:ARG|ENV|WORKDIR|USER|HEALTHCHECK|ENTRYPOINT|CMD)\b/;
 const CONFIG_MODE_RE = /^RUN\s+chmod\s+660\s+\/sandbox\/\.openclaw\/openclaw\.json$/;
 const CONFIG_HASH_RE =
-  /^RUN\s+sha256sum\s+\/sandbox\/\.openclaw\/openclaw\.json\s+>\s+\/sandbox\/\.openclaw\/\.config-hash(?:\s+&&\s+chmod\s+660\s+\/sandbox\/\.openclaw\/\.config-hash)?(?:\s+&&\s+chown\s+sandbox:sandbox\s+\/sandbox\/\.openclaw\/\.config-hash)?$/;
+  /^RUN\s+(?:sha256sum\s+\/sandbox\/\.openclaw\/openclaw\.json\s+>\s+\/sandbox\/\.openclaw\/\.config-hash|cd\s+\/sandbox\/\.openclaw\s+&&\s+sha256sum\s+openclaw\.json\s+fabric\.json\s+>\s+\.config-hash)(?:\s+&&\s+chmod\s+660\s+\/sandbox\/\.openclaw\/\.config-hash)?(?:\s+&&\s+chown\s+sandbox:sandbox\s+\/sandbox\/\.openclaw\/\.config-hash)?$/;
 const MESSAGING_BUILD_APPLIER_RE =
   /^RUN\s+OPENCLAW_VERSION="\$\{OPENCLAW_VERSION\}"\s+node\s+--experimental-strip-types\s+\/src\/lib\/messaging\/applier\/build\/messaging-build-applier\.mts\s+--agent\s+openclaw\s+--phase\s+(?:agent-install|post-agent-install)$/;
 const EXACT_CUSTOM_POST_GENERATOR_RUN_RE = [
@@ -86,6 +86,21 @@ const CANONICAL_POST_GENERATOR_INSTRUCTION_SHA256 = new Set([
   "525c47213e5c184ced226eeb369fa70a32dd6180d6d2c71d9bb7a59f85609be0",
   "8b1a73bf8ef0aec2c6cd1fa63990dac978e060b739048ca664fd55ebacf17961",
   "701c1c57b2b3e225f02e5e1c0d9b01d709cad54f54aa495af1f17bfaae4bd7fa",
+  // Reviewed Fabric runner and OpenClaw adapter publication. These exact
+  // instructions install only locked wheels and preserve the generated
+  // dashboard configuration that precedes them.
+  "37ed15ad88fe1d480bcb59abe5956b6c13d76ca09f2256d6508e4855838b2ff5",
+  "9820254009284f2341a4ef4645f94d938d0cb5d8df5bcdfdff4a82d11338f719",
+  "9abd0d1e2a062580d55daac0489237919e3af778fac8dc286d610d8aac741c63",
+  "ac799ca83744563589b73aa4d07e1392808b0471f57089f1a321e060ac30391b",
+  "c5c322ce6650ebd60ee4932b2065befd9bea1fad1229995897cf684370da399b",
+  "dd3636863b92854086c58823c99c3da8d58f5a5d50d6aa5ab294226c9245f1c0",
+  "9c8fcb98cdcf6e88b83c7cd47206a7dd46c5df3a060423ca21c8bc8f5e44c9c6",
+  "783810002b02460024859fa494db8a6d137011165b010ae12cc44387d43a4014",
+  "9d47b7331543c5bb502c6ca39f1a1036d3b0ac8d1738247c284e4a9abf0a2db2",
+  // Reviewed Fabric-aware OpenClaw state layout and final mutable modes.
+  "3e13d45f89b7bb0f70d4ba2c8007efa787178827ca550f63359d4bab137b5aa0",
+  "eb2eacb9252f93219562cf38fb6ecfae385837d03ab8f7542c93fbb8b4688cc5",
   // COPY --from=openclaw-runtime-payload / /
   // The reviewed scratch payload has no /sandbox/.openclaw content, so this
   // exact late copy preserves the generated remote-dashboard configuration.

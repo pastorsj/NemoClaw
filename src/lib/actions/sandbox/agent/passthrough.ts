@@ -271,6 +271,10 @@ type ResolvedRegistryReadResult = Exclude<RegistryReadResult, { kind: "error" }>
 type ManifestCommandResult =
   | { kind: "command"; argv: string[] }
   | { kind: "unsupported"; message: string };
+type AgentPassthroughInvocation = {
+  command: string[];
+  stdinInput?: string;
+};
 
 function readSandboxAgentFromRegistry(
   sandboxName: string,
@@ -351,19 +355,37 @@ function isPlainPromptInvocation(args: readonly string[]): boolean {
   return args.length > 0 && args.every((arg) => arg.trim().length > 0 && !arg.startsWith("-"));
 }
 
+function isFabricRunCommand(command: readonly string[]): boolean {
+  const runnerIndex = command.indexOf("nemoclaw-fabric");
+  return runnerIndex >= 0 && command[runnerIndex + 1] === "run";
+}
+
+function buildManifestInvocation(
+  command: readonly string[],
+  extraArgs: readonly string[],
+): AgentPassthroughInvocation {
+  if (isFabricRunCommand(command) && isPlainPromptInvocation(extraArgs)) {
+    return {
+      command: command.includes("--stdin") ? [...command] : [...command, "--stdin"],
+      stdinInput: extraArgs.join(" "),
+    };
+  }
+  return { command: [...command, ...extraArgs] };
+}
+
 function getPassthroughCommand(
   sandboxName: string,
   lookup: ResolvedRegistryReadResult,
   extraArgs: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
   resolveAgent: typeof resolveLifecycleEligibleSandboxAgent,
-): string[] | null {
+): AgentPassthroughInvocation | null {
   if (lookup.kind === "missing") {
     if (hasAgentPassthroughHelpToken(extraArgs)) {
       printAgentPassthroughHelp();
       return null;
     }
-    return ["openclaw", "agent", ...extraArgs];
+    return { command: ["openclaw", "agent", ...extraArgs] };
   }
 
   // Rendering the wrapper's OpenClaw help does not dispatch into a sandbox.
@@ -401,7 +423,7 @@ function getPassthroughCommand(
     // A positional prompt can use the package-owned headless contract without
     // changing existing automation that calls `openclaw agent` flags.
     if (!isPlainPromptInvocation(extraArgs) || !agent.runtime?.headless_command) {
-      return ["openclaw", "agent", ...extraArgs];
+      return { command: ["openclaw", "agent", ...extraArgs] };
     }
   }
 
@@ -414,7 +436,7 @@ function getPassthroughCommand(
   if (manifestCommand.argv.length === 0) {
     rejectNonOpenclawAgent(sandboxName, agentName, proc);
   }
-  return [...manifestCommand.argv, ...extraArgs];
+  return buildManifestInvocation(manifestCommand.argv, extraArgs);
 }
 
 function isOpenClawPassthroughCommand(command: readonly string[]): boolean {
@@ -545,14 +567,15 @@ export async function runAgentPassthrough(
   if (lookup.kind === "error") {
     rejectRegistryReadError(sandboxName, lookup.message, proc);
   }
-  const command = getPassthroughCommand(
+  const invocation = getPassthroughCommand(
     sandboxName,
     lookup,
     extraArgs,
     proc,
     deps.resolveAgent ?? resolveLifecycleEligibleSandboxAgent,
   );
-  if (!command) return;
+  if (!invocation) return;
+  const { command } = invocation;
   const ensureLive = deps.ensureLive ?? ensureLiveSandboxOrExit;
   const state = await ensureLive(sandboxName, { allowNonReadyPhase: true });
   const phase = state?.phase ?? null;
@@ -587,5 +610,8 @@ export async function runAgentPassthrough(
     return;
   }
   const exec = deps.exec ?? execSandbox;
-  await exec(sandboxName, command, { tty: false });
+  await exec(sandboxName, command, {
+    tty: false,
+    ...(invocation.stdinInput !== undefined ? { stdinInput: invocation.stdinInput } : {}),
+  });
 }

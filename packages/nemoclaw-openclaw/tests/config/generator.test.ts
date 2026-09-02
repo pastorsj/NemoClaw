@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildConfig, main } from "../../config/generate-config.mts";
+import { buildConfig, buildOpenClawFabricConfig, main } from "../../config/generate-config.mts";
 import {
   applyMessagingAgentRenderToObject,
   applyMessagingBuildPhase,
@@ -216,6 +216,22 @@ describe("generate-openclaw-config.mts: config generation", () => {
     const config = runConfigSubprocess();
     expect(config.gateway).toBeDefined();
     expect(config.models).toBeDefined();
+  });
+
+  it("writes the credential-free Fabric adapter selection beside OpenClaw config", () => {
+    runConfigScript();
+    const fabricPath = path.join(tmpDir, ".openclaw", "fabric.json");
+    const fabric = JSON.parse(fs.readFileSync(fabricPath, "utf-8"));
+
+    expect(fabric).toEqual(buildOpenClawFabricConfig());
+    expect(fabric.harness).toEqual({
+      adapter_id: "nvidia.nemoclaw.openclaw",
+      resolution: "preinstalled",
+    });
+    expect(fabric.environment.workspace).toBe("/sandbox");
+    expect(fabric.models).toEqual({});
+    expect(JSON.stringify(fabric)).not.toMatch(/api[_-]?key|token|credential/iu);
+    expect(fs.statSync(fabricPath).mode & 0o777).toBe(0o600);
   });
 
   it("keeps OpenClaw OTEL diagnostics disabled by default", () => {

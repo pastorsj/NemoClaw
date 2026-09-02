@@ -26,6 +26,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -40,6 +41,7 @@ FS_IMMUTABLE_FL = 0x00000010
 FS_APPEND_FL = 0x00000020
 MAX_CONFIG_INPUT_BYTES = 16 * 1024 * 1024
 MAX_ENV_BYTES = 4 * 1024 * 1024
+MAX_FABRIC_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_HASH_BYTES = 4 * 1024
 MAX_RUNTIME_PLAN_BYTES = 4 * 1024 * 1024
 MAX_RESTART_STATE_BYTES = 32 * 1024 * 1024
@@ -57,7 +59,8 @@ OPENSHELL_SUPERVISOR_ARGV0 = b"/opt/openshell/bin/openshell-sandbox"
 # Keep this in exact parity with manifest config_file + config.shields_files +
 # .config-hash. The host manifest remains authoritative for host transitions;
 # the integration test protects this separate in-image recovery boundary.
-SEALED_FILE_NAMES = ("config.yaml", ".env", ".config-hash")
+HASHED_INPUT_NAMES = ("config.yaml", ".env", "fabric.json")
+SEALED_FILE_NAMES = (*HASHED_INPUT_NAMES, ".config-hash")
 RESTART_ORPHAN_MARKER_NAME = ".nemoclaw-hermes-restart-seal"
 SHIELDS_TRANSITION_LEASE_SECONDS = 300
 STATE_WORKER_LEASE_SECONDS = 15 * 60
@@ -67,6 +70,8 @@ NEMOCLAW_RUNTIME_DIR = "/run/nemoclaw"
 NEMOCLAW_RUNTIME_DIR_MODE = 0o711
 HERMES_RESTART_STATE_FILE = "/run/nemoclaw/hermes-restart-seal.json"
 HERMES_MUTATION_LOCK_FILE = "/run/nemoclaw/hermes-config-mutation.lock"
+HERMES_PROXY_REWRITE_SENTINEL = "sk-OPENSHELL-PROXY-REWRITE"
+HERMES_FABRIC_API_KEY_ENV = "HERMES_FABRIC_API_KEY"
 DIRECTORY_FSYNC_UNSUPPORTED_ERRNOS = frozenset(
     {errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP}
 )
@@ -177,7 +182,7 @@ class McpHashState:
 
 # invalidState: managed-state inspection authenticates one config snapshot, then
 # reopens mutable config and accidentally compares different bytes to host intent.
-# sourceBoundary: this guard owns the authenticated config/env/hash snapshots;
+# sourceBoundary: this guard owns the authenticated sealed-input/hash snapshots;
 # the transaction helper may parse the returned config text, but must revalidate
 # this opaque snapshot immediately before reporting a managed-state match.
 # whyNotSourceFix: the Hermes config has no runtime-provided authenticated read
@@ -197,7 +202,15 @@ class McpIntegritySnapshot:
     config_snapshot: FileSnapshot
     env_path: str
     env_snapshot: FileSnapshot
+    fabric_path: str
+    fabric_snapshot: FileSnapshot
     hash_snapshots: tuple[tuple[str, FileSnapshot], ...]
+
+
+@dataclass(frozen=True)
+class HermesManagedInferenceRoute:
+    model: str
+    base_url: str
 
 
 class OpenFile:
@@ -1294,20 +1307,23 @@ def _hash_text_and_mcp_digest(
     config_path: str,
     env_path: str,
     mcp_state: McpHashState | None = None,
-) -> tuple[str, FileSnapshot, FileSnapshot, str, str]:
+) -> tuple[str, FileSnapshot, FileSnapshot, FileSnapshot, str, str]:
     config_text, config_snapshot = _read_text(config_path, MAX_CONFIG_INPUT_BYTES)
     config_digest = hashlib.sha256(config_text.encode("utf-8")).hexdigest()
     config_entry = f"{config_digest}  {config_path}\n"
     env_entry, env_snapshot = _sha256_entry(env_path, MAX_ENV_BYTES)
+    fabric_path = os.path.join(os.path.dirname(config_path), "fabric.json")
+    fabric_entry, fabric_snapshot = _sha256_entry(fabric_path, MAX_FABRIC_CONFIG_BYTES)
     current_mcp = _canonical_mcp_servers_digest(config_text)
     state = mcp_state or McpHashState(current_mcp, current_mcp)
     state_entry = (
         f"{MCP_HASH_STATE_PREFIX} intended={state.intended} applied={state.applied}\n"
     )
     return (
-        config_entry + env_entry + state_entry,
+        config_entry + env_entry + fabric_entry + state_entry,
         config_snapshot,
         env_snapshot,
+        fabric_snapshot,
         current_mcp,
         config_text,
     )
@@ -1317,15 +1333,16 @@ def _hash_text(
     config_path: str,
     env_path: str,
     mcp_state: McpHashState | None = None,
-) -> tuple[str, FileSnapshot, FileSnapshot]:
+) -> tuple[str, FileSnapshot, FileSnapshot, FileSnapshot]:
     (
         text,
         config_snapshot,
         env_snapshot,
+        fabric_snapshot,
         _current_mcp,
         _config_text,
     ) = _hash_text_and_mcp_digest(config_path, env_path, mcp_state)
-    return text, config_snapshot, env_snapshot
+    return text, config_snapshot, env_snapshot, fabric_snapshot
 
 
 def _applied_mcp_hash_text(
@@ -1336,19 +1353,19 @@ def _applied_mcp_hash_text(
     current_mcp: str,
     state: McpHashState,
     mode: str,
-) -> tuple[str, FileSnapshot, FileSnapshot]:
+) -> tuple[str, FileSnapshot, FileSnapshot, FileSnapshot]:
     """Build the metadata-only MCP applied-state commit from one stable input."""
     if not secrets.compare_digest(current_mcp, state.intended):
         raise UnsafePathError("Hermes MCP config changed before applied-state commit")
     # Applying intent is a metadata-only commit. Require the complete
-    # config/env snapshot to still match the pending trust anchor rather than
+    # sealed-input snapshot to still match the pending trust anchor rather than
     # re-hashing and blessing unrelated concurrent changes.
-    pending_hash_text, config_snapshot, env_snapshot = _hash_text(
+    pending_hash_text, config_snapshot, env_snapshot, fabric_snapshot = _hash_text(
         config_path, env_path, state
     )
     if not secrets.compare_digest(pending_hash_text, source_hash_text):
         raise UnsafePathError(
-            "Hermes config or env changed before applied-state commit"
+            "Hermes config, env, or Fabric config changed before applied-state commit"
         )
     if mode == "both" and not secrets.compare_digest(
         _read_hash_file(compat_hash), source_hash_text
@@ -1371,7 +1388,7 @@ def _applied_mcp_hash_text(
         raise UnsafePathError(
             "Hermes MCP state marker missing before applied-state commit"
         )
-    return "".join(lines), config_snapshot, env_snapshot
+    return "".join(lines), config_snapshot, env_snapshot, fabric_snapshot
 
 
 def _hash_text_for_refresh(
@@ -1383,7 +1400,7 @@ def _hash_text_for_refresh(
     state: McpHashState,
     mode: str,
     mcp_transition: str,
-) -> tuple[str, FileSnapshot, FileSnapshot]:
+) -> tuple[str, FileSnapshot, FileSnapshot, FileSnapshot]:
     """Resolve the hash refresh payload and its input snapshots in one step."""
     if mcp_transition == "apply":
         return _applied_mcp_hash_text(
@@ -1403,9 +1420,20 @@ def _sealed_file_limit(name: str) -> int:
         return MAX_CONFIG_INPUT_BYTES
     if name == ".env":
         return MAX_ENV_BYTES
+    if name == "fabric.json":
+        return MAX_FABRIC_CONFIG_BYTES
     if name == ".config-hash":
         return MAX_HASH_BYTES
     raise UnsafePathError(f"refusing unknown Hermes sealed path: {name}")
+
+
+def _mutable_sealed_file_mode(name: str) -> int:
+    if name not in SEALED_FILE_NAMES:
+        raise UnsafePathError(f"refusing unknown Hermes sealed path: {name}")
+    # Fabric's adapter selection is generated as a private runtime input. Keep
+    # that file private when shields are down instead of broadening it to the
+    # group-readable Hermes config/hash posture.
+    return 0o600 if name == "fabric.json" else 0o640
 
 
 def _decode_bounded_base64(value: str, max_bytes: int, label: str) -> bytes:
@@ -1425,7 +1453,9 @@ def _decode_bounded_base64(value: str, max_bytes: int, label: str) -> bytes:
 
 def _hash_state_from_file(path: str, config_path: str, env_path: str) -> McpHashState:
     text = _read_hash_file(path)
-    _config_digest, _env_digest, state = _parse_config_hash(text, config_path, env_path)
+    _config_digest, _env_digest, _fabric_digest, state = _parse_config_hash(
+        text, config_path, env_path
+    )
     return state
 
 
@@ -1442,10 +1472,10 @@ def refresh_hashes(
     ``rollback`` requires restored config to equal the prior applied digest,
     then conservatively records restored/failed-candidate until reload health is
     proven. ``apply`` is a metadata-only intended/intended commit and requires
-    the complete pending config/env anchor to remain byte-identical. Thus a new
+    the complete pending sealed-input anchor to remain byte-identical. Thus a new
     image begins current/current, add/remove moves to new/old, rollback moves to
     old/new, and only a healthy replacement advances either pending state to
-    current/current; concurrent config or env changes fail closed.
+    current/current; concurrent sealed-input changes fail closed.
     """
     config_path = os.path.join(hermes_dir, "config.yaml")
     env_path = os.path.join(hermes_dir, ".env")
@@ -1454,18 +1484,18 @@ def refresh_hashes(
         raise UnsafePathError("refusing unsupported Hermes MCP hash transition")
 
     # Snapshot-stability/TOCTOU contract: derive the config hash and canonical
-    # MCP digest from one `_read_text` result, retain both config/env inode
-    # snapshots, and reopen/compare them before each anchor write and once after
+    # MCP digest from one `_read_text` result, retain every sealed-input inode
+    # snapshot, and reopen/compare them before each anchor write and once after
     # the final write. For `apply`, the complete pending anchor must also remain
     # byte-identical, so advancing only the metadata line cannot bless unrelated
-    # config/env drift between gateway health and commit.
+    # sealed-input drift between gateway health and commit.
     state_path = hash_file if mode in ("strict", "both") else compat_hash
     # Runtime refresh is allowed to advance an existing trust anchor, never to
     # create one from the mutable config it is supposed to authenticate. Image
     # construction emits the initial intended/applied marker; missing or
     # malformed metadata must therefore fail closed.
     source_hash_text = _read_hash_file(state_path)
-    _config_digest, _env_digest, state = _parse_config_hash(
+    _config_digest, _env_digest, _fabric_digest, state = _parse_config_hash(
         source_hash_text, config_path, env_path
     )
     current_mcp, _ = _current_mcp_servers_digest(config_path)
@@ -1519,7 +1549,7 @@ def refresh_hashes(
                 "Hermes MCP rollback config does not match the previously applied state"
             )
         state = McpHashState(current_mcp, state.intended)
-    hash_text, config_snapshot, env_snapshot = _hash_text_for_refresh(
+    hash_text, config_snapshot, env_snapshot, fabric_snapshot = _hash_text_for_refresh(
         config_path,
         env_path,
         compat_hash,
@@ -1533,14 +1563,20 @@ def refresh_hashes(
     def assert_inputs_stable() -> None:
         config = _open_regular(config_path)
         env = _open_regular(env_path)
+        fabric = _open_regular(os.path.join(hermes_dir, "fabric.json"))
         try:
-            if config.snapshot != config_snapshot or env.snapshot != env_snapshot:
+            if (
+                config.snapshot != config_snapshot
+                or env.snapshot != env_snapshot
+                or fabric.snapshot != fabric_snapshot
+            ):
                 raise UnsafePathError(
-                    "refusing raced Hermes config/env path before hash refresh"
+                    "refusing raced Hermes sealed input before hash refresh"
                 )
         finally:
             config.close()
             env.close()
+            fabric.close()
 
     # `both` is the transaction contract: both trust anchors must advance or
     # the caller rolls the config write back. `compat` remains best-effort for
@@ -1579,6 +1615,7 @@ def inspect_mcp_integrity_snapshot(
 ) -> McpIntegritySnapshot:
     config_path = os.path.join(hermes_dir, "config.yaml")
     env_path = os.path.join(hermes_dir, ".env")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     text, hash_snapshot = _read_text(hash_file, MAX_HASH_BYTES)
     hash_snapshots = [(hash_file, hash_snapshot)]
     if compatibility_hash_file is not None:
@@ -1590,11 +1627,14 @@ def inspect_mcp_integrity_snapshot(
                 "Hermes strict and compatibility MCP integrity anchors differ"
             )
         hash_snapshots.append((compatibility_hash_file, compatibility_snapshot))
-    _config_digest, _env_digest, state = _parse_config_hash(text, config_path, env_path)
+    _config_digest, _env_digest, _fabric_digest, state = _parse_config_hash(
+        text, config_path, env_path
+    )
     (
         actual,
         config_snapshot,
         env_snapshot,
+        fabric_snapshot,
         current_mcp,
         config_text,
     ) = _hash_text_and_mcp_digest(config_path, env_path, state)
@@ -1609,6 +1649,8 @@ def inspect_mcp_integrity_snapshot(
         config_snapshot=config_snapshot,
         env_path=env_path,
         env_snapshot=env_snapshot,
+        fabric_path=fabric_path,
+        fabric_snapshot=fabric_snapshot,
         hash_snapshots=tuple(hash_snapshots),
     )
 
@@ -1617,6 +1659,7 @@ def assert_mcp_integrity_snapshot_current(snapshot: McpIntegritySnapshot) -> Non
     for path, expected in (
         (snapshot.config_path, snapshot.config_snapshot),
         (snapshot.env_path, snapshot.env_snapshot),
+        (snapshot.fabric_path, snapshot.fabric_snapshot),
         *snapshot.hash_snapshots,
     ):
         try:
@@ -1707,10 +1750,12 @@ def _verify_strict_hash(hermes_dir: str, hash_file: str) -> None:
     config_path = os.path.join(hermes_dir, "config.yaml")
     env_path = os.path.join(hermes_dir, ".env")
     strict = _read_hash_file(hash_file)
-    _config_digest, _env_digest, state = _parse_config_hash(
+    _config_digest, _env_digest, _fabric_digest, state = _parse_config_hash(
         strict, config_path, env_path
     )
-    actual, _config_snapshot, _env_snapshot = _hash_text(config_path, env_path, state)
+    actual, _config_snapshot, _env_snapshot, _fabric_snapshot = _hash_text(
+        config_path, env_path, state
+    )
     if actual != strict:
         raise StrictHashMismatchError(
             "strict hash verification failed for Hermes restart seal"
@@ -1724,12 +1769,16 @@ def _verify_compat_hash(hash_file: str, compat_hash_file: str) -> None:
 
 def _parse_config_hash(
     text: str, config_path: str, env_path: str
-) -> tuple[str, str, McpHashState]:
+) -> tuple[str, str, str, McpHashState]:
     parts = text.split("\n")
-    if len(parts) != 4 or parts[-1] != "":
+    if len(parts) != 5 or parts[-1] != "":
         raise UnsafePathError("refusing malformed Hermes config hash")
-    lines = parts[:2]
-    expected_paths = (config_path, env_path)
+    lines = parts[:3]
+    expected_paths = (
+        config_path,
+        env_path,
+        os.path.join(os.path.dirname(config_path), "fabric.json"),
+    )
     if len(lines) != len(expected_paths):
         raise UnsafePathError("refusing malformed Hermes config hash")
     digests: list[str] = []
@@ -1738,12 +1787,13 @@ def _parse_config_hash(
         if match is None or match.group(2) != expected_path:
             raise UnsafePathError("refusing malformed Hermes config hash")
         digests.append(match.group(1))
-    state_match = MCP_HASH_STATE_RE.fullmatch(parts[2])
+    state_match = MCP_HASH_STATE_RE.fullmatch(parts[3])
     if state_match is None:
         raise UnsafePathError("refusing malformed Hermes MCP hash state")
     return (
         digests[0],
         digests[1],
+        digests[2],
         McpHashState(state_match.group(1), state_match.group(2)),
     )
 
@@ -1803,13 +1853,14 @@ def _mutable_nonroot_reconciliation_posture_is_allowed(
     ):
         return False
 
-    for name in ("config.yaml", ".env", ".config-hash"):
+    for name in SEALED_FILE_NAMES:
         original = file_states.get(name, {}).get("original")
+        allowed_modes = (0o600,) if name == "fabric.json" else (0o600, 0o640)
         if (
             not isinstance(original, dict)
             or original.get("uid") != sandbox_uid
             or original.get("gid") != sandbox_gid
-            or int(original.get("mode", 0)) not in (0o600, 0o640)
+            or int(original.get("mode", 0)) not in allowed_modes
         ):
             return False
     return True
@@ -1827,7 +1878,7 @@ def _reconcile_nonroot_startup_api_key_hash(
     OpenShell starts the Hermes entrypoint as ``sandbox``. That process must
     mint a per-sandbox API bearer token, but it cannot update the root-owned
     strict hash. A later root config write may reconcile that exact append only
-    after the namespace has been frozen. Every other config or env difference
+    after the namespace has been frozen. Every other sealed-input difference
     remains a hard refusal.
     """
 
@@ -1846,15 +1897,21 @@ def _reconcile_nonroot_startup_api_key_hash(
     env_path = os.path.join(hermes_dir, ".env")
     compat_hash_path = os.path.join(hermes_dir, ".config-hash")
     strict_text = _read_hash_file(hash_file)
-    strict_config_sha256, strict_env_sha256, strict_mcp_state = _parse_config_hash(
-        strict_text, config_path, env_path
-    )
-    actual_text, config_snapshot, env_snapshot = _hash_text(
+    (
+        strict_config_sha256,
+        strict_env_sha256,
+        strict_fabric_sha256,
+        strict_mcp_state,
+    ) = _parse_config_hash(strict_text, config_path, env_path)
+    actual_text, config_snapshot, env_snapshot, fabric_snapshot = _hash_text(
         config_path, env_path, strict_mcp_state
     )
-    actual_config_sha256, _actual_env_sha256, _actual_mcp_state = _parse_config_hash(
-        actual_text, config_path, env_path
-    )
+    (
+        actual_config_sha256,
+        _actual_env_sha256,
+        actual_fabric_sha256,
+        _actual_mcp_state,
+    ) = _parse_config_hash(actual_text, config_path, env_path)
 
     if not secrets.compare_digest(_read_hash_file(compat_hash_path), actual_text):
         raise UnsafePathError(
@@ -1865,6 +1922,10 @@ def _reconcile_nonroot_startup_api_key_hash(
     if not secrets.compare_digest(actual_config_sha256, strict_config_sha256):
         raise UnsafePathError(
             "refusing config drift during non-root strict hash reconciliation"
+        )
+    if not secrets.compare_digest(actual_fabric_sha256, strict_fabric_sha256):
+        raise UnsafePathError(
+            "refusing Fabric config drift during non-root strict hash reconciliation"
         )
 
     env_text, env_read_snapshot = _read_text(env_path, MAX_ENV_BYTES)
@@ -1878,12 +1939,13 @@ def _reconcile_nonroot_startup_api_key_hash(
             "refusing non-API-key env drift during non-root strict hash reconciliation"
         )
 
-    # Recheck both path snapshots immediately before the root-owned commit.
+    # Recheck every input snapshot immediately before the root-owned commit.
     # A writable descriptor retained before the namespace freeze must not race
     # the bytes whose trust is being advanced.
     for path, expected_snapshot in (
         (config_path, config_snapshot),
         (env_path, env_snapshot),
+        (os.path.join(hermes_dir, "fabric.json"), fabric_snapshot),
     ):
         opened = _open_regular(path)
         try:
@@ -2276,7 +2338,9 @@ def recover_dead_prestate_mutation_lock(state_file: str) -> bool:
 
     if os.path.exists(state_file):
         raise UnsafePathError("refusing pre-state lock recovery while state exists")
-    lock_path = os.path.join(os.path.dirname(state_file), "hermes-config-mutation.lock")
+    lock_path = os.path.join(
+        os.path.dirname(state_file), "hermes-config-mutation.lock"
+    )
     parent_fd, basename = _open_parent_dir(lock_path)
     quarantine = f".{basename}.dead.{os.getpid()}.{secrets.token_hex(8)}"
     fd: int | None = None
@@ -2601,7 +2665,9 @@ def _restore_restart_seal(
 
         if verify_hash:
             _verify_strict_hash(hermes_dir, hash_file)
-            _verify_compat_hash(hash_file, os.path.join(hermes_dir, ".config-hash"))
+            _verify_compat_hash(
+                hash_file, os.path.join(hermes_dir, ".config-hash")
+            )
 
         # Re-freeze the mutable sealed posture and clear any partially restored
         # immutable flags first. This makes unseal retryable if a prior attempt
@@ -2814,7 +2880,7 @@ def seal_restart(
             raise UnsafePathError("refusing pre-existing Hermes restart orphan marker")
         _ensure_restart_orphan_marker(hermes_fd)
 
-        # The agent could rename either file between the pre-token snapshot and
+        # The agent could rename any sealed file between the pre-token snapshot and
         # the parent freeze. Require the same inode before hashing or replacing.
         for name in SEALED_FILE_NAMES:
             current = os.stat(name, dir_fd=hermes_fd, follow_symlinks=False)
@@ -2986,7 +3052,7 @@ def _restart_state_was_locked(state_data: dict[str, object]) -> bool:
         hermes_meta.get("uid"), hermes_meta.get("gid"), hermes_meta.get("mode")
     ):
         return False
-    for name in ("config.yaml", ".env"):
+    for name in SEALED_FILE_NAMES:
         file_state = files.get(name)
         original = file_state.get("original") if isinstance(file_state, dict) else None
         if not isinstance(original, dict):
@@ -3169,9 +3235,7 @@ def _seal_shields_locked(
     if os.path.exists(state_file):
         raise UnsafePathError("Hermes restart seal is already active")
     lock_token = secrets.token_hex(32)
-    lock_path = os.path.join(
-        os.path.dirname(state_file), "hermes-config-mutation.lock"
-    )
+    lock_path = os.path.join(os.path.dirname(state_file), "hermes-config-mutation.lock")
     _acquire_mutation_lock(lock_path, lock_token, "shields-locked", state_file)
     state_data: dict[str, object] = {
         "version": 1,
@@ -3294,7 +3358,7 @@ def _seal_shields_locked(
 
         inputs: dict[str, bytes] = {}
         initial_stats: dict[str, os.stat_result | None] = {}
-        for name in ("config.yaml", ".env"):
+        for name in HASHED_INPUT_NAMES:
             data, input_st, reason = _read_hardening_input(
                 hermes_fd, name, hermes_st.st_dev
             )
@@ -3316,7 +3380,7 @@ def _seal_shields_locked(
                 and initial_stats[name].st_gid == os.getegid()
                 and stat.S_IMODE(initial_stats[name].st_mode) == 0o444
                 and initial_stats[name].st_nlink == 1
-                for name in ("config.yaml", ".env")
+                for name in HASHED_INPUT_NAMES
             )
         )
         unavailable = bool(unavailable_reasons)
@@ -3329,18 +3393,16 @@ def _seal_shields_locked(
             # Containment cannot let a malformed mutable input veto shields-up.
             # Semantic MCP inspection still rejects those frozen config bytes.
             mcp_digest = hashlib.sha256(b"{}").hexdigest()
-        hash_text = (
-            f"{hashlib.sha256(inputs['config.yaml']).hexdigest()}  "
-            f"{os.path.join(hermes_dir, 'config.yaml')}\n"
-            f"{hashlib.sha256(inputs['.env']).hexdigest()}  "
-            f"{os.path.join(hermes_dir, '.env')}\n"
-            f"{MCP_HASH_STATE_PREFIX} intended={mcp_digest} applied={mcp_digest}\n"
-        )
+        hash_text = "".join(
+            f"{hashlib.sha256(inputs[name]).hexdigest()}  "
+            f"{os.path.join(hermes_dir, name)}\n"
+            for name in HASHED_INPUT_NAMES
+        ) + (f"{MCP_HASH_STATE_PREFIX} intended={mcp_digest} applied={mcp_digest}\n")
         if len(hash_text.encode("utf-8")) > MAX_HASH_BYTES:
             raise UnsafePathError("refusing oversized synthesized Hermes hash")
 
         file_states: dict[str, dict[str, object]] = {}
-        for name in ("config.yaml", ".env"):
+        for name in HASHED_INPUT_NAMES:
             replacement = _fresh_replace_at(
                 hermes_fd, name, inputs[name], mode=file_mode
             )
@@ -3503,9 +3565,7 @@ def _resume_shields_locked(
                 os.close(fd)
         if transition.get("unavailable") is not True:
             _verify_strict_hash(hermes_dir, hash_file)
-            _verify_compat_hash(
-                hash_file, os.path.join(hermes_dir, ".config-hash")
-            )
+            _verify_compat_hash(hash_file, os.path.join(hermes_dir, ".config-hash"))
         transition["lease_expires_ns"] = (
             time.time_ns() + SHIELDS_TRANSITION_LEASE_SECONDS * 1_000_000_000
         )
@@ -3683,7 +3743,12 @@ def begin_shields_transition(
     # the next root transaction and must admit that same narrowly reviewed
     # reconciliation as write-config. Derive the expected config digest from
     # the existing strict anchor so shields can never bless config drift.
-    strict_config_sha256, _strict_env_sha256, _strict_mcp_state = _parse_config_hash(
+    (
+        strict_config_sha256,
+        _strict_env_sha256,
+        _strict_fabric_sha256,
+        _strict_mcp_state,
+    ) = _parse_config_hash(
         _read_hash_file(hash_file),
         os.path.join(hermes_dir, "config.yaml"),
         os.path.join(hermes_dir, ".env"),
@@ -3824,7 +3889,6 @@ def _configure_shields_target_metadata(
     locked = mode == "locked"
     desired_uid = os.geteuid() if locked else sandbox_uid
     desired_gid = os.getegid() if locked else sandbox_gid
-    desired_file_mode = 0o444 if locked else 0o640
     # The config root keeps one set-id/sticky shape in both postures; only its
     # owner changes. Hermes writes its top-level runtime state directly here —
     # auth.json, the drain request, and the temporary files that back every
@@ -3871,7 +3935,11 @@ def _configure_shields_target_metadata(
                     f"refusing missing Hermes shields transition metadata for {name}"
                 )
             original.update(
-                {"uid": desired_uid, "gid": desired_gid, "mode": desired_file_mode}
+                {
+                    "uid": desired_uid,
+                    "gid": desired_gid,
+                    "mode": 0o444 if locked else _mutable_sealed_file_mode(name),
+                }
             )
             file_state["original"] = original
             fd = os.open(
@@ -4540,6 +4608,60 @@ def run_state_dir_transition(
     )
 
 
+def _config_write_rollback_bytes(
+    state_data: dict[str, object],
+    write_state: dict[str, object],
+    name: str,
+    max_bytes: int,
+) -> bytes:
+    files = state_data.get("files")
+    file_state = files.get(name) if isinstance(files, dict) else None
+    field_name = "config" if name == "config.yaml" else "fabric"
+    encoded_key = f"original_{field_name}_base64"
+    digest_key = f"original_{field_name}_sha256"
+    encoded = write_state.get(encoded_key)
+    digest = write_state.get(digest_key)
+    if name == "config.yaml":
+        # Recognize the previous config-only field names so the native rollback
+        # bytes can still be authenticated. Complete recovery remains blocked
+        # below unless the journal also has authenticated Fabric rollback bytes.
+        encoded = (
+            encoded if isinstance(encoded, str) else write_state.get("original_base64")
+        )
+        digest = (
+            digest if isinstance(digest, str) else write_state.get("original_sha256")
+        )
+    if not isinstance(encoded, str) and isinstance(file_state, dict):
+        encoded = file_state.get("trusted_base64")
+    if not isinstance(encoded, str):
+        if name == "fabric.json":
+            raise UnsafePathError(
+                "refusing config-write recovery without authenticated Fabric "
+                "rollback bytes; restore a trusted backup or rebuild the sandbox"
+            )
+        raise UnsafePathError(
+            f"refusing config-write recovery without rollback bytes for {name}"
+        )
+    original = _decode_bounded_base64(
+        encoded,
+        max_bytes,
+        f"Hermes config-write rollback bytes for {name}",
+    )
+    if not isinstance(digest, str):
+        if name != "fabric.json":
+            raise UnsafePathError(
+                f"refusing config-write recovery without rollback digest for {name}"
+            )
+        # Config-only journals created before Fabric route projection have no
+        # Fabric digest. Their root-owned seal still carries the trusted bytes.
+        digest = hashlib.sha256(original).hexdigest()
+    if not secrets.compare_digest(hashlib.sha256(original).hexdigest(), digest):
+        raise UnsafePathError(
+            f"refusing invalid Hermes config-write rollback digest for {name}"
+        )
+    return original
+
+
 def _recover_config_write_transaction(hermes_dir: str, state_file: str) -> None:
     state_data = _load_restart_state(state_file)
     phase = str(state_data.get("phase", ""))
@@ -4548,53 +4670,52 @@ def _recover_config_write_transaction(hermes_dir: str, state_file: str) -> None:
         raise UnsafePathError(
             "refusing config-write recovery without rollback metadata"
         )
-    encoded_original = write_state.get("original_base64")
-    if not isinstance(encoded_original, str):
-        files = state_data.get("files")
-        config_state = files.get("config.yaml") if isinstance(files, dict) else None
-        encoded_original = (
-            config_state.get("trusted_base64")
-            if isinstance(config_state, dict)
-            else None
-        )
-    original_digest = write_state.get("original_sha256")
-    if not isinstance(encoded_original, str) or not isinstance(original_digest, str):
-        raise UnsafePathError(
-            "refusing malformed Hermes config-write rollback metadata"
-        )
-    original_bytes = _decode_bounded_base64(
-        encoded_original,
+    original_config = _config_write_rollback_bytes(
+        state_data,
+        write_state,
+        "config.yaml",
         MAX_CONFIG_INPUT_BYTES,
-        "Hermes config-write rollback bytes",
     )
-    if not secrets.compare_digest(
-        hashlib.sha256(original_bytes).hexdigest(), original_digest
-    ):
-        raise UnsafePathError("refusing invalid Hermes config-write rollback digest")
+    original_fabric = _config_write_rollback_bytes(
+        state_data,
+        write_state,
+        "fabric.json",
+        MAX_FABRIC_CONFIG_BYTES,
+    )
 
     config_path = os.path.join(hermes_dir, "config.yaml")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
     if phase == "config-write-prepared":
-        current = _open_regular(config_path)
-        try:
-            current_snapshot = current.snapshot
-        finally:
-            current.close()
-        _atomic_replace(
-            config_path,
-            original_bytes,
-            expected=current_snapshot,
-            mode=0o444,
-            uid=os.geteuid(),
-            gid=os.getegid(),
-        )
+        for path, original in (
+            (config_path, original_config),
+            (fabric_path, original_fabric),
+        ):
+            current = _open_regular(path)
+            try:
+                current_snapshot = current.snapshot
+            finally:
+                current.close()
+            _atomic_replace(
+                path,
+                original,
+                expected=current_snapshot,
+                mode=0o444,
+                uid=os.geteuid(),
+                gid=os.getegid(),
+            )
         refresh_hashes(hermes_dir, str(state_data["hash_file"]), "both")
         _record_current_sealed_inodes(
-            state_file, hermes_dir, ("config.yaml", ".config-hash")
+            state_file,
+            hermes_dir,
+            ("config.yaml", "fabric.json", ".config-hash"),
         )
     elif phase == "config-write-committed":
-        # The committed phase is published only after config + both hashes are
-        # durable. Re-verify the strict anchor, but do not repeat the write.
+        # The committed phase is published only after config, Fabric, and both
+        # hashes are durable. Re-verify the anchors, but do not repeat the write.
         _verify_strict_hash(hermes_dir, str(state_data["hash_file"]))
+        _verify_compat_hash(
+            str(state_data["hash_file"]), os.path.join(hermes_dir, ".config-hash")
+        )
     else:
         raise UnsafePathError(
             f"refusing unsupported Hermes config-write phase: {phase}"
@@ -4606,7 +4727,7 @@ def _recover_config_write_transaction(hermes_dir: str, state_file: str) -> None:
     _write_restart_state(state_file, state_data, create=False)
 
 
-def _validate_hermes_config_candidate(config_bytes: bytes) -> None:
+def _validate_hermes_config_candidate(config_bytes: bytes) -> dict[str, object]:
     """Parse a candidate with Hermes' own config model before any mutation.
 
     The guard owns the sealed write transaction, while Hermes owns the schema.
@@ -4635,6 +4756,117 @@ def _validate_hermes_config_candidate(config_bytes: bytes) -> None:
         raise UnsafePathError(
             f"Hermes schema validation rejected the candidate: {detail}"
         ) from exc
+    return parsed
+
+
+def _managed_route_string(value: object, label: str, max_length: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value != value.strip()
+        or len(value) > max_length
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in value)
+    ):
+        raise UnsafePathError(f"Hermes managed route {label} is invalid")
+    return value
+
+
+def _extract_managed_inference_route(
+    config: dict[str, object],
+) -> HermesManagedInferenceRoute:
+    """Read only the non-secret route projected into Fabric."""
+    model_config = config.get("model")
+    upstream = config.get("_nemoclaw_upstream")
+    if not isinstance(model_config, dict) or not isinstance(upstream, dict):
+        raise UnsafePathError("Hermes managed inference route is incomplete")
+    if model_config.get("provider") != "custom":
+        raise UnsafePathError("Hermes managed route provider must be custom")
+    if model_config.get("api_key") != HERMES_PROXY_REWRITE_SENTINEL:
+        raise UnsafePathError(
+            "Hermes managed route must use the OpenShell proxy rewrite sentinel"
+        )
+
+    model = _managed_route_string(model_config.get("default"), "model", 1024)
+    base_url = _managed_route_string(model_config.get("base_url"), "base URL", 4096)
+    upstream_model = _managed_route_string(
+        upstream.get("model"), "upstream model", 1024
+    )
+    _managed_route_string(upstream.get("provider"), "upstream provider", 512)
+    _managed_route_string(upstream.get("provider_key"), "upstream provider key", 512)
+    if model != upstream_model:
+        raise UnsafePathError("Hermes managed route model annotations disagree")
+
+    try:
+        parsed_url = urlsplit(base_url)
+        hostname = parsed_url.hostname
+        # Accessing port performs urllib's range and syntax validation.
+        _port = parsed_url.port
+    except ValueError as exc:
+        raise UnsafePathError("Hermes managed route base URL is invalid") from exc
+    if (
+        parsed_url.scheme not in ("http", "https")
+        or not hostname
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_url.query
+        or parsed_url.fragment
+    ):
+        raise UnsafePathError(
+            "Hermes managed route base URL must be an HTTP(S) endpoint without "
+            "credentials, query, or fragment"
+        )
+    return HermesManagedInferenceRoute(model=model, base_url=base_url)
+
+
+def _render_fabric_route_config(
+    fabric_bytes: bytes, route: HermesManagedInferenceRoute
+) -> bytes:
+    """Update only Fabric's model and endpoint while preserving its contract."""
+    try:
+        fabric_text = fabric_bytes.decode("utf-8")
+        document = json.loads(fabric_text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UnsafePathError("Hermes Fabric configuration is not valid JSON") from exc
+    if not isinstance(document, dict):
+        raise UnsafePathError("Hermes Fabric configuration must be a mapping")
+    harness = document.get("harness")
+    models = document.get("models")
+    default_model = models.get("default") if isinstance(models, dict) else None
+    if (
+        document.get("schema_version") != "fabric.agent/v1alpha1"
+        or not isinstance(harness, dict)
+        or harness.get("adapter_id") != "nvidia.nemoclaw.hermes"
+        or harness.get("resolution") != "preinstalled"
+        or not isinstance(default_model, dict)
+        or default_model.get("provider") != "custom"
+        or default_model.get("api_key_env") != HERMES_FABRIC_API_KEY_ENV
+    ):
+        raise UnsafePathError("Hermes Fabric configuration contract is invalid")
+    if not isinstance(default_model.get("model"), str) or not isinstance(
+        default_model.get("base_url"), str
+    ):
+        raise UnsafePathError("Hermes Fabric managed route is incomplete")
+
+    projected = copy.deepcopy(document)
+    projected_models = projected["models"]
+    if not isinstance(projected_models, dict):
+        raise UnsafePathError("Hermes Fabric configuration contract is invalid")
+    projected_default = projected_models["default"]
+    if not isinstance(projected_default, dict):
+        raise UnsafePathError("Hermes Fabric configuration contract is invalid")
+    projected_default["model"] = route.model
+    projected_default["base_url"] = route.base_url
+    try:
+        rendered = (
+            json.dumps(projected, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise UnsafePathError(
+            "Hermes Fabric configuration is not serializable"
+        ) from exc
+    if len(rendered) > MAX_FABRIC_CONFIG_BYTES:
+        raise UnsafePathError("refusing oversized Hermes Fabric configuration")
+    return rendered
 
 
 def write_config_transaction(
@@ -4650,12 +4882,15 @@ def write_config_transaction(
         raise UnsafePathError("refusing oversized Hermes config input")
 
     # Validate before `seal_restart` writes the restart state or opens mutable
-    # inputs. A rejected candidate must leave config, env, and both hash anchors
-    # byte-for-byte unchanged. The established exact-size boundary runs its
-    # filesystem check first when the config path is absent.
+    # inputs. A rejected candidate must leave every sealed input and both hash
+    # anchors byte-for-byte unchanged. The established exact-size boundary runs
+    # its filesystem check first when the config path is absent.
     config_path = os.path.join(hermes_dir, "config.yaml")
+    fabric_path = os.path.join(hermes_dir, "fabric.json")
+    managed_route: HermesManagedInferenceRoute | None = None
     if os.path.exists(config_path):
-        _validate_hermes_config_candidate(config_bytes)
+        parsed_candidate = _validate_hermes_config_candidate(config_bytes)
+        managed_route = _extract_managed_inference_route(parsed_candidate)
 
     seal_restart(
         hermes_dir,
@@ -4673,16 +4908,25 @@ def write_config_transaction(
             )
         opened = _open_regular(config_path)
         try:
-            original_bytes = opened.read_bytes(MAX_CONFIG_INPUT_BYTES)
-            original_snapshot = opened.snapshot
+            original_config = opened.read_bytes(MAX_CONFIG_INPUT_BYTES)
+            original_config_snapshot = opened.snapshot
         finally:
             opened.close()
+        fabric = _open_regular(fabric_path)
+        try:
+            original_fabric = fabric.read_bytes(MAX_FABRIC_CONFIG_BYTES)
+            original_fabric_snapshot = fabric.snapshot
+        finally:
+            fabric.close()
         if not secrets.compare_digest(
-            hashlib.sha256(original_bytes).hexdigest(), expected_config_sha256
+            hashlib.sha256(original_config).hexdigest(), expected_config_sha256
         ):
             raise UnsafePathError(
                 "Hermes config changed after the host read it; retry the command"
             )
+        if managed_route is None:
+            raise UnsafePathError("Hermes managed inference route is unavailable")
+        replacement_fabric = _render_fabric_route_config(original_fabric, managed_route)
         try:
             replacement_text = config_bytes.decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -4698,21 +4942,32 @@ def write_config_transaction(
 
         state_data["phase"] = "config-write-prepared"
         state_data["config_write"] = {
-            "original_sha256": hashlib.sha256(original_bytes).hexdigest(),
+            "original_config_sha256": hashlib.sha256(original_config).hexdigest(),
+            "original_fabric_sha256": hashlib.sha256(original_fabric).hexdigest(),
         }
         _write_restart_state(state_file, state_data, create=False)
 
         _atomic_replace(
             config_path,
             config_bytes,
-            expected=original_snapshot,
+            expected=original_config_snapshot,
+            mode=0o444,
+            uid=os.geteuid(),
+            gid=os.getegid(),
+        )
+        _atomic_replace(
+            fabric_path,
+            replacement_fabric,
+            expected=original_fabric_snapshot,
             mode=0o444,
             uid=os.geteuid(),
             gid=os.getegid(),
         )
         refresh_hashes(hermes_dir, hash_file, "both")
         _record_current_sealed_inodes(
-            state_file, hermes_dir, ("config.yaml", ".config-hash")
+            state_file,
+            hermes_dir,
+            ("config.yaml", "fabric.json", ".config-hash"),
         )
         state_data = _load_restart_state(state_file)
         state_data["phase"] = "config-write-committed"

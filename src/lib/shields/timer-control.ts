@@ -17,6 +17,7 @@ import {
   readShieldsTimerMarkerFile,
   readShieldsTimerRecoveryCandidate,
   readShieldsTimerTakeoverToken,
+  resolveShieldsTimerProtectedFilePaths,
   readTimerProcessStartIdentity,
   sameShieldsTimerMarkerGeneration,
   type ShieldsTimerMarker,
@@ -65,25 +66,28 @@ function readAutoRestoreTakeoverToken(sandboxName: string): string | undefined {
 }
 
 function timerAuthoritySha256(marker: ShieldsTimerMarker): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        schemaVersion: 1,
-        pid: marker.pid,
-        sandboxName: marker.sandboxName,
-        snapshotPath: marker.snapshotPath,
-        restoreAt: marker.restoreAt,
-        processToken: marker.processToken ?? null,
-        timerProcessStartIdentity: marker.timerProcessStartIdentity ?? null,
-        allowLegacyHermesProtocol: marker.allowLegacyHermesProtocol === true,
-        agentName: marker.agentName ?? null,
-        configPath: marker.configPath ?? null,
-        configDir: marker.configDir ?? null,
-        leaseOwnerPid: marker.leaseOwnerPid ?? null,
-        leaseOwnerStartIdentity: marker.leaseOwnerStartIdentity ?? null,
-      }),
-    )
-    .digest("hex");
+  const authority: Record<string, unknown> = {
+    schemaVersion: 1,
+    pid: marker.pid,
+    sandboxName: marker.sandboxName,
+    snapshotPath: marker.snapshotPath,
+    restoreAt: marker.restoreAt,
+    processToken: marker.processToken ?? null,
+    timerProcessStartIdentity: marker.timerProcessStartIdentity ?? null,
+    allowLegacyHermesProtocol: marker.allowLegacyHermesProtocol === true,
+    agentName: marker.agentName ?? null,
+    configPath: marker.configPath ?? null,
+    configDir: marker.configDir ?? null,
+    leaseOwnerPid: marker.leaseOwnerPid ?? null,
+    leaseOwnerStartIdentity: marker.leaseOwnerStartIdentity ?? null,
+  };
+  if (marker.protectedFiles !== undefined) {
+    authority.protectedFiles = marker.protectedFiles;
+  }
+  if (marker.mutableAccess !== undefined) {
+    authority.mutableAccess = marker.mutableAccess;
+  }
+  return createHash("sha256").update(JSON.stringify(authority)).digest("hex");
 }
 
 function timerAuthorizationProofPath(
@@ -542,6 +546,7 @@ export {
   readProcessState,
   readTimerMarker,
   readShieldsTimerRecoveryCandidate,
+  resolveShieldsTimerProtectedFilePaths,
   removeTimerAuthorizationProof,
   timerAuthoritySha256,
   timerAuthorizationProofPath,

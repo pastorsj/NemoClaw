@@ -21,6 +21,7 @@ import type {
 } from "./manifest-types";
 import {
   readBoolean,
+  readConfigMutableAccess,
   readConfigShieldsFiles,
   readDashboard,
   readHealthProbe,
@@ -249,6 +250,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const healthProbe = readHealthProbe(raw);
   const config = readObject(raw, "config");
   const configShieldsFiles = readConfigShieldsFiles(config);
+  const configMutableAccess = readConfigMutableAccess(config);
   const inference = readInference(raw);
   const mcp = readMcpCapability(raw);
   if (raw.runtime_auth_state_dirs !== undefined) {
@@ -391,6 +393,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
         envFile: readString(config ?? {}, "env_file") ?? null,
         format: readString(config ?? {}, "format") ?? "json",
         shieldsFiles: configShieldsFiles,
+        mutableAccess: configMutableAccess,
       };
     },
 

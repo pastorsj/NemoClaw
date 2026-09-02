@@ -274,7 +274,9 @@ describe("Hermes doctor and config hash boundary", () => {
     const hermesDir = path.join(sandboxRoot, ".hermes");
     const configPath = path.join(hermesDir, "config.yaml");
     const envPath = path.join(hermesDir, ".env");
+    const fabricPath = path.join(hermesDir, "fabric.json");
     const fakeHermes = path.join(tmp, "hermes");
+    const fakeFabric = path.join(tmp, "nemoclaw-fabric");
     const orderLogPath = path.join(tmp, "doctor-generate-order.log");
     const etcDir = path.join(tmp, "etc", "nemoclaw");
     const hermesPython = writeYamlStubPython(tmp);
@@ -290,7 +292,8 @@ describe("Hermes doctor and config hash boundary", () => {
       `printf 'generate\\n' >>${JSON.stringify(orderLogPath)}`,
       `printf '%s\\n' ${JSON.stringify(generatedConfig)} >${JSON.stringify(configPath)}`,
       `printf 'API_SERVER_HOST=127.0.0.1\\nAPI_SERVER_PORT=18642\\n' >${JSON.stringify(envPath)}`,
-      `chmod 600 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)}`,
+      `printf '{"schema_version":"fabric.agent/v1alpha1"}\\n' >${JSON.stringify(fabricPath)}`,
+      `chmod 600 ${JSON.stringify(configPath)} ${JSON.stringify(envPath)} ${JSON.stringify(fabricPath)}`,
     ].join("; ");
     fs.mkdirSync(hermesDir, { recursive: true });
     fs.writeFileSync(configPath, "model: test\n", { mode: 0o600 });
@@ -307,6 +310,18 @@ describe("Hermes doctor and config hash boundary", () => {
       ].join("\n"),
       { mode: 0o700 },
     );
+    fs.writeFileSync(
+      fakeFabric,
+      [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        'test "${HERMES_FABRIC_API_KEY:-}" = "nemoclaw-managed-inference"',
+        `test "$#" -eq 4 && test "$1" = doctor && test "$2" = --config && test "$3" = ${JSON.stringify(fabricPath)} && test "$4" = --json`,
+        `printf 'fabric-doctor\\n' >>${JSON.stringify(orderLogPath)}`,
+        `printf '{"status":"pass"}\\n'`,
+      ].join("\n"),
+      { mode: 0o700 },
+    );
 
     const doctorAndGenerateCommand = dockerRunCommandBetween(
       dockerfile,
@@ -314,7 +329,13 @@ describe("Hermes doctor and config hash boundary", () => {
       "# Install NemoClaw plugin into Hermes",
     )
       .replaceAll("/sandbox", sandboxRoot)
+      .replaceAll(
+        "stat -c %a",
+        "python3 -c 'import os,sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])'",
+      )
       .replaceAll("/usr/local/bin/hermes", fakeHermes)
+      .replaceAll("/usr/local/bin/nemoclaw-fabric", fakeFabric)
+      .replaceAll("/opt/nemoclaw-fabric-venv/bin/python3", "python3")
       .replaceAll(
         "node --experimental-strip-types /opt/nemoclaw-hermes-config/config/generate-config.ts",
         fakeGenerateCommand,
@@ -351,16 +372,18 @@ describe("Hermes doctor and config hash boundary", () => {
         cwd: tmp,
         timeout: 5000,
       });
-      expect(doctorAndGenerate.status).toBe(0);
-      expect(fs.readFileSync(orderLogPath, "utf-8")).toBe("doctor\ngenerate\n");
-      expect([mode(configPath), mode(envPath)]).toEqual(["600", "600"]);
+      expect(doctorAndGenerate.status, doctorAndGenerate.stderr || doctorAndGenerate.stdout).toBe(
+        0,
+      );
+      expect(fs.readFileSync(orderLogPath, "utf-8")).toBe("doctor\ngenerate\nfabric-doctor\n");
+      expect([mode(configPath), mode(envPath), mode(fabricPath)]).toEqual(["600", "600", "600"]);
       expect(fs.readFileSync(configPath, "utf-8")).not.toContain("doctor_migrated");
       expect(fs.readFileSync(envPath, "utf-8")).not.toContain("DOCTOR_MIGRATED");
 
       const lock = runDockerShell(lockCommand, sandboxRoot);
       expect(lock.result.status, lock.result.stderr).toBe(0);
       expect(lock.result.stderr).toBe("");
-      expect([mode(configPath), mode(envPath)]).toEqual(["640", "640"]);
+      expect([mode(configPath), mode(envPath), mode(fabricPath)]).toEqual(["640", "640", "600"]);
 
       const hash = runDockerShell(hashCommand, sandboxRoot);
       expect(hash.result.status, hash.result.stderr).toBe(0);

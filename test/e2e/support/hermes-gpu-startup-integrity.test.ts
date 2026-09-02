@@ -14,6 +14,7 @@ interface IntegrityFixture {
   root: string;
   configPath: string;
   envPath: string;
+  fabricPath: string;
   strictHashPath: string;
   compatHashPath: string;
   startupLogPath: string;
@@ -39,10 +40,12 @@ function writeHash(
   config: string,
   envPath: string,
   env: string,
+  fabricPath: string,
+  fabric: string,
 ): void {
   fs.writeFileSync(
     hashPath,
-    `${digest(config)}  ${configPath}\n${digest(env)}  ${envPath}\n${MCP_STATE_RECORD}\n`,
+    `${digest(config)}  ${configPath}\n${digest(env)}  ${envPath}\n${digest(fabric)}  ${fabricPath}\n${MCP_STATE_RECORD}\n`,
   );
 }
 
@@ -62,6 +65,7 @@ function createFixture(): IntegrityFixture {
     root,
     configPath: path.join(hermesDir, "config.yaml"),
     envPath: path.join(hermesDir, ".env"),
+    fabricPath: path.join(hermesDir, "fabric.json"),
     strictHashPath: path.join(root, "hermes.config-hash"),
     compatHashPath: path.join(hermesDir, ".config-hash"),
     startupLogPath: path.join(root, "nemoclaw-start.log"),
@@ -70,11 +74,29 @@ function createFixture(): IntegrityFixture {
   };
   const config = "model:\n  default: test-model\n";
   const liveEnv = `${fixture.baseEnv}API_SERVER_KEY=${fixture.generatedKey}\n`;
+  const fabric = '{"models":{"default":{"model":"test-model"}}}\n';
   fs.mkdirSync(hermesDir, { recursive: true });
   fs.writeFileSync(fixture.configPath, config);
   fs.writeFileSync(fixture.envPath, liveEnv);
-  writeHash(fixture.strictHashPath, fixture.configPath, config, fixture.envPath, fixture.baseEnv);
-  writeHash(fixture.compatHashPath, fixture.configPath, config, fixture.envPath, liveEnv);
+  fs.writeFileSync(fixture.fabricPath, fabric);
+  writeHash(
+    fixture.strictHashPath,
+    fixture.configPath,
+    config,
+    fixture.envPath,
+    fixture.baseEnv,
+    fixture.fabricPath,
+    fabric,
+  );
+  writeHash(
+    fixture.compatHashPath,
+    fixture.configPath,
+    config,
+    fixture.envPath,
+    liveEnv,
+    fixture.fabricPath,
+    fabric,
+  );
   fs.chmodSync(fixture.strictHashPath, 0o444);
   fs.writeFileSync(fixture.startupLogPath, "[config] managed startup complete\n");
   return fixture;
@@ -89,6 +111,7 @@ function runProof(fixture: IntegrityFixture, extraEnv: NodeJS.ProcessEnv = {}) {
       buildHermesManagedStartupIntegrityScript({
         configPath: fixture.configPath,
         envPath: fixture.envPath,
+        fabricPath: fixture.fabricPath,
         strictHashPath: fixture.strictHashPath,
         compatHashPath: fixture.compatHashPath,
         startupLogPath: fixture.startupLogPath,
@@ -126,22 +149,23 @@ describe("Hermes managed startup integrity proof", () => {
 
   it("rejects a missing Hermes MCP state record (#6427)", () => {
     const fixture = createFixture();
-    const [configRecord, envRecord] = readHashRecords(fixture.compatHashPath);
-    writeHashRecords(fixture.compatHashPath, [configRecord!, envRecord!]);
+    const [configRecord, envRecord, fabricRecord] = readHashRecords(fixture.compatHashPath);
+    writeHashRecords(fixture.compatHashPath, [configRecord!, envRecord!, fabricRecord!]);
 
     const proof = runProof(fixture);
     expect(proof.status).not.toBe(0);
     expect(proof.stderr).toContain(
-      "Hermes compatibility hash does not contain exactly three records",
+      "Hermes compatibility hash does not contain exactly four records",
     );
   });
 
   it("rejects a malformed Hermes MCP state record (#6427)", () => {
     const fixture = createFixture();
-    const [configRecord, envRecord] = readHashRecords(fixture.compatHashPath);
+    const [configRecord, envRecord, fabricRecord] = readHashRecords(fixture.compatHashPath);
     writeHashRecords(fixture.compatHashPath, [
       configRecord!,
       envRecord!,
+      fabricRecord!,
       `# nemoclaw-hermes-mcp-state-v1 intended=${"1".repeat(64)} applied=invalid`,
     ]);
 
@@ -160,14 +184,21 @@ describe("Hermes managed startup integrity proof", () => {
     const proof = runProof(fixture);
     expect(proof.status).not.toBe(0);
     expect(proof.stderr).toContain(
-      "Hermes compatibility hash does not contain exactly three records",
+      "Hermes compatibility hash does not contain exactly four records",
     );
   });
 
   it("rejects a reordered Hermes MCP state record (#6427)", () => {
     const fixture = createFixture();
-    const [configRecord, envRecord, stateRecord] = readHashRecords(fixture.compatHashPath);
-    writeHashRecords(fixture.compatHashPath, [stateRecord!, configRecord!, envRecord!]);
+    const [configRecord, envRecord, fabricRecord, stateRecord] = readHashRecords(
+      fixture.compatHashPath,
+    );
+    writeHashRecords(fixture.compatHashPath, [
+      stateRecord!,
+      configRecord!,
+      envRecord!,
+      fabricRecord!,
+    ]);
 
     const proof = runProof(fixture);
     expect(proof.status).not.toBe(0);
@@ -182,16 +213,25 @@ describe("Hermes managed startup integrity proof", () => {
     const proof = runProof(fixture);
     expect(proof.status).not.toBe(0);
     expect(proof.stderr).toContain(
-      "Hermes compatibility hash does not contain exactly three records",
+      "Hermes compatibility hash does not contain exactly four records",
     );
   });
 
   it("rejects non-key environment drift even when the compatibility hash accepts it", () => {
     const fixture = createFixture();
     const config = fs.readFileSync(fixture.configPath, "utf-8");
+    const fabric = fs.readFileSync(fixture.fabricPath, "utf-8");
     const driftedEnv = `${fs.readFileSync(fixture.envPath, "utf-8")}UNEXPECTED=drift\n`;
     fs.writeFileSync(fixture.envPath, driftedEnv);
-    writeHash(fixture.compatHashPath, fixture.configPath, config, fixture.envPath, driftedEnv);
+    writeHash(
+      fixture.compatHashPath,
+      fixture.configPath,
+      config,
+      fixture.envPath,
+      driftedEnv,
+      fixture.fabricPath,
+      fabric,
+    );
 
     const proof = runProof(fixture);
     expect(proof.status).not.toBe(0);
@@ -211,12 +251,34 @@ describe("Hermes managed startup integrity proof", () => {
   it("rejects a stale compatibility hash", () => {
     const stale = createFixture();
     const config = fs.readFileSync(stale.configPath, "utf-8");
-    writeHash(stale.compatHashPath, stale.configPath, config, stale.envPath, stale.baseEnv);
+    const fabric = fs.readFileSync(stale.fabricPath, "utf-8");
+    writeHash(
+      stale.compatHashPath,
+      stale.configPath,
+      config,
+      stale.envPath,
+      stale.baseEnv,
+      stale.fabricPath,
+      fabric,
+    );
     const proof = runProof(stale);
     expect(proof.status).not.toBe(0);
     expect(proof.stderr).toContain(
       "Hermes compatibility hash does not match the current environment",
     );
+  });
+
+  it("rejects Fabric config drift even when native Hermes inputs are unchanged", () => {
+    const fixture = createFixture();
+    fs.writeFileSync(
+      fixture.fabricPath,
+      '{"models":{"default":{"model":"unexpected-model"}}}\n',
+    );
+
+    const proof = runProof(fixture);
+
+    expect(proof.status).not.toBe(0);
+    expect(proof.stderr).toContain("Hermes Fabric config differs from the strict startup base");
   });
 
   it("rejects pending MCP state in the strict anchor (#6110)", () => {
@@ -237,13 +299,30 @@ describe("Hermes managed startup integrity proof", () => {
   it("rejects a noncanonical API key assignment even when it belongs to the strict base", () => {
     const fixture = createFixture();
     const config = fs.readFileSync(fixture.configPath, "utf-8");
+    const fabric = fs.readFileSync(fixture.fabricPath, "utf-8");
     const pollutedBase = `${fixture.baseEnv}export API_SERVER_KEY=${"b".repeat(64)}\n`;
     const liveEnv = `${pollutedBase}API_SERVER_KEY=${fixture.generatedKey}\n`;
     fs.writeFileSync(fixture.envPath, liveEnv);
     fs.chmodSync(fixture.strictHashPath, 0o644);
-    writeHash(fixture.strictHashPath, fixture.configPath, config, fixture.envPath, pollutedBase);
+    writeHash(
+      fixture.strictHashPath,
+      fixture.configPath,
+      config,
+      fixture.envPath,
+      pollutedBase,
+      fixture.fabricPath,
+      fabric,
+    );
     fs.chmodSync(fixture.strictHashPath, 0o444);
-    writeHash(fixture.compatHashPath, fixture.configPath, config, fixture.envPath, liveEnv);
+    writeHash(
+      fixture.compatHashPath,
+      fixture.configPath,
+      config,
+      fixture.envPath,
+      liveEnv,
+      fixture.fabricPath,
+      fabric,
+    );
 
     const proof = runProof(fixture);
     expect(proof.status).not.toBe(0);

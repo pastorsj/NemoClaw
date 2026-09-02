@@ -17,7 +17,10 @@ export const OPENCLAW_CONFIG_PATH = `${OPENCLAW_CONFIG_DIR}/openclaw.json`;
 export const OPENCLAW_CONFIG_HASH_PATH = `${OPENCLAW_CONFIG_DIR}/.config-hash`;
 
 const CONTAINER_HELPER = "/usr/local/lib/nemoclaw/openclaw-config-guard.py";
-const HOST_HELPER = path.resolve(__dirname, "../../../packages/nemoclaw-openclaw/runtime/config-guard.py");
+const HOST_HELPER = path.resolve(
+  __dirname,
+  "../../../packages/nemoclaw-openclaw/runtime/config-guard.py",
+);
 const CONTAINER_TIMEOUT = ["timeout", "--signal=TERM", "--kill-after=5s", "5m"];
 // Must exceed STATE_DIR_GUARD_TIMEOUT_SECONDS (22m) in
 // packages/nemoclaw-openclaw/runtime/config-guard.py, which is the guard's whole-action budget
@@ -53,6 +56,8 @@ export type OpenClawConfigGuardOptions = {
   expectedConfigSha256?: string;
   input?: string;
   startupOwner?: boolean;
+  /** Exact manifest-declared file names the guard must report protecting. */
+  protectedFiles?: readonly string[];
   /** Agent state lock plan, required by `unlock-failed-startup`. */
   planJson?: string;
 };
@@ -102,6 +107,37 @@ const GUARD_ACTIONS = new Set<OpenClawConfigGuardAction>([
   "publish-startup-ready",
   "unlock-failed-startup",
 ]);
+const DEFAULT_PROTECTED_FILES = ["openclaw.json", ".config-hash"] as const;
+
+function protectedFilesContractIssue(files: readonly string[]): string | null {
+  if (
+    files.length < 2 ||
+    files[0] !== DEFAULT_PROTECTED_FILES[0] ||
+    files[1] !== DEFAULT_PROTECTED_FILES[1]
+  ) {
+    return "must begin with openclaw.json and .config-hash";
+  }
+  const unique = new Set<string>();
+  for (const file of files) {
+    if (
+      file.length === 0 ||
+      file !== path.posix.basename(file) ||
+      file.includes("\\") ||
+      /[\x00-\x1f\x7f]/.test(file)
+    ) {
+      return "must contain only direct canonical file names";
+    }
+    if (unique.has(file)) return "must not contain duplicate file names";
+    unique.add(file);
+  }
+  return null;
+}
+
+function sameProtectedFiles(actual: readonly string[], expected: readonly string[]): boolean {
+  return (
+    actual.length === expected.length && actual.every((file, index) => file === expected[index])
+  );
+}
 
 function executionFailure(label: string, result: PrivilegedExecResult): string {
   const details = [result.error, result.stderr.trim(), result.stdout.trim()]
@@ -213,10 +249,15 @@ export function validateOpenClawConfigCandidate(
 export function parseOpenClawConfigGuardOutput(
   action: OpenClawConfigGuardAction,
   result: PrivilegedExecResult,
+  protectedFiles: readonly string[] = DEFAULT_PROTECTED_FILES,
 ): OpenClawConfigGuardResult {
   const issues: GuardIssue[] = [];
   const summaries: GuardSummary[] = [];
   const contractIssues: string[] = [];
+  const protectedFilesIssue = protectedFilesContractIssue(protectedFiles);
+  if (protectedFilesIssue) {
+    contractIssues.push(`OpenClaw config guard protectedFiles ${protectedFilesIssue}`);
+  }
 
   for (const line of result.stdout.split("\n")) {
     const trimmed = line.trim();
@@ -285,10 +326,8 @@ export function parseOpenClawConfigGuardOutput(
     const startupAction = action === "revoke-startup-ready" || action === "publish-startup-ready";
     if (
       !startupAction &&
-      (!summary.files ||
-        summary.files.length !== 2 ||
-        summary.files[0] !== "openclaw.json" ||
-        summary.files[1] !== ".config-hash")
+      !protectedFilesIssue &&
+      (!summary.files || !sameProtectedFiles(summary.files, protectedFiles))
     ) {
       contractIssues.push("OpenClaw config guard returned an unexpected protected-file set");
     }
@@ -349,6 +388,14 @@ export function runOpenClawConfigGuard(
   action: OpenClawConfigGuardAction,
   options: OpenClawConfigGuardOptions = {},
 ): OpenClawConfigGuardResult {
+  const protectedFiles = options.protectedFiles ?? DEFAULT_PROTECTED_FILES;
+  const protectedFilesIssue = protectedFilesContractIssue(protectedFiles);
+  if (protectedFilesIssue) {
+    return {
+      issues: [`OpenClaw config guard protectedFiles ${protectedFilesIssue}`],
+      chattrApplied: false,
+    };
+  }
   if (
     options.expectedConfigSha256 !== undefined &&
     !/^[0-9a-f]{64}$/.test(options.expectedConfigSha256)
@@ -376,7 +423,47 @@ export function runOpenClawConfigGuard(
     action === "unlock-failed-startup" ? RECOVERY_CONTAINER_TIMEOUT : CONTAINER_TIMEOUT;
   let command: string[];
   let input: string | undefined;
-  if (capability.status === 0 && capability.signal === null && !capability.error) {
+  let expectedProtectedFiles = protectedFiles;
+  let installedHelperSupportsFileSets = true;
+  if (
+    capability.status === 0 &&
+    capability.signal === null &&
+    !capability.error &&
+    !sameProtectedFiles(protectedFiles, DEFAULT_PROTECTED_FILES)
+  ) {
+    const helperHelp = privileged.run([
+      ...SCHEMA_VALIDATION_TIMEOUT,
+      "python3",
+      "-I",
+      CONTAINER_HELPER,
+      "--help",
+    ]);
+    if (
+      helperHelp.status !== 0 ||
+      helperHelp.signal !== null ||
+      helperHelp.error ||
+      helperHelp.stderr.trim()
+    ) {
+      return {
+        issues: [executionFailure("OpenClaw config guard feature probe failed", helperHelp)],
+        chattrApplied: false,
+      };
+    }
+    installedHelperSupportsFileSets = helperHelp.stdout.includes("--config-file-set");
+    if (!installedHelperSupportsFileSets) {
+      // Retained pre-Fabric images can have a valid older helper that owns only
+      // openclaw.json and .config-hash. Use the current trusted helper against
+      // that exact old contract until the sandbox is rebuilt.
+      expectedProtectedFiles = DEFAULT_PROTECTED_FILES;
+    }
+  }
+
+  if (
+    capability.status === 0 &&
+    capability.signal === null &&
+    !capability.error &&
+    installedHelperSupportsFileSets
+  ) {
     command = [
       ...timeoutPrefix,
       "python3",
@@ -387,14 +474,22 @@ export function runOpenClawConfigGuard(
       OPENCLAW_CONFIG_DIR,
     ];
     input = options.input;
-  } else if (capability.status === 1 && capability.signal === null && !capability.error) {
+  } else if (
+    (capability.status === 1 && capability.signal === null && !capability.error) ||
+    (capability.status === 0 &&
+      capability.signal === null &&
+      !capability.error &&
+      !installedHelperSupportsFileSets)
+  ) {
     // Keep rebuild and shields recovery usable against older images without
     // returning to unsafe pathname mutation: inject the exact helper shipped
     // with this CLI over authenticated privileged-exec stdin.
+    const helperCondition =
+      capability.status === 0 ? "does not support the current file contract" : "is absent";
     if (action === "write-config") {
       return {
         issues: [
-          "OpenClaw config guard is absent in the sandbox; rebuild before writing config transactionally",
+          `OpenClaw config guard ${helperCondition} in the sandbox; rebuild before writing config transactionally`,
         ],
         chattrApplied: false,
       };
@@ -404,7 +499,7 @@ export function runOpenClawConfigGuard(
       // copy satisfies neither, so refuse instead of half-running it.
       return {
         issues: [
-          "OpenClaw config guard is absent in the sandbox; rebuild before recovering a failed startup",
+          `OpenClaw config guard ${helperCondition} in the sandbox; rebuild before recovering a failed startup`,
         ],
         chattrApplied: false,
       };
@@ -421,6 +516,12 @@ export function runOpenClawConfigGuard(
       };
     }
     command = [...timeoutPrefix, "python3", "-I", "-", action, "--config-dir", OPENCLAW_CONFIG_DIR];
+    if (sameProtectedFiles(expectedProtectedFiles, DEFAULT_PROTECTED_FILES)) {
+      // Retained pre-Fabric package manifests own only the native config and
+      // hash. Tell the injected current helper to preserve that exact contract
+      // instead of requiring or creating a Fabric sidecar in the old image.
+      command.push("--config-file-set", "native");
+    }
   } else {
     return {
       issues: [executionFailure("OpenClaw config guard capability probe failed", capability)],
@@ -434,5 +535,9 @@ export function runOpenClawConfigGuard(
   if (options.startupOwner) command.push("--startup-owner");
   if (options.planJson) command.push("--plan-json", options.planJson);
 
-  return parseOpenClawConfigGuardOutput(action, privileged.run(command, input));
+  return parseOpenClawConfigGuardOutput(
+    action,
+    privileged.run(command, input),
+    expectedProtectedFiles,
+  );
 }

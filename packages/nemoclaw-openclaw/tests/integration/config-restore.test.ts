@@ -150,6 +150,7 @@ function restoreOpenClawStateFileWithFakeSsh(options: {
     fs.mkdirSync(binDir, { recursive: true });
     fs.mkdirSync(openclawDir, { recursive: true });
     fs.writeFileSync(path.join(openclawDir, "openclaw.json"), options.currentContents);
+    fs.writeFileSync(path.join(openclawDir, "fabric.json"), "{}\n", { mode: 0o600 });
 
     process.env.NEMOCLAW_OPENSHELL_BIN = writeFakeOpenshell(binDir);
     writeExecutable(

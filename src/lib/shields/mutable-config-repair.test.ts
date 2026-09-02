@@ -8,9 +8,19 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createShieldsFlowHarness } from "../../../test/helpers/shields-flow-harness";
+import type { AgentConfigTarget } from "../sandbox/agent-config";
 
 const NORMALIZER = "/usr/local/lib/nemoclaw/normalize_mutable_config_perms.py";
 const NORMALIZER_WATCHDOG = ["/usr/bin/timeout", "--signal=TERM", "--kill-after=5s", "15s"];
+const OPENCLAW_TARGET: AgentConfigTarget = {
+  agentName: "openclaw",
+  configDir: "/sandbox/.openclaw",
+  configPath: "/sandbox/.openclaw/openclaw.json",
+  configFile: "openclaw.json",
+  format: "json",
+  sensitiveFiles: ["/sandbox/.openclaw/.config-hash", "/sandbox/.openclaw/fabric.json"],
+  stateLockPlanInImage: true,
+};
 const requireSource = createRequire(import.meta.url);
 
 type DockerExecModule = typeof import("../adapters/docker/exec");
@@ -48,7 +58,7 @@ describe("mutable OpenClaw config repair", () => {
       .mockReturnValueOnce("1001\n")
       .mockReturnValue("");
 
-    normalizeMutableOpenClawConfig("alpha", "/sandbox/.openclaw");
+    normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET);
 
     expect(privilegedArgv.mock.calls).toEqual([
       ["alpha", ["/usr/bin/id", "-u", "sandbox"], false, true],
@@ -63,6 +73,13 @@ describe("mutable OpenClaw config repair", () => {
           "/sandbox/.openclaw",
           "1000",
           "1001",
+          "normalize-protected",
+          "openclaw.json",
+          "660",
+          ".config-hash",
+          "660",
+          "fabric.json",
+          "600",
         ],
         false,
         true,
@@ -81,6 +98,13 @@ describe("mutable OpenClaw config repair", () => {
         "/sandbox/.openclaw",
         "1000",
         "1001",
+        "normalize-protected",
+        "openclaw.json",
+        "660",
+        ".config-hash",
+        "660",
+        "fabric.json",
+        "600",
       ],
     ]);
     expect(dockerExecFileSync.mock.calls.map(([, options]) => options)).toEqual([
@@ -94,7 +118,7 @@ describe("mutable OpenClaw config repair", () => {
     const privilegedArgv = mockPrivilegedArgv();
     const dockerExecFileSync = vi.spyOn(dockerExec, "dockerExecFileSync").mockReturnValue("0\n");
 
-    expect(() => normalizeMutableOpenClawConfig("alpha", "/sandbox/.openclaw")).toThrow(
+    expect(() => normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET)).toThrow(
       "sandbox identity lookup returned an invalid UID",
     );
     expect(privilegedArgv).toHaveBeenCalledOnce();
@@ -114,7 +138,7 @@ describe("mutable OpenClaw config repair", () => {
       .mockReturnValueOnce("1000\n")
       .mockReturnValueOnce("not-a-gid\n");
 
-    expect(() => normalizeMutableOpenClawConfig("alpha", "/sandbox/.openclaw")).toThrow(
+    expect(() => normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET)).toThrow(
       "sandbox identity lookup returned an invalid GID",
     );
     expect(privilegedArgv).toHaveBeenCalledTimes(2);
@@ -138,7 +162,7 @@ describe("mutable OpenClaw config repair", () => {
         throw failure;
       });
 
-    expect(() => normalizeMutableOpenClawConfig("alpha", "/sandbox/.openclaw")).toThrow(failure);
+    expect(() => normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET)).toThrow(failure);
     expect(privilegedArgv).toHaveBeenLastCalledWith(
       "alpha",
       [
@@ -149,11 +173,35 @@ describe("mutable OpenClaw config repair", () => {
         "/sandbox/.openclaw",
         "1000",
         "1001",
+        "normalize-protected",
+        "openclaw.json",
+        "660",
+        ".config-hash",
+        "660",
+        "fabric.json",
+        "600",
       ],
       false,
       true,
     );
     expect(dockerExecFileSync).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects a nested protected path before privileged execution", () => {
+    const privilegedArgv = mockPrivilegedArgv();
+    const dockerExecFileSync = vi.spyOn(dockerExec, "dockerExecFileSync");
+
+    expect(() =>
+      normalizeMutableOpenClawConfig("alpha", {
+        ...OPENCLAW_TARGET,
+        sensitiveFiles: [
+          "/sandbox/.openclaw/.config-hash",
+          "/sandbox/.openclaw/nested/fabric.json",
+        ],
+      }),
+    ).toThrow("must be a direct canonical file");
+    expect(privilegedArgv).not.toHaveBeenCalled();
+    expect(dockerExecFileSync).not.toHaveBeenCalled();
   });
 });
 

@@ -12,13 +12,17 @@ import type { PrivilegedExec, PrivilegedExecResult } from "./state-dir-lock";
 
 type RunCall = { cmd: string[]; input?: string };
 
-function success(action: string, chattrApplied = false): string {
+function success(
+  action: string,
+  chattrApplied = false,
+  files: readonly string[] = ["openclaw.json", ".config-hash"],
+): string {
   return JSON.stringify({
     type: "result",
     action,
     status: "ok",
     configDir: OPENCLAW_CONFIG_DIR,
-    files: ["openclaw.json", ".config-hash"],
+    files,
     chattrApplied,
     ...(action === "write-config" ? { configSha256: "b".repeat(64) } : {}),
   });
@@ -32,6 +36,7 @@ function createExec(
     stdout: '{"valid":true}\n',
     stderr: "",
   },
+  protectedFiles: readonly string[] = ["openclaw.json", ".config-hash"],
 ): { calls: RunCall[]; privileged: PrivilegedExec } {
   const calls: RunCall[] = [];
   const guardResult = (cmd: string[]): PrivilegedExecResult => {
@@ -43,7 +48,7 @@ function createExec(
     return {
       status: 0,
       signal: null,
-      stdout: `${success(action, action === "lock")}\n`,
+      stdout: `${success(action, action === "lock", protectedFiles)}\n`,
       stderr: "",
     };
   };
@@ -55,6 +60,15 @@ function createExec(
         switch (cmd[0]) {
           case "test":
             return { status: installed ? 0 : 1, signal: null, stdout: "", stderr: "" };
+        }
+        switch (cmd.includes("--help")) {
+          case true:
+            return {
+              status: 0,
+              signal: null,
+              stdout: "usage: openclaw-config-guard.py [-h] [--config-file-set {fabric,native}]\n",
+              stderr: "",
+            };
         }
         return cmd.includes("/usr/bin/setpriv") ? validationResult : guardResult(cmd);
       },
@@ -85,6 +99,73 @@ describe("OpenClaw top-config guard host wiring", () => {
     expect(calls.at(-1)?.input).toBeUndefined();
   });
 
+  it("accepts the exact manifest-declared protected-file set", () => {
+    const protectedFiles = ["openclaw.json", ".config-hash", "fabric.json"];
+    const { privileged } = createExec(true, undefined, protectedFiles);
+
+    expect(runOpenClawConfigGuard(privileged, "lock", { protectedFiles })).toEqual({
+      issues: [],
+      chattrApplied: true,
+    });
+  });
+
+  it("uses the current helper against the native contract in a retained pre-Fabric image", () => {
+    const protectedFiles = ["openclaw.json", ".config-hash", "fabric.json"];
+    const calls: RunCall[] = [];
+    const privileged: PrivilegedExec = {
+      run: (cmd, input) => {
+        calls.push({ cmd, input });
+        switch (true) {
+          case cmd[0] === "test":
+            return { status: 0, signal: null, stdout: "", stderr: "" };
+          case cmd.includes("--help"):
+            return {
+              status: 0,
+              signal: null,
+              stdout: "usage: openclaw-config-guard.py [-h]\n",
+              stderr: "",
+            };
+        }
+        return {
+          status: 0,
+          signal: null,
+          stdout: `${success("lock", true)}\n`,
+          stderr: "",
+        };
+      },
+    };
+
+    expect(runOpenClawConfigGuard(privileged, "lock", { protectedFiles })).toEqual({
+      issues: [],
+      chattrApplied: true,
+    });
+    expect(calls.at(-1)?.cmd).toEqual([
+      "timeout",
+      "--signal=TERM",
+      "--kill-after=5s",
+      "5m",
+      "python3",
+      "-I",
+      "-",
+      "lock",
+      "--config-dir",
+      OPENCLAW_CONFIG_DIR,
+      "--config-file-set",
+      "native",
+    ]);
+    expect(calls.at(-1)?.input).toContain("Descriptor-safe OpenClaw top-level config");
+  });
+
+  it("rejects a guard result that omits a manifest-declared protected file", () => {
+    const { privileged } = createExec(true);
+
+    expect(
+      runOpenClawConfigGuard(privileged, "lock", {
+        protectedFiles: ["openclaw.json", ".config-hash", "fabric.json"],
+      }).issues,
+    ).toEqual([expect.stringContaining("unexpected protected-file set")]);
+  });
+
   it("injects the trusted host helper into old images", () => {
     const { calls, privileged } = createExec(false);
 
@@ -100,8 +181,18 @@ describe("OpenClaw top-config guard host wiring", () => {
       "unlock",
       "--config-dir",
       OPENCLAW_CONFIG_DIR,
+      "--config-file-set",
+      "native",
     ]);
     expect(calls.at(-1)?.input).toContain("Descriptor-safe OpenClaw top-level config");
+  });
+
+  it("keeps the current Fabric file contract when the current helper is injected", () => {
+    const protectedFiles = ["openclaw.json", ".config-hash", "fabric.json"];
+    const { calls, privileged } = createExec(false, undefined, protectedFiles);
+
+    expect(runOpenClawConfigGuard(privileged, "lock", { protectedFiles }).issues).toEqual([]);
+    expect(calls.at(-1)?.cmd).not.toContain("native");
   });
 
   it("passes OpenClaw config bytes and the matching CAS digest to the installed helper", () => {

@@ -15,6 +15,22 @@ ACP packaging review date: August 20, 2026.
 
 OpenSSL base pin refresh date: August 28, 2026.
 
+## Fabric headless graph
+
+Hermes' native gateway and interactive command remain unchanged. The package installs the generic
+`nemoclaw-fabric==0.1.2` runner with `nemo-fabric==0.2.0` and
+`nemo-fabric-runtime==0.2.0` in a separate Python 3.13 environment. It installs the released
+`nemo-fabric-adapters-hermes==0.2.0` adapter, its contract, and common support packages into the
+native Hermes environment. `ADAPTER_PYTHON` makes that interpreter boundary explicit.
+
+`fabric/runtime-requirements.lock` and `fabric/adapter-requirements.lock` hash lock the two graphs.
+Package tests validate the released descriptor and project NemoClaw's managed configuration
+through the released adapter's configuration builder. The image build verifies both dependency
+sets, the descriptor, adapter import, runner identity, and Fabric doctor result. When any Fabric
+package advances, regenerate both locks for the supported image architectures, run
+`npm run test:fabric`, build the image, and repeat the native and Fabric live-turn qualification.
+Do not advance the adapter independently of its contract and common packages.
+
 ## Decision
 
 Pin the NemoClaw Hermes runtime to the published, non-draft, non-prerelease `v2026.7.20` release, whose package version is `0.19.0`.

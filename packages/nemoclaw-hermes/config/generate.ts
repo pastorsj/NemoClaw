@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type HermesBuildSettings, readHermesBuildSettings } from "./build-env.ts";
+import { buildHermesFabricConfig } from "./fabric-config.ts";
 import {
   buildHermesManagedPolicy,
   finalizeHermesPlatformToolsets,
@@ -48,11 +49,13 @@ export function generateHermesConfig({
   const config = policy.config;
   const envLines = policy.env_lines;
   finalizeHermesPlatformToolsets(config, settings);
-  const written = writeHermesConfigFiles(config, envLines, policy, homeDir);
+  const fabricConfig = buildHermesFabricConfig(settings);
+  const written = writeHermesConfigFiles(config, envLines, policy, fabricConfig, homeDir);
 
   log(`[config] Wrote ${written.configPath} (model=${settings.model}, provider=custom)`);
   log(`[config] Wrote ${written.envPath} (${written.envEntryCount} entries)`);
   log(`[config] Wrote ${written.policyPath} (schema=${policy.schema_version})`);
+  log(`[config] Wrote ${written.fabricPath} (adapter=${fabricConfig.harness.adapter_id})`);
 
   return { settings, config, envLines, policy, written };
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +19,33 @@ import {
   ensureHarnessPackageStore,
   harnessPackageStorePaths,
 } from "../../src/lib/agent-runtime/package/store-files";
+
+function createCheckoutCandidate(parent: string, fabricTestScript?: string): string {
+  const candidateRoot = path.join(parent, "candidate");
+  fs.mkdirSync(candidateRoot);
+  fs.writeFileSync(
+    path.join(candidateRoot, "package.json"),
+    `${JSON.stringify({
+      name: "@nvidia/nemoclaw-example",
+      nemoclaw: { harnessManifest: "manifest.yaml" },
+      ...(fabricTestScript ? { scripts: { "test:fabric": fabricTestScript } } : {}),
+    })}\n`,
+  );
+  fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
+  fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
+  return candidateRoot;
+}
+
+function createCheckoutToolDirectory(parent: string, includeUv: boolean): string {
+  const toolDirectory = path.join(parent, "host-tools");
+  fs.mkdirSync(toolDirectory);
+  for (const toolName of ["npm", "git", "tar", ...(includeUv ? ["uv"] : [])]) {
+    const toolPath = path.join(toolDirectory, toolName);
+    fs.writeFileSync(toolPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    fs.chmodSync(toolPath, 0o755);
+  }
+  return toolDirectory;
+}
 
 describe("package checkout cleanup", () => {
   it("uses a canonical private home when the temporary parent has a symlinked ancestor", () => {
@@ -164,6 +192,171 @@ describe("package checkout cleanup", () => {
       expect(fs.readFileSync(outsideFile, "utf8")).toBe("keep\n");
     } finally {
       fs.chmodSync(outsideRoot, 0o700);
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("package checkout Fabric tools", () => {
+  it.skipIf(process.platform === "win32")(
+    "runs the DCode adapter lane without a sibling NemoClaw Fabric runner",
+    () => {
+      const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-package-only-"));
+      const packageRoot = path.join(parent, "package");
+      const fabricRoot = path.join(packageRoot, "fabric");
+      const testRoot = path.join(packageRoot, "tests", "fabric");
+      const toolRoot = path.join(parent, "tools");
+      const argumentsPath = path.join(parent, "uv-arguments");
+      fs.mkdirSync(fabricRoot, { recursive: true });
+      fs.mkdirSync(testRoot, { recursive: true });
+      fs.mkdirSync(toolRoot);
+      fs.writeFileSync(path.join(fabricRoot, "requirements.lock"), "");
+      fs.copyFileSync(
+        path.resolve(
+          import.meta.dirname,
+          "../../packages/nemoclaw-langchain-deepagents-code/tests/fabric/run-tests.sh",
+        ),
+        path.join(testRoot, "run-tests.sh"),
+      );
+      const fakeUv = path.join(toolRoot, "uv");
+      fs.writeFileSync(
+        fakeUv,
+        '#!/bin/sh\n: "${UV_ARGUMENTS_FILE:?}"\nprintf \'%s\\n\' "$@" > "$UV_ARGUMENTS_FILE"\n',
+        { mode: 0o755 },
+      );
+      fs.chmodSync(fakeUv, 0o755);
+
+      try {
+        expect(fs.existsSync(path.join(parent, "nemoclaw-fabric"))).toBe(false);
+        const result = spawnSync("bash", [path.join(testRoot, "run-tests.sh")], {
+          cwd: packageRoot,
+          env: {
+            PATH: `${toolRoot}${path.delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`,
+            TMPDIR: parent,
+            UV_ARGUMENTS_FILE: argumentsPath,
+          },
+          encoding: "utf8",
+        });
+
+        expect(result.status, result.stderr).toBe(0);
+        const argumentsList = fs.readFileSync(argumentsPath, "utf8").trim().split("\n");
+        expect(argumentsList).toContain("fabric/requirements.lock");
+        expect(argumentsList).toContain("tests.fabric.test_turn.ReleasedDeepAgentsAdapterTests");
+        expect(argumentsList.some((argument) => argument.includes("nemoclaw-fabric"))).toBe(false);
+      } finally {
+        fs.rmSync(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("links uv when the candidate Fabric test invokes it", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-checkout-uv-"));
+    const candidateRoot = createCheckoutCandidate(parent, "uv --version");
+    const hostTools = createCheckoutToolDirectory(parent, true);
+    const hostUv = fs.realpathSync(path.join(hostTools, "uv"));
+    const commandPurposes: string[] = [];
+    let linkedUv = "";
+
+    try {
+      runPackageCheckoutRehearsal(
+        {
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: hostTools },
+        },
+        {
+          runCommand: (command) => {
+            commandPurposes.push(command.purpose);
+            const privateTools = command.env.PATH?.split(path.delimiter)[0] ?? "";
+            linkedUv = fs.realpathSync(path.join(privateTools, "uv"));
+            return { stdout: "" };
+          },
+        },
+      );
+
+      expect(linkedUv).toBe(hostUv);
+      expect(commandPurposes).toEqual([
+        "install candidate package dependencies",
+        "run candidate package-only tests",
+        "run candidate Fabric tests",
+      ]);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("lets a declared Fabric test choose tools other than uv", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-checkout-no-uv-"));
+    const candidateRoot = createCheckoutCandidate(parent, "python3 -m unittest");
+    const hostTools = createCheckoutToolDirectory(parent, false);
+
+    try {
+      const commandPurposes: string[] = [];
+      let linkedUv = true;
+      runPackageCheckoutRehearsal(
+        {
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: hostTools },
+        },
+        {
+          runCommand: (command) => {
+            commandPurposes.push(command.purpose);
+            const privateTools = command.env.PATH?.split(path.delimiter)[0] ?? "";
+            linkedUv = fs.existsSync(path.join(privateTools, "uv"));
+            return { stdout: "" };
+          },
+        },
+      );
+
+      expect(linkedUv).toBe(false);
+      expect(commandPurposes).toEqual([
+        "install candidate package dependencies",
+        "run candidate package-only tests",
+        "run candidate Fabric tests",
+      ]);
+      expect(fs.readdirSync(parent).filter((entry) => entry.startsWith("nc-"))).toEqual([]);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("does not link or require uv when the candidate has no Fabric tests", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-package-checkout-no-fabric-"));
+    const candidateRoot = createCheckoutCandidate(parent);
+    const hostTools = createCheckoutToolDirectory(parent, true);
+    const commandPurposes: string[] = [];
+    let linkedUv = true;
+
+    try {
+      runPackageCheckoutRehearsal(
+        {
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: hostTools },
+        },
+        {
+          runCommand: (command) => {
+            commandPurposes.push(command.purpose);
+            const privateTools = command.env.PATH?.split(path.delimiter)[0] ?? "";
+            linkedUv = fs.existsSync(path.join(privateTools, "uv"));
+            return { stdout: "" };
+          },
+        },
+      );
+
+      expect(linkedUv).toBe(false);
+      expect(commandPurposes).toEqual([
+        "install candidate package dependencies",
+        "run candidate package-only tests",
+      ]);
+    } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }
   });

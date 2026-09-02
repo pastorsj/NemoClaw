@@ -29,7 +29,10 @@ export {
 import { redact, run } from "../runner";
 import * as registry from "../state/registry";
 import * as baseImage from "./base-image";
-import { describeAgentBinaryFailure, verifyAgentBinaryAvailable } from "../agent-runtime/runtime/binary-availability";
+import {
+  describeAgentBinaryFailure,
+  verifyAgentBinaryAvailable,
+} from "../agent-runtime/runtime/binary-availability";
 import { printOptionalDashboardUi } from "../agent-runtime/dashboard-ui";
 import {
   type AgentDefinition,
@@ -40,11 +43,15 @@ import {
   resolveAgentName,
 } from "./defs";
 import { waitForAgentGatewayReady } from "../agent-runtime/lifecycle/gateway-readiness";
-import { runAgentSmokeCommands } from "../agent-runtime/runtime/terminal-smoke";
+import {
+  createAgentSmokeCommandVerifier,
+  runAgentSmokeCommands,
+} from "../agent-runtime/runtime/terminal-smoke";
 import { enforceTerminalAgentVersion } from "../agent-runtime/runtime/version-enforcement";
 import { printBearerTokenApiAccess } from "../agent-runtime/web-auth-ui";
 
 export { verifyAgentBinaryAvailable } from "../agent-runtime/runtime/binary-availability";
+export { createAgentSmokeCommandVerifier, runAgentSmokeCommands };
 
 export interface OnboardContext {
   step: (current: number, total: number, message: string) => void;
@@ -436,10 +443,18 @@ export async function handleAgentSetup(
         // to the Dockerfile's zero-byte placeholder. Mirrors the OpenClaw
         // path in src/lib/onboard.ts. Fixes #3999 for non-OpenClaw agents.
         syncNemoClawConfig();
-        revalidateSandboxIdentity?.(`record resumed agent setup for sandbox '${sandboxName}'`);
-        skippedStepMessage("agent_setup", sandboxName);
-        await recordStepComplete("agent_setup", { sandboxName, provider, model });
-        return;
+        const smokeResult = runAgentSmokeCommands(
+          sandboxName,
+          agent,
+          runSmokeCapture,
+          ctx.gatewayName,
+        );
+        if (smokeResult.ok) {
+          revalidateSandboxIdentity?.(`record resumed agent setup for sandbox '${sandboxName}'`);
+          skippedStepMessage("agent_setup", sandboxName);
+          await recordStepComplete("agent_setup", { sandboxName, provider, model });
+          return;
+        }
       }
     }
   }
@@ -489,6 +504,18 @@ export async function handleAgentSetup(
     console.log(`  \u2713 ${agent.displayName} terminal runtime is ready`);
     await recordStepComplete("agent_setup", { sandboxName, provider, model });
     return;
+  }
+
+  const packageSmoke = runAgentSmokeCommands(sandboxName, agent, runSmokeCapture, ctx.gatewayName);
+  if (!packageSmoke.ok) {
+    await failAgentSetup(
+      sandboxName,
+      agent,
+      `${agent.displayName} package smoke command failed: ${packageSmoke.command}`,
+      recordStepFailed,
+      packageSmoke.output ? [String(redact(packageSmoke.output)).slice(0, 500)] : [],
+      revalidateSandboxIdentity,
+    );
   }
 
   const probe = agent.healthProbe;

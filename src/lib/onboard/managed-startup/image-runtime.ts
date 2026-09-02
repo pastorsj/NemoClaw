@@ -69,8 +69,9 @@ const ROOT_RUNTIME_DIRECTORY = "/run/nemoclaw";
 const ROOT_OWNED_DIRECTORY_MODE = 0o755;
 const MAX_TRUST_BUNDLE_BYTES = 4 * 1024 * 1024;
 const HERMES_MANAGED_CONFIG_FILES = [
-  "/sandbox/.hermes/config.yaml",
-  "/sandbox/.hermes/.env",
+  { path: "/sandbox/.hermes/config.yaml", mutableMode: 0o640 },
+  { path: "/sandbox/.hermes/.env", mutableMode: 0o640 },
+  { path: "/sandbox/.hermes/fabric.json", mutableMode: 0o600 },
 ] as const;
 const HERMES_GENERATED_MANAGED_POLICY_FILE = "/sandbox/.hermes/managed-policy.json";
 const HERMES_INSTALLED_MANAGED_POLICY_FILE = "/usr/local/share/nemoclaw/hermes-managed-policy.json";
@@ -830,8 +831,11 @@ export function installHermesManagedPolicy(
 
 /**
  * Restore the mutable Hermes image contract after its sandbox-side generator
- * atomically replaces config.yaml or .env with mode 0600. The mode transition
- * is performed through the already-authenticated descriptor, never by path.
+ * atomically replaces a generated configuration input. config.yaml and .env
+ * become group-readable (0640); the Fabric route configuration stays private
+ * at 0600 even though it stores only credential references.
+ * The mode transition is performed through the already-authenticated
+ * descriptor, never by path.
  *
  * Shields-up turns these files into root:root 0444 trust anchors. That state is
  * valid on an already-committed replay and must not be made mutable again.
@@ -839,6 +843,7 @@ export function installHermesManagedPolicy(
 export function normalizeHermesManagedConfigDescriptor(
   target: string,
   sandboxIdentity: NumericIdentity,
+  mutableMode: 0o600 | 0o640 = 0o640,
 ): void {
   if (
     !Number.isSafeInteger(sandboxIdentity.uid) ||
@@ -847,6 +852,9 @@ export function normalizeHermesManagedConfigDescriptor(
     sandboxIdentity.gid <= 0
   ) {
     fail("invalid sandbox identity for Hermes descriptor normalization");
+  }
+  if (mutableMode !== 0o600 && mutableMode !== 0o640) {
+    fail("invalid mutable mode for Hermes descriptor normalization");
   }
   if (typeof fs.constants.O_NOFOLLOW !== "number") {
     fail("O_NOFOLLOW is unavailable for Hermes descriptor normalization");
@@ -865,14 +873,14 @@ export function normalizeHermesManagedConfigDescriptor(
     const mutable =
       before.uid === BigInt(sandboxIdentity.uid) &&
       before.gid === BigInt(sandboxIdentity.gid) &&
-      (beforeMode === 0o600 || beforeMode === 0o640);
+      (beforeMode === 0o600 || beforeMode === mutableMode);
     const shielded = before.uid === 0n && before.gid === 0n && beforeMode === 0o444;
     if (!before.isFile() || before.nlink !== 1n || (!mutable && !shielded)) {
       fail(`refusing unexpected Hermes managed config descriptor ${target}`);
     }
 
-    const expectedMode = mutable ? 0o640 : 0o444;
-    if (mutable && beforeMode === 0o600) {
+    const expectedMode = mutable ? mutableMode : 0o444;
+    if (mutable && beforeMode !== expectedMode) {
       try {
         fs.fchmodSync(descriptor, expectedMode);
       } catch {
@@ -920,9 +928,27 @@ function normalizeHermesManagedConfiguration(): void {
     uid: Number(identity.uid),
     gid: Number(identity.gid),
   };
-  for (const target of HERMES_MANAGED_CONFIG_FILES) {
-    normalizeHermesManagedConfigDescriptor(target, sandboxIdentity);
+  for (const file of HERMES_MANAGED_CONFIG_FILES) {
+    normalizeHermesManagedConfigDescriptor(file.path, sandboxIdentity, file.mutableMode);
   }
+}
+
+export function buildHermesManagedConfigHash(
+  config: Buffer,
+  env: Buffer,
+  fabric: Buffer,
+  mcpDigest: string,
+): string {
+  if (!SHA256_RE.test(mcpDigest)) {
+    fail("Hermes MCP digest helper returned an invalid digest");
+  }
+  return [
+    `${createHash("sha256").update(config).digest("hex")}  /sandbox/.hermes/config.yaml`,
+    `${createHash("sha256").update(env).digest("hex")}  /sandbox/.hermes/.env`,
+    `${createHash("sha256").update(fabric).digest("hex")}  /sandbox/.hermes/fabric.json`,
+    `# nemoclaw-hermes-mcp-state-v1 intended=${mcpDigest} applied=${mcpDigest}`,
+    "",
+  ].join("\n");
 }
 
 function sealHermesConfiguration(
@@ -931,8 +957,10 @@ function sealHermesConfiguration(
 ): void {
   const configPath = "/sandbox/.hermes/config.yaml";
   const envPath = "/sandbox/.hermes/.env";
+  const fabricPath = "/sandbox/.hermes/fabric.json";
   const config = readStableRegularFile(configPath, 4 * 1024 * 1024);
   const env = readStableRegularFile(envPath, 512 * 1024);
+  const fabric = readStableRegularFile(fabricPath, 4 * 1024 * 1024);
   const digest = execute(
     [
       "/opt/hermes/.venv/bin/python3",
@@ -948,15 +976,7 @@ function sealHermesConfiguration(
     applicationRuntime,
     true,
   ).stdout.trim();
-  if (!SHA256_RE.test(digest)) {
-    fail("Hermes MCP digest helper returned an invalid digest");
-  }
-  const hashText = [
-    `${createHash("sha256").update(config).digest("hex")}  ${configPath}`,
-    `${createHash("sha256").update(env).digest("hex")}  ${envPath}`,
-    `# nemoclaw-hermes-mcp-state-v1 intended=${digest} applied=${digest}`,
-    "",
-  ].join("\n");
+  const hashText = buildHermesManagedConfigHash(config, env, fabric, digest);
   atomicWriteRootFile("/etc/nemoclaw/hermes.config-hash", hashText, 0o444);
   runInternalSandboxAction(
     "write-hermes-compat-hash",
@@ -1654,11 +1674,20 @@ function writeSandboxFileAtomically(target: string, contents: string, mode: numb
   }
 }
 
+export function buildOpenClawManagedConfigHash(config: Buffer, fabric: Buffer): string {
+  return (
+    `${createHash("sha256").update(config).digest("hex")}  openclaw.json\n` +
+    `${createHash("sha256").update(fabric).digest("hex")}  fabric.json\n`
+  );
+}
+
 function internalWriteOpenClawHash(): void {
   if (process.geteuid?.() === 0) fail("sandbox hash writer must not run as root");
   const configPath = "/sandbox/.openclaw/openclaw.json";
+  const fabricPath = "/sandbox/.openclaw/fabric.json";
   const config = readStableRegularFile(configPath, 16 * 1024 * 1024);
-  const text = `${createHash("sha256").update(config).digest("hex")}  openclaw.json\n`;
+  const fabric = readStableRegularFile(fabricPath, 4 * 1024 * 1024);
+  const text = buildOpenClawManagedConfigHash(config, fabric);
   writeSandboxFileAtomically("/sandbox/.openclaw/.config-hash", text, 0o660);
 }
 

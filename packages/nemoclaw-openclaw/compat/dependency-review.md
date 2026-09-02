@@ -3,6 +3,23 @@
 
 # OpenClaw MCP Runtime Dependency Review
 
+## Fabric headless graph
+
+OpenClaw's native gateway and interactive command remain unchanged. The package adds a separate
+Python 3.13 environment for the generic `nemoclaw-fabric==0.1.2` runner and the package-owned
+`nemoclaw-openclaw-fabric==0.1.0` adapter. The released dependencies are pinned to
+`nemo-fabric==0.2.0`, `nemo-fabric-runtime==0.2.0`,
+`nemo-fabric-adapter-contract==0.2.0`, and `nemo-fabric-adapters-common==0.2.0` in
+`fabric/requirements.lock`; every selected artifact is hash locked.
+
+The adapter invokes the pinned OpenClaw command rather than importing OpenClaw internals. Its
+package tests cover request projection, response validation, redacted failure output, prompt-file
+cleanup, timeout, and process-tree cleanup. The image build verifies the installed versions,
+descriptor ownership, runner identity, adapter import, and Fabric doctor result. When any Fabric
+package advances, regenerate the lock for both supported image architectures, rerun
+`npm run test:fabric`, build the image, and repeat the native and Fabric live-turn qualification.
+Do not advance this graph based only on successful dependency resolution.
+
 This file records the reviewed `mcporter` baseline installed in the OpenClaw sandbox image. Update it and `packages/nemoclaw-openclaw/runtime/mcporter/package*.json` together whenever `MCPORTER_VERSION`, its integrity value, a manifest override, or the locked graph changes in `Dockerfile.base` or `Dockerfile`.
 
 - Package: `mcporter@0.7.3`

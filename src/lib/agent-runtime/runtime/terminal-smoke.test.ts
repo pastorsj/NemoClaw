@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import { DCODE_MANAGED_EXEC_LAUNCHER } from "../../actions/sandbox/connect-inference-route-probe";
 import { type AgentDefinition, loadAgent } from "../../agent/defs";
-import { buildAgentSmokeArgs, runAgentSmokeCommands } from "./terminal-smoke";
+import {
+  buildAgentSmokeArgs,
+  createAgentSmokeCommandVerifier,
+  runAgentSmokeCommands,
+} from "./terminal-smoke";
 
 function agent(name: string): AgentDefinition {
   return { name, runtime: { smoke_commands: ["dcode --version"] } } as unknown as AgentDefinition;
@@ -122,5 +126,27 @@ describe("terminal agent smoke command invocation", () => {
     }));
 
     expect(result).toMatchObject({ ok: false, command: "dcode --version" });
+  });
+
+  it("verifies package smoke commands against the selected gateway", () => {
+    const capture = vi.fn((_args: string[]) => "NEMOCLAW_AGENT_SMOKE_EXIT:0\n");
+    const verify = createAgentSmokeCommandVerifier(agent("openclaw"), capture, () => "gateway-a");
+
+    expect(() => verify("sandbox-a")).not.toThrow();
+    expect(capture.mock.calls[0]![0]).toEqual(
+      expect.arrayContaining(["sandbox-a", "-g", "gateway-a"]),
+    );
+  });
+
+  it("reports the package smoke command that fails", () => {
+    const verify = createAgentSmokeCommandVerifier(
+      { ...agent("openclaw"), displayName: "OpenClaw" },
+      () => "NEMOCLAW_AGENT_SMOKE_EXIT:12\n",
+      () => "gateway-a",
+    );
+
+    expect(() => verify("sandbox-a")).toThrow(
+      "OpenClaw package smoke command failed: dcode --version",
+    );
   });
 });

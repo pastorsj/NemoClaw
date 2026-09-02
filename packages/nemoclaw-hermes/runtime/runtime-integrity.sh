@@ -178,8 +178,8 @@ refresh_hermes_provider_placeholders() {
 
 refresh_hermes_runtime_config_hashes() {
   local mode="${1:-strict}"
-  # A locked root seals config.yaml, .env, and .config-hash as root-owned, and
-  # the lock transaction already wrote a coherent hash for them. The compat
+  # A locked root seals config.yaml, .env, fabric.json, and .config-hash as
+  # root-owned. The lock transaction already wrote a coherent hash for them. The compat
   # refresh runs as the sandbox identity, which by design cannot replace a
   # sealed hash: the sticky config root refuses the rename, so every launch
   # under shields failed here and the supervisor stopped respawning (#7865).

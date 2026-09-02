@@ -36,9 +36,10 @@ it("detects real Hermes config/hash drift without mutating the inspected fixture
   const hermesDir = path.join(root, ".hermes");
   const configPath = path.join(hermesDir, "config.yaml");
   const envPath = path.join(hermesDir, ".env");
+  const fabricPath = path.join(hermesDir, "fabric.json");
   const strictHashPath = path.join(root, "hermes.config-hash");
   const compatHashPath = path.join(hermesDir, ".config-hash");
-  const fixturePaths = [configPath, envPath, strictHashPath, compatHashPath] as const;
+  const fixturePaths = [configPath, envPath, fabricPath, strictHashPath, compatHashPath] as const;
   const setup = spawnSync(
     "python3",
     [
@@ -60,6 +61,7 @@ root = sys.argv[3]
 hermes = os.path.join(root, ".hermes")
 config = os.path.join(hermes, "config.yaml")
 env = os.path.join(hermes, ".env")
+fabric = os.path.join(hermes, "fabric.json")
 strict = os.path.join(root, "hermes.config-hash")
 compat = os.path.join(hermes, ".config-hash")
 os.mkdir(hermes)
@@ -72,7 +74,8 @@ open(config, "w", encoding="utf-8").write(
     yaml.safe_dump({"model": "test", "mcp_servers": {"github": candidate}}, sort_keys=False)
 )
 open(env, "w", encoding="utf-8").write("SAFE=1\n")
-hash_text, _config_snapshot, _env_snapshot = guard._hash_text(config, env)
+open(fabric, "w", encoding="utf-8").write("{}\n")
+hash_text, _config_snapshot, _env_snapshot, _fabric_snapshot = guard._hash_text(config, env)
 guard._write_hash(strict, hash_text)
 guard._write_hash(compat, hash_text)
 print(json.dumps(payload, sort_keys=True))

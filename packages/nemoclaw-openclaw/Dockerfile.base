@@ -327,6 +327,7 @@ RUN mkdir -p /sandbox/.openclaw/agents/main/agent \
         /sandbox/.openclaw/memory \
         /sandbox/.openclaw/logs \
         /sandbox/.openclaw/credentials \
+        /sandbox/.openclaw/fabric-artifacts \
         /sandbox/.openclaw/flows \
         /sandbox/.openclaw/sandbox \
         /sandbox/.openclaw/state \

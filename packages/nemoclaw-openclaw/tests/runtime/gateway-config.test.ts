@@ -31,6 +31,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     const openclawDir = path.join(tmpDir, ".openclaw");
     const optNemoclaw = path.join(tmpDir, "opt", "nemoclaw");
     const configPath = path.join(openclawDir, "openclaw.json");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const hashPath = path.join(openclawDir, ".config-hash");
     const proxyEnv = path.join(tmpDir, "proxy-env.sh");
     const scriptPath = path.join(tmpDir, "run.sh");
@@ -42,6 +43,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
       recursive: true,
     });
     fs.writeFileSync(configPath, configJson);
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
     fs.writeFileSync(hashPath, "initial-hash\n");
     if (preseedPredictableTmpSymlink) {
       fs.writeFileSync(tmpSymlinkVictim, "do-not-overwrite\n");
@@ -53,6 +55,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
       .replaceAll("/opt/nemoclaw", optNemoclaw);
     const ensureGatewayToken = extractShellFunctionFromSource(src, "ensure_gateway_token")
       .replaceAll("/sandbox/.openclaw/openclaw.json", configPath)
+      .replaceAll("/sandbox/.openclaw/fabric.json", fabricPath)
       .replaceAll("/sandbox/.openclaw/.config-hash", hashPath)
       .replaceAll("/opt/nemoclaw", optNemoclaw);
     const configWriteHelperStubs = [
@@ -108,6 +111,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     const envFile = fs.existsSync(proxyEnv) ? fs.readFileSync(proxyEnv, "utf-8") : "";
     const configAfter = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     const hashAfter = fs.readFileSync(hashPath, "utf-8");
+    const fabricAfter = fs.readFileSync(fabricPath, "utf-8");
     const tmpSymlinkVictimAfter = fs.existsSync(tmpSymlinkVictim)
       ? fs.readFileSync(tmpSymlinkVictim, "utf-8")
       : undefined;
@@ -120,6 +124,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
       envFile,
       configAfter,
       hashAfter,
+      fabricAfter,
       tmpSymlinkVictimAfter,
       predictableTmpPathIsSymlink,
       configPathIsSymlink,
@@ -175,7 +180,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
   });
 
   it("generates a gateway token before writing the runtime shell env (#3256)", () => {
-    const { result, envFile, configAfter, hashAfter } = runGatewayTokenHarness(
+    const { result, envFile, configAfter, hashAfter, fabricAfter } = runGatewayTokenHarness(
       JSON.stringify({ gateway: { auth: {} } }),
       "stale-token",
       "18790",
@@ -191,11 +196,12 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(envFile).toContain(`OPENCLAW_GATEWAY_TOKEN='${configAfter.gateway.auth.token}'`);
     expect(envFile).not.toContain("stale-token");
     expect(hashAfter).not.toBe("initial-hash\n");
-    expect(hashAfter).toMatch(/ openclaw\.json\n$/);
+    expect(hashAfter).toMatch(/ openclaw\.json\n[0-9a-f]{64}  fabric\.json\n$/);
+    expect(fabricAfter).toBe("{}\n");
   });
   it("rotates an existing gateway token before writing the runtime shell env (#4517)", () => {
     const oldToken = "old-token-before-rebuild";
-    const { result, envFile, configAfter, hashAfter } = runGatewayTokenHarness(
+    const { result, envFile, configAfter, hashAfter, fabricAfter } = runGatewayTokenHarness(
       JSON.stringify({ gateway: { auth: { token: oldToken } } }),
       "stale-token",
       "18790",
@@ -210,12 +216,13 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(envFile).not.toContain(oldToken);
     expect(envFile).not.toContain("stale-token");
     expect(hashAfter).not.toBe("initial-hash\n");
-    expect(hashAfter).toMatch(/ openclaw\.json\n$/);
+    expect(hashAfter).toMatch(/ openclaw\.json\n[0-9a-f]{64}  fabric\.json\n$/);
+    expect(fabricAfter).toBe("{}\n");
   });
 
   it("rotates an existing gateway token from JSON5 config (#4517)", () => {
     const oldToken = "old-json5-token-before-rebuild";
-    const { result, envFile, configAfter, hashAfter } = runGatewayTokenHarness(
+    const { result, envFile, configAfter, hashAfter, fabricAfter } = runGatewayTokenHarness(
       [
         "{",
         "  // OpenClaw config accepts JSON5.",
@@ -237,7 +244,8 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     expect(envFile).not.toContain(oldToken);
     expect(envFile).not.toContain("stale-token");
     expect(hashAfter).not.toBe("initial-hash\n");
-    expect(hashAfter).toMatch(/ openclaw\.json\n$/);
+    expect(hashAfter).toMatch(/ openclaw\.json\n[0-9a-f]{64}  fabric\.json\n$/);
+    expect(fabricAfter).toBe("{}\n");
   });
 
   it("does not write gateway tokens through a preseeded predictable temp symlink", () => {
@@ -269,12 +277,14 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     const realConfig = path.join(tmpDir, "real-openclaw.json");
     const linkConfig = path.join(openclawDir, "openclaw.json");
     const hashPath = path.join(openclawDir, ".config-hash");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const scriptPath = path.join(tmpDir, "run.sh");
     const configJson = JSON.stringify({ gateway: { auth: {} } });
     fs.mkdirSync(openclawDir, { recursive: true });
     fs.writeFileSync(realConfig, configJson);
     fs.symlinkSync(realConfig, linkConfig);
     fs.writeFileSync(hashPath, "initial-hash\n");
+    fs.writeFileSync(fabricPath, "{}\n", { mode: 0o600 });
 
     const readToken = extractShellFunctionFromSource(src, "_read_gateway_token").replaceAll(
       "/sandbox/.openclaw/openclaw.json",
@@ -282,6 +292,7 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
     );
     const ensureGatewayToken = extractShellFunctionFromSource(src, "ensure_gateway_token")
       .replaceAll("/sandbox/.openclaw/openclaw.json", linkConfig)
+      .replaceAll("/sandbox/.openclaw/fabric.json", fabricPath)
       .replaceAll("/sandbox/.openclaw/.config-hash", hashPath);
 
     fs.writeFileSync(

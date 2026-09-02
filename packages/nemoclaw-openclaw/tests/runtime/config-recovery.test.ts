@@ -172,10 +172,12 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
     fs.mkdirSync(openclawDir, { recursive: true });
     const configPath = path.join(openclawDir, "openclaw.json");
     const hashPath = path.join(openclawDir, ".config-hash");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const baselinePath = path.join(openclawDir, "openclaw.json.nemoclaw-baseline");
     const lastGoodPath = path.join(openclawDir, "openclaw.json.last-good");
 
     fs.writeFileSync(configPath, fixture.configContent);
+    fs.writeFileSync(fabricPath, '{"schema":"fabric.agent/v1alpha1"}\n', { mode: 0o600 });
     if (fixture.hashContent !== undefined) fs.writeFileSync(hashPath, fixture.hashContent);
     if (fixture.baselineContent !== undefined) {
       fs.writeFileSync(baselinePath, fixture.baselineContent);
@@ -286,13 +288,16 @@ describe("openclaw.json baseline + recovery (#3118)", () => {
     fs.mkdirSync(openclawDir, { recursive: true });
     const configPath = path.join(openclawDir, "openclaw.json");
     const hashPath = path.join(openclawDir, ".config-hash");
+    const fabricPath = path.join(openclawDir, "fabric.json");
     const baselinePath = path.join(openclawDir, "openclaw.json.nemoclaw-baseline");
     fs.writeFileSync(configPath, "{}");
     fs.writeFileSync(hashPath, "oldhash\n");
+    fs.writeFileSync(fabricPath, '{"schema":"fabric.agent/v1alpha1"}\n');
     fs.writeFileSync(baselinePath, JSON.stringify({ source: "baseline" }));
     fs.chmodSync(openclawDir, 0o2770);
     fs.chmodSync(configPath, 0o660);
     fs.chmodSync(hashPath, 0o660);
+    fs.chmodSync(fabricPath, 0o600);
     fs.chmodSync(baselinePath, 0o460);
     const protectedTarget = path.join(root, "protected-target");
     fs.writeFileSync(protectedTarget, "protected", { mode: 0o640 });
