@@ -280,8 +280,8 @@ export function isHealthProbeOk(result: string | null | undefined): boolean {
     return true;
   }
   try {
-    const parsed = JSON.parse(body) as { status?: unknown };
-    return parsed.status === "ok";
+    const parsed = JSON.parse(body) as { ok?: unknown; status?: unknown };
+    return parsed.ok === true || parsed.status === "ok";
   } catch {
     return false;
   }

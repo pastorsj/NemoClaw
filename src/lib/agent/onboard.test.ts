@@ -25,6 +25,7 @@ import type { AgentDefinition } from "./defs";
 import {
   collectHermesStartupDiagnostics,
   handleAgentSetup,
+  isHealthProbeOk,
   type OnboardContext,
   printDashboardUi,
   verifyAgentBinaryAvailable,
@@ -405,7 +406,7 @@ describe("agent setup session boundaries", () => {
       nowMs += seconds * 1000;
     });
     const runCaptureOpenshell = vi
-      .fn<OnboardContext["runCaptureOpenshell"]>(() => "ok")
+      .fn<OnboardContext["runCaptureOpenshell"]>(() => '{"ok":true,"status":"live"}')
       .mockReturnValueOnce("NEMOCLAW_AGENT_BINARY_CHECK:ok")
       .mockReturnValueOnce("");
     const { context } = createAgentSetupContext(runCaptureOpenshell, {
@@ -697,6 +698,25 @@ describe("agent setup session boundaries", () => {
     expect(probeUrlsFrom(runCaptureOpenshell)).toEqual(["http://localhost:8643/health"]);
     expect(context.skippedStepMessage).toHaveBeenCalledWith("agent_setup", "hermes-core-test");
     expect(context.startRecordedStep).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent health response parsing", () => {
+  it.each([
+    ["plain readiness body", "ok"],
+    ["status readiness body", JSON.stringify({ status: "ok" })],
+    ["boolean readiness body", JSON.stringify({ ok: true, status: "live" })],
+  ])("accepts a healthy %s", (_label, body) => {
+    expect(isHealthProbeOk(body)).toBe(true);
+  });
+
+  it.each([
+    ["empty body", ""],
+    ["malformed JSON", "{"],
+    ["false boolean", JSON.stringify({ ok: false, status: "live" })],
+    ["unrecognized status", JSON.stringify({ status: "live" })],
+  ])("rejects an unhealthy %s", (_label, body) => {
+    expect(isHealthProbeOk(body)).toBe(false);
   });
 });
 
