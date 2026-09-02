@@ -48,6 +48,7 @@ import {
 import { readFullE2eColdWorkloadEvidence } from "./full-e2e-workload-evidence.ts";
 import { runOpenClawLaunchReadinessLeaseTurns } from "./launch-agent-turn.ts";
 import { bindApprovedPrBaseForBaseImageComparison } from "./pr-base-comparison.ts";
+import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-full";
 const FULL_E2E_TARGET_ID = process.env.E2E_TARGET_ID ?? "full-e2e";
@@ -413,6 +414,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
       "nemoclaw and openshell are installed and usable",
       "sandbox appears in list/status and has policy/inference configuration",
       "direct hosted inference and sandbox inference.local both respond",
+      "the public agent command completes through the pinned Fabric runner without leaving a child process",
       ...(process.platform === "linux"
         ? [
             "each of two PTY launches records two ordered structured turns and restores the mutable config permission contract",
@@ -593,6 +595,17 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   const sandboxInferenceDiagnostic = `${resultText(finalInferenceAttempt.result)}\n${JSON.stringify(sandboxInferenceEvidence, null, 2)}`;
   expect(finalInferenceAttempt.result.exitCode, sandboxInferenceDiagnostic).toBe(0);
   expect(sandboxInference.outcome, sandboxInferenceDiagnostic).toBe("passed");
+
+  await runPublicFabricTurn({
+    agent: "openclaw",
+    artifacts,
+    env: env(),
+    host,
+    lifecyclePhase: "before-gateway-restart",
+    redactionValues,
+    sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
 
   await (process.platform === "linux"
     ? runOpenClawLaunchTurnAfterRecovery({ host, redactionValues, sandbox })
