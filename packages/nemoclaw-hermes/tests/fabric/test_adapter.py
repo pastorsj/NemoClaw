@@ -231,6 +231,35 @@ class ReleasedHermesAdapterTests(unittest.TestCase):
 class HermesProxyTests(unittest.TestCase):
     """Keep every proxy exit routed through the private process owner."""
 
+    def test_process_owner_uses_the_hermes_adapter_interpreter(self) -> None:
+        adapter_python = "/opt/hermes/.venv/bin/python"
+
+        with (
+            patch.dict(os.environ, {"ADAPTER_PYTHON": adapter_python}),
+            patch.object(proxy_adapter.subprocess, "Popen") as start_process,
+        ):
+            proxy_adapter._start_supervisor()
+
+        command = start_process.call_args.args[0]
+        self.assertEqual(
+            command[-3:],
+            [adapter_python, "-m", proxy_adapter.OFFICIAL_ADAPTER_MODULE],
+        )
+        self.assertEqual(command[0], sys.executable)
+
+    def test_process_owner_uses_its_interpreter_outside_the_managed_image(self) -> None:
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(proxy_adapter.subprocess, "Popen") as start_process,
+        ):
+            proxy_adapter._start_supervisor()
+
+        command = start_process.call_args.args[0]
+        self.assertEqual(
+            command[-3:],
+            [sys.executable, "-m", proxy_adapter.OFFICIAL_ADAPTER_MODULE],
+        )
+
     def test_official_adapter_stderr_is_drained_without_forwarding_credentials(self) -> None:
         secret = b"nvapi-official-adapter-stderr-sentinel"
         source = io.BytesIO(secret)

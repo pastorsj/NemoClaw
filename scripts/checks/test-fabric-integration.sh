@@ -37,6 +37,8 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 venv_dir="${work_dir}/venv"
+hermes_runner_venv="${work_dir}/hermes-runner-venv"
+hermes_adapter_venv="${work_dir}/hermes-adapter-venv"
 wheel_dir="${work_dir}/wheels"
 runner_build_source="${work_dir}/runner-source"
 pi_adapter_build_source="${work_dir}/pi-adapter-source"
@@ -122,6 +124,7 @@ assert version("nemoclaw-pi-fabric") == "0.1.0"
 assert version("nemoclaw-openclaw-fabric") == "0.1.0"
 assert version("nemoclaw-hermes-fabric") == "0.1.0"
 assert version("nemo-fabric-adapters-hermes") == "0.2.0"
+assert requires("nemoclaw-hermes-fabric") in (None, [])
 assert metadata("nemoclaw-fabric")["Requires-Python"] == "<3.14,>=3.13"
 declared = [item.replace(" ", "") for item in (requires("nemoclaw-fabric") or [])]
 runtime = [item for item in declared if ";extra==" not in item]
@@ -131,6 +134,51 @@ assert optional == [
     'nemo-fabric-adapter-contract==0.2.0;extra=="test"',
     'nemo-fabric-adapters-common==0.2.0;extra=="test"',
 ], declared
+PY
+
+# Reproduce the managed Hermes image's intentional two-environment boundary.
+# The generic runner must import the package proxy, while the released adapter
+# and Hermes SDK remain behind the ADAPTER_PYTHON process boundary.
+"${python_command}" -m venv "${hermes_runner_venv}"
+"${python_command}" -m venv "${hermes_adapter_venv}"
+hermes_runner_python="${hermes_runner_venv}/bin/python"
+hermes_adapter_python="${hermes_adapter_venv}/bin/python"
+"${hermes_runner_python}" -m pip install \
+  --disable-pip-version-check \
+  --quiet \
+  --require-hashes \
+  --requirement "${repository_root}/packages/nemoclaw-hermes/fabric/runtime-requirements.lock"
+"${hermes_adapter_python}" -m pip install \
+  --disable-pip-version-check \
+  --quiet \
+  --require-hashes \
+  --requirement "${hermes_adapter_lock}"
+"${hermes_runner_python}" -m pip install \
+  --disable-pip-version-check \
+  --quiet \
+  --no-index \
+  --no-deps \
+  "${runner_wheel}" \
+  "${hermes_proxy_wheel}"
+"${hermes_runner_python}" -m pip check
+"${hermes_adapter_python}" -m pip check
+ADAPTER_PYTHON="${hermes_adapter_python}" "${hermes_runner_python}" -I - <<'PY'
+import os
+from importlib.metadata import version
+from unittest.mock import patch
+
+from nemoclaw_hermes_fabric import adapter
+
+assert version("nemoclaw-hermes-fabric") == "0.1.0"
+with patch.object(adapter.subprocess, "Popen") as start_process:
+    adapter._start_supervisor()
+command = start_process.call_args.args[0]
+assert command[0] != os.environ["ADAPTER_PYTHON"]
+assert command[-3:] == [
+    os.environ["ADAPTER_PYTHON"],
+    "-m",
+    adapter.OFFICIAL_ADAPTER_MODULE,
+]
 PY
 
 for installed_command in nemoclaw-fabric nemoclaw-fabric-run; do

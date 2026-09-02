@@ -11,9 +11,9 @@ version = "0.1.0"
 description = "NemoClaw's bounded NeMo Fabric host for the released Hermes adapter"
 requires-python = ">=3.13,<3.14"
 license = "Apache-2.0"
-dependencies = [
-  "nemo-fabric-adapters-hermes == 0.2.0",
-]
+# The released adapter lives with Hermes and is selected through
+# ADAPTER_PYTHON. This proxy stays in the independent Fabric runner environment.
+dependencies = []
 
 [tool.setuptools.packages.find]
 where = ["src"]

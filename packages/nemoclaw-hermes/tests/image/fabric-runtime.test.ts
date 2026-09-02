@@ -25,4 +25,23 @@ describe("Hermes Fabric runtime entrypoint", () => {
       `${FABRIC_RUNNER_COMMAND} --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK`,
     );
   });
+
+  it("installs the proxy with the runner and keeps the released adapter with Hermes", () => {
+    const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile"), "utf8");
+    const proxyInstall = [
+      "/opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps \\",
+      '        "$runner_wheel" "$proxy_wheel"',
+    ].join("\n");
+
+    expect(dockerfile).toContain("ENV ADAPTER_PYTHON=/opt/hermes/.venv/bin/python");
+    expect(dockerfile).toContain(proxyInstall);
+    expect(dockerfile).toContain(
+      'expected = {"nemoclaw-fabric": "0.1.2", "nemoclaw-hermes-fabric": "0.1.0",',
+    );
+    expect(dockerfile).toContain("import nemoclaw_hermes_fabric.adapter");
+    expect(dockerfile).toContain(
+      "/opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import distribution, version;",
+    );
+    expect(dockerfile).toContain("import nemo_fabric_adapters.hermes.adapter");
+  });
 });

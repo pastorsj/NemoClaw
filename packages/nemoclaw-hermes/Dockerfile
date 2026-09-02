@@ -925,7 +925,7 @@ RUN set -eu; \
     && uv pip check --python /opt/hermes/.venv/bin/python \
     && /opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import distribution, version; expected = {"nemo-fabric-adapter-contract": "0.2.0", "nemo-fabric-adapters-common": "0.2.0", "nemo-fabric-adapters-hermes": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; package = distribution("nemo-fabric-adapters-hermes"); descriptors = [path for path in package.files or () if str(path).endswith("hermes/hermes.fabric-adapter.json")]; assert len(descriptors) == 1, descriptors; import nemo_fabric_adapters.hermes.adapter' \
     && python3 -I -c 'import tomllib; from pathlib import Path; runner = tomllib.loads(Path("/opt/nemoclaw-fabric-runner/pyproject.toml").read_text(encoding="utf-8"))["project"]; assert (runner["name"], runner["version"], runner["dependencies"]) == ("nemoclaw-fabric", "0.1.2", ["nemo-fabric == 0.2.0"])' \
-    && python3 -I -c 'import json, tomllib; from pathlib import Path; package = tomllib.loads(Path("/opt/nemoclaw-hermes-fabric-proxy/pyproject.toml").read_text(encoding="utf-8"))["project"]; descriptor = json.loads(Path("/usr/local/share/nemoclaw/hermes.fabric-adapter.json").read_text(encoding="utf-8")); assert (package["name"], package["version"], package["dependencies"]) == ("nemoclaw-hermes-fabric", "0.1.0", ["nemo-fabric-adapters-hermes == 0.2.0"]); assert descriptor["adapter_id"] == "nvidia.nemoclaw.hermes"; assert descriptor["runner"]["module"] == "nemoclaw_hermes_fabric.adapter"' \
+    && python3 -I -c 'import json, tomllib; from pathlib import Path; package = tomllib.loads(Path("/opt/nemoclaw-hermes-fabric-proxy/pyproject.toml").read_text(encoding="utf-8"))["project"]; descriptor = json.loads(Path("/usr/local/share/nemoclaw/hermes.fabric-adapter.json").read_text(encoding="utf-8")); assert (package["name"], package["version"], package["dependencies"]) == ("nemoclaw-hermes-fabric", "0.1.0", []); assert descriptor["adapter_id"] == "nvidia.nemoclaw.hermes"; assert descriptor["runner"]["module"] == "nemoclaw_hermes_fabric.adapter"' \
     && python3 -m venv --copies /tmp/nemoclaw-fabric-build-venv \
     && /tmp/nemoclaw-fabric-build-venv/bin/pip3 install --no-cache-dir --require-hashes \
         -r /tmp/nemoclaw-fabric-build-requirements.lock \
@@ -935,14 +935,14 @@ RUN set -eu; \
         /opt/nemoclaw-hermes-fabric-proxy \
     && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_hermes_fabric-0.1.0-*.whl \
     && test "$#" -eq 1 \
-    && UV_NO_CACHE=1 uv pip install --python /opt/hermes/.venv/bin/python --no-deps "$1" \
-    && uv pip check --python /opt/hermes/.venv/bin/python \
-    && /opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import version; assert version("nemoclaw-hermes-fabric") == "0.1.0"; import nemoclaw_hermes_fabric.adapter' \
+    && proxy_wheel="$1" \
     && set -- /tmp/nemoclaw-fabric-wheels/nemoclaw_fabric-0.1.2-*.whl \
     && test "$#" -eq 1 \
-    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps "$1" \
+    && runner_wheel="$1" \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-index --no-cache-dir --no-deps \
+        "$runner_wheel" "$proxy_wheel" \
     && /opt/nemoclaw-fabric-venv/bin/pip3 check \
-    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemoclaw-fabric": "0.1.2", "nemo-fabric": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual' \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c 'from importlib.metadata import version; expected = {"nemoclaw-fabric": "0.1.2", "nemoclaw-hermes-fabric": "0.1.0", "nemo-fabric": "0.2.0", "nemo-fabric-runtime": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; import nemoclaw_hermes_fabric.adapter' \
     && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric /usr/local/bin/nemoclaw-fabric \
     && ln -s /opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run /usr/local/bin/nemoclaw-fabric-run \
     && chown -h root:root /usr/local/bin/nemoclaw-fabric \

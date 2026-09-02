@@ -25,6 +25,12 @@ class _ResponseLimitExceeded(RuntimeError):
     """The released adapter produced a lifecycle record that is too large."""
 
 
+def _hermes_adapter_python() -> str:
+    """Return the interpreter that contains Hermes and its released adapter."""
+
+    return os.environ.get("ADAPTER_PYTHON") or sys.executable
+
+
 def _request_operation(request: bytes) -> str | None:
     """Read only the operation needed to end the proxy after a stop response."""
 
@@ -105,7 +111,7 @@ def _start_supervisor() -> subprocess.Popen[bytes]:
             "--parent-pid",
             str(os.getpid()),
             "--",
-            sys.executable,
+            _hermes_adapter_python(),
             "-m",
             OFFICIAL_ADAPTER_MODULE,
         ],
