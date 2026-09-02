@@ -28,6 +28,7 @@ from nemoclaw_fabric.runner import (
 )
 
 
+EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_USAGE = 2
 EXIT_TIMEOUT = 124
@@ -121,6 +122,10 @@ def _process_exit_code(return_code: int) -> int:
 
 def run_supervised(arguments: Sequence[str]) -> int:
     """Run the worker and remove its artifacts even after a forced stop."""
+
+    if list(arguments) in (["-h"], ["--help"]):
+        build_parser().print_help()
+        return EXIT_SUCCESS
 
     reserved = ("--config", "--deadline-seconds", "--kill-grace-seconds")
     if any(_option_count(arguments, option) != 1 for option in reserved):

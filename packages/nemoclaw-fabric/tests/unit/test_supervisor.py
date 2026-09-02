@@ -71,6 +71,20 @@ class FabricRunSupervisorTests(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.kill(process_id, 0)
 
+    def test_help_succeeds_without_starting_a_worker(self) -> None:
+        for argument in ("-h", "--help"):
+            with self.subTest(argument=argument):
+                stdout = io.StringIO()
+                with (
+                    patch.object(supervisor.subprocess, "Popen") as popen,
+                    patch.object(sys, "stdout", stdout),
+                ):
+                    exit_code = supervisor.run_supervised([argument])
+
+                self.assertEqual(exit_code, supervisor.EXIT_SUCCESS)
+                self.assertIn("usage: nemoclaw-fabric-run", stdout.getvalue())
+                popen.assert_not_called()
+
     def test_worker_rejects_a_config_changed_after_parent_validation(self) -> None:
         original_popen = subprocess.Popen
         children: list[subprocess.Popen[bytes]] = []

@@ -139,6 +139,7 @@ for installed_command in nemoclaw-fabric nemoclaw-fabric-run; do
     exit 1
   fi
 done
+"${venv_dir}/bin/nemoclaw-fabric-run" --help >/dev/null
 
 cd "${repository_root}"
 env -u PYTHONHOME -u PYTHONPATH \
