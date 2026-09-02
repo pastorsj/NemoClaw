@@ -38,7 +38,7 @@ describe("terminal agent runtime helpers", () => {
 
     expect(getTerminalCommand(deepAgentsCode, "interactive")).toBe("dcode");
     expect(getTerminalCommand(deepAgentsCode, "headless")).toBe(
-      "timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.deepagents/fabric.json",
+      "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.deepagents/fabric.json",
     );
   });
 });

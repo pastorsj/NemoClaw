@@ -112,13 +112,23 @@ class FabricCommandTests(unittest.TestCase):
         self._temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(self._temporary_directory.cleanup)
         self.base_dir = Path(self._temporary_directory.name)
+        (self.base_dir / "artifacts").mkdir(mode=0o700)
+        (self.base_dir / "workspace").mkdir(mode=0o700)
         self.config_path = self.base_dir / "fabric.json"
         self.config_path.write_text(
             json.dumps(
                 {
                     "metadata": {"name": "command-test"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                 }
             ),
             encoding="utf-8",
@@ -320,8 +330,14 @@ class FabricCommandTests(unittest.TestCase):
                 {
                     "metadata": {"name": "package-unavailable"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
                     "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
                         "metadata": {
                             "nemoclaw": {
                                 "invocation_unavailable_reason": (
@@ -385,7 +401,15 @@ class FabricCommandTests(unittest.TestCase):
                 {
                     "metadata": {"name": "service-account-redaction"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                     "mcp": {
                         "servers": {
                             "service": {
@@ -451,7 +475,15 @@ class FabricCommandTests(unittest.TestCase):
                 {
                     "metadata": {"name": "result-error-redaction"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                     "models": {
                         "default": {
                             "provider": "example",
@@ -495,7 +527,15 @@ class FabricCommandTests(unittest.TestCase):
                 {
                     "metadata": {"name": "raised-error-redaction"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                     "models": {
                         "default": {
                             "provider": "example",
@@ -794,7 +834,15 @@ class FabricCommandTests(unittest.TestCase):
                 {
                     "metadata": {"name": "declared-credential-test"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                     "models": {
                         "default": {
                             "provider": "example",
@@ -838,7 +886,15 @@ class FabricCommandTests(unittest.TestCase):
                 {
                     "metadata": {"name": "declared-short-credential-test"},
                     "harness": {"adapter_id": "test.command.adapter"},
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                     "models": {
                         "default": {
                             "provider": "example",
@@ -885,7 +941,15 @@ class FabricCommandTests(unittest.TestCase):
                         "adapter_id": "test.command.adapter",
                         "settings": {"token_env": credential_name},
                     },
-                    "runtime": {"timeout_seconds": 30},
+                    "runtime": {
+                        "artifacts": "./artifacts",
+                        "timeout_seconds": 30,
+                    },
+                    "environment": {
+                        "provider": "local",
+                        "workspace": "./workspace",
+                        "artifacts": "./artifacts",
+                    },
                 }
             ),
             encoding="utf-8",

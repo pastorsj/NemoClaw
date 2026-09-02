@@ -67,7 +67,7 @@ function configProbe(
   return shellResult({
     stdout: `${JSON.stringify({
       adapterId: contract.adapterId,
-      artifactEntryCount: 2,
+      artifactEntryCount: 0,
       artifactRoot: contract.artifactRoot,
       artifactRootExists: true,
       artifactScanComplete: true,
@@ -109,8 +109,8 @@ function successfulSandboxResults(agent: PublicFabricAgent): ShellProbeResult[] 
   return [
     processProbe(),
     shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
-    configProbe(agent),
     shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
+    configProbe(agent),
     processProbe(),
   ];
 }
@@ -164,7 +164,7 @@ describe("public Fabric live turn", () => {
         schemaVersion: 1,
         adapterId: contract.adapterId,
         agent,
-        artifactEntryCount: 2,
+        artifactEntryCount: 0,
         artifactRoot: contract.artifactRoot,
         artifactRootExists: true,
         command: "nemoclaw sandbox agent <sandbox> <plain prompt>",
@@ -218,7 +218,7 @@ describe("public Fabric live turn", () => {
         }),
       );
 
-      const configCommand = harness.sandboxExec.mock.calls[2]![1];
+      const configCommand = harness.sandboxExec.mock.calls[3]![1];
       expect(configCommand.slice(0, 3)).toEqual([
         "/opt/nemoclaw-fabric-venv/bin/python3",
         "-I",
@@ -239,7 +239,7 @@ describe("public Fabric live turn", () => {
         },
       ]);
 
-      expect(harness.sandboxExec.mock.calls[3]![1]).toEqual([
+      expect(harness.sandboxExec.mock.calls[2]![1]).toEqual([
         "/bin/bash",
         "-lc",
         expect.stringContaining(`nemoclaw-fabric doctor --config ${contract.configPath} --json`),
@@ -270,8 +270,8 @@ describe("public Fabric live turn", () => {
 
   it("accepts the exact root-owned read-only Shields posture and a warning-only doctor", async () => {
     const results = successfulSandboxResults("openclaw");
-    results[2] = configProbe("openclaw", { configMode: "0444", configOwner: "root:root" });
-    results[3] = shellResult({ stdout: '{"checks":[],"status":"warn"}\n' });
+    results[2] = shellResult({ stdout: '{"checks":[],"status":"warn"}\n' });
+    results[3] = configProbe("openclaw", { configMode: "0444", configOwner: "root:root" });
     const harness = fixture({ sandboxResults: results });
 
     await expect(runTurn("openclaw", harness)).resolves.toMatchObject({
@@ -284,7 +284,7 @@ describe("public Fabric live turn", () => {
   it("executes the private config probe without publishing config bytes or credential digests", async () => {
     const harness = fixture({ sandboxResults: successfulSandboxResults("openclaw") });
     await runTurn("openclaw", harness);
-    const configCommand = harness.sandboxExec.mock.calls[2]![1];
+    const configCommand = harness.sandboxExec.mock.calls[3]![1];
     const processCommand = harness.sandboxExec.mock.calls[4]![1];
     const configScript = configCommand[3]!;
     const processScript = processCommand[3]!;
@@ -478,6 +478,7 @@ describe("public Fabric live turn", () => {
       results: [
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
+        shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { configCredentialFree: false }),
       ],
       message: "config or artifact-root integrity",
@@ -487,6 +488,7 @@ describe("public Fabric live turn", () => {
       results: [
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
+        shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { descriptorRunnerModule: "unreviewed.adapter" }),
       ],
       message: "config or artifact-root integrity",
@@ -496,6 +498,7 @@ describe("public Fabric live turn", () => {
       results: [
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
+        shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { artifactTreeBounded: false }),
       ],
       message: "config or artifact-root integrity",
@@ -505,6 +508,7 @@ describe("public Fabric live turn", () => {
       results: [
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
+        shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { artifactRootExists: false }),
       ],
       message: "config or artifact-root integrity",
@@ -514,10 +518,19 @@ describe("public Fabric live turn", () => {
       results: [
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
-        configProbe("hermes"),
         shellResult({ stdout: '{"checks":[],"status":"fail"}\n' }),
       ],
       message: "unhealthy status",
+    },
+    {
+      label: "retained Fabric request artifacts",
+      results: [
+        processProbe(),
+        shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
+        shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
+        configProbe("hermes", { artifactEntryCount: 1 }),
+      ],
+      message: "config or artifact-root integrity",
     },
     {
       label: "a lingering adapter process",

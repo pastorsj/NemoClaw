@@ -16,6 +16,8 @@ their native interactive or gateway commands.
 nemoclaw-fabric --version
 nemoclaw-fabric doctor --config /etc/nemoclaw/fabric.json
 nemoclaw-fabric run --config /etc/nemoclaw/fabric.json -m "Review the workspace"
+nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 \
+  --config /etc/nemoclaw/fabric.json --stdin
 ```
 
 `run` accepts one prompt source: `-m`, positional text, or `--stdin`. Add
@@ -66,6 +68,36 @@ Credential-shaped environment values, values under credential-shaped result
 keys, common token forms, and prompts embedded in exception diagnostics are
 redacted.
 
+Each package configuration names the same artifact directory in
+`runtime.artifacts` and `environment.artifacts`. That directory must be a
+canonical direct child of the configuration directory. The runner creates a
+missing direct child with mode `0700`, then gives every request its own private
+directory. Fabric can use that directory while the request is active. After
+successful cleanup, NemoClaw has removed it on success, failure, timeout, or
+cancellation. The public result therefore reports an empty artifact manifest
+and omits output or metadata fields that point inside the removed directory.
+
+The sandbox agent, its adapter, and other processes running as the sandbox user
+share one operating-system identity. The private request directory prevents
+routine Fabric retention and access by other sandbox identities; it is not an
+isolation boundary between processes running as that same user. NemoClaw treats
+the gateway and root identities inside the sandbox as trusted lifecycle owners.
+
+Package manifests use `nemoclaw-fabric-run`, which owns the worker process,
+hard deadline, stop grace, and final artifact cleanup. If a worker must be
+killed, the supervisor removes only directories bearing that worker's process
+identifier. A completed cleanup does not leave prompts or credentials in
+Fabric's diagnostic tree, and independent worker processes do not delete one
+another's state.
+
+If process-group shutdown or artifact removal cannot be confirmed, the
+supervisor returns a generic failure instead of success. That failure requires
+the operator to inspect and remove entries from the package's dedicated
+`fabric-artifacts` directory before treating another turn as qualified. An
+unrecoverable kill of the supervisor itself or loss of the sandbox host can
+prevent cleanup; the next qualification probe detects the non-empty artifact
+root rather than claiming a clean turn.
+
 From the repository root, run the complete isolated test lane:
 
 ```bash
@@ -97,7 +129,7 @@ Keep the adapter-specific work in the agent package:
 1. Add the released Fabric adapter to the package's hash lock.
 2. Generate a Fabric config that selects the adapter, sets `runtime.timeout_seconds`, and names credential environment variables.
 3. Mark configurations unavailable when the released adapter cannot preserve required agent behavior.
-4. Set a bounded manifest headless command, such as `timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config ...`.
+4. Set a bounded manifest headless command, such as `nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ...`.
 5. Install the runner and adapter graph in the package image.
 6. Add only the network policy destinations that the runner and adapter use.
 7. Add a package-owned test that runs the generated config through the released adapter.

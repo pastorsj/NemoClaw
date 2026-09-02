@@ -505,11 +505,12 @@ export async function runFabricCompatibleEndpointJourney({
   expect(workspaceCleanup.exitCode, redactedResultText(workspaceCleanup)).toBe(0);
   expect(workspaceCleanup.stdout.trim()).toBe("NEMOCLAW_FABRIC_WORKSPACE_CLEAN");
 
-  progress.phase("verify Fabric failure redaction and process cleanup");
+  progress.phase("reject unsafe Fabric arguments without spawning a request process");
   const redactionSentinel = "sk-proj-tc-inf-09-redaction-0123456789";
+  const promptSentinel = "tc-inf-09-private-rejected-prompt";
   const missingConfig = `/sandbox/.deepagents/missing-${redactionSentinel}.json`;
   const rejectedFabric = await runNemoclawCli(
-    [sandboxName, "agent", "--config", missingConfig, "-m", "redaction probe", "--json"],
+    [sandboxName, "agent", "--config", missingConfig, "-m", promptSentinel, "--json"],
     {
       artifactName: "tc-inf-09-fabric-redacted-config-failure",
       artifacts,
@@ -521,15 +522,12 @@ export async function runFabricCompatibleEndpointJourney({
   );
   expect(rejectedFabric.timedOut).toBe(false);
   expect(rejectedFabric.exitCode).toBe(2);
-  expect(rejectedFabric.stdout.includes(redactionSentinel)).toBe(false);
-  expect(JSON.parse(rejectedFabric.stdout.trim())).toMatchObject({
-    error: {
-      code: "invalid_config",
-      message: expect.stringContaining("<redacted>"),
-      stage: "config",
-    },
-    status: "failed",
-  });
+  expect(rejectedFabric.stdout).toBe("");
+  expect(`${rejectedFabric.stdout}\n${rejectedFabric.stderr}`).not.toContain(redactionSentinel);
+  expect(`${rejectedFabric.stdout}\n${rejectedFabric.stderr}`).not.toContain(promptSentinel);
+  expect(rejectedFabric.stderr).toContain(
+    "Refusing to place unrecognized request values in the sandbox process arguments.",
+  );
   const fabricProcesses = await runNemoclawCli(
     [
       sandboxName,

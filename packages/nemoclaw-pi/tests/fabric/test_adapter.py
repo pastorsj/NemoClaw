@@ -637,6 +637,9 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
             )
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
+    def assert_fabric_artifacts_removed(self) -> None:
+        self.assertEqual(list(self.artifacts.rglob("*")), [])
+
     def test_doctor_and_run_use_the_real_released_fabric_lifecycle(self) -> None:
         _exit_failure, exit_success, _run_cli = _generic_runner()
         config = self.write_config()
@@ -657,6 +660,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
         self.assertEqual(result["harness"], ADAPTER_ID)
         self.assertEqual(result["adapter_kind"], "python")
         self.assertEqual(result["output"], {"response": "deterministic Pi response"})
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_failure_never_returns_pi_stderr_or_credential(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -678,6 +682,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
         result = json.loads(stdout)
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "pi_process_failed")
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_timeout_stops_pi_and_its_detached_tool(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -697,6 +702,7 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
             self.assertEqual(payload["child_group"], payload["child"])
             self.assertNotEqual(payload["child_group"], payload["parent_group"])
         _wait_for_stopped([payload["parent"], payload["child"]])
+        self.assert_fabric_artifacts_removed()
 
 
 if __name__ == "__main__":

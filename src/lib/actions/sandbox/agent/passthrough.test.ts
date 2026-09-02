@@ -708,18 +708,86 @@ describe("runAgentPassthrough", () => {
     expect(execMock).toHaveBeenCalledWith(
       "dcode-fabric",
       [
-        "timeout",
-        "--signal=TERM",
-        "--kill-after=10s",
-        "120s",
-        "nemoclaw-fabric",
-        "run",
+        "nemoclaw-fabric-run",
+        "--deadline-seconds",
+        "120",
+        "--kill-grace-seconds",
+        "10",
         "--config",
         "/sandbox/.deepagents/fabric.json",
         "--stdin",
       ],
       { stdinInput: "Reply with PONG", tty: false },
     );
+  });
+
+  it("keeps a message-option Fabric prompt out of argv while preserving JSON output", async () => {
+    const actualAgentDefinitions =
+      await vi.importActual<typeof import("../../../agent/defs")>("../../../agent/defs");
+    const sentinel = "private-message-option-prompt-349c";
+    getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
+    loadAgentMock.mockImplementationOnce(actualAgentDefinitions.loadAgent);
+
+    await runAgentPassthrough("dcode-fabric", {
+      extraArgs: ["-m", sentinel, "--json"],
+    });
+
+    const invocation = execMock.mock.calls.at(-1) as unknown as
+      | [string, string[], { stdinInput: string; tty: boolean }]
+      | undefined;
+    expect(invocation?.[1]).toEqual([
+      "nemoclaw-fabric-run",
+      "--deadline-seconds",
+      "120",
+      "--kill-grace-seconds",
+      "10",
+      "--config",
+      "/sandbox/.deepagents/fabric.json",
+      "--stdin",
+      "--json",
+    ]);
+    expect(invocation?.[1]).not.toContain(sentinel);
+    expect(invocation?.[2]).toEqual({ stdinInput: sentinel, tty: false });
+  });
+
+  it.each([
+    {
+      name: "a duplicate config option",
+      arguments: [
+        "--config",
+        "/sandbox/.deepagents/private-missing-config.json",
+        "-m",
+        "private-duplicate-config-prompt",
+        "--json",
+      ],
+      forbiddenOutput: /private-missing-config\.json|private-duplicate-config-prompt/u,
+    },
+    {
+      name: "an option after the message",
+      arguments: ["-m", "private-unknown-option-prompt", "--unknown"],
+      forbiddenOutput: /private-unknown-option-prompt/u,
+    },
+    {
+      name: "an unknown option before positional text",
+      arguments: ["--unknown", "private-positional-prompt"],
+      forbiddenOutput: /private-positional-prompt/u,
+    },
+  ])("rejects $name without forwarding request values in argv", async ({ arguments: args, forbiddenOutput }) => {
+    const actualAgentDefinitions =
+      await vi.importActual<typeof import("../../../agent/defs")>("../../../agent/defs");
+    getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
+    loadAgentMock.mockImplementationOnce(actualAgentDefinitions.loadAgent);
+    const { writes, exit, proc } = makeProcMock();
+
+    await expect(
+      runAgentPassthrough("dcode-fabric", { extraArgs: args }, { process: proc }),
+    ).rejects.toThrow("__exit:2");
+
+    expect(exit).toHaveBeenCalledWith(2);
+    expect(ensureLiveMock).not.toHaveBeenCalled();
+    expect(execMock).not.toHaveBeenCalled();
+    expect(writes.join("\n")).toContain("Refusing to place unrecognized request values");
+    expect(writes.join("\n")).not.toMatch(forbiddenOutput);
   });
 
   it("keeps a Fabric prompt out of argv and diagnostics while delivering exact stdin", async () => {

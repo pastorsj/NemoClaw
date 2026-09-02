@@ -133,6 +133,13 @@ assert optional == [
 ], declared
 PY
 
+for installed_command in nemoclaw-fabric nemoclaw-fabric-run; do
+  if [[ ! -x "${venv_dir}/bin/${installed_command}" ]]; then
+    echo "Installed runner wheel is missing executable ${installed_command}." >&2
+    exit 1
+  fi
+done
+
 cd "${repository_root}"
 env -u PYTHONHOME -u PYTHONPATH \
   PYTHONDONTWRITEBYTECODE=1 VIRTUAL_ENV="${venv_dir}" PATH="${venv_dir}/bin:${PATH}" \

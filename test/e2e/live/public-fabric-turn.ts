@@ -386,7 +386,7 @@ function requireConfigProbe(
     value.artifactScanComplete !== true ||
     value.artifactTreeBounded !== true ||
     value.artifactRootExists !== true ||
-    !Number.isSafeInteger(value.artifactEntryCount) ||
+    value.artifactEntryCount !== 0 ||
     !securePosture
   ) {
     throw new Error("public Fabric config or artifact-root integrity check failed");
@@ -490,6 +490,26 @@ export async function runPublicFabricTurn({
     throw new Error(`public ${agent} Fabric runner identity did not match the pinned package`);
   }
 
+  const doctor = await sandbox.exec(
+    sandboxName,
+    [
+      "/bin/bash",
+      "-lc",
+      `set -eu; . /tmp/nemoclaw-proxy-env.sh; exec /usr/local/bin/nemoclaw-fabric doctor --config ${contract.configPath} --json`,
+    ],
+    {
+      artifactName: `fabric-${agent}-${lifecyclePhase}-doctor`,
+      env,
+      redactionValues: [...redactionValues],
+      timeoutMs: 60_000,
+    },
+  );
+  requireSuccessfulProbe(doctor, `public ${agent} Fabric doctor`, redactionValues);
+  const doctorStatus = parseProbeRecord(doctor, `public ${agent} Fabric doctor`).status;
+  if (doctorStatus !== "pass" && doctorStatus !== "warn") {
+    throw new Error(`public ${agent} Fabric doctor returned an unhealthy status`);
+  }
+
   const fingerprints = credentialFingerprints(redactionValues);
   const fingerprintDigests = fingerprints.map((fingerprint) => fingerprint.sha256);
   const configResult = await sandbox.exec(
@@ -519,26 +539,6 @@ export async function runPublicFabricTurn({
     parseProbeRecord(configResult, `public ${agent} Fabric config probe`),
     contract,
   );
-
-  const doctor = await sandbox.exec(
-    sandboxName,
-    [
-      "/bin/bash",
-      "-lc",
-      `set -eu; . /tmp/nemoclaw-proxy-env.sh; exec /usr/local/bin/nemoclaw-fabric doctor --config ${contract.configPath} --json`,
-    ],
-    {
-      artifactName: `fabric-${agent}-${lifecyclePhase}-doctor`,
-      env,
-      redactionValues: [...redactionValues],
-      timeoutMs: 60_000,
-    },
-  );
-  requireSuccessfulProbe(doctor, `public ${agent} Fabric doctor`, redactionValues);
-  const doctorStatus = parseProbeRecord(doctor, `public ${agent} Fabric doctor`).status;
-  if (doctorStatus !== "pass" && doctorStatus !== "warn") {
-    throw new Error(`public ${agent} Fabric doctor returned an unhealthy status`);
-  }
 
   const processResult = await sandbox.exec(
     sandboxName,

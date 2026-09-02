@@ -1022,7 +1022,7 @@ test("TC-INF-09 Deep Agents Code uses a local compatible endpoint through infere
       "verify the installed Fabric identity",
       "request a Fabric completion through the public agent command",
       "write and remove a workspace artifact through the public agent command",
-      "verify Fabric failure redaction and process cleanup",
+      "reject unsafe Fabric arguments without spawning a request process",
       "verify compatible credential custody",
     ],
   },

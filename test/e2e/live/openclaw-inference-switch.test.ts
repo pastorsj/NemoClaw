@@ -13,7 +13,6 @@
 import fs from "node:fs";
 import http, { type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
 import path from "node:path";
 
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
@@ -32,6 +31,10 @@ import {
   compatibleAnthropicSwitchEnv,
   requireCompatibleAnthropicProviderAbsent,
 } from "../fixtures/compatible-anthropic-switch.ts";
+import {
+  createPrivateTestHome,
+  isolatedHomeEnvironment,
+} from "../fixtures/environment-profiles.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import {
   type FakeOpenAiCompatibleServer,
@@ -219,19 +222,13 @@ function parsePortEnv(name: string, fallback: number): number {
 }
 
 function commandEnv(home: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  const base = buildAvailabilityProbeEnv();
-  return {
-    ...base,
-    HOME: home,
-    PATH: [path.join(home, ".local", "bin"), path.join(home, ".npm-global", "bin"), base.PATH]
-      .filter(Boolean)
-      .join(":"),
+  return isolatedHomeEnvironment(home, {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
     OPENSHELL_GATEWAY: process.env.OPENSHELL_GATEWAY ?? "nemoclaw",
     ...extra,
-  };
+  });
 }
 
 async function bestEffortStateReset(run: () => Promise<unknown>): Promise<void> {
@@ -950,7 +947,7 @@ test("openclaw-inference-switch: switches route and preserves live OpenClaw beha
     (value): value is string => typeof value === "string",
   );
 
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-switch-home-"));
+  const home = createPrivateTestHome(".nemoclaw-openclaw-switch-home-");
   let mockProvider: MockAnthropicProvider | undefined;
   cleanup.trackDisposable(`remove OpenClaw inference switch test home for ${SANDBOX_NAME}`, () => {
     fs.rmSync(home, { recursive: true, force: true });

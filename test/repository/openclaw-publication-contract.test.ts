@@ -25,7 +25,7 @@ it("keeps every protected OpenClaw publication recipe on the package Fabric cont
   );
 
   expect(inspection.agent.runtime?.headless_command).toBe(
-    "timeout --signal=TERM --kill-after=15s 120s nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json",
+    "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 15 --config /sandbox/.openclaw/fabric.json",
   );
   expect(inspection.agent.runtime?.smoke_commands).toEqual(
     expect.arrayContaining([

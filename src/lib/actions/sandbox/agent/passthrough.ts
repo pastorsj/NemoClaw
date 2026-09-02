@@ -275,6 +275,10 @@ type AgentPassthroughInvocation = {
   command: string[];
   stdinInput?: string;
 };
+type FabricArgumentResult =
+  | { kind: "forward"; arguments: string[] }
+  | { kind: "prompt"; prompt: string; jsonOutput: boolean }
+  | { kind: "invalid" };
 
 function readSandboxAgentFromRegistry(
   sandboxName: string,
@@ -356,21 +360,77 @@ function isPlainPromptInvocation(args: readonly string[]): boolean {
 }
 
 function isFabricRunCommand(command: readonly string[]): boolean {
+  if (command[0] === "nemoclaw-fabric-run") return true;
   const runnerIndex = command.indexOf("nemoclaw-fabric");
   return runnerIndex >= 0 && command[runnerIndex + 1] === "run";
 }
 
+function parseFabricPromptArguments(extraArgs: readonly string[]): FabricArgumentResult {
+  if (
+    extraArgs.length === 0 ||
+    (extraArgs.length === 1 && ["-h", "--help"].includes(extraArgs[0]))
+  ) {
+    return { kind: "forward", arguments: [...extraArgs] };
+  }
+
+  const jsonCount = extraArgs.filter((argument) => argument === "--json").length;
+  if (jsonCount > 1) return { kind: "invalid" };
+  const jsonOutput = jsonCount === 1;
+  const promptArguments = extraArgs.filter((argument) => argument !== "--json");
+  if (promptArguments.length === 0) return { kind: "invalid" };
+
+  if (promptArguments[0] === "-m" || promptArguments[0] === "--message") {
+    if (promptArguments.length !== 2 || !promptArguments[1]?.trim()) {
+      return { kind: "invalid" };
+    }
+    return { kind: "prompt", prompt: promptArguments[1], jsonOutput };
+  }
+  if (promptArguments[0]?.startsWith("--message=")) {
+    const prompt = promptArguments[0].slice("--message=".length);
+    return promptArguments.length === 1 && prompt.trim()
+      ? { kind: "prompt", prompt, jsonOutput }
+      : { kind: "invalid" };
+  }
+  if (!isPlainPromptInvocation(promptArguments)) return { kind: "invalid" };
+  return { kind: "prompt", prompt: promptArguments.join(" "), jsonOutput };
+}
+
+function rejectFabricInvocationArguments(
+  sandboxName: string,
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
+): never {
+  proc.stderr.write(
+    `  The package-managed Fabric command for sandbox '${sandboxName}' accepts one prompt as positional text or with -m/--message, plus optional --json.\n`,
+  );
+  proc.stderr.write(
+    "  Refusing to place unrecognized request values in the sandbox process arguments.\n",
+  );
+  return proc.exit(2);
+}
+
 function buildManifestInvocation(
+  sandboxName: string,
   command: readonly string[],
   extraArgs: readonly string[],
+  proc: NonNullable<AgentPassthroughDeps["process"]>,
 ): AgentPassthroughInvocation {
-  if (isFabricRunCommand(command) && isPlainPromptInvocation(extraArgs)) {
+  if (!isFabricRunCommand(command)) return { command: [...command, ...extraArgs] };
+
+  const fabricArguments = parseFabricPromptArguments(extraArgs);
+  if (fabricArguments.kind === "invalid") {
+    rejectFabricInvocationArguments(sandboxName, proc);
+  }
+  if (fabricArguments.kind === "prompt") {
     return {
-      command: command.includes("--stdin") ? [...command] : [...command, "--stdin"],
-      stdinInput: extraArgs.join(" "),
+      command: [
+        ...command,
+        ...(command.includes("--stdin") ? [] : ["--stdin"]),
+        ...(fabricArguments.jsonOutput ? ["--json"] : []),
+      ],
+      stdinInput: fabricArguments.prompt,
     };
   }
-  return { command: [...command, ...extraArgs] };
+  return { command: [...command, ...fabricArguments.arguments] };
 }
 
 function getPassthroughCommand(
@@ -436,7 +496,7 @@ function getPassthroughCommand(
   if (manifestCommand.argv.length === 0) {
     rejectNonOpenclawAgent(sandboxName, agentName, proc);
   }
-  return buildManifestInvocation(manifestCommand.argv, extraArgs);
+  return buildManifestInvocation(sandboxName, manifestCommand.argv, extraArgs, proc);
 }
 
 function isOpenClawPassthroughCommand(command: readonly string[]): boolean {

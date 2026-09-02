@@ -19,6 +19,7 @@ test = ["nemo-fabric-adapter-contract == 0.2.0", "nemo-fabric-adapters-common ==
 
 [project.scripts]
 nemoclaw-fabric = "nemoclaw_fabric.command:main"
+nemoclaw-fabric-run = "nemoclaw_fabric.supervisor:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

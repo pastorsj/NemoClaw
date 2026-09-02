@@ -16,7 +16,6 @@ from typing import BinaryIO
 
 OFFICIAL_ADAPTER_MODULE = "nemo_fabric_adapters.hermes.adapter"
 PROCESS_RESPONSE_LIMIT_BYTES = 1024 * 1024
-PROCESS_STDERR_LIMIT_BYTES = 64 * 1024
 PROCESS_STOP_GRACE_SECONDS = 2.0
 OUTPUT_LIMIT_EXIT = 74
 PROCESS_UNAVAILABLE_EXIT = 127
@@ -48,23 +47,12 @@ def _read_bounded_response(stream: BinaryIO) -> bytes:
     return response
 
 
-def _drain_bounded_stderr(stream: BinaryIO) -> None:
-    """Keep the official host unblocked while forwarding bounded diagnostics."""
+def _discard_adapter_stderr(stream: BinaryIO) -> None:
+    """Keep the official host unblocked without exposing unredacted diagnostics."""
 
-    remaining = PROCESS_STDERR_LIMIT_BYTES
-    output = sys.stderr.buffer
     try:
-        while chunk := stream.read(8192):
-            if remaining <= 0:
-                continue
-            selected = chunk[:remaining]
-            try:
-                output.write(selected)
-                output.flush()
-            except (BrokenPipeError, OSError):
-                remaining = 0
-                continue
-            remaining -= len(selected)
+        while stream.read(8192):
+            pass
     except OSError:
         pass
     finally:
@@ -139,7 +127,7 @@ def run() -> int:
     assert process.stdout is not None
     assert process.stderr is not None
     stderr_thread = threading.Thread(
-        target=_drain_bounded_stderr,
+        target=_discard_adapter_stderr,
         args=(process.stderr,),
         daemon=True,
         name="hermes-fabric-stderr",

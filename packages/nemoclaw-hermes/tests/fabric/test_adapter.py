@@ -231,6 +231,19 @@ class ReleasedHermesAdapterTests(unittest.TestCase):
 class HermesProxyTests(unittest.TestCase):
     """Keep every proxy exit routed through the private process owner."""
 
+    def test_official_adapter_stderr_is_drained_without_forwarding_credentials(self) -> None:
+        secret = b"nvapi-official-adapter-stderr-sentinel"
+        source = io.BytesIO(secret)
+        captured = io.BytesIO()
+        output = io.TextIOWrapper(captured, encoding="utf-8")
+
+        with patch.object(sys, "stderr", output):
+            proxy_adapter._discard_adapter_stderr(source)
+            output.flush()
+
+        self.assertTrue(source.closed)
+        self.assertEqual(captured.getvalue(), b"")
+
     def test_arbitrary_response_io_failure_stops_the_process_owner(self) -> None:
         request_bytes = b'{"operation":"start","payload":{}}\n'
         input_stream = io.TextIOWrapper(io.BytesIO(request_bytes), encoding="utf-8")
@@ -370,6 +383,9 @@ class ComposedFabricTests(unittest.TestCase):
             "VIRTUAL_ENV": str(Path(sys.executable).parent.parent),
         }
 
+    def assert_fabric_artifacts_removed(self) -> None:
+        self.assertEqual(list(self.artifacts.iterdir()), [])
+
     def write_config(self, *, timeout_seconds: float = 5) -> Path:
         payload = {
             **MANAGED_CONFIG,
@@ -426,6 +442,7 @@ class ComposedFabricTests(unittest.TestCase):
         self.assertEqual(result["metadata"]["adapter_runner"], "persistent_local_host")
         self.assertEqual(result["output"]["response"], "deterministic Hermes response")
         self.assertTrue(self.closed_marker.is_file())
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_redacts_adapter_failures_and_closes_the_runtime(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -443,6 +460,7 @@ class ComposedFabricTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertTrue(result["error"]["code"])
         self.assertTrue(self.closed_marker.is_file())
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_timeout_terminates_the_persistent_adapter_host(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -459,6 +477,7 @@ class ComposedFabricTests(unittest.TestCase):
         invocation = json.loads(self.invocation_marker.read_text(encoding="utf-8"))
         _wait_for_stopped(invocation["pid"])
         _wait_for_stopped(invocation["child_pid"])
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_bounds_oversized_output_and_redacts_credentials(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -481,6 +500,7 @@ class ComposedFabricTests(unittest.TestCase):
         invocation = json.loads(self.invocation_marker.read_text(encoding="utf-8"))
         _wait_for_stopped(invocation["pid"])
         _wait_for_stopped(invocation["child_pid"])
+        self.assert_fabric_artifacts_removed()
 
 
 if __name__ == "__main__":

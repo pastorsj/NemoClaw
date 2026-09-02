@@ -22,6 +22,7 @@ from nemoclaw_fabric.config import (
     DEFAULT_CONFIG_PATH,
     FabricConfigLoadError,
     LoadedFabricConfig,
+    require_supervisor_config_identity,
     load_fabric_config,
 )
 from nemoclaw_fabric.output import (
@@ -331,6 +332,7 @@ def run_cli(
     prompt: str | None = None
     try:
         loaded = load_fabric_config(args.config)
+        require_supervisor_config_identity(loaded, process_environment)
         secret_values = collect_secret_values(
             process_environment,
             loaded.credential_environment_names,

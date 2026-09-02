@@ -134,6 +134,9 @@ class DeepAgentsFixtureMixin:
         self.server_thread.join(timeout=5)
         self.assertFalse(self.server_thread.is_alive())
 
+    def assert_package_artifacts_removed(self) -> None:
+        self.assertEqual(list(self.package_artifacts.rglob("*")), [])
+
     @staticmethod
     def _assistant_response(content: str) -> dict[str, Any]:
         return {
@@ -238,9 +241,12 @@ class DeepAgentsFixtureMixin:
         )
         self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
 
-        payload["runtime"]["artifacts"] = str(self.artifacts)
+        package_artifacts = config_path.parent / "fabric-artifacts"
+        package_artifacts.mkdir(mode=0o700, exist_ok=True)
+        self.package_artifacts = package_artifacts.resolve()
+        payload["runtime"]["artifacts"] = "./fabric-artifacts"
         payload["environment"]["workspace"] = str(self.workspace)
-        payload["environment"]["artifacts"] = str(self.artifacts)
+        payload["environment"]["artifacts"] = "./fabric-artifacts"
         payload["models"]["default"]["api_key_env"] = credential_name
         # `uv run --isolated --with-requirements` links wheel contents from its
         # cache, so the wheel's data descriptor can sit outside the temporary
@@ -445,6 +451,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
                 self.assertIn(expected_reason, result["error"]["message"])
                 self.assertEqual(client_factory_calls, 0)
                 self.assertEqual(self.server.request_count, 0)  # type: ignore[attr-defined]
+                self.assert_package_artifacts_removed()
 
     def test_package_config_completes_one_turn_with_the_released_adapter(self) -> None:
         _, exit_success, _, run_cli = generic_runner()
@@ -475,7 +482,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
                 stderr=stderr,
             )
 
-        self.assertEqual(exit_code, exit_success, stderr.getvalue())
+        self.assertEqual(exit_code, exit_success, stdout.getvalue() + stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "succeeded")
@@ -500,6 +507,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
         )
         self.assertNotIn(credential.encode("utf-8"), retained_bytes)
         self.assertNotIn(credential, stdout.getvalue())
+        self.assert_package_artifacts_removed()
 
     def test_released_adapter_writes_workspace_file_before_final_response(self) -> None:
         _, exit_success, _, run_cli = generic_runner()
@@ -534,7 +542,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
                 stderr=stderr,
             )
 
-        self.assertEqual(exit_code, exit_success, stderr.getvalue())
+        self.assertEqual(exit_code, exit_success, stdout.getvalue() + stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         result = json.loads(stdout.getvalue())
         self.assertEqual(result["status"], "succeeded")
@@ -604,6 +612,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
             path.read_bytes() for path in self.base_dir.rglob("*") if path.is_file()
         )
         self.assertNotIn(credential.encode("utf-8"), retained_bytes)
+        self.assert_package_artifacts_removed()
 
     def test_missing_credential_fails_before_the_released_adapter_sends_a_request(self) -> None:
         exit_failure, _, _, run_cli = generic_runner()
@@ -629,7 +638,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
                 stderr=stderr,
             )
 
-        self.assertEqual(exit_code, exit_failure, stderr.getvalue())
+        self.assertEqual(exit_code, exit_failure, stdout.getvalue() + stderr.getvalue())
         self.assertEqual(stderr.getvalue(), "")
         self.assertNotIn(prompt, stdout.getvalue())
         result = json.loads(stdout.getvalue())
@@ -639,6 +648,7 @@ class ComposedFabricTests(DeepAgentsFixtureMixin, unittest.TestCase):
         self.assertIn(credential_name, result["error"]["message"])
         self.assertIn("is not set in the environment", result["error"]["message"])
         self.assertEqual(self.server.request_count, 0)  # type: ignore[attr-defined]
+        self.assert_package_artifacts_removed()
 
 
 if __name__ == "__main__":

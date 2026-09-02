@@ -21,7 +21,7 @@ managed_image:
 runtime:
   kind: terminal
   interactive_command: "pi"
-  headless_command: "timeout --signal=TERM --kill-after=10s 120s nemoclaw-fabric run --config /sandbox/.pi/agent/fabric.json"
+  headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.pi/agent/fabric.json"
   smoke_commands:
     - "pi --version"
     - "nemoclaw-fabric --version"

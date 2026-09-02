@@ -10,6 +10,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from unittest.mock import patch
 
 OPENCLAW_ROOT = Path(__file__).resolve().parents[2]
 FABRIC_SOURCE = OPENCLAW_ROOT / "fabric" / "src"
+FABRIC_RUN_SUPERVISOR = shutil.which("nemoclaw-fabric-run")
 sys.path.insert(0, str(FABRIC_SOURCE))
 
 from nemo_fabric_adapter_contract.models import AgentConfig  # noqa: E402
@@ -120,6 +122,18 @@ if mode == "hang":
                 "parent_group": os.getpgrp(),
                 "child": child.pid,
                 "child_group": os.getpgid(child.pid),
+            }),
+            encoding="utf-8",
+        )
+    while True:
+        time.sleep(60)
+if mode == "hang_without_child":
+    marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_PIDS")
+    if marker:
+        Path(marker).write_text(
+            json.dumps({
+                "parent": os.getpid(),
+                "parent_group": os.getpgrp(),
             }),
             encoding="utf-8",
         )
@@ -327,6 +341,7 @@ class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCas
         self.assertEqual(arguments[11], prompt["path"])
         self.assertEqual(prompt["text"], "Review the workspace")
         self.assertEqual(prompt["mode"], 0o600)
+        self.assertEqual(Path(str(prompt["path"])).parent, self.artifacts.resolve())
         self.assertNotIn("Review the workspace", arguments)
         self.assertFalse(Path(str(prompt["path"])).exists())
 
@@ -633,7 +648,7 @@ class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCas
             )
             await asyncio.wait_for(spawn_started.wait(), timeout=5)
             prompt_paths = list(
-                self.workspace.glob(".nemoclaw-openclaw-prompt-*.txt")
+                self.artifacts.glob(".nemoclaw-openclaw-prompt-*.txt")
             )
             self.assertEqual(len(prompt_paths), 1)
             task.cancel()
@@ -787,6 +802,9 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
             timeout=10,
         )
 
+    def assert_fabric_artifacts_removed(self) -> None:
+        self.assertEqual(list(self.artifacts.iterdir()), [])
+
     def test_doctor_accepts_openclaws_empty_model_catalogue_before_run(self) -> None:
         _exit_failure, exit_success, _run_cli = _generic_runner()
         config = self.write_config()
@@ -808,6 +826,7 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
             result["output"], {"response": "deterministic OpenClaw response"}
         )
         self.assertEqual(self.recorded_prompt()["text"], "hello from Fabric")
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_failure_never_returns_openclaw_output_or_prompt(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -830,6 +849,7 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["code"], "openclaw_process_failed")
         _wait_for_removed(Path(str(self.recorded_prompt()["path"])))
+        self.assert_fabric_artifacts_removed()
 
     def test_runner_timeout_stops_openclaw_and_removes_prompt(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()
@@ -845,6 +865,104 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
         payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
         _wait_for_stopped([payload["parent"], payload["child"]])
         _wait_for_removed(Path(str(self.recorded_prompt()["path"])))
+        self.assert_fabric_artifacts_removed()
+
+    @unittest.skipUnless(
+        os.name == "posix" and FABRIC_RUN_SUPERVISOR is not None,
+        "the installed POSIX Fabric supervisor is required",
+    )
+    def test_supervisor_forced_kill_removes_openclaw_prompt(self) -> None:
+        config = self.write_config(timeout_seconds=30)
+        secret_prompt = "forced-kill-private-openclaw-prompt"
+        environment = {
+            **os.environ,
+            **self.environment,
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "hang_without_child",
+            "VIRTUAL_ENV": str(Path(sys.executable).parent.parent),
+        }
+        assert FABRIC_RUN_SUPERVISOR is not None
+        process = subprocess.Popen(
+            [
+                FABRIC_RUN_SUPERVISOR,
+                "--deadline-seconds",
+                "30",
+                "--kill-grace-seconds",
+                "0.1",
+                "--config",
+                str(config),
+                "--stdin",
+                "--json",
+            ],
+            env=environment,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        worker_group: int | None = None
+        wrapper_group: int | None = None
+        fake_process: int | None = None
+        try:
+            assert process.stdin is not None
+            process.stdin.write(secret_prompt)
+            process.stdin.close()
+            process.stdin = None
+
+            deadline = time.monotonic() + 10
+            while (
+                not self.prompt_marker.exists() or not self.pid_marker.exists()
+            ) and time.monotonic() < deadline:
+                time.sleep(0.025)
+            self.assertTrue(self.prompt_marker.exists())
+            self.assertTrue(self.pid_marker.exists())
+
+            prompt_path = Path(str(self.recorded_prompt()["path"]))
+            invocation_directory = prompt_path.parent
+            self.assertEqual(invocation_directory.parent, self.artifacts.resolve())
+            self.assertTrue(invocation_directory.name.startswith(".nemoclaw-run-"))
+            worker_group = int(
+                invocation_directory.name.removeprefix(".nemoclaw-run-").split(
+                    "-", 1
+                )[0]
+            )
+            process_payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+            fake_process = int(process_payload["parent"])
+            wrapper_group = int(process_payload["parent_group"])
+
+            # Freeze both cleanup-capable process groups. The supervisor must
+            # escalate its worker to SIGKILL and remove the request directory
+            # without relying on either adapter finally block.
+            os.killpg(wrapper_group, signal.SIGSTOP)
+            os.killpg(worker_group, signal.SIGSTOP)
+            process.send_signal(signal.SIGTERM)
+            return_code = process.wait(timeout=10)
+            stdout = process.stdout.read() if process.stdout is not None else ""
+            stderr = process.stderr.read() if process.stderr is not None else ""
+
+            self.assertEqual(return_code, 128 + signal.SIGTERM, stdout + stderr)
+            self.assertNotIn(secret_prompt, stdout + stderr)
+            self.assertFalse(prompt_path.exists())
+            self.assert_fabric_artifacts_removed()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            for process_group in (worker_group, wrapper_group):
+                if process_group is None:
+                    continue
+                try:
+                    os.killpg(process_group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if fake_process is not None:
+                _wait_for_stopped([fake_process])
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
 
 
 if __name__ == "__main__":

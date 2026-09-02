@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -12,7 +13,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from nemoclaw_fabric.config import FabricConfigLoadError
+from nemoclaw_fabric.config import SUPERVISOR_CONFIG_SHA256_ENV
 from nemoclaw_fabric.config import load_fabric_config
+from nemoclaw_fabric.config import require_supervisor_config_identity
 
 
 class FabricConfigLoadingTests(unittest.TestCase):
@@ -48,6 +51,58 @@ class FabricConfigLoadingTests(unittest.TestCase):
         self.assertEqual(loaded.config.harness.settings, {"adapter_owned": True})
         self.assertEqual(loaded.base_dir, self.base_dir.resolve())
         self.assertEqual(loaded.path, self.config_path.resolve())
+        self.assertEqual(
+            loaded.content_sha256,
+            hashlib.sha256(self.config_path.read_bytes()).hexdigest(),
+        )
+
+    def test_supervisor_identity_rejects_a_config_changed_before_worker_load(self) -> None:
+        config_path = self.write_config(
+            {
+                "metadata": {"name": "supervised-agent"},
+                "harness": {"adapter_id": "third.party.harness"},
+                "runtime": {"timeout_seconds": 30},
+            }
+        )
+        selected = load_fabric_config(config_path)
+        config_path.write_text(
+            json.dumps(
+                {
+                    "metadata": {"name": "changed-agent"},
+                    "harness": {"adapter_id": "third.party.changed"},
+                    "runtime": {"timeout_seconds": 30},
+                }
+            ),
+            encoding="utf-8",
+        )
+        reloaded = load_fabric_config(config_path)
+
+        with self.assertRaisesRegex(
+            FabricConfigLoadError,
+            "changed after the request supervisor validated it",
+        ):
+            require_supervisor_config_identity(
+                reloaded,
+                {SUPERVISOR_CONFIG_SHA256_ENV: selected.content_sha256},
+            )
+
+    def test_supervisor_identity_rejects_malformed_expected_digests(self) -> None:
+        loaded = load_fabric_config(
+            self.write_config(
+                {
+                    "metadata": {"name": "supervised-agent"},
+                    "harness": {"adapter_id": "third.party.harness"},
+                    "runtime": {"timeout_seconds": 30},
+                }
+            )
+        )
+
+        for digest in ("", "A" * 64, "0" * 63, "g" * 64):
+            with self.subTest(digest=digest), self.assertRaises(FabricConfigLoadError):
+                require_supervisor_config_identity(
+                    loaded,
+                    {SUPERVISOR_CONFIG_SHA256_ENV: digest},
+                )
 
     def test_accepts_credential_free_uri_and_email_values(self) -> None:
         values = (

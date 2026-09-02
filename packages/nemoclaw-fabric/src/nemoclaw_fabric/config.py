@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -21,6 +23,7 @@ from nemoclaw_fabric.output import value_looks_like_secret
 
 
 DEFAULT_CONFIG_PATH = Path("/etc/nemoclaw/fabric.json")
+SUPERVISOR_CONFIG_SHA256_ENV = "NEMOCLAW_FABRIC_SUPERVISOR_CONFIG_SHA256"
 
 # Fabric 0.2 credential fields contain environment-variable names, never the
 # credential values themselves. Keep this list aligned with the pinned SDK
@@ -52,6 +55,7 @@ class LoadedFabricConfig:
     config: FabricConfig
     base_dir: Path
     path: Path
+    content_sha256: str
     credential_environment_names: tuple[str, ...]
     invocation_unavailable_reason: str | None
 
@@ -232,7 +236,8 @@ def load_fabric_config(path: str | Path) -> LoadedFabricConfig:
     config_path = Path(path).expanduser()
     try:
         resolved_path = config_path.resolve(strict=True)
-        raw = resolved_path.read_text(encoding="utf-8")
+        raw_bytes = resolved_path.read_bytes()
+        raw = raw_bytes.decode("utf-8")
     except (OSError, UnicodeError) as error:
         raise FabricConfigLoadError(
             f"could not read Fabric config {config_path}: {error}"
@@ -266,6 +271,25 @@ def load_fabric_config(path: str | Path) -> LoadedFabricConfig:
         config=config,
         base_dir=resolved_path.parent,
         path=resolved_path,
+        content_sha256=hashlib.sha256(raw_bytes).hexdigest(),
         credential_environment_names=tuple(sorted(names)),
         invocation_unavailable_reason=_invocation_unavailable_reason(payload),
     )
+
+
+def require_supervisor_config_identity(
+    loaded: LoadedFabricConfig,
+    environment: Mapping[str, str],
+) -> None:
+    """Reject a config changed after the cleanup supervisor selected its root."""
+
+    expected = environment.get(SUPERVISOR_CONFIG_SHA256_ENV)
+    if expected is None:
+        return
+    if not re.fullmatch(r"[0-9a-f]{64}", expected) or not hmac.compare_digest(
+        loaded.content_sha256,
+        expected,
+    ):
+        raise FabricConfigLoadError(
+            "Fabric config changed after the request supervisor validated it"
+        )

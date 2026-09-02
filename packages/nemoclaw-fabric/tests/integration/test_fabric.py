@@ -31,7 +31,7 @@ from nemoclaw_fabric.config import load_fabric_config
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 ECHO_FIXTURE = PACKAGE_ROOT / "tests" / "fixtures" / "echo"
-GNU_TIMEOUT = shutil.which("timeout") or shutil.which("gtimeout")
+FABRIC_RUN_SUPERVISOR = shutil.which("nemoclaw-fabric-run")
 
 
 def process_exists(process_id: int) -> bool:
@@ -293,8 +293,11 @@ class ReleasedFabricIntegrationTests(unittest.TestCase):
         self.assertEqual(self.read_events(), ["start", "invoke:1"])
         self.assert_adapter_process_stopped()
 
-    @unittest.skipUnless(GNU_TIMEOUT, "GNU timeout is required for the hard-deadline contract")
-    def test_external_deadline_kills_a_nonreturning_adapter_process(self) -> None:
+    @unittest.skipUnless(
+        FABRIC_RUN_SUPERVISOR,
+        "the installed Fabric run supervisor is required for the hard-deadline contract",
+    )
+    def test_supervisor_deadline_cleans_a_nonreturning_adapter_process(self) -> None:
         config_path = self.write_config("block", timeout_seconds=60)
         environment = os.environ.copy()
         environment["PATH"] = self._test_path
@@ -309,14 +312,11 @@ class ReleasedFabricIntegrationTests(unittest.TestCase):
         started_at = time.monotonic()
         process = subprocess.Popen(
             [
-                str(GNU_TIMEOUT),
-                "--signal=TERM",
-                "--kill-after=0.5s",
-                "1s",
-                sys.executable,
-                "-m",
-                "nemoclaw_fabric",
-                "run",
+                str(FABRIC_RUN_SUPERVISOR),
+                "--deadline-seconds",
+                "1",
+                "--kill-grace-seconds",
+                "0.5",
                 "--config",
                 str(config_path),
                 "-m",
@@ -337,11 +337,12 @@ class ReleasedFabricIntegrationTests(unittest.TestCase):
                 stdout, stderr = process.communicate(timeout=5)
         elapsed_seconds = time.monotonic() - started_at
 
-        self.assertIn(process.returncode, {124, 137}, (stdout, stderr))
+        self.assertEqual(process.returncode, 124, (stdout, stderr))
         self.assertLess(elapsed_seconds, 5)
         self.assertNotIn("hard deadline", f"{stdout}\n{stderr}")
         self.assertEqual(self.read_events(), ["start", "invoke:1"])
         self.assert_adapter_process_stopped()
+        self.assertEqual(list((self.base_dir / "artifacts").iterdir()), [])
 
     @unittest.skipUnless(os.name == "posix", "process signals require POSIX")
     def test_signals_wait_for_adapter_cleanup_before_exit(self) -> None:

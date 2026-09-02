@@ -241,6 +241,27 @@ class OpenClawRuntime:
             )
         return workspace
 
+    def _artifact_directory(self, context: RuntimeContext) -> Path:
+        """Resolve the request directory owned by Fabric's cleanup boundary."""
+
+        assert self._base_dir is not None
+        configured = context.environment.artifacts
+        if configured is None:
+            raise lifecycle.LifecycleError(
+                "openclaw_artifacts_unavailable",
+                "OpenClaw's Fabric artifact directory is unavailable",
+            )
+        artifacts = Path(configured)
+        if not artifacts.is_absolute():
+            artifacts = self._base_dir / artifacts
+        artifacts = artifacts.resolve()
+        if not artifacts.is_dir():
+            raise lifecycle.LifecycleError(
+                "openclaw_artifacts_unavailable",
+                "OpenClaw's Fabric artifact directory is unavailable",
+            )
+        return artifacts
+
     def _command(self, prompt_path: Path) -> list[str]:
         """Build OpenClaw's bounded gateway command for one Fabric request."""
 
@@ -284,8 +305,9 @@ class OpenClawRuntime:
             return _failed("openclaw_empty_input", "OpenClaw requires a non-empty request")
 
         workspace = self._workspace(context)
+        artifact_directory = self._artifact_directory(context)
         try:
-            prompt_path = _write_prompt(workspace, request.input)
+            prompt_path = _write_prompt(artifact_directory, request.input)
         except OSError:
             return _failed(
                 "openclaw_prompt_unavailable",

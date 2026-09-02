@@ -382,7 +382,7 @@ test(
         "onboard the hosted Fabric model from the installed package",
         "verify the Fabric identity and managed route",
         "request hosted Fabric model and workspace turns",
-        "reject an invalid Fabric config without leaking credentials",
+        "reject unsafe Fabric arguments without spawning a request process",
         "verify Fabric process and credential cleanup",
       ],
     },
@@ -802,11 +802,12 @@ test(
     expect(workspaceCleanup.exitCode, redactedResultText(workspaceCleanup)).toBe(0);
     expect(workspaceCleanup.stdout.trim()).toBe("NEMOCLAW_FABRIC_WORKSPACE_CLEAN");
 
-    progress.phase("reject an invalid Fabric config without leaking credentials");
+    progress.phase("reject unsafe Fabric arguments without spawning a request process");
     const redactionSentinel = "sk-proj-tc-inf-14-redaction-0123456789";
+    const promptSentinel = "tc-inf-14-private-rejected-prompt";
     const missingConfig = `/sandbox/.deepagents/missing-${redactionSentinel}.json`;
     const rejectedFabric = await runNemoclawCli(
-      [sandboxName, "agent", "--config", missingConfig, "-m", "redaction probe", "--json"],
+      [sandboxName, "agent", "--config", missingConfig, "-m", promptSentinel, "--json"],
       {
         artifactName: "tc-inf-14-fabric-invalid-config",
         artifacts,
@@ -819,15 +820,12 @@ test(
     expect(rejectedFabric.timedOut).toBe(false);
     expect(rejectedFabric.exitCode).toBe(2);
     expectResultOmitsSecret(rejectedFabric, apiKey, "invalid Fabric config");
-    expect(rejectedFabric.stdout.includes(redactionSentinel)).toBe(false);
-    expect(parseJsonObject(rejectedFabric.stdout, "invalid Fabric config")).toMatchObject({
-      error: {
-        code: "invalid_config",
-        message: expect.stringContaining("<redacted>"),
-        stage: "config",
-      },
-      status: "failed",
-    });
+    expect(rejectedFabric.stdout).toBe("");
+    expect(`${rejectedFabric.stdout}\n${rejectedFabric.stderr}`).not.toContain(redactionSentinel);
+    expect(`${rejectedFabric.stdout}\n${rejectedFabric.stderr}`).not.toContain(promptSentinel);
+    expect(rejectedFabric.stderr).toContain(
+      "Refusing to place unrecognized request values in the sandbox process arguments.",
+    );
 
     progress.phase("verify Fabric process and credential cleanup");
     const fabricProcessesAfter = await runNemoclawCli(
