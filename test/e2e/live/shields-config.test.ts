@@ -29,6 +29,7 @@ import {
   type IsolatedTestRuntime,
 } from "../fixtures/environment-profiles.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
+import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { pollUntil } from "../fixtures/polling.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
@@ -521,9 +522,19 @@ test(
   },
   async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
     const runtime = initializeTestRuntime();
-    cleanup.trackDisposable("remove isolated shields test home", () => {
-      fs.rmSync(runtime.home, { force: true, recursive: true });
+    cleanup.trackDisposable("clear isolated shields test runtime", () => {
       activeTestRuntime = undefined;
+    });
+    const gatewayCleanupEnvironment = commandEnv();
+    const gatewayCleanupRedactionValues: string[] = [];
+    trackIsolatedGatewayCleanup(cleanup, host, {
+      artifactName: "cleanup-shields-gateway",
+      environment: gatewayCleanupEnvironment,
+      gatewayName: runtime.gatewayName,
+      gatewayPort: runtime.gatewayPort,
+      home: runtime.home,
+      redactionValues: gatewayCleanupRedactionValues,
+      timeoutMs: 120_000,
     });
     await artifacts.target.declare({
       id: "shields-config",
@@ -564,6 +575,7 @@ test(
 
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
+    gatewayCleanupRedactionValues.push(apiKey);
 
     await preCleanSandbox(host, sandbox, "pre-cleanup");
     cleanup.trackDisposable(`remove shields state for ${SANDBOX_NAME}`, () => {
@@ -574,29 +586,6 @@ test(
         force: true,
       });
     });
-    const gatewayCleanupOptions = {
-      artifactName: "cleanup-openshell-gateway-destroy",
-      env: commandEnv(),
-      redactionValues: [apiKey],
-      timeoutMs: 60_000,
-    };
-    cleanup.trackGateway(
-      {
-        cleanupGatewayRegistration: (name: string) =>
-          cleanupWhenOpenShellAvailable(
-            host,
-            {
-              artifactName: "cleanup-probe-openshell-gateway",
-              env: gatewayCleanupOptions.env,
-              redactionValues: gatewayCleanupOptions.redactionValues,
-              timeoutMs: 30_000,
-            },
-            () => host.cleanupGatewayRegistration(name, gatewayCleanupOptions),
-          ),
-      },
-      runtime.gatewayName,
-      gatewayCleanupOptions,
-    );
     const openshellSandboxCleanupOptions = {
       artifactName: "cleanup-openshell-sandbox-delete",
       env: commandEnv(),

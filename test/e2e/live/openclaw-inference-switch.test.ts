@@ -41,6 +41,7 @@ import {
   type FakeOpenAiCompatibleServer,
   startFakeOpenAiCompatibleServer,
 } from "../fixtures/fake-openai-compatible.ts";
+import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import {
   inferenceResponseModel,
@@ -896,14 +897,18 @@ test(
   },
   },
   async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
-    const gatewayName = isolatedGatewayName();
+    const gateway = requireIsolatedTestGateway();
+    const gatewayName = gateway.name;
+    const gatewayPort = Number(gateway.environment.NEMOCLAW_GATEWAY_PORT);
     const home = createPrivateTestHome(".nemoclaw-openclaw-switch-home-");
-    cleanup.trackDisposable(
-      `remove OpenClaw inference switch test home for ${SANDBOX_NAME}`,
-      () => {
-        fs.rmSync(home, { recursive: true, force: true });
-      },
-    );
+    trackIsolatedGatewayCleanup(cleanup, host, {
+      artifactName: "cleanup-openclaw-inference-switch-gateway",
+      environment: commandEnv(home),
+      gatewayName,
+      gatewayPort,
+      home,
+      timeoutMs: 120_000,
+    });
   await artifacts.target.declare({
     id: "openclaw-inference-switch",
     boundary: "install-sh-openclaw-inference-set-and-live-agent-turn",
@@ -977,11 +982,6 @@ test(
   });
   cleanup.trackDisposable("close baseline inference provider", async () => {
     await baselineProvider?.close();
-  });
-    cleanup.trackGateway(host, gatewayName, {
-    artifactName: "cleanup-openshell-gateway-destroy-openclaw-inference-switch",
-    env: commandEnv(home),
-    timeoutMs: 120_000,
   });
   cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
     sandbox.cleanupSandbox(SANDBOX_NAME, {

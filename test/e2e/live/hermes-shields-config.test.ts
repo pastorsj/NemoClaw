@@ -1,16 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import fs from "node:fs";
-
 import {
   HERMES_SHIELDS_COMMAND_TIMEOUT_MS,
   HERMES_SHIELDS_CONFIG_TEST_TIMEOUT_MS,
 } from "../../../tools/e2e/hermes-timeout-contract.mts";
-import {
-  cleanupWhenCommandAvailable,
-  cleanupWhenOpenShellAvailable,
-} from "../fixtures/cleanup-resources.ts";
+import { cleanupWhenCommandAvailable } from "../fixtures/cleanup-resources.ts";
 import { assertExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
@@ -24,6 +19,7 @@ import {
   type IsolatedTestRuntime,
 } from "../fixtures/environment-profiles.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
+import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { stripAnsi } from "./json-envelope.ts";
@@ -314,9 +310,18 @@ test(
   },
   async ({ artifacts, cleanup: cleanupRegistry, host, progress, sandbox }) => {
     const runtime = initializeTestRuntime();
-    cleanupRegistry.trackDisposable("remove isolated Hermes shields test home", () => {
-      fs.rmSync(runtime.home, { force: true, recursive: true });
+    cleanupRegistry.trackDisposable("clear isolated Hermes shields test runtime", () => {
       activeTestRuntime = undefined;
+    });
+    const gatewayCleanupEnvironment = commandEnv();
+    trackIsolatedGatewayCleanup(cleanupRegistry, host, {
+      artifactName: "cleanup-hermes-shields-gateway",
+      environment: gatewayCleanupEnvironment,
+      gatewayName: runtime.gatewayName,
+      gatewayPort: runtime.gatewayPort,
+      home: runtime.home,
+      redactionValues: [COMPATIBLE_API_KEY],
+      timeoutMs: 120_000,
     });
   await artifacts.target.declare({
     id: "hermes-shields-config",
@@ -358,29 +363,6 @@ test(
       await fake.close();
     }
   });
-  const gatewayCleanupOptions = {
-    artifactName: "cleanup-destroy-gateway",
-    env: commandEnv(),
-    redactionValues: [COMPATIBLE_API_KEY],
-    timeoutMs: 60_000,
-  };
-  cleanupRegistry.trackGateway(
-    {
-      cleanupGatewayRegistration: (name: string) =>
-        cleanupWhenOpenShellAvailable(
-          host,
-          {
-            artifactName: "cleanup-probe-openshell-gateway",
-            env: gatewayCleanupOptions.env,
-            redactionValues: gatewayCleanupOptions.redactionValues,
-            timeoutMs: 30_000,
-          },
-          () => host.cleanupGatewayRegistration(name, gatewayCleanupOptions),
-        ),
-    },
-      runtime.gatewayName,
-    gatewayCleanupOptions,
-  );
   const sandboxCleanupOptions = {
     artifactName: "cleanup-destroy-sandbox",
     env: commandEnv(),

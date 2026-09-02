@@ -17,6 +17,7 @@ import {
 } from "../fixtures/environment-profiles.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { readJsonFile, readJsonFileOr, writeJsonFile } from "../fixtures/file-state.ts";
+import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
@@ -402,10 +403,16 @@ test(
     const gatewayPort = Number(gateway.environment.NEMOCLAW_GATEWAY_PORT);
     const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
     const home = createPrivateTestHome(".nemoclaw-rebuild-openclaw-home-");
-    cleanup.trackDisposable(`remove rebuild test home for ${SANDBOX_NAME}`, () => {
-      fs.rmSync(home, { recursive: true, force: true });
-    });
     const commandEnvironments = createRebuildCommandEnvironments(home, gateway.environment);
+    trackIsolatedGatewayCleanup(cleanup, host, {
+      artifactName: "cleanup-rebuild-openclaw-gateway",
+      environment: commandEnvironments.docker(),
+      gatewayName,
+      gatewayPort,
+      home,
+      redactionValues: [apiKey],
+      timeoutMs: OPENSHELL_TIMEOUT_MS,
+    });
     const statePaths = rebuildStatePaths(home, gatewayPort);
     expect(
       fs.existsSync(CLI_ENTRYPOINT),
@@ -470,11 +477,6 @@ test(
     cleanup.trackDisposable(`remove old OpenClaw base image ${OLD_BASE_TAG}`, () =>
       cleanupOldOpenClawBaseImage(host, commandEnvironments.docker()),
     );
-    cleanup.trackGateway(host, gatewayName, {
-      artifactName: "cleanup-openshell-gateway-destroy",
-      env: commandEnvironments.docker(),
-      timeoutMs: OPENSHELL_TIMEOUT_MS,
-    });
     cleanup.trackDisposable(`delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`, () =>
       sandbox.cleanupSandbox(SANDBOX_NAME, {
         artifactName: "cleanup-openshell-sandbox-delete",

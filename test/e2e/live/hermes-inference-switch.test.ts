@@ -1,8 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import fs from "node:fs";
-
 import { resultText } from "../fixtures/clients/index.ts";
 import { trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import {
@@ -11,6 +9,7 @@ import {
 } from "../fixtures/environment-profiles.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
+import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { DEFAULT_HOSTED_INFERENCE_BASE_URL } from "../fixtures/hosted-inference.ts";
 import { inferenceResponseModel } from "../fixtures/inference-switch-retry.ts";
 import {
@@ -92,8 +91,13 @@ test(
     const gatewayName = testGateway.name;
     const gatewayPort = Number(testGateway.environment.NEMOCLAW_GATEWAY_PORT);
     const home = createPrivateTestHome(".nemoclaw-hermes-switch-home-");
-    cleanup.trackDisposable(`remove Hermes inference switch test home for ${SANDBOX_NAME}`, () => {
-      fs.rmSync(home, { recursive: true, force: true });
+    trackIsolatedGatewayCleanup(cleanup, host, {
+      artifactName: "cleanup-hermes-inference-switch-gateway",
+      environment: env(undefined, {}, home),
+      gatewayName,
+      gatewayPort,
+      home,
+      timeoutMs: 60_000,
     });
   await artifacts.target.declare({
     id: "hermes-inference-switch",
@@ -109,11 +113,6 @@ test(
     const commandEnv = (apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv =>
       env(apiKey, extra, home);
     const cleanupEnv = commandEnv();
-    cleanup.trackGateway(host, gatewayName, {
-    artifactName: "cleanup-openshell-gateway",
-    env: cleanupEnv,
-    timeoutMs: 60_000,
-  });
   cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
     sandbox.cleanupSandbox(SANDBOX_NAME, {
       artifactName: "cleanup-openshell-delete",

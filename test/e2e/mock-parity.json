@@ -510,14 +510,16 @@
         "src/lib/actions/inference-set-compatible-provider.test.ts",
         "test/e2e/support/compatible-anthropic-switch.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
-        "test/e2e/support/e2e-clients.test.ts"
+        "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/gateway-cleanup.test.ts"
       ]
     },
     {
       "live": "test/e2e/live/hermes-shields-config.test.ts",
       "fast": [
         "test/e2e/support/e2e-cleanup-resources.test.ts",
-        "test/e2e/support/e2e-clients.test.ts"
+        "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/gateway-cleanup.test.ts"
       ]
     },
     {
@@ -643,6 +645,7 @@
         "test/e2e/support/compatible-anthropic-switch.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
         "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/gateway-cleanup.test.ts",
         "test/e2e/support/openclaw-agent-output.test.ts"
       ]
     },
@@ -701,6 +704,7 @@
         "src/lib/actions/sandbox/rebuild-flow-lifecycle.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
         "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/gateway-cleanup.test.ts",
         "test/e2e/support/public-fabric-turn.test.ts",
         "test/e2e/support/rebuild-hermes-env.test.ts",
         "test/e2e/support/rebuild-hermes-base-identity.test.ts",
@@ -716,6 +720,7 @@
         "src/lib/actions/sandbox/rebuild-flow-lifecycle.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
         "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/gateway-cleanup.test.ts",
         "test/e2e/support/public-fabric-turn.test.ts"
       ]
     },
@@ -739,6 +744,7 @@
         "src/lib/shields/policy-delta.test.ts",
         "test/e2e/support/e2e-cleanup-resources.test.ts",
         "test/e2e/support/e2e-clients.test.ts",
+        "test/e2e/support/gateway-cleanup.test.ts",
         "test/e2e/support/shields-failed-startup.test.ts"
       ]
     },

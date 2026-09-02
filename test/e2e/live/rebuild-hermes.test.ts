@@ -26,6 +26,7 @@ import {
   snapshotFile,
   writeJsonFile,
 } from "../fixtures/file-state.ts";
+import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { CLI_ENTRYPOINT } from "../fixtures/paths.ts";
 import { listCredentialLeakPaths } from "../fixtures/phases/state-validation.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
@@ -539,18 +540,24 @@ test(
     meta: { e2ePhases: REBUILD_HERMES_PHASES },
   },
   async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
-    const runtime = createIsolatedTestRuntime(".nemoclaw-e2e-rebuild-hermes-");
-    cleanup.trackDisposable(`remove isolated rebuild-Hermes HOME ${runtime.home}`, () => {
-      fs.rmSync(runtime.home, { recursive: true, force: true });
-    });
+    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
+    const runtime = createIsolatedTestRuntime(".nemoclaw-e2e-rebuild-hermes-home-");
     const testEnv = createRebuildHermesEnvFactory(runtime.environment(), {
       endpointUrl: HOSTED_ENDPOINT_URL,
       model: HOSTED_MODEL,
       openshellBin: process.env.OPENSHELL_BIN,
       sandboxName: SANDBOX_NAME,
     });
+    trackIsolatedGatewayCleanup(cleanup, host, {
+      artifactName: "cleanup-rebuild-hermes-gateway",
+      environment: hermesCleanupEnv(testEnv, apiKey),
+      gatewayName: runtime.gatewayName,
+      gatewayPort: runtime.gatewayPort,
+      home: runtime.home,
+      redactionValues: hermesCleanupRedactions(apiKey),
+      timeoutMs: 3 * 60_000,
+    });
     const statePaths = rebuildHermesStatePaths(runtime.home, runtime.gatewayPort);
-    const apiKey = secrets.required("NVIDIA_INFERENCE_API_KEY");
     const redactionValues = [apiKey, DISCORD_FAKE_TOKEN, PRE_REBUILD_API_SERVER_KEY];
     const expectedVersion = expectedHermesVersion();
     const cronRestore = createRebuildHermesCronRestoreFixture({
@@ -646,12 +653,6 @@ test(
         }),
       ),
     );
-    cleanup.trackGateway(host, runtime.gatewayName, {
-      artifactName: "cleanup-hermes-rebuild-resources-gateway",
-      env: hermesCleanupEnv(testEnv, apiKey),
-      redactionValues: hermesCleanupRedactions(apiKey),
-      timeoutMs: 3 * 60_000,
-    });
     cleanup.trackDisposable(`remove Hermes Discord provider for ${SANDBOX_NAME}`, () =>
       cleanupHermesDiscordProvider(host, testEnv, apiKey, activeOpenshellBin),
     );
