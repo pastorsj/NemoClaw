@@ -61,6 +61,7 @@ export default defineConfig({
     include: [
       ...hermesNemoclawTestMoves.map(({ destination }) => destination),
       ...hermesNemoclawSplitTests,
+      "tests/image/fabric-policy.test.ts",
     ],
   },
 });

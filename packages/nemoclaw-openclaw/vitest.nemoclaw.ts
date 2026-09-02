@@ -62,6 +62,7 @@ export default defineConfig({
     include: [
       ...openclawNemoclawTestMoves.map(({ destination }) => destination),
       ...openclawNemoclawSplitTests,
+      "tests/image/fabric-policy.test.ts",
     ],
   },
 });

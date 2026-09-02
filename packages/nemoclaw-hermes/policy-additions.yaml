@@ -18,6 +18,7 @@ filesystem_policy:
     - /usr
     - /lib
     - /opt/hermes
+    - /opt/nemoclaw-fabric-venv
     - /proc
     - /dev/urandom
     - /app
