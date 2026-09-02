@@ -11,7 +11,7 @@ export default class SandboxAgentCommand extends NemoClawCommand {
   static strict = false;
   static summary = "Run one agent turn non-interactively in a sandbox";
   static description =
-    "Run the registered package's headless command with a plain prompt. OpenClaw selector flags keep the native `openclaw agent` passthrough.";
+    "Run the registered package's headless command with a common prompt. Bare, help, and option-first package commands stay native. OpenClaw selector flags keep the native `openclaw agent` passthrough.";
   static usage = ["<name> [prompt-or-agent-flags...]"];
   static examples = [
     '<%= config.bin %> sandbox agent alpha "Summarise README.md"',

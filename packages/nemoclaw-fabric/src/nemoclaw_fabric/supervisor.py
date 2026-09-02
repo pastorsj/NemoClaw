@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import math
 import os
 import signal
@@ -33,6 +34,8 @@ EXIT_FAILURE = 1
 EXIT_USAGE = 2
 EXIT_TIMEOUT = 124
 EXIT_UNAVAILABLE = 127
+PR_SET_CHILD_SUBREAPER = 36
+PROCESS_CHECK_SECONDS = 0.025
 
 
 class SupervisorArgumentParser(argparse.ArgumentParser):
@@ -79,6 +82,73 @@ def _signal_process_group(process: subprocess.Popen[bytes], selected_signal: int
             pass
 
 
+def _enable_linux_child_subreaper() -> None:
+    """Adopt nested-session processes when an inner cleanup owner is killed."""
+
+    if sys.platform != "linux":
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, os.strerror(error_number))
+
+
+def _direct_linux_children(worker_process_id: int) -> set[int]:
+    """Find adopted children without treating the supervised worker as detached."""
+
+    if sys.platform != "linux":
+        return set()
+    children: set[int] = set()
+    try:
+        entries = os.scandir("/proc")
+    except OSError:
+        return children
+    with entries:
+        for entry in entries:
+            if not entry.name.isdecimal():
+                continue
+            try:
+                process_id = int(entry.name)
+                process_stat = Path(f"/proc/{entry.name}/stat").read_text(
+                    encoding="ascii"
+                )
+                closing = process_stat.rfind(")")
+                if closing == -1:
+                    continue
+                fields = process_stat[closing + 2 :].split()
+                if len(fields) >= 2 and int(fields[1]) == os.getpid():
+                    if process_id != worker_process_id:
+                        children.add(process_id)
+            except (FileNotFoundError, PermissionError, ValueError, OSError):
+                continue
+    return children
+
+
+def _reap_linux_children(process_ids: set[int]) -> None:
+    """Release exited processes adopted from nested sessions."""
+
+    for process_id in process_ids:
+        while True:
+            try:
+                reaped, _status = os.waitpid(process_id, os.WNOHANG)
+            except ChildProcessError:
+                break
+            except InterruptedError:
+                continue
+            if reaped == 0:
+                break
+
+
+def _signal_linux_children(process_ids: set[int], selected_signal: int) -> None:
+    """Signal processes that the Linux subreaper now directly owns."""
+
+    for process_id in process_ids:
+        try:
+            os.kill(process_id, selected_signal)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
 def _process_group_exists(process_group_id: int) -> bool:
     try:
         os.killpg(process_group_id, 0)
@@ -92,28 +162,51 @@ def _process_group_exists(process_group_id: int) -> bool:
 def _wait_for_process_tree(
     process: subprocess.Popen[bytes],
     deadline: float,
+    adopted_signal: int,
 ) -> bool:
-    """Wait until the worker is reaped and its process group is gone."""
+    """Wait until the worker group and every adopted nested session are gone."""
 
     while time.monotonic() < deadline:
         worker_stopped = process.poll() is not None
         process_group_stopped = not _process_group_exists(process.pid)
-        if worker_stopped and process_group_stopped:
+        adopted_children = _direct_linux_children(process.pid)
+        _signal_linux_children(adopted_children, adopted_signal)
+        _reap_linux_children(adopted_children)
+        adopted_children = _direct_linux_children(process.pid)
+        if worker_stopped and process_group_stopped and not adopted_children:
             return True
-        time.sleep(0.025)
-    return process.poll() is not None and not _process_group_exists(process.pid)
+        time.sleep(PROCESS_CHECK_SECONDS)
+
+    worker_stopped = process.poll() is not None
+    process_group_stopped = not _process_group_exists(process.pid)
+    adopted_children = _direct_linux_children(process.pid)
+    _signal_linux_children(adopted_children, adopted_signal)
+    _reap_linux_children(adopted_children)
+    return (
+        worker_stopped
+        and process_group_stopped
+        and not _direct_linux_children(process.pid)
+    )
 
 
 def _stop_process(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
-    """Stop the worker's complete process group before artifact cleanup."""
+    """Stop the worker group and nested sessions before artifact cleanup."""
 
     _signal_process_group(process, signal.SIGTERM)
-    if _wait_for_process_tree(process, time.monotonic() + grace_seconds):
+    if _wait_for_process_tree(
+        process,
+        time.monotonic() + grace_seconds,
+        signal.SIGTERM,
+    ):
         return
     _signal_process_group(process, signal.SIGKILL)
     final_wait_seconds = max(0.25, min(grace_seconds, 2.0))
-    if not _wait_for_process_tree(process, time.monotonic() + final_wait_seconds):
-        raise RuntimeError("Fabric worker process group did not stop")
+    if not _wait_for_process_tree(
+        process,
+        time.monotonic() + final_wait_seconds,
+        signal.SIGKILL,
+    ):
+        raise RuntimeError("Fabric worker process tree did not stop")
 
 
 def _process_exit_code(return_code: int) -> int:
@@ -162,6 +255,10 @@ def run_supervised(arguments: Sequence[str]) -> int:
 
     exit_code = EXIT_FAILURE
     try:
+        try:
+            _enable_linux_child_subreaper()
+        except OSError:
+            return EXIT_UNAVAILABLE
         try:
             process = subprocess.Popen(
                 command,

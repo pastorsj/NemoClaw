@@ -19,6 +19,8 @@ from nemo_fabric import FabricError
 from nemoclaw_fabric.command import EXIT_FAILURE
 from nemoclaw_fabric.command import EXIT_SUCCESS
 from nemoclaw_fabric.command import EXIT_USAGE
+from nemoclaw_fabric.command import MAX_OUTPUT_BYTES
+from nemoclaw_fabric.command import MAX_PROMPT_BYTES
 from nemoclaw_fabric.command import run_cli
 from nemoclaw_fabric.command import version_text
 
@@ -223,6 +225,34 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertEqual(exit_code, EXIT_USAGE)
                 self.assertEqual(stdout, "")
                 self.assertIn("input failed [invalid_prompt]", stderr)
+                self.assertEqual(client.run_calls, [])
+
+    def test_prompt_byte_limit_accepts_limit_and_rejects_limit_plus_one(self) -> None:
+        exact_prompt = "é" * (MAX_PROMPT_BYTES // 2)
+        exit_code, stdout, stderr, client = self.invoke(
+            self.run_arguments("--stdin"),
+            stdin_text=exact_prompt,
+        )
+
+        self.assertEqual(exit_code, EXIT_SUCCESS)
+        self.assertEqual(stdout, "ok\n")
+        self.assertEqual(stderr, "")
+        self.assertEqual(client.run_calls[0][2].input, exact_prompt)
+
+        for arguments, stdin_text in (
+            (self.run_arguments("--stdin"), f"{exact_prompt}é"),
+            (self.run_arguments("-m", f"{'a' * MAX_PROMPT_BYTES}a"), ""),
+        ):
+            with self.subTest(arguments=arguments[:3]):
+                exit_code, stdout, stderr, client = self.invoke(
+                    arguments,
+                    stdin_text=stdin_text,
+                )
+
+                self.assertEqual(exit_code, EXIT_USAGE)
+                self.assertEqual(stdout, "")
+                self.assertIn("input failed [invalid_prompt]", stderr)
+                self.assertIn(f"{MAX_PROMPT_BYTES}-byte input limit", stderr)
                 self.assertEqual(client.run_calls, [])
 
     def test_json_prompt_errors_are_reported_before_client_creation(self) -> None:
@@ -668,6 +698,69 @@ class FabricCommandTests(unittest.TestCase):
                 self.assertEqual(stderr, "")
                 self.assertNotIn(secret, stdout)
                 self.assertIn("<redacted>", stdout)
+
+    def test_output_byte_limit_accepts_limit_and_rejects_limit_plus_one(self) -> None:
+        exact_response = "a" * MAX_OUTPUT_BYTES
+        exit_code, stdout, stderr, _selected = self.invoke(
+            self.run_arguments("-m", "prompt"),
+            client=StubFabricClient(
+                result=StubResult("succeeded", output={"response": exact_response})
+            ),
+        )
+
+        self.assertEqual(exit_code, EXIT_SUCCESS)
+        self.assertEqual(stdout, f"{exact_response}\n")
+        self.assertEqual(stderr, "")
+
+        for output_arguments in ((), ("--json",)):
+            with self.subTest(arguments=output_arguments):
+                exit_code, stdout, stderr, _selected = self.invoke(
+                    self.run_arguments("-m", "prompt", *output_arguments),
+                    client=StubFabricClient(
+                        result=StubResult(
+                            "succeeded",
+                            output={"response": f"{exact_response}a"},
+                        )
+                    ),
+                )
+
+                self.assertEqual(exit_code, EXIT_FAILURE)
+                combined_output = f"{stdout}\n{stderr}"
+                self.assertIn("output_limit_exceeded", combined_output)
+                self.assertNotIn(exact_response, combined_output)
+                if output_arguments:
+                    self.assertEqual(json.loads(stdout)["error"]["stage"], "output")
+
+    def test_output_limit_bounds_doctor_reports_and_raised_errors(self) -> None:
+        oversized_text = "a" * (MAX_OUTPUT_BYTES + 1)
+        cases = (
+            (
+                self.doctor_arguments(),
+                StubFabricClient(
+                    report=StubReport("warn", [StubCheck("adapter", "warn", oversized_text)])
+                ),
+            ),
+            (
+                self.run_arguments("-m", "prompt", "--json"),
+                StubFabricClient(
+                    report=StubReport("fail", [StubCheck("adapter", "fail", oversized_text)])
+                ),
+            ),
+            (
+                self.doctor_arguments("--json"),
+                StubFabricClient(
+                    doctor_error=FabricError(oversized_text, stage="doctor", code="failed")
+                ),
+            ),
+        )
+        for arguments, client in cases:
+            with self.subTest(arguments=arguments):
+                exit_code, stdout, stderr, _selected = self.invoke(arguments, client=client)
+
+                self.assertEqual(exit_code, EXIT_FAILURE)
+                combined_output = f"{stdout}\n{stderr}"
+                self.assertIn("output_limit_exceeded", combined_output)
+                self.assertNotIn(oversized_text, combined_output)
 
     def test_success_output_redacts_values_under_nested_credential_keys(self) -> None:
         response = {

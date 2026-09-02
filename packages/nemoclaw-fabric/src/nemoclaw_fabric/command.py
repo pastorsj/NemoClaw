@@ -44,6 +44,8 @@ from nemoclaw_fabric.runner import (
 EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 EXIT_USAGE = 2
+MAX_PROMPT_BYTES = 1024 * 1024
+MAX_OUTPUT_BYTES = 1024 * 1024
 
 
 class PromptSourceError(ValueError):
@@ -56,6 +58,10 @@ class CommandArgumentError(ValueError):
 
 class FabricInvocationUnavailableError(RuntimeError):
     """Package data marks this Fabric invocation configuration unavailable."""
+
+
+class FabricOutputLimitError(RuntimeError):
+    """A rendered Fabric result exceeds the public command output limit."""
 
 
 class CommandInterrupted(RuntimeError):
@@ -139,8 +145,8 @@ def version_text() -> str:
 def select_prompt(args: argparse.Namespace, stdin: TextIO) -> str:
     """Require one non-empty positional, message, or standard-input prompt."""
 
-    positional = " ".join(args.prompt).strip() if args.prompt else None
-    message = args.message.strip() if args.message is not None else None
+    positional = " ".join(args.prompt) if args.prompt else None
+    message = args.message if args.message is not None else None
     selected_sources = sum(
         value is not None for value in (positional, message, True if args.stdin else None)
     )
@@ -148,13 +154,12 @@ def select_prompt(args: argparse.Namespace, stdin: TextIO) -> str:
         raise PromptSourceError(
             "run requires exactly one prompt source: positional text, -m/--message, or --stdin"
         )
-    prompt = (
-        stdin.read().strip()
-        if args.stdin
-        else positional
-        if positional is not None
-        else message
-    )
+    prompt = stdin.read(MAX_PROMPT_BYTES + 1) if args.stdin else positional or message
+    if prompt is not None and len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
+        raise PromptSourceError(
+            f"the selected prompt exceeds the {MAX_PROMPT_BYTES}-byte input limit"
+        )
+    prompt = prompt.strip() if prompt is not None else None
     if prompt is None or not prompt:
         raise PromptSourceError("the selected prompt source is empty")
     return prompt
@@ -168,6 +173,14 @@ def _write_line(stream: TextIO, text: str) -> None:
     stream.write(text)
     stream.write("\n")
     stream.flush()
+
+
+def _require_bounded_output(text: str) -> str:
+    if len(text.encode("utf-8")) > MAX_OUTPUT_BYTES:
+        raise FabricOutputLimitError(
+            f"the Fabric result exceeds the {MAX_OUTPUT_BYTES}-byte output limit"
+        )
+    return text
 
 
 def _doctor_plain_text(report: Any, secret_values: Sequence[str]) -> str:
@@ -267,6 +280,8 @@ def _write_command_error(
         stage, code, exit_code = "input", "invalid_arguments", EXIT_USAGE
     elif isinstance(error, FabricInvocationUnavailableError):
         stage, code, exit_code = "config", "unsupported_configuration", EXIT_USAGE
+    elif isinstance(error, FabricOutputLimitError):
+        stage, code, exit_code = "output", "output_limit_exceeded", EXIT_FAILURE
     elif isinstance(error, FabricConfigLoadError):
         stage, code, exit_code = "config", "invalid_config", EXIT_USAGE
     elif isinstance(error, FabricError):
@@ -278,20 +293,35 @@ def _write_command_error(
     code = redact_diagnostic_text(code, hidden_values)
     message = redact_diagnostic_text(str(error) or error.__class__.__name__, hidden_values)
     if json_output:
-        _write_line(
-            stdout,
-            serialize_json_output(
+        rendered = serialize_json_output(
+            error_payload(
+                stage=stage,
+                code=code,
+                message=message,
+                secret_values=hidden_values,
+            ),
+            hidden_values,
+        )
+        if len(rendered.encode("utf-8")) > MAX_OUTPUT_BYTES:
+            rendered = serialize_json_output(
                 error_payload(
-                    stage=stage,
-                    code=code,
-                    message=message,
-                    secret_values=hidden_values,
+                    stage="output",
+                    code="output_limit_exceeded",
+                    message=(
+                        f"the Fabric result exceeds the {MAX_OUTPUT_BYTES}-byte output limit"
+                    ),
                 ),
                 hidden_values,
-            ),
-        )
+            )
+        _write_line(stdout, rendered)
     else:
-        _write_line(stderr, f"nemoclaw-fabric: {stage} failed [{code}]: {message}")
+        rendered = f"nemoclaw-fabric: {stage} failed [{code}]: {message}"
+        if len(rendered.encode("utf-8")) > MAX_OUTPUT_BYTES:
+            rendered = (
+                "nemoclaw-fabric: output failed [output_limit_exceeded]: "
+                f"the Fabric result exceeds the {MAX_OUTPUT_BYTES}-byte output limit"
+            )
+        _write_line(stderr, rendered)
     return exit_code
 
 
@@ -348,7 +378,7 @@ def run_cli(
                 else _doctor_plain_text(report, secret_values)
             )
             target = error_stream if report.status == "fail" and not args.json else output_stream
-            _write_line(target, rendered)
+            _write_line(target, _require_bounded_output(rendered))
             return EXIT_FAILURE if report.status == "fail" else EXIT_SUCCESS
 
         prompt = select_prompt(args, input_stream)
@@ -362,12 +392,11 @@ def run_cli(
                 if result.status == "succeeded"
                 else (*secret_values, prompt)
             )
-            _write_line(
-                output_stream,
-                serialize_json_output(_report_mapping(result), result_secrets),
-            )
+            rendered = serialize_json_output(_report_mapping(result), result_secrets)
+            _write_line(output_stream, _require_bounded_output(rendered))
         elif result.status == "succeeded":
-            _write_line(output_stream, render_plain_result(result, secret_values))
+            rendered = render_plain_result(result, secret_values)
+            _write_line(output_stream, _require_bounded_output(rendered))
         else:
             error = result.error
             stage = error.stage if error is not None else "invoke"
@@ -379,11 +408,11 @@ def run_cli(
             )
             stage = redact_diagnostic_text(stage, (*secret_values, prompt))
             code = redact_diagnostic_text(code, (*secret_values, prompt))
-            _write_line(
-                error_stream,
+            rendered = (
                 f"nemoclaw-fabric: {stage} failed [{code}]: "
-                f"{redact_diagnostic_text(message, (*secret_values, prompt))}",
+                f"{redact_diagnostic_text(message, (*secret_values, prompt))}"
             )
+            _write_line(error_stream, _require_bounded_output(rendered))
         return EXIT_SUCCESS if result.status == "succeeded" else EXIT_FAILURE
     except PromptSourceError as error:
         return _write_command_error(
@@ -396,16 +425,28 @@ def run_cli(
         )
     except FabricDoctorFailure as error:
         report = _report_mapping(error.report)
-        if args.json:
-            payload = error_payload(
-                stage="doctor",
-                code="doctor_failed",
-                message=str(error),
-                details={"report": report},
+        try:
+            if args.json:
+                payload = error_payload(
+                    stage="doctor",
+                    code="doctor_failed",
+                    message=str(error),
+                    details={"report": report},
+                )
+                rendered = serialize_json_output(payload, secret_values)
+                _write_line(output_stream, _require_bounded_output(rendered))
+            else:
+                rendered = _doctor_plain_text(error.report, secret_values)
+                _write_line(error_stream, _require_bounded_output(rendered))
+        except FabricOutputLimitError as output_error:
+            return _write_command_error(
+                error=output_error,
+                json_output=bool(getattr(args, "json", False)),
+                stdout=output_stream,
+                stderr=error_stream,
+                secret_values=secret_values,
+                prompt=prompt,
             )
-            _write_line(output_stream, serialize_json_output(payload, secret_values))
-        else:
-            _write_line(error_stream, _doctor_plain_text(error.report, secret_values))
         return EXIT_FAILURE
     except CommandInterrupted as error:
         message = f"interrupted by signal {error.signal_number}"
@@ -427,6 +468,7 @@ def run_cli(
     except (
         FabricConfigLoadError,
         FabricInvocationUnavailableError,
+        FabricOutputLimitError,
         FabricError,
     ) as error:
         return _write_command_error(

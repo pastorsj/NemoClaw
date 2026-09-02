@@ -10,6 +10,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -22,6 +23,7 @@ from unittest.mock import patch
 
 PI_ROOT = Path(__file__).resolve().parents[2]
 FABRIC_SOURCE = PI_ROOT / "fabric" / "src"
+FABRIC_RUN_SUPERVISOR = shutil.which("nemoclaw-fabric-run")
 sys.path.insert(0, str(FABRIC_SOURCE))
 
 from nemo_fabric_adapter_contract.models import AgentConfig  # noqa: E402
@@ -703,6 +705,104 @@ class GenericRunnerTests(PiFixtureMixin, unittest.TestCase):
             self.assertNotEqual(payload["child_group"], payload["parent_group"])
         _wait_for_stopped([payload["parent"], payload["child"]])
         self.assert_fabric_artifacts_removed()
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and FABRIC_RUN_SUPERVISOR is not None,
+        "the installed Linux Fabric supervisor is required",
+    )
+    def test_supervisor_deadline_reaps_nested_pi_session(self) -> None:
+        config = self.write_config(timeout_seconds=30)
+        secret_prompt = "forced-kill-private-pi-prompt"
+        environment = {
+            **os.environ,
+            **self.environment,
+            "NEMOCLAW_FAKE_PI_MODE": "hang",
+            "VIRTUAL_ENV": str(Path(sys.executable).parent.parent),
+        }
+        assert FABRIC_RUN_SUPERVISOR is not None
+        process = subprocess.Popen(
+            [
+                FABRIC_RUN_SUPERVISOR,
+                "--deadline-seconds",
+                "2",
+                "--kill-grace-seconds",
+                "0.1",
+                "--config",
+                str(config),
+                "-m",
+                secret_prompt,
+                "--json",
+            ],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        worker_group: int | None = None
+        wrapper_group: int | None = None
+        pi_process: int | None = None
+        detached_process: int | None = None
+        try:
+            invocation_directories: list[Path] = []
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                invocation_directories = [
+                    entry
+                    for entry in self.artifacts.iterdir()
+                    if entry.is_dir() and entry.name.startswith(".nemoclaw-run-")
+                ]
+                if self.pid_marker.exists() and len(invocation_directories) == 1:
+                    break
+                time.sleep(0.025)
+            self.assertTrue(self.pid_marker.exists())
+            self.assertEqual(len(invocation_directories), 1)
+            worker_group = int(
+                invocation_directories[0]
+                .name.removeprefix(".nemoclaw-run-")
+                .split("-", 1)[0]
+            )
+            payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
+            pi_process = int(payload["parent"])
+            detached_process = int(payload["child"])
+            wrapper_group = int(payload["parent_group"])
+            self.assertEqual(int(payload["child_group"]), detached_process)
+            self.assertNotEqual(detached_process, wrapper_group)
+
+            os.killpg(wrapper_group, signal.SIGSTOP)
+            os.killpg(worker_group, signal.SIGSTOP)
+            stdout, stderr = process.communicate(timeout=10)
+
+            self.assertEqual(process.returncode, 124, stdout + stderr)
+            self.assertNotIn(secret_prompt, stdout + stderr)
+            for process_id in (wrapper_group, pi_process, detached_process):
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(process_id, 0)
+            self.assert_fabric_artifacts_removed()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            for process_group in (worker_group, wrapper_group, detached_process):
+                if process_group is None:
+                    continue
+                try:
+                    os.killpg(process_group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            remaining = [
+                process_id
+                for process_id in (wrapper_group, pi_process, detached_process)
+                if process_id is not None
+            ]
+            if remaining:
+                _wait_for_stopped(remaining)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
 
 
 if __name__ == "__main__":

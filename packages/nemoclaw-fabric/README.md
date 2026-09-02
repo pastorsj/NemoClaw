@@ -22,6 +22,10 @@ nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 \
 
 `run` accepts one prompt source: `-m`, positional text, or `--stdin`. Add
 `--json` to print the normalized Fabric report or result as one JSON object.
+The runner accepts at most 1 MiB of UTF-8 prompt text and emits at most 1 MiB
+for one rendered result or doctor report. It rejects an oversized prompt
+before creating the Fabric client and returns `output_limit_exceeded` instead
+of forwarding an oversized result.
 
 The configuration file is the integration boundary. It is validated as a
 native `FabricConfig`. This experimental qualification covers configurations
@@ -89,6 +93,12 @@ killed, the supervisor removes only directories bearing that worker's process
 identifier. A completed cleanup does not leave prompts or credentials in
 Fabric's diagnostic tree, and independent worker processes do not delete one
 another's state.
+
+On Linux, the supervisor becomes a child subreaper before it starts the
+worker. It adopts, signals, and reaps nested sessions when an adapter cleanup
+owner cannot return. The command fails before starting a worker if Linux does
+not provide that ownership boundary. Other operating systems retain the
+worker-process-group cleanup boundary.
 
 If process-group shutdown or artifact removal cannot be confirmed, the
 supervisor returns a generic failure instead of success. That failure requires

@@ -9,6 +9,7 @@ import io
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from nemoclaw_hermes_fabric import adapter as proxy_adapter
 from nemoclaw_hermes_fabric.adapter import PROCESS_RESPONSE_LIMIT_BYTES
 
 
+FABRIC_RUN_SUPERVISOR = shutil.which("nemoclaw-fabric-run")
 MANAGED_CONFIG = {
     "schema_version": "fabric.agent/v1alpha1",
     "metadata": {
@@ -97,6 +99,8 @@ class AIAgent:
                 start_new_session=True,
             )
             invocation["child_pid"] = child.pid
+            invocation["process_group"] = os.getpgrp()
+            invocation["child_group"] = os.getpgid(child.pid)
             if marker:
                 Path(marker).write_text(json.dumps(invocation), encoding="utf-8")
             while True:
@@ -566,6 +570,101 @@ class ComposedFabricTests(unittest.TestCase):
         _wait_for_stopped(invocation["pid"])
         _wait_for_stopped(invocation["child_pid"])
         self.assert_fabric_artifacts_removed()
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and FABRIC_RUN_SUPERVISOR is not None,
+        "the installed Linux Fabric supervisor is required",
+    )
+    def test_supervisor_deadline_reaps_nested_hermes_session(self) -> None:
+        config = self.write_config(timeout_seconds=30)
+        secret_prompt = "forced-kill-private-hermes-prompt"
+        environment = {
+            **os.environ,
+            **self.environment,
+            "NEMOCLAW_FAKE_HERMES_MODE": "hang",
+        }
+        assert FABRIC_RUN_SUPERVISOR is not None
+        process = subprocess.Popen(
+            [
+                FABRIC_RUN_SUPERVISOR,
+                "--deadline-seconds",
+                "2",
+                "--kill-grace-seconds",
+                "0.1",
+                "--config",
+                str(config),
+                "-m",
+                secret_prompt,
+                "--json",
+            ],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        worker_group: int | None = None
+        wrapper_group: int | None = None
+        hermes_process: int | None = None
+        detached_process: int | None = None
+        try:
+            invocation_directories: list[Path] = []
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                invocation_directories = [
+                    entry
+                    for entry in self.artifacts.iterdir()
+                    if entry.is_dir() and entry.name.startswith(".nemoclaw-run-")
+                ]
+                if self.invocation_marker.exists() and len(invocation_directories) == 1:
+                    break
+                time.sleep(0.025)
+            self.assertTrue(self.invocation_marker.exists())
+            self.assertEqual(len(invocation_directories), 1)
+            worker_group = int(
+                invocation_directories[0]
+                .name.removeprefix(".nemoclaw-run-")
+                .split("-", 1)[0]
+            )
+            invocation = json.loads(
+                self.invocation_marker.read_text(encoding="utf-8")
+            )
+            hermes_process = int(invocation["pid"])
+            detached_process = int(invocation["child_pid"])
+            wrapper_group = int(invocation["process_group"])
+            self.assertEqual(int(invocation["child_group"]), detached_process)
+            self.assertNotEqual(detached_process, wrapper_group)
+
+            os.killpg(wrapper_group, signal.SIGSTOP)
+            os.killpg(worker_group, signal.SIGSTOP)
+            stdout, stderr = process.communicate(timeout=10)
+
+            self.assertEqual(process.returncode, 124, stdout + stderr)
+            self.assertNotIn(secret_prompt, stdout + stderr)
+            for process_id in (wrapper_group, hermes_process, detached_process):
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(process_id, 0)
+            self.assert_fabric_artifacts_removed()
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=5)
+            for process_group in (worker_group, wrapper_group, detached_process):
+                if process_group is None:
+                    continue
+                try:
+                    os.killpg(process_group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            for process_id in (wrapper_group, hermes_process, detached_process):
+                if process_id is not None:
+                    _wait_for_stopped(process_id)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
 
     def test_runner_bounds_oversized_output_and_redacts_credentials(self) -> None:
         exit_failure, _exit_success, _run_cli = _generic_runner()

@@ -171,12 +171,14 @@ command.
 
 ## Headless Fabric path
 
-A terminal agent runtime can declare both `runtime.interactive_command` and
-`runtime.headless_command`. NemoClaw preserves the native interactive command. For a plain prompt,
-`nemoclaw sandbox agent <sandbox> "<prompt>"` invokes the receipt-pinned headless command. The
-bundled Fabric packages point that command at the generic `nemoclaw-fabric` runner and a
-package-owned `fabric.json`. NemoClaw adds `--stdin` and writes the prompt through a private pipe;
-prompt text is never appended to the host OpenShell process arguments.
+An agent runtime can declare both `runtime.interactive_command` and `runtime.headless_command`.
+NemoClaw sends a plain prompt, or `-m`/`--message` with optional `--json`, to the receipt-pinned
+headless command. The bundled Fabric packages point that command at the generic
+`nemoclaw-fabric` runner and a package-owned `fabric.json`. NemoClaw adds `--stdin` and writes the
+prompt through a private pipe; prompt text is never appended to the host OpenShell process
+arguments. When the package declares an interactive command, a bare invocation, help, and
+option-first package commands use it, so packages keep their own command surface without core
+knowing its grammar. OpenClaw selector flags also keep the existing native passthrough.
 
 Every package lists generated sidecars such as `fabric.json` under `config.shields_files`, so the
 same Shields transition protects the native config, its hash, and the adapter configuration. A
@@ -187,8 +189,7 @@ Packages that need a shared gateway writer use their package-owned guard or decl
 The package owns the remaining choices: whether to consume a released Fabric adapter or ship a
 small adapter, how managed configuration is projected into `fabric.json`, and how the image pins
 the runner and adapter dependency graphs. NemoClaw core resolves the receipt-pinned manifest
-command without importing a Fabric harness adapter. Native option and selector invocations continue
-to use the native command so the existing command surface is preserved.
+command without importing a Fabric adapter.
 
 Fabric qualification follows the same layers for every package:
 

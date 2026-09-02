@@ -20,7 +20,10 @@
 //      agent flags verbatim. Terminal-runtime dispatch uses that manifest
 //      command only when it can be represented as simple whitespace-delimited
 //      argv tokens; shell quoting/escaping fails closed until manifests expose
-//      argv natively.
+//      argv natively. For a Fabric headless command, NemoClaw recognizes only
+//      the shared prompt grammar and delivers that prompt over private stdin.
+//      Bare, help, and option-first calls use the manifest's native command, so
+//      core does not need to understand a package-specific option grammar.
 //    - Source-fix constraint: NemoClaw cannot prove agent type from anywhere
 //      except the registry, because the OpenShell exec transport has no
 //      pre-execution probe that reveals the sandbox's configured agent. A
@@ -116,6 +119,8 @@
 //     argv arrays natively.
 //   - Drop Ollama pre-dispatch recovery when supported daemon restarts preserve
 //     loaded runners or NemoClaw manages and warms the daemon lifecycle.
+
+import path from "node:path";
 
 import { type AgentDefinition, isTerminalAgent } from "../../../agent/defs";
 import { CLI_NAME } from "../../../cli/branding";
@@ -276,7 +281,7 @@ type AgentPassthroughInvocation = {
   stdinInput?: string;
 };
 type FabricArgumentResult =
-  | { kind: "forward"; arguments: string[] }
+  | { kind: "native" }
   | { kind: "prompt"; prompt: string; jsonOutput: boolean }
   | { kind: "invalid" };
 
@@ -346,53 +351,67 @@ function splitManifestCommand(command: string): ManifestCommandResult {
   return { kind: "command", argv: trimmed.split(/\s+/).filter(Boolean) };
 }
 
-function getTerminalPassthroughCommand(agent: AgentDefinition): ManifestCommandResult {
+function getHeadlessPassthroughCommand(agent: AgentDefinition): ManifestCommandResult {
   const command = agent.runtime?.headless_command ?? agent.runtime?.interactive_command ?? "";
   return splitManifestCommand(command);
 }
 
-function getGatewayHeadlessCommand(agent: AgentDefinition): ManifestCommandResult {
-  return splitManifestCommand(agent.runtime?.headless_command ?? "");
+function getNativePassthroughCommand(agent: AgentDefinition): ManifestCommandResult {
+  return splitManifestCommand(agent.runtime?.interactive_command ?? "");
 }
 
 function isPlainPromptInvocation(args: readonly string[]): boolean {
   return args.length > 0 && args.every((arg) => arg.trim().length > 0 && !arg.startsWith("-"));
 }
 
+function matchesExecutableName(command: string | undefined, executableName: string): boolean {
+  if (command === executableName) return true;
+  return Boolean(
+    command && path.posix.isAbsolute(command) && path.posix.basename(command) === executableName,
+  );
+}
+
 function isFabricRunCommand(command: readonly string[]): boolean {
-  if (command[0] === "nemoclaw-fabric-run") return true;
-  const runnerIndex = command.indexOf("nemoclaw-fabric");
-  return runnerIndex >= 0 && command[runnerIndex + 1] === "run";
+  if (matchesExecutableName(command[0], "nemoclaw-fabric-run")) return true;
+  return matchesExecutableName(command[0], "nemoclaw-fabric") && command[1] === "run";
 }
 
 function parseFabricPromptArguments(extraArgs: readonly string[]): FabricArgumentResult {
-  if (
-    extraArgs.length === 0 ||
-    (extraArgs.length === 1 && ["-h", "--help"].includes(extraArgs[0]))
-  ) {
-    return { kind: "forward", arguments: [...extraArgs] };
-  }
-
   const jsonCount = extraArgs.filter((argument) => argument === "--json").length;
-  if (jsonCount > 1) return { kind: "invalid" };
   const jsonOutput = jsonCount === 1;
   const promptArguments = extraArgs.filter((argument) => argument !== "--json");
-  if (promptArguments.length === 0) return { kind: "invalid" };
+  if (promptArguments.length === 0) return { kind: "native" };
 
   if (promptArguments[0] === "-m" || promptArguments[0] === "--message") {
-    if (promptArguments.length !== 2 || !promptArguments[1]?.trim()) {
+    if (jsonCount > 1 || promptArguments.length !== 2 || !promptArguments[1]?.trim()) {
       return { kind: "invalid" };
     }
     return { kind: "prompt", prompt: promptArguments[1], jsonOutput };
   }
   if (promptArguments[0]?.startsWith("--message=")) {
     const prompt = promptArguments[0].slice("--message=".length);
-    return promptArguments.length === 1 && prompt.trim()
+    return jsonCount <= 1 && promptArguments.length === 1 && prompt.trim()
       ? { kind: "prompt", prompt, jsonOutput }
       : { kind: "invalid" };
   }
-  if (!isPlainPromptInvocation(promptArguments)) return { kind: "invalid" };
-  return { kind: "prompt", prompt: promptArguments.join(" "), jsonOutput };
+  if (isPlainPromptInvocation(promptArguments)) {
+    return jsonCount <= 1
+      ? { kind: "prompt", prompt: promptArguments.join(" "), jsonOutput }
+      : { kind: "invalid" };
+  }
+
+  // An option-first invocation belongs to the package's native CLI unless it
+  // also contains the common message grammar in an invalid position. This
+  // keeps native help and harness-specific options available without teaching
+  // NemoClaw their grammar.
+  if (promptArguments[0]?.startsWith("-")) {
+    const containsMessageArgument = promptArguments.some(
+      (argument) =>
+        argument === "-m" || argument === "--message" || argument.startsWith("--message="),
+    );
+    return containsMessageArgument ? { kind: "invalid" } : { kind: "native" };
+  }
+  return { kind: "invalid" };
 }
 
 function rejectFabricInvocationArguments(
@@ -410,11 +429,15 @@ function rejectFabricInvocationArguments(
 
 function buildManifestInvocation(
   sandboxName: string,
-  command: readonly string[],
+  agentName: string,
+  headlessCommand: readonly string[],
+  nativeCommand: ManifestCommandResult,
   extraArgs: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
 ): AgentPassthroughInvocation {
-  if (!isFabricRunCommand(command)) return { command: [...command, ...extraArgs] };
+  if (!isFabricRunCommand(headlessCommand)) {
+    return { command: [...headlessCommand, ...extraArgs] };
+  }
 
   const fabricArguments = parseFabricPromptArguments(extraArgs);
   if (fabricArguments.kind === "invalid") {
@@ -423,14 +446,18 @@ function buildManifestInvocation(
   if (fabricArguments.kind === "prompt") {
     return {
       command: [
-        ...command,
-        ...(command.includes("--stdin") ? [] : ["--stdin"]),
+        ...headlessCommand,
+        ...(headlessCommand.includes("--stdin") ? [] : ["--stdin"]),
         ...(fabricArguments.jsonOutput ? ["--json"] : []),
       ],
       stdinInput: fabricArguments.prompt,
     };
   }
-  return { command: [...command, ...fabricArguments.arguments] };
+  if (nativeCommand.kind === "unsupported") {
+    rejectAgentResolutionError(sandboxName, agentName, nativeCommand.message, proc);
+  }
+  const command = nativeCommand.argv.length > 0 ? nativeCommand.argv : headlessCommand;
+  return { command: [...command, ...extraArgs] };
 }
 
 function getPassthroughCommand(
@@ -488,15 +515,22 @@ function getPassthroughCommand(
   }
 
   const manifestCommand = isTerminalAgent(agent)
-    ? getTerminalPassthroughCommand(agent)
-    : getGatewayHeadlessCommand(agent);
+    ? getHeadlessPassthroughCommand(agent)
+    : splitManifestCommand(agent.runtime?.headless_command ?? "");
   if (manifestCommand.kind === "unsupported") {
     rejectAgentResolutionError(sandboxName, agentName, manifestCommand.message, proc);
   }
   if (manifestCommand.argv.length === 0) {
     rejectNonOpenclawAgent(sandboxName, agentName, proc);
   }
-  return buildManifestInvocation(sandboxName, manifestCommand.argv, extraArgs, proc);
+  return buildManifestInvocation(
+    sandboxName,
+    agentName,
+    manifestCommand.argv,
+    getNativePassthroughCommand(agent),
+    extraArgs,
+    proc,
+  );
 }
 
 function isOpenClawPassthroughCommand(command: readonly string[]): boolean {

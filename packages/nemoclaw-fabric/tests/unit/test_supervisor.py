@@ -71,6 +71,29 @@ class FabricRunSupervisorTests(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.kill(process_id, 0)
 
+    def test_non_linux_hosts_do_not_require_the_subreaper_api(self) -> None:
+        with (
+            patch.object(supervisor.sys, "platform", "darwin"),
+            patch.object(supervisor.ctypes, "CDLL") as load_libc,
+        ):
+            supervisor._enable_linux_child_subreaper()
+
+        load_libc.assert_not_called()
+
+    def test_linux_subreaper_failure_prevents_an_unowned_worker(self) -> None:
+        with (
+            patch.object(
+                supervisor,
+                "_enable_linux_child_subreaper",
+                side_effect=OSError("subreaper unavailable"),
+            ),
+            patch.object(supervisor.subprocess, "Popen") as popen,
+        ):
+            exit_code = supervisor.run_supervised(self.supervisor_arguments())
+
+        self.assertEqual(exit_code, supervisor.EXIT_UNAVAILABLE)
+        popen.assert_not_called()
+
     def test_help_succeeds_without_starting_a_worker(self) -> None:
         for argument in ("-h", "--help"):
             with self.subTest(argument=argument):
@@ -181,6 +204,75 @@ class FabricRunSupervisorTests(unittest.TestCase):
         self.assertLess(elapsed, 0.75)
         self.assert_process_stopped(process.pid)
         self.assertFalse(supervisor._process_group_exists(process.pid))
+
+    @unittest.skipUnless(sys.platform == "linux", "child subreapers require Linux")
+    def test_forced_stop_reaps_a_frozen_nested_session_and_detached_child(self) -> None:
+        process_marker = self.base_dir / "nested-processes.json"
+        nested_source = "\n".join(
+            [
+                "import json, os, signal, subprocess, sys, time",
+                "from pathlib import Path",
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+                "child = subprocess.Popen(",
+                "    [sys.executable, '-c', "
+                "'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'],",
+                "    start_new_session=True,",
+                ")",
+                f"Path({str(process_marker)!r}).write_text(",
+                "    json.dumps({'owner': os.getpid(), 'child': child.pid}),",
+                "    encoding='utf-8',",
+                ")",
+                "while True: time.sleep(1)",
+            ]
+        )
+        worker_source = "\n".join(
+            [
+                "import signal, subprocess, sys, time",
+                "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+                "subprocess.Popen(",
+                f"    [sys.executable, '-c', {nested_source!r}],",
+                "    start_new_session=True,",
+                ")",
+                "while True: time.sleep(1)",
+            ]
+        )
+        supervisor._enable_linux_child_subreaper()
+        process = subprocess.Popen(
+            [sys.executable, "-c", worker_source],
+            start_new_session=True,
+        )
+        nested_owner: int | None = None
+        detached_child: int | None = None
+        try:
+            deadline = time.monotonic() + 3
+            while not process_marker.exists() and time.monotonic() < deadline:
+                time.sleep(0.025)
+            self.assertTrue(process_marker.exists())
+            payload = json.loads(process_marker.read_text(encoding="utf-8"))
+            nested_owner = int(payload["owner"])
+            detached_child = int(payload["child"])
+            os.killpg(nested_owner, signal.SIGSTOP)
+
+            started_at = time.monotonic()
+            supervisor._stop_process(process, 0.2)
+            elapsed = time.monotonic() - started_at
+        finally:
+            for process_group in (process.pid, nested_owner, detached_child):
+                if process_group is None:
+                    continue
+                try:
+                    os.killpg(process_group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=2)
+
+        self.assertLess(elapsed, 1.0)
+        self.assert_process_stopped(process.pid)
+        assert nested_owner is not None and detached_child is not None
+        self.assert_process_stopped(nested_owner)
+        self.assert_process_stopped(detached_child)
 
     def test_cleanup_failure_cannot_be_reported_as_success_or_echo_details(self) -> None:
         original_popen = subprocess.Popen

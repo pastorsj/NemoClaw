@@ -1008,16 +1008,16 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
         self.assert_fabric_artifacts_removed()
 
     @unittest.skipUnless(
-        os.name == "posix" and FABRIC_RUN_SUPERVISOR is not None,
-        "the installed POSIX Fabric supervisor is required",
+        sys.platform.startswith("linux") and FABRIC_RUN_SUPERVISOR is not None,
+        "the installed Linux Fabric supervisor is required",
     )
-    def test_supervisor_forced_kill_removes_openclaw_prompt(self) -> None:
+    def test_supervisor_deadline_reaps_nested_openclaw_session(self) -> None:
         config = self.write_config(timeout_seconds=30)
         secret_prompt = "forced-kill-private-openclaw-prompt"
         environment = {
             **os.environ,
             **self.environment,
-            "NEMOCLAW_FAKE_OPENCLAW_MODE": "hang_without_child",
+            "NEMOCLAW_FAKE_OPENCLAW_MODE": "hang",
             "VIRTUAL_ENV": str(Path(sys.executable).parent.parent),
         }
         assert FABRIC_RUN_SUPERVISOR is not None
@@ -1025,7 +1025,7 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
             [
                 FABRIC_RUN_SUPERVISOR,
                 "--deadline-seconds",
-                "30",
+                "2",
                 "--kill-grace-seconds",
                 "0.1",
                 "--config",
@@ -1042,6 +1042,7 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
         worker_group: int | None = None
         wrapper_group: int | None = None
         fake_process: int | None = None
+        detached_process: int | None = None
         try:
             assert process.stdin is not None
             process.stdin.write(secret_prompt)
@@ -1067,20 +1068,25 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
             )
             process_payload = json.loads(self.pid_marker.read_text(encoding="utf-8"))
             fake_process = int(process_payload["parent"])
+            detached_process = int(process_payload["child"])
             wrapper_group = int(process_payload["parent_group"])
+            self.assertEqual(int(process_payload["child_group"]), detached_process)
+            self.assertNotEqual(detached_process, wrapper_group)
 
             # Freeze both cleanup-capable process groups. The supervisor must
-            # escalate its worker to SIGKILL and remove the request directory
-            # without relying on either adapter finally block.
+            # reach its hard deadline, adopt the nested wrapper, then reap both
+            # the stopped OpenClaw session and its separately detached child.
             os.killpg(wrapper_group, signal.SIGSTOP)
             os.killpg(worker_group, signal.SIGSTOP)
-            process.send_signal(signal.SIGTERM)
             return_code = process.wait(timeout=10)
             stdout = process.stdout.read() if process.stdout is not None else ""
             stderr = process.stderr.read() if process.stderr is not None else ""
 
-            self.assertEqual(return_code, 128 + signal.SIGTERM, stdout + stderr)
+            self.assertEqual(return_code, 124, stdout + stderr)
             self.assertNotIn(secret_prompt, stdout + stderr)
+            for process_id in (wrapper_group, fake_process, detached_process):
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(process_id, 0)
             self.assertFalse(prompt_path.exists())
             self.assert_fabric_artifacts_removed()
         finally:
@@ -1091,15 +1097,20 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
-            for process_group in (worker_group, wrapper_group):
+            for process_group in (worker_group, wrapper_group, detached_process):
                 if process_group is None:
                     continue
                 try:
                     os.killpg(process_group, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-            if fake_process is not None:
-                _wait_for_stopped([fake_process])
+            remaining = [
+                process_id
+                for process_id in (wrapper_group, fake_process, detached_process)
+                if process_id is not None
+            ]
+            if remaining:
+                _wait_for_stopped(remaining)
             for stream in (process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()

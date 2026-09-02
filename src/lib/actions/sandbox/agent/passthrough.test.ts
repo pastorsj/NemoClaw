@@ -688,15 +688,50 @@ describe("runAgentPassthrough", () => {
     expect(execMock).not.toHaveBeenCalled();
   });
 
-  it("dispatches Deep Agents Code help to its headless command instead of local wrapper help", async () => {
-    getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
-    await runAgentPassthrough("dcode-help", { extraArgs: ["--help"] });
-    expect(ensureLiveMock).toHaveBeenCalledWith("dcode-help", { allowNonReadyPhase: true });
-    expect(execMock).toHaveBeenCalledWith("dcode-help", ["nemoclaw-fabric", "run", "--help"], {
-      tty: false,
-    });
-  });
+  it.each([
+    ["Pi", "bare", "pi", "terminal", "pi", []],
+    ["Pi", "help", "pi", "terminal", "pi", ["--help"]],
+    ["Pi", "option-first", "pi", "terminal", "pi", ["--model", "native-model"]],
+    ["Hermes", "bare", "hermes", "gateway", "hermes", []],
+    ["Hermes", "help", "hermes", "gateway", "hermes", ["--help"]],
+    ["Hermes", "option-first", "hermes", "gateway", "hermes", ["--model", "native-model"]],
+    ["Deep Agents Code", "bare", "langchain-deepagents-code", "terminal", "dcode", []],
+    ["Deep Agents Code", "help", "langchain-deepagents-code", "terminal", "dcode", ["--help"]],
+    [
+      "Deep Agents Code",
+      "option-first",
+      "langchain-deepagents-code",
+      "terminal",
+      "dcode",
+      ["--model", "native-model"],
+    ],
+  ] as const)(
+    "keeps the %s %s invocation on its native command",
+    async (_displayName, _invocation, agentName, runtimeKind, nativeCommand, extraArgs) => {
+      const entry = { agent: agentName };
+      getSandboxMock.mockReturnValueOnce(entry as never);
+      resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+        recordedAgent: agentName,
+        effectiveAgentId: agentName,
+        definition: {
+          name: agentName,
+          runtime: {
+            kind: runtimeKind,
+            interactive_command: nativeCommand,
+            headless_command: "nemoclaw-fabric run --config /sandbox/runtime/fabric.json",
+          },
+        } as ResolvedSandboxAgent["definition"],
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      });
 
+      await runAgentPassthrough(`${agentName}-native`, { extraArgs });
+
+      expect(execMock).toHaveBeenCalledWith(`${agentName}-native`, [nativeCommand, ...extraArgs], {
+        tty: false,
+      });
+    },
+  );
   it("dispatches Deep Agents Code through the bounded Fabric command in its manifest", async () => {
     const actualAgentDefinitions =
       await vi.importActual<typeof import("../../../agent/defs")>("../../../agent/defs");
@@ -751,6 +786,60 @@ describe("runAgentPassthrough", () => {
   });
 
   it.each([
+    [
+      "nemoclaw-fabric-run",
+      "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run --config /sandbox/runtime/fabric.json",
+      [
+        "/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run",
+        "--config",
+        "/sandbox/runtime/fabric.json",
+        "--stdin",
+      ],
+    ],
+    [
+      "nemoclaw-fabric run",
+      "/usr/local/bin/nemoclaw-fabric run --config /sandbox/runtime/fabric.json",
+      [
+        "/usr/local/bin/nemoclaw-fabric",
+        "run",
+        "--config",
+        "/sandbox/runtime/fabric.json",
+        "--stdin",
+      ],
+    ],
+  ] as const)(
+    "delivers a prompt privately when the absolute %s executable path is installed",
+    async (_runnerName, headlessCommand, expectedArgv) => {
+      const sentinel = "absolute-runner-private-prompt-1d8b";
+      const entry = { agent: "package-agent" };
+      getSandboxMock.mockReturnValueOnce(entry as never);
+      resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+        recordedAgent: "package-agent",
+        effectiveAgentId: "package-agent",
+        definition: {
+          name: "package-agent",
+          runtime: {
+            kind: "terminal",
+            interactive_command: "package-agent",
+            headless_command: headlessCommand,
+          },
+        } as ResolvedSandboxAgent["definition"],
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      });
+
+      await runAgentPassthrough("absolute-fabric", { extraArgs: [sentinel] });
+
+      const invocation = execMock.mock.calls.at(-1) as unknown as
+        | [string, string[], { stdinInput: string; tty: boolean }]
+        | undefined;
+      expect(invocation?.[1]).toEqual(expectedArgv);
+      expect(invocation?.[1]).not.toContain(sentinel);
+      expect(invocation?.[2]).toEqual({ stdinInput: sentinel, tty: false });
+    },
+  );
+
+  it.each([
     {
       name: "a duplicate config option",
       arguments: [
@@ -767,28 +856,26 @@ describe("runAgentPassthrough", () => {
       arguments: ["-m", "private-unknown-option-prompt", "--unknown"],
       forbiddenOutput: /private-unknown-option-prompt/u,
     },
-    {
-      name: "an unknown option before positional text",
-      arguments: ["--unknown", "private-positional-prompt"],
-      forbiddenOutput: /private-positional-prompt/u,
+  ])(
+    "rejects $name without forwarding request values in argv",
+    async ({ arguments: args, forbiddenOutput }) => {
+      const actualAgentDefinitions =
+        await vi.importActual<typeof import("../../../agent/defs")>("../../../agent/defs");
+      getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
+      loadAgentMock.mockImplementationOnce(actualAgentDefinitions.loadAgent);
+      const { writes, exit, proc } = makeProcMock();
+
+      await expect(
+        runAgentPassthrough("dcode-fabric", { extraArgs: args }, { process: proc }),
+      ).rejects.toThrow("__exit:2");
+
+      expect(exit).toHaveBeenCalledWith(2);
+      expect(ensureLiveMock).not.toHaveBeenCalled();
+      expect(execMock).not.toHaveBeenCalled();
+      expect(writes.join("\n")).toContain("Refusing to place unrecognized request values");
+      expect(writes.join("\n")).not.toMatch(forbiddenOutput);
     },
-  ])("rejects $name without forwarding request values in argv", async ({ arguments: args, forbiddenOutput }) => {
-    const actualAgentDefinitions =
-      await vi.importActual<typeof import("../../../agent/defs")>("../../../agent/defs");
-    getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
-    loadAgentMock.mockImplementationOnce(actualAgentDefinitions.loadAgent);
-    const { writes, exit, proc } = makeProcMock();
-
-    await expect(
-      runAgentPassthrough("dcode-fabric", { extraArgs: args }, { process: proc }),
-    ).rejects.toThrow("__exit:2");
-
-    expect(exit).toHaveBeenCalledWith(2);
-    expect(ensureLiveMock).not.toHaveBeenCalled();
-    expect(execMock).not.toHaveBeenCalled();
-    expect(writes.join("\n")).toContain("Refusing to place unrecognized request values");
-    expect(writes.join("\n")).not.toMatch(forbiddenOutput);
-  });
+  );
 
   it("keeps a Fabric prompt out of argv and diagnostics while delivering exact stdin", async () => {
     const sentinel = "private-prompt-sentinel-83b2f1";
@@ -824,10 +911,13 @@ describe("runAgentPassthrough", () => {
     getSandboxMock.mockReturnValueOnce({ agent: "langchain-deepagents-code" });
     execMock.mockRejectedValueOnce(new Error("__exit:42"));
 
-    await expect(runAgentPassthrough("dcode-fail")).rejects.toThrow("__exit:42");
+    await expect(
+      runAgentPassthrough("dcode-fail", { extraArgs: ["Reply with PONG"] }),
+    ).rejects.toThrow("__exit:42");
 
     expect(ensureLiveMock).toHaveBeenCalledWith("dcode-fail", { allowNonReadyPhase: true });
-    expect(execMock).toHaveBeenCalledWith("dcode-fail", ["nemoclaw-fabric", "run"], {
+    expect(execMock).toHaveBeenCalledWith("dcode-fail", ["nemoclaw-fabric", "run", "--stdin"], {
+      stdinInput: "Reply with PONG",
       tty: false,
     });
   });

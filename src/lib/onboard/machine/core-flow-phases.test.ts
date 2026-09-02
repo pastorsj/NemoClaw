@@ -157,12 +157,12 @@ describe("core onboard flow phases", () => {
         | ((context: {
             revalidateSandboxIdentity: (operation: string) => void;
           }) => Promise<void>)
-        | undefined;
+        | null;
       expect(createIntent).toMatchObject({
         resolved: { policy: { basePolicyPath: "/repo/policy.yaml" } },
       });
       expect(createIntent.deferSandboxEffectsUntilIdentityVerification).toBeUndefined();
-      expect(runVerifiedEffects).toBeUndefined();
+      expect(runVerifiedEffects).toBeNull();
       expect(stageSandboxCredentialProviders).toHaveBeenCalledOnce();
       events.push("sandbox-create");
       return "created-sandbox";
