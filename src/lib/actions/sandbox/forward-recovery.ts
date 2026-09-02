@@ -24,7 +24,8 @@ import {
 } from "../../onboard/forward-cleanup";
 import {
   resolveSandboxHermesApiPort,
-  retargetHermesApiPortInUrl,
+  resolveSandboxHealthPort,
+  retargetAgentHealthUrl,
 } from "../../onboard/hermes-api-port";
 import { isWsl } from "../../platform";
 import { ROOT } from "../../state/paths";
@@ -58,9 +59,10 @@ export type {
 } from "./probe/hermes-portable-forward-recovery";
 
 type SandboxPortAgent = {
+  name?: string;
   forwardPort?: unknown;
   forward_ports?: unknown;
-  healthProbe?: { url?: string } | null;
+  healthProbe?: { port?: number; url?: string } | null;
   runtime?: { kind?: unknown };
 } | null;
 
@@ -142,9 +144,13 @@ export function resolveSandboxHealthProbeUrl(
       typeof agent.healthProbe?.url === "string" && agent.healthProbe.url.length > 0
         ? agent.healthProbe.url
         : `http://127.0.0.1:${DASHBOARD_PORT}/health`;
-    return retargetHermesApiPortInUrl(
+    const resolvedPort = resolveSandboxHealthPort(sandboxName, agent, {
+      getSandbox: deps.getSandbox ?? registry.getSandbox,
+    });
+    return retargetAgentHealthUrl(
       healthProbeUrl,
-      resolveSandboxHermesApiPort(registry.getSandbox(sandboxName) ?? {}),
+      agent.healthProbe?.port,
+      resolvedPort,
     );
   }
   return `http://127.0.0.1:${resolveSandboxDashboardPort(sandboxName, deps)}/health`;

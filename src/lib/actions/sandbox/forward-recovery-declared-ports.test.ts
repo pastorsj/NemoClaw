@@ -107,3 +107,33 @@ describe("ensureDeclaredAgentForwardPortsHealthy", () => {
     expect(mocks.runOpenshell).not.toHaveBeenCalled();
   });
 });
+
+describe("resolveSandboxHealthProbeUrl", () => {
+  it("targets the allocated primary port for a dashboard-backed gateway", async () => {
+    mocks.getSandbox.mockReturnValue({ agent: "openclaw", dashboardPort: 18791 });
+    mocks.getSessionAgent.mockReturnValue({
+      name: "openclaw",
+      forwardPort: 18789,
+      forward_ports: [18789],
+      healthProbe: { port: 18789, url: "http://127.0.0.1:18789/health" },
+    });
+    const { resolveSandboxHealthProbeUrl } = await import("./forward-recovery");
+    expect(resolveSandboxHealthProbeUrl("openclaw")).toBe("http://127.0.0.1:18791/health");
+  });
+
+  it("targets the allocated API port for a separate Hermes gateway", async () => {
+    mocks.getSandbox.mockReturnValue({
+      agent: "hermes",
+      dashboardPort: 18791,
+      hermesApiPort: 8643,
+    });
+    mocks.getSessionAgent.mockReturnValue({
+      name: "hermes",
+      forwardPort: 18789,
+      forward_ports: [18789, 8642],
+      healthProbe: { port: 8642, url: "http://127.0.0.1:8642/health" },
+    });
+    const { resolveSandboxHealthProbeUrl } = await import("./forward-recovery");
+    expect(resolveSandboxHealthProbeUrl("hermes")).toBe("http://127.0.0.1:8643/health");
+  });
+});

@@ -14,7 +14,7 @@ import { runCapture as defaultRunCapture } from "../runner";
 import {
   ensureAgentDashboardForward as ensureAgentDashboardForwardForAgent,
   replaceUrlPort,
-  resolveVerifyAgentApiPort,
+  resolveSandboxHealthPort,
 } from "./agent-dashboard-forward";
 import { ensureAgentFixedForward as ensureFixedAgentForward } from "./agent-fixed-forward";
 import { fetchAgentWebAuthTokenFromSandbox as fetchAgentWebAuthToken } from "./agent-web-auth-token";
@@ -278,9 +278,9 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
   /**
    * Build the delivery chain deployment verification probes for `sandboxName`.
    *
-   * Resolves the agent's OpenAI-compatible API port for this sandbox rather
-   * than the agent manifest default, so verification probes the port this
-   * sandbox actually publishes on the host (#9290).
+   * Resolves the agent's in-sandbox health port rather than assuming the
+   * package manifest default. This covers both an allocated primary dashboard
+   * port and a separate per-sandbox API port.
    */
   function buildAgentVerifyChain(
     chatUiUrl: string,
@@ -290,7 +290,7 @@ export function createOnboardDashboardHelpers(deps: OnboardDashboardDeps): Onboa
     // Resolve WSL once: `buildChain` and the host-address lookup must agree, or
     // the chain can claim WSL while dropping the fallback URL that pairs with it.
     const isWsl = deps.isWsl();
-    const sandboxHealthPort = resolveVerifyAgentApiPort(sandboxName, agent, {
+    const sandboxHealthPort = resolveSandboxHealthPort(sandboxName, agent, {
       getSandbox: deps.getSandbox,
     });
     return buildChain({

@@ -2,7 +2,71 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureAgentDashboardForward } from "./agent-dashboard-forward";
+import {
+  ensureAgentDashboardForward,
+  resolveSandboxHealthPort,
+  retargetAgentHealthUrl,
+} from "./agent-dashboard-forward";
+
+describe("sandbox agent health port", () => {
+  it("uses the allocated dashboard port for a dashboard-backed gateway", () => {
+    expect(
+      resolveSandboxHealthPort(
+        "openclaw",
+        {
+          name: "openclaw",
+          forwardPort: 18789,
+          healthProbe: { port: 18789 },
+        },
+        { getSandbox: () => ({ dashboardPort: 18791 }) },
+      ),
+    ).toBe(18791);
+  });
+
+  it("uses the allocated Hermes API port for a separate API gateway", () => {
+    expect(
+      resolveSandboxHealthPort(
+        "hermes",
+        {
+          name: "hermes",
+          forwardPort: 18789,
+          forward_ports: [18789, 8642],
+          healthProbe: { port: 8642 },
+        },
+        { getSandbox: () => ({ dashboardPort: 18791, hermesApiPort: 8643 }) },
+      ),
+    ).toBe(8643);
+  });
+
+  it("keeps an unrelated declared health port", () => {
+    expect(
+      resolveSandboxHealthPort(
+        "custom",
+        {
+          name: "custom",
+          forwardPort: 18789,
+          healthProbe: { port: 9000 },
+        },
+        { getSandbox: () => ({ dashboardPort: 18791 }) },
+      ),
+    ).toBe(9000);
+  });
+
+  it("returns undefined when the package declares no health port", () => {
+    expect(
+      resolveSandboxHealthPort("terminal", { name: "terminal" }, { getSandbox: () => null }),
+    ).toBeUndefined();
+  });
+
+  it("retargets only a URL that names the replaced default port", () => {
+    expect(retargetAgentHealthUrl("http://127.0.0.1:18789/health", 18789, 18791)).toBe(
+      "http://127.0.0.1:18791/health",
+    );
+    expect(retargetAgentHealthUrl("http://127.0.0.1:9000/health", 18789, 18791)).toBe(
+      "http://127.0.0.1:9000/health",
+    );
+  });
+});
 
 describe("ensureAgentDashboardForward", () => {
   afterEach(() => {

@@ -11,10 +11,9 @@ import {
 } from "./dashboard-runtime";
 import { resolveOnboardHermesApiPort } from "./hermes-api-port";
 
-// The port deployment verification must probe lives with the rest of this
-// module's "which host port does this agent publish" logic, so onboarding
-// reaches it through the dashboard helpers it already consumes (#9290).
-export { resolveVerifyAgentApiPort } from "./hermes-api-port";
+// Health-port resolution lives with the existing per-sandbox port allocator;
+// re-export it beside the host-forward workflow that consumes the result.
+export { resolveSandboxHealthPort, retargetAgentHealthUrl } from "./hermes-api-port";
 
 export type EnsureDashboardForward = (
   sandboxName: string,

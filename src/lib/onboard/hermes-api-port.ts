@@ -416,25 +416,72 @@ export function resolveOnboardHermesApiPort(
 }
 
 /**
- * Resolve the API port deployment verification must probe for `agent`.
+ * Resolve the port that deployment and recovery must probe inside a sandbox.
  *
- * Returns the agent's declared health-probe port, except for Hermes, whose
- * per-sandbox allocation from the 8642-8652 range means the manifest default
- * would name a sibling sandbox's port. Returns undefined when the agent
- * declares no health-probe port, which leaves `buildChain` on its dashboard-port
- * fallback so agents without a separate API surface keep their existing single
- * host probe (#9290).
+ * A manifest declares default ports. A dashboard-backed gateway follows the
+ * primary port NemoClaw allocated for this sandbox, while Hermes follows its
+ * separately allocated API port. Unallocated or unrelated health ports remain
+ * unchanged.
  */
-export function resolveVerifyAgentApiPort(
+export function resolveSandboxHealthPort(
   sandboxName: string,
-  agent: { name?: string; healthProbe?: { port?: number } | null } | null | undefined,
+  agent:
+    | {
+        name?: string;
+        forwardPort?: unknown;
+        forward_ports?: unknown;
+        healthProbe?: { port?: number } | null;
+      }
+    | null
+    | undefined,
   options: {
-    getSandbox?: (name: string) => { hermesApiPort?: number | null } | null | undefined;
+    getSandbox?: (
+      name: string,
+    ) => { dashboardPort?: number | null; hermesApiPort?: number | null } | null | undefined;
   } = {},
 ): number | undefined {
-  const declared = agent?.healthProbe?.port;
-  if (!Number.isInteger(declared)) return undefined;
-  if (agent?.name !== "hermes" || declared !== HERMES_OPENAI_API_PORT) return declared;
-  const getSandbox = options.getSandbox ?? registry.getSandbox;
-  return resolveSandboxHermesApiPort(getSandbox(sandboxName) ?? {});
+  const declaredPort = agent?.healthProbe?.port;
+  if (!isValidHealthPort(declaredPort)) return undefined;
+
+  const sandbox = (options.getSandbox ?? registry.getSandbox)(sandboxName);
+  if (agent?.name === "hermes" && declaredPort === HERMES_OPENAI_API_PORT) {
+    return resolveSandboxHermesApiPort(sandbox ?? {});
+  }
+
+  const declaredForwardPorts = [
+    agent?.forwardPort,
+    ...(Array.isArray(agent?.forward_ports) ? agent.forward_ports : []),
+  ];
+  const primaryForwardPort = declaredForwardPorts.find(isValidHealthPort);
+  if (declaredPort === primaryForwardPort && isValidHealthPort(sandbox?.dashboardPort)) {
+    return sandbox.dashboardPort;
+  }
+  return declaredPort;
+}
+
+function isValidHealthPort(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+/** Retarget a manifest health URL only when it names the replaced default port. */
+export function retargetAgentHealthUrl(
+  url: string,
+  declaredPort: number | undefined,
+  resolvedPort: number | undefined,
+): string {
+  if (
+    !isValidHealthPort(declaredPort) ||
+    !isValidHealthPort(resolvedPort) ||
+    declaredPort === resolvedPort
+  ) {
+    return url;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.port !== String(declaredPort)) return url;
+    parsed.port = String(resolvedPort);
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }
