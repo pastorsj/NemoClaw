@@ -160,10 +160,14 @@ print(json.dumps({
 }, sort_keys=True))
 `;
 
+const PROCESS_CLEANUP_MAX_INSPECTIONS = 3;
+const PROCESS_CLEANUP_SETTLE_SECONDS = 1;
+
 const PROCESS_PROBE_SCRIPT = String.raw`
 import json
 import os
 import sys
+import time
 
 mode, agent, prompt_marker, baseline_json = sys.argv[1:]
 if mode not in {"baseline", "verify"}:
@@ -207,35 +211,53 @@ while current > 0 and current not in excluded:
     except (FileNotFoundError, PermissionError, ValueError, OSError):
         break
 
-matches = []
-new_processes = []
-process_identities = []
-unreadable = []
-for entry in os.scandir("/proc"):
-    if not entry.name.isdecimal():
-        continue
-    process_id = int(entry.name)
-    if process_id in excluded:
-        continue
-    try:
-        _parent, start_time = process_record(process_id)
-        command = open(f"/proc/{process_id}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
-    except FileNotFoundError:
-        continue
-    except (PermissionError, OSError):
-        unreadable.append(process_id)
-        continue
-    identity = {"pid": process_id, "startTime": start_time}
-    process_identities.append(identity)
-    if mode == "verify" and (process_id, start_time) not in baseline:
-        new_processes.append(process_id)
-    if command and any(token in command for token in tokens):
-        matches.append(process_id)
+def inspect_processes():
+    matches = []
+    new_processes = []
+    process_identities = []
+    unreadable = []
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdecimal():
+            continue
+        process_id = int(entry.name)
+        if process_id in excluded:
+            continue
+        try:
+            _parent, start_time = process_record(process_id)
+            command = open(f"/proc/{process_id}/cmdline", "rb").read().replace(b"\0", b" ").decode("utf-8", "replace")
+        except FileNotFoundError:
+            continue
+        except (PermissionError, OSError):
+            unreadable.append(process_id)
+            continue
+        identity = {"pid": process_id, "startTime": start_time}
+        process_identities.append(identity)
+        if mode == "verify" and (process_id, start_time) not in baseline:
+            new_processes.append(process_id)
+        if command and any(token in command for token in tokens):
+            matches.append(process_id)
+    return matches, new_processes, process_identities, unreadable
+
+observations = []
+inspection_limit = ${PROCESS_CLEANUP_MAX_INSPECTIONS} if mode == "verify" else 1
+for attempt in range(1, inspection_limit + 1):
+    matches, new_processes, process_identities, unreadable = inspect_processes()
+    observations.append({
+        "attempt": attempt,
+        "matchingCount": len(matches),
+        "newCount": len(new_processes),
+        "unreadableCount": len(unreadable),
+    })
+    should_settle = not matches and not unreadable and bool(new_processes)
+    if not should_settle or attempt == inspection_limit:
+        break
+    time.sleep(${PROCESS_CLEANUP_SETTLE_SECONDS})
 
 print(json.dumps({
     "inspectionComplete": not unreadable,
     "matchingPids": sorted(matches),
     "newPids": sorted(new_processes),
+    "observations": observations,
     "processIdentities": sorted(process_identities, key=lambda item: item["pid"]),
     "unreadablePids": sorted(unreadable),
 }, sort_keys=True))
@@ -269,6 +291,12 @@ interface FabricProcessProbe {
   readonly inspectionComplete: boolean;
   readonly matchingPids: number[];
   readonly newPids: number[];
+  readonly observations: Array<{
+    readonly attempt: number;
+    readonly matchingCount: number;
+    readonly newCount: number;
+    readonly unreadableCount: number;
+  }>;
   readonly processIdentities: Array<{ readonly pid: number; readonly startTime: string }>;
   readonly unreadablePids: number[];
 }
@@ -408,6 +436,51 @@ function requireProcessProbe(
         typeof (item as Record<string, unknown>).startTime === "string" &&
         /^\d+$/.test((item as Record<string, unknown>).startTime as string),
     );
+  const observationsAreValid =
+    Array.isArray(value.observations) &&
+    value.observations.length >= 1 &&
+    value.observations.length <= (phase === "baseline" ? 1 : PROCESS_CLEANUP_MAX_INSPECTIONS) &&
+    value.observations.every((item, index) => {
+      if (item === null || typeof item !== "object") {
+        return false;
+      }
+      const record = item as Record<string, unknown>;
+      return (
+        record.attempt === index + 1 &&
+        Number.isSafeInteger(record.matchingCount) &&
+        Number(record.matchingCount) >= 0 &&
+        Number.isSafeInteger(record.newCount) &&
+        Number(record.newCount) >= 0 &&
+        Number.isSafeInteger(record.unreadableCount) &&
+        Number(record.unreadableCount) >= 0
+      );
+    });
+  const observations = observationsAreValid
+    ? (value.observations as FabricProcessProbe["observations"])
+    : [];
+  const finalObservation = observations.at(-1);
+  const finalObservationMatches =
+    finalObservation !== undefined &&
+    Array.isArray(value.matchingPids) &&
+    finalObservation.matchingCount === value.matchingPids.length &&
+    Array.isArray(value.newPids) &&
+    finalObservation.newCount === value.newPids.length &&
+    Array.isArray(value.unreadablePids) &&
+    finalObservation.unreadableCount === value.unreadablePids.length;
+  const intermediateObservationsAreRetryable = observations
+    .slice(0, -1)
+    .every(
+      (observation) =>
+        observation.matchingCount === 0 &&
+        observation.newCount > 0 &&
+        observation.unreadableCount === 0,
+    );
+  const finalObservationRequiredAnotherInspection =
+    phase === "verify" &&
+    observations.length < PROCESS_CLEANUP_MAX_INSPECTIONS &&
+    finalObservation?.matchingCount === 0 &&
+    Number(finalObservation?.newCount) > 0 &&
+    finalObservation?.unreadableCount === 0;
   if (
     value.inspectionComplete !== true ||
     !Array.isArray(value.matchingPids) ||
@@ -416,7 +489,11 @@ function requireProcessProbe(
     value.newPids.length !== 0 ||
     !processIdentitiesAreValid ||
     !Array.isArray(value.unreadablePids) ||
-    value.unreadablePids.length !== 0
+    value.unreadablePids.length !== 0 ||
+    !observationsAreValid ||
+    !finalObservationMatches ||
+    !intermediateObservationsAreRetryable ||
+    finalObservationRequiredAnotherInspection
   ) {
     throw new Error(
       phase === "baseline"

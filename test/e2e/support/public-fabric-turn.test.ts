@@ -93,15 +93,27 @@ function configProbe(
 }
 
 function processProbe(overrides: Record<string, unknown> = {}): ShellProbeResult {
+  const record: Record<string, unknown> = {
+    inspectionComplete: true,
+    matchingPids: [],
+    newPids: [],
+    processIdentities: [{ pid: 7, startTime: "100" }],
+    unreadablePids: [],
+    ...overrides,
+  };
+  record.observations =
+    "observations" in overrides
+      ? overrides.observations
+      : [
+          {
+            attempt: 1,
+            matchingCount: (record.matchingPids as unknown[]).length,
+            newCount: (record.newPids as unknown[]).length,
+            unreadableCount: (record.unreadablePids as unknown[]).length,
+          },
+        ];
   return shellResult({
-    stdout: `${JSON.stringify({
-      inspectionComplete: true,
-      matchingPids: [],
-      newPids: [],
-      processIdentities: [{ pid: 7, startTime: "100" }],
-      unreadablePids: [],
-      ...overrides,
-    })}\n`,
+    stdout: `${JSON.stringify(record)}\n`,
   });
 }
 
@@ -433,11 +445,76 @@ describe("public Fabric live turn", () => {
           { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
         );
         expect(processProbeResult.status, processProbeResult.stderr).toBe(0);
-        const processRecord = JSON.parse(processProbeResult.stdout) as { newPids: number[] };
+        const processRecord = JSON.parse(processProbeResult.stdout) as {
+          newPids: number[];
+          observations: Array<{ newCount: number }>;
+        };
         expect(processRecord.newPids).toContain(leaked.pid);
+        expect(processRecord.observations).toHaveLength(3);
+        expect(processRecord.observations.every((observation) => observation.newCount > 0)).toBe(
+          true,
+        );
       } finally {
         leaked.kill("SIGKILL");
         await new Promise<void>((resolve) => leaked.once("close", () => resolve()));
+      }
+    },
+  );
+
+  it.runIf(process.platform === "linux")(
+    "lets a short-lived exec process settle without hiding a persistent child",
+    async () => {
+      const harness = fixture({ sandboxResults: successfulSandboxResults("openclaw") });
+      await runTurn("openclaw", harness);
+      const processScript = harness.sandboxExec.mock.calls[4]![1][3]!;
+      const baseline = spawnSync(
+        "python3",
+        ["-I", "-c", processScript, "baseline", "openclaw", PUBLIC_FABRIC_TURN_PROMPT, "[]"],
+        { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
+      );
+      expect(baseline.status, baseline.stderr).toBe(0);
+      const baselineRecord = JSON.parse(baseline.stdout) as {
+        processIdentities: Array<{ pid: number; startTime: string }>;
+      };
+      const transient = spawn(
+        "python3",
+        ["-c", "import time; time.sleep(0.25)", "transient-openshell-exec-session"],
+        { stdio: "ignore" },
+      );
+      try {
+        await new Promise<void>((resolve, reject) => {
+          transient.once("spawn", resolve);
+          transient.once("error", reject);
+        });
+        const processProbeResult = spawnSync(
+          "python3",
+          [
+            "-I",
+            "-c",
+            processScript,
+            "verify",
+            "openclaw",
+            PUBLIC_FABRIC_TURN_PROMPT,
+            JSON.stringify(baselineRecord.processIdentities),
+          ],
+          { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
+        );
+        expect(processProbeResult.status, processProbeResult.stderr).toBe(0);
+        const processRecord = JSON.parse(processProbeResult.stdout) as {
+          newPids: number[];
+          observations: Array<{ newCount: number }>;
+        };
+        expect(processRecord.observations).toHaveLength(2);
+        expect(processRecord.observations[0]!.newCount).toBeGreaterThan(0);
+        expect(processRecord.observations[1]!.newCount).toBe(0);
+        expect(processRecord.newPids).toEqual([]);
+      } finally {
+        await (transient.exitCode === null && transient.signalCode === null
+          ? new Promise<void>((resolve) => {
+              transient.once("close", () => resolve());
+              transient.kill("SIGKILL");
+            })
+          : Promise.resolve());
       }
     },
   );
@@ -537,6 +614,14 @@ describe("public Fabric live turn", () => {
       results: [
         ...successfulSandboxResults("hermes").slice(0, 4),
         processProbe({ matchingPids: [321] }),
+      ],
+      message: "left a runner, adapter, or agent child process",
+    },
+    {
+      label: "a malformed cleanup observation ledger",
+      results: [
+        ...successfulSandboxResults("hermes").slice(0, 4),
+        processProbe({ observations: [] }),
       ],
       message: "left a runner, adapter, or agent child process",
     },
