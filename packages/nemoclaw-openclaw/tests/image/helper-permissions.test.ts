@@ -93,6 +93,8 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const nestedPluginFile = path.join(nestedPluginDir, "helper.js");
     const gatewayControlPath = path.join(localBin, "nemoclaw-gateway-control");
     const gatewaySupervisorPath = path.join(localLib, "gateway-supervisor.sh");
+    const startupDirectory = path.join(localLib, "openclaw-startup");
+    const startupModulePath = path.join(startupDirectory, "auto-pair.py");
     const stateDirGuardPath = path.join(localLib, "state-dir-guard.py");
     const stateLockPlanPath = path.join(localShare, "state-lock-plan.json");
     const configGuardPath = path.join(localLib, "openclaw-config-guard.py");
@@ -107,6 +109,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       path.join(localLib, "sandbox-init.sh"),
       path.join(localLib, "sandbox-rlimits.sh"),
       gatewaySupervisorPath,
+      startupModulePath,
       stateDirGuardPath,
       stateLockPlanPath,
       configGuardPath,
@@ -126,6 +129,7 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     try {
       fs.mkdirSync(localBin, { recursive: true });
       fs.mkdirSync(localLib, { recursive: true });
+      fs.mkdirSync(startupDirectory, { recursive: true });
       fs.mkdirSync(localScripts, { recursive: true });
       fs.mkdirSync(path.dirname(generatorPath), { recursive: true });
       fs.mkdirSync(nestedPluginDir, { recursive: true });
@@ -135,6 +139,8 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
         fs.writeFileSync(file, "# fixture\n", { mode: 0o600 });
         fs.chmodSync(file, 0o600);
       });
+      fs.chmodSync(startupModulePath, 0o444);
+      fs.chmodSync(startupDirectory, 0o444);
       for (const directory of [
         path.join(tmp, "packages"),
         localPackageRoot,
@@ -200,6 +206,8 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       expect((fs.statSync(nestedPluginFile).mode & 0o777).toString(8)).toBe("644");
       expect((fs.statSync(gatewayControlPath).mode & 0o777).toString(8)).toBe("700");
       expect((fs.statSync(gatewaySupervisorPath).mode & 0o777).toString(8)).toBe("444");
+      expect((fs.statSync(startupDirectory).mode & 0o777).toString(8)).toBe("755");
+      expect((fs.statSync(startupModulePath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(stateDirGuardPath).mode & 0o777).toString(8)).toBe("500");
       expect((fs.statSync(stateLockPlanPath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(configGuardPath).mode & 0o777).toString(8)).toBe("500");

@@ -2031,6 +2031,7 @@ RUN chmod 755 /packages \
         /usr/local/bin/nemoclaw-managed-bootstrap \
         /usr/local/bin/nemoclaw-managed-startup-hold \
         /usr/local/lib/nemoclaw/sandbox-init.sh \
+        /usr/local/lib/nemoclaw/openclaw-startup \
         /packages/nemoclaw-openclaw/config/generate-config.mts \
         /scripts/validate-openclaw-tool-search.mts \
     && chmod 444 /src/lib/tool-disclosure.ts \
