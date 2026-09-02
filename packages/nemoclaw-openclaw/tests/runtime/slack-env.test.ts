@@ -130,19 +130,19 @@ describe("Slack runtime env normalization (#4274)", () => {
     });
 
     expect(run.result.status, run.result.stderr).toBe(0);
-    expect(run.bot).toBe("xoxb-OPENSHELL-RESOLVE-ENV-SLACK_BOT_TOKEN");
-    expect(run.app).toBe("xapp-OPENSHELL-RESOLVE-ENV-SLACK_APP_TOKEN");
+    expect(run.bot).toBe("xoxb-OPENSHELL-RESOLVE-ENV-v51_SLACK_BOT_TOKEN");
+    expect(run.app).toBe("xapp-OPENSHELL-RESOLVE-ENV-v51_SLACK_APP_TOKEN");
   });
 
-  it("does not leak the revision suffix into the normalized env or logs", () => {
+  it("preserves the revision suffix in aliases without leaking it to logs", () => {
     const run = runNormalize({
       SLACK_BOT_TOKEN: "openshell:resolve:env:v51_SLACK_BOT_TOKEN",
       SLACK_APP_TOKEN: "openshell:resolve:env:v51_SLACK_APP_TOKEN",
     });
 
     expect(run.result.status, run.result.stderr).toBe(0);
-    expect(run.bot).not.toContain("v51_");
-    expect(run.app).not.toContain("v51_");
+    expect(run.bot).toContain("v51_");
+    expect(run.app).toContain("v51_");
     expect(run.result.stderr).not.toContain("v51_");
     expect(run.bot).not.toContain("openshell:resolve:env:");
     expect(run.app).not.toContain("openshell:resolve:env:");

@@ -26,6 +26,7 @@ def load(name, path):
 
 transaction = load("apply_race_transaction", sys.argv[1])
 guard = load("apply_race_guard", sys.argv[2])
+transaction.os.environ["FAKE_TOKEN"] = "openshell:resolve:env:FAKE_TOKEN"
 
 with tempfile.TemporaryDirectory(prefix="hermes-mcp-apply-race-") as root:
     hermes = os.path.join(root, ".hermes")
@@ -186,6 +187,7 @@ def load(name, path):
 
 transaction = load("partial_apply_race_transaction", sys.argv[1])
 guard = load("partial_apply_race_guard", sys.argv[2])
+transaction.os.environ["FAKE_TOKEN"] = "openshell:resolve:env:FAKE_TOKEN"
 
 with tempfile.TemporaryDirectory(prefix="hermes-mcp-partial-apply-race-") as root:
     hermes = os.path.join(root, ".hermes")
@@ -388,6 +390,7 @@ def load(name, path):
 
 transaction = load("failed_reload_race_transaction", sys.argv[1])
 guard = load("failed_reload_race_guard", sys.argv[2])
+transaction.os.environ["FAKE_TOKEN"] = "openshell:resolve:env:FAKE_TOKEN"
 
 with tempfile.TemporaryDirectory(prefix="hermes-mcp-failed-reload-race-") as root:
     hermes = os.path.join(root, ".hermes")

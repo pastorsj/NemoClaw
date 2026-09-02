@@ -87,7 +87,7 @@ test(
     ],
   },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets }) => {
     const testGateway = requireIsolatedTestGateway();
     const gatewayName = testGateway.name;
     const gatewayPort = Number(testGateway.environment.NEMOCLAW_GATEWAY_PORT);
@@ -132,12 +132,10 @@ test(
   );
     await cleanupHermesSwitch(host, sandbox, home);
 
-  const docker = await host.command("docker", ["info"], {
-    artifactName: "docker-info",
-      env: commandEnv(),
-    timeoutMs: 30_000,
-  });
-  expect(docker.exitCode, resultText(docker)).toBe(0);
+    await runtimeProvider.requireAvailable({
+      artifactName: "runtime-info",
+      scenarioLabel: "Hermes inference switch",
+    });
 
   // OpenShell reaches this fixture from its gateway network namespace, where
   // the runner's loopback address is not routable.

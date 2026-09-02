@@ -60,7 +60,7 @@ function stageDockerfile(providerArgLine: string): string {
 }
 
 const MANAGED_DOCKERFILES = [
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ];

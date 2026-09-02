@@ -28,6 +28,5 @@ jobs:
 
       - name: Check Dockerfile base-image pin
         run: |
-          bash scripts/update-docker-pin.sh --check
-          DOCKERFILE=Dockerfile.base bash scripts/update-docker-pin.sh --check
+          DOCKERFILE=packages/nemoclaw-openclaw/Dockerfile.base bash scripts/update-docker-pin.sh --check
           DOCKERFILE=packages/nemoclaw-hermes/Dockerfile.base bash scripts/update-docker-pin.sh --check

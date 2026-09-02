@@ -6,6 +6,10 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { dockerCapture } from "../../adapters/docker";
 import {
+  namedOpenShellGateway,
+  syncCliOpenShellSandboxPolicyReader,
+} from "../../adapters/openshell/sandbox-policy-cli";
+import {
   captureOpenshell,
   getOpenshellBinary,
   runOpenshell,
@@ -42,9 +46,12 @@ import {
 } from "../../onboard/gateway-binding";
 import { findAvailableHermesApiPort, HERMES_API_PORT_ENV } from "../../onboard/hermes-api-port";
 import { resolveHermesDashboardOnboardState } from "../../onboard/hermes-dashboard";
-import { cleanupTempDir, secureTempFile } from "../../onboard/temp-files";
+import {
+  cleanupTempDir,
+  createExactTempFileCleanup,
+  secureTempFile,
+} from "../../onboard/temp-files";
 import * as policies from "../../policy";
-import { buildPolicyGetArgs } from "../../policy/commands";
 import { ROOT, run, shellQuote, validateName } from "../../runner";
 import { parseLiveSandboxNames } from "../../runtime-recovery";
 import { streamSandboxCreate } from "../../sandbox/create-stream";
@@ -93,6 +100,7 @@ import {
   fingerprintSandboxRecreateValue,
   fingerprintSandboxLiveIdentity,
   pendingCloneMatchesPackageAuthority,
+  isSandboxPolicyCredentialFree,
   type PreparedHostLocalInferenceAuthority,
   type PreparedSandboxRuntimeRestore,
   prepareHostLocalInferenceAuthority,
@@ -422,18 +430,36 @@ async function prepareSnapshotClonePolicy(
     throw new Error("Snapshot source definition no longer matches its registered agent.");
   }
   const gatewayName = resolveSandboxGatewayName(srcEntry);
-  const raw = captureOpenshell(buildPolicyGetArgs(srcEntry.name, gatewayName)).output;
-  const policy = policies.parseCurrentPolicy(raw);
-  if (!policy) throw new Error(`Cannot read the live OpenShell policy for '${srcEntry.name}'.`);
+  const policyRead = syncCliOpenShellSandboxPolicyReader.readSandboxPolicy({
+    target: namedOpenShellGateway(gatewayName),
+    sandboxName: srcEntry.name,
+    scope: "base",
+  });
+  if (!policyRead.ok) {
+    throw new SnapshotCommandError([
+      `Cannot read the live OpenShell policy for source sandbox '${srcEntry.name}'.`,
+      policyRead.error.message,
+      "Restore access to the source sandbox's OpenShell gateway, then retry the original snapshot restore command.",
+    ]);
+  }
+  const policy = policyRead.value.document;
+  if (!isSandboxPolicyCredentialFree(policy)) {
+    throw new SnapshotCommandError([
+      `Cannot prepare a snapshot clone policy for source sandbox '${srcEntry.name}' because its live OpenShell policy contains a literal credential value.`,
+      "Replace literal credentials with supported OpenShell credential bindings or resolver placeholders, then retry the original snapshot restore command.",
+    ]);
+  }
   const policyPath = secureTempFile("nemoclaw-clone-policy", ".yaml");
-  fs.writeFileSync(policyPath, policy, { mode: 0o600 });
-  return {
-    policyPath,
-    cleanup: () => {
-      cleanupTempDir(policyPath, "nemoclaw-clone-policy");
-      return true;
-    },
-  };
+  try {
+    fs.writeFileSync(policyPath, policy, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    return {
+      policyPath,
+      cleanup: createExactTempFileCleanup(policyPath, "nemoclaw-clone-policy"),
+    };
+  } catch (error) {
+    cleanupTempDir(policyPath, "nemoclaw-clone-policy");
+    throw error;
+  }
 }
 
 function pendingCloneMatchesRestoreAuthority(
@@ -479,7 +505,8 @@ function pendingCloneHasCapturedLiveIdentity(
 
 // Used by `snapshot restore --to <dst>` when dst does not exist yet: reuses
 // the source's baked image so the user does not have to re-run onboarding.
-// Returns true on success; on failure, logs and throws SnapshotCommandError.
+// Leaves a verified pending registration on success. The caller publishes it
+// only after the clone-policy handoff file has been securely removed.
 async function autoCreateSandboxFromSource(
   srcName: string,
   dstName: string,
@@ -753,21 +780,10 @@ async function autoCreateSandboxFromSource(
   if (!pendingCloneHasCapturedLiveIdentity(dstName, sourceGatewayName, pendingRegistration)) {
     failPendingSnapshotClone(dstName, pendingRegistration);
   }
-  if (!registry.finalizePendingSandboxRegistrationIfCurrent(pendingRegistration)) {
-    // The live clone already has an identity-bound pending owner. Preserve it
-    // so a retry can reconcile or remove that exact instance.
-    failPendingSnapshotClone(dstName, pendingRegistration);
-  }
-  const expectedFinalRegistration = finalizedPendingCloneEntry(pendingRegistration);
-  const finalRegistration = registry.getSandbox(dstName);
-  if (!finalRegistration || !isDeepStrictEqual(finalRegistration, expectedFinalRegistration)) {
-    throw new SnapshotCommandError(
-      `Sandbox '${dstName}' changed immediately after its clone registration was finalized. Snapshot state was not restored.`,
-    );
-  }
+  // The pending registry row now owns any host-local inference reservation.
+  // Keep it unpublished until the caller completes sensitive-file cleanup.
   cloneHostLocalReservation = null;
-  console.log(`  ${G}\u2713${R} Sandbox '${dstName}' created`);
-  return finalRegistration;
+  return pendingRegistration;
 }
 
 // Delete an existing destination sandbox so `snapshot restore --to <dst> --force`
@@ -1793,12 +1809,49 @@ async function runSnapshotRestoreUnlocked(
         const dstDashboardPort = allocateCloneDashboardPort(targetSandbox, lockedSourceEntry);
         const dstHermesApiPort = allocateCloneHermesApiPort(targetSandbox, lockedSourceEntry);
         const dashboardEnvArgs = resolveCloneDashboardEnvArgs(lockedSourceEntry, dstDashboardPort);
-        const clonePolicy = await prepareSnapshotClonePolicy(
+        let clonePolicy = await prepareSnapshotClonePolicy(
           lockedSourceEntry,
           targetSandbox,
           lockedSourceAuthority.agentDefinition,
         );
+        let cloneCreatedPending: SandboxEntry | null = null;
+        const validateBeforeCloneFinalRegistration = (expectedPending: SandboxEntry): void => {
+          try {
+            // The pending row is published from the already frozen authority,
+            // and registry finalization atomically requires that it is still an
+            // operation-owned pending row. Re-prove the source bytes or
+            // candidate gate after supervisor startup immediately before that
+            // compare-and-set.
+            validatePackageBoundMutation();
+            const pending = registry.getSandbox(targetSandbox);
+            if (!pending || !isDeepStrictEqual(pending, expectedPending)) {
+              throw new Error(
+                `snapshot target '${targetSandbox}' changed before clone registration`,
+              );
+            }
+          } catch (error) {
+            console.error(
+              `  Snapshot package authority changed before clone registration: ${
+                error instanceof Error ? error.message : String(error)
+              }.`,
+            );
+            snapshotExit(1);
+          }
+        };
         try {
+          const refreshedClonePolicy = await prepareSnapshotClonePolicy(
+            lockedSourceEntry,
+            targetSandbox,
+            lockedSourceAuthority.agentDefinition,
+          );
+          if (clonePolicy.cleanup && !clonePolicy.cleanup()) {
+            refreshedClonePolicy.cleanup?.();
+            throw new SnapshotCommandError([
+              `Could not securely replace temporary clone policy '${clonePolicy.policyPath}'.`,
+              "Inspect the task-owned temporary directory before retrying the snapshot restore command.",
+            ]);
+          }
+          clonePolicy = refreshedClonePolicy;
           try {
             validatePackageBoundMutation({ targetMayBeUnregistered: !targetExists });
           } catch (error) {
@@ -1885,30 +1938,7 @@ async function runSnapshotRestoreUnlocked(
               snapshotExit(1);
             }
           };
-          const validateBeforeCloneFinalRegistration = (expectedPending: SandboxEntry): void => {
-            try {
-              // The pending row is published from the already frozen authority,
-              // and registry finalization atomically requires that it is still an
-              // operation-owned pending row. Re-prove the source bytes or
-              // candidate gate after supervisor startup immediately before that
-              // compare-and-set.
-              validatePackageBoundMutation();
-              const pending = registry.getSandbox(targetSandbox);
-              if (!pending || !isDeepStrictEqual(pending, expectedPending)) {
-                throw new Error(
-                  `snapshot target '${targetSandbox}' changed before clone registration`,
-                );
-              }
-            } catch (error) {
-              console.error(
-                `  Snapshot package authority changed before clone registration: ${
-                  error instanceof Error ? error.message : String(error)
-                }.`,
-              );
-              snapshotExit(1);
-            }
-          };
-          expectedRestoreTargetEntry = await autoCreateSandboxFromSource(
+          cloneCreatedPending = await autoCreateSandboxFromSource(
             sandboxName,
             targetSandbox,
             lockedSourceEntry,
@@ -1929,8 +1959,53 @@ async function runSnapshotRestoreUnlocked(
           // package authority frozen immediately before creation.
           snapshotSourceAuthority = lockedSourceAuthority;
         } finally {
-          clonePolicy.cleanup?.();
+          if (clonePolicy.cleanup && !clonePolicy.cleanup()) {
+            if (cloneCreatedPending) {
+              throw new SnapshotCommandError([
+                `Temporary clone policy '${clonePolicy.policyPath}' could not be securely removed after '${targetSandbox}' was created.`,
+                `Destination '${targetSandbox}' remains registered as a pending clone. Snapshot state was not restored.`,
+                "Inspect and remove the task-owned temporary policy file before continuing.",
+                `Then rerun the same restore without --force so NemoClaw can reconcile '${targetSandbox}' and continue without deleting or recreating it.`,
+              ]);
+            }
+            throw new SnapshotCommandError([
+              `Could not securely remove temporary clone policy '${clonePolicy.policyPath}'.`,
+              "Inspect the task-owned temporary directory before retrying the snapshot restore command.",
+            ]);
+          }
         }
+        if (!cloneCreatedPending) {
+          throw new SnapshotCommandError(
+            `Sandbox '${targetSandbox}' was created without a pending registry owner. Snapshot state was not restored.`,
+          );
+        }
+        validateBeforeCloneFinalRegistration(cloneCreatedPending);
+        if (
+          !pendingCloneHasCapturedLiveIdentity(
+            targetSandbox,
+            lockedGatewayName,
+            cloneCreatedPending,
+          )
+        ) {
+          failPendingSnapshotClone(targetSandbox, cloneCreatedPending);
+        }
+        if (!registry.finalizePendingSandboxRegistrationIfCurrent(cloneCreatedPending)) {
+          // The live clone already has an identity-bound pending owner. Preserve
+          // it so a retry can reconcile or remove that exact instance.
+          failPendingSnapshotClone(targetSandbox, cloneCreatedPending);
+        }
+        const expectedFinalRegistration = finalizedPendingCloneEntry(cloneCreatedPending);
+        const finalRegistration = registry.getSandbox(targetSandbox);
+        if (
+          !finalRegistration ||
+          !isDeepStrictEqual(finalRegistration, expectedFinalRegistration)
+        ) {
+          throw new SnapshotCommandError(
+            `Sandbox '${targetSandbox}' changed immediately after its clone registration was finalized. Snapshot state was not restored.`,
+          );
+        }
+        expectedRestoreTargetEntry = finalRegistration;
+        console.log(`  ${G}\u2713${R} Sandbox '${targetSandbox}' created`);
       };
       // Lock order is both sandbox names (sorted by the outer caller), host
       // dashboard, then gateway route. The host-wide lease stays held from port

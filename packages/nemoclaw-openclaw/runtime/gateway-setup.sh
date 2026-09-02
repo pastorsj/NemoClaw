@@ -242,11 +242,22 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     plan = json.load(handle)
 for alias in plan.get("envAliases", []):
-    if not re.search(alias["match"], os.environ.get(alias["envKey"], "")):
+    env_key = alias["envKey"]
+    runtime_value = os.environ.get(env_key, "")
+    if not re.search(alias["match"], runtime_value):
         continue
+    value = alias["value"]
+    marker = "-OPENSHELL-RESOLVE-ENV-"
+    placeholder_prefix = "openshell:resolve:env:"
+    if marker in value and runtime_value.startswith(placeholder_prefix):
+        runtime_suffix = runtime_value[len(placeholder_prefix) :]
+        if re.fullmatch(rf"v[0-9]{{1,20}}_{re.escape(env_key)}", runtime_suffix):
+            alias_suffix = value.split(marker, 1)[1]
+            if alias_suffix == env_key:
+                value = value.split(marker, 1)[0] + marker + runtime_suffix
     print("\t".join([
         alias.get("targetEnvKey", alias["envKey"]),
-        alias["value"],
+        value,
         alias.get("message", ""),
     ]))
 PYMESSAGINGALIASES

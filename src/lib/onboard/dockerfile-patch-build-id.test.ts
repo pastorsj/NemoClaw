@@ -67,7 +67,7 @@ describe("Dockerfile build-id cache policy (#4682)", () => {
   });
 
   it.each([
-    ["OpenClaw", path.join(REPO_ROOT, "Dockerfile")],
+    ["OpenClaw", path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile")],
     ["Hermes", path.join(REPO_ROOT, "packages", "nemoclaw-hermes", "Dockerfile")],
   ])("keeps the managed stock %s context byte-identical across per-run IDs", (agentName, stockDockerfile) => {
     expect(fs.existsSync(stockDockerfile), `missing managed ${agentName} Dockerfile`).toBe(true);

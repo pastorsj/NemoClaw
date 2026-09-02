@@ -630,8 +630,10 @@ if [ "$(id -u)" -ne 0 ]; then
   bootstrap_hermes_gateway_current_user || exit 1
   print_dashboard_urls
 
-  supervise_hermes_gateway_current_user
-  exit $?
+  if ! supervise_hermes_gateway_current_user; then
+    nemoclaw_runtime_state_mutation_hold_supervisor_failure || exit 1
+    exit 1
+  fi
 fi
 
 # ── Root path (full privilege separation via setpriv) ──────────

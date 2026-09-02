@@ -9,7 +9,6 @@ import { expectNoSandboxDelete } from "../../../../test/helpers/rebuild-delete-a
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
-  policyGet,
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
 import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { fingerprintSandboxLiveIdentity } from "../../onboard/sandbox-recreate-transaction";
@@ -39,7 +38,12 @@ describe("rebuildSandbox flow: recovery", () => {
   installRebuildFlowTestHooks();
 
   it("uses marked manifest provenance when the custom-image registry baseline is missing (#6108)", async () => {
-    const customDockerfile = path.join(process.cwd(), "Dockerfile");
+    const customDockerfile = path.join(
+      process.cwd(),
+      "packages",
+      "nemoclaw-openclaw",
+      "Dockerfile",
+    );
     const harnessPackage = installRebuildHarnessPackage("openclaw");
     expect(harnessPackage).not.toBeNull();
     const recoveryManifest = {
@@ -257,15 +261,13 @@ describe("rebuildSandbox flow: recovery", () => {
   }
 
   it("retains the exact policy handoff across a failed recreate and consumes it on retry", async () => {
-    const policyDocument = "version: 1\nnetwork_policies:\n  host_preserved: {}\n";
+    const policyDocument = "version: 1\nnetwork_policies:\n  host_preserved: {}";
     const interrupted = createRebuildFlowHarness({
       captureOpenshell: sandboxGetProbes([SOURCE_PROBE, null]),
       onboard: () => {
         throw new Error("replacement create failed");
       },
     });
-    policyGet.getSandboxPolicy.mockReset().mockReturnValue({ yaml: policyDocument });
-
     await expect(
       interrupted.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).rejects.toThrow("Recreate failed");
@@ -278,9 +280,9 @@ describe("rebuildSandbox flow: recovery", () => {
       persistedManifest.rebuildPolicyHandoff.file,
     );
     expect(fs.readFileSync(handoffPath, "utf8")).toBe(policyDocument);
-    expect(fs.existsSync(path.join(interrupted.backupPath, ".nemoclaw-rebuild-recovery.json"))).toBe(
-      true,
-    );
+    expect(
+      fs.existsSync(path.join(interrupted.backupPath, ".nemoclaw-rebuild-recovery.json")),
+    ).toBe(true);
     let recreatedPolicy = "";
     const restarted = createRebuildFlowHarness({
       staleRecovery: true,
@@ -290,8 +292,6 @@ describe("rebuildSandbox flow: recovery", () => {
       },
     });
     restarted.session.checkpoint = interrupted.session.checkpoint;
-    policyGet.getSandboxPolicy.mockReset().mockReturnValue({ yaml: "" });
-
     await expect(
       restarted.rebuildSandbox("alpha", ["--yes"], {
         throwOnError: true,
@@ -301,9 +301,9 @@ describe("rebuildSandbox flow: recovery", () => {
 
     expect(recreatedPolicy).toBe(policyDocument);
     expect(fs.existsSync(handoffPath)).toBe(false);
-    expect(fs.existsSync(path.join(interrupted.backupPath, ".nemoclaw-rebuild-recovery.json"))).toBe(
-      false,
-    );
+    expect(
+      fs.existsSync(path.join(interrupted.backupPath, ".nemoclaw-rebuild-recovery.json")),
+    ).toBe(false);
   });
 
   function restartFromJournaledSource(probes: readonly (string | null)[], checkpoint: unknown) {
@@ -483,7 +483,7 @@ describe("rebuildSandbox flow: recovery", () => {
     ).rejects.toThrow("Prepared backup recovery");
 
     expect(harness.errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("MCP bridge restore incomplete: MCP restore boom"),
+      expect.stringContaining("MCP bridge restore incomplete; inspect redacted diagnostics"),
     );
     expect(harness.relockSpy).toHaveBeenCalled();
   });
@@ -651,7 +651,7 @@ describe("rebuildSandbox flow: recovery", () => {
     expect(output).toContain("MCP bridge definitions were preserved but not fully refreshed");
     expect(output).not.toContain("rebuilt successfully");
     expect(harness.errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("MCP bridge restore incomplete: MCP restore boom"),
+      expect.stringContaining("MCP bridge restore incomplete; inspect redacted diagnostics"),
     );
   });
 });

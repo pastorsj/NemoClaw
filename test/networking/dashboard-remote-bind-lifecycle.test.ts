@@ -79,7 +79,10 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-from-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
+    const stockDockerfile = fs.readFileSync(
+      path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"),
+      "utf8",
+    );
     const generator =
       "RUN NEMOCLAW_OPENCLAW_MANAGED_PROXY=0 node --experimental-strip-types /packages/nemoclaw-openclaw/config/generate-config.mts";
     const proxyPatch = 'RUN python3 -c "\\\n';
@@ -132,7 +135,10 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-stock-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    fs.copyFileSync(path.join(process.cwd(), "Dockerfile"), dockerfile);
+    fs.copyFileSync(
+      path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"),
+      dockerfile,
+    );
 
     try {
       const result = patchStagedDockerfile(dockerfile, "test-model", "http://127.0.0.1:18789");
@@ -146,7 +152,10 @@ describe("remote dashboard bind production lifecycle", () => {
     vi.stubEnv("NEMOCLAW_DASHBOARD_BIND", "0.0.0.0");
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-remote-bind-metadata-"));
     const dockerfile = path.join(directory, "Dockerfile");
-    const stockDockerfile = fs.readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
+    const stockDockerfile = fs.readFileSync(
+      path.join(process.cwd(), "packages", "nemoclaw-openclaw", "Dockerfile"),
+      "utf8",
+    );
     const metadataTail =
       "    && check_metadata /usr/local/lib/nemoclaw/preloads/sandbox-safety-net.js 'root:root:644'";
     const mutatedDockerfile = stockDockerfile.replace(

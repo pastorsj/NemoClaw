@@ -1745,6 +1745,14 @@ def _clear_secondary_journal(identity: Identity) -> None:
 
 
 def _open_config(config_path: str) -> OpenConfig:
+    """Pin the exact OpenClaw state root, including its managed-volume form.
+
+    SOURCE_OF_TRUTH_REVIEW
+    The host runtime validates and mounts the declared ``/sandbox/.openclaw``
+    state root.  A different device at that exact root is therefore expected;
+    descriptor-relative traversal below it remains bound to ``config_stat``
+    and continues to reject symlinks, races, hardlinks, and nested devices.
+    """
     normalized = posixpath.normpath(config_path)
     parent_path = posixpath.dirname(normalized)
     config_name = posixpath.basename(normalized)
@@ -1772,7 +1780,10 @@ def _open_config(config_path: str) -> OpenConfig:
             raise GuardError(
                 "entry-raced", normalized, "config directory changed while opening"
             )
-        if config_stat.st_dev != parent_stat.st_dev:
+        if (
+            config_stat.st_dev != parent_stat.st_dev
+            and normalized != PRODUCTION_CONFIG_DIR
+        ):
             os.close(config_fd)
             raise GuardError(
                 "cross-device-entry",
@@ -1827,6 +1838,7 @@ def _open_config_for_lock(config_path: str, identity: Identity) -> OpenConfig:
             before is not None
             and stat.S_ISDIR(before.st_mode)
             and before.st_dev != original_parent.st_dev
+            and normalized != PRODUCTION_CONFIG_DIR
         ):
             if not already_protected:
                 os.fchown(parent_fd, identity.root_uid, identity.sandbox_gid)
@@ -1851,6 +1863,7 @@ def _open_config_for_lock(config_path: str, identity: Identity) -> OpenConfig:
             before is not None
             and stat.S_ISDIR(before.st_mode)
             and before.st_dev != original_parent.st_dev
+            and normalized != PRODUCTION_CONFIG_DIR
         ):
             raise GuardError(
                 "cross-device-entry",

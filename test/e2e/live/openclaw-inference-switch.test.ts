@@ -52,7 +52,7 @@ import {
 } from "../fixtures/inference-switch-retry.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { parseOpenClawAgentText } from "../fixtures/openclaw-agent-output.ts";
-import { runBoundedRetry } from "../fixtures/retry-policy.ts";
+import { runBoundedRetry } from "../../../tools/e2e/retry-evidence.mts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
   agentReplyContainsToken,
@@ -868,11 +868,9 @@ async function runOpenClawInferenceSetWithRetry(
   return runInferenceSetWithRetry({
     attempts,
     onEvidence: (evidence) => writeInferenceSwitchRetryEvidence(artifacts, evidence),
-    run: (attempt, verify) =>
-      runNemoclaw(host, home, verify ? args : [...args, "--no-verify"], {
-        artifactName: verify
-          ? `nemoclaw-inference-set-${attempt}`
-          : "nemoclaw-inference-set-no-verify-after-transient-failures",
+    run: (attempt) =>
+      runNemoclaw(host, home, args, {
+        artifactName: `nemoclaw-inference-set-${attempt}`,
         env: compatibleAnthropicSwitchEnv(switchBinding),
         redactionValues,
         timeoutMs: COMMAND_TIMEOUT_MS,
@@ -886,7 +884,7 @@ test(
   timeout: TEST_TIMEOUT_MS,
   meta: {
     e2ePhases: [
-      "confirm Docker and choose the baseline provider",
+      "confirm the selected runtime and choose the baseline provider",
       "clear existing inference-switch state",
       "install and onboard baseline OpenClaw",
       "prepare the switched provider and endpoint",
@@ -897,7 +895,7 @@ test(
     ],
   },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets, skip }) => {
     const gateway = requireIsolatedTestGateway();
     const gatewayName = gateway.name;
     const gatewayPort = Number(gateway.environment.NEMOCLAW_GATEWAY_PORT);
@@ -918,7 +916,7 @@ test(
     switchModel: SWITCH_MODEL,
     switchInferenceApi: SWITCH_INFERENCE_API,
     contracts: [
-      "Docker is running and an authenticated compatible baseline endpoint is staged",
+      "the selected runtime is available and an authenticated compatible baseline endpoint is staged",
       "install.sh --non-interactive onboards an OpenClaw sandbox",
       "when selected, the mock baseline route completes one explicit authenticated fixture request",
       "nemoclaw inference set switches the running sandbox route",
@@ -937,19 +935,10 @@ test(
     "run `npm run build:cli` before live repo CLI targets",
   ).toBe(true);
 
-  const docker = await host.command("docker", ["info"], {
-    artifactName: "prereq-docker-info-openclaw-inference-switch",
-      env: commandEnv(home),
-    timeoutMs: 30_000,
-  });
-  if (docker.exitCode !== 0) {
-    if (process.env.GITHUB_ACTIONS === "true") {
-      throw new Error(
-        `Docker is required for OpenClaw inference switch E2E: ${resultText(docker)}`,
-      );
-    }
-    skip("Docker is required for OpenClaw inference switch E2E");
-  }
+    await runtimeProvider.requireAvailable({
+      artifactName: "prereq-runtime-info-openclaw-inference-switch",
+      scenarioLabel: "OpenClaw inference switch",
+    });
 
   const useMockBaseline =
     SWITCH_PROVIDER === "compatible-anthropic-endpoint" && SWITCH_MOCK_ANTHROPIC === "1";
@@ -1138,7 +1127,7 @@ test(
     id: "openclaw-inference-switch",
     status: "passed",
     assertions: {
-      dockerRunning: docker.exitCode === 0,
+        runtimeProviderAvailable: true,
       installCompleted: install.exitCode === 0,
       inferenceSetCompleted: switchResult.exitCode === 0,
       gatewayRestartExpected,

@@ -67,7 +67,12 @@ const IMAGE_ID = `sha256:${"b".repeat(64)}`;
 function resolutionOptions() {
   return {
     imageName: IMAGE_NAME,
-    dockerfilePath: path.join(process.cwd(), "Dockerfile.base"),
+    dockerfilePath: path.join(
+      process.cwd(),
+      "packages",
+      "nemoclaw-openclaw",
+      "Dockerfile.base",
+    ),
     localTag: "nemoclaw-sandbox-base-local:test",
     rootDir: process.cwd(),
     env: {
@@ -790,13 +795,13 @@ describe("sandbox base-image warm resolution", () => {
     expect(dockerMocks.build).not.toHaveBeenCalled();
   });
 
-  it("prefers an explicitly trusted pin over an available source-SHA image", () => {
+  it("requires an explicitly trusted pin instead of an available source-SHA image", () => {
     dockerMocks.imageInspect.mockReturnValue({ status: 0 });
 
     const resolved = resolveSandboxBaseImage({
       ...resolutionOptions(),
       pinnedRemoteRef: REF,
-      preferPinnedRemoteRef: true,
+      requirePinnedRemoteRef: true,
     });
 
     expect(resolved).toMatchObject({ ref: REF, source: "pinned" });
@@ -805,6 +810,39 @@ describe("sandbox base-image warm resolution", () => {
       ignoreError: true,
       suppressOutput: true,
     });
+    expect(dockerMocks.build).not.toHaveBeenCalled();
+  });
+
+  it("rejects required pin mode without a pinned remote reference (#10826)", () => {
+    expect(() =>
+      resolveSandboxBaseImage({
+        ...resolutionOptions(),
+        requirePinnedRemoteRef: true,
+      }),
+    ).toThrow("Sandbox base image requires a non-empty pinned remote reference.");
+    expect(dockerMocks.imageInspect).not.toHaveBeenCalled();
+    expect(dockerMocks.pull).not.toHaveBeenCalled();
+    expect(dockerMocks.build).not.toHaveBeenCalled();
+  });
+
+  it("uses a proven local image after a required remote pin fails (#10826)", () => {
+    const options = resolutionOptions();
+    const provenance = `${createSandboxBaseImageBuildProvenanceKey(options)}.${"c".repeat(64)}`;
+    mockLocalFallback(options, provenance);
+
+    const resolved = resolveSandboxBaseImage({
+      ...options,
+      pinnedRemoteRef: REF,
+      requirePinnedRemoteRef: true,
+    });
+
+    expect(resolved).toMatchObject({ ref: options.localTag, source: "local" });
+    const dockerOptions = { ignoreError: true, suppressOutput: true };
+    expect(dockerMocks.pull.mock.calls).toEqual([[REF, dockerOptions]]);
+    expect(dockerMocks.imageInspect.mock.calls).toEqual([
+      [REF, dockerOptions],
+      [options.localTag, dockerOptions],
+    ]);
     expect(dockerMocks.build).not.toHaveBeenCalled();
   });
 

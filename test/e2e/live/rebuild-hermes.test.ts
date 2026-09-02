@@ -1030,6 +1030,13 @@ test(
       },
     );
     expectExitZero(writeExcludedHooksMarker, "write backup:false Hermes hooks marker");
+    const sessionSummary = seedRegistryAndSession(
+      statePaths,
+      runtime.gatewayName,
+      runtime.gatewayPort,
+      dashboardPort ?? fail("Hermes dashboard port allocation disappeared before registry seeding"),
+      seededOldSandboxImageState,
+    );
     await cronRestore.seed();
     const seededKanbanDb = await host.command("docker", inspectKanbanTaskArgs(SANDBOX_NAME), {
       artifactName: "phase-4-inspect-seeded-kanban-db",
@@ -1064,13 +1071,6 @@ test(
     );
     expectExitZero(preConfig, "read pre-rebuild Hermes config.yaml");
     expect(preConfig.stdout).toContain("discord:");
-    const sessionSummary = seedRegistryAndSession(
-      statePaths,
-      runtime.gatewayName,
-      runtime.gatewayPort,
-      dashboardPort ?? fail("Hermes dashboard port allocation disappeared before registry seeding"),
-      seededOldSandboxImageState,
-    );
     const seededRegistry = registrySandbox(statePaths);
     cleanupRegistryDashboardPort = seededRegistry.dashboardPort;
     expect(

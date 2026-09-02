@@ -23,8 +23,8 @@ const ROOT = path.resolve(import.meta.dirname, "../../..");
 const SECURITY_IMAGES = [
   {
     name: "OpenClaw",
-    dockerfile: path.join(ROOT, "Dockerfile.base"),
-    finalDockerfile: path.join(ROOT, "Dockerfile"),
+    dockerfile: path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
+    finalDockerfile: path.join(ROOT, "packages", "nemoclaw-openclaw", "Dockerfile"),
     startMarker: "# Trixie has not published fixes",
     additionalStartMarker:
       "RUN apt-get update \\\n    && apt-get install -y --no-install-recommends \\\n        /tmp/nemoclaw-native-security/perl-base.deb",

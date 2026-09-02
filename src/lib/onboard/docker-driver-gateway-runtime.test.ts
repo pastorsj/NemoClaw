@@ -444,6 +444,14 @@ describe("docker-driver gateway runtime helpers", () => {
           ]);
           const { helpers, runCapture } = makeHelpers({
             dockerCapture: vi.fn(() => JSON.stringify("unix:///tmp/context-docker.sock")),
+            loadDockerDriverGatewayEnv: () => ({
+              ...dockerDriverGatewayEnv,
+              buildDockerDriverGatewayEnv: (options) =>
+                dockerDriverGatewayEnv.buildDockerDriverGatewayEnv({
+                  ...options,
+                  architecture: "arm64",
+                }),
+            }),
             runCapture: vi.fn((args) => processOutput.get(args.join(" ")) ?? ""),
           });
           const desiredEnv = helpers.getDockerDriverGatewayEnv(null, "darwin");

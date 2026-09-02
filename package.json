@@ -74,10 +74,12 @@
     "build:policy-boundary": "tsc -p tsconfig.shared.json",
     "catalog:compile": "tsx src/lib/inference/serving/generate-catalog.ts",
     "catalog:check": "tsx src/lib/inference/serving/generate-catalog.ts --check",
-    "build:cli": "npm run prune:retired-cli && npm run build:policy-boundary && npm run build:runner-boundary && tsc -p tsconfig.src.json && node --experimental-strip-types --no-warnings scripts/lib/package-blueprint-runner-runtime.mts && node dist/lib/core/generate-build-identity.js && node dist/lib/inference/serving/generate-catalog.js && node dist/lib/cli/generate-oclif-metadata-manifest.js && if [ -d nemoclaw-blueprint/scripts ] && find nemoclaw-blueprint/scripts -name '*.ts' -print -quit | grep -q .; then tsc -p nemoclaw-blueprint/tsconfig.json; fi && tsx scripts/build-harnesses.mts",
+    "catalog:verify-hugging-face": "npm run catalog:compile && tsx tools/managed-inference/verify-hugging-face-models.ts",
+    "build:cli": "npm run prune:retired-cli && npm run build:policy-boundary && npm run build:runner-boundary && npm run build:openclaw-shared && tsc -p tsconfig.src.json && node --experimental-strip-types --no-warnings scripts/lib/package-blueprint-runner-runtime.mts && node dist/lib/core/generate-build-identity.js && node dist/lib/inference/serving/generate-catalog.js && node dist/lib/cli/generate-oclif-metadata-manifest.js && if [ -d nemoclaw-blueprint/scripts ] && find nemoclaw-blueprint/scripts -name '*.ts' -print -quit | grep -q .; then tsc -p nemoclaw-blueprint/tsconfig.json; fi && tsx scripts/build-harnesses.mts",
+    "build:openclaw-shared": "node -e \"require('node:fs').rmSync('packages/nemoclaw-openclaw/plugin/dist/shared', { recursive: true, force: true })\" && tsc -p packages/nemoclaw-openclaw/plugin/tsconfig.shared.json",
     "build:runner-boundary": "node -e \"require('node:fs').rmSync('packages/nemoclaw-openclaw/plugin/runner-dist', { recursive: true, force: true })\" && tsc -p packages/nemoclaw-openclaw/plugin/tsconfig.runner.json",
     "clean:cli": "tsx scripts/build-harnesses.mts --clean && node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
-    "prune:retired-cli": "node -e \"const fs = require('node:fs'); for (const prefix of ['dist/commands/deploy', 'dist/lib/actions/deploy']) for (const suffix of ['.js', '.js.map', '.d.ts', '.d.ts.map']) fs.rmSync(prefix + suffix, { force: true }); fs.rmSync('dist/lib/deploy', { recursive: true, force: true })\"",
+    "prune:retired-cli": "node -e \"const fs = require('node:fs'); for (const prefix of ['dist/commands/deploy', 'dist/lib/actions/deploy', 'dist/lib/policy/merge']) for (const suffix of ['.js', '.js.map', '.d.ts', '.d.ts.map']) fs.rmSync(prefix + suffix, { force: true }); fs.rmSync('dist/lib/deploy', { recursive: true, force: true })\"",
     "typecheck:cli": "tsc -p tsconfig.cli.json",
     "validate:configs": "tsx scripts/validate-configs.mts",
     "generate:agent-state-lock-plans": "node --import tsx scripts/lib/generate-agent-state-lock-plans.mts",
@@ -156,7 +158,6 @@
     "schemas/sandbox-policy.schema.json",
     "scripts/",
     "docs/resources/local-credential-form.html",
-    "Dockerfile",
     ".dockerignore"
   ],
   "engines": {

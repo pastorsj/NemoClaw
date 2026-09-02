@@ -4,7 +4,7 @@
 /**
  *
  * Preserves the real shields/config boundary from the former shell test: source
- * install, OpenShell/Docker sandbox exec, host-root Docker tamper, chmod/chown
+ * install, OpenShell/runtime sandbox exec, host-root runtime tamper, chmod/chown
  * lock state, config redaction, audit JSONL, and the auto-restore timer. Local
  * helpers stay in this file because this is one focused security/policy
  * dependent, not a new shields fixture family.
@@ -33,6 +33,7 @@ import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { pollUntil } from "../fixtures/polling.ts";
+import { RuntimeProviderPrerequisite } from "../fixtures/runtime-provider.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { resumeSupervisorIfPaused } from "../fixtures/shields-failed-startup.ts";
 import { stripAnsi } from "./json-envelope.ts";
@@ -131,14 +132,20 @@ async function sandboxShell(
   });
 }
 
-async function docker(
+function selectedRuntimeProvider(host: HostCliClient): RuntimeProviderPrerequisite {
+  return new RuntimeProviderPrerequisite(host, (reason) => {
+    throw new Error(reason);
+  });
+}
+
+async function runtimeCommand(
   host: HostCliClient,
   args: string[],
   options: { artifactName: string; timeoutMs?: number; redactionValues?: string[] } = {
-    artifactName: "docker",
+    artifactName: "runtime",
   },
 ): Promise<ShellProbeResult> {
-  return host.command("docker", args, {
+  return selectedRuntimeProvider(host).command(args, {
     artifactName: options.artifactName,
     env: commandEnv(),
     redactionValues: options.redactionValues,
@@ -195,12 +202,12 @@ async function expectCanonicalProtectedConfigHash(
   expect(result.stdout.trim()).toBe("OK");
 }
 
-async function collectStartFailureDockerLogs(
+async function collectStartFailureRuntimeLogs(
   host: HostCliClient,
   artifactPrefix: string,
   redactionValues: string[],
 ): Promise<string> {
-  const lookup = await docker(
+  const lookup = await runtimeCommand(
     host,
     [
       "ps",
@@ -223,8 +230,8 @@ async function collectStartFailureDockerLogs(
   const result =
     lookup.exitCode !== 0 || !containerId
       ? lookup
-      : await docker(host, ["logs", "--tail", "200", containerId], {
-          artifactName: `${artifactPrefix}-failure-docker-logs`,
+      : await runtimeCommand(host, ["logs", "--tail", "200", containerId], {
+          artifactName: `${artifactPrefix}-failure-runtime-logs`,
           redactionValues,
           timeoutMs: 30_000,
         });
@@ -253,10 +260,10 @@ async function expectStopStartRecovery(
   const startFailureLogs =
     start.exitCode === 0
       ? ""
-      : await collectStartFailureDockerLogs(host, artifactPrefix, redactionValues);
+      : await collectStartFailureRuntimeLogs(host, artifactPrefix, redactionValues);
   expect(
     start.exitCode,
-    [resultText(start), startFailureLogs && `Docker logs:\n${startFailureLogs}`]
+    [resultText(start), startFailureLogs && `Runtime logs:\n${startFailureLogs}`]
       .filter(Boolean)
       .join("\n"),
   ).toBe(0);
@@ -302,7 +309,7 @@ async function expectLockedSandboxParent(
   artifactPrefix: string,
 ): Promise<void> {
   const containerId = await findSandboxContainer(host);
-  const parent = await docker(
+  const parent = await runtimeCommand(
     host,
     ["exec", "--user", "0", containerId, "stat", "-c", "%a %U:%G", "/sandbox"],
     { artifactName: `${artifactPrefix}-sandbox-parent` },
@@ -318,7 +325,7 @@ async function expectCredentialsTraversalBoundary(
 ): Promise<void> {
   const credentialsDir = "/sandbox/.openclaw/credentials";
   const seededPath = `${credentialsDir}/.nemoclaw-permission-probe`;
-  const seeded = await docker(
+  const seeded = await runtimeCommand(
     host,
     ["exec", "--user", "0", containerId, "sh", "-c", `umask 077; : > ${seededPath}`],
     { artifactName: "phase-5a-seed-credential-permission-probe" },
@@ -345,7 +352,7 @@ async function expectCredentialsTraversalBoundary(
       expect(boundary.stdout).toContain(`${operation}=denied`);
     }
   } finally {
-    await docker(host, ["exec", "--user", "0", containerId, "rm", "-f", seededPath], {
+    await runtimeCommand(host, ["exec", "--user", "0", containerId, "rm", "-f", seededPath], {
       artifactName: "phase-5a-remove-credential-permission-probe",
     });
   }
@@ -383,7 +390,7 @@ async function preCleanSandbox(
 }
 
 async function findSandboxContainer(host: HostCliClient): Promise<string> {
-  const result = await docker(
+  const result = await runtimeCommand(
     host,
     [
       "ps",
@@ -396,7 +403,7 @@ async function findSandboxContainer(host: HostCliClient): Promise<string> {
       "-q",
     ],
     {
-      artifactName: "docker-ps-sandbox-container",
+      artifactName: "runtime-ps-sandbox-container",
       timeoutMs: 30_000,
     },
   );
@@ -421,7 +428,7 @@ async function installedStartupCensus(
     "assert census is not None",
     "print(json.dumps({'count': census[0], 'pid': census[1]}))",
   ].join("\n");
-  const result = await docker(
+  const result = await runtimeCommand(
     host,
     ["exec", "--user", "0", containerId, "python3", "-I", "-c", script],
     { artifactName, timeoutMs: 30_000 },
@@ -440,7 +447,7 @@ async function runInstalledFailedStartupUnlock(
     `plan_json=$(cat ${STATE_LOCK_PLAN_PATH})`,
     `exec timeout --signal=TERM --kill-after=5s 25m python3 -I ${CONFIG_GUARD_PATH} unlock-failed-startup --config-dir ${CONFIG_DIR} --plan-json "$plan_json"`,
   ].join("\n");
-  return docker(host, ["exec", "--user", "0", containerId, "sh", "-c", script], {
+  return runtimeCommand(host, ["exec", "--user", "0", containerId, "sh", "-c", script], {
     artifactName,
     timeoutMs: 26 * 60_000,
   });
@@ -462,14 +469,24 @@ async function readOriginalConfig(
   containerId: string,
   targetFile: string,
 ): Promise<void> {
+  const invocation = selectedRuntimeProvider(host).hostInvocation([
+    "container",
+    "exec",
+    "--user",
+    "0",
+    containerId,
+    "cat",
+    CONFIG_PATH,
+  ]);
   const result = await host.command(
     "bash",
     [
       "-lc",
-      `umask 077; docker exec -u 0 "$1" cat ${CONFIG_PATH} > "$2"`,
-      "backup-openclaw-config",
-      containerId,
+      'output="$1"; shift; "$@" > "$output"',
+      "runtime-config-backup",
       targetFile,
+      invocation.command,
+      ...invocation.args,
     ],
     {
       artifactName: "phase-5b-backup-original-config",
@@ -506,7 +523,7 @@ test(
     timeout: TEST_TIMEOUT_MS,
     meta: {
       e2ePhases: [
-        "confirm Docker and onboard the shields sandbox",
+        "confirm selected runtime and onboard the shields sandbox",
         "establish the mutable unified OpenClaw config",
         "lock config and workspace, inspect redaction, and run the public Fabric turn",
         "restart OpenClaw with shields up",
@@ -521,7 +538,7 @@ test(
       ],
     },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets }) => {
     const runtime = initializeTestRuntime();
     cleanup.trackDisposable("clear isolated shields test runtime", () => {
       activeTestRuntime = undefined;
@@ -561,18 +578,10 @@ test(
       ],
     });
 
-    const dockerInfo = await docker(host, ["info"], {
-      artifactName: "prereq-docker-info",
-      timeoutMs: 30_000,
+    await runtimeProvider.requireAvailable({
+      artifactName: "prereq-runtime-info",
+      scenarioLabel: "shields-config",
     });
-    if (dockerInfo.exitCode !== 0) {
-      if (process.env.GITHUB_ACTIONS === "true") {
-        throw new Error(
-          `Docker is required for shields-config live E2E: ${resultText(dockerInfo)}`,
-        );
-      }
-      skip("Docker is required for shields-config live E2E");
-    }
 
     const hosted = requireHostedInferenceConfig(secrets);
     const apiKey = hosted.apiKey;
@@ -704,7 +713,7 @@ test(
     expect(dirAfterDoctor).toMatchObject({ mode: "2770", owner: "sandbox:sandbox" });
 
     const containerId = await findSandboxContainer(host);
-    const gatewayWrite = await docker(
+    const gatewayWrite = await runtimeCommand(
       host,
       ["exec", "-u", "gateway", containerId, "sh", "-c", `printf ' ' >>${CONFIG_PATH}`],
       {
@@ -895,26 +904,32 @@ test(
     const originalConfig = path.join(runtime.home, "openclaw-config-backup.json");
     await readOriginalConfig(host, containerId, originalConfig);
     try {
-      const tamper = await host.command(
-        "bash",
+      const tamper = await runtimeCommand(
+        host,
         [
-          "-lc",
+          "container",
+          "exec",
+          "--user",
+          "0",
+          containerId,
+          "sh",
+          "-c",
           [
             `had_immutable=false`,
-            `if docker exec -u 0 ${containerId} lsattr -d ${CONFIG_PATH} 2>/dev/null | awk '{print $1}' | grep -q i; then had_immutable=true; fi`,
-            `docker exec -u 0 ${containerId} sh -c 'chattr -i ${CONFIG_PATH} 2>/dev/null || true; chmod 644 ${CONFIG_PATH} && printf " " >> ${CONFIG_PATH} && chmod 444 ${CONFIG_PATH}'`,
-            `if [ "$had_immutable" = true ]; then docker exec -u 0 ${containerId} chattr +i ${CONFIG_PATH} >/dev/null 2>&1 || true; fi`,
+            `if lsattr -d ${CONFIG_PATH} 2>/dev/null | awk '{print $1}' | grep -q i; then had_immutable=true; fi`,
+            `chattr -i ${CONFIG_PATH} 2>/dev/null || true`,
+            `chmod 644 ${CONFIG_PATH} && printf " " >> ${CONFIG_PATH} && chmod 444 ${CONFIG_PATH}`,
+            `if [ "$had_immutable" = true ]; then chattr +i ${CONFIG_PATH} >/dev/null 2>&1 || true; fi`,
           ].join("\n"),
         ],
         {
           artifactName: "phase-5b-host-root-tamper",
-          env: commandEnv(),
           timeoutMs: 30_000,
         },
       );
       expect(tamper.exitCode, resultText(tamper)).toBe(0);
 
-      const afterTamper = await docker(
+      const afterTamper = await runtimeCommand(
         host,
         ["exec", containerId, "stat", "-c", "%a %U:%G", CONFIG_PATH],
         {
@@ -938,14 +953,26 @@ test(
       expect(reUp.exitCode, resultText(reUp)).not.toBe(0);
       expect(resultText(reUp)).toContain("Refusing to re-seal");
     } finally {
-      await host.command(
+      const invocation = selectedRuntimeProvider(host).hostInvocation([
+        "container",
+        "exec",
+        "--interactive",
+        "--user",
+        "0",
+        containerId,
+        "sh",
+        "-c",
+        `chattr -i ${CONFIG_PATH} 2>/dev/null || true; chmod 644 ${CONFIG_PATH} && cat > ${CONFIG_PATH} && chmod 444 ${CONFIG_PATH} && chattr +i ${CONFIG_PATH} 2>/dev/null || true`,
+      ]);
+      const restore = await host.command(
         "bash",
         [
           "-lc",
-          `docker exec -i -u 0 "$1" sh -c 'chattr -i ${CONFIG_PATH} 2>/dev/null || true; chmod 644 ${CONFIG_PATH} && cat > ${CONFIG_PATH} && chmod 444 ${CONFIG_PATH} && chattr +i ${CONFIG_PATH} 2>/dev/null || true' < "$2"`,
-          "restore-openclaw-config",
-          containerId,
+          'input="$1"; shift; exec "$@" < "$input"',
+          "runtime-config-restore",
           originalConfig,
+          invocation.command,
+          ...invocation.args,
         ],
         {
           artifactName: "phase-5b-restore-original-config",
@@ -953,6 +980,7 @@ test(
           timeoutMs: 30_000,
         },
       );
+      expect(restore.exitCode, resultText(restore)).toBe(0);
       fs.rmSync(originalConfig, { force: true });
     }
 
@@ -970,15 +998,20 @@ test(
     // "restart seal requires the exact shields-locked file posture" (which
     // stranded host state UNLOCKED while the tree stayed root-locked). The bytes
     // are untouched here, so it is a launderable perms drift, not content drift.
-    const permsDrift = await host.command(
-      "bash",
+    const permsDrift = await runtimeCommand(
+      host,
       [
-        "-lc",
-        `docker exec -u 0 ${containerId} sh -c 'chattr -i ${CONFIG_HASH_PATH} 2>/dev/null || true; chmod 660 ${CONFIG_HASH_PATH} && chown sandbox:sandbox ${CONFIG_HASH_PATH}'`,
+        "container",
+        "exec",
+        "--user",
+        "0",
+        containerId,
+        "sh",
+        "-c",
+        `chattr -i ${CONFIG_HASH_PATH} 2>/dev/null || true; chmod 660 ${CONFIG_HASH_PATH} && chown sandbox:sandbox ${CONFIG_HASH_PATH}`,
       ],
       {
         artifactName: "phase-5c-config-hash-perms-only-drift",
-        env: commandEnv(),
         timeoutMs: 30_000,
       },
     );
@@ -1255,7 +1288,7 @@ test(
       "prove installed failed-startup guard refuses a live child and supported shields down unlocks childless state",
     );
     const recoveryContainerId = await findSandboxContainer(host);
-    const removeMarkers = await docker(
+    const removeMarkers = await runtimeCommand(
       host,
       ["exec", "--user", "0", recoveryContainerId, "rm", "-f", ...STARTUP_MARKER_PATHS],
       { artifactName: "phase-12-remove-startup-markers", timeoutMs: 30_000 },
@@ -1304,10 +1337,13 @@ test(
     expect(openshellResolution.exitCode, resultText(openshellResolution)).toBe(0);
     const realOpenshellPath = openshellResolution.stdout.trim();
     expect(path.isAbsolute(realOpenshellPath), realOpenshellPath).toBe(true);
+    const runtimeInvocation = selectedRuntimeProvider(host).hostInvocation([]);
     const policyBoundary = createPolicySetChildlessBoundaryShim({
       configGuardPath: CONFIG_GUARD_PATH,
       containerId: recoveryContainerId,
       realOpenshellPath,
+      runtimeCommand: runtimeInvocation.command,
+      runtimePrefix: runtimeInvocation.args,
       sandboxName: SANDBOX_NAME,
       startupPid: liveCensus.pid ?? 0,
       tempRoot: runtime.home,
@@ -1317,7 +1353,7 @@ test(
     });
     cleanup.trackDisposable(`resume stopped supervisor for ${SANDBOX_NAME}`, async () => {
       await resumeSupervisorIfPaused(supervisorPaused, async () => {
-        const resume = await docker(host, policyBoundary.resumeSupervisor, {
+        const resume = await runtimeCommand(host, policyBoundary.resumeSupervisor, {
           artifactName: "cleanup-phase-12-resume-startup-supervisor",
           timeoutMs: 30_000,
         });
@@ -1355,7 +1391,7 @@ test(
       status: "childless",
     });
     await waitForChildlessStartup(host, recoveryContainerId);
-    const unlockedPaths = await docker(
+    const unlockedPaths = await runtimeCommand(
       host,
       [
         "exec",
@@ -1376,7 +1412,7 @@ test(
       { mode: "2770", owner: "sandbox:sandbox" },
     ]);
 
-    const resumeSupervisor = await docker(host, policyBoundary.resumeSupervisor, {
+    const resumeSupervisor = await runtimeCommand(host, policyBoundary.resumeSupervisor, {
       artifactName: "phase-12-resume-startup-supervisor",
       timeoutMs: 30_000,
     });

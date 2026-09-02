@@ -17,6 +17,8 @@ export function createPolicySetChildlessBoundaryShim(options: {
   configGuardPath: string;
   containerId: string;
   realOpenshellPath: string;
+  runtimeCommand: string;
+  runtimePrefix: readonly string[];
   sandboxName: string;
   startupPid: number;
   tempRoot: string;
@@ -65,19 +67,22 @@ fs.writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ status: "arming" }
   flag: "wx",
   mode: 0o600,
 });
-const pause = spawnSync("docker", ${JSON.stringify(processControl.pauseSupervisor)}, {
+const runtimeCommand = ${JSON.stringify(options.runtimeCommand)};
+const runtimePrefix = ${JSON.stringify(options.runtimePrefix)};
+const pause = spawnSync(runtimeCommand, [...runtimePrefix, ...${JSON.stringify(processControl.pauseSupervisor)}], {
   env: process.env,
   stdio: "inherit",
 });
 if (pause.error || pause.status !== 0) process.exit(pause.status ?? 1);
-const terminate = spawnSync("docker", ${JSON.stringify(processControl.terminateStartupChild)}, {
+const terminate = spawnSync(runtimeCommand, [...runtimePrefix, ...${JSON.stringify(processControl.terminateStartupChild)}], {
   env: process.env,
   stdio: "inherit",
 });
 if (terminate.error || terminate.status !== 0) process.exit(terminate.status ?? 1);
 const childless = spawnSync(
-  "docker",
+  runtimeCommand,
   [
+    ...runtimePrefix,
     "exec",
     "--user",
     "0",

@@ -161,7 +161,10 @@ function stageLegacySandboxBuildContext(
   tmpDir: string = os.tmpdir(),
 ): StagedBuildContext {
   const buildCtx = createBuildContextDir(tmpDir);
-  fs.copyFileSync(path.join(rootDir, "Dockerfile"), path.join(buildCtx, "Dockerfile"));
+  fs.copyFileSync(
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
+    path.join(buildCtx, "Dockerfile"),
+  );
   fs.copyFileSync(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),
@@ -205,7 +208,10 @@ function stageOptimizedSandboxBuildContext(
   const stagedCiDir = path.join(buildCtx, "ci");
   const stagedScriptsDir = path.join(buildCtx, "scripts");
 
-  fs.copyFileSync(path.join(rootDir, "Dockerfile"), stagedDockerfile);
+  fs.copyFileSync(
+    path.join(rootDir, "packages", "nemoclaw-openclaw", "Dockerfile"),
+    stagedDockerfile,
+  );
   fs.copyFileSync(
     path.join(rootDir, "tsconfig.runtime-preloads.json"),
     path.join(buildCtx, "tsconfig.runtime-preloads.json"),

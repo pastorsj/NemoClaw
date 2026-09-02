@@ -4,7 +4,6 @@
 import path from "node:path";
 import type { AgentConfigTarget } from "../sandbox/agent-config";
 
-const dockerExec: typeof import("../adapters/docker/exec") = require("../adapters/docker/exec");
 const privilegedExecModule: typeof import("../sandbox/privileged-exec") = require("../sandbox/privileged-exec");
 
 const MUTABLE_CONFIG_NORMALIZER = "/usr/local/lib/nemoclaw/normalize_mutable_config_perms.py";
@@ -60,13 +59,10 @@ function runPrivileged(sandboxName: string, cmd: string[], timeout = 15000): voi
     sandboxName,
     "mutable config permission repair",
     () => {
-      dockerExec.dockerExecFileSync(
-        privilegedExecModule.privilegedSandboxExecArgv(sandboxName, cmd, false, true),
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-          timeout,
-        },
-      );
+      privilegedExecModule.capturePrivilegedSandboxCommand(sandboxName, cmd, {
+        sanitizeEnvironment: true,
+        timeout,
+      });
     },
   );
 }
@@ -76,14 +72,12 @@ function privilegedExecCapture(sandboxName: string, cmd: string[], timeout = 150
     sandboxName,
     "mutable config identity lookup",
     () =>
-      dockerExec
-        .dockerExecFileSync(
-          privilegedExecModule.privilegedSandboxExecArgv(sandboxName, cmd, false, true),
-          {
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout,
-          },
-        )
+      privilegedExecModule
+        .capturePrivilegedSandboxCommand(sandboxName, cmd, {
+          sanitizeEnvironment: true,
+          timeout,
+        })
+        .toString("utf8")
         .trim(),
   );
 }

@@ -131,7 +131,14 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code)\/)?Dockerfile$/,
+    pattern: /(?:^|\/)packages\/nemoclaw-openclaw\/Dockerfile(?:\.base)?$/,
+    testsToRun: runTests(
+      "src/lib/onboard/managed-startup-profile.test.ts",
+      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
+    ),
+  },
+  {
+    pattern: /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code)\/)Dockerfile$/,
     testsToRun: (_file, match) => {
       if (match[1] === "packages/nemoclaw-hermes/") {
         return [
@@ -139,12 +146,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
           "packages/nemoclaw-hermes/tests/image/mcp-runtime.test.ts",
         ];
       }
-      return match[1]
-        ? ["src/lib/onboard/managed-startup-profile.test.ts"]
-        : [
-            "src/lib/onboard/managed-startup-profile.test.ts",
-            "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
-          ];
+      return ["src/lib/onboard/managed-startup-profile.test.ts"];
     },
   },
   {

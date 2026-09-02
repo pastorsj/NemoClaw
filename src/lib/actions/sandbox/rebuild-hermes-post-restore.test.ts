@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
-} from "../../../../test/helpers/rebuild-flow-dcode-harness";
+} from "../../../../test/helpers/rebuild-flow-generic-harness";
 import {
   ensureHermesGatewayAfterStateRestore,
   ensureHermesGatewayAfterStateRestoreForCronGate,

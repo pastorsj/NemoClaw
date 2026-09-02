@@ -194,6 +194,10 @@ export const HERMES_PORTABLE_BUILD_CONTEXT_FILES = [
   { path: "packages/nemoclaw-hermes/policies/presets/nous-image.yaml", mode: "100644" },
   { path: "packages/nemoclaw-hermes/policies/presets/nous-web.yaml", mode: "100644" },
   { path: "packages/nemoclaw-hermes/portable-build-context.json", mode: "100644" },
+  {
+    path: "packages/nemoclaw-hermes/provider-profiles/langfuse-hermes-v1.yaml",
+    mode: "100644",
+  },
   { path: "packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml", mode: "100644" },
   { path: "packages/nemoclaw-hermes/runtime/cli-adapter.json", mode: "100644" },
   { path: "packages/nemoclaw-hermes/runtime/cli-wrapper.py", mode: "100755" },

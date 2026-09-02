@@ -16,12 +16,12 @@ import { requireSingleReviewedDockerfileRunCommand } from "../../helpers/dockerf
 
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const baseDockerfiles = [
-  "Dockerfile.base",
+  "packages/nemoclaw-openclaw/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
 ] as const;
 const finalDockerfiles = [
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ] as const;
@@ -36,7 +36,7 @@ const hermesTarCacheSeedArguments = [
   "/tmp/nemoclaw-bundled-npm-tar.tgz",
 ] as const;
 const tarPatchArgumentsByDockerfile = {
-  Dockerfile: npmRootArguments,
+  "packages/nemoclaw-openclaw/Dockerfile": npmRootArguments,
   "packages/nemoclaw-hermes/Dockerfile": hermesTarCacheSeedArguments,
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile": npmRootArguments,
 } as const;

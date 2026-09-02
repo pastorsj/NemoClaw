@@ -10,7 +10,12 @@ import { dockerRunCommandBetween, runLoggedDockerShell } from "../../helpers/doc
 import { stageFixedParser, useRealPatchedParser } from "../../helpers/python-parser-security-fixture";
 
 const ROOT = path.resolve(import.meta.dirname, "../../..");
-const DOCKERFILE_BASE = path.join(ROOT, "Dockerfile.base");
+const DOCKERFILE_BASE = path.join(
+  ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "Dockerfile.base",
+);
 const MANAGED_BASE_DOCKERFILES = [
   DOCKERFILE_BASE,
   path.join(ROOT, "packages", "nemoclaw-hermes", "Dockerfile.base"),

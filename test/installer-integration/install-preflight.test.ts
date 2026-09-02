@@ -136,7 +136,7 @@ if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
 if [ "$1" = "-e" ]; then
-  exit 1
+  exit 0
 fi
 echo "unexpected node invocation: $*" >&2
 exit 99
@@ -198,7 +198,7 @@ if [ "$1" = "--version" ]; then
   exit 0
 fi
 if [ "$1" = "-e" ]; then
-  exit 1
+  exit 0
 fi
 echo "unexpected node invocation: $*" >&2
 exit 99
@@ -1017,7 +1017,7 @@ if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
 if [ "$1" = "-e" ]; then
-  exit 1
+  exit 0
 fi
 exit 99
 `,
@@ -1122,7 +1122,7 @@ if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
 if [ "$1" = "-e" ]; then
-  exit 1
+  exit 0
 fi
 exit 99
 `,
@@ -1741,7 +1741,9 @@ exit 1
   it("resolve_openclaw_version: falls back to Dockerfile.base when package.json omits it", () => {
     const { root: tmp } = installerCheckout("nemoclaw-openclaw-version-");
     fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "fixture" }));
-    fs.writeFileSync(path.join(tmp, "Dockerfile.base"), "ARG OPENCLAW_VERSION=1.2.3\n");
+    const packageRoot = path.join(tmp, "packages", "nemoclaw-openclaw");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    fs.writeFileSync(path.join(packageRoot, "Dockerfile.base"), "ARG OPENCLAW_VERSION=1.2.3\n");
     const r = callInstallerFn(`resolve_openclaw_version ${JSON.stringify(tmp)}`);
     expect(r.stdout.trim()).toBe("1.2.3");
   });
@@ -2295,7 +2297,7 @@ fi
 if [ "$1" = "-e" ] && [[ "\${2:-}" == *"schemaVersion"* ]]; then
   exec ${JSON.stringify(process.execPath)} "$@"
 fi
-if [ "$1" = "-e" ]; then exit 1; fi
+if [ "$1" = "-e" ]; then exit 0; fi
 exit 99`,
     );
 

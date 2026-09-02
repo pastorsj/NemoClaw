@@ -19,12 +19,17 @@ import {
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
 const dockerfiles = [
   {
-    file: "Dockerfile.base",
+    file: "packages/nemoclaw-openclaw/Dockerfile.base",
     installsPatchDownloader: false,
     installsWithNpm: true,
     patchCount: 2,
   },
-  { file: "Dockerfile", installsPatchDownloader: false, installsWithNpm: true, patchCount: 1 },
+  {
+    file: "packages/nemoclaw-openclaw/Dockerfile",
+    installsPatchDownloader: false,
+    installsWithNpm: true,
+    patchCount: 1,
+  },
   {
     file: "packages/nemoclaw-hermes/Dockerfile.base",
     installsPatchDownloader: false,
@@ -71,7 +76,7 @@ const hermesFinalPatchArguments = [
   hermesFinalArchivePath,
 ] as const;
 const pinnedBaseDockerfiles = [
-  "Dockerfile.base",
+  "packages/nemoclaw-openclaw/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
   "packages/nemoclaw-pi/Dockerfile.base",
@@ -285,7 +290,7 @@ describe("node-tar image remediation contract", () => {
   });
 
   it.each([
-    "Dockerfile.base",
+    "packages/nemoclaw-openclaw/Dockerfile.base",
     "packages/nemoclaw-hermes/Dockerfile.base",
     "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
     "packages/nemoclaw-pi/Dockerfile.base",
@@ -464,7 +469,7 @@ describe("reviewed npm image remediation contract", () => {
   });
 
   it.each([
-    { file: "Dockerfile.base", installsWithNpm: true },
+    { file: "packages/nemoclaw-openclaw/Dockerfile.base", installsWithNpm: true },
     { file: "packages/nemoclaw-hermes/Dockerfile.base", installsWithNpm: true },
     { file: "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base", installsWithNpm: false },
     { file: "packages/nemoclaw-pi/Dockerfile.base", installsWithNpm: true },

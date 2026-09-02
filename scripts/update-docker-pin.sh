@@ -7,7 +7,7 @@
 # rewrites every FROM line that references node:22-trixie-slim.
 #
 # Usage:
-#   scripts/update-docker-pin.sh            # update Dockerfile in repo root
+#   scripts/update-docker-pin.sh            # update the OpenClaw package Dockerfile
 #   scripts/update-docker-pin.sh --check    # exit 0 if up-to-date, 1 if stale
 
 set -euo pipefail
@@ -22,7 +22,7 @@ esac
 
 IMAGE="node"
 TAG="22-trixie-slim"
-DOCKERFILE="${DOCKERFILE:-Dockerfile}"
+DOCKERFILE="${DOCKERFILE:-packages/nemoclaw-openclaw/Dockerfile}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOCKERFILE_PATH="${REPO_ROOT}/${DOCKERFILE}"
 

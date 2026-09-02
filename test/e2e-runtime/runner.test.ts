@@ -1225,14 +1225,20 @@ describe("regression guards", () => {
     const repoRoot = path.join(import.meta.dirname, "..", "..");
 
     it("base image installs a pinned tmux in the apt package list", () => {
-      const src = fs.readFileSync(path.join(repoRoot, "Dockerfile.base"), "utf-8");
+      const src = fs.readFileSync(
+        path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
+        "utf-8",
+      );
       // Pinned (DL3008) tmux must be part of the single base apt-get install
       // layer so fresh builds ship it without a runtime apt round-trip.
       expect(src).toMatch(/tmux=[0-9]/);
     });
 
     it("runtime image repairs tmux on stale bases and asserts it at build time", () => {
-      const src = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf-8");
+      const src = fs.readFileSync(
+        path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"),
+        "utf-8",
+      );
       // Stale GHCR bases predating the tmux addition must still converge: the
       // hardening layer detects a missing tmux, installs a pinned version, and
       // fails the build if tmux is still absent afterwards.
@@ -1242,8 +1248,14 @@ describe("regression guards", () => {
     });
 
     it("base and runtime images pin tmux to the same version", () => {
-      const baseSrc = fs.readFileSync(path.join(repoRoot, "Dockerfile.base"), "utf-8");
-      const runtimeSrc = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf-8");
+      const baseSrc = fs.readFileSync(
+        path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
+        "utf-8",
+      );
+      const runtimeSrc = fs.readFileSync(
+        path.join(repoRoot, "packages", "nemoclaw-openclaw", "Dockerfile"),
+        "utf-8",
+      );
       const baseVersion = baseSrc.match(/tmux=([0-9][^\s\\]*)/)?.[1];
       const runtimeVersion = runtimeSrc.match(
         /apt-get install -y --no-install-recommends tmux=([0-9][^\s\\;]*)/,

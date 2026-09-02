@@ -58,7 +58,8 @@ const OPAQUE_INPUTS = [
   ".github/actions/resolve-hermes-base-image/action.yaml",
   ".github/actions/resolve-reviewed-hermes-platform/action.yaml",
   ".agents/skills/nemoclaw-contributor-update-dependencies/scripts/collect-hermes-release-supplement.py",
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
@@ -219,7 +220,11 @@ describe("Vitest opaque-input watch triggers", () => {
         ".agents/skills/nemoclaw-contributor-update-dependencies/scripts/collect-hermes-release-supplement.py",
       ),
     ).toEqual(["packages/nemoclaw-hermes/tests/integration/release-supplement.test.ts"]);
-    expect(triggeredBy("Dockerfile")).toEqual([
+    expect(triggeredBy("packages/nemoclaw-openclaw/Dockerfile")).toEqual([
+      "src/lib/onboard/managed-startup-profile.test.ts",
+      "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-openclaw/Dockerfile.base")).toEqual([
       "src/lib/onboard/managed-startup-profile.test.ts",
       "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
     ]);

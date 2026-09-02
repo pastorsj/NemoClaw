@@ -441,6 +441,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/provider-profiles/langfuse-hermes-v1.yaml",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/provider-profiles/tavily-hermes-v1.yaml",
       "mode": "100644"
     },

@@ -57,7 +57,12 @@ const PLATFORM_REF = `${IMAGE_NAME}@${PLATFORM_DIGEST}`;
 function resolutionOptions() {
   return {
     imageName: IMAGE_NAME,
-    dockerfilePath: path.join(process.cwd(), "Dockerfile.base"),
+    dockerfilePath: path.join(
+      process.cwd(),
+      "packages",
+      "nemoclaw-openclaw",
+      "Dockerfile.base",
+    ),
     localTag: "nemoclaw-sandbox-base-local:test",
     rootDir: process.cwd(),
     env: {
@@ -122,7 +127,7 @@ describe("sandbox base-image pinned platform digest resolution", () => {
     const resolved = resolveSandboxBaseImage({
       ...resolutionOptions(),
       pinnedRemoteRef: REF,
-      preferPinnedRemoteRef: true,
+      requirePinnedRemoteRef: true,
     });
 
     expect(resolved).toEqual({
@@ -181,7 +186,7 @@ describe("sandbox base-image pinned platform digest resolution", () => {
     const resolved = resolveSandboxBaseImage({
       ...resolutionOptions(),
       pinnedRemoteRef: REF,
-      preferPinnedRemoteRef: true,
+      requirePinnedRemoteRef: true,
     });
 
     expect(resolved).toMatchObject({
@@ -221,7 +226,7 @@ describe("sandbox base-image pinned platform digest resolution", () => {
     const resolved = resolveSandboxBaseImage({
       ...resolutionOptions(),
       pinnedRemoteRef: REF,
-      preferPinnedRemoteRef: true,
+      requirePinnedRemoteRef: true,
     });
 
     expect(resolved).toMatchObject({

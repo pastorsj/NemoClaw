@@ -14,7 +14,7 @@ import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
   snapshotEnv,
-} from "../../../../test/helpers/rebuild-flow-dcode-harness";
+} from "../../../../test/helpers/rebuild-flow-generic-harness";
 import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { resolveRebuildDurableConfig } from "./rebuild-durable-config";
 

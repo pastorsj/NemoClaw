@@ -24,10 +24,8 @@ import {
 
 type FabricCompatibleEndpointContext = Pick<
   E2ETargetFixtures,
-  "artifacts" | "cleanup" | "host" | "progress" | "sandbox"
-> & {
-  skip(note?: string): void;
-};
+  "artifacts" | "cleanup" | "host" | "progress" | "runtimeProvider" | "sandbox"
+>;
 
 interface FabricLiveEnvironment {
   readonly commandEnv: NodeJS.ProcessEnv;
@@ -83,14 +81,14 @@ export async function runFabricCompatibleEndpointJourney({
   cleanup,
   host,
   progress,
+  runtimeProvider,
   sandbox,
-  skip,
 }: FabricCompatibleEndpointContext): Promise<void> {
   const model = "nemoclaw-e2e-compatible";
   const apiKey = "sk-compatible-TEST-NOT-A-REAL-VALUE";
   const { commandEnv: initialCommandEnv, gatewayName } = fabricLiveEnvironment();
   let commandEnv = initialCommandEnv;
-  await requireLivePrerequisites(host, skip);
+  await requireLivePrerequisites(host, runtimeProvider);
 
   progress.phase("install and verify the Deep Agents Code harness package");
   const installation = await runNemoclawCli(["harness", "install", "langchain-deepagents-code"], {

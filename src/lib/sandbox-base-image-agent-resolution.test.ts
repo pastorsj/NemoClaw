@@ -46,7 +46,12 @@ const IMAGE_NAME = "ghcr.io/nvidia/nemoclaw/sandbox-base";
 function resolutionOptions() {
   return {
     imageName: IMAGE_NAME,
-    dockerfilePath: path.join(process.cwd(), "Dockerfile.base"),
+    dockerfilePath: path.join(
+      process.cwd(),
+      "packages",
+      "nemoclaw-openclaw",
+      "Dockerfile.base",
+    ),
     localTag: "nemoclaw-sandbox-base-local:test",
     rootDir: process.cwd(),
     env: {
@@ -123,7 +128,9 @@ describe("agent-specific sandbox base-image resolution", () => {
       suppressOutput: true,
     });
     expect(validateImage).toHaveBeenCalledWith(staleRef);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("deepagents-code==0.1.55"));
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("lacks a required runtime capability"),
+    );
     expect(dockerMocks.build).not.toHaveBeenCalled();
     warn.mockRestore();
   });

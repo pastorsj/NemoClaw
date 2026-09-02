@@ -28,6 +28,10 @@ const RUNTIME_CONTRACTS = [
   "host/mcp-adapter.cts",
   "host/base-qualification.cts",
 ] as const;
+const PROVIDER_PROFILES = [
+  "provider-profiles/langfuse-hermes-v1.yaml",
+  "provider-profiles/tavily-hermes-v1.yaml",
+] as const;
 
 type PackedFile = { path?: string; mode?: number };
 type PackReport = { filename?: string; files?: PackedFile[] };
@@ -129,6 +133,10 @@ describe("published Hermes package", () => {
   );
 
   it.each(RUNTIME_CONTRACTS)("ships package-owned runtime contract %s", (artifact) => {
+    expect(packedFiles.has(artifact)).toBe(true);
+  });
+
+  it.each(PROVIDER_PROFILES)("ships package-owned provider profile %s", (artifact) => {
     expect(packedFiles.has(artifact)).toBe(true);
   });
 

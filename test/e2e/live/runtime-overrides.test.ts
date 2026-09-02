@@ -306,7 +306,7 @@ async function buildImage(
       "-t",
       image,
       "-f",
-      path.join(REPO_ROOT, "Dockerfile"),
+      path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile"),
       "--build-arg",
       "NEMOCLAW_DISABLE_DEVICE_AUTH=1",
       "--build-arg",

@@ -30,10 +30,10 @@ afterEach(() => {
 });
 
 describe("agentSupportsWebSearch", () => {
-  it("detects default, OpenClaw, and Hermes agent support", () => {
-    expect(agentSupportsWebSearch(null)).toBe(true);
-    expect(agentSupportsWebSearch({ name: "openclaw" })).toBe(true);
-    expect(agentSupportsWebSearch({ name: "hermes" })).toBe(true);
+  it("does not infer web-search support without a package image", () => {
+    expect(agentSupportsWebSearch(null)).toBe(false);
+    expect(agentSupportsWebSearch({ name: "openclaw" })).toBe(false);
+    expect(agentSupportsWebSearch({ name: "hermes" })).toBe(false);
   });
 
   it("accepts Hermes when its Dockerfile declares web-search support", () => {
@@ -100,7 +100,7 @@ describe("agentSupportsWebSearch", () => {
     expect(agentSupportsWebSearch({ name: "openclaw" }, override, root)).toBe(true);
   });
 
-  it("falls back to the agent Dockerfile and then the root Dockerfile", () => {
+  it("falls back to the package Dockerfile when the resolved path disappears", () => {
     const root = tmpRoot();
     const agentDockerfile = writeDockerfile(root, "FROM scratch\n", "Agentfile");
     writeDockerfile(root, "ARG NEMOCLAW_WEB_SEARCH_ENABLED=1\n");

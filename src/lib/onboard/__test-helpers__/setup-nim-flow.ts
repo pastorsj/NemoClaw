@@ -114,6 +114,10 @@ export function makeDeps(overrides: Partial<SetupNimFlowDeps> = {}): SetupNimFlo
     readRecordedNimContainer: () => null,
     readRecordedModel: () => null,
     rejectWindowsHostOllama: () => false,
+    resolveManagedLlamaCppSelection: () => ({
+      kind: "rejected",
+      reason: "no managed llama.cpp test fixture selected",
+    }),
     prompt: async () => "",
     selectFromNumberedMenu,
     note: vi.fn(),

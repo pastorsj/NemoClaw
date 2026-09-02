@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { DASHBOARD_PORT_RANGE_END, DASHBOARD_PORT_RANGE_START } from "../../src/lib/core/ports.js";
 import { getBuildIdentity } from "../../src/lib/core/version.js";
 import { appendHostProxyEnvArgs } from "../../src/lib/onboard/host-proxy-env.js";
 import {
@@ -15,6 +16,7 @@ import {
   shouldPromptForInferenceInputCapability,
 } from "../../src/lib/onboard/inference-input-capability.js";
 import { createInferenceRouteHelpers } from "../../src/lib/onboard/inference-route.js";
+import { probePortBoundSync } from "../../src/lib/onboard/dashboard-port.js";
 import type { SetupInference, SetupInferenceDeps } from "../../src/lib/onboard/setup-inference.js";
 import { stageOptimizedSandboxBuildContext } from "../../src/lib/sandbox/build-context.js";
 import { writeOkOpenshell } from "../helpers/onboard-openshell-fixture";
@@ -663,6 +665,11 @@ startGateway(null).catch((error) => {
   });
 
   it("restores the dashboard forward when onboarding reuses an existing ready sandbox", async () => {
+    const dashboardPort = Array.from(
+      { length: DASHBOARD_PORT_RANGE_END - DASHBOARD_PORT_RANGE_START + 1 },
+      (_value, index) => DASHBOARD_PORT_RANGE_START + index,
+    ).find((port) => !probePortBoundSync(port));
+    assert.ok(dashboardPort, "expected one free dashboard port for the process fixture");
     const repoRoot = path.join(import.meta.dirname, "../..");
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-reuse-forward-"));
     const fakeBin = path.join(tmpDir, "bin");
@@ -703,7 +710,7 @@ runner.run = (command, opts = {}) => {
 runner.runCapture = (command) => {
   const sandboxResult = existingSandbox.run(sandboxCommand(command));
   if (sandboxResult !== null) return sandboxResult.status === 0 ? sandboxResult.stdout.toString() : "";
-  if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 18789 12345 running";
+  if (_n(command).includes("forward list")) return "my-assistant 127.0.0.1 ${dashboardPort} 12345 running";
   return "";
 };
 	registry.getSandbox = () => fixtureMocks.sandboxLifecycleFixture({
@@ -727,7 +734,7 @@ const { createSandbox } = require(${onboardPath});
 
 (async () => {
   process.env.OPENSHELL_GATEWAY = "nemoclaw";
-  process.env.CHAT_UI_URL = "https://chat.example.com";
+  process.env.CHAT_UI_URL = "https://chat.example.com:${dashboardPort}";
   const sandboxName = await createSandbox(
     ...fixtureMocks.buildHarnessRouteArguments(
       [null, "gpt-5.4", "nvidia-prod", null, "my-assistant"],
@@ -761,7 +768,7 @@ const { createSandbox } = require(${onboardPath});
     assert.equal(payload.sandboxName, "my-assistant");
     assert.ok(
       payload.commands.some((entry: CommandEntry) =>
-        entry.command.includes("forward start --background 0.0.0.0:18789 my-assistant"),
+        entry.command.includes(`forward start --background 0.0.0.0:${dashboardPort} my-assistant`),
       ),
       "expected dashboard forward restore on sandbox reuse",
     );

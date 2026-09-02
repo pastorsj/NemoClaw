@@ -24,7 +24,6 @@ describe("E2E operations workflow", testTimeoutOptions(15_000), () => {
   it("accepts the checked-in workflow", () => {
     expect(validateE2eOperationsWorkflowBoundary()).toEqual([]);
   });
-
   it("rejects a lookalike live cold-onboard performance artifact path (#6660)", () => {
     const workflow = readE2eOperationsWorkflow();
     const upload = workflow.jobs.live.steps!.find((step) => step.name === "Upload E2E artifacts")!;
@@ -41,7 +40,6 @@ describe("E2E operations workflow", testTimeoutOptions(15_000), () => {
       "live E2E must upload cold-onboard performance evidence",
     );
   });
-
   it("requires the scorecard to wait for every reporting dependency", () => {
     const workflow = readE2eOperationsWorkflow();
     workflow.jobs.scorecard.needs = [...(workflow.jobs.scorecard.needs as string[])];
@@ -51,7 +49,6 @@ describe("E2E operations workflow", testTimeoutOptions(15_000), () => {
       "scorecard needs must exactly match report-to-pr needs",
     );
   });
-
   it("limits scorecard permissions to read access", () => {
     const workflow = readE2eOperationsWorkflow();
     workflow.jobs.scorecard.permissions = {
@@ -469,6 +466,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       "b",
       "c",
       "refs/heads/main",
+      1,
       "::error::checkout_repository must be an owner/repository name\n",
     ],
     [
@@ -478,6 +476,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       "d",
       "c",
       "refs/heads/main",
+      1,
       "::error::base_sha must match the PR base SHA\n",
     ],
     [
@@ -487,19 +486,21 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       "b",
       "d",
       "refs/heads/main",
+      1,
       "::error::workflow_sha must match the trusted main workflow SHA\n",
     ],
     [
-      "a matching workflow SHA from a non-main workflow ref",
+      "a matching workflow SHA from a same-repository workflow branch",
       "NVIDIA/NemoClaw",
       "a",
       "b",
       "c",
       "refs/heads/pr-controlled-workflow",
-      "::error::Manual PR E2E must be dispatched from trusted main\n",
+      0,
+      "",
     ],
   ] as const)(
-    "rejects manual PR authentication for %s",
+    "handles manual PR authentication for %s",
     (
       _caseName,
       requestedRepository,
@@ -507,6 +508,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       requestedBaseCharacter,
       expectedWorkflowCharacter,
       workflowRef,
+      expectedStatus,
       expectedStderr,
     ) => {
       const apiHeadSha = "a".repeat(40);
@@ -545,7 +547,7 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
         },
       );
 
-      expect(result.status).toBe(1);
+      expect(result.status).toBe(expectedStatus);
       expect(result.stderr).toBe(expectedStderr);
     },
   );
@@ -693,7 +695,6 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
     const summary = join(directory, "summary");
     const targetSelection =
       "ubuntu-repo-cloud-langchain-deepagents-code,ubuntu-repo-docker-post-reboot-recovery";
-
     try {
       writeFileSync(output, "");
       writeFileSync(summary, "");
@@ -713,7 +714,6 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       const controllerTestMatrix = controllerOutput
         .find((line) => line.startsWith("test_matrix="))!
         .slice("test_matrix=".length);
-
       writeFileSync(output, "");
       const plannerResult = spawnSync(
         "bash",
@@ -757,9 +757,15 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       const testMatrixLine = readFileSync(output, "utf8")
         .split("\n")
         .find((line) => line.startsWith("test_matrix="))!;
-      expect(JSON.parse(testMatrixLine.slice("test_matrix=".length))).toEqual(
-        JSON.parse(controllerTestMatrix),
-      );
+      expect(
+        JSON.parse(testMatrixLine.slice("test_matrix=".length)).map(
+          ({ id, file, project }: { id: string; file: string; project: string }) => ({
+            id,
+            file,
+            project,
+          }),
+        ),
+      ).toEqual(JSON.parse(controllerTestMatrix));
       expect(
         (generateMatrix as unknown as { outputs: Record<string, string> }).outputs.matrix,
       ).toBe("${{ steps.matrix.outputs.matrix }}");
@@ -767,7 +773,6 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
       rmSync(directory, { recursive: true, force: true });
     }
   });
-
   it.each([
     ["inference-routing job", "inference-routing", ""],
     ["managed-image-protected-runtime job", "managed-image-protected-runtime", ""],

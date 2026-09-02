@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = path.join(import.meta.dirname, "../..");
 const runtimeRoot = "/usr/local/lib/nemoclaw/mcp-tool-discovery-runtime";
 const dockerfiles = [
-  "Dockerfile",
+  "packages/nemoclaw-openclaw/Dockerfile",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
 ] as const;
@@ -204,7 +204,7 @@ describe("MCP tool discovery image contract", () => {
   // source-shape-contract: security -- Exact reviewed runtime digests reject substituted executable and license artifacts before managed image construction.
   it.each([
     {
-      expectedHash: "c7505c6fbee8e685096a62381fa8b8c2c5fa7249037fce613575e74d82b5a903",
+      expectedHash: "3391afccb708888fca457e88203b5e70f825a0417b6ff7b1cc7df8a2ff2fc220",
       relativePath: "managed-startup-image-runtime.bundle",
     },
     {
@@ -216,7 +216,7 @@ describe("MCP tool discovery image contract", () => {
       relativePath: "mcp-tool-discovery/THIRD_PARTY_LICENSES.txt",
     },
     {
-      expectedHash: "5622323afbace37445582fa889da4cfbae31bf8ecb2a5bab571026f9cc479fdb",
+      expectedHash: "f08d138e8f3cd96a922cab396398ad23109bdbc9401fecec2b39705e461a26a3",
       relativePath: "mcp-tool-discovery/mcp-tool-discovery.bundle",
     },
   ])("pins the reviewed image runtime artifacts exactly", ({ expectedHash, relativePath }) => {

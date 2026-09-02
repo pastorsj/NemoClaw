@@ -23,24 +23,21 @@ const OPENCLAW_TARGET: AgentConfigTarget = {
 };
 const requireSource = createRequire(import.meta.url);
 
-type DockerExecModule = typeof import("../adapters/docker/exec");
 type MutableConfigRepairModule = typeof import("./mutable-config-repair");
 type PrivilegedExecModule = typeof import("../sandbox/privileged-exec");
 
-let dockerExec: DockerExecModule;
 let normalizeMutableOpenClawConfig: MutableConfigRepairModule["normalizeMutableOpenClawConfig"];
 let privilegedExec: PrivilegedExecModule;
 
-function mockPrivilegedArgv() {
+function mockPrivilegedLease() {
   return vi
-    .spyOn(privilegedExec, "privilegedSandboxExecArgv")
-    .mockImplementation((_sandboxName, cmd) => ["privileged", ...cmd]);
+    .spyOn(privilegedExec, "withPrivilegedSandboxExecutionLease")
+    .mockImplementation(<T>(_sandboxName: string, _operation: string, fn: () => T): T => fn());
 }
 
 describe("mutable OpenClaw config repair", () => {
   beforeEach(() => {
     delete require.cache[requireSource.resolve("./mutable-config-repair.js")];
-    dockerExec = requireSource("../adapters/docker/exec.js");
     privilegedExec = requireSource("../sandbox/privileged-exec.js");
     ({ normalizeMutableOpenClawConfig } = requireSource("./mutable-config-repair.js"));
   });
@@ -51,18 +48,18 @@ describe("mutable OpenClaw config repair", () => {
   });
 
   it("sanitizes identity probes and watchdogs the privileged normalizer", () => {
-    const privilegedArgv = mockPrivilegedArgv();
-    const dockerExecFileSync = vi
-      .spyOn(dockerExec, "dockerExecFileSync")
-      .mockReturnValueOnce("1000\n")
-      .mockReturnValueOnce("1001\n")
-      .mockReturnValue("");
+    const lease = mockPrivilegedLease();
+    const capture = vi
+      .spyOn(privilegedExec, "capturePrivilegedSandboxCommand")
+      .mockReturnValueOnce(Buffer.from("1000\n"))
+      .mockReturnValueOnce(Buffer.from("1001\n"))
+      .mockReturnValue(Buffer.alloc(0));
 
     normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET);
 
-    expect(privilegedArgv.mock.calls).toEqual([
-      ["alpha", ["/usr/bin/id", "-u", "sandbox"], false, true],
-      ["alpha", ["/usr/bin/id", "-g", "sandbox"], false, true],
+    expect(capture.mock.calls).toEqual([
+      ["alpha", ["/usr/bin/id", "-u", "sandbox"], { sanitizeEnvironment: true, timeout: 15000 }],
+      ["alpha", ["/usr/bin/id", "-g", "sandbox"], { sanitizeEnvironment: true, timeout: 15000 }],
       [
         "alpha",
         [
@@ -81,89 +78,59 @@ describe("mutable OpenClaw config repair", () => {
           "fabric.json",
           "600",
         ],
-        false,
-        true,
+        { sanitizeEnvironment: true, timeout: 25000 },
       ],
     ]);
-    expect(dockerExecFileSync).toHaveBeenCalledTimes(3);
-    expect(dockerExecFileSync.mock.calls.map(([argv]) => argv)).toEqual([
-      ["privileged", "/usr/bin/id", "-u", "sandbox"],
-      ["privileged", "/usr/bin/id", "-g", "sandbox"],
-      [
-        "privileged",
-        ...NORMALIZER_WATCHDOG,
-        "/usr/bin/python3",
-        "-I",
-        NORMALIZER,
-        "/sandbox/.openclaw",
-        "1000",
-        "1001",
-        "normalize-protected",
-        "openclaw.json",
-        "660",
-        ".config-hash",
-        "660",
-        "fabric.json",
-        "600",
-      ],
-    ]);
-    expect(dockerExecFileSync.mock.calls.map(([, options]) => options)).toEqual([
-      { stdio: ["ignore", "pipe", "pipe"], timeout: 15000 },
-      { stdio: ["ignore", "pipe", "pipe"], timeout: 15000 },
-      { stdio: ["ignore", "pipe", "pipe"], timeout: 25000 },
+    expect(lease.mock.calls.map(([sandboxName, operation]) => [sandboxName, operation])).toEqual([
+      ["alpha", "mutable config identity lookup"],
+      ["alpha", "mutable config identity lookup"],
+      ["alpha", "mutable config permission repair"],
     ]);
   });
 
   it("rejects an invalid sandbox UID before the GID or normalizer runs", () => {
-    const privilegedArgv = mockPrivilegedArgv();
-    const dockerExecFileSync = vi.spyOn(dockerExec, "dockerExecFileSync").mockReturnValue("0\n");
+    mockPrivilegedLease();
+    const capture = vi
+      .spyOn(privilegedExec, "capturePrivilegedSandboxCommand")
+      .mockReturnValue(Buffer.from("0\n"));
 
     expect(() => normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET)).toThrow(
       "sandbox identity lookup returned an invalid UID",
     );
-    expect(privilegedArgv).toHaveBeenCalledOnce();
-    expect(privilegedArgv).toHaveBeenCalledWith(
-      "alpha",
-      ["/usr/bin/id", "-u", "sandbox"],
-      false,
-      true,
-    );
-    expect(dockerExecFileSync).toHaveBeenCalledOnce();
+    expect(capture).toHaveBeenCalledOnce();
+    expect(capture).toHaveBeenCalledWith("alpha", ["/usr/bin/id", "-u", "sandbox"], {
+      sanitizeEnvironment: true,
+      timeout: 15000,
+    });
   });
 
   it("rejects an invalid sandbox GID before the normalizer runs", () => {
-    const privilegedArgv = mockPrivilegedArgv();
-    const dockerExecFileSync = vi
-      .spyOn(dockerExec, "dockerExecFileSync")
-      .mockReturnValueOnce("1000\n")
-      .mockReturnValueOnce("not-a-gid\n");
+    mockPrivilegedLease();
+    const capture = vi
+      .spyOn(privilegedExec, "capturePrivilegedSandboxCommand")
+      .mockReturnValueOnce(Buffer.from("1000\n"))
+      .mockReturnValueOnce(Buffer.from("not-a-gid\n"));
 
     expect(() => normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET)).toThrow(
       "sandbox identity lookup returned an invalid GID",
     );
-    expect(privilegedArgv).toHaveBeenCalledTimes(2);
-    expect(privilegedArgv).not.toHaveBeenCalledWith(
-      "alpha",
-      expect.arrayContaining([NORMALIZER]),
-      false,
-      true,
-    );
-    expect(dockerExecFileSync).toHaveBeenCalledTimes(2);
+    expect(capture).toHaveBeenCalledTimes(2);
+    expect(capture.mock.calls.flatMap(([, command]) => command)).not.toContain(NORMALIZER);
   });
 
   it("propagates a trusted normalizer execution failure", () => {
-    const privilegedArgv = mockPrivilegedArgv();
-    const failure = new Error("docker exec failed");
-    const dockerExecFileSync = vi
-      .spyOn(dockerExec, "dockerExecFileSync")
-      .mockReturnValueOnce("1000\n")
-      .mockReturnValueOnce("1001\n")
+    mockPrivilegedLease();
+    const failure = new Error("provider exec failed");
+    const capture = vi
+      .spyOn(privilegedExec, "capturePrivilegedSandboxCommand")
+      .mockReturnValueOnce(Buffer.from("1000\n"))
+      .mockReturnValueOnce(Buffer.from("1001\n"))
       .mockImplementationOnce(() => {
         throw failure;
       });
 
     expect(() => normalizeMutableOpenClawConfig("alpha", OPENCLAW_TARGET)).toThrow(failure);
-    expect(privilegedArgv).toHaveBeenLastCalledWith(
+    expect(capture).toHaveBeenLastCalledWith(
       "alpha",
       [
         ...NORMALIZER_WATCHDOG,
@@ -181,15 +148,14 @@ describe("mutable OpenClaw config repair", () => {
         "fabric.json",
         "600",
       ],
-      false,
-      true,
+      { sanitizeEnvironment: true, timeout: 25000 },
     );
-    expect(dockerExecFileSync).toHaveBeenCalledTimes(3);
+    expect(capture).toHaveBeenCalledTimes(3);
   });
 
   it("rejects a nested protected path before privileged execution", () => {
-    const privilegedArgv = mockPrivilegedArgv();
-    const dockerExecFileSync = vi.spyOn(dockerExec, "dockerExecFileSync");
+    const lease = mockPrivilegedLease();
+    const capture = vi.spyOn(privilegedExec, "capturePrivilegedSandboxCommand");
 
     expect(() =>
       normalizeMutableOpenClawConfig("alpha", {
@@ -200,8 +166,8 @@ describe("mutable OpenClaw config repair", () => {
         ],
       }),
     ).toThrow("must be a direct canonical file");
-    expect(privilegedArgv).not.toHaveBeenCalled();
-    expect(dockerExecFileSync).not.toHaveBeenCalled();
+    expect(lease).not.toHaveBeenCalled();
+    expect(capture).not.toHaveBeenCalled();
   });
 });
 

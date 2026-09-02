@@ -887,6 +887,10 @@ def _verify_state_posture(posture: str, plan_json: str) -> None:
         plan = guard.parse_agent_state_lock_plan(plan_json)
         identity = guard._production_identity()
         if posture == "mutable":
+            try:
+                gateway_uid = pwd.getpwnam("gateway").pw_uid
+            except KeyError:
+                _fail("publisher-state-posture-invalid")
             result = guard.run_guard(
                 "verify-mutable",
                 HERMES_DIR,
@@ -895,6 +899,7 @@ def _verify_state_posture(posture: str, plan_json: str) -> None:
                 mutable_top_level_files=tuple(
                     os.path.join(HERMES_DIR, name) for name in TOP_SELECTORS
                 ),
+                mutable_service_uids=(gateway_uid,),
             )
             if not result.ok:
                 _fail("publisher-state-posture-invalid")

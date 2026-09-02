@@ -38,7 +38,7 @@ const WORKFLOW_SOURCE = `on:
     branches: [main]
     paths:
       - ".github/workflows/base-image.yaml"
-      - "Dockerfile.base"
+      - "packages/nemoclaw-openclaw/Dockerfile.base"
   workflow_dispatch:
 jobs: {}
 `;
@@ -185,14 +185,13 @@ describe("base-image publication evidence", () => {
         ".github/actions/ci-reviewed-npm-audit/**",
         ".github/actions/publish-managed-image-digest/**",
         ".github/workflows/base-image.yaml",
-        "Dockerfile",
-        "Dockerfile.base",
         "agents/**",
         "packages/nemoclaw-openclaw/**",
         "packages/nemoclaw-hermes/**",
         "packages/nemoclaw-fabric/**",
         "packages/nemoclaw-langchain-deepagents-code/**",
         "packages/nemoclaw-pi/**",
+        "packages/nemoclaw-openclaw/Dockerfile.base",
         "packages/nemoclaw-hermes/Dockerfile.base",
         "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
         "nemoclaw-blueprint/**",
@@ -210,29 +209,38 @@ describe("base-image publication evidence", () => {
     [
       "a duplicate",
       WORKFLOW_SOURCE.replace(
-        '      - "Dockerfile.base"',
-        '      - "Dockerfile.base"\n      - "Dockerfile.base"',
+        '      - "packages/nemoclaw-openclaw/Dockerfile.base"',
+        '      - "packages/nemoclaw-openclaw/Dockerfile.base"\n      - "packages/nemoclaw-openclaw/Dockerfile.base"',
       ),
       /must be unique/u,
     ],
     [
       "a glob",
-      WORKFLOW_SOURCE.replace("Dockerfile.base", "Dockerfile.*"),
+      WORKFLOW_SOURCE.replace(
+        "packages/nemoclaw-openclaw/Dockerfile.base",
+        "packages/nemoclaw-openclaw/Dockerfile.*",
+      ),
       /not a safe literal path/u,
     ],
     [
       "an unreviewed package glob",
-      WORKFLOW_SOURCE.replace("Dockerfile.base", "packages/**"),
+      WORKFLOW_SOURCE.replace("packages/nemoclaw-openclaw/Dockerfile.base", "packages/**"),
       /not a safe literal path/u,
     ],
     [
       "a parent traversal",
-      WORKFLOW_SOURCE.replace("Dockerfile.base", "../Dockerfile.base"),
+      WORKFLOW_SOURCE.replace(
+        "packages/nemoclaw-openclaw/Dockerfile.base",
+        "../Dockerfile.base",
+      ),
       /not a safe literal path/u,
     ],
     [
       "an unquoted scalar",
-      WORKFLOW_SOURCE.replace('"Dockerfile.base"', "Dockerfile.base"),
+      WORKFLOW_SOURCE.replace(
+        '"packages/nemoclaw-openclaw/Dockerfile.base"',
+        "packages/nemoclaw-openclaw/Dockerfile.base",
+      ),
       /must be one quoted scalar/u,
     ],
     [
@@ -243,8 +251,8 @@ describe("base-image publication evidence", () => {
     [
       "a flow list",
       WORKFLOW_SOURCE.replace(
-        'paths:\n      - ".github/workflows/base-image.yaml"\n      - "Dockerfile.base"',
-        'paths: [".github/workflows/base-image.yaml", "Dockerfile.base"]',
+        'paths:\n      - ".github/workflows/base-image.yaml"\n      - "packages/nemoclaw-openclaw/Dockerfile.base"',
+        'paths: [".github/workflows/base-image.yaml", "packages/nemoclaw-openclaw/Dockerfile.base"]',
       ),
       /non-empty on\.push\.paths/u,
     ],
@@ -1013,6 +1021,20 @@ describe("base-image publication evidence", () => {
         fetchImpl: async () => new Response("{", { status: 200 }),
       }),
     ).rejects.toThrow(/not valid JSON/u);
+  });
+
+  it("omits authorization for public GitHub metadata requests", async () => {
+    let authorization: string | null = "unobserved";
+    await expect(
+      githubRequest("/repos/NVIDIA/NemoClaw/pulls/9923", "unused-token", {
+        authenticated: false,
+        fetchImpl: async (_input, init) => {
+          authorization = new Headers(init.headers).get("authorization");
+          return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        },
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(authorization).toBeNull();
   });
 
   it("loads directly with the Node strip-types runtime used by Actions (#7372)", () => {

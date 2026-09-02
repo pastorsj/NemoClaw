@@ -551,7 +551,7 @@ test(
           "--build-arg",
           "NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW=1",
           "-f",
-          path.join(REPO_ROOT, "Dockerfile.base"),
+          path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
           "-t",
           OLD_BASE_TAG,
           oldBaseBuildContext,
@@ -780,7 +780,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
       [
         "build",
         "-f",
-        path.join(REPO_ROOT, "Dockerfile.base"),
+        path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile.base"),
         "-t",
         "ghcr.io/nvidia/nemoclaw/sandbox-base:latest",
         REPO_ROOT,

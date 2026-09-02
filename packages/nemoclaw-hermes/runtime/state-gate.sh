@@ -114,3 +114,21 @@ nemoclaw_runtime_state_mutation_checkpoint() {
   kill -STOP "$$"
   return 1
 }
+
+# A supervised Hermes recovery can fail after the provider has fenced this
+# exact startup shell. Keep that authenticated process available for the
+# existing USR2 retry protocol instead of letting `set -e` replace its
+# PID/start identity. Outside an active mutation, preserve ordinary failure.
+nemoclaw_runtime_state_mutation_hold_supervisor_failure() {
+  local status
+  if nemoclaw_runtime_state_mutation_gate admit; then
+    return 1
+  else
+    status=$?
+  fi
+  [ "$status" -eq 75 ] || return 1
+  printf '%s\n' '[SECURITY] Hermes supervisor recovery failed during an active runtime state mutation; holding for authenticated retry.' >&2
+  while :; do
+    kill -STOP "$$"
+  done
+}

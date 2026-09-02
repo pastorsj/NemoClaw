@@ -25,6 +25,7 @@ import {
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
+import type { RuntimeProviderPrerequisite } from "../fixtures/runtime-provider.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { stripAnsi } from "./json-envelope.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
@@ -127,21 +128,17 @@ async function expectShieldsStatus(
   expect(resultText(status)).toContain(`Shields: ${expected}`);
 }
 
-async function collectStartFailureDockerLogs(
-  host: HostCliClient,
+async function collectStartFailureRuntimeLogs(
+  runtimeProvider: RuntimeProviderPrerequisite,
   artifactPrefix: string,
 ): Promise<string> {
-  const lookup = await host.command(
-    "docker",
+  const lookup = await runtimeProvider.command(
     [
+      "container",
       "ps",
       "--all",
       "--filter",
-      "label=openshell.ai/managed-by=openshell",
-      "--filter",
       `label=openshell.ai/sandbox-name=${SANDBOX_NAME}`,
-      "--filter",
-      "label=openshell.ai/sandbox-workspace=default",
       "-q",
     ],
     {
@@ -155,8 +152,8 @@ async function collectStartFailureDockerLogs(
   const result =
     lookup.exitCode !== 0 || !containerId
       ? lookup
-      : await host.command("docker", ["logs", "--tail", "200", containerId], {
-          artifactName: `${artifactPrefix}-failure-docker-logs`,
+      : await runtimeProvider.command(["container", "logs", "--tail", "200", containerId], {
+          artifactName: `${artifactPrefix}-failure-runtime-logs`,
           env: commandEnv(),
           redactionValues: [COMPATIBLE_API_KEY],
           timeoutMs: 30_000,
@@ -166,6 +163,7 @@ async function collectStartFailureDockerLogs(
 
 async function expectStopStartRecovery(
   host: HostCliClient,
+  runtimeProvider: RuntimeProviderPrerequisite,
   sandbox: SandboxClient,
   posture: "DOWN" | "UP",
   artifactPrefix: string,
@@ -185,12 +183,14 @@ async function expectStopStartRecovery(
     timeoutMs: 5 * 60_000,
   });
   const startFailureLogs =
-    start.exitCode === 0 ? "" : await collectStartFailureDockerLogs(host, artifactPrefix);
+    start.exitCode === 0
+      ? ""
+      : await collectStartFailureRuntimeLogs(runtimeProvider, artifactPrefix);
   expect(
     start.exitCode,
     [
       `start Hermes with shields ${posture.toLowerCase()}: ${resultText(start)}`,
-      startFailureLogs && `Docker logs:\n${startFailureLogs}`,
+      startFailureLogs && `Runtime logs:\n${startFailureLogs}`,
     ]
       .filter(Boolean)
       .join("\n"),
@@ -312,7 +312,7 @@ test(
     ],
   },
   },
-  async ({ artifacts, cleanup: cleanupRegistry, host, progress, sandbox }) => {
+  async ({ artifacts, cleanup: cleanupRegistry, host, progress, runtimeProvider, sandbox }) => {
     const runtime = initializeTestRuntime();
     cleanupRegistry.trackDisposable("clear isolated Hermes shields test runtime", () => {
       activeTestRuntime = undefined;
@@ -345,12 +345,10 @@ test(
     sandboxName: SANDBOX_NAME,
   });
 
-  const docker = await host.command("docker", ["info"], {
-    artifactName: "prereq-docker-info",
-      env: commandEnv(),
-    timeoutMs: 30_000,
-  });
-  assertExitZero(docker, "Docker prerequisite for Hermes shields E2E");
+    await runtimeProvider.requireAvailable({
+      artifactName: "prereq-runtime-info",
+      scenarioLabel: "Hermes shields",
+    });
 
   const fake = await startFakeOpenAiCompatibleServer({
     apiKey: COMPATIBLE_API_KEY,
@@ -470,7 +468,13 @@ test(
   });
 
   progress.phase("restart Hermes with shields up");
-  await expectStopStartRecovery(host, sandbox, "UP", "cycle-1-shields-up-start-recovery");
+    await expectStopStartRecovery(
+      host,
+      runtimeProvider,
+      sandbox,
+      "UP",
+      "cycle-1-shields-up-start-recovery",
+    );
   await expectLockedPosture(sandbox, 1);
 
   progress.phase("unlock shields and restart Hermes");
@@ -493,7 +497,13 @@ test(
     sandbox,
     sandboxName: SANDBOX_NAME,
   });
-  await expectStopStartRecovery(host, sandbox, "DOWN", "cycle-2-shields-down-start-recovery");
+  await expectStopStartRecovery(
+    host,
+    runtimeProvider,
+    sandbox,
+    "DOWN",
+    "cycle-2-shields-down-start-recovery",
+  );
   await expectMutablePosture(sandbox, 2);
 
   progress.phase("complete second shields cycle");

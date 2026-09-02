@@ -20,9 +20,12 @@ import {
   entryHeaders,
   HERMES_MCP_TRANSACTION_HELPER,
 } from "./mcp-bridge-adapter-status";
+import {
+  type McpAttachedCredentialRevision,
+  observeMcpCredentialRevision,
+} from "./mcp-bridge-provider-readiness";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { commandOutput, redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
-import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readiness";
 import {
   buildInstalledMcpRegistrationCommand,
   buildInstalledMcpRemovalCommand,
@@ -319,6 +322,35 @@ export function registerHermesAdapter(
     { envValues, requireReload: true },
   );
   verifyHermesAdapterRegistration(sandboxName, entry, credentialRevision);
+  if (credentialRevision === undefined) return;
+  const afterReloadRevision = observeMcpCredentialRevision(sandboxName, entry);
+  if (afterReloadRevision === credentialRevision) return;
+  if (afterReloadRevision === "absent" || afterReloadRevision === "canonical") {
+    throw new McpBridgeError(
+      `Hermes MCP credential revision was unavailable after reloading '${entry.server}'.`,
+    );
+  }
+  const convergedInstalledCommand = buildInstalledMcpRegistrationCommand(
+    sandboxName,
+    "hermes-config",
+    entry,
+    { replaceExisting: true, credentialRevision: afterReloadRevision },
+  );
+  runHermesAdapterCommand(
+    sandboxName,
+    entry,
+    convergedInstalledCommand === null
+      ? buildHermesMcpRegisterCommand(entry, true, afterReloadRevision)
+      : requireMcpArgvCommand(convergedInstalledCommand),
+    `Hermes MCP config convergence failed for '${entry.server}'.`,
+    { envValues, requireReload: true },
+  );
+  verifyHermesAdapterRegistration(sandboxName, entry, afterReloadRevision);
+  if (observeMcpCredentialRevision(sandboxName, entry) !== afterReloadRevision) {
+    throw new McpBridgeError(
+      `Hermes MCP credential revision did not converge after reloading '${entry.server}'.`,
+    );
+  }
 }
 
 export function unregisterHermesAdapter(

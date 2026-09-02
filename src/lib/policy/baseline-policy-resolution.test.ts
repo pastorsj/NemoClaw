@@ -26,16 +26,10 @@ function writePolicy(content: string): string {
   return policyPath;
 }
 
-function writeOpenClawPolicy(content: string): { packageRoot: string; policyPath: string } {
+function writeOpenClawPackagePolicy(content: string): { packageRoot: string; policyPath: string } {
   const packageRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-policy-"));
   tempDirs.push(packageRoot);
-  const policyPath = path.join(
-    packageRoot,
-    "nemoclaw-blueprint",
-    "policies",
-    "openclaw-sandbox.yaml",
-  );
-  fs.mkdirSync(path.dirname(policyPath), { recursive: true });
+  const policyPath = path.join(packageRoot, "policy-additions.yaml");
   fs.writeFileSync(policyPath, content);
   return { packageRoot, policyPath };
 }
@@ -128,7 +122,7 @@ describe("agent definition baseline policy resolution", () => {
       path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
       "utf-8",
     );
-    const pinned = writeOpenClawPolicy(reviewedPolicy);
+    const pinned = writeOpenClawPackagePolicy(reviewedPolicy);
     const repositoryPolicyPath = writePolicy("version: [unterminated");
     const loadAgentSpy = vi.spyOn(agentDefs, "loadAgent").mockReturnValue({
       name: "openclaw",
@@ -139,7 +133,7 @@ describe("agent definition baseline policy resolution", () => {
       resolveAgentDefinitionBaselinePolicy({
         name: "openclaw",
         packageRoot: pinned.packageRoot,
-        policyAdditionsPath: null,
+        policyAdditionsPath: pinned.policyPath,
       }),
     ).toMatchObject({ agent: "openclaw", policyPath: pinned.policyPath, content: reviewedPolicy });
     expect(loadAgentSpy).not.toHaveBeenCalled();

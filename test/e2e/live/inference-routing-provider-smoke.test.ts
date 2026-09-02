@@ -92,11 +92,11 @@ test(
       ],
     },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets, skip }) => {
     const apiKey =
       secrets.optional("NVIDIA_INFERENCE_API_KEY") ??
       skipLive(skip, "NVIDIA_INFERENCE_API_KEY not set — cannot test credential isolation");
-    await requireLivePrerequisites(host, skip);
+    await requireLivePrerequisites(host, runtimeProvider);
     const sandboxName = inferenceSandboxName("e2e-cred");
     cleanup.add(
       `best-effort inference-routing credential-isolation cleanup for ${sandboxName}`,
@@ -275,10 +275,10 @@ test(
       ],
     },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets, skip }) => {
     requireProviderSmokeSelected("openai", skip);
     const apiKey = secrets.optional("OPENAI_API_KEY") ?? skipLive(skip, "OPENAI_API_KEY not set");
-    await requireLivePrerequisites(host, skip);
+    await requireLivePrerequisites(host, runtimeProvider);
     const sandboxName = inferenceSandboxName("e2e-openai");
     const model = process.env.NEMOCLAW_OPENAI_MODEL || "gpt-4o-mini";
     cleanup.add(`best-effort inference-routing OpenAI cleanup for ${sandboxName}`, () =>
@@ -330,11 +330,11 @@ test(
       ],
     },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets, skip }) => {
     requireProviderSmokeSelected("anthropic", skip);
     const apiKey =
       secrets.optional("ANTHROPIC_API_KEY") ?? skipLive(skip, "ANTHROPIC_API_KEY not set");
-    await requireLivePrerequisites(host, skip);
+    await requireLivePrerequisites(host, runtimeProvider);
     const sandboxName = inferenceSandboxName("e2e-anth");
     const model = process.env.NEMOCLAW_ANTHROPIC_MODEL || "claude-sonnet-4-6";
     cleanup.add(`best-effort inference-routing Anthropic cleanup for ${sandboxName}`, () =>
@@ -387,9 +387,9 @@ test(
       ],
     },
   },
-  async ({ artifacts, cleanup, host, progress, sandbox, secrets, skip }) => {
+  async ({ artifacts, cleanup, host, progress, runtimeProvider, sandbox, secrets, skip }) => {
     requireProviderSmokeSelected("fabric", skip);
-    await requireLivePrerequisites(host, skip);
+    await requireLivePrerequisites(host, runtimeProvider);
     const apiKey =
       secrets.optional("NVIDIA_INFERENCE_API_KEY") ??
       secrets.optional("INFERENCE_NVIDIA_API_KEY") ??

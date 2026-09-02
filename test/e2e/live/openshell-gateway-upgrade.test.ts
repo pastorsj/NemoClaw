@@ -1448,7 +1448,10 @@ runOpenShellGatewayUpgrade(
       runner: "vitest",
       boundary: "static Dockerfile and Dockerfile patch contract",
     });
-    const dockerfile = fs.readFileSync(path.join(REPO_ROOT, "Dockerfile"), "utf8");
+    const dockerfile = fs.readFileSync(
+      path.join(REPO_ROOT, "packages", "nemoclaw-openclaw", "Dockerfile"),
+      "utf8",
+    );
     const patchFlow = fs.readFileSync(
       path.join(REPO_ROOT, "src/lib/onboard/sandbox-dockerfile-patch-flow.ts"),
       "utf8",

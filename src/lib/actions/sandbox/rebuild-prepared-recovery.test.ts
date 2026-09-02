@@ -11,7 +11,7 @@ import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
   makePreparedRecoveryManifest,
-} from "../../../../test/helpers/rebuild-flow-dcode-harness";
+} from "../../../../test/helpers/rebuild-flow-generic-harness";
 import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import {
   installRebuildHarnessPackage,
@@ -89,14 +89,14 @@ describe("prepared rebuild recovery", () => {
       recoveryManifest.backupPath,
       expect.objectContaining({ targetAgentType: "openclaw" }),
     );
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledTimes(5);
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledTimes(6);
     const expectedRecovery = expect.objectContaining({
       sandboxName: recoveryManifest.sandboxName,
       timestamp: recoveryManifest.timestamp,
       backupPath: recoveryManifest.backupPath,
     });
     expect(sandboxState.validateRebuildRecoveryManifest.mock.calls).toEqual(
-      Array.from({ length: 5 }, () => ["alpha", null, expectedRecovery]),
+      Array.from({ length: 6 }, () => ["alpha", null, expectedRecovery]),
     );
   });
 
@@ -182,9 +182,9 @@ describe("prepared rebuild recovery", () => {
       backupPath: recoveryManifest.backupPath,
       harnessPackage,
     });
-    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledTimes(5);
+    expect(sandboxState.validateRebuildRecoveryManifest).toHaveBeenCalledTimes(6);
     expect(sandboxState.validateRebuildRecoveryManifest.mock.calls).toEqual(
-      Array.from({ length: 5 }, () => ["alpha", expectedOwner, expectedRecovery]),
+      Array.from({ length: 6 }, () => ["alpha", expectedOwner, expectedRecovery]),
     );
   });
 
@@ -404,7 +404,7 @@ describe("prepared rebuild recovery", () => {
       packageFixture.cleanup();
     }
 
-    expect(validationCount).toBe(5);
+    expect(validationCount).toBe(6);
     const advancedPackage = advancedPackages[0];
     assert.ok(advancedPackage, "prepared recovery test must advance the active package");
     expect(advancedPackage.identity).not.toEqual(harnessPackage);

@@ -21,6 +21,7 @@ import {
 import { githubRequest } from "../../../tools/e2e/base-image-publication.mts";
 import {
   assembleManagedImageCatalog,
+  main,
   resolvePrManagedImageCatalog,
   selectManagedImagePublicationRun,
   writeManagedImageCatalog,
@@ -41,7 +42,7 @@ const WORKFLOW_SOURCE = `on:
     branches: [main]
     paths:
       - ".github/workflows/base-image.yaml"
-      - "Dockerfile.base"
+      - "packages/nemoclaw-openclaw/Dockerfile.base"
       - "packages/nemoclaw-hermes/**"
       - "src/lib/onboard/**"
   workflow_dispatch:
@@ -76,6 +77,12 @@ function contractForCohort(
 
 function contract(agent: ManagedImageAgent, index: number): ManagedImageContractV1 {
   return contractForCohort(agent, index, `ghrun-${RUN_ID}-1`);
+}
+
+function contractArchive(agent: ManagedImageAgent, index: number): Buffer {
+  return artifactZip([
+    { name: "contract.json", contents: `${JSON.stringify(contract(agent, index))}\n` },
+  ]);
 }
 
 function treeEntry(entryPath: string, sha: string) {
@@ -116,7 +123,8 @@ function candidateRequest(options: {
   readonly missingAgent?: ManagedImageAgent;
 }) {
   const candidateRepository = options.candidateRepository ?? CANONICAL_REPOSITORY;
-  const changedPath = options.changedPath ?? "Dockerfile.base";
+  const changedPath =
+    options.changedPath ?? "packages/nemoclaw-openclaw/Dockerfile.base";
   const artifactRunAttempt = options.artifactRunAttempt ?? 1;
   const artifactRunId = options.artifactRunId ?? RUN_ID;
   const baseEntries = [
@@ -169,9 +177,7 @@ function candidateRequest(options: {
   }
   for (const [index, agent] of SHIPPED_MANAGED_IMAGE_AGENTS.entries()) {
     const name = `managed-pr-contract-${artifactRunId}-${artifactRunAttempt}-${agent}`;
-    const archive = artifactZip([
-      { name: "contract.json", contents: `${JSON.stringify(contract(agent, index))}\n` },
-    ]);
+    const archive = contractArchive(agent, index);
     const id = index + 100;
     responses.set(
       `/repos/${CANONICAL_REPOSITORY}/actions/runs/${artifactRunId}/artifacts?name=${encodeURIComponent(name)}&per_page=100`,
@@ -232,6 +238,7 @@ function downloadContract(
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   for (const directory of temporaryDirectories.splice(0)) {
     fs.rmSync(directory, { force: true, recursive: true });
@@ -279,6 +286,65 @@ describe("exact PR managed-image publication", () => {
       ),
     ).resolves.toBe("candidate-catalog");
     expect(fs.existsSync(input.outputPath)).toBe(true);
+  });
+
+  it("keeps artifact download evidence out of the machine-readable selection", async () => {
+    const input = resolverInput();
+    const apiRequest = candidateRequest({ imageChanged: true });
+    const artifactResponses = new Map<string, Response>(
+      SHIPPED_MANAGED_IMAGE_AGENTS.map((agent, index) => {
+        const archive = contractArchive(agent, index);
+        return [
+          `/repos/${CANONICAL_REPOSITORY}/actions/artifacts/${index + 100}/zip`,
+          new Response(new Uint8Array(archive), {
+            status: 200,
+            headers: { "content-length": String(archive.length) },
+          }),
+        ] as const;
+      }),
+    );
+    let standardOutput = "";
+    let standardError = "";
+    vi.spyOn(process.stdout, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      standardOutput += chunk.toString();
+      return true;
+    }) as typeof process.stdout.write);
+    vi.spyOn(console, "log").mockImplementation((...values: unknown[]) => {
+      standardOutput += `${values.map(String).join(" ")}\n`;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      standardError += chunk.toString();
+      return true;
+    }) as typeof process.stderr.write);
+    vi.spyOn(console, "error").mockImplementation((...values: unknown[]) => {
+      standardError += `${values.map(String).join(" ")}\n`;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (request: string | URL | Request) => {
+        const url = new URL(String(request));
+        return (
+          artifactResponses.get(url.pathname) ??
+          Response.json(await apiRequest(`${url.pathname}${url.search}`))
+        );
+      }),
+    );
+
+    await main([input.outputPath], {
+      BASE_SHA,
+      CANDIDATE_REPOSITORY: CANONICAL_REPOSITORY,
+      CANDIDATE_SHA,
+      GITHUB_TOKEN: "test-token",
+      PR_NUMBER: String(PR_NUMBER),
+    });
+
+    const artifactEvidence = Array.from(
+      { length: SHIPPED_MANAGED_IMAGE_AGENTS.length },
+      () => "artifact-content-read attempt=1 outcome=passed-first-attempt\n",
+    ).join("");
+    expect(standardOutput).toBe("candidate-catalog\n");
+    expect(standardOutput).not.toContain("artifact-content-read");
+    expect(standardError).toBe(artifactEvidence);
   });
 
   it("selects a candidate catalog when only managed-image onboarding runtime changes", async () => {
@@ -490,12 +556,22 @@ describe("exact PR managed-image publication", () => {
   it.each([
     [
       "duplicate paths",
-      [treeEntry("Dockerfile.base", "5".repeat(40)), treeEntry("Dockerfile.base", "6".repeat(40))],
+      [
+        treeEntry("packages/nemoclaw-openclaw/Dockerfile.base", "5".repeat(40)),
+        treeEntry("packages/nemoclaw-openclaw/Dockerfile.base", "6".repeat(40)),
+      ],
       "contains duplicate paths",
     ],
     [
       "invalid type and mode",
-      [{ mode: "040000", path: "Dockerfile.base", sha: "5".repeat(40), type: "blob" }],
+      [
+        {
+          mode: "040000",
+          path: "packages/nemoclaw-openclaw/Dockerfile.base",
+          sha: "5".repeat(40),
+          type: "blob",
+        },
+      ],
       "entry mode is invalid",
     ],
   ])("rejects candidate commit trees with %s", async (_label, tree, message) => {

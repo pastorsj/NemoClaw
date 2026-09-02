@@ -174,6 +174,18 @@ function writePackageArtifact(input: {
       baselineContent,
     );
   }
+  if (input.declaration.id === "openclaw" || input.declaration.id === "hermes") {
+    writePrivateFile(
+      input.packageRoot,
+      path.posix.join(path.posix.dirname(input.declaration.manifestPath), "Dockerfile"),
+      [
+        "FROM scratch",
+        "ARG NEMOCLAW_WEB_SEARCH_ENABLED=0",
+        `ARG NEMOCLAW_WEB_SEARCH_PROVIDER=${input.declaration.id === "hermes" ? "tavily" : "brave"}`,
+        "",
+      ].join("\n"),
+    );
+  }
   if (input.declaration.id === "langchain-deepagents-code") {
     writePrivateFile(
       input.packageRoot,

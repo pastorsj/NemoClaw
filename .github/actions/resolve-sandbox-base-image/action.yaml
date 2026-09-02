@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 name: resolve-sandbox-base-image
-description: Resolve the sandbox base image from GHCR, falling back to a local Dockerfile.base build.
+description: Resolve the OpenClaw sandbox base image from GHCR, falling back to its package Dockerfile.
 
 runs:
   using: composite
@@ -15,7 +15,7 @@ runs:
         image="ghcr.io/nvidia/nemoclaw/sandbox-base"
         min_glibc="2.39"
         base_inputs=(
-          Dockerfile.base
+          packages/nemoclaw-openclaw/Dockerfile.base
           packages/nemoclaw-openclaw/runtime/openclaw/package.json
           packages/nemoclaw-openclaw/runtime/openclaw/npm-shrinkwrap.json
           nemoclaw-blueprint/blueprint.yaml
@@ -64,8 +64,8 @@ runs:
 
         use_local_base() {
           local version
-          echo "::notice::Sandbox base image inputs changed in this checkout; building Dockerfile.base locally"
-          resolver_build_local Dockerfile.base nemoclaw-sandbox-base-local
+          echo "::notice::OpenClaw base image inputs changed in this checkout; building its package Dockerfile locally"
+          resolver_build_local packages/nemoclaw-openclaw/Dockerfile.base nemoclaw-sandbox-base-local
           version="$(resolver_glibc_version nemoclaw-sandbox-base-local || true)"
           if ! resolver_glibc_ok "$version" "$min_glibc"; then
             echo "::error::Local sandbox base image has glibc ${version:-unknown}; need >= ${min_glibc}"

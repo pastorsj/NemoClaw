@@ -280,20 +280,18 @@ function encodeUnknown(value: unknown): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
 }
 
-function dockerArgs(relativePath: string): Set<string> {
-  const source = readFileSync(relativePath, "utf8");
+function readPackageDockerArgs(packageName: string): Set<string> {
+  const source = readFileSync(path.join("packages", packageName, "Dockerfile"), "utf8");
   return new Set(
     [...source.matchAll(/^ARG\s+([A-Z][A-Z0-9_]*)/gmu)].map((match) => match[1] as string),
   );
 }
 
 const STOCK_DOCKER_ARGS = {
-  openclaw: dockerArgs(path.join(process.cwd(), "Dockerfile")),
-  hermes: dockerArgs(path.join(process.cwd(), "packages/nemoclaw-hermes/Dockerfile")),
-  "langchain-deepagents-code": dockerArgs(
-    path.join(process.cwd(), "packages/nemoclaw-langchain-deepagents-code/Dockerfile"),
-  ),
-  pi: dockerArgs(path.join(process.cwd(), "packages/nemoclaw-pi/Dockerfile")),
+  openclaw: readPackageDockerArgs("nemoclaw-openclaw"),
+  hermes: readPackageDockerArgs("nemoclaw-hermes"),
+  "langchain-deepagents-code": readPackageDockerArgs("nemoclaw-langchain-deepagents-code"),
+  pi: readPackageDockerArgs("nemoclaw-pi"),
 } satisfies Record<ManagedStartupAgent, Set<string>>;
 
 const RUNTIME_INPUT_SOURCE_FILES = [
@@ -527,8 +525,11 @@ describe("managed startup profile", () => {
           MANAGED_STARTUP_PROFILE_AFFORDANCE_INVENTORY[agent].map(({ input }) => input),
         ).not.toContain(obligation.input);
       });
-      expect(obligation.supportedFor.every((agent) =>
-          supportedAgents.some((supportedAgent) => supportedAgent === agent))).toBe(true);
+      expect(
+        obligation.supportedFor.every((agent) =>
+          supportedAgents.some((supportedAgent) => supportedAgent === agent),
+        ),
+      ).toBe(true);
     },
   );
 
@@ -564,12 +565,12 @@ describe("managed startup profile", () => {
     (profile) => {
       MANAGED_STARTUP_PROFILE_AFFORDANCE_INVENTORY[profile.agent].forEach(({ profilePath }) => {
         let current: unknown = profile;
-      profilePath.split(".").forEach((segment) => {
-        expect(current).not.toBeNull();
-        expect(typeof current).toBe("object");
-        expect(Object.hasOwn(current as object, segment)).toBe(true);
-        current = (current as Record<string, unknown>)[segment];
-      });
+        profilePath.split(".").forEach((segment) => {
+          expect(current).not.toBeNull();
+          expect(typeof current).toBe("object");
+          expect(Object.hasOwn(current as object, segment)).toBe(true);
+          current = (current as Record<string, unknown>)[segment];
+        });
       });
     },
   );
@@ -779,10 +780,10 @@ describe("managed startup profile", () => {
   it.each([
     ...listMessagingCredentialEnvAssignments({ agent: "hermes" })
       .filter(({ sourceEnvKey, targetEnvKey }) => sourceEnvKey !== targetEnvKey)
-      .map(({ targetEnvKey, placeholder }) => [
-        "a cross-agent credential environment alias",
-        `${targetEnvKey}=${placeholder}`,
-      ] as const),
+      .map(
+        ({ targetEnvKey, placeholder }) =>
+          ["a cross-agent credential environment alias", `${targetEnvKey}=${placeholder}`] as const,
+      ),
     ["a raw credential", `SLACK_BOT_TOKEN=xoxb-${"a".repeat(32)}`],
     ["a malformed assignment", "SLACK_BOT_TOKEN =openshell:resolve:env:SLACK_BOT_TOKEN"],
     ["more than one assignment", "SLACK_BOT_TOKEN=openshell:resolve:env:SLACK_BOT_TOKEN=FORGED"],
@@ -1157,28 +1158,28 @@ describe("managed startup profile", () => {
   });
 
   it.each(HERMES_RESERVED_API_PORTS)("rejects reserved Hermes API port %s", (port) => {
-      expect(() =>
-        validateManagedStartupProfile({
-          ...HERMES_PROFILE,
-          dashboard: { ...HERMES_PROFILE.dashboard, publicPort: port },
-        }),
-      ).toThrow(/reserved API ports/);
+    expect(() =>
+      validateManagedStartupProfile({
+        ...HERMES_PROFILE,
+        dashboard: { ...HERMES_PROFILE.dashboard, publicPort: port },
+      }),
+    ).toThrow(/reserved API ports/);
   });
 
   it.each([HERMES_API_PORT_RANGE_START - 1, HERMES_API_PORT_RANGE_END + 1])(
     "accepts dashboard port %s outside the reserved Hermes API port range",
     (port) => {
-    expect(() =>
-      validateManagedStartupProfile({
-        ...HERMES_PROFILE,
-        dashboard: {
-          ...HERMES_PROFILE.dashboard,
-          url: `http://127.0.0.1:${port}`,
-          browserUrl: `https://hermes.example.test:${port}`,
-          publicPort: port,
-        },
-      }),
-    ).not.toThrow();
+      expect(() =>
+        validateManagedStartupProfile({
+          ...HERMES_PROFILE,
+          dashboard: {
+            ...HERMES_PROFILE.dashboard,
+            url: `http://127.0.0.1:${port}`,
+            browserUrl: `https://hermes.example.test:${port}`,
+            publicPort: port,
+          },
+        }),
+      ).not.toThrow();
     },
   );
 

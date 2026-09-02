@@ -47,7 +47,7 @@ J0N7VBg2CdK6jRjKLQOSOPq3ySCicHhVRI8hxIWotif7mK3jj6D8NRalwmlHgNM=
 `;
 
 const DOCKERFILES = [
-  ["OpenClaw", join(import.meta.dirname, "../../Dockerfile")],
+  ["OpenClaw", join(import.meta.dirname, "../../packages/nemoclaw-openclaw/Dockerfile")],
   ["Hermes", join(import.meta.dirname, "../../packages/nemoclaw-hermes/Dockerfile")],
   [
     "Deep Agents Code",

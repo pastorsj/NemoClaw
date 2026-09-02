@@ -29,7 +29,12 @@ import {
 // helpers. Keep the route provider/model assertion and direct `inference.local`
 // pre-block probe so a status result of "not probed" cannot weaken the precondition.
 
-const DOCKERFILE_BASE = path.join(REPO_ROOT, "Dockerfile.base");
+const DOCKERFILE_BASE = path.join(
+  REPO_ROOT,
+  "packages",
+  "nemoclaw-openclaw",
+  "Dockerfile.base",
+);
 const ENVIRONMENT = ubuntuRepoDocker("cloud-openclaw");
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-issue-4434";
 validateSandboxName(SANDBOX_NAME);

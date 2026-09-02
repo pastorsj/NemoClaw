@@ -8,7 +8,7 @@ import {
   createRebuildFlowHarness,
   installRebuildFlowTestHooks,
   type RebuildFlowHarness,
-} from "../../../../test/helpers/rebuild-flow-dcode-harness";
+} from "../../../../test/helpers/rebuild-flow-generic-harness";
 import {
   setupOllamaLocalInference,
   setupVllmLocalInference,
@@ -83,7 +83,6 @@ const localProviderScenarios = [
           validateLocalProvider: () => ({ ok: true }),
           getLocalProviderBaseUrl: () => "http://host.openshell.internal:11435/v1",
           applyLocalInferenceRoute,
-          getOllamaWarmupCommand: () => ["true"],
           run: () => ({ status: 0 }),
           shouldFrontOllamaWithProxy: () => false,
           ensureOllamaAuthProxy: vi.fn(),
@@ -93,6 +92,8 @@ const localProviderScenarios = [
           localInference: {
             validateOllamaModelWithToolsOverride: () => ({ ok: true }),
             validateSandboxFacingOllamaModel: () => ({ ok: true }),
+            runOllamaWarmup: () => {},
+            persistResolvedOllamaHost: () => () => {},
           },
           OLLAMA_PROXY_CREDENTIAL_ENV: "NEMOCLAW_OLLAMA_PROXY_TOKEN",
           ...unusedCommonInferenceDeps,

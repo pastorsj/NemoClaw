@@ -3,19 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Defense-in-depth guard: primary enforcement of legacy fixture pin rejection is
-# in Dockerfile and Dockerfile.base install blocks. This script prevents the
-# fixture flag, versions, and pin overrides from reaching production Docker
-# build commands.
+# in package Dockerfile install blocks. This script prevents the fixture flag,
+# versions, and pin overrides from reaching production Docker build commands.
 
 set -euo pipefail
 
 readonly legacy_fixture_key="NEMOCLAW_E2E_FIXTURE_LEGACY_OPENCLAW"
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly repo_root
-production_dockerfiles=(
-  "${repo_root}/Dockerfile"
-  "${repo_root}/Dockerfile.base"
-)
+production_dockerfiles=()
 while IFS= read -r -d '' dockerfile; do
   production_dockerfiles+=("${dockerfile}")
 done < <(

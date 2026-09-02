@@ -9,6 +9,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { getHarnessPackageStoreRoot } from "../../../../src/lib/agent-runtime/package/store";
+import { resolveCredentialProviderProfile } from "../../../../src/lib/agent-runtime/provider-profile";
 import {
   isValidName as isCanonicalSandboxName,
   isValidProviderName as isCanonicalProviderName,
@@ -173,6 +175,43 @@ describe("Hermes tool-gateway package paths", () => {
     expect(probeInvocation?.argv).toEqual(["--experimental-strip-types", runtimePaths.script]);
     expect(probeInvocation?.env.HERMES_TOOL_GATEWAY_MATRIX_PATH).toBe(runtimePaths.matrix);
     expect(() => loadBroker()).toThrow("object identity does not match its receipt");
+  });
+
+  it("resolves package profiles from the Hermes receipt and retains the core fallback", () => {
+    const home = fs.mkdtempSync(
+      path.join(fs.realpathSync.native(os.tmpdir()), "nemoclaw-hermes-provider-profile-"),
+    );
+    temporaryHome = home;
+    const installed = installHermesPackage(home);
+
+    const resolverOptions = {
+      storeRoot: getHarnessPackageStoreRoot(home),
+      coreRoot: REPO_ROOT,
+    };
+    const profile = resolveCredentialProviderProfile("Langfuse-Hermes-V1", resolverOptions);
+
+    const installedProfiles = path.join(
+      path.dirname(installed.packageManifest.manifestPath),
+      "provider-profiles",
+    );
+    const expectedPath = path.join(installedProfiles, "langfuse-hermes-v1.yaml");
+    expect(profile).toEqual({
+      profileType: "langfuse-hermes-v1",
+      profilePath: expectedPath,
+    });
+    expect(
+      resolveCredentialProviderProfile("langfuse-hermes-v1", {
+        ...resolverOptions,
+        coreRoot: path.join(home, "core-without-hermes-profiles"),
+      }),
+    ).toEqual(profile);
+    expect(resolveCredentialProviderProfile("tavily-hermes-v1", resolverOptions)?.profilePath).toBe(
+      path.join(installedProfiles, "tavily-hermes-v1.yaml"),
+    );
+    expect(resolveCredentialProviderProfile("openai", resolverOptions)).toEqual({
+      profileType: "openai",
+      profilePath: path.join(REPO_ROOT, "nemoclaw-blueprint", "provider-profiles", "openai.yaml"),
+    });
   });
 
   it("shares one captured runtime and cleanup across isolated module globals", () => {

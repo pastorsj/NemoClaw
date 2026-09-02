@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   ),
   stopNimContainer: vi.fn(),
   stopNimContainerByName: vi.fn(),
+  settleAgentForwardPortsForRebuild: vi.fn(),
 }));
 
 vi.mock("../../adapters/openshell/runtime", () => ({
@@ -50,6 +51,10 @@ vi.mock("../../core/wait", () => ({
 vi.mock("../../inference/nim", () => ({
   stopNimContainer: mocks.stopNimContainer,
   stopNimContainerByName: mocks.stopNimContainerByName,
+}));
+
+vi.mock("../../tunnel/agent-forward-stop", () => ({
+  settleAgentForwardPortsForRebuild: mocks.settleAgentForwardPortsForRebuild,
 }));
 
 vi.mock("../../state/registry", async (importOriginal) => ({
@@ -147,6 +152,7 @@ describe("rebuild destroy phase", () => {
     mocks.waitUntil.mockImplementation(
       (condition: () => boolean) => condition() || condition() || condition(),
     );
+    mocks.settleAgentForwardPortsForRebuild.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -984,6 +990,10 @@ describe("rebuild destroy phase", () => {
   it("journals the delete boundary before the destructive command (#7734)", async () => {
     const order: string[] = [];
     const recreateJournal = stubRecreateJournal();
+    mocks.settleAgentForwardPortsForRebuild.mockImplementation(() => {
+      order.push("forward:stop");
+      return true;
+    });
     vi.mocked(recreateJournal.markDeleting).mockImplementation(() => {
       order.push("journal:deleting");
     });
@@ -1009,7 +1019,12 @@ describe("rebuild destroy phase", () => {
       onDeleted: vi.fn(),
     });
 
-    expect(order).toEqual(["journal:deleting", "openshell:delete"]);
+    expect(order).toEqual([
+      "forward:stop",
+      "journal:deleting",
+      "openshell:delete",
+      "forward:stop",
+    ]);
   });
 
   it("reattaches MCP providers when the delete boundary cannot be journaled (#7734)", async () => {

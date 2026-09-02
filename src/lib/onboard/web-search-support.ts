@@ -5,8 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { WebSearchProvider } from "../inference/web-search";
-import { ROOT } from "../state/paths";
-
 export type WebSearchAgent =
   | {
       name?: string | null;
@@ -22,18 +20,18 @@ export type WebSearchAgent =
  * the config generator has no code path to emit a web search block — so offering
  * the web-search prompt would mislead the user.
  *
- * OpenClaw uses the root Dockerfile (not packages/nemoclaw-openclaw/Dockerfile), so we
- * fall back to the root Dockerfile when the agent-specific one doesn't exist.
+ * Installed runtime packages may expose their image through either the resolved
+ * Dockerfile path or the package root. Core does not select a harness fallback.
  */
 export function agentSupportsWebSearch(
   agent: WebSearchAgent,
   dockerfilePathOverride: string | null = null,
-  rootDir = ROOT,
+  packageRoot = "",
 ): boolean {
   const candidates = [
     dockerfilePathOverride,
     agent?.dockerfilePath,
-    path.join(rootDir, "Dockerfile"),
+    agent && packageRoot ? path.join(packageRoot, "Dockerfile") : null,
   ].filter(
     (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );
@@ -59,7 +57,7 @@ export function agentSupportsWebSearchProvider(
   agent: WebSearchAgent,
   provider: WebSearchProvider,
   dockerfilePathOverride: string | null = null,
-  rootDir = ROOT,
+  packageRoot = "",
 ): boolean {
   // Hermes currently exposes only its native Tavily backend. Brave remains
   // OpenClaw-only until Hermes ships a compatible Brave backend.
@@ -68,7 +66,7 @@ export function agentSupportsWebSearchProvider(
   const candidates = [
     dockerfilePathOverride,
     agent?.dockerfilePath,
-    path.join(rootDir, "Dockerfile"),
+    agent && packageRoot ? path.join(packageRoot, "Dockerfile") : null,
   ].filter(
     (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );
