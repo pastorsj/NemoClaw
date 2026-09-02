@@ -1225,7 +1225,7 @@ RUN set -eu; \
                 ;; \
         esac; \
     done; \
-    rm -rf /root/.cache/pip /sandbox/.cache \
+    rm -rf /root/.cache/pip /root/.cache/uv /sandbox/.cache \
     && chown -R sandbox:sandbox /sandbox/.hermes \
     && chown gateway:sandbox \
         /sandbox/.hermes/cron \

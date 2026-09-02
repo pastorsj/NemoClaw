@@ -184,10 +184,13 @@ function runFinalLayout({
   const legacyTarget = path.join(tmp, "legacy-target");
   const openclawDir = path.join(sandboxRoot, ".openclaw");
   const openclawTarget = path.join(tmp, "openclaw-target");
+  const rootUvCache = path.join(tmp, "root-cache", "uv");
 
   fs.mkdirSync(hermesDir, { recursive: true });
   fs.writeFileSync(path.join(hermesDir, "config.yaml"), "model: test\n");
   fs.writeFileSync(path.join(hermesDir, ".env"), "TOKEN=test\n");
+  fs.mkdirSync(rootUvCache, { recursive: true });
+  fs.writeFileSync(path.join(rootUvCache, "build-artifact"), "remove\n");
 
   const fixturePaths = {
     hermesDir,
@@ -203,12 +206,24 @@ function runFinalLayout({
     dockerfile,
     "# Flatten stale published base images",
     "# Pin config hash at build time",
-  ).replaceAll("/root/.cache/pip", path.join(tmp, "root-cache", "pip"));
+  )
+    .replaceAll("/root/.cache/pip", path.join(tmp, "root-cache", "pip"))
+    .replaceAll("/root/.cache/uv", rootUvCache);
   const { result } = runDockerShell(layoutCommand, sandboxRoot);
-  return { hermesDir, legacyTarget, openclawTarget, result, sandboxRoot, tmp };
+  return { hermesDir, legacyTarget, openclawTarget, result, rootUvCache, sandboxRoot, tmp };
 }
 
 describe("Hermes final image layout", () => {
+  it("removes the build-only uv cache", () => {
+    const run = runFinalLayout();
+    try {
+      expect(run.result.status, run.result.stderr).toBe(0);
+      expect(fs.existsSync(run.rootUvCache)).toBe(false);
+    } finally {
+      fs.rmSync(run.tmp, { recursive: true, force: true });
+    }
+  });
+
   it("rejects retired OpenClaw state represented as a directory", () => {
     const run = runFinalLayout({ openclaw: "directory" });
     try {
