@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import BinaryIO
 
 
@@ -19,6 +20,7 @@ PROCESS_RESPONSE_LIMIT_BYTES = 1024 * 1024
 PROCESS_STOP_GRACE_SECONDS = 2.0
 OUTPUT_LIMIT_EXIT = 74
 PROCESS_UNAVAILABLE_EXIT = 127
+ADAPTER_PYTHON_UNAVAILABLE = "Hermes adapter interpreter is unavailable"
 
 
 class _ResponseLimitExceeded(RuntimeError):
@@ -28,7 +30,29 @@ class _ResponseLimitExceeded(RuntimeError):
 def _hermes_adapter_python() -> str:
     """Return the interpreter that contains Hermes and its released adapter."""
 
-    return os.environ.get("ADAPTER_PYTHON") or sys.executable
+    value = os.environ.get("ADAPTER_PYTHON")
+    if not value:
+        raise FileNotFoundError(ADAPTER_PYTHON_UNAVAILABLE)
+    path = Path(value)
+    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+        raise FileNotFoundError(ADAPTER_PYTHON_UNAVAILABLE)
+    return str(path)
+
+
+def _hermes_adapter_environment(adapter_python: str) -> dict[str, str]:
+    """Make Hermes' environment authoritative for its adapter and tool children."""
+
+    adapter_bin = str(Path(adapter_python).parent)
+    adapter_environment = dict(os.environ)
+    path_entries = [
+        entry
+        for entry in adapter_environment.get("PATH", "").split(os.pathsep)
+        if entry and entry != adapter_bin
+    ]
+    adapter_environment["PATH"] = os.pathsep.join([adapter_bin, *path_entries])
+    adapter_environment["VIRTUAL_ENV"] = str(Path(adapter_bin).parent)
+    adapter_environment.pop("PYTHONHOME", None)
+    return adapter_environment
 
 
 def _request_operation(request: bytes) -> str | None:
@@ -103,6 +127,7 @@ def _stop_supervisor(process: subprocess.Popen[bytes]) -> None:
 def _start_supervisor() -> subprocess.Popen[bytes]:
     """Start the released adapter behind NemoClaw's process owner."""
 
+    adapter_python = _hermes_adapter_python()
     return subprocess.Popen(
         [
             sys.executable,
@@ -111,10 +136,11 @@ def _start_supervisor() -> subprocess.Popen[bytes]:
             "--parent-pid",
             str(os.getpid()),
             "--",
-            _hermes_adapter_python(),
+            adapter_python,
             "-m",
             OFFICIAL_ADAPTER_MODULE,
         ],
+        env=_hermes_adapter_environment(adapter_python),
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -40,8 +40,10 @@ describe("Hermes Fabric runtime entrypoint", () => {
     );
     expect(dockerfile).toContain("import nemoclaw_hermes_fabric.adapter");
     expect(dockerfile).toContain(
-      "/opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import distribution, version;",
+      "/opt/hermes/.venv/bin/python -I -c 'from importlib.metadata import distribution, distributions, version;",
     );
     expect(dockerfile).toContain("import nemo_fabric_adapters.hermes.adapter");
+    expect(dockerfile).toContain('assert "nemoclaw-hermes-fabric" not in names');
+    expect(dockerfile).toContain('assert "nemo-fabric-adapters-hermes" not in names');
   });
 });

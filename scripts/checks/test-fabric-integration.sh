@@ -164,21 +164,58 @@ hermes_adapter_python="${hermes_adapter_venv}/bin/python"
 "${hermes_adapter_python}" -m pip check
 ADAPTER_PYTHON="${hermes_adapter_python}" "${hermes_runner_python}" -I - <<'PY'
 import os
-from importlib.metadata import version
+import sys
+from importlib.metadata import PackageNotFoundError, version
 from unittest.mock import patch
 
 from nemoclaw_hermes_fabric import adapter
 
+
+def assert_missing(distribution_name: str) -> None:
+    try:
+        version(distribution_name)
+    except PackageNotFoundError:
+        return
+    raise AssertionError(f"unexpected runner distribution: {distribution_name}")
+
+
+assert version("nemoclaw-fabric") == "0.1.2"
 assert version("nemoclaw-hermes-fabric") == "0.1.0"
+assert_missing("nemo-fabric-adapters-hermes")
 with patch.object(adapter.subprocess, "Popen") as start_process:
     adapter._start_supervisor()
 command = start_process.call_args.args[0]
-assert command[0] != os.environ["ADAPTER_PYTHON"]
+child_environment = start_process.call_args.kwargs["env"]
+adapter_bin = os.path.dirname(os.environ["ADAPTER_PYTHON"])
+assert command[0] == sys.executable
 assert command[-3:] == [
     os.environ["ADAPTER_PYTHON"],
     "-m",
     adapter.OFFICIAL_ADAPTER_MODULE,
 ]
+assert child_environment["VIRTUAL_ENV"] == os.path.dirname(adapter_bin)
+assert child_environment["PATH"].split(os.pathsep)[0] == adapter_bin
+assert "PYTHONHOME" not in child_environment
+PY
+"${hermes_adapter_python}" -I - <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+
+import nemo_fabric_adapters.hermes.adapter
+
+
+def assert_missing(distribution_name: str) -> None:
+    try:
+        version(distribution_name)
+    except PackageNotFoundError:
+        return
+    raise AssertionError(f"unexpected adapter distribution: {distribution_name}")
+
+
+assert version("nemo-fabric-adapter-contract") == "0.2.0"
+assert version("nemo-fabric-adapters-common") == "0.2.0"
+assert version("nemo-fabric-adapters-hermes") == "0.2.0"
+assert_missing("nemoclaw-fabric")
+assert_missing("nemoclaw-hermes-fabric")
 PY
 
 for installed_command in nemoclaw-fabric nemoclaw-fabric-run; do

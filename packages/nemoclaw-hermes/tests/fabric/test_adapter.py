@@ -231,34 +231,91 @@ class ReleasedHermesAdapterTests(unittest.TestCase):
 class HermesProxyTests(unittest.TestCase):
     """Keep every proxy exit routed through the private process owner."""
 
-    def test_process_owner_uses_the_hermes_adapter_interpreter(self) -> None:
-        adapter_python = "/opt/hermes/.venv/bin/python"
+    def test_process_owner_uses_the_validated_hermes_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            adapter_bin = Path(temporary_directory) / "hermes" / ".venv" / "bin"
+            adapter_bin.mkdir(parents=True)
+            adapter_python = adapter_bin / "python"
+            adapter_python.write_text("#!/bin/sh\n", encoding="utf-8")
+            adapter_python.chmod(0o700)
+            runner_bin = str(Path(sys.executable).parent)
+            environment = {
+                "ADAPTER_PYTHON": str(adapter_python),
+                "HERMES_FABRIC_API_KEY": "preserved-credential",
+                "PATH": os.pathsep.join(
+                    [runner_bin, str(adapter_bin), "/usr/bin", str(adapter_bin)]
+                ),
+                "PYTHONHOME": "/opt/nemoclaw-fabric-venv",
+                "VIRTUAL_ENV": "/opt/nemoclaw-fabric-venv",
+            }
 
-        with (
-            patch.dict(os.environ, {"ADAPTER_PYTHON": adapter_python}),
-            patch.object(proxy_adapter.subprocess, "Popen") as start_process,
-        ):
-            proxy_adapter._start_supervisor()
+            with (
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(proxy_adapter.subprocess, "Popen") as start_process,
+            ):
+                proxy_adapter._start_supervisor()
 
         command = start_process.call_args.args[0]
-        self.assertEqual(
-            command[-3:],
-            [adapter_python, "-m", proxy_adapter.OFFICIAL_ADAPTER_MODULE],
-        )
+        options = start_process.call_args.kwargs
         self.assertEqual(command[0], sys.executable)
-
-    def test_process_owner_uses_its_interpreter_outside_the_managed_image(self) -> None:
-        with (
-            patch.dict(os.environ, {}, clear=True),
-            patch.object(proxy_adapter.subprocess, "Popen") as start_process,
-        ):
-            proxy_adapter._start_supervisor()
-
-        command = start_process.call_args.args[0]
         self.assertEqual(
             command[-3:],
-            [sys.executable, "-m", proxy_adapter.OFFICIAL_ADAPTER_MODULE],
+            [str(adapter_python), "-m", proxy_adapter.OFFICIAL_ADAPTER_MODULE],
         )
+        self.assertNotIn("shell", options)
+        self.assertTrue(options["start_new_session"])
+        child_environment = options["env"]
+        self.assertEqual(child_environment["VIRTUAL_ENV"], str(adapter_bin.parent))
+        self.assertEqual(
+            child_environment["PATH"].split(os.pathsep),
+            [str(adapter_bin), runner_bin, "/usr/bin"],
+        )
+        self.assertNotIn("PYTHONHOME", child_environment)
+        self.assertEqual(
+            child_environment["HERMES_FABRIC_API_KEY"], "preserved-credential"
+        )
+
+    def test_missing_adapter_interpreter_fails_before_process_creation(self) -> None:
+        for environment in ({}, {"ADAPTER_PYTHON": ""}):
+            with self.subTest(environment=environment):
+                with (
+                    patch.dict(os.environ, environment, clear=True),
+                    patch.object(proxy_adapter.subprocess, "Popen") as start_process,
+                ):
+                    self.assertEqual(
+                        proxy_adapter.run(), proxy_adapter.PROCESS_UNAVAILABLE_EXIT
+                    )
+                start_process.assert_not_called()
+
+    def test_invalid_adapter_interpreter_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            base_dir = Path(temporary_directory)
+            directory = base_dir / "directory"
+            directory.mkdir()
+            non_executable = base_dir / "non-executable"
+            non_executable.write_text("not executable\n", encoding="utf-8")
+            candidates = (
+                "relative/python",
+                str(base_dir / "missing"),
+                str(directory),
+                str(non_executable),
+            )
+            for candidate in candidates:
+                with self.subTest(candidate=candidate):
+                    with (
+                        patch.dict(
+                            os.environ, {"ADAPTER_PYTHON": candidate}, clear=True
+                        ),
+                        patch.object(
+                            proxy_adapter.subprocess, "Popen"
+                        ) as start_process,
+                    ):
+                        with self.assertRaisesRegex(
+                            FileNotFoundError,
+                            proxy_adapter.ADAPTER_PYTHON_UNAVAILABLE,
+                        ):
+                            proxy_adapter._start_supervisor()
+                    start_process.assert_not_called()
 
     def test_official_adapter_stderr_is_drained_without_forwarding_credentials(self) -> None:
         secret = b"nvapi-official-adapter-stderr-sentinel"
