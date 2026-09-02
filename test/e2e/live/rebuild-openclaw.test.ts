@@ -477,15 +477,16 @@ test(
     cleanup.trackDisposable(`remove old OpenClaw base image ${OLD_BASE_TAG}`, () =>
       cleanupOldOpenClawBaseImage(host, commandEnvironments.docker()),
     );
+    // Cleanup is LIFO: raw OpenShell deletion must run before NemoClaw destroy.
+    cleanup.trackDisposable(`destroy rebuilt sandbox ${SANDBOX_NAME}`, () =>
+      cleanupRebuiltNemoClawSandbox(host, commandEnvironments.cli(apiKey), apiKey),
+    );
     cleanup.trackDisposable(`delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`, () =>
       sandbox.cleanupSandbox(SANDBOX_NAME, {
         artifactName: "cleanup-openshell-sandbox-delete",
         env: commandEnvironments.docker(),
         timeoutMs: OPENSHELL_TIMEOUT_MS,
       }),
-    );
-    cleanup.trackDisposable(`destroy rebuilt sandbox ${SANDBOX_NAME}`, () =>
-      cleanupRebuiltNemoClawSandbox(host, commandEnvironments.cli(apiKey), apiKey),
     );
 
     // Phase 1: create a normal current sandbox first so the real gateway and

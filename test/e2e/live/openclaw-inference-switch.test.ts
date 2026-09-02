@@ -983,6 +983,12 @@ test(
   cleanup.trackDisposable("close baseline inference provider", async () => {
     await baselineProvider?.close();
   });
+  // Cleanup is LIFO: raw OpenShell deletion must run before NemoClaw destroy.
+  cleanup.trackSandbox(host, SANDBOX_NAME, {
+    artifactName: "cleanup-nemoclaw-destroy-openclaw-inference-switch",
+    env: commandEnv(home),
+    timeoutMs: 120_000,
+  });
   cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
     sandbox.cleanupSandbox(SANDBOX_NAME, {
       artifactName: "cleanup-openshell-sandbox-delete-openclaw-inference-switch",
@@ -990,11 +996,6 @@ test(
       timeoutMs: 60_000,
     }),
   );
-  cleanup.trackSandbox(host, SANDBOX_NAME, {
-    artifactName: "cleanup-nemoclaw-destroy-openclaw-inference-switch",
-    env: commandEnv(home),
-    timeoutMs: 120_000,
-  });
 
   progress.phase("clear existing inference-switch state");
   await resetOpenClawInferenceSwitchState(host, sandbox, home, "pre-cleanup");

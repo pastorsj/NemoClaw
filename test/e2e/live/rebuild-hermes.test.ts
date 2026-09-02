@@ -674,6 +674,10 @@ test(
         }),
       ),
     );
+    // Cleanup is LIFO: raw OpenShell deletion must run before NemoClaw destroy.
+    cleanup.trackDisposable(`destroy Hermes rebuild sandbox ${SANDBOX_NAME}`, () =>
+      cleanupHermesNemoClawSandbox(host, testEnv, apiKey),
+    );
     cleanup.trackDisposable(`delete Hermes rebuild OpenShell sandbox ${SANDBOX_NAME}`, () =>
       sandbox.cleanupSandbox(SANDBOX_NAME, {
         artifactName: "cleanup-hermes-rebuild-resources-openshell-sandbox-delete",
@@ -681,9 +685,6 @@ test(
         redactionValues: hermesCleanupRedactions(apiKey),
         timeoutMs: 3 * 60_000,
       }),
-    );
-    cleanup.trackDisposable(`destroy Hermes rebuild sandbox ${SANDBOX_NAME}`, () =>
-      cleanupHermesNemoClawSandbox(host, testEnv, apiKey),
     );
 
     progress.phase("prepare trusted gateway inference and the current Hermes base");

@@ -5,7 +5,10 @@ import {
   HERMES_SHIELDS_COMMAND_TIMEOUT_MS,
   HERMES_SHIELDS_CONFIG_TEST_TIMEOUT_MS,
 } from "../../../tools/e2e/hermes-timeout-contract.mts";
-import { cleanupWhenCommandAvailable } from "../fixtures/cleanup-resources.ts";
+import {
+  cleanupWhenCommandAvailable,
+  cleanupWhenOpenShellAvailable,
+} from "../fixtures/cleanup-resources.ts";
 import { assertExitZero, resultText } from "../fixtures/clients/command.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
@@ -386,6 +389,25 @@ test(
     },
     SANDBOX_NAME,
     sandboxCleanupOptions,
+  );
+  // Cleanup is LIFO: raw OpenShell deletion must run before NemoClaw destroy.
+  const openshellSandboxCleanupOptions = {
+    artifactName: "cleanup-delete-openshell-sandbox",
+    env: commandEnv(),
+    redactionValues: [COMPATIBLE_API_KEY],
+    timeoutMs: 60_000,
+  };
+  cleanupRegistry.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
+    cleanupWhenOpenShellAvailable(
+      host,
+      {
+        artifactName: "cleanup-probe-openshell-sandbox",
+        env: openshellSandboxCleanupOptions.env,
+        redactionValues: openshellSandboxCleanupOptions.redactionValues,
+        timeoutMs: 30_000,
+      },
+      () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
+    ),
   );
   await preClean(host);
 

@@ -113,6 +113,12 @@ test(
     const commandEnv = (apiKey?: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv =>
       env(apiKey, extra, home);
     const cleanupEnv = commandEnv();
+  // Cleanup is LIFO: raw OpenShell deletion must run before NemoClaw destroy.
+  cleanup.trackSandbox(host, SANDBOX_NAME, {
+    artifactName: "cleanup-nemoclaw-destroy",
+    env: cleanupEnv,
+    timeoutMs: 120_000,
+  });
   cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
     sandbox.cleanupSandbox(SANDBOX_NAME, {
       artifactName: "cleanup-openshell-delete",
@@ -120,11 +126,6 @@ test(
       timeoutMs: 60_000,
     }),
   );
-  cleanup.trackSandbox(host, SANDBOX_NAME, {
-    artifactName: "cleanup-nemoclaw-destroy",
-    env: cleanupEnv,
-    timeoutMs: 120_000,
-  });
     await cleanupHermesSwitch(host, sandbox, home);
 
   const docker = await host.command("docker", ["info"], {

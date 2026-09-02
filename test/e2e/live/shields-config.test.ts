@@ -586,24 +586,6 @@ test(
         force: true,
       });
     });
-    const openshellSandboxCleanupOptions = {
-      artifactName: "cleanup-openshell-sandbox-delete",
-      env: commandEnv(),
-      redactionValues: [apiKey],
-      timeoutMs: 60_000,
-    };
-    cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
-      cleanupWhenOpenShellAvailable(
-        host,
-        {
-          artifactName: "cleanup-probe-openshell-sandbox",
-          env: openshellSandboxCleanupOptions.env,
-          redactionValues: openshellSandboxCleanupOptions.redactionValues,
-          timeoutMs: 30_000,
-        },
-        () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
-      ),
-    );
     const nemoclawSandboxCleanupOptions = {
       artifactName: "cleanup-nemoclaw-destroy",
       env: commandEnv(),
@@ -627,6 +609,25 @@ test(
       },
       SANDBOX_NAME,
       nemoclawSandboxCleanupOptions,
+    );
+    // Cleanup is LIFO: raw OpenShell deletion must run before NemoClaw destroy.
+    const openshellSandboxCleanupOptions = {
+      artifactName: "cleanup-openshell-sandbox-delete",
+      env: commandEnv(),
+      redactionValues: [apiKey],
+      timeoutMs: 60_000,
+    };
+    cleanup.trackDisposable(`delete OpenShell sandbox ${SANDBOX_NAME}`, () =>
+      cleanupWhenOpenShellAvailable(
+        host,
+        {
+          artifactName: "cleanup-probe-openshell-sandbox",
+          env: openshellSandboxCleanupOptions.env,
+          redactionValues: openshellSandboxCleanupOptions.redactionValues,
+          timeoutMs: 30_000,
+        },
+        () => sandbox.cleanupSandbox(SANDBOX_NAME, openshellSandboxCleanupOptions),
+      ),
     );
 
     const install = await installedShellCommand(
