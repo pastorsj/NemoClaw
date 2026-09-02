@@ -26,6 +26,7 @@ import {
   hasOpenShellGatewayUserService,
   OpenShellGatewayServiceEnvironmentError,
   type PackageManagedDockerDriverGatewayOptions,
+  startOpenShellGatewayUserService,
   startPackageManagedDockerDriverGateway,
   stopOpenShellGatewayUserService,
 } from "./docker-driver-gateway-service";
@@ -429,6 +430,14 @@ export function startPackageManagedDockerDriverGatewayWithEnvOverride(
         throw new OpenShellGatewayServiceEnvironmentError(error);
       }
     },
+    startOpenShellGatewayUserService:
+      options.startOpenShellGatewayUserService ??
+      ((serviceOptions) =>
+        startOpenShellGatewayUserService({
+          ...serviceOptions,
+          env,
+          home: effectiveHome,
+        })),
     stopOpenShellGatewayUserService:
       options.stopOpenShellGatewayUserService ??
       (() => stopOpenShellGatewayUserService({ env, home: effectiveHome })),

@@ -32,6 +32,8 @@ export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER =
 export const NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER_LINE = `# ${NEMOCLAW_OPENSHELL_GATEWAY_USER_SERVICE_MARKER}`;
 
 export interface OpenShellGatewayUserServiceOptions {
+  /** Test seam for the account HOME that launchd assigns to a Homebrew service. */
+  accountHome?: string;
   commandExists?: (command: string) => boolean;
   env?: NodeJS.ProcessEnv;
   existsSync?: (filePath: string) => boolean;
@@ -1108,6 +1110,23 @@ function runHook(
   }
 }
 
+function assertHomebrewGatewayEnvironmentVisible(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  accountHome = os.userInfo().homedir,
+): void {
+  const requestedConfigHome = getOpenShellUserConfigHome(home, env);
+  const accountConfigHome = path.join(accountHome, ".config");
+  if (requestedConfigHome === accountConfigHome) return;
+
+  throw new OpenShellGatewayServiceEnvironmentError(
+    new Error(
+      `The account-scoped OpenShell Homebrew service reads ${accountConfigHome}, not ${requestedConfigHome}. ` +
+        "Use a non-default NEMOCLAW_GATEWAY_PORT for an isolated HOME, or run NemoClaw with the account HOME.",
+    ),
+  );
+}
+
 export function startOpenShellGatewayUserService(
   opts: OpenShellGatewayUserServiceOptions = {},
 ): OpenShellGatewayUserServiceStartResult {
@@ -1131,6 +1150,9 @@ export function startOpenShellGatewayUserService(
       started: false,
       reason: "service not installed",
     };
+  }
+  if (service.manager === "homebrew") {
+    assertHomebrewGatewayEnvironmentVisible(home, env, opts.accountHome);
   }
   const command = stopServiceCommandName(service);
   if (!commandExists(command)) {

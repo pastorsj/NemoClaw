@@ -5,11 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { GATEWAY_STOP_SCRIPT } from "../../../src/lib/tunnel/gateway-stop-script.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { resultText } from "../fixtures/clients/command.ts";
 import { type HostCliClient } from "../fixtures/clients/host.ts";
+import { resolveTestGatewayBinding } from "../fixtures/environment-profiles.ts";
 import {
   type SandboxClient,
   trustedSandboxShellScript,
@@ -76,6 +78,12 @@ expect(
 ).toContain(SETUP_MODE);
 process.env.NEMOCLAW_CLI_BIN ??= USE_PREINSTALLED_LAUNCHABLE ? "nemoclaw" : CLI_ENTRYPOINT;
 validateSandboxName(SANDBOX_NAME);
+const TEST_GATEWAY = resolveTestGatewayBinding({
+  NEMOCLAW_GATEWAY_PORT: process.env.NEMOCLAW_GATEWAY_PORT,
+  OPENSHELL_GATEWAY: process.env.NEMOCLAW_GATEWAY_PORT
+    ? process.env.OPENSHELL_GATEWAY
+    : undefined,
+});
 
 function env(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
@@ -85,7 +93,7 @@ function env(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     NEMOCLAW_NON_INTERACTIVE: "1",
     NEMOCLAW_RECREATE_SANDBOX: "1",
     NEMOCLAW_SANDBOX_NAME: SANDBOX_NAME,
-    OPENSHELL_GATEWAY: "nemoclaw",
+    ...TEST_GATEWAY.environment,
     ...securityPostureModeEnv(),
     ...extra,
   };
@@ -185,7 +193,7 @@ async function cleanup(host: HostCliClient, sandbox: SandboxClient): Promise<voi
     })
     .catch(() => undefined);
   await sandbox
-    .openshell(["gateway", "destroy", "-g", "nemoclaw"], {
+    .openshell(["gateway", "destroy", "-g", TEST_GATEWAY.name], {
       artifactName: "cleanup-openshell-gateway-destroy",
       env: env(),
       timeoutMs: 60_000,
@@ -437,7 +445,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
     skip(`Docker is required: ${resultText(docker)}`);
   }
 
-  cleanupRegistry.trackGateway(host, "nemoclaw", {
+  cleanupRegistry.trackGateway(host, TEST_GATEWAY.name, {
     artifactName: "cleanup-openshell-gateway-destroy",
     env: env(),
     redactionValues: [hosted.apiKey],
@@ -628,7 +636,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
 
   progress.phase("remove full-E2E sandbox");
   await cleanup(host, sandbox);
-  const registry = path.join(os.homedir(), ".nemoclaw", "sandboxes.json");
+  const registry = path.join(nemoclawStateRoot(os.homedir()), "sandboxes.json");
   const registryText = fs.existsSync(registry) ? fs.readFileSync(registry, "utf8") : "";
   expect(registryText).not.toContain(SANDBOX_NAME);
 

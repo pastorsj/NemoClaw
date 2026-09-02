@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
@@ -417,6 +418,7 @@ describe("docker-driver-gateway-service", () => {
       return args[0] === "info" ? officialFormulaInfo() : spawnResult();
     });
     const result = startOpenShellGatewayUserService({
+      accountHome: os.homedir(),
       commandExists: (command) => command === "brew",
       env: {},
       homebrewFormulaOperation: trustedBrew(brew),
@@ -443,6 +445,33 @@ describe("docker-driver-gateway-service", () => {
       "prepare-port",
       "services restart openshell",
     ]);
+  });
+
+  it("rejects a private HOME before Homebrew changes the account service (#6903)", () => {
+    const events: string[] = [];
+    const brew = vi.fn((_command: string, args: string[]) => {
+      events.push(args.join(" "));
+      return args[0] === "info" ? officialFormulaInfo() : spawnResult();
+    });
+
+    expect(() =>
+      startOpenShellGatewayUserService({
+        accountHome: "/Users/tester",
+        commandExists: (command) => command === "brew",
+        env: {
+          HOME: "/Users/tester/.nemoclaw-e2e-home",
+          XDG_CONFIG_HOME: "/Users/tester/.nemoclaw-e2e-home/.config",
+        },
+        home: "/Users/tester/.nemoclaw-e2e-home",
+        homebrewFormulaOperation: trustedBrew(brew),
+        platform: "darwin",
+        preparePortForServiceStart: () => events.push("prepare-port"),
+        prepareServiceEnv: () => events.push("prepare-env"),
+        spawnSyncImpl: brew,
+        validatePortOwnerForServiceStart: () => events.push("validate-port"),
+      }),
+    ).toThrow("Use a non-default NEMOCLAW_GATEWAY_PORT for an isolated HOME");
+    expect(events).toEqual(["list --formula openshell", "info --json=v2 openshell"]);
   });
 
   it.each([
