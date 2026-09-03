@@ -40,7 +40,12 @@ UV_ARGS=(
   --with-requirements fabric/adapter-requirements.lock
   --with "${WORK_DIR}/nemoclaw-hermes-fabric"
 )
-TEST_ARGS=(python3 tests/fabric/test_adapter.py ReleasedHermesAdapterTests)
+TEST_ARGS=(
+  python3
+  tests/fabric/test_adapter.py
+  ReleasedHermesAdapterTests
+  HermesProxyTests
+)
 
 if [ "${TEST_MODE}" = "composed" ]; then
   REPOSITORY_ROOT="$(cd "${PACKAGE_ROOT}/../.." && pwd)"

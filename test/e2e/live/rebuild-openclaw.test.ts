@@ -388,7 +388,7 @@ test(
     meta: {
       e2ePhases: [
         "confirm Docker and prepare OpenClaw rebuild resources",
-        "onboard the current OpenClaw sandbox",
+        "install the OpenClaw harness and onboard the current sandbox",
         "build the old OpenClaw base image",
         "create the old OpenClaw sandbox",
         "seed persistent state and registry metadata",
@@ -442,7 +442,7 @@ test(
       preservedBoundaries: [
         "docker build Dockerfile.base with old OPENCLAW_VERSION",
         "openshell sandbox create/exec/policy",
-        "real nemoclaw onboard and rebuild CLI",
+        "real nemoclaw harness install, onboard, and rebuild CLI",
         "public nemoclaw sandbox agent Fabric turn after rebuild",
         "workspace marker, registry/session files, backup manifest, config hash",
       ],
@@ -484,7 +484,7 @@ test(
     );
     const sandboxDeleteGuard = trackGuardedSandboxNameDelete(
       cleanup,
-      `delete rebuilt OpenShell sandbox ${SANDBOX_NAME}`,
+      `delete OpenShell sandbox ${SANDBOX_NAME}`,
       () =>
         sandbox.cleanupSandbox(SANDBOX_NAME, {
           artifactName: "cleanup-openshell-sandbox-delete",
@@ -496,7 +496,19 @@ test(
     // Phase 1: create a normal current sandbox first so the real gateway and
     // session/credential scaffolding exist, matching the legacy install/onboard
     // setup before it swaps in an old OpenClaw sandbox.
-    progress.phase("onboard the current OpenClaw sandbox");
+    progress.phase("install the OpenClaw harness and onboard the current sandbox");
+    const harnessInstall = await host.command(
+      "node",
+      [CLI_ENTRYPOINT, "harness", "install", "openclaw"],
+      {
+        artifactName: "phase-1-install-openclaw-harness",
+        env: commandEnvironments.cli(apiKey),
+        redactionValues: [apiKey],
+        timeoutMs: 2 * 60_000,
+      },
+    );
+    expectExitZero(harnessInstall, "install the OpenClaw harness before rebuild setup");
+
     const onboard = await host.command("node", [CLI_ENTRYPOINT, "onboard", "--non-interactive"], {
       artifactName: "phase-1-onboard-current",
       env: commandEnvironments.cli(apiKey, { NEMOCLAW_RECREATE_SANDBOX: "1" }),
