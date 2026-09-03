@@ -320,6 +320,53 @@ describe("E2E workflow plan", () => {
     ).toEqual(targetIds);
   });
 
+  it("selects every Fabric journey when the shared runner changes", () => {
+    expect(
+      catalogueTargetsForChangedFiles([
+        "packages/nemoclaw-fabric/src/nemoclaw_fabric/command.py",
+      ]).map(({ id }) => id),
+    ).toEqual([
+      "full-e2e",
+      "hermes-inference-switch",
+      "hermes-shields-config",
+      "openclaw-inference-switch",
+      "pi-agent-qualification-amd64",
+      "pi-agent-qualification-arm64",
+      "rebuild-openclaw",
+      "rebuild-hermes",
+      "shields-config",
+    ]);
+  });
+
+  it.each([
+    "packages/nemoclaw-openclaw/fabric/src/nemoclaw_openclaw_fabric/adapter.py",
+    "packages/nemoclaw-openclaw/Dockerfile",
+    "packages/nemoclaw-openclaw/manifest.yaml",
+    "packages/nemoclaw-openclaw/config/generate-config.mts",
+  ])("selects only OpenClaw Fabric journeys for %s", (changedFile) => {
+    expect(catalogueTargetsForChangedFiles([changedFile]).map(({ id }) => id)).toEqual([
+      "full-e2e",
+      "openclaw-inference-switch",
+      "rebuild-openclaw",
+      "shields-config",
+    ]);
+  });
+
+  it.each([
+    "packages/nemoclaw-hermes/fabric/src/nemoclaw_hermes_fabric/adapter.py",
+    "packages/nemoclaw-hermes/Dockerfile",
+    "packages/nemoclaw-hermes/manifest.yaml",
+    "packages/nemoclaw-hermes/config/fabric-config.ts",
+    "packages/nemoclaw-hermes/config/generate.ts",
+    "packages/nemoclaw-hermes/config/write-config.ts",
+  ])("selects only Hermes Fabric journeys for %s", (changedFile) => {
+    expect(catalogueTargetsForChangedFiles([changedFile]).map(({ id }) => id)).toEqual([
+      "hermes-inference-switch",
+      "hermes-shields-config",
+      "rebuild-hermes",
+    ]);
+  });
+
   it("emits the required workflow fields for migrated targets", () => {
     const plan = buildE2eWorkflowPlan({
       jobs: "gateway-guard-recovery,hermes-slack,network-policy,openclaw-inference-switch,openclaw-tui-chat-correlation,sandbox-operations",
