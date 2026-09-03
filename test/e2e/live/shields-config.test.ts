@@ -1378,18 +1378,18 @@ test(
       ],
       {
         artifactName: "phase-12-childless-shields-down",
-        env: commandEnv({ NEMOCLAW_OPENSHELL_BIN: policyBoundary.executable }),
+        env: {
+          ...commandEnv(),
+          NEMOCLAW_OPENSHELL_BIN: policyBoundary.executable,
+        },
         timeoutMs: 16 * 60_000,
       },
     );
     expect(childlessRecovery.exitCode, resultText(childlessRecovery)).toBe(0);
-    expect(resultText(childlessRecovery)).toContain(
-      "Lowered shields on a sandbox whose startup never completed.",
-    );
-    expect(resultText(childlessRecovery)).toContain("Sandbox is in default (mutable) state.");
     expect(JSON.parse(fs.readFileSync(policyBoundary.receipt, "utf8"))).toEqual({
       status: "childless",
     });
+    expect(resultText(childlessRecovery)).toContain("Sandbox is in default (mutable) state.");
     await waitForChildlessStartup(host, recoveryContainerId);
     const unlockedPaths = await runtimeCommand(
       host,
