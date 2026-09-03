@@ -339,6 +339,7 @@ test(
       "start restores a stopped Hermes sandbox while shields are up",
       "start restores a stopped Hermes sandbox while shields are down",
       "each successful shields-down returns only after inference.local serves the configured model",
+      "the public Fabric adapter completes a clean turn with shields up and down",
       "a second down/up cycle completes without corrupting config state",
     ],
     issue: "#6381",
@@ -352,6 +353,7 @@ test(
 
   const fake = await startFakeOpenAiCompatibleServer({
     apiKey: COMPATIBLE_API_KEY,
+    chatContent: "PONG",
     host: "0.0.0.0",
     model: COMPATIBLE_MODEL,
     progress,
