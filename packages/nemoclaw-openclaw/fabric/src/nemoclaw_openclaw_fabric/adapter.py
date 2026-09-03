@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import signal
 import stat
 import sys
@@ -36,6 +37,15 @@ PROCESS_STOP_GRACE_SECONDS = 2.0
 PROCESS_STREAM_CAPTURE_LIMIT_BYTES = 1024 * 1024
 PROCESS_STREAM_READ_BYTES = 64 * 1024
 SESSION_PREFIX = "nemoclaw-fabric-"
+
+# OpenClaw can exit zero after switching to embedded execution and does not
+# expose a stable machine-readable transport discriminator. Keep these
+# observed representations aligned with NemoClaw's native agent command until
+# OpenClaw supplies a supported gateway-only result.
+OPENCLAW_EMBEDDED_FALLBACK_PATTERN = re.compile(
+    rb"embedded fallback|\[agent/embedded\]|fallbackfrom[\": ]+gateway|transport[\": ]+embedded",
+    re.IGNORECASE,
+)
 
 
 class _OutputCaptureLimitExceeded(Exception):
@@ -462,7 +472,7 @@ class OpenClawRuntime:
                 "OpenClaw output exceeded the "
                 f"{PROCESS_STREAM_CAPTURE_LIMIT_BYTES}-byte stream capture limit",
             )
-        if b"embedded fallback:" in stderr.lower():
+        if OPENCLAW_EMBEDDED_FALLBACK_PATTERN.search(stderr):
             return _failed(
                 "openclaw_gateway_fallback_rejected",
                 "OpenClaw did not remain on its managed gateway",

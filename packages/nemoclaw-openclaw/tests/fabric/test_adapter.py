@@ -132,7 +132,8 @@ if mode == "gateway_auth_failure":
     raise SystemExit(1)
 if mode == "embedded_fallback":
     secret = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_SECRET", "missing-secret")
-    print(f"EMBEDDED FALLBACK: gateway failed with {secret}", file=sys.stderr)
+    marker = os.environ.get("NEMOCLAW_FAKE_OPENCLAW_FALLBACK_MARKER", "EMBEDDED FALLBACK:")
+    print(f"{marker} gateway failed with {secret}", file=sys.stderr)
     print(json.dumps(default_response))
     raise SystemExit(0)
 if mode == "hang":
@@ -674,28 +675,38 @@ class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCas
         self.assertNotIn(secret, json.dumps(result.to_mapping()))
         self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
 
-    async def test_embedded_fallback_is_rejected_without_forwarding_stderr(self) -> None:
+    async def test_each_embedded_fallback_marker_is_rejected_without_forwarding_stderr(
+        self,
+    ) -> None:
         secret = "nvapi-openclaw-fallback-sentinel"
-        environment = {
-            **self.environment,
-            "NEMOCLAW_FAKE_OPENCLAW_MODE": "embedded_fallback",
-            "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
-        }
-        with patch.dict(os.environ, environment):
-            runtime = await self.start_runtime()
-            result = await runtime.invoke(
-                _request(), _runtime_context(self.workspace, self.artifacts)
-            )
-            await runtime.stop()
+        for marker in (
+            "EMBEDDED FALLBACK:",
+            "[agent/embedded]",
+            '"fallbackFrom": "gateway"',
+            '"transport": "embedded"',
+        ):
+            with self.subTest(marker=marker):
+                environment = {
+                    **self.environment,
+                    "NEMOCLAW_FAKE_OPENCLAW_MODE": "embedded_fallback",
+                    "NEMOCLAW_FAKE_OPENCLAW_FALLBACK_MARKER": marker,
+                    "NEMOCLAW_FAKE_OPENCLAW_SECRET": secret,
+                }
+                with patch.dict(os.environ, environment):
+                    runtime = await self.start_runtime()
+                    result = await runtime.invoke(
+                        _request(), _runtime_context(self.workspace, self.artifacts)
+                    )
+                    await runtime.stop()
 
-        self.assertIs(result.status, AgentRunStatus.FAILED)
-        self.assertEqual(result.error.code, "openclaw_gateway_fallback_rejected")
-        self.assertEqual(
-            result.error.message,
-            "OpenClaw did not remain on its managed gateway",
-        )
-        self.assertNotIn(secret, json.dumps(result.to_mapping()))
-        self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
+                self.assertIs(result.status, AgentRunStatus.FAILED)
+                self.assertEqual(result.error.code, "openclaw_gateway_fallback_rejected")
+                self.assertEqual(
+                    result.error.message,
+                    "OpenClaw did not remain on its managed gateway",
+                )
+                self.assertNotIn(secret, json.dumps(result.to_mapping()))
+                self.assertFalse(Path(str(self.recorded_prompt()["path"])).exists())
 
     async def test_gateway_auth_failure_is_classified_without_forwarding_stderr(self) -> None:
         secret = "nvapi-openclaw-gateway-auth-sentinel"
