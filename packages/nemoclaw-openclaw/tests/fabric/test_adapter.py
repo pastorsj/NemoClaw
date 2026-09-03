@@ -347,6 +347,99 @@ class OpenClawFixtureMixin:
 class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCase):
     """Verify gateway translation, response validation, and process ownership."""
 
+    async def test_success_waits_for_exit_status_after_pipe_eof(self) -> None:
+        class CompletedProcess:
+            pid = 12345
+            returncode: int | None = None
+            wait_calls = 0
+
+            async def wait(self) -> int:
+                self.wait_calls += 1
+                self.returncode = 0
+                return self.returncode
+
+        process = CompletedProcess()
+
+        async def spawn_process(*_args: object, **_kwargs: object) -> CompletedProcess:
+            return process
+
+        async def capture_output(_process: object) -> tuple[bytes, bytes]:
+            return json.dumps(DEFAULT_RESPONSE).encode("utf-8"), b""
+
+        runtime = await self.start_runtime()
+        with (
+            patch.object(asyncio, "create_subprocess_exec", spawn_process),
+            patch.object(openclaw_adapter, "_capture_bounded_output", capture_output),
+            patch.object(os, "killpg", side_effect=ProcessLookupError),
+        ):
+            result = await runtime.invoke(
+                _request(), _runtime_context(self.workspace, self.artifacts)
+            )
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        self.assertEqual(result.output, {"response": "deterministic OpenClaw response"})
+        self.assertEqual(process.wait_calls, 1)
+        self.assertEqual(process.returncode, 0)
+        self.assertIsNone(runtime._process)
+        self.assertEqual(list(self.artifacts.iterdir()), [])
+
+    async def test_cleanup_permission_error_retains_process_ownership(self) -> None:
+        class ActiveProcess:
+            pid = 12345
+            returncode: int | None = None
+
+        process = ActiveProcess()
+
+        async def spawn_process(*_args: object, **_kwargs: object) -> ActiveProcess:
+            return process
+
+        async def capture_output(_process: object) -> tuple[bytes, bytes]:
+            return json.dumps(DEFAULT_RESPONSE).encode("utf-8"), b""
+
+        runtime = await self.start_runtime()
+        with (
+            patch.object(asyncio, "create_subprocess_exec", spawn_process),
+            patch.object(openclaw_adapter, "_capture_bounded_output", capture_output),
+            patch.object(os, "killpg", side_effect=PermissionError),
+        ):
+            with self.assertRaises(PermissionError):
+                await runtime.invoke(
+                    _request(), _runtime_context(self.workspace, self.artifacts)
+                )
+
+        self.assertIs(runtime._process, process)
+        self.assertEqual(list(self.artifacts.iterdir()), [])
+
+    async def test_probe_permission_error_is_only_accepted_on_macos(self) -> None:
+        class ExitedProcess:
+            pid = 12345
+            returncode = 0
+
+        with (
+            patch.object(openclaw_adapter.sys, "platform", "darwin"),
+            patch.object(
+                openclaw_adapter.os,
+                "killpg",
+                side_effect=[None, PermissionError],
+            ) as signal_group,
+        ):
+            await openclaw_adapter._stop_process_group(ExitedProcess())
+
+        self.assertEqual(
+            [invocation.args for invocation in signal_group.call_args_list],
+            [(12345, signal.SIGTERM), (12345, 0)],
+        )
+        with (
+            patch.object(openclaw_adapter.sys, "platform", "linux"),
+            patch.object(
+                openclaw_adapter.os,
+                "killpg",
+                side_effect=[None, PermissionError],
+            ),
+        ):
+            with self.assertRaises(PermissionError):
+                await openclaw_adapter._stop_process_group(ExitedProcess())
+
     async def test_success_uses_private_prompt_file_and_gateway_options(self) -> None:
         with patch.dict(os.environ, self.environment):
             runtime = await self.start_runtime()

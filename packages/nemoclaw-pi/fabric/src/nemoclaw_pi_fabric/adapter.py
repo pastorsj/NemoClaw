@@ -83,13 +83,21 @@ def _validate_model(model: AgentModelConfig) -> None:
         )
 
 
+async def _wait_for_process_exit(process: asyncio.subprocess.Process) -> None:
+    """Publish the direct child's exit status before releasing process ownership."""
+
+    if process.returncode is None:
+        await process.wait()
+
+
 async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     """Stop Pi and every tool process in the session created for its turn."""
 
     process_group = process.pid
     try:
         os.killpg(process_group, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
+        await _wait_for_process_exit(process)
         return
 
     deadline = asyncio.get_running_loop().time() + PROCESS_STOP_GRACE_SECONDS
@@ -105,16 +113,23 @@ async def _stop_process_group(process: asyncio.subprocess.Process) -> None:
     while asyncio.get_running_loop().time() < deadline:
         try:
             os.killpg(process_group, 0)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
+            await _wait_for_process_exit(process)
+            return
+        except PermissionError:
+            # macOS can report EPERM while a terminated group drains. Only
+            # accept that state after the direct wrapper has published exit.
+            if sys.platform != "darwin" or process.returncode is None:
+                raise
             return
         await asyncio.sleep(0.025)
 
     try:
         os.killpg(process_group, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
+    except ProcessLookupError:
+        await _wait_for_process_exit(process)
         return
-    if process.returncode is None:
-        await process.wait()
+    await _wait_for_process_exit(process)
 
 
 async def _read_bounded_stream(stream: asyncio.StreamReader) -> bytes:
@@ -275,6 +290,7 @@ class PiRuntime:
 
         self._process = process
         output_limit_exceeded = False
+        cleanup_complete = False
         stdout = b""
         try:
             stdout, _stderr = await _capture_bounded_output(
@@ -283,20 +299,24 @@ class PiRuntime:
         except _OutputCaptureLimitExceeded:
             output_limit_exceeded = True
             await asyncio.shield(_stop_process_group(process))
+            cleanup_complete = True
         except asyncio.CancelledError:
             await asyncio.shield(_stop_process_group(process))
+            cleanup_complete = True
             raise
         except BaseException:
             # Reader and stdin-writer failures must not detach the process
             # from stop() before the wrapper has reaped every Pi tool.
             await asyncio.shield(_stop_process_group(process))
+            cleanup_complete = True
             raise
         else:
             # Pi may return after starting a background tool. Bound that tool to
             # this turn even though the wrapper process already exited cleanly.
             await _stop_process_group(process)
+            cleanup_complete = True
         finally:
-            if self._process is process:
+            if cleanup_complete and self._process is process:
                 self._process = None
 
         if output_limit_exceeded:
