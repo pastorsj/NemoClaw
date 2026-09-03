@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { type CommandRunner } from "../fixtures/clients/command.ts";
 import { HostCliClient } from "../fixtures/clients/host.ts";
@@ -46,23 +49,35 @@ describe("host address discovery", () => {
   });
 
   it("uses the selected runtime provider's sandbox-to-host address", async () => {
+    const toolDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-podman-host-address-"));
+    const ipCommand = path.join(toolDirectory, "ip");
+    fs.writeFileSync(
+      ipCommand,
+      "#!/bin/sh\nprintf '%s\\n' '1: lo    inet 169.254.2.2/32 scope global lo'\n",
+      { mode: 0o700 },
+    );
     const runner: CommandRunner = {
       run: async () => {
         throw new Error("provider-owned address must not run route discovery");
       },
     };
 
-    await expect(
-      discoverHostAddress(
-        new HostCliClient(runner),
-        "host-address",
-        {
-          NEMOCLAW_GATEWAY_RUNTIME: "podman",
-          OPENSHELL_PODMAN_SOCKET: "/tmp/podman.sock",
-        },
-        "linux",
-      ),
-    ).resolves.toEqual({ source: "runtime-provider", address: "169.254.2.2", probe: null });
+    try {
+      await expect(
+        discoverHostAddress(
+          new HostCliClient(runner),
+          "host-address",
+          {
+            NEMOCLAW_GATEWAY_RUNTIME: "podman",
+            OPENSHELL_PODMAN_SOCKET: "/tmp/podman.sock",
+            PATH: toolDirectory,
+          },
+          "linux",
+        ),
+      ).resolves.toEqual({ source: "runtime-provider", address: "169.254.2.2", probe: null });
+    } finally {
+      fs.rmSync(toolDirectory, { recursive: true, force: true });
+    }
   });
 
   it("preserves portable-profile route discovery", async () => {
