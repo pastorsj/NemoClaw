@@ -46,10 +46,10 @@ version pairing, so the image uses a separate `/opt/nemoclaw-fabric-venv` and
 leaves native DCode unchanged.
 
 - Lockfile: `packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock`
-- Lockfile SHA-256: `b561be9731f82af8e67a891440970f6ad7ad4aa1a9b5e34d8ed6b8fff524c0c9`
+- Lockfile SHA-256: `8c4684c364b371e781b01fcdae71ec0407184bc4b1c7a778467a9f8790c66f5a`
 - Generate command: `uv pip compile packages/nemoclaw-langchain-deepagents-code/fabric/requirements.in --generate-hashes --python-version 3.13 --python-platform x86_64-manylinux_2_28 --prerelease disallow --exclude-newer 2026-08-29T00:00:00Z -o packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock`
 - Audit command: `uv tool run --python 3.13 pip-audit -r packages/nemoclaw-langchain-deepagents-code/fabric/requirements.lock --progress-spinner off --disable-pip`
-- Audit date: August 29, 2026
+- Audit date: September 3, 2026
 - Complete-lock audit result: `No known vulnerabilities found`
 - Released Fabric packages: `nemo-fabric==0.2.0`,
   `nemo-fabric-runtime==0.2.0`,

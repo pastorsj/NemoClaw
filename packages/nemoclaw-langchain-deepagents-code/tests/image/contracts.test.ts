@@ -759,12 +759,14 @@ print(json.dumps(values, sort_keys=True))`,
     (name, expectedVersion) => {
       const review = readAgentFile("compat/dependencies.md");
       const requirementsLock = readAgentFile("runtime/requirements.lock");
+      const fabricRequirementsLock = readAgentFile("fabric/requirements.lock");
       const adapterModule = readAgentFile("plugin/src/nemoclaw_deepagents_profile/__init__.py");
       const adapterMetadata = readAgentFile("plugin/pyproject.toml");
       const dockerfile = readAgentFile("Dockerfile");
       const profileValidator = readAgentFile("checks/model-profile.py");
 
       expect(review).toContain(`Lockfile SHA-256: \`${sha256(requirementsLock)}\``);
+      expect(review).toContain(`Lockfile SHA-256: \`${sha256(fabricRequirementsLock)}\``);
       expect(review).toContain(
         "uv tool run --python 3.13 pip-audit -r packages/nemoclaw-langchain-deepagents-code/runtime/requirements.lock --progress-spinner off --disable-pip",
       );
