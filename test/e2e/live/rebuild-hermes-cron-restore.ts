@@ -5,7 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
-import { resolveDirectSandboxContainer } from "../../../src/lib/sandbox/privileged-exec";
 import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts";
 import { type HostCliClient, resultText } from "../fixtures/clients/index.ts";
 import { expect } from "../fixtures/e2e-test.ts";
@@ -29,6 +28,17 @@ const EXECUTION_POLL_ATTEMPTS = 30;
 const POLL_INTERVAL_MS = 5_000;
 const SUBSTITUTION_PROBE_ATTEMPTS = 13;
 const RECEIPT_PREFIX = "NEMOCLAW_HERMES_CRON_RESTORE_V1:";
+const PRIVILEGED_EXEC_MODULE = path.resolve(
+  import.meta.dirname,
+  "../../../dist/lib/sandbox/privileged-exec.js",
+);
+const RESOLVE_SANDBOX_CONTAINER_PROGRAM = [
+  '"use strict";',
+  "const [modulePath, sandboxName] = process.argv.slice(1);",
+  "const { resolveDirectSandboxContainer } = require(modulePath);",
+  'process.stdout.write(`${resolveDirectSandboxContainer(sandboxName, "docker")}\\n`);',
+].join("\n");
+const DOCKER_CONTAINER_ID = /^[a-f0-9]{64}$/u;
 
 type JsonObject = Record<string, unknown>;
 
@@ -38,6 +48,10 @@ interface RebuildHermesCronRestoreOptions {
   env: NodeJS.ProcessEnv;
   redactionValues: string[];
   timeoutMs?: number;
+}
+
+interface ResolveHermesSandboxContainerOptions extends RebuildHermesCronRestoreOptions {
+  artifactName: string;
 }
 
 interface SeededCronJob {
@@ -225,17 +239,33 @@ export function parseGatewayEvidence(text: string): GatewayEvidence {
   return parseHermesGatewayEvidence(text);
 }
 
-export function hermesRuntimeExecArgs(sandboxName: string, command: string[]): string[] {
-  // `openshell sandbox exec` intentionally runs inside Landlock, which cannot
-  // read the immutable `/opt/hermes` runtime. These checks need the managed
-  // Docker container while retaining Hermes' ordinary sandbox identity.
-  const containerId = resolveDirectSandboxContainer(sandboxName, "docker");
-  return buildHermesRuntimeExecArgs(containerId, command);
-}
-
-function hermesRootExecArgs(sandboxName: string, command: string[]): string[] {
-  const containerId = resolveDirectSandboxContainer(sandboxName, "docker");
-  return ["exec", "--user", "root", "--env", `HERMES_HOME=${HERMES_HOME}`, containerId, ...command];
+/** Resolve the managed container because Landlock blocks OpenShell exec from reading `/opt/hermes`. */
+export async function resolveHermesSandboxContainer({
+  host,
+  sandboxName,
+  env,
+  redactionValues,
+  artifactName,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+}: ResolveHermesSandboxContainerOptions): Promise<string> {
+  // The private HOME and gateway port must exist before privileged-exec loads.
+  // A fresh process preserves its registry, provider, label, and mutation-fence checks.
+  const result = await host.command(
+    process.execPath,
+    ["-e", RESOLVE_SANDBOX_CONTAINER_PROGRAM, PRIVILEGED_EXEC_MODULE, sandboxName],
+    {
+      artifactName,
+      env,
+      redactionValues,
+      timeoutMs,
+    },
+  );
+  expectExitZero(result, `resolve registered sandbox container for ${sandboxName}`);
+  const containerId = result.stdout.trim();
+  if (!DOCKER_CONTAINER_ID.test(containerId)) {
+    fail(`registered sandbox container resolver returned an invalid immutable ID`);
+  }
+  return containerId;
 }
 
 function scriptContent(executionMarker: string, executionToken: string): string {
@@ -275,7 +305,15 @@ export function createRebuildHermesCronRestoreFixture({
     command: string[],
     artifactName: string,
   ): Promise<Awaited<ReturnType<HostCliClient["command"]>>> {
-    return host.command("docker", hermesRuntimeExecArgs(sandboxName, command), {
+    const containerId = await resolveHermesSandboxContainer({
+      host,
+      sandboxName,
+      env,
+      redactionValues,
+      artifactName: `${artifactName}-resolve-container`,
+      timeoutMs,
+    });
+    return host.command("docker", buildHermesRuntimeExecArgs(containerId, command), {
       artifactName,
       env,
       redactionValues,
@@ -287,12 +325,24 @@ export function createRebuildHermesCronRestoreFixture({
     command: string[],
     artifactName: string,
   ): Promise<Awaited<ReturnType<HostCliClient["command"]>>> {
-    return host.command("docker", hermesRootExecArgs(sandboxName, command), {
-      artifactName,
+    const containerId = await resolveHermesSandboxContainer({
+      host,
+      sandboxName,
       env,
       redactionValues,
+      artifactName: `${artifactName}-resolve-container`,
       timeoutMs,
     });
+    return host.command(
+      "docker",
+      ["exec", "--user", "root", "--env", `HERMES_HOME=${HERMES_HOME}`, containerId, ...command],
+      {
+        artifactName,
+        env,
+        redactionValues,
+        timeoutMs,
+      },
+    );
   }
 
   async function readCronJob(jobId: string, artifactName: string): Promise<JsonObject> {
@@ -562,6 +612,8 @@ export function createRebuildHermesCronRestoreFixture({
     expect(restoredGateway).toMatchObject(expectedGateway);
   }
   return {
+    runSandboxCommand: dockerSandbox,
+
     async seed(): Promise<void> {
       if (rebuildSeed) fail("Hermes rebuild cron fixture was seeded twice");
       rebuildSeed = await seedCronJob("rebuild");
@@ -643,7 +695,14 @@ export function createRebuildHermesCronRestoreFixture({
       );
       expect(beforeRestart).toMatchObject({ pid: receipt.pid, start_time: receipt.start_time });
 
-      const containerId = resolveDirectSandboxContainer(sandboxName, "docker");
+      const containerId = await resolveHermesSandboxContainer({
+        host,
+        sandboxName,
+        env,
+        redactionValues,
+        artifactName: "phase-8-resolve-container-for-stranded-gate-restart",
+        timeoutMs,
+      });
       const restart = await host.command("docker", ["restart", containerId], {
         artifactName: "phase-8-restart-container-with-stranded-hermes-cron-gate",
         env,

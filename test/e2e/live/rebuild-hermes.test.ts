@@ -16,9 +16,7 @@ import { assertExitZero as expectExitZero } from "../fixtures/clients/command.ts
 import { type HostCliClient, resultText } from "../fixtures/clients/index.ts";
 import { validateSandboxName } from "../fixtures/clients/sandbox.ts";
 import { expect, test } from "../fixtures/e2e-test.ts";
-import {
-  createIsolatedTestRuntime,
-} from "../fixtures/environment-profiles.ts";
+import { createIsolatedTestRuntime } from "../fixtures/environment-profiles.ts";
 import { expectSandboxProviderAttachment } from "../fixtures/gateway-providers.ts";
 import { assertManagedImageReceiptMatchesSelectedCohort } from "../fixtures/managed-image-receipt.ts";
 import {
@@ -49,10 +47,7 @@ import {
   requireRebuildHermesOpenshellBin,
   resolveRebuildHermesCurrentBase,
 } from "./rebuild-hermes-bootstrap.ts";
-import {
-  createRebuildHermesCronRestoreFixture,
-  hermesRuntimeExecArgs,
-} from "./rebuild-hermes-cron-restore.ts";
+import { createRebuildHermesCronRestoreFixture } from "./rebuild-hermes-cron-restore.ts";
 import {
   buildRebuildHermesRecreateEnv,
   createRebuildHermesEnvFactory,
@@ -154,24 +149,6 @@ const LIVE_TIMEOUT_MS = 70 * 60_000;
 // generous diagnostic tail without letting a stuck child exhaust the hosted
 // runner by growing the fixture's in-memory stdout/stderr buffers forever.
 const LONG_COMMAND_CAPTURE_LIMIT_BYTES = 4 * 1024 * 1024;
-
-function inspectKanbanTaskArgs(sandboxName: string): string[] {
-  const script = [
-    "import json, sqlite3, sys",
-    "conn = sqlite3.connect(f'file:{sys.argv[1]}?mode=ro', uri=True)",
-    "rows = conn.execute('SELECT id, title, status FROM tasks WHERE title = ?', (sys.argv[2],)).fetchall()",
-    "conn.close()",
-    "print(json.dumps(rows))",
-    "raise SystemExit(0 if rows else 1)",
-  ].join("; ");
-  return hermesRuntimeExecArgs(sandboxName, [
-    "python3",
-    "-c",
-    script,
-    KANBAN_FILE,
-    KANBAN_TASK_TITLE,
-  ]);
-}
 
 interface RegistryData {
   sandboxes?: Record<string, Record<string, unknown>>;
@@ -872,9 +849,7 @@ test(
     );
     expectExitZero(tagOldBase, "tag immutable old Hermes base fixture for sandbox creation");
 
-    const oldDockerfileDir = fs.mkdtempSync(
-      path.join(runtime.home, "rebuild-hermes-dockerfile-"),
-    );
+    const oldDockerfileDir = fs.mkdtempSync(path.join(runtime.home, "rebuild-hermes-dockerfile-"));
     const oldDockerfile = path.join(oldDockerfileDir, "Dockerfile");
     fs.writeFileSync(
       oldDockerfile,
@@ -1038,12 +1013,18 @@ test(
       seededOldSandboxImageState,
     );
     await cronRestore.seed();
-    const seededKanbanDb = await host.command("docker", inspectKanbanTaskArgs(SANDBOX_NAME), {
-      artifactName: "phase-4-inspect-seeded-kanban-db",
-      env: testEnv(apiKey),
-      redactionValues,
-      timeoutMs: OPENSHELL_TIMEOUT_MS,
-    });
+    const inspectKanbanScript = [
+      "import json, sqlite3, sys",
+      "conn = sqlite3.connect(f'file:{sys.argv[1]}?mode=ro', uri=True)",
+      "rows = conn.execute('SELECT id, title, status FROM tasks WHERE title = ?', (sys.argv[2],)).fetchall()",
+      "conn.close()",
+      "print(json.dumps(rows))",
+      "raise SystemExit(0 if rows else 1)",
+    ].join("; ");
+    const seededKanbanDb = await cronRestore.runSandboxCommand(
+      ["python3", "-c", inspectKanbanScript, KANBAN_FILE, KANBAN_TASK_TITLE],
+      "phase-4-inspect-seeded-kanban-db",
+    );
     expectExitZero(seededKanbanDb, "inspect seeded Hermes kanban database");
     expect(resultText(seededKanbanDb)).toContain(KANBAN_TASK_TITLE);
 
@@ -1250,15 +1231,9 @@ test(
     expectExitZero(restoredMarker, "verify restored Hermes state and dashboard profile migration");
     expect(restoredMarker.stdout).toBe(REBUILD_HERMES_STATE.expectedOutput);
 
-    const hermesVersion = await host.command(
-      "docker",
-      hermesRuntimeExecArgs(SANDBOX_NAME, ["hermes", "--version"]),
-      {
-        artifactName: "phase-7-hermes-version-after-rebuild",
-        env: testEnv(apiKey),
-        redactionValues,
-        timeoutMs: OPENSHELL_TIMEOUT_MS,
-      },
+    const hermesVersion = await cronRestore.runSandboxCommand(
+      ["hermes", "--version"],
+      "phase-7-hermes-version-after-rebuild",
     );
     expectExitZero(hermesVersion, "Hermes version after rebuild");
     const hermesVersionText = resultText(hermesVersion);
@@ -1302,15 +1277,9 @@ test(
       timeoutMs: OPENSHELL_TIMEOUT_MS,
     });
 
-    const restoredKanban = await host.command(
-      "docker",
-      hermesRuntimeExecArgs(SANDBOX_NAME, ["hermes", "kanban", "list", "--json"]),
-      {
-        artifactName: "phase-7-list-kanban-after-rebuild",
-        env: testEnv(apiKey),
-        redactionValues,
-        timeoutMs: OPENSHELL_TIMEOUT_MS,
-      },
+    const restoredKanban = await cronRestore.runSandboxCommand(
+      ["hermes", "kanban", "list", "--json"],
+      "phase-7-list-kanban-after-rebuild",
     );
     expectExitZero(restoredKanban, "list Hermes kanban tasks after rebuild");
     expect(resultText(restoredKanban)).toContain(KANBAN_TASK_TITLE);

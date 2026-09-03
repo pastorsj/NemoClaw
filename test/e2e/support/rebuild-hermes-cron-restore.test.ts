@@ -1,13 +1,81 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { HostCliClient } from "../fixtures/clients/host.ts";
 import {
   hermesCronJobRuntimeState,
   parseCronTickerTimestamp,
   parseGatewayEvidence,
   parseHermesCronBeginReceipt,
+  resolveHermesSandboxContainer,
 } from "../live/rebuild-hermes-cron-restore.ts";
+
+function commandResult(exitCode: number, stdout = "", stderr = "") {
+  return {
+    artifacts: { result: "", stderr: "", stdout: "" },
+    command: [],
+    exitCode,
+    signal: null,
+    stderr,
+    stdout,
+    timedOut: false,
+  };
+}
+
+describe("Hermes rebuild container resolution", () => {
+  it("loads privileged sandbox authority inside the isolated runtime environment", async () => {
+    const containerId = "a".repeat(64);
+    const command = vi
+      .fn<HostCliClient["command"]>()
+      .mockResolvedValue(commandResult(0, `${containerId}\n`));
+    const env = {
+      HOME: "/home/tester/private-rebuild-home",
+      NEMOCLAW_GATEWAY_PORT: "18137",
+      OPENSHELL_GATEWAY: "nemoclaw-18137",
+    };
+
+    await expect(
+      resolveHermesSandboxContainer({
+        host: { command } as unknown as HostCliClient,
+        sandboxName: "e2e-rebuild-hermes",
+        env,
+        redactionValues: ["fixture-secret"],
+        artifactName: "resolve-isolated-container",
+      }),
+    ).resolves.toBe(containerId);
+
+    expect(command).toHaveBeenCalledOnce();
+    const [executable, args, options] = command.mock.calls[0]!;
+    const commandArgs = args as string[];
+    expect(executable).toBe(process.execPath);
+    expect(commandArgs[0]).toBe("-e");
+    expect(commandArgs[1]).toContain("resolveDirectSandboxContainer");
+    expect(commandArgs[2]).toMatch(/\/dist\/lib\/sandbox\/privileged-exec\.js$/u);
+    expect(commandArgs[3]).toBe("e2e-rebuild-hermes");
+    expect(options).toMatchObject({
+      artifactName: "resolve-isolated-container",
+      env,
+      redactionValues: ["fixture-secret"],
+    });
+  });
+
+  it("rejects ambiguous output from the privileged sandbox resolver", async () => {
+    const command = vi
+      .fn<HostCliClient["command"]>()
+      .mockResolvedValue(commandResult(0, `${"a".repeat(64)}\n${"b".repeat(64)}\n`));
+
+    await expect(
+      resolveHermesSandboxContainer({
+        host: { command } as unknown as HostCliClient,
+        sandboxName: "e2e-rebuild-hermes",
+        env: { HOME: "/home/tester/private-rebuild-home" },
+        redactionValues: [],
+        artifactName: "resolve-ambiguous-container",
+      }),
+    ).rejects.toThrow("registered sandbox container resolver returned an invalid immutable ID");
+  });
+});
 
 describe("Hermes rebuild cron restore evidence", () => {
   it("reads the flat runtime state emitted by Hermes", () => {
@@ -101,16 +169,14 @@ describe("Hermes rebuild cron ticker timestamp", () => {
     );
   });
 
-  it.each([
-    "",
-    "not-an-epoch\n",
-    "Infinity\n",
-    "-1\n",
-  ])("rejects malformed ticker evidence %j", (evidence) => {
-    expect(() => parseCronTickerTimestamp(evidence, "ticker timestamp")).toThrow(
-      "ticker timestamp is invalid",
-    );
-  });
+  it.each(["", "not-an-epoch\n", "Infinity\n", "-1\n"])(
+    "rejects malformed ticker evidence %j",
+    (evidence) => {
+      expect(() => parseCronTickerTimestamp(evidence, "ticker timestamp")).toThrow(
+        "ticker timestamp is invalid",
+      );
+    },
+  );
 });
 
 describe("Hermes rebuild gateway evidence", () => {
