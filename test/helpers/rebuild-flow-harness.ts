@@ -49,6 +49,7 @@ export const hermesProviderAuth = requireDist("../../hermes-provider-auth.js");
 export const mcpBridge = requireDist("./mcp-bridge.js");
 export const messaging = requireDist("../../messaging/index.js");
 export const messagingHostForwardLifecycle = requireDist("./messaging-host-forward-lifecycle.js");
+export const machineFinalization = requireDist("../../onboard/machine/finalization-deps.js");
 export const nim = requireDist("../../inference/nim.js");
 export const onboardCredentialEnv = requireDist("../../onboard/credential-env.js");
 export const onboardSession = requireDist("../../state/onboard-session.js");

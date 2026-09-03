@@ -30,6 +30,7 @@ import {
   listHarnessRebuildBackups,
   loadRebuildSandbox,
   mcpBridge,
+  machineFinalization,
   messaging,
   messagingHostForwardLifecycle,
   nim,
@@ -994,6 +995,11 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
           forwardRecovered: false,
         })),
     );
+  const settleOpenClawPairingSpy = vi
+    .spyOn(machineFinalization, "settleOrdinaryOpenClawPairing")
+    .mockImplementation(
+      overrides.settleOpenClawPairing ?? (() => Promise.resolve({ kind: "settled" })),
+    );
   vi.spyOn(shields, "repairMutableConfigPerms").mockImplementation(
     overrides.repairMutableConfigPerms ?? (() => ({ applied: true, verified: true, errors: [] })),
   );
@@ -1048,6 +1054,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     backupSandboxStateSpy,
     checkAndRecoverSandboxProcessesSpy,
     restartSandboxGatewaySpy,
+    settleOpenClawPairingSpy,
     errorSpy,
     executeSandboxCommandSpy,
     executeSandboxExecCommandSpy,

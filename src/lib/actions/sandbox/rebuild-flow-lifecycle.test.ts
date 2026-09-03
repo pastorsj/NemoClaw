@@ -224,6 +224,17 @@ describe("rebuildSandbox flow: lifecycle", () => {
       300_000,
       { allowLocalDockerFallback: false },
     );
+    expect(harness.restartSandboxGatewaySpy).toHaveBeenCalledWith("alpha", {
+      quiet: true,
+      agentDefinition: expect.objectContaining({ name: "openclaw" }),
+    });
+    expect(harness.settleOpenClawPairingSpy).toHaveBeenCalledWith("alpha");
+    expect(harness.restoreMcpBridgesAfterRebuildSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.restartSandboxGatewaySpy.mock.invocationCallOrder[0],
+    );
+    expect(harness.restartSandboxGatewaySpy.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.settleOpenClawPairingSpy.mock.invocationCallOrder[0],
+    );
     expect(harness.relockSpy).toHaveBeenCalledWith("alpha", expect.any(Object), true, "nemoclaw");
     expect(process.env.NEMOCLAW_SANDBOX_NAME).toBe(originalSandboxName);
     expect(harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(

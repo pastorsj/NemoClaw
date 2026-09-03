@@ -4,12 +4,13 @@
 import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import type { SandboxMessagingPlan } from "../../messaging";
+import { settleOrdinaryOpenClawPairing } from "../../onboard/machine/finalization-deps";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import type * as sandboxVersion from "../../sandbox/version";
 import * as shields from "../../shields";
 import * as registry from "../../state/registry";
 import { ensureMessagingHostForwardAfterRebuild } from "./messaging-host-forward-lifecycle";
-import { executeSandboxExecCommand } from "./process-recovery";
+import { executeSandboxExecCommand, restartSandboxGateway } from "./process-recovery";
 import { verifyCurrentAgentAuthority } from "./rebuild/authority";
 import type { RebuildBackupManifest } from "./rebuild-backup-phase";
 import {
@@ -101,6 +102,37 @@ function printHermesApiTokenChangeNotice(sandboxName: string, targetAgentName: s
   console.log(
     `    Retrieve the new token with \`${CLI_NAME} ${sandboxName} gateway-token --quiet\`.`,
   );
+}
+
+async function restoreOpenClawGatewayPairing(
+  sandboxName: string,
+  agentDefinition: ResolvedSandboxAgent["definition"],
+  requireCurrentAgentAuthority: (stage: string) => RebuildSandboxEntry | null,
+  log: RebuildLog,
+  bail: RebuildBail,
+): Promise<boolean> {
+  if (!requireCurrentAgentAuthority("before managed gateway restart")) return false;
+  log("Restarting the managed OpenClaw gateway after restored configuration writes");
+  const gatewayRestart = restartSandboxGateway(sandboxName, {
+    quiet: true,
+    agentDefinition,
+  });
+  if (!gatewayRestart.ok) {
+    log(`Managed OpenClaw gateway restart failed: ${gatewayRestart.failureLayer}`);
+    bail("OpenClaw managed gateway restart failed after rebuild.");
+    return false;
+  }
+
+  if (!requireCurrentAgentAuthority("after managed gateway restart")) return false;
+  log("Settling OpenClaw pairing after managed gateway restart");
+  const pairing = await settleOrdinaryOpenClawPairing(sandboxName);
+  if (!requireCurrentAgentAuthority("after OpenClaw pairing settlement")) return false;
+  if (pairing.kind !== "settled") {
+    log(`OpenClaw pairing settlement failed: ${pairing.reason}`);
+    bail("OpenClaw pairing settlement failed after rebuild.");
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -265,7 +297,7 @@ export async function runRebuildPostRestorePhase(
       );
       if (!verifiedRecreatedEntry) return;
       const updated = registry.updateSandboxIfCurrent(verifiedRecreatedEntry, {
-          messaging: { schemaVersion: 1, plan: finalizedMessagingPlan },
+        messaging: { schemaVersion: 1, plan: finalizedMessagingPlan },
       });
       if (!updated) {
         bail("Could not retire pending messaging removals after rebuild.");
@@ -317,6 +349,16 @@ export async function runRebuildPostRestorePhase(
         finalMutableConfigHashUnverified = true;
       }
     }
+  }
+  if (targetAgentName === "openclaw") {
+    const gatewayRestored = await restoreOpenClawGatewayPairing(
+      sandboxName,
+      agentDef,
+      requireCurrentAgentAuthority,
+      log,
+      bail,
+    );
+    if (!gatewayRestored) return;
   }
   const hermesGatewayVerification = hermesCronRestoreIdentity
     ? verifyHermesGatewayAfterStateRestoreForCronGate(

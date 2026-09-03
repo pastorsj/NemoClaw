@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as finalizationDeps from "../../onboard/machine/finalization-deps";
 import * as sandboxAgent from "../../onboard/sandbox-agent";
 import * as shields from "../../shields";
 import * as onboardSession from "../../state/onboard-session";
@@ -53,6 +54,14 @@ describe("rebuild post-restore phase", () => {
     vi.spyOn(processRecovery, "executeSandboxExecCommand").mockImplementation(() => {
       order.push("doctor");
       return { status: 0, stdout: "", stderr: "" };
+    });
+    vi.spyOn(processRecovery, "restartSandboxGateway").mockImplementation(() => {
+      order.push("gateway-restart");
+      return { ok: true, restarted: true, healthPassed: true, forwardRecovered: true };
+    });
+    vi.spyOn(finalizationDeps, "settleOrdinaryOpenClawPairing").mockImplementation(async () => {
+      order.push("pairing");
+      return { kind: "settled" };
     });
     vi.spyOn(sessionModels, "reconcileStalePinnedSessionModelsAfterRebuild").mockImplementation(
       () => {
@@ -158,6 +167,8 @@ describe("rebuild post-restore phase", () => {
       "mcp",
       "config-hash",
       "config-hash-final",
+      "gateway-restart",
+      "pairing",
       "host-forward",
       "config-hash-final",
     ]);
@@ -166,6 +177,93 @@ describe("rebuild post-restore phase", () => {
       "openclaw doctor --fix",
       300_000,
       { allowLocalDockerFallback: false },
+    );
+    expect(processRecovery.restartSandboxGateway).toHaveBeenCalledExactlyOnceWith("alpha", {
+      quiet: true,
+      agentDefinition: currentAgentAuthority().definition,
+    });
+  });
+
+  it("stops publication when the restored OpenClaw gateway cannot restart", async () => {
+    vi.mocked(processRecovery.restartSandboxGateway).mockReturnValue({
+      ok: false,
+      failureLayer: "health timeout",
+      detail: "gateway process restarted but health did not pass before timeout",
+    });
+    const args = input();
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "OpenClaw managed gateway restart failed after rebuild.",
+    );
+  });
+
+  it("stops publication when restored OpenClaw pairing does not settle", async () => {
+    vi.mocked(finalizationDeps.settleOrdinaryOpenClawPairing).mockResolvedValue({
+      kind: "incomplete",
+      reason: "scope-upgrade-not-approved",
+    });
+    const args = input();
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(processRecovery.restartSandboxGateway).toHaveBeenCalledOnce();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith("OpenClaw pairing settlement failed after rebuild.");
+  });
+
+  it("stops pairing when agent authority changes during the managed gateway restart", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(processRecovery.restartSandboxGateway).mockImplementation(() => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return { ok: true, restarted: true, healthPassed: true, forwardRecovered: true };
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    );
+  });
+
+  it("stops publication when agent authority changes during pairing settlement", async () => {
+    const args = input();
+    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
+      currentOnboardSession();
+    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
+    vi.mocked(finalizationDeps.settleOrdinaryOpenClawPairing).mockImplementation(async () => {
+      currentSession = {
+        ...currentSession,
+        harnessPackage: {
+          ...args.agentAuthority.harnessPackage!,
+          contentDigest: "b".repeat(64),
+        },
+      } as never;
+      return { kind: "settled" };
+    });
+
+    await runRebuildPostRestorePhase(args);
+
+    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
+    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(args.bail).toHaveBeenCalledWith(
+      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
     );
   });
 
@@ -188,6 +286,17 @@ describe("rebuild post-restore phase", () => {
       "restarted",
       { agentDefinition },
     );
+    expect(processRecovery.restartSandboxGateway).not.toHaveBeenCalled();
+    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
+  });
+
+  it("does not apply the managed gateway pairing gate to a terminal agent runtime", async () => {
+    agentName = "pi";
+
+    await runRebuildPostRestorePhase(input());
+
+    expect(processRecovery.restartSandboxGateway).not.toHaveBeenCalled();
+    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
   });
 
   it("stops every harness-owned repair when the recreated Session authority drifts", async () => {
@@ -602,9 +711,9 @@ describe("rebuild post-restore phase", () => {
   });
 
   it("stops rebuild when OpenClaw messaging config reapply fails", async () => {
-    vi.mocked(
-      rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor,
-    ).mockRejectedValue(new Error("config write failed"));
+    vi.mocked(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).mockRejectedValue(
+      new Error("config write failed"),
+    );
     const args = input();
 
     await runRebuildPostRestorePhase(args);
@@ -615,9 +724,7 @@ describe("rebuild post-restore phase", () => {
     expect(args.bail).toHaveBeenCalledWith(
       "OpenClaw messaging manifest config reapply failed during rebuild.",
     );
-    expect(args.log).toHaveBeenCalledWith(
-      "Messaging manifest reapply failed: config write failed",
-    );
+    expect(args.log).toHaveBeenCalledWith("Messaging manifest reapply failed: config write failed");
     const output = vi.mocked(console.error).mock.calls.flat().join("\n");
     expect(output).toContain("Messaging manifest config reapply failed after doctor");
   });

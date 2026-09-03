@@ -10,6 +10,7 @@ import type {
   RebuildImagePreflightResult,
 } from "../../src/lib/actions/sandbox/rebuild-custom-image-preflight";
 import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
+import type { OrdinaryOpenClawPairingSettlementResult } from "../../src/lib/onboard/machine/finalization-deps";
 import type { VersionCheckResult } from "../../src/lib/sandbox/version";
 import type { PreservedEnvFile } from "../../src/lib/state/preserved-env";
 import type { SandboxRemovalReceipt } from "../../src/lib/state/registry";
@@ -58,6 +59,7 @@ export type RebuildFlowOverrides = {
     mcpReconciliationRefused?: boolean;
   };
   restartSandboxGateway?: () => GatewayRestartResult;
+  settleOpenClawPairing?: () => Promise<OrdinaryOpenClawPairingSettlementResult>;
   onboard?: (
     session: RebuildFlowSession,
     options: RebuildRecreateOnboardOpts,
@@ -168,6 +170,7 @@ export type RebuildFlowHarness = {
   backupSandboxStateSpy: MockInstance;
   checkAndRecoverSandboxProcessesSpy: MockInstance;
   restartSandboxGatewaySpy: MockInstance;
+  settleOpenClawPairingSpy: MockInstance;
   errorSpy: MockInstance;
   executeSandboxCommandSpy: MockInstance;
   executeSandboxExecCommandSpy: MockInstance;
