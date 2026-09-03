@@ -198,6 +198,7 @@ describe("E2E environment profiles", () => {
       XDG_CONFIG_HOME: "/home/tester/.nemoclaw-e2e-home/.config",
       XDG_DATA_HOME: "/home/tester/.nemoclaw-e2e-home/.local/share",
       XDG_STATE_HOME: "/home/tester/.nemoclaw-e2e-home/.local/state",
+      NEMOCLAW_SKIP_FORWARD_WATCHER: "1",
     });
     expect(result).not.toHaveProperty("NEMOCLAW_OPENSHELL_BIN");
     expect(result).not.toHaveProperty("OPENSHELL_BIN");
@@ -207,6 +208,22 @@ describe("E2E environment profiles", () => {
       "/untrusted/bin",
     ]);
     expect(result).not.toHaveProperty("XDG_RUNTIME_DIR");
+  });
+
+  it("prevents detached forward recovery from escaping the isolated test lifecycle", () => {
+    const result = isolatedNemoClawEnvironment(
+      "/home/tester/.nemoclaw-e2e-home",
+      { NEMOCLAW_SKIP_FORWARD_WATCHER: "0" },
+      {
+        HOME: "/home/tester",
+        PATH: "/usr/bin",
+        DOCKER_HOST: "unix:///run/user/1000/docker.sock",
+        NEMOCLAW_OPENSHELL_BIN: process.execPath,
+      },
+      vi.fn(),
+    );
+
+    expect(result.NEMOCLAW_SKIP_FORWARD_WATCHER).toBe("1");
   });
 
   it.each([

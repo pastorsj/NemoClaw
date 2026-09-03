@@ -347,6 +347,9 @@ export function isolatedNemoClawEnvironment(
   delete environment.XDG_RUNTIME_DIR;
   environment.DOCKER_CONFIG = path.join(home, ".docker");
   environment.DOCKER_HOST = dockerHost;
+  // Isolated E2E homes are removed at teardown. Do not detach the Hermes
+  // forward recovery watcher with its script and PID state rooted in that home.
+  environment.NEMOCLAW_SKIP_FORWARD_WATCHER = "1";
   return environment;
 }
 
