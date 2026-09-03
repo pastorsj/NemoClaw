@@ -34,10 +34,16 @@ const expectedHonoNodeServerTarball =
   "https://registry.npmjs.org/@hono/node-server/-/node-server-2.0.11.tgz";
 const expectedHonoVersion = "4.12.34";
 const expectedHonoTarball = "https://registry.npmjs.org/hono/-/hono-4.12.34.tgz";
-const expectedFastUriVersion = "3.1.5";
-const expectedFastUriTarball = "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.5.tgz";
+const expectedFastUriVersion = "3.1.6";
+const expectedFastUriTarball = "https://registry.npmjs.org/fast-uri/-/fast-uri-3.1.6.tgz";
+const expectedFastUriIntegrity =
+  "sha512-7Ical1vFEMr0onbVzEDIreM22I4khW+fzyQPwvAFWBp1iwdshSZRsL4jjRvPG9JP1uiqMHRto+YU6R2/CzDz5Q==";
 const expectedIpAddressVersion = "10.3.1";
 const expectedIpAddressTarball = "https://registry.npmjs.org/ip-address/-/ip-address-10.3.1.tgz";
+const expectedQsVersion = "6.15.3";
+const expectedQsTarball = "https://registry.npmjs.org/qs/-/qs-6.15.3.tgz";
+const expectedQsIntegrity =
+  "sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==";
 const runtimePrefix = "npm --prefix /usr/local/lib/nemoclaw/mcporter-runtime";
 const reviewedAuditConfig = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "ci", "reviewed-npm-audit.json"), "utf8"),
@@ -107,10 +113,20 @@ describe("mcporter image supply-chain controls", () => {
     );
     expect(dependencyReview).toContain("any version other than exact `2.0.11`");
     expect(dependencyReview).toContain("the `/vercel` adapter");
-    expect(dependencyReview).toContain("`fast-uri@3.1.5`");
+    expect(dependencyReview).toContain("`fast-uri@3.1.6`");
     expect(dependencyReview).toContain("`GHSA-v2hh-gcrm-f6hx`");
     expect(dependencyReview).toContain("`GHSA-7p8r-x3mc-p8w7`");
-    expect(dependencyReview).toContain("exact `3.1.5`");
+    expect(dependencyReview).toContain("`GHSA-5jgf-p345-68v8`");
+    expect(dependencyReview).toContain("`GHSA-f65p-4m7j-42xc`");
+    expect(dependencyReview).toContain("`GHSA-fph4-wmhf-6fwf`");
+    expect(dependencyReview).toContain("`GHSA-jqff-g426-hqxp`");
+    expect(dependencyReview).toContain("exact `3.1.6`");
+    expect(dependencyReview).toContain("`qs@6.15.3`");
+    expect(dependencyReview).toContain("`GHSA-x5fp-wj9c-mxmx`");
+    expect(dependencyReview).toContain("`GHSA-4mjr-xmp4-gh2g`");
+    expect(dependencyReview).toContain("configured high-severity blocking threshold");
+    expect(dependencyReview).toContain("exception registry remains empty");
+    expect(dependencyReview).toContain("exact `6.15.3`");
     expect(dependencyReview).toContain("`hono@4.12.34`");
     expect(dependencyReview).toContain("`GHSA-54fx-42gc-7vw4`");
     expect(dependencyReview).toContain("exact `4.12.34`");
@@ -157,6 +173,28 @@ describe("mcporter image supply-chain controls", () => {
         version: expectedIpAddressVersion,
       }),
     );
+    expect(findDependency(graph, "qs")).toEqual(
+      expect.objectContaining({
+        version: expectedQsVersion,
+      }),
+    );
+    expect(findDependency(graph, "qs")?.overridden).not.toBe(true);
+
+    const shrinkwrap = JSON.parse(
+      fs.readFileSync(path.join(runtimeDirectory, "npm-shrinkwrap.json"), "utf8"),
+    ) as {
+      packages: Record<string, { integrity?: string; resolved?: string; version?: string }>;
+    };
+    expect(shrinkwrap.packages["node_modules/fast-uri"]).toMatchObject({
+      integrity: expectedFastUriIntegrity,
+      resolved: expectedFastUriTarball,
+      version: expectedFastUriVersion,
+    });
+    expect(shrinkwrap.packages["node_modules/qs"]).toMatchObject({
+      integrity: expectedQsIntegrity,
+      resolved: expectedQsTarball,
+      version: expectedQsVersion,
+    });
   });
 
   it.each(dockerfiles)("pins and verifies the package in $name", ({ contents }) => {

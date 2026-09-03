@@ -106,8 +106,7 @@
       "integrity": "sha512-egoPVYqTnWb3NjRIxo+xc8OrAI0dlPrJm9pAiZx0pImuNIV5rKhGtTnIfH/Y1ldGPVu74ibj3KR5c9U/QSdQFA==",
       "tarballUrl": "https://registry.npmjs.org/mcporter/-/mcporter-0.7.3.tgz",
       "directory": "packages/nemoclaw-openclaw/runtime/mcporter",
-      "lockSha256": "17f2372a0a6949df928333a2f98862ae563013a7682b19a8ce63825c4696a064",
-      "replacementLockSha256": "720c0e3ec2efcccd2c820ce2a39d733f7bd5bf9d3e6fb95310e7f6cd369db83c"
+      "lockSha256": "720c0e3ec2efcccd2c820ce2a39d733f7bd5bf9d3e6fb95310e7f6cd369db83c"
     },
     {
       "id": "mcp-tool-discovery-runtime",
