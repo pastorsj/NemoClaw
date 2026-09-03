@@ -264,6 +264,19 @@ function seedRegistryAndSession(
     defaultSandbox?: string;
   }>(statePaths.registryFile, {});
   registry.sandboxes = registry.sandboxes ?? {};
+  const currentSandbox = registry.sandboxes[SANDBOX_NAME];
+  const harnessPackage = currentSandbox?.harnessPackage;
+  expect(
+    Boolean(harnessPackage) && typeof harnessPackage === "object" && !Array.isArray(harnessPackage),
+    "initial onboard must record exact OpenClaw package authority",
+  ).toBe(true);
+  const harnessPackageMigration = currentSandbox?.harnessPackageMigration;
+  expect(
+    harnessPackageMigration === undefined ||
+      harnessPackageMigration === null ||
+      (typeof harnessPackageMigration === "object" && !Array.isArray(harnessPackageMigration)),
+    "initial onboard must record valid OpenClaw package migration authority",
+  ).toBe(true);
   registry.sandboxes[SANDBOX_NAME] = {
     name: SANDBOX_NAME,
     createdAt: new Date().toISOString(),
@@ -279,6 +292,8 @@ function seedRegistryAndSession(
     // OpenShell. Record the managed-image provenance explicitly so rebuild
     // does not have to guess whether an omitted legacy value meant `--from`.
     fromDockerfile: null,
+    harnessPackage,
+    ...(harnessPackageMigration ? { harnessPackageMigration } : {}),
   };
   registry.defaultSandbox = SANDBOX_NAME;
   writeJsonFile(statePaths.registryFile, registry);
@@ -701,18 +716,29 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     const sessionAfterSeed = readJsonFileOr<Record<string, unknown>>(statePaths.sessionFile, {});
     const seededSteps = sessionAfterSeed.steps as Record<string, { status?: string }> | undefined;
     const seededSandbox = registrySandbox(statePaths);
+    expect(
+      seededSandbox.harnessPackage,
+      "seeded registry and Session must retain the same exact package authority",
+    ).toEqual(sessionAfterSeed.harnessPackage);
+    expect(seededSandbox.harnessPackageMigration ?? null).toEqual(
+      sessionAfterSeed.harnessPackageMigration ?? null,
+    );
     await artifacts.writeJson("phase-4-registry-session-summary.json", {
       registry: {
         name: seededSandbox.name,
         provider: seededSandbox.provider,
         agentVersion: seededSandbox.agentVersion,
         dashboardPort: seededSandbox.dashboardPort,
+        harnessPackage: seededSandbox.harnessPackage,
+        harnessPackageMigration: seededSandbox.harnessPackageMigration ?? null,
       },
       session: {
         sandboxName: sessionAfterSeed.sandboxName,
         status: sessionAfterSeed.status,
         provider: sessionAfterSeed.provider,
         model: sessionAfterSeed.model,
+        harnessPackage: sessionAfterSeed.harnessPackage,
+        harnessPackageMigration: sessionAfterSeed.harnessPackageMigration ?? null,
         stepStatuses: Object.fromEntries(
           Object.entries(seededSteps ?? {}).map(([step, value]) => [step, value.status]),
         ),
