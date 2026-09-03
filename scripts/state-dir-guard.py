@@ -2014,6 +2014,7 @@ def _verify_mutable_boundary(
     config_path: str,
     identity: Identity,
     top_level_files: tuple[str, ...],
+    private_top_level_files: tuple[str, ...],
     issues: list[Issue],
 ) -> None:
     parent_path = posixpath.dirname(config_path)
@@ -2056,7 +2057,8 @@ def _verify_mutable_boundary(
         config_flags_issue = _verify_mutable_flags(config_fd, config_path)
         if config_flags_issue is not None:
             issues.append(config_flags_issue)
-        for file_path in top_level_files:
+        private_files = frozenset(private_top_level_files)
+        for file_path in (*top_level_files, *private_top_level_files):
             name = posixpath.basename(file_path)
             try:
                 before = os.stat(name, dir_fd=config_fd, follow_symlinks=False)
@@ -2090,7 +2092,11 @@ def _verify_mutable_boundary(
                 try:
                     file_st = os.fstat(file_fd)
                     metadata_issue = _verify_mutable_boundary_metadata(
-                        file_path, file_st, "file", (0o640,), identity
+                        file_path,
+                        file_st,
+                        "file",
+                        (0o600,) if file_path in private_files else (0o640,),
+                        identity,
                     )
                     if metadata_issue is not None:
                         issues.append(metadata_issue)
@@ -2150,7 +2156,11 @@ def _verify_mutable_boundary(
 
 
 def _normalize_mutable_top_level_files(
-    config_path: str, files: tuple[str, ...]
+    config_path: str,
+    files: tuple[str, ...],
+    *,
+    issue_code: str = "invalid-mutable-top-level-file",
+    field_name: str = "mutable top-level file",
 ) -> tuple[str, ...]:
     normalized_files: list[str] = []
     seen: set[str] = set()
@@ -2158,10 +2168,10 @@ def _normalize_mutable_top_level_files(
         normalized = posixpath.normpath(file_path)
         name = posixpath.basename(normalized)
         try:
-            _validate_top_level_name(name, "mutable top-level file")
+            _validate_top_level_name(name, field_name)
         except PlanValidationError as exc:
             raise GuardOperationError(
-                Issue("invalid-mutable-top-level-file", file_path, str(exc))
+                Issue(issue_code, file_path, str(exc))
             ) from exc
         if (
             not posixpath.isabs(file_path)
@@ -2171,7 +2181,7 @@ def _normalize_mutable_top_level_files(
         ):
             raise GuardOperationError(
                 Issue(
-                    "invalid-mutable-top-level-file",
+                    issue_code,
                     file_path,
                     "file must be a unique canonical direct child of the config directory",
                 )
@@ -2525,6 +2535,7 @@ def _run_guard_unserialized(
     identity: Identity,
     plan: AgentStateLockPlan,
     mutable_top_level_files: tuple[str, ...] = (),
+    mutable_private_top_level_files: tuple[str, ...] = (),
     mutable_service_uids: frozenset[int] = frozenset(),
 ) -> GuardResult:
     """Run one guard action.  ``identity`` is explicit for focused tests."""
@@ -2536,8 +2547,27 @@ def _run_guard_unserialized(
         normalized_top_level_files = _normalize_mutable_top_level_files(
             normalized_config, mutable_top_level_files
         )
+        normalized_private_top_level_files = _normalize_mutable_top_level_files(
+            normalized_config,
+            mutable_private_top_level_files,
+            issue_code="invalid-mutable-private-top-level-file",
+            field_name="mutable private top-level file",
+        )
     except GuardOperationError as exc:
         result.issues.append(exc.issue)
+        return result
+    overlap = frozenset(normalized_top_level_files).intersection(
+        normalized_private_top_level_files
+    )
+    if overlap:
+        file_path = sorted(overlap)[0]
+        result.issues.append(
+            Issue(
+                "overlapping-mutable-top-level-file",
+                file_path,
+                "file cannot use both regular and private mutable modes",
+            )
+        )
         return result
     if action == "startup":
         return _restore_empty_credentials_startup_access(
@@ -2742,12 +2772,13 @@ def _run_guard_unserialized(
                         "protected state-dir roots changed during observation",
                     )
                 )
-            if normalized_top_level_files:
+            if normalized_top_level_files or normalized_private_top_level_files:
                 _verify_mutable_boundary(
                     config_fd,
                     normalized_config,
                     identity,
                     normalized_top_level_files,
+                    normalized_private_top_level_files,
                     result.issues,
                 )
         if fail_closed_config_root and not result.issues:
@@ -2908,6 +2939,7 @@ def run_guard(
     *,
     transition_lock_fd: int | None = None,
     mutable_top_level_files: tuple[str, ...] = (),
+    mutable_private_top_level_files: tuple[str, ...] = (),
     mutable_service_uids: tuple[int, ...] = (),
 ) -> GuardResult:
     """Serialize production OpenClaw recursive transitions with its top guard."""
@@ -2943,6 +2975,7 @@ def run_guard(
             identity,
             plan,
             mutable_top_level_files,
+            mutable_private_top_level_files,
             normalized_service_uids,
         )
     lock_path = _transition_lock_path(normalized_config)
@@ -3035,6 +3068,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     plan_source.add_argument("--plan-file")
     parser.add_argument("--transition-lock-fd", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--mutable-top-level-file", action="append", default=[])
+    parser.add_argument("--mutable-private-top-level-file", action="append", default=[])
     parser.add_argument("--mutable-service-user", action="append", default=[])
     return parser.parse_args(argv)
 
@@ -3123,6 +3157,9 @@ def main(argv: list[str] | None = None) -> int:
                         plan,
                         transition_lock_fd=args.transition_lock_fd,
                         mutable_top_level_files=tuple(args.mutable_top_level_file),
+                        mutable_private_top_level_files=tuple(
+                            args.mutable_private_top_level_file
+                        ),
                         mutable_service_uids=mutable_service_uids,
                     )
 

@@ -332,7 +332,9 @@ describe("legacy Hermes shields compatibility", () => {
         case cmd[0] === "stat":
           return cmd.at(-1) === "/sandbox/.hermes"
             ? `${hermesDirMode} sandbox:sandbox`
-            : "640 sandbox:sandbox";
+            : cmd.at(-1) === "/sandbox/.hermes/fabric.json"
+              ? "600 sandbox:sandbox"
+              : "640 sandbox:sandbox";
         case cmd[0] === "sha256sum":
           return `${"b".repeat(64)}  ${cmd.at(-1)}`;
         case cmd[0] === "lsattr":
@@ -1189,8 +1191,9 @@ describe("legacy Hermes shields compatibility", () => {
           confidentialRoots: expect.arrayContaining(["pairing"]),
         }),
         true,
-        [target.configPath, ...(target.sensitiveFiles || [])],
+        [target.configPath, "/sandbox/.hermes/.config-hash", "/sandbox/.hermes/.env"],
         ["gateway"],
+        ["/sandbox/.hermes/fabric.json"],
       );
       expect(vi.mocked(console.log).mock.calls.flat().map(String).join("\n")).toContain(
         "NOT CONFIGURED (default mutable state)",

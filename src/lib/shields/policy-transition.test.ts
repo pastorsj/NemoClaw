@@ -662,11 +662,17 @@ describe("shields config lock without a shipped config hash", () => {
   function runConfigUnlock(command: string[]): string {
     unlockCalls.push(command);
     const fileMode = String(command[4]);
-    const dirMode = String(command[5]);
+    const privateFileMode = String(command[5]);
+    const dirMode = String(command[6]);
+    const regularFileCount = Number(command[10]);
+    const paths = command.slice(11);
     entries.set("/sandbox", { mode: "755", owner: "sandbox:sandbox" });
     entries.set(CONFIG_DIR, { mode: dirMode, owner: "sandbox:sandbox" });
-    for (const pathname of command.slice(9)) {
-      entries.set(pathname, { mode: fileMode, owner: "sandbox:sandbox" });
+    for (const [index, pathname] of paths.entries()) {
+      entries.set(pathname, {
+        mode: index < regularFileCount ? fileMode : privateFileMode,
+        owner: "sandbox:sandbox",
+      });
       immutablePaths.delete(pathname);
     }
     return "";
@@ -1063,7 +1069,15 @@ describe("shields config lock without a shipped config hash", () => {
     entries.set(CONFIG_PATH, { mode: "444", owner: "root:root" });
     entries.set(HASH_PATH, { mode: "444", owner: "root:root" });
     commandHandlers.set("python3", (_args, command) => {
-      expect(command.slice(4, 9)).toEqual(["660", "2770", "sandbox:sandbox", "1", CONFIG_DIR]);
+      expect(command.slice(4, 11)).toEqual([
+        "660",
+        "600",
+        "2770",
+        "sandbox:sandbox",
+        "1",
+        CONFIG_DIR,
+        "2",
+      ]);
       entries.set("/sandbox", { mode: "755", owner: "sandbox:sandbox" });
       entries.set(CONFIG_DIR, { mode: "2770", owner: "sandbox:sandbox" });
       entries.set(CONFIG_PATH, { mode: "660", owner: "sandbox:sandbox" });
@@ -1092,16 +1106,47 @@ describe("shields config lock without a shipped config hash", () => {
 
     shields.unlockAgentConfig("dcode-safety", privateTarget, true);
 
-    expect(unlockCalls.at(-1)?.slice(4, 9)).toEqual([
+    expect(unlockCalls.at(-1)?.slice(4, 11)).toEqual([
+      "600",
       "600",
       "700",
       "sandbox:sandbox",
       "1",
       CONFIG_DIR,
+      "0",
     ]);
     expect(entries.get(CONFIG_DIR)).toEqual({ mode: "700", owner: "sandbox:sandbox" });
     expect(entries.get(CONFIG_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
     expect(entries.get(HASH_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
+    expect(entries.get(FABRIC_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
+  });
+
+  it("keeps a package sidecar private within an otherwise shared mutable config", () => {
+    const sharedTarget = {
+      ...target(),
+      mutableAccess: "shared" as const,
+      sensitiveFiles: [HASH_PATH, FABRIC_PATH],
+      mutablePrivateFiles: [FABRIC_PATH],
+    };
+    entries.set(CONFIG_DIR, { mode: "755", owner: "root:root" });
+    entries.set(CONFIG_PATH, { mode: "444", owner: "root:root" });
+    entries.set(HASH_PATH, { mode: "444", owner: "root:root" });
+    entries.set(FABRIC_PATH, { mode: "444", owner: "root:root" });
+    commandHandlers.set("lsattr", () => "----------------------");
+
+    shields.unlockAgentConfig("dcode-safety", sharedTarget, true);
+
+    expect(unlockCalls.at(-1)?.slice(4, 11)).toEqual([
+      "660",
+      "600",
+      "2770",
+      "sandbox:sandbox",
+      "1",
+      CONFIG_DIR,
+      "2",
+    ]);
+    expect(entries.get(CONFIG_PATH)).toEqual({ mode: "660", owner: "sandbox:sandbox" });
+    expect(entries.get(HASH_PATH)).toEqual({ mode: "660", owner: "sandbox:sandbox" });
     expect(entries.get(FABRIC_PATH)).toEqual({ mode: "600", owner: "sandbox:sandbox" });
   });
 });

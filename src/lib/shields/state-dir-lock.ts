@@ -326,6 +326,7 @@ function runHostStateDirGuard(
   configDir: string,
   plan: AgentStateLockPlan,
   mutableTopLevelFiles: string[] = [],
+  mutablePrivateTopLevelFiles: string[] = [],
   mutableServiceUsers: string[] = [],
 ): string[] {
   let input: string;
@@ -346,6 +347,7 @@ function runHostStateDirGuard(
     "--plan-json",
     JSON.stringify(plan),
     ...mutableTopLevelFiles.flatMap((file) => ["--mutable-top-level-file", file]),
+    ...mutablePrivateTopLevelFiles.flatMap((file) => ["--mutable-private-top-level-file", file]),
     ...mutableServiceUsers.flatMap((user) => ["--mutable-service-user", user]),
   ];
   return parseGuardOutput(action, privileged.run(command, input));
@@ -381,6 +383,7 @@ export function verifyStateDirMutablePosture(
   stateLockPlanInImage: boolean,
   mutableTopLevelFiles: string[] = [],
   mutableServiceUsers: string[] = [],
+  mutablePrivateTopLevelFiles: string[] = [],
 ): string[] {
   const compatibilityIssues = stateLockPlanCompatibilityIssues(
     privileged,
@@ -394,6 +397,7 @@ export function verifyStateDirMutablePosture(
     configDir,
     plan,
     mutableTopLevelFiles,
+    mutablePrivateTopLevelFiles,
     mutableServiceUsers,
   );
 }

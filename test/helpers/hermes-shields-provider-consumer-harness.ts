@@ -19,7 +19,7 @@ const INDEX_MODULE = "./index.js";
 export const HERMES_PROVIDER_CAPABILITY_PATH =
   "/usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json";
 const HERMES_PROVIDER_CAPABILITY =
-  '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}';
+  '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"mutablePrivateFiles":["fabric.json"],"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}';
 const SEALED_PLAN_HELP = [
   "begin-shields-transition",
   "run-state-dir-transition",
@@ -42,6 +42,7 @@ export const hermesProviderConsumerTarget = {
     "/sandbox/.hermes/.env",
     "/sandbox/.hermes/fabric.json",
   ],
+  mutablePrivateFiles: ["/sandbox/.hermes/fabric.json"],
   stateLockPlan: {
     version: 1 as const,
     readOnlyRoots: ["skills"],
@@ -57,6 +58,7 @@ export function createHermesShieldsTarget() {
   return {
     ...hermesProviderConsumerTarget,
     sensitiveFiles: [...hermesProviderConsumerTarget.sensitiveFiles],
+    mutablePrivateFiles: [...hermesProviderConsumerTarget.mutablePrivateFiles],
     stateLockPlan: { ...hermesProviderConsumerTarget.stateLockPlan },
   };
 }
@@ -388,6 +390,9 @@ export function createHermesShieldsProviderConsumerHarness(
       }
       if (command[0] === "stat" && command.at(-1) === hermesProviderConsumerTarget.configDir) {
         return "3770 sandbox:sandbox\n";
+      }
+      if (command[0] === "stat" && command.at(-1) === "/sandbox/.hermes/fabric.json") {
+        return "600 sandbox:sandbox\n";
       }
       if (command[0] === "stat") return "640 sandbox:sandbox\n";
       if (command[0] === "lsattr") return `---------------- ${String(command.at(-1))}\n`;

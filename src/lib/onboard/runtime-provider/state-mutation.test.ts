@@ -134,6 +134,40 @@ describe("runtime provider state mutation plan", () => {
     expect(second.planSha256).not.toBe(first.planSha256);
   });
 
+  it("binds mutable config access into the projection digest", () => {
+    const agent = {
+      name: "hermes",
+      configPaths: {
+        dir: "/sandbox/.hermes",
+        configFile: "config.yaml",
+        envFile: ".env",
+        format: "yaml" as const,
+        shieldsFiles: [".env", "fabric.json"],
+      },
+      stateLockPlan: {
+        version: 1 as const,
+        readOnlyRoots: [],
+        confidentialRoots: [],
+        readOnlyPrefixes: [],
+        confidentialPrefixes: [],
+        writableSubpaths: [],
+      },
+    };
+    const shared = prepareAgentDefinitionProtectionTransitionPlan(agent, "locked", "mutable");
+    const privateConfig = prepareAgentDefinitionProtectionTransitionPlan(
+      {
+        ...agent,
+        configPaths: { ...agent.configPaths, mutableAccess: "private" as const },
+      },
+      "locked",
+      "mutable",
+    );
+
+    expect(privateConfig.plan.selectors).toEqual(shared.plan.selectors);
+    expect(privateConfig.projectionSha256).not.toBe(shared.projectionSha256);
+    expect(privateConfig.planSha256).not.toBe(shared.planSha256);
+  });
+
   it("includes an AgentDefinition environment file even when it is not duplicated as a shields file", () => {
     const prepared = prepareAgentDefinitionProtectionTransitionPlan(
       {

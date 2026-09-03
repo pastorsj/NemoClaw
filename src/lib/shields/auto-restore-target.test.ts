@@ -117,10 +117,8 @@ describe("persisted auto-restore target resolution", () => {
       configDir: "/sandbox/.openclaw",
       configFile: "openclaw.json",
       format: "json" as const,
-      sensitiveFiles: [
-        "/sandbox/.openclaw/.config-hash",
-        "/sandbox/.openclaw/fabric.json",
-      ],
+      sensitiveFiles: ["/sandbox/.openclaw/.config-hash", "/sandbox/.openclaw/fabric.json"],
+      mutablePrivateFiles: ["/sandbox/.openclaw/fabric.json"],
       stateLockPlanInImage: true,
     };
 
@@ -153,6 +151,11 @@ describe("persisted auto-restore target resolution", () => {
       configFile: "models.json",
       format: "json" as const,
       sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutablePrivateFiles: [
+        "/sandbox/.pi/agent/models.json",
+        "/sandbox/.pi/agent/.config-hash",
+        "/sandbox/.pi/agent/fabric.json",
+      ],
       mutableAccess: "shared" as const,
       stateLockPlanInImage: false,
     };
@@ -165,6 +168,7 @@ describe("persisted auto-restore target resolution", () => {
           configPath: registryTarget.configPath,
           configDir: registryTarget.configDir,
           protectedFiles: ["models.json", ".config-hash", "fabric.json"],
+          mutablePrivateFiles: ["fabric.json"],
           mutableAccess: "private",
         },
         () => registryTarget,
@@ -174,6 +178,7 @@ describe("persisted auto-restore target resolution", () => {
       configPath: registryTarget.configPath,
       configDir: registryTarget.configDir,
       sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutablePrivateFiles: ["/sandbox/.pi/agent/fabric.json"],
       mutableAccess: "private",
       stateLockPlanInImage: false,
     });
@@ -211,6 +216,43 @@ describe("persisted auto-restore target resolution", () => {
     });
   });
 
+  it("does not adopt registry mutable-private files omitted by a current marker", () => {
+    const registryTarget = {
+      agentName: "hermes",
+      configPath: "/sandbox/.hermes/config.yaml",
+      configDir: "/sandbox/.hermes",
+      configFile: "config.yaml",
+      format: "yaml" as const,
+      sensitiveFiles: [
+        "/sandbox/.hermes/.config-hash",
+        "/sandbox/.hermes/.env",
+        "/sandbox/.hermes/fabric.json",
+      ],
+      mutablePrivateFiles: ["/sandbox/.hermes/fabric.json"],
+      stateLockPlanInImage: true,
+    };
+
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "hermes",
+        {
+          agentName: "hermes",
+          configPath: registryTarget.configPath,
+          configDir: registryTarget.configDir,
+          protectedFiles: ["config.yaml", ".config-hash", ".env", "fabric.json"],
+        },
+        () => registryTarget,
+      ),
+    ).toEqual({
+      agentName: "hermes",
+      configPath: registryTarget.configPath,
+      configDir: registryTarget.configDir,
+      sensitiveFiles: registryTarget.sensitiveFiles,
+      stateLockPlan: expect.any(Object),
+      stateLockPlanInImage: true,
+    });
+  });
+
   it.each([
     {
       agentName: "openclaw",
@@ -218,6 +260,8 @@ describe("persisted auto-restore target resolution", () => {
       configPath: "/sandbox/.openclaw/openclaw.json",
       protectedFiles: ["openclaw.json", ".config-hash", "fabric.json"],
       sensitiveFiles: ["/sandbox/.openclaw/.config-hash", "/sandbox/.openclaw/fabric.json"],
+      mutablePrivateFiles: ["fabric.json"],
+      resolvedMutablePrivateFiles: ["/sandbox/.openclaw/fabric.json"],
       stateLockPlanAvailable: true,
       stateLockPlanInImage: true,
     },
@@ -231,6 +275,8 @@ describe("persisted auto-restore target resolution", () => {
         "/sandbox/.hermes/.env",
         "/sandbox/.hermes/fabric.json",
       ],
+      mutablePrivateFiles: ["fabric.json"],
+      resolvedMutablePrivateFiles: ["/sandbox/.hermes/fabric.json"],
       stateLockPlanAvailable: true,
       stateLockPlanInImage: true,
     },
@@ -240,6 +286,12 @@ describe("persisted auto-restore target resolution", () => {
       configPath: "/sandbox/.pi/agent/models.json",
       protectedFiles: ["models.json", ".config-hash", "fabric.json"],
       sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+      mutablePrivateFiles: ["models.json", ".config-hash", "fabric.json"],
+      resolvedMutablePrivateFiles: [
+        "/sandbox/.pi/agent/models.json",
+        "/sandbox/.pi/agent/.config-hash",
+        "/sandbox/.pi/agent/fabric.json",
+      ],
       mutableAccess: "private" as const,
       stateLockPlanAvailable: false,
       stateLockPlanInImage: false,
@@ -250,6 +302,12 @@ describe("persisted auto-restore target resolution", () => {
       configPath: "/sandbox/.deepagents/config.toml",
       protectedFiles: ["config.toml", ".config-hash", "fabric.json"],
       sensitiveFiles: ["/sandbox/.deepagents/.config-hash", "/sandbox/.deepagents/fabric.json"],
+      mutablePrivateFiles: ["config.toml", ".config-hash", "fabric.json"],
+      resolvedMutablePrivateFiles: [
+        "/sandbox/.deepagents/config.toml",
+        "/sandbox/.deepagents/.config-hash",
+        "/sandbox/.deepagents/fabric.json",
+      ],
       mutableAccess: "private" as const,
       stateLockPlanAvailable: true,
       stateLockPlanInImage: false,
@@ -262,6 +320,8 @@ describe("persisted auto-restore target resolution", () => {
       configPath,
       protectedFiles,
       sensitiveFiles,
+      mutablePrivateFiles,
+      resolvedMutablePrivateFiles,
       mutableAccess,
       stateLockPlanAvailable,
       stateLockPlanInImage,
@@ -274,6 +334,7 @@ describe("persisted auto-restore target resolution", () => {
             configDir,
             configPath,
             protectedFiles,
+            mutablePrivateFiles,
             ...(mutableAccess ? { mutableAccess } : {}),
           },
           () => {
@@ -285,6 +346,7 @@ describe("persisted auto-restore target resolution", () => {
         configDir,
         configPath,
         sensitiveFiles,
+        mutablePrivateFiles: resolvedMutablePrivateFiles,
         ...(mutableAccess ? { mutableAccess } : {}),
         ...(stateLockPlanAvailable ? { stateLockPlan: expect.any(Object) } : {}),
         stateLockPlanInImage,
@@ -329,6 +391,24 @@ describe("persisted auto-restore target resolution", () => {
           configDir: "/sandbox/.unsafe-agent",
           configPath: "/sandbox/.unsafe-agent/config.json",
           protectedFiles: ["config.json", "../outside.json"],
+        },
+        () => {
+          throw new Error("registry unavailable");
+        },
+      ),
+    ).toBeUndefined();
+  });
+
+  it("fails safely when mutable-private fallback authority leaves the protected set", () => {
+    expect(
+      resolvePersistedAutoRestoreTarget(
+        "unsafe-agent",
+        {
+          agentName: "unsafe-agent",
+          configDir: "/sandbox/.unsafe-agent",
+          configPath: "/sandbox/.unsafe-agent/config.json",
+          protectedFiles: ["config.json", ".config-hash"],
+          mutablePrivateFiles: ["fabric.json"],
         },
         () => {
           throw new Error("registry unavailable");

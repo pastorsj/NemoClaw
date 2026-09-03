@@ -280,6 +280,7 @@ function serializeAgentDefinitionProtectionProjection(
     readonly configFile: string;
     readonly envFile: string | null;
     readonly shieldsFiles: readonly string[];
+    readonly mutableAccess: "private" | "shared" | null;
   },
   stateLockPlan: RuntimeProviderStateMutationStateLockPlan,
 ): string {
@@ -288,6 +289,7 @@ function serializeAgentDefinitionProtectionProjection(
   configTransport.configFile = config.configFile;
   configTransport.envFile = config.envFile;
   configTransport.shieldsFiles = prototypeFreeStringArray(config.shieldsFiles);
+  configTransport.mutableAccess = config.mutableAccess;
 
   const projectionTransport: Record<string, unknown> = Object.create(null);
   projectionTransport.agentName = agentName;
@@ -446,6 +448,10 @@ export function prepareAgentDefinitionProtectionTransitionPlan(
 ): RuntimeProviderPreparedStateMutationPlan {
   const config = agent.configPaths;
   const stateLockPlan = normalizedStateLockProjection(agent.stateLockPlan);
+  const mutableAccess = config.mutableAccess ?? null;
+  if (mutableAccess !== null && mutableAccess !== "private" && mutableAccess !== "shared") {
+    fail("AgentDefinition mutable config access is unsupported");
+  }
   const projection = {
     agentName: boundedString(agent.name, "AgentDefinition name", 128),
     config: {
@@ -459,6 +465,7 @@ export function prepareAgentDefinitionProtectionTransitionPlan(
         (value, index) =>
           canonicalRelativePath(value, `AgentDefinition shields file ${String(index)}`),
       ),
+      mutableAccess,
     },
     stateLockPlan,
   } as const;

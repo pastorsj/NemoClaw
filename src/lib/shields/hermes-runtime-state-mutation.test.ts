@@ -61,6 +61,9 @@ const configTarget = {
       path.posix.join(hermesAgent.configPaths.dir, entry),
     ),
   ],
+  mutablePrivateFiles: hermesAgent.configPaths.shieldsFiles
+    .filter((entry) => entry !== hermesAgent.configPaths.envFile)
+    .map((entry) => path.posix.join(hermesAgent.configPaths.dir, entry)),
   stateLockPlan: hermesAgent.stateLockPlan,
   stateLockPlanInImage: hermesAgent.stateLockPlanInImage,
 };
@@ -231,6 +234,17 @@ describe("Hermes runtime-provider state mutation consumer", () => {
       supportsHermesRuntimeProviderStateMutation(
         sandbox,
         { ...capability, content: `${capability.content} ` },
+        providers(),
+      ),
+    ).toBe(false);
+    expect(
+      supportsHermesRuntimeProviderStateMutation(
+        sandbox,
+        {
+          ...capability,
+          content:
+            '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}',
+        },
         providers(),
       ),
     ).toBe(false);

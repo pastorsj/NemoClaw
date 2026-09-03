@@ -286,6 +286,37 @@ describe("agent config resolution", () => {
       "/sandbox/.deepagents/.env",
     ]);
     expect(target.mutableAccess).toBe("private");
+    expect(target.mutablePrivateFiles).toEqual([
+      "/sandbox/.deepagents/config.toml",
+      "/sandbox/.deepagents/.config-hash",
+      "/sandbox/.deepagents/.env",
+    ]);
     expect(getProtectedConfigFileNames(target)).toEqual(["config.toml", ".config-hash", ".env"]);
+  });
+
+  it("keeps generated sidecars private without making the environment file private", () => {
+    const deps = dependencies({
+      getSandbox: vi.fn(() => ({ agent: "example" })),
+      loadAgent: vi.fn(() => ({
+        configPaths: {
+          dir: "/sandbox/.example",
+          configFile: "config.yaml",
+          envFile: ".env",
+          format: "yaml",
+          shieldsFiles: [".env", "fabric.json"],
+        },
+        stateLockPlan: PLAN,
+        stateLockPlanInImage: true,
+      })),
+    });
+
+    const target = resolveAgentConfig("alpha", deps);
+
+    expect(target.sensitiveFiles).toEqual([
+      "/sandbox/.example/.config-hash",
+      "/sandbox/.example/.env",
+      "/sandbox/.example/fabric.json",
+    ]);
+    expect(target.mutablePrivateFiles).toEqual(["/sandbox/.example/fabric.json"]);
   });
 });

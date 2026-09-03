@@ -665,6 +665,8 @@ describe("Hermes runtime state mutation publisher", () => {
           expect.stringMatching(/\/sandbox\/\.hermes\/\.config-hash$/),
           expect.stringMatching(/\/sandbox\/\.hermes\/\.env$/),
           expect.stringMatching(/\/sandbox\/\.hermes\/config\.yaml$/),
+        ],
+        mutable_private_top_level_files: [
           expect.stringMatching(/\/sandbox\/\.hermes\/fabric\.json$/),
         ],
         mutable_service_uids: [expect.any(Number)],
@@ -807,7 +809,7 @@ describe("Hermes runtime state mutation publisher", () => {
   // source-shape-contract: security -- Exact capability bytes and startup-gate ordering bind the reviewed Hermes state-mutation authority
   it("publishes one exact image capability and checks the durable root gate before startup code", () => {
     expect(fs.readFileSync(CAPABILITY, "utf8")).toBe(
-      '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}\n',
+      '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"mutablePrivateFiles":["fabric.json"],"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}\n',
     );
     const start = readHermesStartupSource();
     const gate = start.indexOf(

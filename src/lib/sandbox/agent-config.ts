@@ -19,6 +19,8 @@ export interface AgentConfigTarget {
   format: string;
   configFile: string;
   sensitiveFiles?: string[];
+  /** Protected files that remain owner-only while the configuration is mutable. */
+  mutablePrivateFiles?: string[];
   mutableAccess?: AgentConfigMutableAccess | null;
   stateLockPlan?: AgentStateLockPlan;
   stateLockPlanInImage: boolean;
@@ -161,8 +163,10 @@ export function resolveAgentConfig(
   const dir = requireCanonicalConfigDir(cfg.dir);
   const configPath = resolveConfigFile(dir, cfg.configFile, "config_file");
   const sensitiveFiles = [resolveConfigFile(dir, ".config-hash", "config hash")];
+  const mutablePrivateFiles: string[] = [];
+  let envPath: string | null = null;
   if (cfg.envFile !== undefined && cfg.envFile !== null) {
-    resolveConfigFile(dir, cfg.envFile, "env_file");
+    envPath = resolveConfigFile(dir, cfg.envFile, "env_file");
   }
   if (
     !Array.isArray(cfg.shieldsFiles) ||
@@ -183,6 +187,11 @@ export function resolveAgentConfig(
       );
     }
     sensitiveFiles.push(resolved);
+    if (resolved !== envPath) mutablePrivateFiles.push(resolved);
+  }
+
+  if (cfg.mutableAccess === "private") {
+    mutablePrivateFiles.splice(0, mutablePrivateFiles.length, configPath, ...sensitiveFiles);
   }
 
   return {
@@ -192,6 +201,7 @@ export function resolveAgentConfig(
     format: cfg.format || "json",
     configFile: cfg.configFile,
     sensitiveFiles,
+    ...(mutablePrivateFiles.length > 0 ? { mutablePrivateFiles } : {}),
     ...(cfg.mutableAccess ? { mutableAccess: cfg.mutableAccess } : {}),
     stateLockPlan: agent.stateLockPlan,
     stateLockPlanInImage: agent.stateLockPlanInImage,

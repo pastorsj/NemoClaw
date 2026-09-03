@@ -48,6 +48,9 @@ function hermesConfigTarget(): HermesRuntimeStateMutationConfigTarget {
         path.posix.join(agent.configPaths.dir, entry),
       ),
     ],
+    mutablePrivateFiles: agent.configPaths.shieldsFiles
+      .filter((entry) => entry !== agent.configPaths.envFile)
+      .map((entry) => path.posix.join(agent.configPaths.dir, entry)),
     stateLockPlan: agent.stateLockPlan,
     stateLockPlanInImage: agent.stateLockPlanInImage,
   };

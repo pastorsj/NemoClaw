@@ -76,6 +76,7 @@ const {
   readShieldsTimerRecoveryCandidate,
   verifyTimerMarkerIdentity,
   killTimer,
+  resolveShieldsTimerMutablePrivateFilePaths,
   resolveShieldsTimerProtectedFilePaths,
 } = require("./timer-control");
 const { appendAuditEntry } = require("./audit");
@@ -1493,14 +1494,23 @@ function runHermesProviderProtectionTransition(
 }
 
 function verifyHermesProviderMutablePosture(sandboxName: string, target: AgentConfigTarget): void {
+  const protectedFiles = [target.configPath, ...(target.sensitiveFiles || [])];
+  const mutablePrivateFiles = target.mutablePrivateFiles || [];
+  const protectedFileSet = new Set(protectedFiles);
+  const invalidPrivateFile = mutablePrivateFiles.find((file) => !protectedFileSet.has(file));
+  if (invalidPrivateFile) {
+    throw new Error(`Private mutable config file is not protected: ${invalidPrivateFile}`);
+  }
+  const mutablePrivateFileSet = new Set(mutablePrivateFiles);
   const issues = [
     ...verifyStateDirMutablePosture(
       stateDirLockExec(sandboxName),
       target.configDir,
       requireStateLockPlan(target),
       target.stateLockPlanInImage,
-      [target.configPath, ...(target.sensitiveFiles || [])],
+      protectedFiles.filter((file) => !mutablePrivateFileSet.has(file)),
       ["gateway"],
+      mutablePrivateFiles,
     ),
   ];
   if (issues.length > 0) throw new Error(`Config not unlocked: ${issues.join(", ")}`);
@@ -1599,6 +1609,7 @@ type AgentConfigTarget = {
   configPath: string;
   configDir: string;
   sensitiveFiles?: string[];
+  mutablePrivateFiles?: string[];
   mutableAccess?: "private" | "shared" | null;
   stateLockPlan?: AgentStateLockPlan;
   stateLockPlanInImage: boolean;
@@ -1658,15 +1669,69 @@ function mutableConfigModes(target: AgentConfigTarget): { file: string; director
     : { file: "660", directory: "2770" };
 }
 
+function partitionMutableConfigFiles(
+  target: AgentConfigTarget,
+  protectedFiles: string[],
+): { regularFiles: string[]; privateFiles: string[]; privateFileSet: Set<string> } {
+  const configuredPrivateFiles =
+    target.mutableAccess === "private" ? protectedFiles : target.mutablePrivateFiles || [];
+  const protectedFileSet = new Set(protectedFiles);
+  const privateFileSet = new Set<string>();
+  for (const file of configuredPrivateFiles) {
+    if (!protectedFileSet.has(file)) {
+      throw new Error(`Private mutable config file is not protected: ${file}`);
+    }
+    if (privateFileSet.has(file)) {
+      throw new Error(`Private mutable config file is duplicated: ${file}`);
+    }
+    privateFileSet.add(file);
+  }
+  return {
+    regularFiles: protectedFiles.filter((file) => !privateFileSet.has(file)),
+    privateFiles: protectedFiles.filter((file) => privateFileSet.has(file)),
+    privateFileSet,
+  };
+}
+
 function configHashPath(configDir: string): string {
   return `${configDir.replace(/\/+$/, "")}/.config-hash`;
+}
+
+function getMutablePrivateConfigFileNames(target: AgentConfigTarget): string[] {
+  const mutablePrivateFiles = target.mutablePrivateFiles || [];
+  if (mutablePrivateFiles.length === 0) return [];
+  const protectedFilePaths = [target.configPath, ...(target.sensitiveFiles || [])];
+  const protectedFileNames = getProtectedConfigFileNames(target);
+  const namesByPath = new Map(
+    protectedFilePaths.map(
+      (protectedFile, index) => [protectedFile, protectedFileNames[index]!] as const,
+    ),
+  );
+  const seenFiles = new Set<string>();
+  return mutablePrivateFiles.map((mutablePrivateFile) => {
+    const fileName = namesByPath.get(mutablePrivateFile);
+    if (!fileName || path.posix.basename(fileName) !== fileName || seenFiles.has(fileName)) {
+      throw new Error(
+        `Private mutable config file '${mutablePrivateFile}' must be one unique protected top-level file`,
+      );
+    }
+    seenFiles.add(fileName);
+    return fileName;
+  });
 }
 
 function ensureConfigHashSensitiveFile<T extends AgentConfigTarget>(target: T): T {
   const hashPath = configHashPath(target.configDir);
   const sensitiveFiles = target.sensitiveFiles || [];
   if (sensitiveFiles.includes(hashPath)) return target;
-  return { ...target, sensitiveFiles: [...sensitiveFiles, hashPath] } as T;
+  const mutablePrivateFiles = target.mutablePrivateFiles || [];
+  return {
+    ...target,
+    sensitiveFiles: [...sensitiveFiles, hashPath],
+    ...(target.mutableAccess === "private"
+      ? { mutablePrivateFiles: [...mutablePrivateFiles, hashPath] }
+      : {}),
+  } as T;
 }
 function loadMarkerAgentStateLockPlan(
   agentName: string | undefined,
@@ -1688,6 +1753,7 @@ function resolvePersistedAutoRestoreTarget(
     configPath?: string;
     configDir?: string;
     protectedFiles?: readonly string[];
+    mutablePrivateFiles?: readonly string[];
     mutableAccess?: "private" | "shared";
   },
   resolveConfig: (sandboxName: string) => AgentConfigTarget = resolveAgentConfig,
@@ -1696,6 +1762,11 @@ function resolvePersistedAutoRestoreTarget(
   const protectedFilePaths =
     marker.protectedFiles === undefined ? null : resolveShieldsTimerProtectedFilePaths(marker);
   if (marker.protectedFiles !== undefined && protectedFilePaths === null) return undefined;
+  const mutablePrivateFilePaths =
+    marker.mutablePrivateFiles === undefined
+      ? undefined
+      : resolveShieldsTimerMutablePrivateFilePaths(marker);
+  if (mutablePrivateFilePaths === null) return undefined;
 
   const persistedTarget: AgentConfigTarget = {
     ...(marker.agentName ? { agentName: marker.agentName } : {}),
@@ -1705,6 +1776,9 @@ function resolvePersistedAutoRestoreTarget(
       configHashPath(marker.configDir),
       ...(marker.agentName === "hermes" ? [`${marker.configDir.replace(/\/+$/, "")}/.env`] : []),
     ],
+    ...(mutablePrivateFilePaths !== undefined
+      ? { mutablePrivateFiles: mutablePrivateFilePaths }
+      : {}),
     ...(marker.mutableAccess ? { mutableAccess: marker.mutableAccess } : {}),
     ...loadMarkerAgentStateLockPlan(marker.agentName),
   };
@@ -1718,11 +1792,17 @@ function resolvePersistedAutoRestoreTarget(
       marker.protectedFiles !== undefined
         ? resolved.mutableAccess === marker.mutableAccess
         : marker.mutableAccess === undefined || resolved.mutableAccess === marker.mutableAccess;
+    const mutablePrivateFilesMatch =
+      marker.protectedFiles === undefined ||
+      (marker.mutablePrivateFiles === undefined
+        ? resolved.mutablePrivateFiles === undefined
+        : isDeepStrictEqual(resolved.mutablePrivateFiles, mutablePrivateFilePaths));
     return (!marker.agentName || resolved.agentName === marker.agentName) &&
       resolved.configPath === marker.configPath &&
       resolved.configDir === marker.configDir &&
       protectedFilesMatch &&
-      mutableAccessMatches
+      mutableAccessMatches &&
+      mutablePrivateFilesMatch
       ? resolved
       : persistedTarget;
   } catch {
@@ -2690,11 +2770,21 @@ def config_child_name(config_dir, path):
     return name
 
 file_mode = int(sys.argv[1], 8)
-dir_mode = int(sys.argv[2], 8)
-uid, gid = resolve_user_group(sys.argv[3])
-restore_mutable_parent = sys.argv[4] == "1"
-config_dir = os.path.normpath(sys.argv[5])
-files = sys.argv[6:]
+private_file_mode = int(sys.argv[2], 8)
+dir_mode = int(sys.argv[3], 8)
+uid, gid = resolve_user_group(sys.argv[4])
+restore_mutable_parent = sys.argv[5] == "1"
+config_dir = os.path.normpath(sys.argv[6])
+try:
+    regular_file_count = int(sys.argv[7], 10)
+except (IndexError, ValueError):
+    die("invalid regular config file count")
+files = sys.argv[8:]
+if regular_file_count < 0 or regular_file_count > len(files):
+    die("invalid regular config file count")
+file_modes = [file_mode] * regular_file_count + [private_file_mode] * (
+    len(files) - regular_file_count
+)
 
 parent_dir = os.path.dirname(config_dir)
 config_name = os.path.basename(config_dir)
@@ -2721,25 +2811,25 @@ try:
     os.fchown(dir_fd, 0, 0)
     os.fchmod(dir_fd, 0o700)
 
-    for path in files:
+    for path, expected_mode in zip(files, file_modes):
         name = config_child_name(config_dir, path)
         fd = open_checked(name, False, dir_fd=dir_fd)
         try:
             clear_immutable(fd)
             os.fchown(fd, uid, gid)
-            os.fchmod(fd, file_mode)
+            os.fchmod(fd, expected_mode)
         finally:
             os.close(fd)
 
     # Verify before reopening the directory for sandbox writes.
-    for path in files:
+    for path, expected_mode in zip(files, file_modes):
         name = config_child_name(config_dir, path)
         st = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
         if stat.S_ISLNK(st.st_mode):
             die("refusing symlink path after unlock: " + path)
         if not stat.S_ISREG(st.st_mode):
             die("not a regular file after unlock: " + path)
-        if stat.S_IMODE(st.st_mode) != file_mode:
+        if stat.S_IMODE(st.st_mode) != expected_mode:
             die("mode mismatch after unlock for %s: %o" % (path, stat.S_IMODE(st.st_mode)))
         if st.st_uid != uid or st.st_gid != gid:
             die("owner mismatch after unlock for " + path)
@@ -3145,7 +3235,8 @@ function unlockConfigPathsNoSymlinkFollow(
   target: AgentConfigTarget,
   fileMode: string,
   dirMode: string,
-  filesToUnlock: string[],
+  regularFiles: string[],
+  privateFiles: string[],
 ): void {
   privilegedSandboxExec(sandboxName, [
     "python3",
@@ -3153,11 +3244,14 @@ function unlockConfigPathsNoSymlinkFollow(
     "-c",
     CONFIG_UNLOCK_NOFOLLOW_SCRIPT,
     fileMode,
+    "600",
     dirMode,
     "sandbox:sandbox",
     requiresProtectedSandboxParent(target) ? "1" : "0",
     target.configDir,
-    ...filesToUnlock,
+    String(regularFiles.length),
+    ...regularFiles,
+    ...privateFiles,
   ]);
 }
 
@@ -3439,6 +3533,7 @@ function unlockAgentConfigUnderMutationLock(
   }
   const errors: string[] = [];
   const filesToUnlock = [target.configPath, ...(target.sensitiveFiles || [])];
+  const mutableFiles = partitionMutableConfigFiles(target, filesToUnlock);
   // Mutable-default mode for OpenClaw: group-writable + setgid on the
   // config dir so the gateway UID (a member of the sandbox group via
   // Dockerfile.base) can write to OpenClaw config files. Without this,
@@ -3488,7 +3583,14 @@ function unlockAgentConfigUnderMutationLock(
     if (legacyHermesProtocol) {
       transitionLegacyHermesConfig(sandboxName, target, "unlock", filesToUnlock);
     } else if (target.agentName !== "hermes" && !openClawProtocol) {
-      unlockConfigPathsNoSymlinkFollow(sandboxName, target, fileMode, dirMode, filesToUnlock);
+      unlockConfigPathsNoSymlinkFollow(
+        sandboxName,
+        target,
+        fileMode,
+        dirMode,
+        mutableFiles.regularFiles,
+        mutableFiles.privateFiles,
+      );
     }
 
     // Restore sandbox ownership while Hermes remains sealed and its top-level
@@ -3531,7 +3633,8 @@ function unlockAgentConfigUnderMutationLock(
         try {
           const perms = privilegedSandboxExecCapture(sandboxName, ["stat", "-c", "%a %U:%G", f]);
           const [mode, owner] = perms.split(" ");
-          if (mode !== fileMode) issues.push(`${f} mode=${mode} (expected ${fileMode})`);
+          const expectedMode = mutableFiles.privateFileSet.has(f) ? "600" : fileMode;
+          if (mode !== expectedMode) issues.push(`${f} mode=${mode} (expected ${expectedMode})`);
           if (owner !== "sandbox:sandbox")
             issues.push(`${f} owner=${owner} (expected sandbox:sandbox)`);
         } catch (err) {
@@ -5195,6 +5298,9 @@ function startFreshShieldsDownTimer(input: {
       configPath: target.configPath,
       configDir: target.configDir,
       protectedFiles: getProtectedConfigFileNames(target),
+      ...(target.mutablePrivateFiles && target.mutablePrivateFiles.length > 0
+        ? { mutablePrivateFiles: getMutablePrivateConfigFileNames(target) }
+        : {}),
       ...(target.mutableAccess ? { mutableAccess: target.mutableAccess } : {}),
       ...(leaseOwnerPid !== null && leaseOwnerStartIdentity
         ? { leaseOwnerPid, leaseOwnerStartIdentity }

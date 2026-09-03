@@ -75,6 +75,19 @@ describe("timer authorization proof", () => {
     expect(timerAuthoritySha256({ ...protectedMarker, mutableAccess: "shared" })).not.toBe(
       timerAuthoritySha256({ ...protectedMarker, mutableAccess: "private" }),
     );
+    const mixedMutableMarker = {
+      ...protectedMarker,
+      mutablePrivateFiles: ["fabric.json"],
+    };
+    expect(timerAuthoritySha256(mixedMutableMarker)).not.toBe(
+      timerAuthoritySha256(protectedMarker),
+    );
+    expect(
+      timerAuthoritySha256({
+        ...mixedMutableMarker,
+        mutablePrivateFiles: [".config-hash", "fabric.json"],
+      }),
+    ).not.toBe(timerAuthoritySha256(mixedMutableMarker));
   });
 
   it("rejects a proof replaced while it is read", () => {

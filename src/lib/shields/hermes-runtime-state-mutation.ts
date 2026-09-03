@@ -39,7 +39,7 @@ export const HERMES_RUNTIME_STATE_MUTATION_CAPABILITY_PATH =
   "/usr/local/share/nemoclaw/runtime-state-mutation-publisher-v1.json";
 
 export const HERMES_RUNTIME_STATE_MUTATION_CAPABILITY =
-  '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}';
+  '{"schemaVersion":1,"protocol":"nemoclaw-runtime-state-mutation-publisher-v1","agent":"hermes","providerId":"docker","stateRoot":"/sandbox/.hermes","planSchemaVersion":2,"mutablePrivateFiles":["fabric.json"],"entrypoint":"/usr/local/lib/nemoclaw/runtime_state_mutation_hermes_publisher.py"}';
 
 export const HERMES_RUNTIME_STATE_MUTATION_CAPABILITY_METADATA = "444 0 0 1 regular file";
 
@@ -65,6 +65,7 @@ export interface HermesRuntimeStateMutationConfigTarget {
   readonly configFile?: string;
   readonly format?: string;
   readonly sensitiveFiles?: readonly string[];
+  readonly mutablePrivateFiles?: readonly string[];
   readonly stateLockPlan?: AgentStateLockPlan;
   readonly stateLockPlanInImage: boolean;
 }
@@ -289,6 +290,12 @@ function assertCurrentHermesConfigTarget(
     path.posix.join(config.dir, ".config-hash"),
     ...config.shieldsFiles.map((entry) => path.posix.join(config.dir, entry)),
   ];
+  const mutablePrivateFiles =
+    config.mutableAccess === "private"
+      ? [configPath, ...sensitiveFiles]
+      : config.shieldsFiles
+          .filter((entry) => entry !== config.envFile)
+          .map((entry) => path.posix.join(config.dir, entry));
   if (
     target.agentName !== agent.name ||
     target.configDir !== config.dir ||
@@ -296,6 +303,7 @@ function assertCurrentHermesConfigTarget(
     target.configFile !== config.configFile ||
     target.format !== config.format ||
     !exactStringArray(target.sensitiveFiles, sensitiveFiles) ||
+    !exactStringArray(target.mutablePrivateFiles, mutablePrivateFiles) ||
     target.stateLockPlanInImage !== agent.stateLockPlanInImage ||
     !isDeepStrictEqual(target.stateLockPlan, agent.stateLockPlan)
   ) {

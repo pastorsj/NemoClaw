@@ -897,7 +897,12 @@ def _verify_state_posture(posture: str, plan_json: str) -> None:
                 identity,
                 plan,
                 mutable_top_level_files=tuple(
-                    os.path.join(HERMES_DIR, name) for name in TOP_SELECTORS
+                    os.path.join(HERMES_DIR, name)
+                    for name in TOP_SELECTORS
+                    if name != "fabric.json"
+                ),
+                mutable_private_top_level_files=(
+                    os.path.join(HERMES_DIR, "fabric.json"),
                 ),
                 mutable_service_uids=(gateway_uid,),
             )

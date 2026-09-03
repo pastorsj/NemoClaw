@@ -17,6 +17,7 @@ import {
   readShieldsTimerMarkerFile,
   readShieldsTimerRecoveryCandidate,
   readShieldsTimerTakeoverToken,
+  resolveShieldsTimerMutablePrivateFilePaths,
   resolveShieldsTimerProtectedFilePaths,
   readTimerProcessStartIdentity,
   sameShieldsTimerMarkerGeneration,
@@ -83,6 +84,9 @@ function timerAuthoritySha256(marker: ShieldsTimerMarker): string {
   };
   if (marker.protectedFiles !== undefined) {
     authority.protectedFiles = marker.protectedFiles;
+  }
+  if (marker.mutablePrivateFiles !== undefined) {
+    authority.mutablePrivateFiles = marker.mutablePrivateFiles;
   }
   if (marker.mutableAccess !== undefined) {
     authority.mutableAccess = marker.mutableAccess;
@@ -546,6 +550,7 @@ export {
   readProcessState,
   readTimerMarker,
   readShieldsTimerRecoveryCandidate,
+  resolveShieldsTimerMutablePrivateFilePaths,
   resolveShieldsTimerProtectedFilePaths,
   removeTimerAuthorizationProof,
   timerAuthoritySha256,

@@ -23,6 +23,7 @@ export interface ShieldsTimerMarker {
   configPath?: string;
   configDir?: string;
   protectedFiles?: readonly string[];
+  mutablePrivateFiles?: readonly string[];
   mutableAccess?: "private" | "shared";
   leaseOwnerPid?: number;
   leaseOwnerStartIdentity?: string;
@@ -43,6 +44,7 @@ interface ShieldsTimerProtectedFileAuthority {
   readonly configPath?: unknown;
   readonly configDir?: unknown;
   readonly protectedFiles?: unknown;
+  readonly mutablePrivateFiles?: unknown;
 }
 
 /** Resolve one marker's canonical config-relative file authority below /sandbox. */
@@ -99,6 +101,39 @@ export function resolveShieldsTimerProtectedFilePaths(
   return resolvedFiles[0] === configPath ? resolvedFiles : null;
 }
 
+/** Resolve the exact protected files that retain owner-only mutable access. */
+export function resolveShieldsTimerMutablePrivateFilePaths(
+  marker: ShieldsTimerProtectedFileAuthority,
+): string[] | null {
+  const { configDir, protectedFiles, mutablePrivateFiles } = marker;
+  if (mutablePrivateFiles === undefined) return [];
+  const resolvedProtectedFiles = resolveShieldsTimerProtectedFilePaths(marker);
+  if (
+    resolvedProtectedFiles === null ||
+    typeof configDir !== "string" ||
+    !Array.isArray(protectedFiles) ||
+    !Array.isArray(mutablePrivateFiles) ||
+    mutablePrivateFiles.length > MAX_SHIELDS_TIMER_PROTECTED_FILES
+  ) {
+    return null;
+  }
+
+  const seenFiles = new Set<string>();
+  const resolvedFiles: string[] = [];
+  for (const mutablePrivateFile of mutablePrivateFiles) {
+    if (
+      typeof mutablePrivateFile !== "string" ||
+      seenFiles.has(mutablePrivateFile) ||
+      !protectedFiles.includes(mutablePrivateFile)
+    ) {
+      return null;
+    }
+    seenFiles.add(mutablePrivateFile);
+    resolvedFiles.push(path.posix.resolve(configDir, mutablePrivateFile));
+  }
+  return resolvedFiles;
+}
+
 function sameProtectedFileAuthority(
   current: readonly string[] | undefined,
   expected: readonly string[] | undefined,
@@ -132,6 +167,9 @@ function isShieldsTimerMarker(value: unknown): value is ShieldsTimerMarker {
     ((value.configPath === undefined && value.configDir === undefined) ||
       (typeof value.configPath === "string" && typeof value.configDir === "string")) &&
     (value.protectedFiles === undefined || resolveShieldsTimerProtectedFilePaths(value) !== null) &&
+    (value.mutablePrivateFiles === undefined ||
+      (value.protectedFiles !== undefined &&
+        resolveShieldsTimerMutablePrivateFilePaths(value) !== null)) &&
     (value.mutableAccess === undefined ||
       ((value.mutableAccess === "private" || value.mutableAccess === "shared") &&
         typeof value.configPath === "string" &&
@@ -230,6 +268,7 @@ export function sameShieldsTimerMarkerGeneration(
     current.configPath === expected.configPath &&
     current.configDir === expected.configDir &&
     sameProtectedFileAuthority(current.protectedFiles, expected.protectedFiles) &&
+    sameProtectedFileAuthority(current.mutablePrivateFiles, expected.mutablePrivateFiles) &&
     current.mutableAccess === expected.mutableAccess &&
     current.leaseOwnerPid === expected.leaseOwnerPid &&
     current.leaseOwnerStartIdentity === expected.leaseOwnerStartIdentity

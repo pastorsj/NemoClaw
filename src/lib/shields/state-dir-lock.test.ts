@@ -250,14 +250,19 @@ describe("recursive state-dir lock host wiring", () => {
     expect(calls[0]?.input).toContain("Descriptor-safe recursive state-directory");
   });
 
-  it("passes mutable top-level files to the recursive read-only posture verifier (#9485)", () => {
+  it("passes regular and private mutable files to the read-only posture verifier (#9485)", () => {
     const { calls, privileged } = createExec();
 
     expect(
-      verifyStateDirMutablePosture(privileged, "/sandbox/.hermes", PLAN, true, [
-        "/sandbox/.hermes/config.yaml",
-        "/sandbox/.hermes/.credentials.json",
-      ], ["gateway"]),
+      verifyStateDirMutablePosture(
+        privileged,
+        "/sandbox/.hermes",
+        PLAN,
+        true,
+        ["/sandbox/.hermes/config.yaml", "/sandbox/.hermes/.env"],
+        ["gateway"],
+        ["/sandbox/.hermes/fabric.json"],
+      ),
     ).toEqual([]);
     expect(calls).toHaveLength(3);
     expect(calls[2]?.cmd).toEqual([
@@ -276,7 +281,9 @@ describe("recursive state-dir lock host wiring", () => {
       "--mutable-top-level-file",
       "/sandbox/.hermes/config.yaml",
       "--mutable-top-level-file",
-      "/sandbox/.hermes/.credentials.json",
+      "/sandbox/.hermes/.env",
+      "--mutable-private-top-level-file",
+      "/sandbox/.hermes/fabric.json",
       "--mutable-service-user",
       "gateway",
     ]);

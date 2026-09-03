@@ -57,6 +57,7 @@ interface TimerArgs {
   configDir?: string;
   agentName?: string;
   authorizedProtectedFiles?: readonly string[] | null;
+  authorizedMutablePrivateFiles?: readonly string[] | null;
   authorizedMutableAccess?: "private" | "shared" | null;
   processToken?: string;
   allowLegacyHermesProtocol: boolean;
@@ -223,6 +224,17 @@ function markerRecordMatchesCurrentTimer(
     (args.authorizedMutableAccess === null
       ? marker.mutableAccess === undefined
       : marker.mutableAccess === args.authorizedMutableAccess);
+  const authorizedMutablePrivateFiles = args.authorizedMutablePrivateFiles;
+  const mutablePrivateFilesMatch =
+    authorizedMutablePrivateFiles === undefined ||
+    (authorizedMutablePrivateFiles === null
+      ? marker.mutablePrivateFiles === undefined
+      : marker.mutablePrivateFiles !== undefined &&
+        marker.mutablePrivateFiles.length === authorizedMutablePrivateFiles.length &&
+        marker.mutablePrivateFiles.every(
+          (mutablePrivateFile, index) =>
+            mutablePrivateFile === authorizedMutablePrivateFiles[index],
+        ));
   return (
     marker.pid === process.pid &&
     marker.sandboxName === args.sandboxName &&
@@ -238,6 +250,7 @@ function markerRecordMatchesCurrentTimer(
     (marker.configPath === undefined || marker.configPath === args.configPath) &&
     (marker.configDir === undefined || marker.configDir === args.configDir) &&
     protectedFilesMatch &&
+    mutablePrivateFilesMatch &&
     mutableAccessMatches
   );
 }
@@ -697,6 +710,9 @@ function main(): void {
     const marker = readTimerMarker(args.markerPath);
     if (!marker || !markerRecordMatchesCurrentTimer(marker, args)) return false;
     args.authorizedProtectedFiles = marker.protectedFiles ? [...marker.protectedFiles] : null;
+    args.authorizedMutablePrivateFiles = marker.mutablePrivateFiles
+      ? [...marker.mutablePrivateFiles]
+      : null;
     args.authorizedMutableAccess = marker.mutableAccess ?? null;
     const restoreTimeout = setTimeout(
       () => {

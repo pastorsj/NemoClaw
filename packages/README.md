@@ -185,6 +185,8 @@ same Shields transition protects the native config, its hash, and the adapter co
 package whose mutable config is single-user declares `config.mutable_access: private`; the generic
 transition then restores its config directory to `0700` and every protected file to `0600`.
 Packages that need a shared gateway writer use their package-owned guard or declare `shared`.
+For other mutable configurations, `config_file`, `.config-hash`, and a protected `env_file` use the
+agent's shared mode. Other files in `config.shields_files` remain owner-only at `0600`.
 
 The package owns the remaining choices: whether to consume a released Fabric adapter or ship a
 small adapter, how managed configuration is projected into `fabric.json`, and how the image pins

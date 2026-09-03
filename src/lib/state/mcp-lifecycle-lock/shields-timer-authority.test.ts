@@ -13,6 +13,7 @@ import {
   isShieldsTimerDeadlineAbandoned,
   readShieldsTimerMarker,
   readShieldsTimerRecoveryCandidate,
+  resolveShieldsTimerMutablePrivateFilePaths,
   resolveShieldsTimerProtectedFilePaths,
   sameShieldsTimerMarkerGeneration,
   shieldsTimerMarkerPath,
@@ -97,15 +98,20 @@ describe("Shields timer marker authority", () => {
       configPath: "/sandbox/.agent/config.json",
       configDir: "/sandbox/.agent",
       protectedFiles: ["config.json", ".config-hash", "fabric.json"],
+      mutablePrivateFiles: ["fabric.json"],
       mutableAccess: "private",
     });
 
     const marker = readShieldsTimerMarker("alpha", stateDir);
     expect(marker?.protectedFiles).toEqual(["config.json", ".config-hash", "fabric.json"]);
+    expect(marker?.mutablePrivateFiles).toEqual(["fabric.json"]);
     expect(marker?.mutableAccess).toBe("private");
     expect(resolveShieldsTimerProtectedFilePaths(marker!)).toEqual([
       "/sandbox/.agent/config.json",
       "/sandbox/.agent/.config-hash",
+      "/sandbox/.agent/fabric.json",
+    ]);
+    expect(resolveShieldsTimerMutablePrivateFilePaths(marker!)).toEqual([
       "/sandbox/.agent/fabric.json",
     ]);
   });
@@ -134,6 +140,44 @@ describe("Shields timer marker authority", () => {
       configPath: "/sandbox/.agent/config.json",
       configDir: "/sandbox/.agent",
       protectedFiles,
+    });
+
+    expect(readShieldsTimerMarker("alpha", stateDir)).toBeNull();
+  });
+
+  it.each([
+    ["a non-array value", "fabric.json"],
+    ["a file outside the protected set", ["credentials.json"]],
+    ["a duplicate", ["fabric.json", "fabric.json"]],
+    ["a non-string entry", [42]],
+  ])("rejects mutable-private authority with %s", (_caseName, mutablePrivateFiles) => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-shields-marker-"));
+    tempDirs.push(stateDir);
+    writeMarkerPayload(stateDir, "alpha", {
+      pid: process.pid,
+      restoreAt: "2026-08-03T12:00:00.000Z",
+      sandboxName: "alpha",
+      snapshotPath: path.join(stateDir, "snapshot.yaml"),
+      configPath: "/sandbox/.agent/config.json",
+      configDir: "/sandbox/.agent",
+      protectedFiles: ["config.json", ".config-hash", "fabric.json"],
+      mutablePrivateFiles,
+    });
+
+    expect(readShieldsTimerMarker("alpha", stateDir)).toBeNull();
+  });
+
+  it("rejects mutable-private authority without protected-file authority", () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-shields-marker-"));
+    tempDirs.push(stateDir);
+    writeMarkerPayload(stateDir, "alpha", {
+      pid: process.pid,
+      restoreAt: "2026-08-03T12:00:00.000Z",
+      sandboxName: "alpha",
+      snapshotPath: path.join(stateDir, "snapshot.yaml"),
+      configPath: "/sandbox/.agent/config.json",
+      configDir: "/sandbox/.agent",
+      mutablePrivateFiles: ["config.json"],
     });
 
     expect(readShieldsTimerMarker("alpha", stateDir)).toBeNull();
@@ -205,6 +249,9 @@ describe("Shields timer marker authority", () => {
     expect(sameShieldsTimerMarkerGeneration({ ...base, mutableAccess: "private" }, base)).toBe(
       false,
     );
+    expect(
+      sameShieldsTimerMarkerGeneration({ ...base, mutablePrivateFiles: [".config-hash"] }, base),
+    ).toBe(false);
   });
 
   it("rejects a marker whose payload names another sandbox", () => {

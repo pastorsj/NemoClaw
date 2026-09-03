@@ -977,6 +977,29 @@ describe("shields command flow", () => {
       return JSON.parse(fs.readFileSync(path.join(stateDir, transitionName!), "utf-8"));
     };
     const harness = createHarness({
+      agentConfigTarget: {
+        agentName: "pi",
+        configPath: "/sandbox/.pi/agent/models.json",
+        configDir: "/sandbox/.pi/agent",
+        configFile: "models.json",
+        format: "json",
+        sensitiveFiles: ["/sandbox/.pi/agent/.config-hash", "/sandbox/.pi/agent/fabric.json"],
+        mutablePrivateFiles: [
+          "/sandbox/.pi/agent/models.json",
+          "/sandbox/.pi/agent/.config-hash",
+          "/sandbox/.pi/agent/fabric.json",
+        ],
+        mutableAccess: "private",
+        stateLockPlan: {
+          version: 1,
+          readOnlyRoots: ["skills"],
+          confidentialRoots: [],
+          readOnlyPrefixes: [],
+          confidentialPrefixes: [],
+          writableSubpaths: [],
+        },
+        stateLockPlanInImage: true,
+      },
       fork: (_modulePath, args) => {
         timerArgs = args as string[];
         return {
@@ -1007,13 +1030,13 @@ describe("shields command flow", () => {
         observedPreparingDuringUnlock ||= readOnlyTransition().phase === "preparing";
         switch (true) {
           case args.includes("sha256sum"):
-            return `${"a".repeat(64)}  /sandbox/.openclaw/openclaw.json\n`;
+            return `${"a".repeat(64)}  /sandbox/.pi/agent/models.json\n`;
           case args.includes("stat"):
             return args.at(-1) === "/sandbox"
               ? "755 sandbox:sandbox\n"
-              : args.at(-1) === "/sandbox/.openclaw"
-                ? "2770 sandbox:sandbox\n"
-                : "660 sandbox:sandbox\n";
+              : args.at(-1) === "/sandbox/.pi/agent"
+                ? "700 sandbox:sandbox\n"
+                : "600 sandbox:sandbox\n";
           default:
             return "";
         }
@@ -1025,12 +1048,11 @@ describe("shields command flow", () => {
       reason: "race coverage",
       throwOnError: true,
     });
-
     const transition = readOnlyTransition();
     expect(observedPreparingDuringPolicy).toBe(true);
     expect(observedPreparingDuringUnlock).toBe(true);
     expect(authorizationSawMarker).toBe(true);
-    expect(timerArgs.at(9)).toBe("openclaw");
+    expect(timerArgs.at(9)).toBe("pi");
     expect(transition).toMatchObject({
       version: 1,
       phase: "active",
@@ -1042,9 +1064,12 @@ describe("shields command flow", () => {
     expect(
       JSON.parse(fs.readFileSync(path.join(stateDir, "shields-timer-openclaw.json"), "utf-8")),
     ).toMatchObject({
-      agentName: "openclaw",
-      configPath: "/sandbox/.openclaw/openclaw.json",
-      configDir: "/sandbox/.openclaw",
+      agentName: "pi",
+      configPath: "/sandbox/.pi/agent/models.json",
+      configDir: "/sandbox/.pi/agent",
+      protectedFiles: ["models.json", ".config-hash", "fabric.json"],
+      mutablePrivateFiles: ["models.json", ".config-hash", "fabric.json"],
+      mutableAccess: "private",
     });
   });
 

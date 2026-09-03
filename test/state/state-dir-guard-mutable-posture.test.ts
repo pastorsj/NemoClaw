@@ -22,7 +22,7 @@ import json
 import os
 import sys
 
-guard_path, action, config_dir, plan_json = sys.argv[1:5]
+guard_path, action, config_dir, plan_json, top_level_json, private_top_level_json = sys.argv[1:7]
 spec = importlib.util.spec_from_file_location("nemoclaw_state_dir_guard", guard_path)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
@@ -60,7 +60,8 @@ def verify_dir_with_swap(*args, **kwargs):
 module._verify_dir = verify_dir_with_swap
 result = module.run_guard(
     action, config_dir, identity, module.parse_agent_state_lock_plan(plan_json),
-    mutable_top_level_files=tuple(sys.argv[5:]),
+    mutable_top_level_files=tuple(json.loads(top_level_json)),
+    mutable_private_top_level_files=tuple(json.loads(private_top_level_json)),
     mutable_service_uids=(os.getuid(),)
     if os.environ.get("NEMOCLAW_TEST_MUTABLE_SERVICE_OWNER") == "1"
     else (),
@@ -86,10 +87,20 @@ function runGuard(
   configDir: string,
   env = {},
   topLevelFiles: string[] = [],
+  privateTopLevelFiles: string[] = [],
 ) {
   const result = spawnSync(
     "python3",
-    ["-c", RUN_GUARD, GUARD_PATH, action, configDir, JSON.stringify(PLAN), ...topLevelFiles],
+    [
+      "-c",
+      RUN_GUARD,
+      GUARD_PATH,
+      action,
+      configDir,
+      JSON.stringify(PLAN),
+      JSON.stringify(topLevelFiles),
+      JSON.stringify(privateTopLevelFiles),
+    ],
     { encoding: "utf8", env: { ...process.env, ...env } },
   );
   const lines = result.stdout
@@ -160,6 +171,75 @@ describe("read-only recursive mutable posture observation", () => {
       content: "config\n",
     });
     expect(fs.existsSync(path.join(root, ".openclaw-config-mutation.lock"))).toBe(false);
+  });
+
+  it("accepts mixed regular and private files without changing either file", () => {
+    const { root, configDir } = fixture();
+    const configPath = path.join(configDir, "config.yaml");
+    const privatePath = path.join(configDir, "fabric.json");
+    fs.writeFileSync(configPath, "config\n", { mode: 0o640 });
+    fs.writeFileSync(privatePath, "private\n", { mode: 0o600 });
+    fs.chmodSync(root, 0o755);
+    fs.chmodSync(configDir, 0o700);
+    const configBefore = observeFixtureFile(configPath);
+    const privateBefore = observeFixtureFile(privatePath);
+
+    const observed = runGuard("verify-mutable", configDir, {}, [configPath], [privatePath]);
+
+    expect(observed.status, JSON.stringify(observed.lines)).toBe(0);
+    expect(observed.lines).toContainEqual({
+      type: "test-observation",
+      inodeFlagMutationCalls: 0,
+    });
+    expect(observeFixtureFile(configPath)).toEqual(configBefore);
+    expect(observeFixtureFile(privatePath)).toEqual(privateBefore);
+  });
+
+  it("rejects a widened private file without changing it", () => {
+    const { root, configDir } = fixture();
+    const privatePath = path.join(configDir, "fabric.json");
+    fs.writeFileSync(privatePath, "private\n", { mode: 0o640 });
+    fs.chmodSync(root, 0o755);
+    fs.chmodSync(configDir, 0o700);
+    const before = observeFixtureFile(privatePath);
+
+    const observed = runGuard("verify-mutable", configDir, {}, [], [privatePath]);
+
+    expect(observed.status).toBe(1);
+    expect(observed.lines).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "verification-mode-mismatch",
+          path: privatePath,
+          detail: "file mode is 0640, expected 0600",
+        }),
+        { type: "test-observation", inodeFlagMutationCalls: 0 },
+      ]),
+    );
+    expect(observeFixtureFile(privatePath)).toEqual(before);
+  });
+
+  it.each([
+    ["an overlapping file", "overlapping-mutable-top-level-file", "overlap"],
+    ["a nested private file", "invalid-mutable-private-top-level-file", "nested"],
+  ])("rejects %s before filesystem observation", (_case, expectedCode, shape) => {
+    const { configDir } = fixture();
+    const filePath =
+      shape === "overlap"
+        ? path.join(configDir, "fabric.json")
+        : path.join(configDir, "nested", "fabric.json");
+    const regularFiles = shape === "overlap" ? [filePath] : [];
+
+    const observed = runGuard("verify-mutable", configDir, {}, regularFiles, [filePath]);
+
+    expect(observed.status).toBe(1);
+    expect(observed.lines).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: expectedCode, path: filePath })]),
+    );
+    expect(observed.lines).toContainEqual({
+      type: "test-observation",
+      inodeFlagMutationCalls: 0,
+    });
   });
 
   it.skipIf(process.platform === "darwin")(
