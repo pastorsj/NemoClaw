@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { Args, Flags } from "@oclif/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { deferSandboxLifecycleExit } from "../core/process-exit";
 import * as portableAgentLifecycle from "../onboard/experimental/portable-agent-lifecycle";
 import * as receiptAuthority from "../onboard/experimental/hermes-portable-receipt";
 import * as portableHostAuthority from "../state/portable-uninstall-retirement";
@@ -81,6 +82,16 @@ class PlainFailureCommand extends NemoClawCommand {
   public async run(): Promise<void> {
     await this.parse(PlainFailureCommand);
     throw Object.assign(new Error("real failure"), { exitCode: 7 });
+  }
+}
+
+class DeferredSandboxExitCommand extends NemoClawCommand {
+  static id = "sandbox:agent";
+  static exitCode = 0;
+
+  public async run(): Promise<void> {
+    this.parsed = true;
+    deferSandboxLifecycleExit(DeferredSandboxExitCommand.exitCode);
   }
 }
 
@@ -209,6 +220,7 @@ describe("NemoClawCommand", () => {
     RawSandboxDoctorCommand.ran = false;
     ParsedUnsupportedSandboxCommand.ran = false;
     ParsedSupportedSandboxCommand.operation = async () => undefined;
+    DeferredSandboxExitCommand.exitCode = 0;
     GlobalUnsupportedMutationCommand.ran = false;
     GlobalUseMutationCommand.ran = false;
     ProbeOnlyConnectCommand.operation = () => undefined;
@@ -286,6 +298,48 @@ describe("NemoClawCommand", () => {
 
   it("passes non-sentinel failures to the default oclif handler", async () => {
     await expect(PlainFailureCommand.run([], process.cwd())).rejects.toThrow("real failure");
+  });
+
+  it.each([0, 7])(
+    "records deferred exit %i without leaving a sandbox lifecycle lock",
+    async (exitCode) => {
+      vi.stubEnv("VITEST", "true");
+      vi.stubEnv("HOME", stateDir);
+      vi.stubEnv("NEMOCLAW_TEST_BASE_HOME", stateDir);
+      DeferredSandboxExitCommand.exitCode = exitCode;
+
+      await expect(
+        DeferredSandboxExitCommand.run(["alpha"], process.cwd()),
+      ).resolves.toBeUndefined();
+
+      expect(process.exitCode).toBe(exitCode);
+      const lockPath = getMcpLifecycleLockPath("alpha", stateDir);
+      expect(fs.existsSync(lockPath)).toBe(false);
+      expect(fs.existsSync(`${lockPath}.containment`)).toBe(false);
+    },
+  );
+
+  it("releases a deferred agent exit during an active Shields-down window", async () => {
+    vi.stubEnv("VITEST", "true");
+    vi.stubEnv("HOME", stateDir);
+    vi.stubEnv("NEMOCLAW_TEST_BASE_HOME", stateDir);
+    fs.writeFileSync(
+      path.join(stateDir, "shields-timer-alpha.json"),
+      JSON.stringify({
+        pid: process.pid,
+        sandboxName: "alpha",
+        snapshotPath: path.join(stateDir, "snapshot.yaml"),
+        restoreAt: new Date(Date.now() + 60_000).toISOString(),
+        processToken: "a".repeat(32),
+      }),
+    );
+
+    await expect(DeferredSandboxExitCommand.run(["alpha"], process.cwd())).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(0);
+    const lockPath = getMcpLifecycleLockPath("alpha", stateDir);
+    expect(fs.existsSync(lockPath)).toBe(false);
+    expect(fs.existsSync(`${lockPath}.containment`)).toBe(false);
   });
 
   it("rejects schema-5 unsupported parsed commands before the action body (#9203)", async () => {

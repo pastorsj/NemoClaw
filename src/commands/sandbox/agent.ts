@@ -4,6 +4,7 @@
 import { runAgentPassthrough } from "../../lib/actions/sandbox/agent/passthrough";
 import { printAgentPassthroughHelp } from "../../lib/actions/sandbox/agent/passthrough-help";
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
+import { deferSandboxLifecycleExit } from "../../lib/core/process-exit";
 
 export default class SandboxAgentCommand extends NemoClawCommand {
   static id = "sandbox:agent";
@@ -33,6 +34,17 @@ export default class SandboxAgentCommand extends NemoClawCommand {
       printAgentPassthroughHelp();
       return;
     }
-    await runAgentPassthrough(sandboxName, { extraArgs });
+    await runAgentPassthrough(
+      sandboxName,
+      { extraArgs },
+      {
+        deferredLifecycleExit: deferSandboxLifecycleExit,
+        process: {
+          exit: deferSandboxLifecycleExit,
+          stdout: process.stdout,
+          stderr: process.stderr,
+        },
+      },
+    );
   }
 }

@@ -94,7 +94,9 @@
 //    OpenShell before returning the signal-derived exit status. The complete
 //    source-boundary analysis and classifier live in
 //    `passthrough-dispatch.ts`; the operator-facing failure text lives beside
-//    the help copy in `passthrough-help.ts`.
+//    the help copy in `passthrough-help.ts`. The oclif adapter supplies one
+//    deferred exit callback to readiness, native, JSON, and headless paths so
+//    every terminal result can unwind the sandbox lifecycle lock first.
 //
 // Regression tests: `passthrough.test.ts` covers the Hermes redirect, gateway
 // headless dispatch, forwarded argv, SIGTERM exit status, the registry-miss
@@ -254,6 +256,8 @@ export interface AgentPassthroughDeps {
   execNonJson?: typeof runAgentNonJsonPassthrough;
   runOllamaRestartRecovery?: typeof runOllamaRestartRecovery;
   getRecentShieldsAutoRestore?: (sandboxName: string) => ShieldsAutoRestoreReadResult;
+  /** Exit only after the public command can unwind its sandbox lifecycle lock. */
+  deferredLifecycleExit?: (code: number) => never;
   process?: {
     exit(code: number): never;
     stdout?: { write(s: string): unknown };
@@ -671,7 +675,10 @@ export async function runAgentPassthrough(
   if (!invocation) return;
   const { command } = invocation;
   const ensureLive = deps.ensureLive ?? ensureLiveSandboxOrExit;
-  const state = await ensureLive(sandboxName, { allowNonReadyPhase: true });
+  const state = await ensureLive(sandboxName, {
+    allowNonReadyPhase: true,
+    ...(deps.deferredLifecycleExit ? { exit: deps.deferredLifecycleExit } : {}),
+  });
   const phase = state?.phase ?? null;
   if (!phase) {
     rejectUnparseablePhase(sandboxName, proc);
@@ -704,8 +711,17 @@ export async function runAgentPassthrough(
     return;
   }
   const exec = deps.exec ?? execSandbox;
-  await exec(sandboxName, command, {
+  const execOptions = {
     tty: false,
     ...(invocation.stdinInput !== undefined ? { stdinInput: invocation.stdinInput } : {}),
-  });
+  };
+  if (deps.deferredLifecycleExit) {
+    // The public command supplies a deferred process facade. Forward its exit
+    // callback through execSandbox instead of falling back to process.exit.
+    await exec(sandboxName, command, execOptions, {
+      exit: deps.deferredLifecycleExit,
+    });
+    return;
+  }
+  await exec(sandboxName, command, execOptions);
 }

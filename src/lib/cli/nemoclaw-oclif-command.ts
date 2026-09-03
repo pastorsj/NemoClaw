@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Command, Flags, type Interfaces } from "@oclif/core";
+import { isSandboxLifecycleDeferredExit } from "../core/process-exit";
 import {
   assertHermesPortableCommandSupported,
   assertHermesPortableCommandUnavailable,
@@ -220,12 +221,13 @@ export abstract class NemoClawCommand extends Command {
   }
 
   protected override async catch(error: unknown): Promise<unknown> {
-    // Shields transitions defer process.exit through a sentinel so an exit
-    // cannot strand the transition lock (see failShieldsCommand). By the time
-    // oclif routes the rejection here every lock has been released, and the
-    // failure lines were already printed at the throw site, so only the exit
-    // code remains to record. Everything else keeps oclif's default handling.
-    if (isDeferredShieldsExit(error)) {
+    // Lifecycle actions defer process.exit through sentinels so an exit cannot
+    // strand the command's sandbox lock. Oclif catches the sentinel inside
+    // super._run(), before control returns to the outer lifecycle fence, so
+    // recording the code here lets that fence finish normally. Failure lines
+    // were already printed at the throw site. Everything else keeps oclif's
+    // default handling.
+    if (isDeferredShieldsExit(error) || isSandboxLifecycleDeferredExit(error)) {
       this.setExitCode(error.exitCode);
       return;
     }
