@@ -129,6 +129,7 @@ async function waitForSandboxStatus(host: HostCliClient): Promise<ShellProbeResu
 }
 
 async function runOpenClawLaunchTurnAfterRecovery(input: {
+  artifacts: ArtifactSink;
   host: HostCliClient;
   redactionValues: string[];
   sandbox: SandboxClient;
@@ -154,6 +155,17 @@ async function runOpenClawLaunchTurnAfterRecovery(input: {
     120_000,
   );
   expect(recovery.exitCode, resultText(recovery)).toBe(0);
+
+  await runPublicFabricTurn({
+    agent: "openclaw",
+    artifacts: input.artifacts,
+    env: env(),
+    host: input.host,
+    lifecyclePhase: "after-gateway-restart",
+    redactionValues: input.redactionValues,
+    sandbox: input.sandbox,
+    sandboxName: SANDBOX_NAME,
+  });
 
   await runOpenClawLaunchReadinessLeaseTurns({
     artifactName: "phase-4-openclaw-launch-turn",
@@ -426,6 +438,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
       "the public agent command completes through the pinned Fabric runner without leaving a child process",
       ...(process.platform === "linux"
         ? [
+            "the public Fabric command succeeds again after supported gateway recovery",
             "each of two PTY launches records two ordered structured turns and restores the mutable config permission contract",
           ]
         : []),
@@ -614,7 +627,7 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   });
 
   await (process.platform === "linux"
-    ? runOpenClawLaunchTurnAfterRecovery({ host, redactionValues, sandbox })
+    ? runOpenClawLaunchTurnAfterRecovery({ artifacts, host, redactionValues, sandbox })
     : Promise.resolve());
 
   progress.phase("inspect runtime logs and security posture");
