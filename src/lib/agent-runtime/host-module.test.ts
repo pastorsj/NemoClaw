@@ -6,6 +6,8 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { loadHarnessAdapter } from "./adapter/loader";
+import { HARNESS_MCP_ADAPTER_CONTRACT } from "./adapter/mcp";
 import { loadHarnessMcpAdapterHostModule } from "./host-module";
 import { installHarnessPackage } from "./package/install";
 import type { InstalledHarnessPackage } from "./package/store";
@@ -105,6 +107,24 @@ function installFuturePackageWithoutHostModule(): InstalledHarnessPackage {
   );
 }
 
+function installFuturePackageWithoutMcpCapability(): InstalledHarnessPackage {
+  writeFuturePackage();
+  writeFixtureFile(
+    "packages/nemoclaw-future-harness/manifest.yaml",
+    [
+      "name: future-harness",
+      "display_name: Future Harness",
+      "mcp:",
+      "  support: disabled",
+      "",
+    ].join("\n"),
+  );
+  return installHarnessPackage(
+    { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+    { storeRoot },
+  );
+}
+
 beforeEach(() => {
   fixtureRoot = fs.mkdtempSync(path.join(TEST_PARENT, "fixture-"));
   fs.chmodSync(fixtureRoot, 0o700);
@@ -175,6 +195,14 @@ describe("installed harness host module", () => {
     ).toThrow(/manifest does not match the requested MCP adapter/u);
   });
 
+  it("rejects a package that does not declare MCP before the generic loader runs it", () => {
+    const installed = installFuturePackageWithoutMcpCapability();
+
+    expect(() =>
+      loadHarnessAdapter(installed.identity, HARNESS_MCP_ADAPTER_CONTRACT, { storeRoot }),
+    ).toThrow(/manifest does not declare MCP adapter/u);
+  });
+
   it("rejects an MCP adapter whose installed bytes no longer match its receipt", () => {
     const installed = installFuturePackage();
     fs.writeFileSync(
@@ -215,6 +243,50 @@ module.exports = {
         configRoot: null,
       }),
     ).toThrow(/returned an invalid command/u);
+  });
+
+  it("validates requests before package code receives them", () => {
+    const installed = installFuturePackage();
+    const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
+    const invalidRequest = {
+      entry: { server: "docs", url: "https://example.test/mcp", headers: {} },
+      managedEntries: [],
+      replaceExisting: "yes",
+      teardownRollback: false,
+      configRoot: null,
+    } as unknown as Parameters<typeof module.buildMcpRegistrationCommand>[0];
+
+    expect(() => module.buildMcpRegistrationCommand(invalidRequest)).toThrow(
+      /request does not satisfy its schema/u,
+    );
+  });
+
+  it("gives package code a detached frozen request and freezes its result", () => {
+    const installed = installFuturePackage(`
+module.exports = {
+  buildMcpRegistrationCommand(request) {
+    try { request.entry.server = "changed"; } catch {}
+    try { request.managedEntries.push(request.entry); } catch {}
+    return [request.entry.server, String(request.managedEntries.length)];
+  },
+  buildMcpRemovalCommand() { return ["remove"]; },
+};
+`);
+    const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
+    const request = {
+      entry: { server: "docs", url: "https://example.test/mcp", headers: {} },
+      managedEntries: [],
+      replaceExisting: false,
+      teardownRollback: false,
+      configRoot: null,
+    };
+
+    const command = module.buildMcpRegistrationCommand(request);
+
+    expect(command).toEqual(["docs", "0"]);
+    expect(Object.isFrozen(command)).toBe(true);
+    expect(request.entry.server).toBe("docs");
+    expect(request.managedEntries).toEqual([]);
   });
 
   it("rejects package modules that import host dependencies", () => {
