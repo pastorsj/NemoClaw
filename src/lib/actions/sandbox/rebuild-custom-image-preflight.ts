@@ -179,6 +179,7 @@ export async function preflightRebuildImage(
     // null sentinel. Keep that behavior while sourcing every path from the
     // already pinned definition instead of reloading repository state.
     const patchAgent = effectiveAgent.name === "openclaw" ? null : effectiveAgent;
+    const baseDockerfilePath = patchAgent ? null : effectiveAgent.dockerfileBasePath;
     if (input.provider === "compatible-endpoint") {
       process.env.NEMOCLAW_REASONING = input.compatibleEndpointReasoning ?? "false";
       applyReasoningEffortEnv(input.compatibleEndpointReasoningEffort);
@@ -202,6 +203,7 @@ export async function preflightRebuildImage(
     const { buildId, dashboardRemoteBindPrepared } = await preparePatch({
       agent: patchAgent,
       rootDir: effectiveAgent.packageRoot,
+      ...(baseDockerfilePath ? { baseDockerfilePath } : {}),
       fromDockerfile: input.fromDockerfile,
       sandboxBaseImage: OPENCLAW_SANDBOX_BASE_IMAGE,
       sandboxBaseTag: SANDBOX_BASE_TAG,

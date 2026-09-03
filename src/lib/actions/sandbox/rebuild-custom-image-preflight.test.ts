@@ -97,10 +97,12 @@ describe("preflightRebuildImage", () => {
       const stagedDockerfile = path.join(buildCtx, "Dockerfile");
       fs.writeFileSync(stagedDockerfile, "FROM scratch\n");
       const pinnedRoot = `/installed/pinned-${agentName}`;
+      const pinnedBaseDockerfile = `${pinnedRoot}/packages/nemoclaw-${agentName}/Dockerfile.base`;
       const pinnedDefinition = Object.freeze({
         ...OPENCLAW_DEFINITION,
         name: agentName,
         packageRoot: pinnedRoot,
+        dockerfileBasePath: pinnedBaseDockerfile,
       }) as AgentDefinition;
       const stageBuildContext = vi.fn(() => ({
         buildCtx,
@@ -134,6 +136,9 @@ describe("preflightRebuildImage", () => {
           expect.objectContaining({
             rootDir: pinnedRoot,
             agent: expectedPatchAgentName === null ? null : pinnedDefinition,
+            ...(expectedPatchAgentName === null
+              ? { baseDockerfilePath: pinnedBaseDockerfile }
+              : {}),
           }),
         );
         expect(result.prepared.rebuildTarget).toEqual({

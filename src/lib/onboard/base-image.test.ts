@@ -10,10 +10,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const dockerMocks = vi.hoisted(() => ({
   capture: vi.fn(),
 }));
+const sandboxBaseImageMocks = vi.hoisted(() => ({
+  resolve: vi.fn(),
+}));
 
 vi.mock("../adapters/docker", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../adapters/docker")>()),
   dockerCapture: dockerMocks.capture,
+}));
+vi.mock("../sandbox-base-image", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../sandbox-base-image")>()),
+  resolveSandboxBaseImage: sandboxBaseImageMocks.resolve,
 }));
 
 import { openClawBaseImageHasSecurityInventory, pullAndResolveBaseImageDigest } from "./base-image";
@@ -73,6 +80,58 @@ describe("OpenClaw sandbox base image validation", () => {
       expect(dockerMocks.capture).not.toHaveBeenCalled();
     } finally {
       fs.rmSync(packageRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a nested package Dockerfile with its installed object build context", () => {
+    const objectRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-object-")),
+    );
+    const baseDockerfilePath = path.join(
+      objectRoot,
+      "packages",
+      "nemoclaw-openclaw",
+      "Dockerfile.base",
+    );
+    fs.mkdirSync(path.dirname(baseDockerfilePath), { recursive: true });
+    fs.writeFileSync(baseDockerfilePath, "FROM scratch\n");
+    sandboxBaseImageMocks.resolve.mockReturnValue(null);
+    try {
+      expect(
+        pullAndResolveBaseImageDigest({
+          rootDir: objectRoot,
+          baseDockerfilePath,
+        }),
+      ).toBeNull();
+      expect(sandboxBaseImageMocks.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({
+          dockerfilePath: baseDockerfilePath,
+          rootDir: objectRoot,
+        }),
+      );
+    } finally {
+      fs.rmSync(objectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an explicit base Dockerfile outside the installed object root", () => {
+    const testRoot = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-object-escape-")),
+    );
+    const objectRoot = path.join(testRoot, "object");
+    const outsideDockerfile = path.join(testRoot, "Dockerfile.base");
+    fs.mkdirSync(objectRoot);
+    fs.writeFileSync(outsideDockerfile, "FROM scratch\n");
+    try {
+      expect(() =>
+        pullAndResolveBaseImageDigest({
+          rootDir: objectRoot,
+          baseDockerfilePath: outsideDockerfile,
+        }),
+      ).toThrow("OpenClaw base Dockerfile escapes its package root");
+      expect(sandboxBaseImageMocks.resolve).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(testRoot, { recursive: true, force: true });
     }
   });
 

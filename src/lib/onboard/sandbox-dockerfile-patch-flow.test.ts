@@ -71,6 +71,8 @@ describe("prepareSandboxDockerfilePatch", () => {
     await prepareSandboxDockerfilePatch({
       agent: null,
       rootDir: "/tmp/nemoclaw-openclaw-package",
+      baseDockerfilePath:
+        "/tmp/nemoclaw-openclaw-package/packages/nemoclaw-openclaw/Dockerfile.base",
       fromDockerfile: null,
       sandboxBaseImage: resolutionMetadata.imageName,
       sandboxBaseTag: "latest",
@@ -95,6 +97,8 @@ describe("prepareSandboxDockerfilePatch", () => {
 
     expect(pullAndResolveBaseImageDigest).toHaveBeenCalledWith({
       rootDir: "/tmp/nemoclaw-openclaw-package",
+      baseDockerfilePath:
+        "/tmp/nemoclaw-openclaw-package/packages/nemoclaw-openclaw/Dockerfile.base",
       requireOpenshellSandboxAbi: true,
       resolutionHint: resolutionMetadata,
     });

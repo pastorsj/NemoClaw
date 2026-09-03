@@ -22,7 +22,10 @@ import { getInstalledOpenshellVersion } from "./openshell-version";
  */
 export const openClawBaseImageHasSecurityInventory = openClawSandboxBaseImageHasSecurityInventory;
 
-function requireOpenClawBaseDockerfile(rootDir: string): string {
+function requireOpenClawBaseDockerfile(
+  rootDir: string,
+  baseDockerfilePath?: string | null,
+): string {
   if (!path.isAbsolute(rootDir) || path.resolve(rootDir) !== rootDir) {
     throw new Error("OpenClaw package root must be a canonical absolute path");
   }
@@ -36,7 +39,7 @@ function requireOpenClawBaseDockerfile(rootDir: string): string {
     throw new Error(`OpenClaw package root is not a trusted directory: ${rootDir}`);
   }
 
-  const dockerfilePath = defaultOpenclawBaseDockerfile(rootDir);
+  const dockerfilePath = baseDockerfilePath ?? defaultOpenclawBaseDockerfile(rootDir);
   let resolvedDockerfile: string;
   try {
     resolvedDockerfile = fs.realpathSync(dockerfilePath);
@@ -62,6 +65,8 @@ function requireOpenClawBaseDockerfile(rootDir: string): string {
  */
 export function pullAndResolveBaseImageDigest(options: {
   rootDir: string;
+  /** Explicit package asset path when the build context contains a nested package tree. */
+  baseDockerfilePath?: string | null;
   requireOpenshellSandboxAbi?: boolean;
   resolutionHint?: SandboxBaseImageResolutionMetadata | null;
   forceRefresh?: boolean;
@@ -72,7 +77,7 @@ export function pullAndResolveBaseImageDigest(options: {
   glibcVersion?: string | null;
   metadata?: SandboxBaseImageResolutionMetadata;
 } | null {
-  const dockerfilePath = requireOpenClawBaseDockerfile(options.rootDir);
+  const dockerfilePath = requireOpenClawBaseDockerfile(options.rootDir, options.baseDockerfilePath);
   return resolveSandboxBaseImage({
     imageName: SANDBOX_BASE_IMAGE,
     dockerfilePath,
