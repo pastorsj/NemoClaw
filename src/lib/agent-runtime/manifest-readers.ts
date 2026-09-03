@@ -19,6 +19,7 @@ import type {
   ManifestValue,
   StringMap,
 } from "./manifest-types";
+import { isSnapshotControlPath } from "../state/snapshot/content-digest.js";
 import { readStateFileRestore } from "./state/file-restore";
 
 const yaml: { load(input: string): unknown } = require("js-yaml");
@@ -128,6 +129,9 @@ function assertStateFilePath(value: string, field: string): void {
     throw new Error(
       `Agent manifest field '${field}' must be a canonical relative path without empty, '.', or '..' components`,
     );
+  }
+  if (isSnapshotControlPath(value)) {
+    throw new Error(`Agent manifest field '${field}' uses a path reserved for snapshot metadata`);
   }
 }
 

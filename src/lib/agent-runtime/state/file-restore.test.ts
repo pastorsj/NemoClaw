@@ -275,6 +275,28 @@ describe("state file restore ownership", () => {
     expect(() => loadAgent(agentName)).toThrow(/state_files\[0\]\.path.*relative path/);
   });
 
+  it.each([
+    "rebuild-manifest.json",
+    "REBUILD-MANIFEST.JSON",
+    ".nemoclaw-rebuild-recovery.json/nested",
+    ".NEMOCLAW-REBUILD-RECOVERY.JSON/nested",
+    `rebuild-policy-handoff.${"a".repeat(64)}.yaml`,
+    `REBUILD-POLICY-HANDOFF.${"A".repeat(64)}.YAML`,
+  ])("rejects snapshot control path %s as agent state (#6334)", (statePath) => {
+    const agentName = `restore-reserved-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Restore",
+        "state_files:",
+        `  - path: ${statePath}`,
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/state_files\[0\]\.path.*snapshot metadata/);
+  });
+
   it("rejects duplicate or ancestor-overlapping user-owned keys (#6334)", () => {
     const agentName = `restore-overlap-user-${String(Date.now())}`;
     writeTempAgentManifest(

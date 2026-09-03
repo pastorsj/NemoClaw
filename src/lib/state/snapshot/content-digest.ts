@@ -11,10 +11,14 @@ import {
   readdirSync,
   readlinkSync,
   readSync,
+  type Dirent,
 } from "node:fs";
 import path from "node:path";
 
 const REBUILD_MANIFEST_FILE = "rebuild-manifest.json";
+export const REBUILD_RECOVERY_MARKER_FILE = ".nemoclaw-rebuild-recovery.json";
+const REBUILD_POLICY_HANDOFF_FILE_PATTERN = /^rebuild-policy-handoff\.[0-9a-f]{64}\.yaml$/u;
+const REBUILD_POLICY_HANDOFF_FILE_EXAMPLE = `rebuild-policy-handoff.${"0".repeat(64)}.yaml`;
 
 type SnapshotFileStat = NonNullable<ReturnType<typeof lstatSync>>;
 
@@ -50,7 +54,10 @@ function snapshotDirectoryOpenFlags(): number {
 /** Hash one stable snapshot tree, including entry type, path, mode, and file bytes. */
 export function hashSnapshotTree(
   backupPath: string,
-  options: { readonly excludedRootEntries?: readonly string[] } = {},
+  options: {
+    readonly excludedRootEntries?: readonly string[];
+    readonly excludeRootEntry?: (entry: Dirent) => boolean;
+  } = {},
 ): string {
   if (typeof constants.O_NOFOLLOW !== "number") {
     throw new Error("snapshot hashing requires O_NOFOLLOW support");
@@ -90,7 +97,12 @@ export function hashSnapshotTree(
         left.name === right.name ? 0 : left.name < right.name ? -1 : 1,
       );
       for (const entry of entries) {
-        if (relativeDirectory === "" && excludedRootEntries.has(entry.name)) continue;
+        if (
+          relativeDirectory === "" &&
+          (excludedRootEntries.has(entry.name) || options.excludeRootEntry?.(entry) === true)
+        ) {
+          continue;
+        }
         const fullPath = path.join(directory, entry.name);
         const relativePath = path.posix.join(
           relativeDirectory.split(path.sep).join(path.posix.sep),
@@ -179,7 +191,29 @@ export function hashSnapshotTree(
   return hash.digest("hex");
 }
 
-/** Hash only restorable backup content; the manifest records this value. */
+/** Identify root paths reserved for snapshot publication and rebuild recovery control records. */
+export function isSnapshotControlPath(relativePath: string): boolean {
+  const root = relativePath.replace(/\\/gu, "/").split("/", 1)[0].toLowerCase();
+  return (
+    root === REBUILD_MANIFEST_FILE ||
+    root === REBUILD_RECOVERY_MARKER_FILE ||
+    REBUILD_POLICY_HANDOFF_FILE_PATTERN.test(root)
+  );
+}
+
+/** Report whether dynamic state-directory discovery could claim a reserved control record. */
+export function snapshotControlPathMatchesPrefix(prefix: string): boolean {
+  const normalizedPrefix = prefix.toLowerCase();
+  return [
+    REBUILD_MANIFEST_FILE,
+    REBUILD_RECOVERY_MARKER_FILE,
+    REBUILD_POLICY_HANDOFF_FILE_EXAMPLE,
+  ].some((fileName) => fileName.startsWith(normalizedPrefix));
+}
+
+/** Hash only restorable backup content; publication and recovery metadata are validated separately. */
 export function hashSnapshotBackupContent(backupPath: string): string {
-  return hashSnapshotTree(backupPath, { excludedRootEntries: [REBUILD_MANIFEST_FILE] });
+  return hashSnapshotTree(backupPath, {
+    excludeRootEntry: (entry) => entry.isFile() && isSnapshotControlPath(entry.name),
+  });
 }

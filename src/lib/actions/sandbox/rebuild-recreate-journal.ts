@@ -48,6 +48,7 @@ import type {
 } from "../../state/onboard-checkpoint-types";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
+import { REBUILD_RECOVERY_MARKER_FILE } from "../../state/snapshot/content-digest";
 import {
   inspectRebuildManifestHarnessPackage,
   clearRebuildPolicyHandoff,
@@ -64,7 +65,6 @@ import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 
 export type { RebuildPackageAuthority } from "./rebuild/authority";
 
-const REBUILD_RECOVERY_FILE = ".nemoclaw-rebuild-recovery.json";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 type RebuildRecoveryBackupRecordV1 = {
@@ -124,7 +124,7 @@ function validateRecoveryIdentity(
 }
 
 function recoveryPath(backupPath: string): string {
-  return path.join(backupPath, REBUILD_RECOVERY_FILE);
+  return path.join(backupPath, REBUILD_RECOVERY_MARKER_FILE);
 }
 
 function invalidRecoveryRecordError(backupPath: string, detail: string, cause?: unknown): Error {

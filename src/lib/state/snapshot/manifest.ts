@@ -48,7 +48,7 @@ import type {
   SandboxWorkloadReceipt,
 } from "../registry/types.js";
 import { cloneSandboxWorkloadReceipt } from "../registry/workload.js";
-import { hashSnapshotBackupContent } from "./content-digest.js";
+import { hashSnapshotBackupContent, isSnapshotControlPath } from "./content-digest.js";
 
 const MANIFEST_VERSION = 2;
 const CONTENT_SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -159,7 +159,14 @@ export interface ManifestPublishOps {
 export function normalizeStateFilePath(filePath: string): string | null {
   if (!filePath || filePath.includes("\0") || path.isAbsolute(filePath)) return null;
   const normalized = path.posix.normalize(filePath.replace(/\\/g, "/"));
-  if (normalized === "." || normalized.startsWith("../") || normalized === "..") return null;
+  if (
+    normalized === "." ||
+    normalized.startsWith("../") ||
+    normalized === ".." ||
+    isSnapshotControlPath(normalized)
+  ) {
+    return null;
+  }
   return normalized;
 }
 
@@ -174,7 +181,8 @@ function isSafeStateDirPath(dirPath: string): boolean {
     normalized === dirPath &&
     normalized !== "." &&
     normalized !== ".." &&
-    !normalized.startsWith("../")
+    !normalized.startsWith("../") &&
+    !isSnapshotControlPath(normalized)
   );
 }
 

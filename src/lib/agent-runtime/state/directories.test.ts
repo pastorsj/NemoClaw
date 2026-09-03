@@ -147,6 +147,28 @@ describe("agent state directory contract", () => {
   it.each([
     [{ state_dirs: "state" }, /state_dirs.*array/],
     [{ state_dirs: ["../state"] }, /canonical relative path/],
+    [{ state_dirs: ["rebuild-manifest.json/nested"] }, /reserved for snapshot metadata/],
+    [
+      { state_dirs: [{ path: ".nemoclaw-rebuild-recovery.json" }] },
+      /reserved for snapshot metadata/,
+    ],
+    [
+      { state_dirs: [`rebuild-policy-handoff.${"a".repeat(64)}.yaml`] },
+      /reserved for snapshot metadata/,
+    ],
+    [{ state_dirs: ["REBUILD-MANIFEST.JSON"] }, /reserved for snapshot metadata/],
+    [
+      { state_dirs: [{ path: "rebuild" }, { prefix: "rebuild-" }] },
+      /can match a path reserved for snapshot metadata/,
+    ],
+    [
+      { state_dirs: [{ path: ".nemoclaw" }, { prefix: ".nemoclaw-" }] },
+      /can match a path reserved for snapshot metadata/,
+    ],
+    [
+      { state_dirs: [{ path: "REBUILD" }, { prefix: "REBUILD-" }] },
+      /can match a path reserved for snapshot metadata/,
+    ],
     [{ state_dirs: [{ path: "/state" }] }, /relative path/],
     [{ state_dirs: [{ path: "state", prefix: "state-" }] }, /exactly one/],
     [{ state_dirs: [{ path: "state", unknown: true }] }, /unknown.*not allowed/],

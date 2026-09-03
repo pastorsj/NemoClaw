@@ -7,6 +7,10 @@ import type {
   AgentStateDirectoryShields,
   AgentStateLockPlan,
 } from "../manifest-types";
+import {
+  isSnapshotControlPath,
+  snapshotControlPathMatchesPrefix,
+} from "../../state/snapshot/content-digest.js";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -50,6 +54,13 @@ function assertCanonicalPath(value: string, field: string, allowWildcards = fals
   }
 }
 
+function assertStateDirectoryPath(value: string, field: string): void {
+  assertCanonicalPath(value, field);
+  if (isSnapshotControlPath(value)) {
+    throw new Error(`Agent manifest field '${field}' uses a path reserved for snapshot metadata`);
+  }
+}
+
 function readShields(value: unknown, field: string): AgentStateDirectoryShields | undefined {
   if (value === undefined) return undefined;
   if (value === "read-only" || value === "confidential") return value;
@@ -83,7 +94,7 @@ function readWritableSubpaths(value: unknown, field: string): string[] {
 function readStateDirectory(entry: unknown, index: number): AgentStateDirectory {
   const field = `state_dirs[${String(index)}]`;
   if (typeof entry === "string") {
-    assertCanonicalPath(entry, field);
+    assertStateDirectoryPath(entry, field);
     return { kind: "path", path: entry, backup: true, writableSubpaths: [] };
   }
   if (!isRecord(entry)) {
@@ -110,7 +121,7 @@ function readStateDirectory(entry: unknown, index: number): AgentStateDirectory 
     if (typeof path !== "string") {
       throw new Error(`Agent manifest field '${field}.path' must be a string`);
     }
-    assertCanonicalPath(path, `${field}.path`);
+    assertStateDirectoryPath(path, `${field}.path`);
     const writableSubpaths = readWritableSubpaths(
       entry.writable_subpaths,
       `${field}.writable_subpaths`,
@@ -134,6 +145,11 @@ function readStateDirectory(entry: unknown, index: number): AgentStateDirectory 
   if (typeof prefix !== "string" || !SAFE_LOCK_NAME_RE.test(prefix)) {
     throw new Error(
       `Agent manifest field '${field}.prefix' must contain only letters, digits, '.', '_', or '-'`,
+    );
+  }
+  if (snapshotControlPathMatchesPrefix(prefix)) {
+    throw new Error(
+      `Agent manifest field '${field}.prefix' can match a path reserved for snapshot metadata`,
     );
   }
   return {

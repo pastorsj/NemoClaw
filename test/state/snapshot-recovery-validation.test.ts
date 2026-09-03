@@ -1,13 +1,17 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { hashSnapshotBackupContent } from "../../src/lib/state/snapshot/content-digest.js";
+import {
+  hashSnapshotBackupContent,
+  REBUILD_RECOVERY_MARKER_FILE,
+} from "../../src/lib/state/snapshot/content-digest.js";
 
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-recovery-validation-"));
 vi.stubEnv("HOME", TMP_HOME);
@@ -284,6 +288,82 @@ describe("prepared rebuild backup recovery validation (#6114)", () => {
       ok: false,
       reason: "backup payload changed after publication",
     });
+  });
+
+  it("validates rebuild control records separately from the published payload", () => {
+    const timestamp = "2026-07-01T06-50-42-056Z";
+    const policyDocument = "version: 1\nnetwork_policies: {}\n";
+    const policySha256 = createHash("sha256").update(policyDocument).digest("hex");
+    const policyFile = `rebuild-policy-handoff.${policySha256}.yaml`;
+    const manifest = writeBackup(
+      "alpha",
+      timestamp,
+      {
+        version: 2,
+        harnessPackage: OPENCLAW_PACKAGE,
+        backupComplete: true,
+        stateDirs: ["workspace"],
+        backedUpDirs: ["workspace"],
+        rebuildPolicyHandoff: { file: policyFile, sha256: policySha256 },
+      },
+      { payloadFiles: { "workspace/note.txt": "published\n" } },
+    );
+    fs.writeFileSync(path.join(String(manifest.backupPath), policyFile), policyDocument, {
+      mode: 0o600,
+    });
+    fs.writeFileSync(
+      path.join(String(manifest.backupPath), REBUILD_RECOVERY_MARKER_FILE),
+      '{"transactionId":"11111111-1111-4111-8111-111111111111"}\n',
+      { mode: 0o600 },
+    );
+    const latest = sandboxState.getLatestBackup("alpha");
+    expect(latest).not.toBeNull();
+
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", OPENCLAW_OWNER, latest!)).toEqual({
+      ok: true,
+      manifest: expect.objectContaining({ backupPath: manifest.backupPath }),
+    });
+    expect(sandboxState.readRebuildPolicyHandoff(latest!)).toBe(policyDocument);
+
+    fs.writeFileSync(path.join(String(manifest.backupPath), policyFile), "changed\n", {
+      mode: 0o600,
+    });
+    expect(sandboxState.readRebuildPolicyHandoff(latest!)).toBeNull();
+
+    fs.writeFileSync(path.join(String(manifest.backupPath), "workspace", "note.txt"), "changed\n");
+    expect(sandboxState.validateRebuildRecoveryManifest("alpha", OPENCLAW_OWNER, latest!)).toEqual({
+      ok: false,
+      reason: "backup payload changed after publication",
+    });
+  });
+
+  it.each([
+    ["a manifest path", { stateFiles: [{ path: "rebuild-manifest.json", strategy: "copy" }] }],
+    ["a case-folded manifest path", { stateDirs: ["REBUILD-MANIFEST.JSON/nested"] }],
+    ["a recovery-marker descendant", { stateDirs: [`${REBUILD_RECOVERY_MARKER_FILE}/nested`] }],
+    [
+      "a policy-handoff path",
+      {
+        stateFiles: [{ path: `rebuild-policy-handoff.${"a".repeat(64)}.yaml`, strategy: "copy" }],
+      },
+    ],
+  ])("rejects persisted snapshot state that claims %s", (_case, overrides) => {
+    writeBackup("alpha", "2026-07-01T06-50-42-056Z", overrides);
+
+    expect(sandboxState.getLatestBackup("alpha")).toBeNull();
+  });
+
+  it("hashes a directory whose name is reserved for a control file", () => {
+    const backupPath = path.join(BACKUPS_ROOT, "alpha", "reserved-directory");
+    const reservedDirectory = path.join(backupPath, REBUILD_RECOVERY_MARKER_FILE);
+    fs.mkdirSync(reservedDirectory, { recursive: true });
+    const payloadPath = path.join(reservedDirectory, "state.txt");
+    fs.writeFileSync(payloadPath, "published\n");
+    const publishedDigest = hashSnapshotBackupContent(backupPath);
+
+    fs.writeFileSync(payloadPath, "changed\n");
+
+    expect(hashSnapshotBackupContent(backupPath)).not.toBe(publishedDigest);
   });
 
   it("does not authorize a selected backup after its manifest disappears", () => {

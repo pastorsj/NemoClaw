@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { hashSnapshotBackupContent } from "./snapshot/content-digest.js";
 import {
   __test,
   clearRebuildPolicyHandoff,
@@ -13,6 +14,7 @@ import {
   readRebuildPolicyHandoff,
   readSandboxStateBackupManifest,
   type RebuildManifest,
+  validateSnapshotBackupContent,
   writeRebuildPolicyHandoff,
 } from "./sandbox.js";
 
@@ -192,6 +194,34 @@ describe("rebuild manifest publication", () => {
 });
 
 describe("bounded rebuild policy handoff", () => {
+  it("keeps the post-publication handoff outside the restorable payload digest", () => {
+    const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-integrity-"));
+    tempDirs.push(backupPath);
+    const workspacePath = path.join(backupPath, "workspace");
+    fs.mkdirSync(workspacePath);
+    fs.writeFileSync(path.join(workspacePath, "note.txt"), "published\n");
+    const published = {
+      ...manifest(backupPath),
+      stateDirs: ["workspace"],
+      backedUpDirs: ["workspace"],
+      backupContentSha256: hashSnapshotBackupContent(backupPath),
+    };
+    __test.writeManifest(backupPath, published);
+
+    const withHandoff = writeRebuildPolicyHandoff(published, "version: 1\nnetwork_policies: {}\n");
+
+    expect(validateSnapshotBackupContent(withHandoff)).toEqual({
+      ok: true,
+      contentSha256: published.backupContentSha256,
+    });
+
+    fs.writeFileSync(path.join(workspacePath, "note.txt"), "changed\n");
+    expect(validateSnapshotBackupContent(withHandoff)).toEqual({
+      ok: false,
+      reason: "backup payload changed after publication",
+    });
+  });
+
   it("binds exact content, rejects tampering, and retires manifest authority before cleanup", () => {
     const backupPath = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-handoff-"));
     tempDirs.push(backupPath);
