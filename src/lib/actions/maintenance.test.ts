@@ -197,6 +197,7 @@ describe("backupAll", () => {
     readySandboxNames = new Set();
     mocks.startStoppedSandboxContainerForBackup.mockReturnValue({
       containerName: "openshell-sb-stopped-abc",
+      runtimeProviderId: "docker",
     });
     mocks.confirmSnapshotBackupAgentAuthority
       .mockImplementationOnce(() => undefined)
@@ -218,7 +219,10 @@ describe("backupAll", () => {
     expect(mocks.confirmSnapshotBackupAgentAuthority.mock.invocationCallOrder[1]).toBeLessThan(
       mocks.returnSandboxContainerToStopped.mock.invocationCallOrder[0]!,
     );
-    expect(mocks.returnSandboxContainerToStopped).toHaveBeenCalledWith("openshell-sb-stopped-abc");
+    expect(mocks.returnSandboxContainerToStopped).toHaveBeenCalledWith({
+      containerName: "openshell-sb-stopped-abc",
+      runtimeProviderId: "docker",
+    });
     expect(mocks.openBackupShieldsWindow).not.toHaveBeenCalled();
     expect(mocks.backupStartedSandboxState).not.toHaveBeenCalled();
     expect(mocks.backupSandboxState).not.toHaveBeenCalled();
