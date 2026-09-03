@@ -19,6 +19,7 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { readJsonFile, readJsonFileOr, writeJsonFile } from "../fixtures/file-state.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
+import { trackIssue4462FailureDiagnostics } from "../fixtures/issue-4462-diagnostics.ts";
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
@@ -507,6 +508,12 @@ test(
           timeoutMs: OPENSHELL_TIMEOUT_MS,
         }),
     );
+    // Cleanup is LIFO. Register diagnostics after deletion so it reads pairing
+    // state before either sandbox cleanup path removes it.
+    trackIssue4462FailureDiagnostics(cleanup, sandbox, SANDBOX_NAME, commandEnvironments.docker(), [
+      apiKey,
+      PRE_REBUILD_GATEWAY_TOKEN,
+    ]);
 
     // Phase 1: create a normal current sandbox first so the real gateway and
     // session/credential scaffolding exist, matching the legacy install/onboard

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as finalizationDeps from "../../onboard/machine/finalization-deps";
 import * as sandboxAgent from "../../onboard/sandbox-agent";
 import * as shields from "../../shields";
 import * as onboardSession from "../../state/onboard-session";
@@ -16,6 +15,7 @@ import * as rebuildMcp from "./rebuild-mcp-phase";
 import * as rebuildMessaging from "./rebuild-messaging-phase";
 import { runRebuildPostRestorePhase } from "./rebuild-post-restore-phase";
 import * as sessionModels from "./reconcile-session-models";
+import * as restoredGatewayPairing from "./restore-gateway-pairing";
 
 describe("rebuild post-restore phase", () => {
   let agentName: "openclaw" | "hermes" | "pi";
@@ -55,14 +55,11 @@ describe("rebuild post-restore phase", () => {
       order.push("doctor");
       return { status: 0, stdout: "", stderr: "" };
     });
-    vi.spyOn(processRecovery, "restartSandboxGateway").mockImplementation(() => {
-      order.push("gateway-restart");
-      return { ok: true, restarted: true, healthPassed: true, forwardRecovered: true };
-    });
-    vi.spyOn(finalizationDeps, "settleOrdinaryOpenClawPairing").mockImplementation(async () => {
-      order.push("pairing");
-      return { kind: "settled" };
-    });
+    vi.spyOn(restoredGatewayPairing, "establishRestoredSandboxGatewayPairing").mockImplementation(
+      async () => {
+        order.push("restored-pairing");
+      },
+    );
     vi.spyOn(sessionModels, "reconcileStalePinnedSessionModelsAfterRebuild").mockImplementation(
       () => {
         order.push("reconcile");
@@ -167,8 +164,7 @@ describe("rebuild post-restore phase", () => {
       "mcp",
       "config-hash",
       "config-hash-final",
-      "gateway-restart",
-      "pairing",
+      "restored-pairing",
       "host-forward",
       "config-hash-final",
     ]);
@@ -178,85 +174,48 @@ describe("rebuild post-restore phase", () => {
       300_000,
       { allowLocalDockerFallback: false },
     );
-    expect(processRecovery.restartSandboxGateway).toHaveBeenCalledExactlyOnceWith("alpha", {
-      quiet: true,
-      agentDefinition: currentAgentAuthority().definition,
-    });
+    expect(
+      restoredGatewayPairing.establishRestoredSandboxGatewayPairing,
+    ).toHaveBeenCalledExactlyOnceWith("alpha");
   });
 
-  it("stops publication when the restored OpenClaw gateway cannot restart", async () => {
-    vi.mocked(processRecovery.restartSandboxGateway).mockReturnValue({
-      ok: false,
-      failureLayer: "health timeout",
-      detail: "gateway process restarted but health did not pass before timeout",
-    });
+  it("stops publication when restored OpenClaw gateway pairing fails", async () => {
+    vi.mocked(restoredGatewayPairing.establishRestoredSandboxGatewayPairing).mockRejectedValue(
+      new Error(
+        "could not establish gateway pairing for 'alpha': authenticated gateway verification run failed",
+      ),
+    );
     const args = input();
 
     await runRebuildPostRestorePhase(args);
 
-    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
     expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
+    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
+    expect(args.log).toHaveBeenCalledWith(
+      "Restored OpenClaw gateway pairing failed: could not establish gateway pairing for 'alpha': authenticated gateway verification run failed",
+    );
     expect(args.bail).toHaveBeenCalledWith(
-      "OpenClaw managed gateway restart failed after rebuild.",
+      "OpenClaw gateway pairing could not be restored after rebuild.",
     );
   });
 
-  it("stops publication when restored OpenClaw pairing does not settle", async () => {
-    vi.mocked(finalizationDeps.settleOrdinaryOpenClawPairing).mockResolvedValue({
-      kind: "incomplete",
-      reason: "scope-upgrade-not-approved",
-    });
-    const args = input();
-
-    await runRebuildPostRestorePhase(args);
-
-    expect(processRecovery.restartSandboxGateway).toHaveBeenCalledOnce();
-    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
-    expect(args.bail).toHaveBeenCalledWith("OpenClaw pairing settlement failed after rebuild.");
-  });
-
-  it("stops pairing when agent authority changes during the managed gateway restart", async () => {
+  it("stops publication when agent authority changes during restored gateway pairing", async () => {
     const args = input();
     let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
       currentOnboardSession();
     vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
-    vi.mocked(processRecovery.restartSandboxGateway).mockImplementation(() => {
-      currentSession = {
-        ...currentSession,
-        harnessPackage: {
-          ...args.agentAuthority.harnessPackage!,
-          contentDigest: "b".repeat(64),
-        },
-      } as never;
-      return { ok: true, restarted: true, healthPassed: true, forwardRecovered: true };
-    });
-
-    await runRebuildPostRestorePhase(args);
-
-    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
-    expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.bail).toHaveBeenCalledWith(
-      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
+    vi.mocked(restoredGatewayPairing.establishRestoredSandboxGatewayPairing).mockImplementation(
+      async () => {
+        currentSession = {
+          ...currentSession,
+          harnessPackage: {
+            ...args.agentAuthority.harnessPackage!,
+            contentDigest: "b".repeat(64),
+          },
+        } as never;
+      },
     );
-  });
-
-  it("stops publication when agent authority changes during pairing settlement", async () => {
-    const args = input();
-    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
-      currentOnboardSession();
-    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
-    vi.mocked(finalizationDeps.settleOrdinaryOpenClawPairing).mockImplementation(async () => {
-      currentSession = {
-        ...currentSession,
-        harnessPackage: {
-          ...args.agentAuthority.harnessPackage!,
-          contentDigest: "b".repeat(64),
-        },
-      } as never;
-      return { kind: "settled" };
-    });
 
     await runRebuildPostRestorePhase(args);
 
@@ -286,8 +245,7 @@ describe("rebuild post-restore phase", () => {
       "restarted",
       { agentDefinition },
     );
-    expect(processRecovery.restartSandboxGateway).not.toHaveBeenCalled();
-    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
+    expect(restoredGatewayPairing.establishRestoredSandboxGatewayPairing).not.toHaveBeenCalled();
   });
 
   it("does not apply the managed gateway pairing gate to a terminal agent runtime", async () => {
@@ -295,8 +253,7 @@ describe("rebuild post-restore phase", () => {
 
     await runRebuildPostRestorePhase(input());
 
-    expect(processRecovery.restartSandboxGateway).not.toHaveBeenCalled();
-    expect(finalizationDeps.settleOrdinaryOpenClawPairing).not.toHaveBeenCalled();
+    expect(restoredGatewayPairing.establishRestoredSandboxGatewayPairing).not.toHaveBeenCalled();
   });
 
   it("stops every harness-owned repair when the recreated Session authority drifts", async () => {
