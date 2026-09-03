@@ -9,19 +9,11 @@
   "requirements": {
     "binaries": ["openclaw"]
   },
-  "model_schema": {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "additionalProperties": true
-  },
   "settings_schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
     "properties": {},
     "additionalProperties": false
-  },
-  "config": {
-    "accepts": ["models"]
   },
   "capabilities": {
     "streaming": false,

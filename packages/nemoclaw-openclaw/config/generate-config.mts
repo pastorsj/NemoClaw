@@ -827,7 +827,6 @@ export function buildOpenClawFabricConfig(): JsonObject {
       ownership: "caller_owned",
       control_location: "in_env_control",
     },
-    models: {},
   };
 }
 

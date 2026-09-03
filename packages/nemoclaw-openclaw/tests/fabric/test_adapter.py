@@ -220,7 +220,7 @@ raise SystemExit(64)
 
 
 def _agent_config() -> AgentConfig:
-    return AgentConfig.from_mapping({"models": {}})
+    return AgentConfig.from_mapping({})
 
 
 def _runtime_context(workspace: Path, artifacts: Path) -> RuntimeContext:
@@ -347,6 +347,35 @@ class OpenClawFixtureMixin:
 
 class OpenClawRuntimeTests(OpenClawFixtureMixin, unittest.IsolatedAsyncioTestCase):
     """Verify gateway translation, response validation, and process ownership."""
+
+    async def test_start_rejects_model_selection_before_openclaw_can_run(self) -> None:
+        runtime = OpenClawRuntime()
+        configured_model = AgentConfig.from_mapping(
+            {
+                "models": {
+                    "default": {
+                        "provider": "openshell",
+                        "model": "configured-model",
+                    }
+                }
+            }
+        )
+
+        with self.assertRaisesRegex(
+            openclaw_adapter.lifecycle.LifecycleError,
+            "model selection is owned by its managed gateway configuration",
+        ):
+            await runtime.start(
+                {
+                    "agent_name": "openclaw-test",
+                    "base_dir": str(self.base_dir),
+                    "config": configured_model,
+                    "runtime_context": _runtime_context(self.workspace, self.artifacts),
+                }
+            )
+
+        self.assertIsNone(runtime._config)
+        self.assertFalse(self.args_marker.exists())
 
     async def test_success_waits_for_exit_status_after_pipe_eof(self) -> None:
         class CompletedProcess:
@@ -990,7 +1019,12 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
         shutil.copyfile(OPENCLAW_ROOT / "fabric" / self.descriptor.name, self.descriptor)
         self.config_path = self.base_dir / "fabric.json"
 
-    def write_config(self, *, timeout_seconds: float = 5) -> Path:
+    def write_config(
+        self,
+        *,
+        timeout_seconds: float = 5,
+        models: dict[str, object] | None = None,
+    ) -> Path:
         payload = {
             "schema_version": "fabric.agent/v1alpha1",
             "metadata": {"name": "nemoclaw-openclaw-fixture"},
@@ -1007,8 +1041,9 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
                 "workspace": "./workspace",
                 "artifacts": "./artifacts",
             },
-            "models": {},
         }
+        if models is not None:
+            payload["models"] = models
         self.config_path.write_text(json.dumps(payload), encoding="utf-8")
         return self.config_path
 
@@ -1049,7 +1084,7 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
     def assert_fabric_artifacts_removed(self) -> None:
         self.assertEqual(list(self.artifacts.iterdir()), [])
 
-    def test_doctor_accepts_openclaws_empty_model_catalogue_before_run(self) -> None:
+    def test_doctor_accepts_openclaw_without_model_projection_before_run(self) -> None:
         _exit_failure, exit_success, _run_cli = _generic_runner()
         config = self.write_config()
         doctor = self.invoke_doctor_process(config)
@@ -1070,6 +1105,27 @@ class GenericRunnerTests(OpenClawFixtureMixin, unittest.TestCase):
             result["output"], {"response": "deterministic OpenClaw response"}
         )
         self.assertEqual(self.recorded_prompt()["text"], "hello from Fabric")
+        self.assert_fabric_artifacts_removed()
+
+    def test_runner_rejects_model_selection_before_openclaw_can_run(self) -> None:
+        exit_failure, _exit_success, _run_cli = _generic_runner()
+        config = self.write_config(
+            models={
+                "default": {
+                    "provider": "openshell",
+                    "model": "configured-model",
+                }
+            }
+        )
+
+        exit_code, stdout, stderr = self.invoke_cli(
+            ["run", "--config", str(config), "-m", "must not run"]
+        )
+
+        self.assertEqual(exit_code, exit_failure)
+        self.assertEqual(stdout, "")
+        self.assertIn("models", stderr)
+        self.assertFalse(self.args_marker.exists())
         self.assert_fabric_artifacts_removed()
 
     def test_runner_failure_never_returns_openclaw_output_or_prompt(self) -> None:

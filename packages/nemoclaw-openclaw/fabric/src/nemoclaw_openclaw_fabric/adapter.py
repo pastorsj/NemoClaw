@@ -318,6 +318,11 @@ class OpenClawRuntime:
                 "openclaw_invalid_start",
                 "OpenClaw received an invalid Fabric start payload",
             )
+        if config.models:
+            raise lifecycle.LifecycleError(
+                "openclaw_model_configuration_unsupported",
+                "OpenClaw model selection is owned by its managed gateway configuration",
+            )
         self._config = config
         self._base_dir = Path(base_dir)
 

@@ -229,7 +229,7 @@ describe("generate-openclaw-config.mts: config generation", () => {
       resolution: "preinstalled",
     });
     expect(fabric.environment.workspace).toBe("/sandbox");
-    expect(fabric.models).toEqual({});
+    expect(fabric.models).toBeUndefined();
     expect(JSON.stringify(fabric)).not.toMatch(/api[_-]?key|token|credential/iu);
     expect(fs.statSync(fabricPath).mode & 0o777).toBe(0o600);
   });
