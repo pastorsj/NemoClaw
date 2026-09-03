@@ -147,15 +147,17 @@ while NemoClaw safely composes exact versions without taking ownership away from
   contract, Python, fixture identity, and hash-locked dependency graph. They prove discovery,
   doctor, ordered invocation, lifecycle failures, malformed results, transport and process
   failures, environment isolation, signals, deadlines, and cleanup without a live sandbox.
-- [ ] **FABRIC-02A**: Mac and Brev no-messaging development journeys prove installed-package
-  identity, source-built image composition, the policy route, PONG, one confined `write_file` tool
-  call, bounded credential surfaces, process cleanup, and sandbox, provider, and gateway cleanup.
+- [ ] **FABRIC-02A**: macOS and Brev no-messaging development journeys prove exact OpenClaw and
+  Hermes package identity, source-built image composition, the policy route, native and public
+  Fabric PONG, bounded credential surfaces, process cleanup, and sandbox, provider, and gateway
+  cleanup.
 - [ ] **FABRIC-03**: Each real agent integration owns its exact adapter or released-adapter
   dependency, descriptor, configuration projection, image installation, and package tests. The
-  generic runner has no agent branch. Pi and OpenClaw use package-owned adapters; Hermes uses the
-  released Hermes adapter. Fabric 0.2 Deep Agents remains separate evaluation evidence because it
-  does not match native DCode dependencies or model settings. Final deterministic, Mac, and Brev
-  qualification remains required.
+  generic runner has no agent branch. Pi and OpenClaw use package-owned adapters. Hermes owns a
+  descriptor and supervisor that invoke the released Hermes adapter from an isolated environment.
+  Fabric 0.2 Deep Agents remains separate evaluation evidence because it does not match native
+  DCode dependencies or model settings. Final deterministic, macOS, and Brev qualification remains
+  required.
 
 ### Testing and release
 
@@ -214,17 +216,17 @@ while NemoClaw safely composes exact versions without taking ownership away from
 |---|---:|
 | GOV, UX | 2 |
 | PKG-01 through PKG-05, PKG-08 | 2 |
-| PKG-06, PKG-07 | 3 |
-| AGENT-01, AGENT-04 | 2 |
-| AGENT-02, AGENT-03, AGENT-05 | 3 |
+| PKG-06, PKG-07 | 3–4 |
+| AGENT-01, AGENT-04 | 2 and 4 |
+| AGENT-02, AGENT-03, AGENT-05 | 3–4 |
 | COMP-03, COMP-04, COMP-04A, COMP-04B | 2 |
-| Shared PKG, RUNTIME, COMP | 4 |
-| SERVE, COMP extension | 5 |
-| HOST | 6 |
-| FABRIC | 3 for implementation and development evidence; 7 for a separate product decision |
-| TEST-03, TEST-04, TEST-06, TEST-07 | 2 |
-| TEST-01, TEST-02, TEST-08 | 3 |
-| Remaining TEST, DIST, release COMP | 8 |
+| Shared PKG, RUNTIME, COMP | 5 |
+| SERVE, COMP extension | 6 |
+| HOST | 7 |
+| FABRIC | 3–4 for implementation and development evidence; 8 for a separate product decision |
+| TEST-03, TEST-04, TEST-06, TEST-07 | 2 and 4 |
+| TEST-01, TEST-02, TEST-08 | 3–4 |
+| Remaining TEST, DIST, release COMP | 9 |
 
 ---
 

@@ -76,11 +76,12 @@ packages. A privileged host preparer is a separate candidate component only when
 independently owned host mutation, such as DGX Station preparation.
 
 NeMo Fabric is not one of the three composition axes. Its first experiment is a generic
-sandbox-local headless invocation layer. Agent runtime packages select released Fabric adapters
-through data, while NemoClaw retains package, policy, credential, OpenShell, state, and lifecycle
-authority. The released Fabric Deep Agents adapter is exercised beside LangChain Deep Agents Code,
-but its different dependency graph and model settings do not establish native DCode parity. Pi can
-use the same runner after its Fabric adapter has a reproducible public release.
+sandbox-local headless invocation layer. Agent runtime packages select Fabric descriptors through
+data, while NemoClaw retains package, policy, credential, OpenShell, state, and lifecycle authority.
+DCode selects released `nvidia.fabric.langchain.deepagents`. Pi and OpenClaw supply package-owned
+adapters. Hermes selects package-owned `nvidia.nemoclaw.hermes`, whose supervisor invokes released
+`nvidia.fabric.hermes` from an isolated environment. This local-fork development evidence does not
+establish native DCode parity, completed live qualification, or product support.
 
 ## NemoClaw's Role
 

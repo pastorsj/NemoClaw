@@ -9,7 +9,7 @@ Stabilize one in-tree composition path before extracting repositories. Reuse cur
 registries. Introduce a common package envelope only for distribution and identity, then keep each
 component behind its own typed contract.
 
-The roadmap uses eight capability slices. Each slice must leave the current product usable and have
+The roadmap uses nine capability slices. Each slice must leave the current product usable and have
 its own rollback point. This is intentionally smaller than the preserved 57-plan migration.
 
 ## Delivery Gates
@@ -18,11 +18,12 @@ its own rollback point. This is intentionally smaller than the preserved 57-plan
 |---|---:|---|---|
 | Product scope | 2 | Recorded `Accept` decision with reason, placement, accountable maintainer, initial components, trust, validation, and rollback | Stop before implementation |
 | Agent package | 3 | Exact package install, unchanged onboarding, package tests, and one complete lifecycle | Keep current `agents/` paths authoritative |
-| Runtime provider | 4 | Current Docker and external-gateway parity with unchanged activation authority | Keep current static registration |
-| Serving | 5 | Current catalogue parity and one real backend lifecycle | Keep current serving implementation |
-| Platform | 6 | Readiness and claim parity plus accepted host-preparer boundary | Keep host preparation in core |
-| Fabric | 3 and 7 | Phase 3 deterministic and bounded live evidence, followed by a separate product decision | Keep Fabric as a local-fork experiment |
-| External handoff | 8 | Exact artifacts, compatibility edges, supported live profiles, provenance, rollback | Keep qualified packages in-tree |
+| Agent runtime contract | 4 | Explicit identity, finite operations, package ownership, source gates, and bounded live edges | Keep remaining native behavior in core |
+| Runtime provider | 5 | Current Docker and external-gateway parity with unchanged activation authority | Keep current static registration |
+| Serving | 6 | Current catalogue parity and one real backend lifecycle | Keep current serving implementation |
+| Platform | 7 | Readiness and claim parity plus accepted host-preparer boundary | Keep host preparation in core |
+| Fabric | 3 and 8 | Phase 3 deterministic and bounded live evidence, followed by a separate product decision | Keep Fabric as a local-fork experiment |
+| External handoff | 9 | Exact artifacts, compatibility edges, supported live profiles, provenance, rollback | Keep qualified packages in-tree |
 
 ## Phases
 
@@ -33,16 +34,18 @@ its own rollback point. This is intentionally smaller than the preserved 57-plan
   changing execution paths.
 - [ ] **Phase 3: Agent Runtime Packages** — Make agent integrations self-contained and connect
   compatible headless commands through one package-selected Fabric runner.
-- [ ] **Phase 4: Runtime Provider Packages** — Wrap current Docker and the Kubernetes-named
+- [ ] **Phase 4: Agent Runtime Contract** — Move every native implementation and detailed test to
+  its package behind a finite typed contract, leaving core independent of agent runtime identity.
+- [ ] **Phase 5: Runtime Provider Packages** — Wrap current Docker and the Kubernetes-named
   external-gateway bundle behind build-time in-tree package identities while preserving
   registration, activation, qualification, and current support claims.
-- [ ] **Phase 5: Serving Runtime Packages** — Package serving catalogue fragments and current typed
+- [ ] **Phase 6: Serving Runtime Packages** — Package serving catalogue fragments and current typed
   adapters, starting with one backend and removing substrate assumptions through existing surfaces.
-- [ ] **Phase 6: Platform and Host Boundaries** — Consolidate declarative platform profiles and
+- [ ] **Phase 7: Platform and Host Boundaries** — Consolidate declarative platform profiles and
   isolate only justified privileged host preparation.
-- [ ] **Phase 7: NeMo Fabric Product Gate** — Evaluate Phase 3 evidence without changing onboarding,
+- [ ] **Phase 8: NeMo Fabric Product Gate** — Evaluate Phase 3 evidence without changing onboarding,
   always-on lifecycle behavior, or support status.
-- [ ] **Phase 8: Qualification and Repository Handoff** — Prove compatibility edges, exact selected
+- [ ] **Phase 9: Qualification and Repository Handoff** — Prove compatibility edges, exact selected
   artifacts, updates, rollback, named platform journeys, and unchanged external package trees.
 
 ## Phase Details
@@ -179,7 +182,40 @@ FABRIC-02A, FABRIC-03, TEST-01, TEST-02, TEST-04, TEST-06, TEST-07, TEST-08
    canonical package root and the installed object is the real execution asset root.
 8. NemoCUA remains a legacy built-in candidate until separately accepted and packaged.
 
-### Phase 4: Runtime Provider Packages
+### Phase 4: Agent Runtime Contract
+
+**Goal:** NemoClaw core composes explicit installed agent runtime packages through a closed typed
+contract and contains no native OpenClaw, Hermes, DCode, or Pi implementation.
+
+**Depends on:** Phase 3
+
+**Requirements:** GOV-02, PKG-04, PKG-04A, PKG-06, PKG-07, AGENT-01, AGENT-02,
+AGENT-03, AGENT-04, AGENT-05, FABRIC-03, TEST-01, TEST-02, TEST-03, TEST-04, TEST-05,
+TEST-06, TEST-07, TEST-08
+
+**Plans:** 0/5 plans executed
+
+- [ ] `04-01` — Add the finite contract, receipt-bound loader, explicit identity, and source gates.
+- [ ] `04-02` — Move Hermes native behavior and detailed tests behind the contract.
+- [ ] `04-03` — Move OpenClaw native behavior and detailed tests behind the contract.
+- [ ] `04-04` — Close DCode and Pi ownership and remove transitional source mappings.
+- [ ] `04-05` — Remove remaining fallbacks and run deterministic, Mac, and Brev qualification.
+
+**Implementation order:**
+
+1. Record the fixed host-helper boundary for this local candidate; any upstream or support claim
+   still requires an accepted product decision. Do not add arbitrary callbacks.
+2. Build one finite adapter contract and loader from the current MCP security mechanism.
+3. Require explicit `AgentDefinition` and exact package identity in ordinary paths; isolate legacy
+   null-to-OpenClaw migration.
+4. Move Hermes first, OpenClaw second, then DCode and Pi. Delete each old implementation when its
+   package path becomes authoritative.
+5. Move detailed native tests with their implementation. Keep generic composition, transaction,
+   security, and E2E infrastructure in core.
+6. Enforce source and suite ownership, then run contract-first deterministic gates and bounded
+   external-edge E2E rather than a Cartesian matrix.
+
+### Phase 5: Runtime Provider Packages
 
 **Goal:** Runtime provider ownership is independent without weakening privileged activation.
 
@@ -195,7 +231,7 @@ FABRIC-02A, FABRIC-03, TEST-01, TEST-02, TEST-04, TEST-06, TEST-07, TEST-08
    envelope/store behavior and resolve the first cross-component selection receipt. Existing
    lifecycle transactions remain the executors.
 
-### Phase 5: Serving Runtime Packages
+### Phase 6: Serving Runtime Packages
 
 **Goal:** A backend owns its catalogue and executable lifecycle without owning credentials, policy,
 or runtime-provider behavior.
@@ -209,7 +245,7 @@ or runtime-provider behavior.
 4. Move remaining supported backends one at a time.
 5. Keep remote inference provider work as a separate later contract.
 
-### Phase 6: Platform and Host Boundaries
+### Phase 7: Platform and Host Boundaries
 
 **Goal:** Platform support is declarative and evidence-backed; privileged host mutation has explicit
 ownership.
@@ -221,7 +257,7 @@ ownership.
 3. Define a host-preparer contract only if DGX Station and a second real preparer prove it.
 4. Keep platform support claims tied to physical evidence.
 
-### Phase 7: NeMo Fabric Product Gate
+### Phase 8: NeMo Fabric Product Gate
 
 **Goal:** Decide whether Phase 3's sandbox-local Fabric experiment merits a separate supported
 capability proposal. Fabric remains outside the control plane.
@@ -233,7 +269,7 @@ capability proposal. Fabric remains outside the control plane.
 3. Record ownership, compatibility, rollback, and release validation before any support proposal.
 4. Make no product claim unless a separate recorded decision has status `Accept`.
 
-### Phase 8: Qualification and Repository Handoff
+### Phase 9: Qualification and Repository Handoff
 
 **Goal:** Independently released components update without breaking supported NemoClaw compositions.
 
@@ -258,13 +294,14 @@ These are engineering ranges after scope acceptance, not calendar commitments.
 |---|---:|---|
 | Agent store, CLI, and state identity | 3–5 engineer-weeks | State migration and installer compatibility |
 | Agent runtime packages | 10–18 engineer-weeks | OpenClaw and Hermes native behavior still in core |
+| Agent runtime core extraction | 7–12 engineer-weeks | Native state, pairing, gateway, messaging, and legacy identity |
 | Runtime provider packages | 4–7 engineer-weeks | Privileged registration and qualification boundaries |
 | Serving runtime packages | 5–9 engineer-weeks | Docker coupling and physical GPU qualification |
 | Platform and host cleanup | 3–6 engineer-weeks | DGX Station preparation and Windows ownership |
 | NeMo Fabric pilot | 1–3 engineer-weeks | Exact adapter and harness version alignment |
 | External repositories and release automation | 4–7 engineer-weeks | Signing, retention, revocation, and cross-repo CI |
 
-The work is roughly 30–55 engineer-weeks if every workstream is accepted. Three to five engineers
+The work is roughly 37–67 engineer-weeks if every workstream is accepted. Three to five engineers
 can parallelize package-native work after Phase 2, but security, state, installer, and release gates
 remain sequential. The first useful milestone—package store plus one terminal-agent package—is
 roughly 5–8 engineer-weeks.

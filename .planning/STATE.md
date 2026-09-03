@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: nemoclaw-component-composition
 status: Phase 3 Fabric work is active; the generic foundation is complete, OpenClaw and Hermes
   deterministic integration is in progress, and Mac and Brev qualification is pending
-last_updated: "2026-09-02T00:32:30.000Z"
+last_updated: "2026-09-03T00:00:00.000Z"
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 1
-  total_plans: 28
+  total_plans: 33
   completed_plans: 24
-  percent: 86
+  percent: 73
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -20,7 +20,7 @@ progress:
 
 ## Current Position
 
-Phase: 3 of 8 — Agent Runtime Packages and Fabric Headless Integration
+Phase: 3 of 9 — Agent Runtime Packages and Fabric Headless Integration
 
 Status: Phase 2 Plans 02-01 through 02-22 completed the package foundation. Plan 02-23 remains
 pending and shares its no-messaging environment work with Phase 3 Plan 03-04. Phase 3 Plan 03-01
@@ -144,6 +144,11 @@ Finish Plans 03-02 and 03-03, then execute Plan 03-04. Record only rerun determi
 bounded Mac and Brev evidence in `03-QUALIFICATION.md`. Keep arbitrary installed host code, remote
 package discovery, product activation, and support claims outside this work. An upstream
 contribution still requires its own accepted NVIDIA/NemoClaw product decision.
+
+Phase 4 then finishes agent-runtime ownership in five reviewable slices: finite contract and
+explicit identity, Hermes, OpenClaw, DCode and Pi, then core closure and bounded qualification.
+The user's direction authorizes that local product-scope candidate; it does not make the result
+canonical or supported upstream behavior.
 
 ## Preserved Local State
 
