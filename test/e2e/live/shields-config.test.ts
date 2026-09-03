@@ -29,7 +29,6 @@ import {
   createIsolatedTestRuntime,
   type IsolatedTestRuntime,
 } from "../fixtures/environment-profiles.ts";
-import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
 import { REPO_ROOT } from "../fixtures/paths.ts";
 import { pollUntil } from "../fixtures/polling.ts";
@@ -38,6 +37,7 @@ import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { resumeSupervisorIfPaused } from "../fixtures/shields-failed-startup.ts";
 import { stripAnsi } from "./json-envelope.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
+import { prepareShieldsInference } from "./shields-inference.ts";
 import {
   bindChildlessBoundaryRuntime,
   createPolicySetChildlessBoundaryShim,
@@ -586,8 +586,13 @@ test(
       scenarioLabel: "shields-config",
     });
 
-    const hosted = requireHostedInferenceConfig(secrets);
-    const apiKey = hosted.apiKey;
+    const inference = await prepareShieldsInference({
+      artifacts,
+      cleanup,
+      progress,
+      secrets,
+    });
+    const apiKey = inference.apiKey;
     gatewayCleanupRedactionValues.push(apiKey);
 
     await preCleanSandbox(host, sandbox, "pre-cleanup");
@@ -652,7 +657,7 @@ test(
       {
         artifactName: "phase-1-install-shields-config",
         env: commandEnv({
-          ...hosted.env,
+          ...inference.env,
           NEMOCLAW_RECREATE_SANDBOX: "1",
         }),
         redactionValues: [apiKey],
