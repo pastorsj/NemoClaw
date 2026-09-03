@@ -36,6 +36,8 @@ const PUBLISHED_LOCKFILES = [
   "runtime/openclaw/npm-shrinkwrap.json",
   "runtime/wechat/npm-shrinkwrap.json",
 ] as const;
+const ARCHIVE_SETUP_TIMEOUT_MS = 3 * 60_000;
+const PACK_REPORT_MAX_BUFFER = 64 * 1024 * 1024;
 
 type PackedFile = { path?: string; mode?: number };
 type PackReport = { filename?: string; files?: PackedFile[] };
@@ -72,25 +74,18 @@ beforeAll(() => {
   mkdirSync(consumerDirectory);
   writeFileSync(path.join(consumerDirectory, "package.json"), '{"private":true}\n');
 
-  const dryRun = JSON.parse(
-    execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-      cwd: PACKAGE_ROOT,
-      encoding: "utf8",
-    }),
-  ) as PackReport[];
-  packedFiles = new Map(
-    (dryRun[0]?.files ?? [])
-      .filter((entry): entry is PackedFile & { path: string } => typeof entry.path === "string")
-      .map((entry) => [entry.path, entry]),
-  );
-
   const packed = JSON.parse(
     execFileSync(
       "npm",
       ["pack", "--json", "--ignore-scripts", "--pack-destination", archiveDirectory],
-      { cwd: PACKAGE_ROOT, encoding: "utf8" },
+      { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: PACK_REPORT_MAX_BUFFER },
     ),
   ) as PackReport[];
+  packedFiles = new Map(
+    (packed[0]?.files ?? [])
+      .filter((entry): entry is PackedFile & { path: string } => typeof entry.path === "string")
+      .map((entry) => [entry.path, entry]),
+  );
   const filename = packed[0]?.filename;
   expect(filename, "npm pack did not report the OpenClaw archive filename").toBeDefined();
 
@@ -110,7 +105,7 @@ beforeAll(() => {
   );
   const consumerRequire = createRequire(path.join(consumerDirectory, "package.json"));
   installedPackageRoot = path.dirname(consumerRequire.resolve(`${PACKAGE_NAME}/package.json`));
-}, 120_000);
+}, ARCHIVE_SETUP_TIMEOUT_MS);
 
 afterAll(() => {
   rmSync(temporaryRoot, { recursive: true, force: true });
