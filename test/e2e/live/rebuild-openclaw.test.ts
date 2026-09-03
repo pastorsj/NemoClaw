@@ -667,7 +667,7 @@ cfg.setdefault('gateway', {}).setdefault('auth', {})['token']=os.environ['PRE_RE
 with open(path, 'w') as f:
     json.dump(cfg, f, indent=2)
     f.write('\\n')
-subprocess.check_call(['bash','-lc','cd /sandbox/.openclaw && sha256sum openclaw.json fabric.json > .config-hash'])
+subprocess.check_call(['bash','-lc','cd /sandbox/.openclaw && sha256sum openclaw.json > .config-hash'])
 saved=json.load(open(path)).get('gateway',{}).get('auth',{}).get('token','')
 hash_text=open('/sandbox/.openclaw/.config-hash').read()
 hash_files=[line.split(maxsplit=1)[1] for line in hash_text.splitlines()]
@@ -682,7 +682,7 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     );
     expectExitZero(seedGateway, "seed old gateway token");
     const seedResult = JSON.parse(seedGateway.stdout.trim()) as SeedGatewayTokenResult;
-    expect(seedResult).toEqual({ seeded: true, hashFiles: ["openclaw.json", "fabric.json"] });
+    expect(seedResult).toEqual({ seeded: true, hashFiles: ["openclaw.json"] });
 
     const preHashResult = await sandbox.exec(
       SANDBOX_NAME,
