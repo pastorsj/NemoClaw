@@ -2,7 +2,7 @@
 phase: NCC-03-fabric-headless
 plan: 01
 subsystem: fabric-headless
-tags: [fabric, harness, headless, dcode, pi]
+tags: [fabric, agent-runtime, headless, dcode, pi]
 provides:
   - Generic sandbox-local Fabric runner selected through package data
   - Data-only built-artifact validation command
@@ -33,16 +33,20 @@ OpenShell lifecycle, state, and recovery.
 
 ## Recorded Verification
 
-- The current aggregate Fabric run passed 56 runner unit tests and 7 runner integration tests.
-- The same run passed 5 DCode tests and 12 Pi tests, with 1 documented Pi skip.
+- The latest aggregate Fabric run ran 83 runner unit cases: 82 passed and 1 Linux-only case skipped
+  on macOS. All 7 released-SDK integration cases passed.
+- The same run passed all 11 DCode cases and ran 17 Pi cases: 15 passed and 2 Linux-only cases
+  skipped on macOS.
+- After OpenClaw and Hermes joined the lane, the aggregate ran 155 cases: 149 passed and 6
+  Linux-only cases skipped on macOS.
 - Exact Python dependency checks passed.
 - Commits `0edee9ba0b`, `78e1f99715`, `c5ef46cd65`, and `bfaac9e7fd` contain the principal
   foundation, Pi, and headless-dispatch changes.
 
-Plan 03-04 must rerun the aggregate lane after the OpenClaw and Hermes work is final. This summary
-does not record Mac, Brev, release, or product-support evidence.
+Plan 03-04 owns the final qualification record. This summary does not record macOS, Brev, release,
+or product-support evidence.
 
 ## Next Work
 
-Plans 03-02 and 03-03 connect OpenClaw and Hermes. Plan 03-04 owns the common non-messaging live
-qualification.
+Plans 03-02 and 03-03 record the deterministic OpenClaw and Hermes package work. Plan 03-04 owns
+the common non-messaging live qualification.

@@ -14,9 +14,10 @@ which points to commit `810189732befa2a5a7feb139c935bbd4dfc400a2`
 ### Execution update — 2026-09-01
 
 The initial research below rejected Fabric's unreleased Pi adapter. The implementation did not use
-that artifact. Pi now supplies a package-owned adapter against the pinned stable Fabric 0.2.0
-contract. OpenClaw follows the same package-owned pattern. Hermes uses the released Hermes 0.2.0
-adapter. This remains local-fork development work, and common live qualification is pending.
+that artifact. Pi and OpenClaw now supply package-owned adapters against the pinned stable Fabric
+0.2.0 contract. Hermes exposes the package descriptor `nvidia.nemoclaw.hermes`; its package-owned
+supervisor invokes the released `nvidia.fabric.hermes` adapter from an isolated environment. This
+remains local-fork development work, and common live qualification is pending.
 
 Use Fabric as a generic sandbox-local headless invocation layer. Do not make Fabric a fourth
 component axis or a user-facing agent runtime. The existing LangChain Deep Agents Code package is
@@ -93,5 +94,5 @@ generic runner rejects that data before adapter discovery. The live round trip u
    confined workspace tool calls.
 4. Package composition verifies artifact conformance, adapter configuration, exact locks, command
    selection, and built image contents.
-5. One Mac arm64 no-messaging journey uses the fake endpoint. One Brev Linux amd64 no-messaging
-   journey uses the existing approved inference route. Live messaging stays excluded.
+5. One macOS ARM64 no-messaging journey uses the fake endpoint. One Brev Ubuntu Linux ARM64
+   no-messaging journey uses the existing approved inference route. Live messaging stays excluded.

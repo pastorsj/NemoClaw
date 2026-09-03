@@ -17,7 +17,7 @@ created: 2026-08-30
 | Released SDK | `packages/nemoclaw-fabric` | Discovery, doctor, start, two invokes, stop, malformed result, host failure, signals, no orphan |
 | DCode and Pi | Owning packages | Exact locks, config, commands, image files, text or workspace turns, failures, and native-command preservation |
 | OpenClaw | `packages/nemoclaw-openclaw` | Adapter, composed runner, config integrity, recovery, privilege, startup, image, timeout, and redaction |
-| Hermes | `packages/nemoclaw-hermes` | Released adapter, composed runner, atomic route projection, integrity, recovery, MCP state, image, timeout, and redaction |
+| Hermes | `packages/nemoclaw-hermes` | Package descriptor and supervisor, released adapter, composed runner, atomic route projection, integrity, recovery, MCP state, image, timeout, and redaction |
 | Core contract | NemoClaw | Data-only artifact validation, generic headless selection, multi-file restore, rebuild, and Shields behavior |
 | E2E support | Existing typed fixtures | Public Fabric turn, result parsing, artifact checks, redaction, target wiring, and semantic phase membership |
 | Live | Existing E2E registry | Mac and Brev managed activation, restart, inference switch, Shields, rebuild, and cleanup; no messaging |
