@@ -38,7 +38,10 @@ import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import { resumeSupervisorIfPaused } from "../fixtures/shields-failed-startup.ts";
 import { stripAnsi } from "./json-envelope.ts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
-import { createPolicySetChildlessBoundaryShim } from "./shields-shim.ts";
+import {
+  bindChildlessBoundaryRuntime,
+  createPolicySetChildlessBoundaryShim,
+} from "./shields-shim.ts";
 
 const CONFIG_PATH = "/sandbox/.openclaw/openclaw.json";
 const CONFIG_DIR = path.dirname(CONFIG_PATH);
@@ -1337,13 +1340,17 @@ test(
     expect(openshellResolution.exitCode, resultText(openshellResolution)).toBe(0);
     const realOpenshellPath = openshellResolution.stdout.trim();
     expect(path.isAbsolute(realOpenshellPath), realOpenshellPath).toBe(true);
-    const runtimeInvocation = selectedRuntimeProvider(host).hostInvocation([]);
+    const boundaryEnvironment = commandEnv();
+    const boundaryRuntime = bindChildlessBoundaryRuntime(
+      selectedRuntimeProvider(host).hostInvocation([]),
+      boundaryEnvironment.DOCKER_HOST,
+    );
     const policyBoundary = createPolicySetChildlessBoundaryShim({
       configGuardPath: CONFIG_GUARD_PATH,
       containerId: recoveryContainerId,
       realOpenshellPath,
-      runtimeCommand: runtimeInvocation.command,
-      runtimePrefix: runtimeInvocation.args,
+      runtimeCommand: boundaryRuntime.command,
+      runtimePrefix: boundaryRuntime.args,
       sandboxName: SANDBOX_NAME,
       startupPid: liveCensus.pid ?? 0,
       tempRoot: runtime.home,
@@ -1379,7 +1386,7 @@ test(
       {
         artifactName: "phase-12-childless-shields-down",
         env: {
-          ...commandEnv(),
+          ...boundaryEnvironment,
           NEMOCLAW_OPENSHELL_BIN: policyBoundary.executable,
         },
         timeoutMs: 16 * 60_000,

@@ -13,6 +13,25 @@ export interface ChildlessBoundaryShim {
   readonly resumeSupervisor: string[];
 }
 
+export interface ChildlessBoundaryRuntime {
+  readonly args: readonly string[];
+  readonly command: string;
+}
+
+/** Bind Docker to the isolated endpoint that remains valid after env sanitization. */
+export function bindChildlessBoundaryRuntime(
+  invocation: ChildlessBoundaryRuntime,
+  dockerHost: string | undefined,
+): ChildlessBoundaryRuntime {
+  if (invocation.command !== "docker") return invocation;
+  const endpoint = dockerHost?.trim();
+  if (!endpoint) throw new Error("childless Shields recovery requires a Docker endpoint");
+  return {
+    command: invocation.command,
+    args: ["--host", endpoint, ...invocation.args],
+  };
+}
+
 export function createPolicySetChildlessBoundaryShim(options: {
   configGuardPath: string;
   containerId: string;
