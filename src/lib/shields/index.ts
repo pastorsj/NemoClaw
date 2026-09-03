@@ -1618,7 +1618,6 @@ const DEEP_AGENTS_NAME = "langchain-deepagents-code";
 const DEEP_AGENTS_CONFIG_DIR = "/sandbox/.deepagents";
 const DEEP_AGENTS_CONFIG_PATH = `${DEEP_AGENTS_CONFIG_DIR}/config.toml`;
 const DEEP_AGENTS_CONFIG_HASH_PATH = `${DEEP_AGENTS_CONFIG_DIR}/.config-hash`;
-const DEEP_AGENTS_FABRIC_CONFIG_PATH = `${DEEP_AGENTS_CONFIG_DIR}/fabric.json`;
 
 function isDeepAgentsTarget(target: AgentConfigTarget): boolean {
   return target.agentName === DEEP_AGENTS_NAME;
@@ -1626,13 +1625,14 @@ function isDeepAgentsTarget(target: AgentConfigTarget): boolean {
 
 function assertCanonicalDeepAgentsTarget(target: AgentConfigTarget): void {
   if (!isDeepAgentsTarget(target)) return;
-  const files = [target.configPath, ...(target.sensitiveFiles || [])];
-  const nativeFiles = [DEEP_AGENTS_CONFIG_PATH, DEEP_AGENTS_CONFIG_HASH_PATH];
-  const fabricFiles = [...nativeFiles, DEEP_AGENTS_FABRIC_CONFIG_PATH];
+  const fileNames = getProtectedConfigFileNames(target);
   if (
     target.configDir !== DEEP_AGENTS_CONFIG_DIR ||
     target.configPath !== DEEP_AGENTS_CONFIG_PATH ||
-    (!isDeepStrictEqual(files, nativeFiles) && !isDeepStrictEqual(files, fabricFiles))
+    fileNames.length < 2 ||
+    fileNames[0] !== path.posix.basename(DEEP_AGENTS_CONFIG_PATH) ||
+    fileNames[1] !== path.posix.basename(DEEP_AGENTS_CONFIG_HASH_PATH) ||
+    fileNames.some((fileName: string) => fileName !== path.posix.basename(fileName))
   ) {
     throw new Error(
       `Deep Agents shields require the canonical protected-file set under ${DEEP_AGENTS_CONFIG_DIR}`,
@@ -3219,7 +3219,10 @@ function lockDeepAgentsTopConfig(
   try {
     outcome = privilegedSandboxExecCapture(
       sandboxName,
-      buildDeepAgentsConfigLockCommand(target.configDir, target.configPath, failClosedOnError),
+      buildDeepAgentsConfigLockCommand(target.configDir, target.configPath, failClosedOnError, [
+        target.configPath,
+        ...(target.sensitiveFiles || []),
+      ]),
     );
   } catch (error) {
     const status = parseDeepAgentsConfigLockFailure(error);

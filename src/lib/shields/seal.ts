@@ -307,6 +307,8 @@ import sys
 HASH_NAME = ".config-hash"
 MAX_CONFIG_BYTES = 16 * 1024 * 1024
 MAX_HASH_BYTES = 1024
+MAX_PROTECTED_FILES = 128
+MAX_PROTECTED_TOTAL_BYTES = 32 * 1024 * 1024
 FS_IMMUTABLE_FL = 0x00000010
 FS_IOC_GETFLAGS = 0x80086601
 FS_IOC_SETFLAGS = 0x40086602
@@ -525,45 +527,47 @@ def clear_entry_immutable(dir_fd, name):
     finally:
         os.close(fd)
 
-def install_contained_pair(dir_fd, config_name, config_bytes, record_bytes):
-    previous = {
-        config_name: entry_identity(dir_fd, config_name),
-        HASH_NAME: entry_identity(dir_fd, HASH_NAME),
+def install_contained_protected_files(
+    dir_fd,
+    config_name,
+    config_bytes,
+    record_bytes,
+    sidecar_names,
+    opened,
+):
+    names = [config_name, HASH_NAME, *sidecar_names]
+    payloads = {
+        config_name: config_bytes,
+        HASH_NAME: record_bytes,
     }
+    for name in sidecar_names:
+        saved = opened.get(name, {}).get("saved")
+        payloads[name] = saved["data"] if saved is not None else b""
+    previous = {name: entry_identity(dir_fd, name) for name in names}
     containment_staged = {}
     try:
-        clear_entry_immutable(dir_fd, config_name)
-        clear_entry_immutable(dir_fd, HASH_NAME)
-        containment_staged[config_name] = stage(
-            dir_fd, config_name, config_bytes, os.geteuid(), os.getegid(), 0o444
-        )
-        containment_staged[HASH_NAME] = stage(
-            dir_fd, HASH_NAME, record_bytes, os.geteuid(), os.getegid(), 0o444
-        )
-        os.replace(
-            containment_staged[config_name],
-            config_name,
-            src_dir_fd=dir_fd,
-            dst_dir_fd=dir_fd,
-        )
-        containment_staged.pop(config_name)
-        os.replace(
-            containment_staged[HASH_NAME],
-            HASH_NAME,
-            src_dir_fd=dir_fd,
-            dst_dir_fd=dir_fd,
-        )
-        containment_staged.pop(HASH_NAME)
-        installed_config = verify_locked(dir_fd, config_name, config_bytes)
-        installed_hash = verify_locked(dir_fd, HASH_NAME, record_bytes)
-        if previous[config_name] is not None and same_inode(
-            previous[config_name], installed_config
-        ):
-            die("containment did not replace config inode")
-        if previous[HASH_NAME] is not None and same_inode(
-            previous[HASH_NAME], installed_hash
-        ):
-            die("containment did not replace config hash inode")
+        for name in names:
+            clear_entry_immutable(dir_fd, name)
+            containment_staged[name] = stage(
+                dir_fd,
+                name,
+                payloads[name],
+                os.geteuid(),
+                os.getegid(),
+                0o444,
+            )
+        for name in names:
+            os.replace(
+                containment_staged[name],
+                name,
+                src_dir_fd=dir_fd,
+                dst_dir_fd=dir_fd,
+            )
+            containment_staged.pop(name)
+        for name in names:
+            installed = verify_locked(dir_fd, name, payloads[name])
+            if previous[name] is not None and same_inode(previous[name], installed):
+                die("containment did not replace protected inode: " + name)
         os.fsync(dir_fd)
     finally:
         for name, temp in containment_staged.items():
@@ -576,15 +580,33 @@ def install_contained_pair(dir_fd, config_name, config_bytes, record_bytes):
                     "%s containment staging cleanup: %s" % (name, cleanup_error)
                 )
 
-if len(sys.argv) < 3:
+if len(sys.argv) < 4:
     die("unsupported Deep Agents config lock arguments")
-options = sys.argv[3:]
+try:
+    protected_count = int(sys.argv[3], 10)
+except ValueError:
+    die("unsupported Deep Agents protected-file count")
+if protected_count < 2 or protected_count > MAX_PROTECTED_FILES:
+    die("unsupported Deep Agents protected-file count")
+protected_end = 4 + protected_count
+if len(sys.argv) < protected_end:
+    die("incomplete Deep Agents protected-file list")
+protected_paths = sys.argv[4:protected_end]
+options = sys.argv[protected_end:]
 allowed_options = {"--fail-closed-on-error", "--test-protect-parent"}
 if len(options) != len(set(options)) or any(option not in allowed_options for option in options):
     die("unsupported Deep Agents config lock arguments")
 
 config_dir = os.path.normpath(sys.argv[1])
 config_name = child_name(config_dir, sys.argv[2])
+protected_names = [child_name(config_dir, path) for path in protected_paths]
+if (
+    len(protected_names) != len(set(protected_names))
+    or protected_names[:2] != [config_name, HASH_NAME]
+    or any(path != os.path.join(config_dir, name) for path, name in zip(protected_paths, protected_names))
+):
+    die("invalid Deep Agents protected-file list")
+sidecar_names = protected_names[2:]
 fail_closed_on_error = "--fail-closed-on-error" in options
 test_parent = "--test-protect-parent" in options
 parent_dir = os.path.dirname(config_dir)
@@ -653,6 +675,7 @@ try:
         config_bytes,
         inode_flags(config_fd),
     )
+    protected_total_bytes = len(config_bytes)
     record_bytes = (
         "%s  %s\n" % (hashlib.sha256(config_bytes).hexdigest(), config_name)
     ).encode("ascii")
@@ -670,12 +693,38 @@ try:
         if hash_bytes != record_bytes:
             die("existing config hash is stale or malformed: " + os.path.join(config_dir, HASH_NAME))
 
+    for name in sidecar_names:
+        sidecar_fd, sidecar_st = open_checked(name, False, dir_fd=dir_fd)
+        opened[name] = {"fd": sidecar_fd, "stat": sidecar_st, "saved": None}
+        sidecar_bytes = read_fd(
+            sidecar_fd,
+            MAX_CONFIG_BYTES,
+            os.path.join(config_dir, name),
+        )
+        protected_total_bytes += len(sidecar_bytes)
+        if protected_total_bytes > MAX_PROTECTED_TOTAL_BYTES:
+            die("protected files exceed total size limit")
+        opened[name]["saved"] = saved_file(
+            sidecar_st,
+            sidecar_bytes,
+            inode_flags(sidecar_fd),
+        )
+
     staged[config_name] = stage(
         dir_fd, config_name, config_bytes, os.geteuid(), os.getegid(), 0o444
     )
     staged[HASH_NAME] = stage(
         dir_fd, HASH_NAME, record_bytes, os.geteuid(), os.getegid(), 0o444
     )
+    for name in sidecar_names:
+        staged[name] = stage(
+            dir_fd,
+            name,
+            opened[name]["saved"]["data"],
+            os.geteuid(),
+            os.getegid(),
+            0o444,
+        )
     if not same_inode(
         os.stat(config_name, dir_fd=dir_fd, follow_symlinks=False),
         opened[config_name]["stat"],
@@ -694,17 +743,23 @@ try:
             pass
         else:
             die("config hash appeared during lock: " + os.path.join(config_dir, HASH_NAME))
+    for name in sidecar_names:
+        if not same_inode(
+            os.stat(name, dir_fd=dir_fd, follow_symlinks=False),
+            opened[name]["stat"],
+        ):
+            die("protected sidecar changed during lock: " + os.path.join(config_dir, name))
 
     mutation_started = True
-    clear_immutable(opened[config_name]["fd"])
-    if HASH_NAME in opened:
-        clear_immutable(opened[HASH_NAME]["fd"])
-    os.replace(staged[config_name], config_name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-    staged.pop(config_name)
-    os.replace(staged[HASH_NAME], HASH_NAME, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
-    staged.pop(HASH_NAME)
+    for name in [config_name, HASH_NAME, *sidecar_names]:
+        if name in opened:
+            clear_immutable(opened[name]["fd"])
+        os.replace(staged[name], name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+        staged.pop(name)
     verify_locked(dir_fd, config_name, config_bytes)
     verify_locked(dir_fd, HASH_NAME, record_bytes)
+    for name in sidecar_names:
+        verify_locked(dir_fd, name, opened[name]["saved"]["data"])
     os.fchown(dir_fd, os.geteuid(), os.getegid())
     os.fchmod(dir_fd, 0o755)
     os.fsync(dir_fd)
@@ -731,6 +786,11 @@ except BaseException as exc:
                 pass
             except BaseException as rollback_error:
                 rollback_errors.append("%s cleanup: %s" % (HASH_NAME, rollback_error))
+        for name in sidecar_names:
+            try:
+                replace_saved(dir_fd, name, opened[name]["saved"])
+            except BaseException as rollback_error:
+                rollback_errors.append("%s: %s" % (name, rollback_error))
 finally:
     if dir_fd is not None:
         for name, temp in staged.items():
@@ -769,7 +829,7 @@ finally:
                 containment_attempted = True
                 containment_result = "incomplete"
 
-            canonical_pair_contained = False
+            protected_files_contained = False
             if (
                 contain_on_error
                 and dir_fd is not None
@@ -777,16 +837,18 @@ finally:
                 and record_bytes is not None
             ):
                 try:
-                    install_contained_pair(
+                    install_contained_protected_files(
                         dir_fd,
                         config_name,
                         config_bytes,
                         record_bytes,
+                        sidecar_names,
+                        opened,
                     )
-                    canonical_pair_contained = True
+                    protected_files_contained = True
                 except BaseException as containment_error:
                     rollback_errors.append(
-                        "canonical pair fail-closed replacement: %s" % containment_error
+                        "protected files fail-closed replacement: %s" % containment_error
                     )
 
             dir_clamped = False
@@ -809,7 +871,7 @@ finally:
 
             if protect_parent:
                 config_root_candidate = (
-                    contain_on_error and canonical_pair_contained and dir_clamped
+                    contain_on_error and protected_files_contained and dir_clamped
                 )
                 if config_root_candidate or (not contain_on_error and dir_clamped):
                     parent_gid = sandbox_gid
@@ -877,6 +939,7 @@ export function buildDeepAgentsConfigLockCommand(
   configDir: string,
   configPath: string,
   failClosedOnError = false,
+  protectedFiles: readonly string[] = [configPath, `${configDir}/.config-hash`],
 ): string[] {
   return [
     "python3",
@@ -885,6 +948,8 @@ export function buildDeepAgentsConfigLockCommand(
     DEEP_AGENTS_CONFIG_LOCK_NOFOLLOW_SCRIPT,
     configDir,
     configPath,
+    String(protectedFiles.length),
+    ...protectedFiles,
     ...(failClosedOnError ? ["--fail-closed-on-error"] : []),
   ];
 }

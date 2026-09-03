@@ -383,13 +383,18 @@ describe("buildDeepAgentsConfigLockCommand", () => {
     }
   });
 
-  async function lockCommand(configDir: string, failClosedOnError = false): Promise<string[]> {
+  async function lockCommand(
+    configDir: string,
+    failClosedOnError = false,
+    sidecars: readonly string[] = [],
+  ): Promise<string[]> {
     const { buildDeepAgentsConfigLockCommand } = await loadSeal();
-    return buildDeepAgentsConfigLockCommand(
-      configDir,
-      path.join(configDir, "config.toml"),
-      failClosedOnError,
-    );
+    const configPath = path.join(configDir, "config.toml");
+    return buildDeepAgentsConfigLockCommand(configDir, configPath, failClosedOnError, [
+      configPath,
+      hashRecordPath(configDir),
+      ...sidecars,
+    ]);
   }
 
   function expectFailClosedPosture(configDir: string): void {
@@ -488,6 +493,107 @@ os.replace = raced_replace
     expect(config.mode).toBe(0o444);
     expect(record.mode).toBe(0o444);
   });
+
+  it("fresh-replaces and locks a package-declared protected sidecar", async () => {
+    const configDir = makeConfigDir();
+    const sidecarPath = path.join(configDir, "fabric.json");
+    const sidecarBody = '{"adapter":"deepagents"}\n';
+    fs.writeFileSync(sidecarPath, sidecarBody, { mode: 0o660 });
+    const oldSidecar = observeFile(sidecarPath);
+
+    const outcome = runLock(await lockCommand(configDir, false, [sidecarPath]));
+
+    expect(outcome).toEqual({ status: 0, stdout: "hash-created", stderr: "" });
+    const sidecar = observeFile(sidecarPath);
+    expect(sidecar.body.toString("utf-8")).toBe(sidecarBody);
+    expect(sidecar.inode).not.toBe(oldSidecar.inode);
+    expect(sidecar.mode).toBe(0o444);
+  });
+
+  it("revokes a retained writable descriptor for a protected sidecar", async () => {
+    const configDir = makeConfigDir();
+    const sidecarPath = path.join(configDir, "fabric.json");
+    const sidecarBody = '{"adapter":"deepagents"}\n';
+    fs.writeFileSync(sidecarPath, sidecarBody, { mode: 0o660 });
+    const retainedFd = fs.openSync(sidecarPath, "r+");
+    const oldInode = fs.fstatSync(retainedFd).ino;
+
+    try {
+      const outcome = runLock(await lockCommand(configDir, false, [sidecarPath]));
+      expect(outcome).toEqual({ status: 0, stdout: "hash-created", stderr: "" });
+
+      fs.writeSync(retainedFd, "retained-sidecar-write", 0, "utf8");
+      fs.fsyncSync(retainedFd);
+
+      const sidecar = observeFile(sidecarPath);
+      expect(sidecar.body.toString("utf-8")).toBe(sidecarBody);
+      expect(sidecar.inode).not.toBe(oldInode);
+      expect(sidecar.mode).toBe(0o444);
+    } finally {
+      fs.closeSync(retainedFd);
+    }
+  });
+
+  it("contains an unreadable oversized protected sidecar before claiming config-root", async () => {
+    const configDir = makeConfigDir();
+    const sidecarPath = path.join(configDir, "fabric.json");
+    fs.writeFileSync(sidecarPath, Buffer.alloc(16 * 1024 * 1024 + 1, "a"), { mode: 0o660 });
+    const retainedFd = fs.openSync(sidecarPath, "r+");
+    const oldInode = fs.fstatSync(retainedFd).ino;
+    const command = await lockCommand(configDir, true, [sidecarPath]);
+    command.push("--test-protect-parent");
+
+    const outcome = runLock(command);
+
+    try {
+      expect(outcome).toEqual({ status: 1, stdout: "", stderr: lockFailure("config-root") });
+      const installedSidecar = observeFile(sidecarPath);
+      expect(installedSidecar.inode).not.toBe(oldInode);
+      expect(installedSidecar.body).toHaveLength(0);
+      expect(installedSidecar.mode).toBe(0o444);
+
+      fs.writeSync(retainedFd, "retained-sidecar-write", 0, "utf8");
+      fs.fsyncSync(retainedFd);
+
+      const sidecar = observeFile(sidecarPath);
+      expect(sidecar.inode).toBe(installedSidecar.inode);
+      expect(sidecar.body).toHaveLength(0);
+      expect(sidecar.mode).toBe(0o444);
+      expectFailClosedPosture(configDir);
+    } finally {
+      fs.closeSync(retainedFd);
+      restoreFixtureAccess(configDir);
+    }
+  });
+
+  it.each([
+    [
+      "symlink",
+      (outsidePath: string, sidecarPath: string) => fs.symlinkSync(outsidePath, sidecarPath),
+    ],
+    [
+      "hardlink",
+      (outsidePath: string, sidecarPath: string) => fs.linkSync(outsidePath, sidecarPath),
+    ],
+  ] as const)(
+    "rejects a %s protected sidecar without changing its referent",
+    async (_kind, linkSidecar) => {
+      const configDir = makeConfigDir();
+      const parentDir = path.dirname(configDir);
+      const sidecarPath = path.join(configDir, "fabric.json");
+      const outsidePath = path.join(parentDir, "outside-sidecar");
+      fs.writeFileSync(outsidePath, "outside sidecar\n", { mode: 0o640 });
+      const initialOutside = observeFile(outsidePath);
+      linkSidecar(outsidePath, sidecarPath);
+
+      const outcome = runLock(await lockCommand(configDir, false, [sidecarPath]));
+
+      expect(outcome.status).toBe(1);
+      expect(outcome.stderr).toBe(lockFailure("transaction-failed"));
+      const outside = observeFile(outsidePath);
+      expect(outside).toEqual(initialOutside);
+    },
+  );
 
   type FixtureVerification = () => void;
 

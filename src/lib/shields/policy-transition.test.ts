@@ -594,6 +594,7 @@ describe("shields config lock without a shipped config hash", () => {
   const CONFIG_PATH = `${CONFIG_DIR}/config.toml`;
   const HASH_PATH = `${CONFIG_DIR}/.config-hash`;
   const FABRIC_PATH = `${CONFIG_DIR}/fabric.json`;
+  const PACKAGE_SIDECAR_PATH = `${CONFIG_DIR}/package-sidecar.json`;
   const LOCK_COMMAND_KEY = [CONFIG_DIR, CONFIG_PATH].join("\0");
 
   type SandboxEntry = { mode: string; owner: string };
@@ -880,7 +881,14 @@ describe("shields config lock without a shipped config hash", () => {
     const result = shields.lockAgentConfig("dcode-safety", target(), false);
 
     expect(lockCalls).toHaveLength(1);
-    expect(lockCalls[0].slice(4)).toEqual([CONFIG_DIR, CONFIG_PATH, "--fail-closed-on-error"]);
+    expect(lockCalls[0].slice(4)).toEqual([
+      CONFIG_DIR,
+      CONFIG_PATH,
+      "2",
+      CONFIG_PATH,
+      HASH_PATH,
+      "--fail-closed-on-error",
+    ]);
     expect(entries.get(CONFIG_PATH)).toEqual({ mode: "444", owner: "root:root" });
     expect(entries.get(HASH_PATH)).toEqual({ mode: "444", owner: "root:root" });
     expect(Object.keys(result.fileHashes)).toEqual([CONFIG_PATH, HASH_PATH]);
@@ -900,6 +908,20 @@ describe("shields config lock without a shipped config hash", () => {
     expect(entries.get(HASH_PATH)).toEqual({ mode: "444", owner: "root:root" });
     expect(entries.get(FABRIC_PATH)).toEqual({ mode: "444", owner: "root:root" });
     expect(Object.keys(result.fileHashes)).toEqual([CONFIG_PATH, HASH_PATH, FABRIC_PATH]);
+  });
+
+  it("seals a package-declared sidecar without a core filename allowlist", () => {
+    const packageTarget = {
+      ...target(),
+      mutableAccess: "private" as const,
+      sensitiveFiles: [HASH_PATH, PACKAGE_SIDECAR_PATH],
+    };
+    entries.set(PACKAGE_SIDECAR_PATH, { mode: "600", owner: "sandbox:sandbox" });
+
+    const result = shields.lockAgentConfig("dcode-safety", packageTarget, false);
+
+    expect(entries.get(PACKAGE_SIDECAR_PATH)).toEqual({ mode: "444", owner: "root:root" });
+    expect(Object.keys(result.fileHashes)).toEqual([CONFIG_PATH, HASH_PATH, PACKAGE_SIDECAR_PATH]);
   });
 
   it.each([
@@ -1020,7 +1042,7 @@ describe("shields config lock without a shipped config hash", () => {
       /injected recursive lock failure/,
     );
 
-    expect(lockCalls[0].slice(4)).toEqual([CONFIG_DIR, CONFIG_PATH]);
+    expect(lockCalls[0].slice(4)).toEqual([CONFIG_DIR, CONFIG_PATH, "2", CONFIG_PATH, HASH_PATH]);
     expect(unlockCalls).toHaveLength(0);
     expect(restoreStateDirLockPostureSpy).toHaveBeenCalledWith(
       expect.anything(),
