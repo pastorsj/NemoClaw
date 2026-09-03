@@ -5,7 +5,10 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { isMcpLifecycleLockHeld } from "../../state/mcp-lifecycle-lock-acquisition";
+import {
+  isMcpLifecycleLockHeld,
+  withMcpLifecycleLock,
+} from "../../state/mcp-lifecycle-lock-acquisition";
 import type { SandboxEntry } from "../../state/registry/types";
 import {
   assertHermesPortableSandboxLifecycleAuthority,
@@ -40,6 +43,17 @@ export type PortableAgentLifecycleDeps = PortableDemoLifecycleDeps & HermesPorta
 export type PortableAgentLifecycleStopResult = PortableDemoLifecycleStopResult & {
   readonly portableAgent?: "hermes";
 };
+
+/** Hold gateway state and host-global Portable receipts through one lifecycle operation. */
+export function withPortableLifecycleLocks<T>(
+  sandboxName: string,
+  operation: () => Promise<T> | T,
+): Promise<T> {
+  const portableStateDir = path.join(defaultPortableDemoStateDir(process.env), "state");
+  return withMcpLifecycleLock(sandboxName, () =>
+    withMcpLifecycleLock(sandboxName, operation, { stateDir: portableStateDir }),
+  );
+}
 
 export const HERMES_PORTABLE_UNSUPPORTED_COMMAND_MESSAGE =
   "This command is not supported for an experimental Hermes portable sandbox.";

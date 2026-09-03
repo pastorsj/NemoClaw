@@ -83,6 +83,7 @@ import {
   requalifyPortableAgentSandboxAuthority,
   recoverPortableAgentSandboxLifecycle,
   requireHermesPortableActiveLifecycleAuthority,
+  withPortableLifecycleLocks,
 } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { HermesPortableLifecycleRecoveryTiming } from "../../onboard/experimental/hermes-portable-lifecycle";
 import type { PortableDemoLifecycleRecoveryResult } from "../../onboard/experimental/portable-demo-lifecycle";
@@ -138,10 +139,17 @@ export {
   qualifyHermesPortableOperatingCommandAuthority,
   requalifyPortableAgentSandboxAuthority,
   requireHermesPortableActiveLifecycleAuthority,
+  withPortableLifecycleLocks,
 };
 export const withSandboxLifecycleLock = withMcpLifecycleLock;
 export const withSandboxLifecycleLockSync = withMcpLifecycleLockSync;
-export const withConnectSandboxLifecycleLock = withMcpLifecycleLock;
+
+export function withConnectSandboxLifecycleLock<T>(
+  sandboxName: string,
+  operation: () => Promise<T> | T,
+): Promise<T> {
+  return withPortableLifecycleLocks(sandboxName, operation);
+}
 
 /** Capture one accepted-readiness observation through retained Hermes command authority. */
 export function captureHermesPortableAcceptedReadinessObservation(

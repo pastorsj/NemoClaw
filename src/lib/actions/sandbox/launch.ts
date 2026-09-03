@@ -30,7 +30,7 @@ import {
   recoverPortableDemoSandboxLifecycleForConnect,
   requireHermesPortableActiveLifecycleAuthority,
   type HermesPortableActiveLifecycleAuthority,
-  withSandboxLifecycleLock as withSandboxMutationLock,
+  withPortableLifecycleLocks as withSandboxMutationLock,
 } from "./gateway-state";
 import { getKnownSandboxTarget } from "./gateway-target";
 import {
