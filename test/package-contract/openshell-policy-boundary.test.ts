@@ -33,7 +33,6 @@ function collectPackedPaths(): ReadonlySet<string> {
       "packages/nemoclaw-hermes/host",
       "packages/nemoclaw-hermes/manifest.yaml",
       "packages/nemoclaw-openclaw/manifest.yaml",
-      "packages/nemoclaw-openclaw/policies/permissive.yaml",
     ],
   });
   try {
@@ -94,9 +93,7 @@ describe("OpenShell policy boundary package contract", () => {
     ).toEqual({ safe: {} });
 
     const pluginBoundary = (await import(
-      pathToFileURL(
-        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs"),
-      ).href
+      pathToFileURL(path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs")).href
     )) as {
       assertPolicyRequirementContainment: typeof cliPolicy.assertPolicyRequirementContainment;
       parseOpenShellPolicy: (raw: string) => {
@@ -125,7 +122,9 @@ describe("OpenShell policy boundary package contract", () => {
       network_policies: { safe: {} },
     };
     expect(YAML.parse(cliPolicy.stripProviderComposedPolicies(policy))).toEqual(expectedPolicy);
-    expect(YAML.parse(pluginBoundary.stripProviderComposedPolicies(policy))).toEqual(expectedPolicy);
+    expect(YAML.parse(pluginBoundary.stripProviderComposedPolicies(policy))).toEqual(
+      expectedPolicy,
+    );
     expect(() => cliPolicy.stripProviderComposedPolicies("version: [unterminated")).toThrow();
     expect(() => pluginBoundary.stripProviderComposedPolicies("version: [unterminated")).toThrow();
 
@@ -239,66 +238,52 @@ describe("OpenShell policy boundary package contract", () => {
     expect(packageFiles(pluginRoot)).toContain("dist/");
 
     expect(
-      fs.existsSync(
-        path.join(pluginRoot, "src", "shared", "openshell-policy-boundary.cts"),
-      ),
+      fs.existsSync(path.join(pluginRoot, "src", "shared", "openshell-policy-boundary.cts")),
     ).toBe(true);
     expect(
-      fs.existsSync(
-        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs"),
-      ),
+      fs.existsSync(path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs")),
     ).toBe(true);
     expect(
-      fs.existsSync(
-        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.d.cts"),
-      ),
+      fs.existsSync(path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.d.cts")),
     ).toBe(true);
     expect(
-      fs.existsSync(
-        path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.js"),
-      ),
+      fs.existsSync(path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.js")),
     ).toBe(false);
   });
 
-  it.each([
-    "tool-matrix.json",
-    "refresh-credentials.ts",
-    "tool-broker.ts",
-    "tool-contract.ts",
-  ])("ships the Hermes host broker with its canonical sandbox-name boundary [%s]", (file) => {
-    expect(packageFiles(repoRoot)).toContain("packages/nemoclaw-*/**/*");
+  it.each(["tool-matrix.json", "refresh-credentials.ts", "tool-broker.ts", "tool-contract.ts"])(
+    "ships the Hermes host broker with its canonical sandbox-name boundary [%s]",
+    (file) => {
+      expect(packageFiles(repoRoot)).toContain("packages/nemoclaw-*/**/*");
 
-    expect(packedPaths).toContain(`packages/nemoclaw-hermes/host/${file}`);
+      expect(packedPaths).toContain(`packages/nemoclaw-hermes/host/${file}`);
 
-    const controlContractPath = path.join(
-      repoRoot,
-      "packages/nemoclaw-hermes/host/tool-contract.ts",
-    );
-    const validation = JSON.parse(
-      execFileSync(
-        process.execPath,
-        [
-          "--experimental-strip-types",
-          "--no-warnings",
-          "--eval",
-          `const contract = require(${JSON.stringify(controlContractPath)}); process.stdout.write(JSON.stringify([contract.isValidSandboxName("packaged-hermes"), contract.isValidSandboxName("../packaged-hermes")]));`,
-        ],
-        { cwd: repoRoot, encoding: "utf8" },
-      ),
-    ) as [boolean, boolean];
-    expect(validation).toEqual([true, false]);
-  });
+      const controlContractPath = path.join(
+        repoRoot,
+        "packages/nemoclaw-hermes/host/tool-contract.ts",
+      );
+      const validation = JSON.parse(
+        execFileSync(
+          process.execPath,
+          [
+            "--experimental-strip-types",
+            "--no-warnings",
+            "--eval",
+            `const contract = require(${JSON.stringify(controlContractPath)}); process.stdout.write(JSON.stringify([contract.isValidSandboxName("packaged-hermes"), contract.isValidSandboxName("../packaged-hermes")]));`,
+          ],
+          { cwd: repoRoot, encoding: "utf8" },
+        ),
+      ) as [boolean, boolean];
+      expect(validation).toEqual([true, false]);
+    },
+  );
 
-  it("ships agent manifests, generated state lock plans, and package-owned policy assets", () => {
+  it("ships repository-owned and package-owned agent manifests", () => {
     expect(packageFiles(repoRoot)).toEqual(
-      expect.arrayContaining([
-        "agents/*/manifest.yaml",
-        "agents/*/state-lock-plan.json",
-        "packages/nemoclaw-*/**/*",
-      ]),
+      expect.arrayContaining(["agents/*/manifest.yaml", "packages/nemoclaw-*/**/*"]),
     );
     expect(packedPaths).toContain("packages/nemoclaw-openclaw/manifest.yaml");
-    expect(packedPaths).toContain("packages/nemoclaw-openclaw/policies/permissive.yaml");
+    expect(packedPaths).toContain("packages/nemoclaw-hermes/manifest.yaml");
   });
 
   it("ships the complete repository-owned NemoCUA agent definition (#9649)", () => {
@@ -427,12 +412,7 @@ process.stdout.write("validated");
   });
 
   it("locks the generated sandbox boundary to its reviewed direct dependency", () => {
-    const boundaryPath = path.join(
-      pluginRoot,
-      "dist",
-      "shared",
-      "openshell-policy-boundary.cjs",
-    );
+    const boundaryPath = path.join(pluginRoot, "dist", "shared", "openshell-policy-boundary.cjs");
     expect(auditOpenShellPolicyBoundaryDependencies(fs.readFileSync(boundaryPath, "utf8"))).toEqual(
       ["node:util", "yaml"],
     );

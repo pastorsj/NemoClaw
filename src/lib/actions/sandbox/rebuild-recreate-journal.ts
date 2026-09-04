@@ -29,10 +29,10 @@ import {
 } from "../../onboard/sandbox-recreate-probe";
 import {
   advanceSandboxRecreateTransaction,
-  beginSandboxRecreateTransaction,
+  beginSandboxRecreateDelete,
   clearCompletedSandboxRecreateTransaction,
   fingerprintSandboxRecreateValue,
-  planSandboxRecreateRecovery,
+  ownSandboxRecreateTransaction,
   type SandboxRecreateSourcePresence,
   sandboxRecreatePhaseReached,
 } from "../../onboard/sandbox-recreate-transaction";
@@ -57,10 +57,7 @@ import {
   type SnapshotEntry,
   validateRebuildRecoveryManifest,
 } from "../../state/sandbox";
-import {
-  rebuildPackageAuthorityMatches,
-  type RebuildPackageAuthority,
-} from "./rebuild/authority";
+import { rebuildPackageAuthorityMatches, type RebuildPackageAuthority } from "./rebuild/authority";
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 
 export type { RebuildPackageAuthority } from "./rebuild/authority";
@@ -189,15 +186,15 @@ function parseRecoveryRecord(raw: string): RebuildRecoveryBackupRecord | null {
             "transactionId",
           ]
         : value?.schemaVersion === 2
-        ? [
-            "backupTimestamp",
-            "gatewayName",
-            "gatewayPort",
-            "sandboxName",
-            "schemaVersion",
-            "transactionId",
-          ]
-        : ["backupTimestamp", "sandboxName", "schemaVersion", "transactionId"];
+          ? [
+              "backupTimestamp",
+              "gatewayName",
+              "gatewayPort",
+              "sandboxName",
+              "schemaVersion",
+              "transactionId",
+            ]
+          : ["backupTimestamp", "sandboxName", "schemaVersion", "transactionId"];
     if (
       !value ||
       typeof value !== "object" ||
@@ -289,10 +286,7 @@ function recoveryRecordMatches(
   );
 }
 
-function replaceRecoveryRecord(
-  backupPath: string,
-  record: RebuildRecoveryBackupRecordV3,
-): void {
+function replaceRecoveryRecord(backupPath: string, record: RebuildRecoveryBackupRecordV3): void {
   const filePath = recoveryPath(backupPath);
   const temporaryPath = `${filePath}.tmp-${randomUUID()}`;
   let descriptor: number | null = null;
@@ -446,9 +440,7 @@ export type RetiredRebuildRecovery = Readonly<{
   transactionId: string;
 }>;
 
-function packageAuthorityFromRebuildManifest(
-  manifest: RebuildManifest,
-): RebuildPackageAuthority {
+function packageAuthorityFromRebuildManifest(manifest: RebuildManifest): RebuildPackageAuthority {
   const inspection = inspectRebuildManifestHarnessPackage(manifest);
   if (inspection.status === "invalid") {
     throw new Error("Rebuild recovery backup package authority is invalid.");
@@ -593,12 +585,10 @@ type RebuildFingerprintOptions = Pick<
   | "observabilityEnabled"
 >;
 
-function readRebuildPackageAuthority(
-  entry: {
-    readonly harnessPackage?: HarnessPackageIdentity | null;
-    readonly harnessPackageMigration?: HarnessPackageMigration | null;
-  },
-): RebuildPackageAuthority {
+function readRebuildPackageAuthority(entry: {
+  readonly harnessPackage?: HarnessPackageIdentity | null;
+  readonly harnessPackageMigration?: HarnessPackageMigration | null;
+}): RebuildPackageAuthority {
   const state = inspectHarnessPackageState(entry.harnessPackage, entry.harnessPackageMigration);
   if (state.status === "invalid") {
     throw new Error("the source registry harness package authority is malformed");
@@ -646,15 +636,12 @@ export interface RebuildRecreateJournal {
   readonly targetGeneration: string;
   readonly targetIntentFingerprint: string;
   readonly harnessPackage: HarnessPackageIdentity | null;
-  markDeleting(): void;
-  observeSourceForDelete(): RebuildRecreateSourcePresence;
+  beginDelete(): RebuildRecreateSourcePresence;
   confirmDeleted(): void;
   completeAcceptedTarget(): void;
 }
 
-export function fingerprintRebuildRecreateTargetIntent(
-  options: RebuildFingerprintOptions,
-): string {
+export function fingerprintRebuildRecreateTargetIntent(options: RebuildFingerprintOptions): string {
   const hostMounts = (options.hostMounts ?? []).map(
     ({ source, target, readOnly, sourceIdentity }) => ({
       source,
@@ -783,8 +770,12 @@ export function openRebuildRecreateJournal(
     throw error;
   }
   const gatewayAuthority = checkpointGatewayAuthority(authority);
-  const observation = observe(target);
   const openingSession = onboardSession.loadSession();
+  if (!openingSession) {
+    throw new Error(
+      `Cannot journal sandbox '${target.sandboxName}' replacement without its rebuild Session.`,
+    );
+  }
   const openingCheckpoint = openingSession?.checkpoint ?? null;
   const openingTransaction = openingCheckpoint?.sandboxRecreate ?? null;
   const resumedTargetIntentFingerprint =
@@ -792,83 +783,129 @@ export function openRebuildRecreateJournal(
     openingTransaction.targetIntentFingerprint === input.legacyTargetIntentFingerprint
       ? openingTransaction.targetIntentFingerprint
       : targetIntentFingerprint;
-  const boundOpeningCheckpoint = openingCheckpoint?.sandboxRecreate
-    ? bindCheckpointHarnessPackageAuthority(
-        openingCheckpoint,
-        input.packageAuthority.harnessPackage,
-      )
-    : null;
-  const active = boundOpeningCheckpoint?.sandboxRecreate ?? null;
-  const recovery = active
-    ? planSandboxRecreateRecovery(active, observation, sourceEntry)
-    : { action: "continue_delete" as const };
-  if (recovery.action === "reject") {
+  const openingAuthorityFingerprint = fingerprintSandboxRecreateValue({
+    agent: openingSession.agent,
+    harnessPackage: openingSession.harnessPackage,
+    harnessPackageMigration: openingSession.harnessPackageMigration,
+    checkpoint: openingSession.checkpoint,
+  });
+  const bindResult = onboardSession.compareAndSwapSession(
+    (current) =>
+      current.sessionId === openingSession.sessionId &&
+      fingerprintSandboxRecreateValue({
+        agent: current.agent,
+        harnessPackage: current.harnessPackage,
+        harnessPackageMigration: current.harnessPackageMigration,
+        checkpoint: current.checkpoint,
+      }) === openingAuthorityFingerprint &&
+      (assertCurrentRebuildPackageAuthority(target.sandboxName, input.packageAuthority).agent ??
+        "openclaw") === agentName,
+    (current) => {
+      const bindingSourceEntry = assertCurrentRebuildPackageAuthority(
+        target.sandboxName,
+        input.packageAuthority,
+      );
+      const hasActiveTransaction = Boolean(current.checkpoint?.sandboxRecreate);
+      current.agent = bindingSourceEntry.agent ?? null;
+      current.harnessPackage = input.packageAuthority.harnessPackage
+        ? structuredClone(input.packageAuthority.harnessPackage)
+        : null;
+      current.harnessPackageMigration = input.packageAuthority.harnessPackageMigration
+        ? structuredClone(input.packageAuthority.harnessPackageMigration)
+        : null;
+      const checkpoint = hasActiveTransaction
+        ? bindCheckpointHarnessPackageAuthority(
+            current.checkpoint,
+            input.packageAuthority.harnessPackage,
+          )
+        : deriveCheckpointFromSession(current);
+      if (!checkpoint) {
+        throw new Error(
+          `Sandbox '${target.sandboxName}' replacement checkpoint could not be package-bound.`,
+        );
+      }
+      current.checkpoint = checkpoint;
+      return current;
+    },
+    `nemoclaw bind sandbox '${target.sandboxName}' rebuild package authority`,
+  );
+  if (bindResult === "busy") {
     throw new Error(
-      `Cannot resume sandbox '${target.sandboxName}' replacement: ${recovery.reason}.`,
+      `Cannot journal sandbox '${target.sandboxName}': another onboarding writer owns the session lock.`,
     );
   }
-  // A registered, ready same-name sandbox carrying the journaled target
-  // generation and identity is the replacement this rebuild already proved.
-  // The caller must retire the transaction instead of deleting it again.
-  const acceptedTarget = recovery.action === "accept_target";
+  if (bindResult !== "updated") {
+    throw new Error(
+      `Cannot journal sandbox '${target.sandboxName}': its rebuild Session authority changed.`,
+    );
+  }
 
-  const bindingSourceEntry = assertCurrentRebuildPackageAuthority(
-    target.sandboxName,
-    input.packageAuthority,
-  );
-
-  const session = onboardSession.updateSession((current) => {
-    const hasActiveTransaction = Boolean(current.checkpoint?.sandboxRecreate);
-    current.agent = bindingSourceEntry.agent ?? null;
-    current.harnessPackage = input.packageAuthority.harnessPackage
-      ? structuredClone(input.packageAuthority.harnessPackage)
-      : null;
-    current.harnessPackageMigration = input.packageAuthority.harnessPackageMigration
-      ? structuredClone(input.packageAuthority.harnessPackageMigration)
-      : null;
-    const checkpoint = hasActiveTransaction
-      ? bindCheckpointHarnessPackageAuthority(
-          current.checkpoint,
-          input.packageAuthority.harnessPackage,
-        )
-      : deriveCheckpointFromSession(current);
-    if (!checkpoint) {
-      throw new Error(
-        `Sandbox '${target.sandboxName}' replacement checkpoint could not be package-bound.`,
+  const owned = ownSandboxRecreateTransaction({
+    sessionStore: {
+      loadSession: onboardSession.loadSession,
+      updateSession: onboardSession.updateSession,
+      compareAndSwapSession: onboardSession.compareAndSwapSession,
+    },
+    sandboxName: target.sandboxName,
+    gatewayName: target.gatewayName,
+    gatewayPort: target.gatewayPort,
+    targetIntentFingerprint: resumedTargetIntentFingerprint,
+    requireSourceEntry: true,
+    readRegistryEntry: () => {
+      const entry = assertCurrentRebuildPackageAuthority(
+        target.sandboxName,
+        input.packageAuthority,
       );
-    }
-    current.checkpoint = {
+      if ((entry.agent ?? "openclaw") !== agentName) {
+        throw new Error(
+          `Cannot rebuild '${target.sandboxName}': source registry agent authority changed.`,
+        );
+      }
+      return entry;
+    },
+    observe: () => observe(target),
+    decorateCheckpoint: (current, checkpoint, now) => ({
       ...checkpoint,
       machineState: current.machine.state,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
       sandboxIdentity: decisionSelected({ name: target.sandboxName, agent: agentName }),
       gatewayAuthority: decisionSelected(gatewayAuthority),
-    };
-    beginSandboxRecreateTransaction(current, {
-      sandboxName: target.sandboxName,
-      gatewayName: target.gatewayName,
-      gatewayPort: target.gatewayPort,
-      sourceEntry: bindingSourceEntry,
-      observation,
-      targetIntentFingerprint: resumedTargetIntentFingerprint,
-    });
-    return current;
+    }),
   });
-
-  const transaction = session.checkpoint?.sandboxRecreate;
-  if (!transaction || transaction.version !== 2) {
-    throw new Error(
-      `Sandbox '${target.sandboxName}' replacement journal could not be recorded before deletion.`,
+  const { session, transaction, recovery } = owned;
+  if (owned.replacedTransactionId) {
+    log(
+      `Replaced void journal ${owned.replacedTransactionId} with ${transaction.id} for '${target.sandboxName}'; its source sandbox is registered and live`,
+    );
+    console.log(
+      `  Replaced the void replacement journal for '${target.sandboxName}'; its source sandbox is registered and live.`,
     );
   }
+  const acceptedTarget = recovery.action === "accept_target";
   log(
     `Journaled replacement ${transaction.id} for '${target.sandboxName}' on ${target.gatewayName}:${String(target.gatewayPort)} at phase '${transaction.phase}'`,
   );
 
+  const openingSessionId = session.sessionId;
+  let currentTransaction = transaction;
   let phase: CheckpointSandboxRecreatePhase = transaction.phase;
+  const revalidateGatewayAuthority = (): void => {
+    const currentAuthority = resolveGatewayRebuildAuthority({
+      gatewayName: target.gatewayName,
+      gatewayPort: target.gatewayPort,
+    });
+    if (!sameGatewayOwner(authority, currentAuthority)) {
+      throw new GatewayAuthorityError(
+        "Gateway lifecycle authority changed after the recreate journal was recorded " +
+          `(${describeGatewayOwnerForError(authority)} -> ${describeGatewayOwnerForError(currentAuthority)}). ` +
+          "Retry the rebuild; the current run will not delete the source sandbox.",
+      );
+    }
+  };
   const advance = (next: CheckpointSandboxRecreatePhase): void => {
     onboardSession.updateSession((current) => {
-      phase = advanceSandboxRecreateTransaction(current, transaction.id, next).phase;
+      currentTransaction = advanceSandboxRecreateTransaction(current, transaction.id, next);
+      phase = currentTransaction.phase;
       return current;
     });
   };
@@ -880,25 +917,28 @@ export function openRebuildRecreateJournal(
     gatewayAuthority,
     targetGeneration: transaction.targetGeneration,
     targetIntentFingerprint: transaction.targetIntentFingerprint,
-    harnessPackage: transaction.harnessPackage,
-    markDeleting: () => {
-      if (sandboxRecreatePhaseReached(phase, "deleted")) return;
-      assertCurrentRebuildPackageAuthority(target.sandboxName, input.packageAuthority);
-      advance("deleting");
-    },
-    observeSourceForDelete: () => {
-      assertCurrentRebuildPackageAuthority(target.sandboxName, input.packageAuthority);
-      const current = observe(target);
-      if (current.state === "missing") return "missing";
-      if (
-        !transaction.sourceLiveIdentityFingerprint ||
-        current.liveIdentityFingerprint !== transaction.sourceLiveIdentityFingerprint
-      ) {
-        throw new Error(
-          `Cannot delete sandbox '${target.sandboxName}': the live same-name sandbox is not the journaled source.`,
-        );
-      }
-      return "source";
+    harnessPackage:
+      transaction.version === 2
+        ? transaction.harnessPackage
+        : input.packageAuthority.harnessPackage,
+    beginDelete: () => {
+      const begun = beginSandboxRecreateDelete({
+        sessionStore: {
+          loadSession: onboardSession.loadSession,
+          updateSession: onboardSession.updateSession,
+          compareAndSwapSession: onboardSession.compareAndSwapSession,
+        },
+        openingSessionId,
+        expectedTransaction: currentTransaction,
+        targetIntentFingerprint: transaction.targetIntentFingerprint,
+        revalidateGatewayAuthority,
+        readRegistryEntry: () =>
+          assertCurrentRebuildPackageAuthority(target.sandboxName, input.packageAuthority),
+        observe: () => observe(target),
+      });
+      currentTransaction = begun.transaction;
+      phase = currentTransaction.phase;
+      return begun.sourcePresence;
     },
     confirmDeleted: () => {
       if (observe(target).state !== "missing") {

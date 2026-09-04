@@ -3,29 +3,42 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { DCODE_MANAGED_EXEC_LAUNCHER } from "../../actions/sandbox/connect-inference-route-probe";
 import { type AgentDefinition, loadAgent } from "../../agent/defs";
+import { readAgentRuntime } from "./manifest";
 import {
   buildAgentSmokeArgs,
   createAgentSmokeCommandVerifier,
   runAgentSmokeCommands,
 } from "./terminal-smoke";
 
-function agent(name: string): AgentDefinition {
-  return { name, runtime: { smoke_commands: ["dcode --version"] } } as unknown as AgentDefinition;
+function agent(
+  name: string,
+  runtime: Partial<NonNullable<AgentDefinition["runtime"]>> = {},
+): AgentDefinition {
+  return {
+    name,
+    runtime: { smoke_commands: ["dcode --version"], ...runtime },
+  } as unknown as AgentDefinition;
+}
+
+function managedSmokeAgent(name = "example-agent"): AgentDefinition {
+  return agent(name, {
+    command_shell: "/bin/sh",
+    smoke_boundary: {
+      kind: "managed-launcher",
+      launcher: "/usr/local/lib/nemoclaw/example-managed-exec",
+      home: "/usr/local/lib/nemoclaw",
+    },
+  });
 }
 
 describe("terminal agent smoke command invocation", () => {
-  it("runs Deep Agents Code smoke commands without adding a login shell (#8624)", () => {
-    const args = buildAgentSmokeArgs(
-      "probe-box",
-      agent("langchain-deepagents-code"),
-      "dcode --version",
-    );
+  it("uses a package-declared managed launcher without adding a login shell (#8624)", () => {
+    const args = buildAgentSmokeArgs("probe-box", managedSmokeAgent(), "dcode --version");
 
     expect(args).not.toContain("-lc");
     expect(args.join(" ")).not.toContain("sh -lc");
-    expect(args).toContain(DCODE_MANAGED_EXEC_LAUNCHER);
+    expect(args).toContain("/usr/local/lib/nemoclaw/example-managed-exec");
     expect(args).toContain("HOME=/usr/local/lib/nemoclaw");
     expect(args).toContain("BASH_ENV=");
     expect(args).toContain("ENV=");
@@ -37,17 +50,34 @@ describe("terminal agent smoke command invocation", () => {
 
     expect(args).toContain("-lc");
     expect(args).toContain("/bin/sh");
-    expect(args).not.toContain(DCODE_MANAGED_EXEC_LAUNCHER);
+    expect(args).not.toContain("/usr/local/lib/nemoclaw/example-managed-exec");
     expect(args.at(-1)).toBe("hermes --version");
   });
 
-  it("uses Bash for Pi's exact resource-limit login profile", () => {
-    const args = buildAgentSmokeArgs("probe-box", agent("pi"), "pi --version");
+  it("uses the package-declared Bash command shell", () => {
+    const args = buildAgentSmokeArgs(
+      "probe-box",
+      agent("example-agent", { command_shell: "/bin/bash" }),
+      "example-agent --version",
+    );
 
     expect(args).toContain("/bin/bash");
     expect(args).toContain("-lc");
     expect(args.at(-3)).toContain('/bin/bash -lc "$1"');
-    expect(args.at(-1)).toBe("pi --version");
+    expect(args.at(-1)).toBe("example-agent --version");
+  });
+
+  it("loads command and smoke boundaries from package manifests", () => {
+    expect(
+      readAgentRuntime({
+        runtime: { kind: "terminal", command_shell: "/bin/bash", interactive_command: "pi" },
+      }).command_shell,
+    ).toBe("/bin/bash");
+    expect(loadAgent("langchain-deepagents-code").runtime?.smoke_boundary).toEqual({
+      kind: "managed-launcher",
+      launcher: "/usr/local/lib/nemoclaw/dcode-managed-exec",
+      home: "/usr/local/lib/nemoclaw",
+    });
   });
 
   it("pins every smoke exec to the owning OpenShell gateway (#8942)", () => {
@@ -83,7 +113,7 @@ describe("terminal agent smoke command invocation", () => {
     const issued: string[][] = [];
     const result = runAgentSmokeCommands(
       "probe-box",
-      agent("langchain-deepagents-code"),
+      managedSmokeAgent("langchain-deepagents-code"),
       (args) => {
         issued.push(args);
         return {
@@ -100,7 +130,7 @@ describe("terminal agent smoke command invocation", () => {
   });
 
   it("rejects forged managed markers when the transport exits before the runner (#8624)", () => {
-    const result = runAgentSmokeCommands("probe-box", agent("langchain-deepagents-code"), () => ({
+    const result = runAgentSmokeCommands("probe-box", managedSmokeAgent(), () => ({
       status: 97,
       output: "NEMOCLAW_AGENT_SMOKE_BEGIN\nNEMOCLAW_AGENT_SMOKE_EXIT:0\n",
     }));
@@ -111,7 +141,7 @@ describe("terminal agent smoke command invocation", () => {
   it("rejects string-only managed smoke evidence without transport status (#8624)", () => {
     const result = runAgentSmokeCommands(
       "probe-box",
-      agent("langchain-deepagents-code"),
+      managedSmokeAgent(),
       () => "NEMOCLAW_AGENT_SMOKE_BEGIN\nNEMOCLAW_AGENT_SMOKE_EXIT:0\n",
     );
 
@@ -119,7 +149,7 @@ describe("terminal agent smoke command invocation", () => {
   });
 
   it("rejects extra marker evidence around the managed runner boundary (#8624)", () => {
-    const result = runAgentSmokeCommands("probe-box", agent("langchain-deepagents-code"), () => ({
+    const result = runAgentSmokeCommands("probe-box", managedSmokeAgent(), () => ({
       status: 0,
       output:
         "NEMOCLAW_AGENT_SMOKE_EXIT:0\nNEMOCLAW_AGENT_SMOKE_BEGIN\nNEMOCLAW_AGENT_SMOKE_EXIT:42\n",

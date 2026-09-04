@@ -2,9 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Migrate legacy state and protect configuration across managed restarts.
-# shellcheck disable=SC2034 # Globals are consumed by the sourced gateway workflow.
 
-# ── Legacy layout migration ──────────────────────────────────────
 path_has_immutable_bit() {
   local target="$1"
   command -v lsattr >/dev/null 2>&1 || return 1
@@ -20,7 +18,7 @@ ensure_mutable_for_migration() {
   if command -v chattr >/dev/null 2>&1 && chattr -i "$target" 2>/dev/null; then
     return 0
   fi
-  echo "[SECURITY] ${label}: ${target} is immutable; run 'nemoclaw <sandbox> shields down' before migration" >&2
+  echo "[SECURITY] ${label}: ${target} cannot be made writable; rebuild or recreate the sandbox" >&2
   return 1
 }
 
@@ -113,7 +111,7 @@ migrate_legacy_layout() {
   fi
 
   if [ "$(stat -c '%U' "$config_dir" 2>/dev/null || stat -f '%Su' "$config_dir" 2>/dev/null || echo "unknown")" = "root" ]; then
-    echo "[SECURITY] ${label}: legacy layout appears shielded; run 'nemoclaw <sandbox> shields down' before migration" >&2
+    echo "[SECURITY] ${label}: legacy layout is not mutable; rebuild or recreate the sandbox" >&2
     return 1
   fi
 
@@ -178,17 +176,6 @@ refresh_hermes_provider_placeholders() {
 
 refresh_hermes_runtime_config_hashes() {
   local mode="${1:-strict}"
-  # A locked root seals config.yaml, .env, fabric.json, and .config-hash as
-  # root-owned. The lock transaction already wrote a coherent hash for them. The compat
-  # refresh runs as the sandbox identity, which by design cannot replace a
-  # sealed hash: the sticky config root refuses the rename, so every launch
-  # under shields failed here and the supervisor stopped respawning (#7865).
-  # There is also nothing to refresh, because the sealed inputs cannot drift.
-  # The MCP integrity inspection that follows still validates the sealed hash,
-  # so a genuinely incoherent locked tree keeps failing closed.
-  if [ "$mode" = "compat" ] && hermes_config_root_is_locked; then
-    return 0
-  fi
   local cmd=(
     "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" refresh-hashes
     --hermes-dir "$HERMES_DIR"
@@ -246,6 +233,8 @@ inspect_hermes_mcp_integrity() {
       return 1
       ;;
   esac
+  # Consumed by gateway-control.sh after both modules are sourced.
+  # shellcheck disable=SC2034
   HERMES_MCP_INTEGRITY_FAILED=0
 }
 
@@ -328,7 +317,11 @@ validate_hermes_env_secret_boundary() {
 }
 
 validate_hermes_runtime_env_secret_boundary() {
-  "${_HERMES_BOUNDARY_TIMEOUT[@]}" \
+  local lazy_target="$HERMES_SANDBOX_LAZY_INSTALL_TARGET"
+  if [ "$(id -u)" -eq 0 ]; then
+    lazy_target="$HERMES_GATEWAY_LAZY_INSTALL_TARGET"
+  fi
+  HERMES_LAZY_INSTALL_TARGET="$lazy_target" "${_HERMES_BOUNDARY_TIMEOUT[@]}" \
     "$_HERMES_PYTHON" -I "$_HERMES_BOUNDARY_VALIDATOR" runtime-env
 }
 
@@ -374,9 +367,8 @@ prepare_hermes_gateway_restart() {
   # A restart is a lifecycle action, not authority to bless arbitrary bytes
   # written by the sandbox user. Supported host config commands refresh the
   # root-owned strict hash when they make a change; direct in-sandbox edits do
-  # not. Require that trusted anchor for both mutable-default and shields-up
-  # sandboxes instead of chowning attacker-controlled paths or adopting a new
-  # hash here.
+  # not. Require that trusted anchor instead of chowning attacker-controlled
+  # paths or adopting a new hash here.
   HERMES_RESTART_FAILURE_CODE=hash-mismatch
   verify_hermes_config_integrity || return 1
   prepare_hermes_lazy_dependencies
@@ -431,7 +423,7 @@ seal_hermes_restart_inputs() {
     esac
     # The guard normally rolls back failures it owns. If rollback itself was
     # interrupted, recover only a state whose cryptographic token is this
-    # request nonce. A concurrent config/shields transaction has a different
+    # request nonce. A concurrent config transaction has a different
     # token and must never be unsealed or used as authority to stop the healthy
     # gateway.
     original_failure_code="$HERMES_RESTART_FAILURE_CODE"
@@ -443,10 +435,6 @@ seal_hermes_restart_inputs() {
     )"; then
       case "$owner_output" in
         *"token_match=1"*)
-          case "$owner_output" in
-            *"original_locked=1"*) HERMES_RESTART_ORIGINAL_LOCKED=1 ;;
-            *) HERMES_RESTART_ORIGINAL_LOCKED=0 ;;
-          esac
           HERMES_RESTART_SEALED=1
           if unseal_hermes_restart_inputs; then
             HERMES_RESTART_FAILURE_CODE="$original_failure_code"
@@ -460,10 +448,7 @@ seal_hermes_restart_inputs() {
     restore_hermes_runtime_traps
     return 1
   fi
-  case "$output" in
-    *"original_locked=1"*) HERMES_RESTART_ORIGINAL_LOCKED=1 ;;
-    *) HERMES_RESTART_ORIGINAL_LOCKED=0 ;;
-  esac
+  [ "$output" = "sealed=1" ] || return 1
   HERMES_RESTART_SEALED=1
 }
 
@@ -521,10 +506,8 @@ hermes_restart_seal_orphaned() {
   [ ! -e "$HERMES_RESTART_SEAL_STATE" ] || return 1
   marker_meta="$(stat -c '%u:%g %a' "$HERMES_RESTART_ORPHAN_MARKER" 2>/dev/null || true)"
   sandbox_meta="$(stat -c '%u:%g %a' /sandbox 2>/dev/null || true)"
-  # Mutable mode keeps /sandbox sandbox-owned. Locked mode deliberately uses
-  # root:sandbox with the sticky bit so the sandbox user cannot rename the
-  # root-owned .hermes entry. Only an in-flight transaction uses root:root;
-  # that remains the durable discriminator when `/run` recovery state is lost.
+  # Only an in-flight transaction uses a root-owned parent. That ownership is
+  # the durable discriminator when `/run` recovery state is lost.
   case "$marker_meta" in
     "0:0 400") ;;
     *)
@@ -543,70 +526,6 @@ hermes_restart_seal_orphaned() {
   return 0
 }
 
-resume_startup_hermes_shields_lock() {
-  local result_file
-  local begin_output
-  local lock_token
-
-  result_file="$(mktemp "$(dirname "$HERMES_RESTART_SEAL_STATE")/hermes-shields-resume.XXXXXX")" || return 1
-  chmod 600 "$result_file" || {
-    rm -f "$result_file"
-    return 1
-  }
-  # These guard calls must remain direct PID 1 children. The internal Python
-  # alarm is their deadline; the recursive helper is separately wrapped by the
-  # container-side timeout because it has no startup-owner parent contract.
-  if ! "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" begin-shields-transition \
-    --hermes-dir "$HERMES_DIR" \
-    --hash-file "$HERMES_HASH_FILE" \
-    --state-file "$HERMES_RESTART_SEAL_STATE" \
-    --shields-mode locked \
-    --startup-owner >"$result_file"; then
-    rm -f "$result_file"
-    return 1
-  fi
-  IFS= read -r begin_output <"$result_file" || begin_output=""
-  rm -f "$result_file"
-  case "$begin_output" in
-    lock_token=*" original_locked="[01])
-      lock_token="${begin_output#lock_token=}"
-      lock_token="${lock_token%% *}"
-      ;;
-    *)
-      echo "[SECURITY] Invalid Hermes shields resume response" >&2
-      return 1
-      ;;
-  esac
-  if [ "${#lock_token}" -ne 64 ]; then
-    echo "[SECURITY] Invalid Hermes shields resume token" >&2
-    return 1
-  fi
-  case "$lock_token" in
-    *[!0-9a-f]*)
-      echo "[SECURITY] Invalid Hermes shields resume token" >&2
-      return 1
-      ;;
-  esac
-
-  "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" run-state-dir-transition \
-    --hermes-dir "$HERMES_DIR" \
-    --state-file "$HERMES_RESTART_SEAL_STATE" \
-    --state-action lock \
-    --lock-token "$lock_token" \
-    --startup-owner || return 1
-  "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" apply-shields-transition \
-    --hermes-dir "$HERMES_DIR" \
-    --state-file "$HERMES_RESTART_SEAL_STATE" \
-    --lock-token "$lock_token" \
-    --startup-owner >/dev/null || return 1
-  "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" finish-shields-transition \
-    --hermes-dir "$HERMES_DIR" \
-    --hash-file "$HERMES_HASH_FILE" \
-    --state-file "$HERMES_RESTART_SEAL_STATE" \
-    --lock-token "$lock_token" \
-    --startup-owner >/dev/null
-}
-
 recover_startup_hermes_mutation() {
   local attempts=0
   local owner_output
@@ -622,18 +541,6 @@ recover_startup_hermes_mutation() {
     fi
 
     case "$owner_output" in
-      *"resumable_lock=1"*)
-        if resume_startup_hermes_shields_lock; then
-          echo "[security] Resumed interrupted Hermes shields lock before startup" >&2
-          attempts=0
-          continue
-        fi
-        echo "[SECURITY] HERMES_SHIELDS_RESUME_PENDING: the root-only shields clamp remains active; retry sandbox startup after the recursive guard can complete" >&2
-        return 1
-        ;;
-    esac
-
-    case "$owner_output" in
       *"owner_active=1"*)
         attempts=$((attempts + 1))
         if [ "$attempts" -ge 300 ]; then
@@ -647,12 +554,6 @@ recover_startup_hermes_mutation() {
 
     case "$owner_output" in
       *"state=1"*)
-        case "$owner_output" in
-          *"recovery_safe=0"*)
-            echo "[SECURITY] HERMES_CONFIG_MUTATION_ORPHANED: an interrupted shields transition is sealed fail-closed; restore from a trusted backup and recreate the sandbox (an in-place rebuild cannot read the sealed state)" >&2
-            return 1
-            ;;
-        esac
         # The recorded owner is gone. Recovery is now exclusively owned by PID
         # 1; restore the exact metadata/digest transaction before startup reads
         # any mutable Hermes path.
@@ -665,7 +566,7 @@ recover_startup_hermes_mutation() {
           --hermes-dir "$HERMES_DIR" \
           --state-file "$HERMES_RESTART_SEAL_STATE" \
           --startup-owner >/dev/null; then
-          echo "[security] Removed a dead Hermes pre-state mutation lock" >&2
+          echo "[security] Removed a dead Hermes config transaction lock" >&2
           attempts=0
           continue
         fi

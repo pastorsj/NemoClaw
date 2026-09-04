@@ -512,20 +512,13 @@ else
 fi
 
 # Begin the root PID 1 readiness lease before any startup path reads or mutates
-# OpenClaw config. Recovery runs before the locked-parent discriminator so a
-# crash in a prior config write/restart/handoff can complete deterministically.
+# OpenClaw config so a prior config write or restart can recover before reads.
 if [ "$(id -u)" -eq 0 ]; then
   prepare_openclaw_config_startup || exit 1
 fi
 
-# A root-owned config directory is the shields-up discriminator. Its parent
-# must be sticky and root-owned too; otherwise the sandbox identity can rename
-# the entire `.openclaw` entry and replace the pathname with mutable content.
-# Refuse before migration or any config read. PID 1 cannot repair this posture
-# after startup has failed, so recovery requires a trusted snapshot/recreate.
-if [ "$(openclaw_config_dir_owner /sandbox/.openclaw)" = "root" ] \
-  && ! openclaw_locked_parent_is_protected; then
-  echo "[SECURITY] OPENCLAW_LOCKED_PARENT_UNPROTECTED: /sandbox must be root:sandbox 1775 while OpenClaw shields are up; restore from a trusted backup and recreate the sandbox" >&2
+if [ "$(openclaw_config_dir_owner /sandbox/.openclaw)" = "root" ]; then
+  echo "[SECURITY] Existing OpenClaw config is not in the supported mutable posture. Rebuild or recreate the sandbox." >&2
   exit 1
 fi
 
@@ -549,15 +542,9 @@ fi
 if [ "$(id -u)" -ne 0 ]; then
   echo "[gateway] Running as non-root (uid=$(id -u)) — privilege separation disabled" >&2
   export HOME=/sandbox
-  # Empty-config recovery runs before integrity check so a #3118 truncation
-  # (openshell inference set inside the sandbox) is restored from baseline
-  # rather than failing the integrity hash for the empty file.
+  # Restore a #3118 truncation before later config reads.
   _nemoclaw_capture_epoch_realtime _NEMOCLAW_GATEWAY_CONFIG_STARTED_EPOCH
   recover_openclaw_config_if_empty
-  if ! verify_config_integrity_if_locked /sandbox/.openclaw; then
-    echo "[SECURITY] Config integrity check failed — refusing to start (non-root mode)" >&2
-    exit 1
-  fi
   normalize_mutable_config_perms
   _nemoclaw_capture_epoch_realtime _NEMOCLAW_GATEWAY_CONFIG_FINISHED_EPOCH
   apply_model_override
@@ -710,13 +697,8 @@ fi
 
 echo "[gateway] NEMOCLAW_ENTRYPOINT_MODE=root" >&2
 
-# Empty-config recovery runs before integrity check so a #3118 truncation
-# (openshell inference set inside the sandbox) is restored from baseline
-# rather than failing the integrity hash for the empty file.
+# Restore a #3118 truncation before later config reads.
 recover_openclaw_config_if_empty
-# Verify locked config integrity before starting anything. Mutable-default
-# config is intentionally writable and is not a trust anchor until shields-up.
-verify_config_integrity_if_locked /sandbox/.openclaw
 normalize_mutable_config_perms
 apply_model_override
 reconcile_agent_model_with_provider

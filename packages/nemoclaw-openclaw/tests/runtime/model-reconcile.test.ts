@@ -24,7 +24,6 @@ interface RunReconcileOptions {
    */
   gatewayRawOutput?: string;
   env?: Record<string, string>;
-  locked?: boolean;
 }
 
 describe("agent identity reconciliation with provider (#3175)", () => {
@@ -77,12 +76,10 @@ describe("agent identity reconciliation with provider (#3175)", () => {
     }
 
     const helperFns = [
-      extractShellFunction("openclaw_config_dir_owner"),
-      extractShellFunction("prepare_openclaw_config_for_write"),
-      extractShellFunction("restore_openclaw_config_after_write"),
-    ]
-      .join("\n")
-      .replaceAll("/sandbox", root);
+      "normalize_mutable_config_perms() { :; }",
+      'run_openclaw_config_as_owner() { "$@"; }',
+      `ensure_mutable_openclaw_config_hash() { (cd ${JSON.stringify(openclawDir)} && sha256sum openclaw.json >.config-hash); }`,
+    ].join("\n");
     const fn = extractShellFunction("reconcile_agent_model_with_provider").replaceAll(
       "/sandbox",
       root,
@@ -91,10 +88,6 @@ describe("agent identity reconciliation with provider (#3175)", () => {
       "#!/usr/bin/env bash",
       "set -euo pipefail",
       "id() { echo 0; }",
-      "chown() { return 0; }",
-      `stat() { if [ "$1" = "-c" ] && [ "$2" = "%U" ] && [ "$3" = ${JSON.stringify(openclawDir)} ]; then echo ${options.locked ? "root" : "sandbox"}; return 0; fi; command stat "$@"; }`,
-      'relax_config_for_write() { chmod 644 "$@"; }',
-      'lock_config_after_write() { chmod 444 "$@"; }',
       helperFns,
       fn,
       "reconcile_agent_model_with_provider",
@@ -149,7 +142,9 @@ describe("agent identity reconciliation with provider (#3175)", () => {
 
   it("is a no-op when primary already matches the provider's model", () => {
     const { result, config, hash } = runReconcile({
-      agents: { defaults: { model: { primary: "inference/nvidia/same-model" } } },
+      agents: {
+        defaults: { model: { primary: "inference/nvidia/same-model" } },
+      },
       models: {
         providers: {
           inference: {
@@ -163,26 +158,6 @@ describe("agent identity reconciliation with provider (#3175)", () => {
     expect(result.status).toBe(0);
     expect(config.agents.defaults.model.primary).toBe("inference/nvidia/same-model");
     expect(hash).toBe("oldhash\n");
-  });
-
-  it("never rewrites the host-sealed config while shields are up", () => {
-    const initial = {
-      agents: { defaults: { model: { primary: "inference/old-model" } } },
-      models: {
-        providers: {
-          inference: {
-            api: "openai-completions",
-            models: [{ id: "nvidia/new-model", name: "inference/nvidia/new-model" }],
-          },
-        },
-      },
-    };
-    const { result, config, hash } = runReconcile(initial, { locked: true });
-
-    expect(result.status).toBe(0);
-    expect(config).toEqual(initial);
-    expect(hash).toBe("oldhash\n");
-    expect(result.stderr).toContain("Shields are up");
   });
 
   it("falls back to an inference-qualified model ref when provider metadata lacks name", () => {
@@ -227,12 +202,19 @@ describe("agent identity reconciliation with provider (#3175)", () => {
 
   it("preserves an explicit model override when the live gateway reports a conflicting model", () => {
     const initial = {
-      agents: { defaults: { model: { primary: "anthropic/claude-sonnet-4-6" } } },
+      agents: {
+        defaults: { model: { primary: "anthropic/claude-sonnet-4-6" } },
+      },
       models: {
         providers: {
           inference: {
             api: "openai-completions",
-            models: [{ id: "anthropic/claude-sonnet-4-6", name: "anthropic/claude-sonnet-4-6" }],
+            models: [
+              {
+                id: "anthropic/claude-sonnet-4-6",
+                name: "anthropic/claude-sonnet-4-6",
+              },
+            ],
           },
         },
       },
@@ -386,12 +368,19 @@ describe("agent identity reconciliation with provider (#3175)", () => {
   it("leaves an explicit NEMOCLAW_MODEL_OVERRIDE untouched even when the gateway reports a divergent model", () => {
     const { result, config, hash } = runReconcile(
       {
-        agents: { defaults: { model: { primary: "inference/user/explicit-choice" } } },
+        agents: {
+          defaults: { model: { primary: "inference/user/explicit-choice" } },
+        },
         models: {
           providers: {
             inference: {
               api: "openai-completions",
-              models: [{ id: "user/explicit-choice", name: "inference/user/explicit-choice" }],
+              models: [
+                {
+                  id: "user/explicit-choice",
+                  name: "inference/user/explicit-choice",
+                },
+              ],
             },
           },
         },
@@ -415,13 +404,18 @@ describe("agent identity reconciliation with provider (#3175)", () => {
     // already written the user's choice, so a stale file model must not win.
     const { result, config, hash } = runReconcile(
       {
-        agents: { defaults: { model: { primary: "inference/user/explicit-choice" } } },
+        agents: {
+          defaults: { model: { primary: "inference/user/explicit-choice" } },
+        },
         models: {
           providers: {
             inference: {
               api: "openai-completions",
               models: [
-                { id: "nvidia/stale-file-model", name: "inference/nvidia/stale-file-model" },
+                {
+                  id: "nvidia/stale-file-model",
+                  name: "inference/nvidia/stale-file-model",
+                },
               ],
             },
           },

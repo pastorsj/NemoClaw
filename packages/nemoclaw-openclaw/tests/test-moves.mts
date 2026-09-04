@@ -9,7 +9,10 @@ export type PackageTestMove = {
 function createTestMoveRecords(
   testMoves: Readonly<Record<string, string>>,
 ): readonly PackageTestMove[] {
-  return Object.entries(testMoves).map(([source, destination]) => ({ source, destination }));
+  return Object.entries(testMoves).map(([source, destination]) => ({
+    source,
+    destination,
+  }));
 }
 
 export const openclawPackageTestMoves = createTestMoveRecords({
@@ -22,12 +25,6 @@ export const openclawPackageTestMoves = createTestMoveRecords({
   "test/agents/openclaw/openclaw-2026-7-startup-compat.test.ts":
     "tests/compat/startup-2026-7.test.ts",
   "test/agents/openclaw/openclaw-chat-send-patch.test.ts": "tests/compat/chat-send.test.ts",
-  "test/agents/openclaw/openclaw-config-guard-absent-hash.test.ts":
-    "tests/runtime/absent-hash.test.ts",
-  "test/agents/openclaw/openclaw-config-guard-lock-reseal.test.ts":
-    "tests/runtime/lock-reseal.test.ts",
-  "test/agents/openclaw/openclaw-config-guard-mutable-unlock.test.ts":
-    "tests/runtime/mutable-unlock.test.ts",
   "test/agents/openclaw/openclaw-config-guard.test.ts": "tests/runtime/config-guard.test.ts",
   "test/agents/openclaw/openclaw-device-approval-policy.test.ts":
     "tests/compat/device-policy.test.ts",
@@ -114,10 +111,8 @@ export const openclawNemoclawTestMoves = createTestMoveRecords({
     "tests/runtime/gateway-route.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-guard-recovery.test.ts":
     "tests/runtime/guard-recovery.test.ts",
-  "test/agents/openclaw/runtime/nemoclaw-start-locked-migration.test.ts":
-    "tests/runtime/locked-migration.test.ts",
-  "test/agents/openclaw/runtime/nemoclaw-start-locked-parent.test.ts":
-    "tests/runtime/locked-parent.test.ts",
+  "test/agents/openclaw/runtime/nemoclaw-start-config-io.test.ts":
+    "tests/runtime/config-io.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-perms.test.ts":
     "tests/runtime/config-permissions.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-plugin-refresh.test.ts":
@@ -135,8 +130,6 @@ export const openclawNemoclawTestMoves = createTestMoveRecords({
   "test/agents/openclaw/runtime/nemoclaw-start-safe-tmp.test.ts": "tests/runtime/safe-temp.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-scope-replacement.test.ts":
     "tests/runtime/device-scope.test.ts",
-  "test/agents/openclaw/runtime/nemoclaw-start-sealed-restart.test.ts":
-    "tests/runtime/sealed-restart.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-shared-state-topology.test.ts":
     "tests/runtime/shared-state.test.ts",
   "test/agents/openclaw/runtime/nemoclaw-start-slack-runtime.test.ts":
@@ -150,8 +143,6 @@ export const openclawNemoclawTestMoves = createTestMoveRecords({
   "test/inference/llama/llama-cpp-openclaw-agent-qualification.test.ts":
     "tests/integration/llama-cpp.test.ts",
   "test/agents/openclaw/openclaw-2026-6-npm-remediation.test.ts": "tests/compat/npm-2026-6.test.ts",
-  "test/agents/openclaw/openclaw-config-guard-startup-failure-gate.test.ts":
-    "tests/runtime/startup-gate.test.ts",
   "test/agents/openclaw/openclaw-dependency-review.test.ts":
     "tests/image/dependency-review.test.ts",
   "test/agents/openclaw/openclaw-diagnostics-jaeger-runtime.test.ts":
@@ -214,7 +205,10 @@ export const openclawPackageTestSplits: readonly PackageTestMove[] = [
     source: "test/e2e-runtime/runner.test.ts",
     destination: "tests/image/runtime-hardening.test.ts",
   },
-  { source: "test/e2e-runtime/runner.test.ts", destination: "tests/image/tmux.test.ts" },
+  {
+    source: "test/e2e-runtime/runner.test.ts",
+    destination: "tests/image/tmux.test.ts",
+  },
   {
     source: "test/runtime/sandbox/sandbox-provisioning.test.ts",
     destination: "tests/image/base-tools.test.ts",

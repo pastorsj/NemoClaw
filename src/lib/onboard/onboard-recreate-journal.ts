@@ -8,10 +8,10 @@ import {
   harnessPackageIdentitiesEqual,
   type HarnessPackageIdentity,
 } from "../agent-runtime/package/identity";
-import { deriveCheckpointFromSession } from "../state/onboard-checkpoint-migrate";
 import * as onboardSession from "../state/onboard-session";
 import * as registry from "../state/registry";
 import { checkpointGatewayAuthority } from "./gateway-authority-checkpoint";
+import { sameGatewayOwner } from "./gateway-ownership";
 import { resolveGatewayTeardownAuthority } from "./gateway-teardown-authority";
 import {
   observeSandboxOnGateway,
@@ -21,12 +21,11 @@ import {
 import {
   abandonSandboxRecreateTransaction,
   advanceSandboxRecreateTransaction,
-  beginSandboxRecreateTransaction,
   clearCompletedSandboxRecreateTransaction,
   createSandboxRecreateRuntime,
   fingerprintSandboxRegistryEntry,
   fingerprintSandboxRecreateValue,
-  planSandboxRecreateRecovery,
+  ownSandboxRecreateTransaction,
   type SandboxRecreateRuntime,
   sandboxRecreatePhaseReached,
 } from "./sandbox-recreate-transaction";
@@ -94,7 +93,9 @@ function requireCurrentRegistryPackageOwner(
 ): registry.SandboxEntry {
   const entry = registry.getSandbox(target.sandboxName);
   if (!entry) {
-    throw new Error(`Cannot ${operation}: sandbox '${target.sandboxName}' registry owner is absent`);
+    throw new Error(
+      `Cannot ${operation}: sandbox '${target.sandboxName}' registry owner is absent`,
+    );
   }
   if (
     (entry.agent ?? "openclaw") !== agentName ||
@@ -104,6 +105,25 @@ function requireCurrentRegistryPackageOwner(
     throw new Error(`Cannot ${operation}: sandbox registry package authority changed`);
   }
   return entry;
+}
+
+/** Capture gateway lifecycle authority and return its delete-edge revalidator. */
+export function createOnboardRecreateGatewayAuthorityRevalidator(target: SandboxRecreateTarget): {
+  authority: ReturnType<typeof resolveGatewayTeardownAuthority>;
+  revalidate: () => void;
+} {
+  const authority = resolveGatewayTeardownAuthority(target);
+  return {
+    authority,
+    revalidate: () => {
+      const currentAuthority = resolveGatewayTeardownAuthority(target);
+      if (!sameGatewayOwner(authority, currentAuthority)) {
+        throw new Error(
+          `Cannot delete sandbox '${target.sandboxName}': its gateway lifecycle authority changed.`,
+        );
+      }
+    },
+  };
 }
 
 export function openOnboardRecreateJournal(
@@ -123,76 +143,46 @@ export function openOnboardRecreateJournal(
     throw new Error("Cannot start sandbox recreate: target package authority changed");
   }
   const requestedTargetIntentFingerprint = fingerprintOnboardRecreateTargetIntent(input.intent);
-  const observe = input.observe ?? observeSandboxOnGateway;
-  const authority = resolveGatewayTeardownAuthority({
-    gatewayName: target.gatewayName,
-    gatewayPort: target.gatewayPort,
-  });
-  const sourceEntry = requireCurrentRegistryPackageOwner(
-    openingSession,
-    target,
-    agentName,
-    "start sandbox recreate without its source registry row",
-  );
-  const observation = observe(target);
   const active = openingSession.checkpoint?.sandboxRecreate ?? null;
   const legacyTargetIntentFingerprint = fingerprintLegacyOnboardRecreateTargetIntent(input.intent);
   const targetIntentFingerprint =
     active?.targetIntentFingerprint === legacyTargetIntentFingerprint
       ? active.targetIntentFingerprint
       : requestedTargetIntentFingerprint;
-  if (active) {
-    const recovery = planSandboxRecreateRecovery(active, observation, sourceEntry);
-    if (recovery.action === "reject") {
-      throw new Error(
-        `Cannot resume sandbox '${target.sandboxName}' replacement: ${recovery.reason}.`,
-      );
-    }
-  }
-
-  const session = onboardSession.updateSession((current) => {
-    if (
-      current.sessionId !== openingSession.sessionId ||
-      !isDeepStrictEqual(current.harnessPackage, openingSession.harnessPackage) ||
-      !isDeepStrictEqual(current.harnessPackageMigration, openingSession.harnessPackageMigration)
-    ) {
-      throw new Error("Cannot start sandbox recreate: owning Session authority changed");
-    }
-    if (!isDeepStrictEqual(current.checkpoint, openingSession.checkpoint)) {
-      throw new Error("Cannot start sandbox recreate: owning Session checkpoint changed");
-    }
-    const mutationSourceEntry = requireCurrentRegistryPackageOwner(
-      current,
-      target,
-      agentName,
-      "open sandbox recreate journal",
-    );
-    if (!isDeepStrictEqual(mutationSourceEntry, sourceEntry)) {
-      throw new Error("Cannot start sandbox recreate: source registry owner changed");
-    }
-    const checkpoint = current.checkpoint ?? deriveCheckpointFromSession(current);
-    current.checkpoint = {
+  const observe = input.observe ?? observeSandboxOnGateway;
+  const gatewayAuthority = createOnboardRecreateGatewayAuthorityRevalidator(target);
+  const { authority } = gatewayAuthority;
+  const owned = ownSandboxRecreateTransaction({
+    sessionStore: {
+      loadSession: onboardSession.loadSession,
+      updateSession: onboardSession.updateSession,
+      compareAndSwapSession: onboardSession.compareAndSwapSession,
+    },
+    sandboxName: target.sandboxName,
+    gatewayName: target.gatewayName,
+    gatewayPort: target.gatewayPort,
+    targetIntentFingerprint,
+    requireSourceEntry: true,
+    readRegistryEntry: () =>
+      requireCurrentRegistryPackageOwner(
+        openingSession,
+        target,
+        agentName,
+        "start sandbox recreate without its source registry row",
+      ),
+    observe: () => observe(target),
+    decorateCheckpoint: (current, checkpoint, now) => ({
       ...checkpoint,
       machineState: current.machine.state,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
       sandboxIdentity: decisionSelected({ name: target.sandboxName, agent: agentName }),
       gatewayAuthority: decisionSelected(checkpointGatewayAuthority(authority)),
-    };
-    beginSandboxRecreateTransaction(current, {
-      sandboxName: target.sandboxName,
-      gatewayName: target.gatewayName,
-      gatewayPort: target.gatewayPort,
-      sourceEntry: mutationSourceEntry,
-      observation,
-      targetIntentFingerprint,
-    });
-    return current;
+    }),
   });
-
-  const transaction = session.checkpoint?.sandboxRecreate;
-  if (!transaction) {
-    throw new Error(
-      `Sandbox '${target.sandboxName}' replacement journal could not be recorded before deletion.`,
+  const { transaction, registryEntry: sourceEntry } = owned;
+  if (owned.replacedTransactionId) {
+    note(
+      `  Replaced void journal ${owned.replacedTransactionId} with ${transaction.id} for '${target.sandboxName}'; its source sandbox is registered and live.`,
     );
   }
   note(
@@ -217,7 +207,8 @@ export function openOnboardRecreateJournal(
     sourceEntry,
     (sandboxName, gatewayName) => observe({ ...target, sandboxName, gatewayName }),
     note,
-    registry.getSandbox,
+    () => registry.getSandbox(target.sandboxName),
+    gatewayAuthority.revalidate,
   );
 
   return {
@@ -265,7 +256,9 @@ export function openOnboardRecreateJournal(
           agentName,
           "complete sandbox recreate",
         );
-        if (!isDeepStrictEqual(currentTransaction.harnessPackage, replacement.harnessPackage ?? null)) {
+        if (
+          !isDeepStrictEqual(currentTransaction.harnessPackage, replacement.harnessPackage ?? null)
+        ) {
           throw new Error("Cannot complete sandbox recreate: replacement registry owner changed");
         }
         for (const next of ["registry_committing", "completed"] as const) {

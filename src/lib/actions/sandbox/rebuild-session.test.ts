@@ -113,8 +113,7 @@ const recreateJournal: RebuildRecreateJournal = {
   targetGeneration: "22222222-2222-4222-8222-222222222222",
   targetIntentFingerprint: "package-bound-target",
   harnessPackage: PACKAGE,
-  markDeleting: vi.fn(),
-  observeSourceForDelete: vi.fn((): "missing" => "missing"),
+  beginDelete: vi.fn((): "missing" => "missing"),
   confirmDeleted: vi.fn(),
   completeAcceptedTarget: vi.fn(),
 };
@@ -180,9 +179,6 @@ function makeInput(overrides: Partial<RebuildRecreatePhaseInput> = {}): RebuildR
     registryRollback: { recordRemoval: vi.fn(), restoreForRetry: vi.fn() },
     backupManifest: null,
     mcpEntries: [],
-    rebuildShieldsWindow: { relocked: false, wasLocked: false },
-    relockShieldsIfNeeded: vi.fn(() => true),
-    onCreated: vi.fn(),
     log: vi.fn(),
     bail: vi.fn((message: string): never => {
       throw new Error(`bail: ${message}`);

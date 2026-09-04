@@ -48,11 +48,31 @@ export interface ShellProbeOutputEvent {
 export type { TrustedShellCommand, TrustedShellCommandInput } from "./shell/trusted-command.ts";
 export { trustedShellCommand } from "./shell/trusted-command.ts";
 
+export type LiveE2EAgentName =
+  | "hermes"
+  | "langchain-deepagents-code"
+  | "nemocua"
+  | "openclaw"
+  | "pi";
+
+export function normalizeLiveE2EAgentName(value: string): LiveE2EAgentName {
+  switch (value) {
+    case "hermes":
+    case "langchain-deepagents-code":
+    case "nemocua":
+    case "openclaw":
+    case "pi":
+      return value;
+    default:
+      throw new Error("Unsupported E2E agent selector.");
+  }
+}
+
 export function requireAgentDockerfilePath(
   agentName: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  const agent = loadAgent(agentName, {
+  const agent = loadAgent(normalizeLiveE2EAgentName(agentName), {
     [CANDIDATE_AGENT_FEATURE_ENV]:
       environment[CANDIDATE_AGENT_FEATURE_ENV] ?? process.env[CANDIDATE_AGENT_FEATURE_ENV],
     [CANDIDATE_QUALIFICATION_RECEIPT_ENV]:

@@ -2719,7 +2719,7 @@ function restoreSandboxStateFromTrustedTree(
           _log,
           configFreshOpenClawImagePluginInstalls,
           previousOpenClawImagePluginInstalls,
-          [targetAgent.configPaths.configFile, ...targetAgent.configPaths.shieldsFiles],
+          [targetAgent.configPaths.configFile],
         )
       ) {
         restoredFiles.push(spec.path);

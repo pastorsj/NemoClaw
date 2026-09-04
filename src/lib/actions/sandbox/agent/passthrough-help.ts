@@ -123,9 +123,6 @@ export function writeTimedOutAgentTurnFailure(
     `    ${CLI_NAME} ${target} sessions export <key>  — export the partial transcript\n`,
   );
   proc.stderr.write(
-    `    ${CLI_NAME} ${target} shields down           — unlock configuration writes\n`,
-  );
-  proc.stderr.write(
     `    ${CLI_NAME} ${target} config set --key <deadline-key> --value <seconds> --restart  — raise the deadline\n`,
   );
   proc.stderr.write(

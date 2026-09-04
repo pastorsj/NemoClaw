@@ -55,12 +55,11 @@ describe("forced rebuild MCP preparation", () => {
 
   it("passes one pinned definition through live preparation and restoration", async () => {
     const agentDefinition = { name: "hermes" } as never;
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await prepareMcpForRebuild("alpha", false, false, relock, bail, agentDefinition);
+    await prepareMcpForRebuild("alpha", false, false, bail, agentDefinition);
     await restoreMcpAfterRebuild("alpha", [{} as never], agentDefinition);
 
     expect(mocks.prepareLive).toHaveBeenCalledWith("alpha", { agentDefinition });
@@ -70,24 +69,22 @@ describe("forced rebuild MCP preparation", () => {
   it("passes the pinned definition through force-only host recovery", async () => {
     const agentDefinition = { name: "hermes" } as never;
     mocks.executeSandboxExecCommand.mockReturnValue(null);
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await prepareMcpForRebuild("alpha", false, true, relock, bail, agentDefinition);
+    await prepareMcpForRebuild("alpha", false, true, bail, agentDefinition);
 
     expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { agentDefinition });
   });
 
   it("uses host-side recovery when OpenShell exec fails even while SSH is healthy (#7062)", async () => {
     mocks.executeSandboxExecCommand.mockReturnValue(null);
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+    await expect(prepareMcpForRebuild("alpha", false, true, bail)).resolves.toEqual(
       emptyPreparation,
     );
 
@@ -98,17 +95,15 @@ describe("forced rebuild MCP preparation", () => {
     expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     expect(mocks.prepareLive).not.toHaveBeenCalled();
-    expect(relock).not.toHaveBeenCalled();
   });
 
   it("uses host-side recovery when SSH fails even while OpenShell exec is healthy (#7062)", async () => {
     mocks.executeSandboxCommand.mockReturnValue(null);
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+    await expect(prepareMcpForRebuild("alpha", false, true, bail)).resolves.toEqual(
       emptyPreparation,
     );
 
@@ -119,7 +114,6 @@ describe("forced rebuild MCP preparation", () => {
     expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareLive).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
-    expect(relock).not.toHaveBeenCalled();
   });
 
   it("uses host-side recovery when SSH exits nonzero even while OpenShell exec is healthy (#7062)", async () => {
@@ -128,12 +122,11 @@ describe("forced rebuild MCP preparation", () => {
       stdout: "",
       stderr: "relay EOF",
     });
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+    await expect(prepareMcpForRebuild("alpha", false, true, bail)).resolves.toEqual(
       emptyPreparation,
     );
 
@@ -142,7 +135,6 @@ describe("forced rebuild MCP preparation", () => {
     });
     expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareLive).not.toHaveBeenCalled();
-    expect(relock).not.toHaveBeenCalled();
   });
 
   it.each([1, 64, 126, 127, 255])(
@@ -153,30 +145,27 @@ describe("forced rebuild MCP preparation", () => {
         stdout: "",
         stderr: "exec failed",
       });
-      const relock = vi.fn(() => true);
       const bail = vi.fn((message: string): never => {
         throw new Error(message);
       });
 
-      await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).resolves.toEqual(
+      await expect(prepareMcpForRebuild("alpha", false, true, bail)).resolves.toEqual(
         emptyPreparation,
       );
 
       expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
       expect(mocks.prepareLive).not.toHaveBeenCalled();
       expect(mocks.prepareAbsent).not.toHaveBeenCalled();
-      expect(relock).not.toHaveBeenCalled();
     },
   );
 
   it("does not mask a live-path safety failure after a successful exec probe (#7062)", async () => {
     mocks.prepareLive.mockRejectedValue(new Error("generated policy drifted"));
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).rejects.toThrow(
+    await expect(prepareMcpForRebuild("alpha", false, true, bail)).rejects.toThrow(
       "Failed to preserve MCP bridges before rebuild: generated policy drifted",
     );
 
@@ -186,7 +175,6 @@ describe("forced rebuild MCP preparation", () => {
       allowLocalDockerFallback: false,
     });
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
-    expect(relock).toHaveBeenCalledWith(true);
   });
 
   it("fails closed when host-side recovery cannot prove durable ownership (#7062)", async () => {
@@ -196,27 +184,24 @@ describe("forced rebuild MCP preparation", () => {
       stderr: "relay EOF",
     });
     mocks.prepareExecUnavailable.mockRejectedValue(new Error("provider ownership is ambiguous"));
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", false, true, relock, bail)).rejects.toThrow(
+    await expect(prepareMcpForRebuild("alpha", false, true, bail)).rejects.toThrow(
       "Failed to preserve MCP bridges before rebuild (--force host-side recovery): provider ownership is ambiguous",
     );
 
     expect(mocks.prepareLive).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
-    expect(relock).toHaveBeenCalledWith(true);
   });
 
   it("does not probe or use host-side recovery without explicit force (#7062)", async () => {
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", false, false, relock, bail)).resolves.toEqual(
+    await expect(prepareMcpForRebuild("alpha", false, false, bail)).resolves.toEqual(
       emptyPreparation,
     );
 
@@ -228,12 +213,11 @@ describe("forced rebuild MCP preparation", () => {
   });
 
   it("keeps already-absent stale recovery on its established host-side path (#7062)", async () => {
-    const relock = vi.fn(() => true);
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
     });
 
-    await expect(prepareMcpForRebuild("alpha", true, true, relock, bail)).resolves.toEqual(
+    await expect(prepareMcpForRebuild("alpha", true, true, bail)).resolves.toEqual(
       emptyPreparation,
     );
 

@@ -229,10 +229,7 @@ describe("config validation target discovery", () => {
     expect(sandboxPolicyFiles).toEqual(
       expect.arrayContaining([
         "nemoclaw-blueprint/policies/openclaw-sandbox.yaml",
-        "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
         "packages/nemoclaw-hermes/policy-additions.yaml",
-        "packages/nemoclaw-hermes/policies/permissive.yaml",
-        "packages/nemoclaw-openclaw/policies/permissive.yaml",
       ]),
     );
   });

@@ -40,7 +40,7 @@ installMock(source("agent", "defs.js"), {
       dir: "/sandbox/.hermes",
       configFile: "config.yaml",
       format: "yaml",
-      shieldsFiles: [".env"],
+      envFile: ".env",
     },
   }),
 });

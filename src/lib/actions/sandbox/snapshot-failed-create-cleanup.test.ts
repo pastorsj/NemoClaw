@@ -30,18 +30,9 @@ vi.mock("../../runtime-recovery", () => ({
   parseLiveSandboxNames: vi.fn(() => new Set(["alpha"])),
 }));
 
-vi.mock("../../shields", () => ({
-  isShieldsDown: vi.fn(() => true),
-}));
-
-vi.mock("../../shields/timer-bound-lock", () => ({
-  withTimerBoundShieldsMutationLock: vi.fn(
-    (_sandboxName: string, _command: string, operation: () => unknown) => operation(),
-  ),
-}));
-
 vi.mock("../../state/mcp-lifecycle-lock", () => ({
-  withSandboxMutationLock: vi.fn((_sandboxName: string, operation: () => unknown) => operation()),
+  withSandboxMutationLock: vi.fn((_name: string, operation: () => unknown) => operation()),
+  withMcpLifecycleLockSync: vi.fn((_name: string, operation: () => unknown) => operation()),
 }));
 
 vi.mock("../../state/registry", () => ({

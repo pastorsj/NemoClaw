@@ -191,6 +191,9 @@ describe("rebuild package-bound journal", () => {
       session = mutator(session) ?? session;
       return session;
     });
+    vi.spyOn(onboardSession, "compareAndSwapSession").mockImplementation((matches, mutator) => {
+      return matches(session) ? ((session = mutator(session) ?? session), "updated") : "mismatch";
+    });
     vi.spyOn(registry, "getSandbox").mockImplementation(() => sourceEntry);
     mocks.resolveGatewayRebuildAuthority.mockReturnValue(GATEWAY_AUTHORITY);
   });
@@ -248,6 +251,7 @@ describe("rebuild package-bound journal", () => {
       observe,
       log: vi.fn(),
     });
+    observe.mockClear();
     sourceEntry = {
       ...sourceEntry!,
       harnessPackageMigration: {
@@ -256,8 +260,8 @@ describe("rebuild package-bound journal", () => {
       },
     };
 
-    expect(() => journal.observeSourceForDelete()).toThrow(/package authority changed/u);
-    expect(observe).toHaveBeenCalledOnce();
+    expect(() => journal.beginDelete()).toThrow(/package authority changed/u);
+    expect(observe).not.toHaveBeenCalled();
     expect(session.checkpoint?.sandboxRecreate?.phase).toBe("planned");
   });
 
@@ -280,7 +284,7 @@ describe("rebuild package-bound journal", () => {
       log: vi.fn(),
     });
 
-    journal.markDeleting();
+    expect(journal.beginDelete()).toBe("source");
     sourceEntry = null;
     sourceMissing = true;
     journal.confirmDeleted();

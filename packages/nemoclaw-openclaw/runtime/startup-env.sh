@@ -306,17 +306,15 @@ GATEWAYURLENVEOF
 # a member of the sandbox group, from persisting config writes. Restore the
 # setgid + group-writable contract (2770 dir / 660 config) after every openclaw
 # invocation routed through this guard, regardless of exit code. Best-effort and
-# idempotent: it skips when shields are up (config dir owned by root) so the lock
-# is never weakened, and is a no-op when the contract already holds. The
-# baseline re-lock stays a root-only startup concern (this runs as the sandbox
-# user), so it is intentionally not attempted here. Kept in sync with the
-# entrypoint's normalize_mutable_config_perms.
+# idempotent: it skips a root-owned active config transaction and is a no-op
+# when the contract already holds. Kept in sync with the entrypoint's
+# normalize_mutable_config_perms.
 _nemoclaw_restore_mutable_config_perms() {
   local _nemoclaw_oc_dir _nemoclaw_oc_owner _nemoclaw_oc_dir_mode _nemoclaw_oc_file_mode _nemoclaw_oc_hash_mode _nemoclaw_oc_fabric_mode
   _nemoclaw_oc_dir="${OPENCLAW_STATE_DIR:-/sandbox/.openclaw}"
   [ -d "$_nemoclaw_oc_dir" ] || return 0
   _nemoclaw_oc_owner="$(stat -c '%U' "$_nemoclaw_oc_dir" 2>/dev/null || stat -f '%Su' "$_nemoclaw_oc_dir" 2>/dev/null || echo unknown)"
-  # Shields up — config is intentionally root-locked; never weaken it.
+  # A root-owned config belongs to a host transaction; never weaken it here.
   [ "$_nemoclaw_oc_owner" = "root" ] && return 0
   _nemoclaw_oc_dir_mode="$(stat -c '%a' "$_nemoclaw_oc_dir" 2>/dev/null || stat -f '%Lp' "$_nemoclaw_oc_dir" 2>/dev/null || echo '')"
   _nemoclaw_oc_file_mode="$(stat -c '%a' "$_nemoclaw_oc_dir/openclaw.json" 2>/dev/null || stat -f '%Lp' "$_nemoclaw_oc_dir/openclaw.json" 2>/dev/null || echo '')"

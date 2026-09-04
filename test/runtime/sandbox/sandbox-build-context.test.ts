@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { dockerSpawn, dockerSpawnSync } from "../../../src/lib/adapters/docker/exec";
+import { openRegularFileNoFollow } from "../../../src/lib/adapters/fs/regular-file";
 import { createAgentSandbox } from "../../../src/lib/agent/base-image";
 import type { AgentDefinition } from "../../../src/lib/agent/defs";
 import { isWsl } from "../../../src/lib/platform";
@@ -123,10 +124,6 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("packages", "nemoclaw-openclaw", "Dockerfile.base"));
     writeFixture(path.join("packages", "nemoclaw-openclaw", "start.sh"), "#!/bin/sh\n", 0o700);
     writeFixture(path.join("packages", "nemoclaw-openclaw", "policy-additions.yaml"));
-    writeFixture(
-      path.join("packages", "nemoclaw-openclaw", "runtime", "state", "plan.json"),
-      "{}\n",
-    );
     writeFixture(
       path.join("ci", "npm-audit-exceptions.json"),
       `${JSON.stringify({ schemaVersion: 1, exceptions: [] })}\n`,
@@ -257,7 +254,6 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("scripts", "managed-bootstrap-trampoline.sh"));
     writeFixture(path.join("scripts", "gateway-control.sh"));
     writeFixture(path.join("scripts", "managed-gateway-control.py"));
-    writeFixture(path.join("scripts", "state-dir-guard.py"));
     writeFixture(path.join("scripts", "codex-acp-wrapper.sh"));
     writeFixture(
       path.join("scripts", "checks", "verify-openshell-policy-boundary-dependencies.mts"),
@@ -534,9 +530,17 @@ describe("sandbox build context staging", () => {
         "reviewed-runtime-bundle",
         relativePath,
       );
-      expect(fs.lstatSync(stagedPath).isFile(), relativePath).toBe(true);
-      expect(fs.readFileSync(stagedPath), relativePath).toEqual(fs.readFileSync(sourcePath));
-      expect((fs.statSync(stagedPath).mode & 0o777).toString(8), relativePath).toBe("644");
+      const staged = openRegularFileNoFollow(stagedPath);
+      const source = openRegularFileNoFollow(sourcePath);
+      try {
+        expect(staged.readBytes(16 * 1024 * 1024), relativePath).toEqual(
+          source.readBytes(16 * 1024 * 1024),
+        );
+        expect((staged.stat().mode & 0o777).toString(8), relativePath).toBe("644");
+      } finally {
+        staged.close();
+        source.close();
+      }
     }
   }
 

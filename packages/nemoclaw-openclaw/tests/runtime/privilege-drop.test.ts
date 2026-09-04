@@ -13,6 +13,17 @@ import {
   readOpenClawStartupSource,
 } from "../helpers/startup-suite";
 
+function commandPath(name: string): string {
+  const result = spawnSync("/bin/sh", ["-c", `command -v ${name}`], {
+    encoding: "utf-8",
+  });
+  if (result.status !== 0 || !result.stdout.trim()) throw new Error(`${name} is required`);
+  return result.stdout.trim();
+}
+
+const CHMOD = commandPath("chmod");
+const SHA256SUM = commandPath("sha256sum");
+
 describe("workspace seed step-down", () => {
   const src = readOpenClawStartupSource();
 
@@ -112,7 +123,10 @@ describe("run_step_down_as_sandbox", () => {
       { mode: 0o700 },
     );
     try {
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+      const result = spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(fs.readFileSync(marker, "utf-8").trim()).toBe("ran");
       const tempScriptPath = fs.readFileSync(stepDownLog, "utf-8").trim();
@@ -141,7 +155,10 @@ describe("run_step_down_as_sandbox", () => {
       { mode: 0o700 },
     );
     try {
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+      const result = spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
       expect(result.status).toBe(0);
       expect(result.stdout).toContain("EXIT=7");
       const tempScriptPath = fs.readFileSync(stepDownLog, "utf-8").trim();
@@ -316,7 +333,10 @@ describe("setup_auth_profile_as_sandbox", () => {
       { mode: 0o700 },
     );
     try {
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+      const result = spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(fs.readFileSync(observedHome, "utf-8").trim()).toBe("/sandbox");
     } finally {
@@ -336,16 +356,18 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
     const configPath = path.join(configDir, "openclaw.json");
     const hashPath = path.join(configDir, ".config-hash");
     fs.writeFileSync(configPath, "{}\n");
-    fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n");
+    fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n", {
+      mode: 0o600,
+    });
     if (opts.preexistingHash !== undefined) {
       fs.writeFileSync(hashPath, opts.preexistingHash);
     }
     const stepDownLog = path.join(tmpDir, "step-down.log");
     const scriptPath = path.join(tmpDir, "run.sh");
-    const helperFn = extractShellFunctionFromSource(
-      src,
-      "ensure_mutable_openclaw_config_hash",
-    ).replaceAll("/sandbox/.openclaw", configDir);
+    const helperFn = extractShellFunctionFromSource(src, "ensure_mutable_openclaw_config_hash")
+      .replaceAll("/sandbox/.openclaw", configDir)
+      .replaceAll("/usr/bin/sha256sum", SHA256SUM)
+      .replaceAll("/usr/bin/chmod", CHMOD);
     fs.writeFileSync(
       scriptPath,
       [
@@ -361,7 +383,10 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
       ].join("\n"),
       { mode: 0o700 },
     );
-    const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+    const result = spawnSync("bash", [scriptPath], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
     const hashAfter = fs.existsSync(hashPath) ? fs.readFileSync(hashPath, "utf-8").trim() : "";
     const stepDownInvocations = fs.existsSync(stepDownLog)
       ? fs.readFileSync(stepDownLog, "utf-8").trim().split("\n").filter(Boolean).length
@@ -370,7 +395,9 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
   }
 
   it("routes the sha256sum write through the sandbox step-down prefix when uid=0", () => {
-    const { tmpDir, result, hashAfter, stepDownInvocations } = runHashRefresh({ asRoot: true });
+    const { tmpDir, result, hashAfter, stepDownInvocations } = runHashRefresh({
+      asRoot: true,
+    });
     try {
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(stepDownInvocations).toBe(1);
@@ -381,7 +408,9 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
   });
 
   it("skips the step-down prefix when already running as non-root", () => {
-    const { tmpDir, result, hashAfter, stepDownInvocations } = runHashRefresh({ asRoot: false });
+    const { tmpDir, result, hashAfter, stepDownInvocations } = runHashRefresh({
+      asRoot: false,
+    });
     try {
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(stepDownInvocations).toBe(0);
@@ -422,7 +451,9 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
       const configPath = path.join(configDir, "openclaw.json");
       const hashPath = path.join(configDir, ".config-hash");
       fs.writeFileSync(configPath, "{}\n");
-      fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n");
+      fs.writeFileSync(path.join(configDir, "fabric.json"), "{}\n", {
+        mode: 0o600,
+      });
       fs.writeFileSync(hashPath, "placeholder\n");
       fs.chmodSync(hashPath, 0o444);
 
@@ -453,10 +484,10 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
       // owner-uid step-down restoring effective write access).
       const stepDownLog = path.join(tmpDir, "step-down.log");
       const scriptPath = path.join(tmpDir, "run.sh");
-      const helperFn = extractShellFunctionFromSource(
-        src,
-        "ensure_mutable_openclaw_config_hash",
-      ).replaceAll("/sandbox/.openclaw", configDir);
+      const helperFn = extractShellFunctionFromSource(src, "ensure_mutable_openclaw_config_hash")
+        .replaceAll("/sandbox/.openclaw", configDir)
+        .replaceAll("/usr/bin/sha256sum", SHA256SUM)
+        .replaceAll("/usr/bin/chmod", CHMOD);
       fs.writeFileSync(
         scriptPath,
         [
@@ -464,14 +495,16 @@ describe("ensure_mutable_openclaw_config_hash root-mode step-down", () => {
           "set -euo pipefail",
           'id() { if [ "${1:-}" = "-u" ]; then printf "0"; else command id "$@"; fi; }',
           'openclaw_config_dir_owner() { printf "sandbox"; }',
-          `export HASH_PATH=${JSON.stringify(hashPath)}`,
-          `STEP_DOWN_PREFIX_SANDBOX=(bash -c 'printf "step-down\\n" >>${JSON.stringify(stepDownLog)}; chmod 0660 "$HASH_PATH"; exec "$@"' sandbox-step-down)`,
+          `STEP_DOWN_PREFIX_SANDBOX=(bash -c 'printf "step-down\\n" >>${JSON.stringify(stepDownLog)}; chmod 0660 ${JSON.stringify(hashPath)}; exec "$@"' sandbox-step-down)`,
           helperFn,
           "ensure_mutable_openclaw_config_hash",
         ].join("\n"),
         { mode: 0o700 },
       );
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+      const result = spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(fs.readFileSync(stepDownLog, "utf-8").trim().split("\n").filter(Boolean)).toHaveLength(
         1,
@@ -510,18 +543,17 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
     fs.writeFileSync(profilePath, "# stub profile\n");
 
     const scriptPath = path.join(tmpDir, "run.sh");
-    const ensureHash = extractShellFunctionFromSource(
-      src,
-      "ensure_mutable_openclaw_config_hash",
-    ).replaceAll("/sandbox/.openclaw", configDir);
-    const readToken = extractShellFunctionFromSource(src, "_read_gateway_token").replaceAll(
-      "/sandbox/.openclaw/openclaw.json",
-      configPath,
-    );
-    const ensureToken = extractShellFunctionFromSource(src, "ensure_gateway_token").replaceAll(
-      "/sandbox/.openclaw",
-      configDir,
-    );
+    const ensureHash = extractShellFunctionFromSource(src, "ensure_mutable_openclaw_config_hash")
+      .replaceAll("/sandbox/.openclaw", configDir)
+      .replaceAll("/usr/bin/sha256sum", SHA256SUM)
+      .replaceAll("/usr/bin/chmod", CHMOD);
+    const readToken = extractShellFunctionFromSource(src, "_read_gateway_token")
+      .replaceAll("/sandbox/.openclaw/openclaw.json", configPath)
+      .replaceAll("/usr/local/bin/node", process.execPath);
+    const ensureToken = extractShellFunctionFromSource(src, "ensure_gateway_token")
+      .replaceAll("/sandbox/.openclaw", configDir)
+      .replaceAll("/usr/local/bin/node", process.execPath);
+    const configWriter = extractShellFunctionFromSource(src, "run_openclaw_config_as_owner");
     const ensureTokenIfMissing = extractShellFunctionFromSource(
       src,
       "ensure_gateway_token_if_missing",
@@ -555,8 +587,7 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
         "set -euo pipefail",
         'id() { if [ "${1:-}" = "-u" ]; then printf "0"; else command id "$@"; fi; }',
         'openclaw_config_dir_owner() { printf "sandbox"; }',
-        "prepare_openclaw_config_for_write() { :; }",
-        "restore_openclaw_config_after_write() { :; }",
+        "normalize_mutable_config_perms() { :; }",
         "NEMOCLAW_CMD=()",
         '_PROXY_URL=""',
         '_NO_PROXY_VAL=""',
@@ -578,6 +609,7 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
         'NODE_USE_ENV_PROXY=""',
         readToken,
         ensureHash,
+        configWriter,
         ensureToken,
         ensureTokenIfMissing,
         needsToken,
@@ -598,7 +630,10 @@ describe("direct-root entrypoint composition under CAP_DAC_OVERRIDE drop", () =>
     );
 
     try {
-      const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 10000 });
+      const result = spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 10000,
+      });
 
       expect(result.status, result.stderr || result.stdout).toBe(0);
       expect(result.stdout).toContain("CONTINUATION_REACHED");

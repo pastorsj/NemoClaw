@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DCODE_MANAGED_EXEC_LAUNCHER } from "../../actions/sandbox/connect-inference-route-probe";
 import type { AgentDefinition } from "../../agent/defs";
+import { getAgentCommandShell, getAgentSmokeBoundary } from "./manifest";
 
 type RunCaptureOpenshell = (
   args: string[],
@@ -34,24 +34,17 @@ function getSmokeExitCode(output: string | null, requireManagedBoundary: boolean
   return Number.parseInt(exitMatches[0]![1]!, 10);
 }
 
-function smokeRunner(shell: "sh -c" | "sh -lc" | "/bin/bash -lc"): string {
-  return `printf '${SMOKE_BEGIN_MARKER}\\n'; ${shell} "$1"; rc=$?; printf '\\n${SMOKE_EXIT_MARKER}%s\\n' "$rc"; exit 0`;
+function smokeRunner(shellPath: "/bin/sh" | "/bin/bash", login: boolean): string {
+  const shellFlag = login ? "-lc" : "-c";
+  return `printf '${SMOKE_BEGIN_MARKER}\\n'; ${shellPath} ${shellFlag} "$1"; rc=$?; printf '\\n${SMOKE_EXIT_MARKER}%s\\n' "$rc"; exit 0`;
 }
 
 /**
- * Deep Agents Code smoke commands run through the same image-baked launcher the
- * managed route probe uses, without adding another login shell (#8624). The
- * OpenShell transport still starts its own login shell before this command; see
- * NVIDIA/OpenShell#2668. Rebuilt managed DCode images reserve that shell's
- * first-match profile as a root-owned file which skips sandbox startup state
- * for the image-baked launcher. Older images can still read a sandbox-user
- * profile before these requested-command environment assignments apply, so the
- * managed runner's single ordered begin/exit pair remains diagnostic rather
- * than a trust boundary. When the caller preserves OpenShell's process status,
- * a nonzero transport exit cannot be hidden by forged marker output. Every
- * other terminal agent keeps the existing nested shells because its smoke
- * commands rely on profile-provided PATH entries and retain legacy diagnostic
- * markers.
+ * A package can select the fixed managed-launcher boundary when its smoke
+ * commands must bypass an agent-controlled login profile. The launcher path
+ * and isolated HOME stay in that package's manifest; core owns only the typed
+ * execution and evidence rules. The default login-shell boundary preserves the
+ * existing profile-provided PATH behavior.
  */
 export function buildAgentSmokeArgs(
   sandboxName: string,
@@ -59,7 +52,9 @@ export function buildAgentSmokeArgs(
   command: string,
   gatewayName?: string,
 ): string[] {
-  if (agent.name === "langchain-deepagents-code") {
+  const shellPath = getAgentCommandShell(agent);
+  const boundary = getAgentSmokeBoundary(agent);
+  if (boundary.kind === "managed-launcher") {
     return [
       "sandbox",
       "exec",
@@ -68,25 +63,20 @@ export function buildAgentSmokeArgs(
       ...(gatewayName ? ["-g", gatewayName] : []),
       "--no-tty",
       "--env",
-      "HOME=/usr/local/lib/nemoclaw",
+      `HOME=${boundary.home}`,
       "--env",
       "BASH_ENV=",
       "--env",
       "ENV=",
       "--",
-      DCODE_MANAGED_EXEC_LAUNCHER,
-      "/bin/sh",
+      boundary.launcher,
+      shellPath,
       "-c",
-      smokeRunner("sh -c"),
+      smokeRunner(shellPath, false),
       "nemoclaw-agent-smoke",
       command,
     ];
   }
-  // Pi's login profile enforces an exact nproc limit, which Ubuntu /bin/sh
-  // cannot inspect. Keep the profile active, but run it with the Bash shell
-  // the Pi image provisions for this contract.
-  const shellPath = agent.name === "pi" ? "/bin/bash" : "/bin/sh";
-  const commandShell = agent.name === "pi" ? "/bin/bash -lc" : "sh -lc";
   return [
     "sandbox",
     "exec",
@@ -96,7 +86,7 @@ export function buildAgentSmokeArgs(
     "--",
     shellPath,
     "-lc",
-    smokeRunner(commandShell),
+    smokeRunner(shellPath, true),
     "nemoclaw-agent-smoke",
     command,
   ];
@@ -119,7 +109,7 @@ export function runAgentSmokeCommands(
       },
     );
     const output = typeof result === "string" ? result : (result?.output ?? null);
-    const requireManagedBoundary = agent.name === "langchain-deepagents-code";
+    const requireManagedBoundary = getAgentSmokeBoundary(agent).kind === "managed-launcher";
     const exitCode = getSmokeExitCode(output, requireManagedBoundary);
     const transportFailed =
       requireManagedBoundary && (typeof result === "string" || result?.status !== 0);

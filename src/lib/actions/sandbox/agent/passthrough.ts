@@ -76,17 +76,13 @@
 //      selector case is intercepted; everything else still flows through to
 //      the in-sandbox binary.
 //
-// 4. Recent shields-relock diagnostic (advisory audit mirror). Its complete
-//    source-boundary analysis lives with the focused implementation in
-//    `passthrough-shields-warning.ts`.
-//
-// 5. Ollama restart recovery (best-effort lifecycle bridge). Ollama owns model
+// 4. Ollama restart recovery (best-effort lifecycle bridge). Ollama owns model
 //    runner lifetime, while NemoClaw owns the registered route and dispatch
 //    ordering. The focused source-boundary analysis, reporting, and regression
 //    coverage live in `ollama-restart-recovery.ts` and
 //    `passthrough-ollama-recovery.ts`.
 //
-// 6. Dispatch delivery contract and stdin posture. Both captured transports
+// 5. Dispatch delivery contract and stdin posture. Both captured transports
 //    fail loud when the exec returns success with no bytes on either stream,
 //    and neither hands an interactive terminal to the non-interactive
 //    dispatch. Both transports pin the sandbox's owning gateway and use the
@@ -106,8 +102,7 @@
 // path, the OpenClaw no-selector rejection, and the `--flag=value`
 // selector-acceptance branch, plus the OpenClaw JSON
 // captured transport path used to append failure provenance without polluting
-// machine-readable stdout. The focused shields and Ollama modules own their
-// diagnostic and recovery tests.
+// machine-readable stdout. The focused Ollama module owns its recovery tests.
 //
 // Removal conditions:
 //
@@ -129,7 +124,6 @@ import { CLI_NAME } from "../../../cli/branding";
 import { isStdinTty } from "../../../core/stdin";
 import { resolveSandboxHermesApiPort } from "../../../onboard/hermes-api-port";
 import { resolveLifecycleEligibleSandboxAgent } from "../../../onboard/package/package-authority";
-import type { ShieldsAutoRestoreReadResult } from "../../../shields/audit";
 import * as registry from "../../../state/registry";
 import {
   buildOpenshellExecArgs,
@@ -162,7 +156,6 @@ import {
   runAgentJsonPassthrough,
 } from "./passthrough-json";
 import { OLLAMA_LOCAL_PROVIDER, runOllamaRestartRecovery } from "./passthrough-ollama-recovery";
-import { maybeEmitShieldsRelockWarning } from "./passthrough-shields-warning";
 
 export { hasAgentPassthroughHelpToken, printAgentPassthroughHelp } from "./passthrough-help";
 
@@ -255,7 +248,6 @@ export interface AgentPassthroughDeps {
   execJson?: typeof runAgentJsonPassthrough;
   execNonJson?: typeof runAgentNonJsonPassthrough;
   runOllamaRestartRecovery?: typeof runOllamaRestartRecovery;
-  getRecentShieldsAutoRestore?: (sandboxName: string) => ShieldsAutoRestoreReadResult;
   /** Exit only after the public command can unwind its sandbox lifecycle lock. */
   deferredLifecycleExit?: (code: number) => never;
   process?: {
@@ -694,7 +686,6 @@ export async function runAgentPassthrough(
       const recoverOllama = deps.runOllamaRestartRecovery ?? runOllamaRestartRecovery;
       recoverOllama(lookup, proc);
     }
-    maybeEmitShieldsRelockWarning(proc, sandboxName, deps.getRecentShieldsAutoRestore);
   }
   if (isOpenClawPassthroughCommand(command) && requestsOpenClawJsonOutput(extraArgs)) {
     const execJson = deps.execJson ?? runAgentJsonPassthrough;

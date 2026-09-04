@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as sandboxAgent from "../../onboard/sandbox-agent";
-import * as shields from "../../shields";
+import * as mutableConfigPerms from "../../sandbox/mutable-config-perms";
 import * as onboardSession from "../../state/onboard-session";
 import * as registry from "../../state/registry";
 import * as messagingHostForward from "./messaging-host-forward-lifecycle";
@@ -18,7 +18,7 @@ import * as sessionModels from "./reconcile-session-models";
 import * as restoredGatewayPairing from "./restore-gateway-pairing";
 
 describe("rebuild post-restore phase", () => {
-  let agentName: "openclaw" | "hermes" | "pi";
+  let agentName: "openclaw" | "hermes" | "langchain-deepagents-code" | "pi";
   let order: string[];
 
   function currentAgentAuthority() {
@@ -81,11 +81,15 @@ describe("rebuild post-restore phase", () => {
       order.push("config-hash-final");
       return true;
     });
-    vi.spyOn(shields, "repairMutableConfigPerms").mockReturnValue({
-      applied: false,
-      reason: "not needed",
-      skipReason: "not-needed",
-    } as never);
+    vi.spyOn(mutableConfigPerms, "repairMutableConfigPerms").mockReturnValue({
+      applied: true,
+      verified: true,
+      errors: [],
+    });
+    vi.spyOn(mutableConfigPerms, "inspectMutableHermesConfigPerms").mockReturnValue({
+      verified: true,
+      errors: [],
+    });
     vi.spyOn(rebuildMcp, "restoreMcpAfterRebuild").mockImplementation(async () => {
       order.push("mcp");
       return true;
@@ -143,12 +147,8 @@ describe("rebuild post-restore phase", () => {
       finalBuiltinPresets: [],
       failedPresetRemovals: [],
       policyPresetReconciliationVerified: true,
-      staleRecovery: false,
-      recoveryRecreate: false,
       preparedBackupRecovery: false,
-      staleSandboxWasLocked: false,
       versionCheck: { expectedVersion: null } as never,
-      relockShieldsIfNeeded: vi.fn(() => true),
       log: vi.fn(),
       bail: vi.fn() as never,
     };
@@ -190,7 +190,6 @@ describe("rebuild post-restore phase", () => {
     await runRebuildPostRestorePhase(args);
 
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
     expect(args.log).toHaveBeenCalledWith(
       "Restored OpenClaw gateway pairing failed: could not establish gateway pairing for 'alpha': authenticated gateway verification run failed",
@@ -220,7 +219,6 @@ describe("rebuild post-restore phase", () => {
     await runRebuildPostRestorePhase(args);
 
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(args.bail).toHaveBeenCalledWith(
       "Recreated sandbox agent identity did not match the authoritative rebuild target.",
     );
@@ -274,7 +272,7 @@ describe("rebuild post-restore phase", () => {
     expect(processRecovery.executeSandboxExecCommand).not.toHaveBeenCalled();
     expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
     expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
-    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.repairMutableConfigPerms).not.toHaveBeenCalled();
     expect(
       rebuildConfigHash.refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
     ).not.toHaveBeenCalled();
@@ -307,7 +305,7 @@ describe("rebuild post-restore phase", () => {
 
     expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
     expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
-    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.repairMutableConfigPerms).not.toHaveBeenCalled();
     expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
@@ -336,7 +334,7 @@ describe("rebuild post-restore phase", () => {
     await runRebuildPostRestorePhase(args);
 
     expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
-    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.repairMutableConfigPerms).not.toHaveBeenCalled();
     expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
@@ -416,11 +414,10 @@ describe("rebuild post-restore phase", () => {
 
     await runRebuildPostRestorePhase(args);
 
-    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.repairMutableConfigPerms).not.toHaveBeenCalled();
     expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
     expect(args.bail).toHaveBeenCalledWith(
       "Recreated sandbox agent identity did not match the authoritative rebuild target.",
@@ -432,7 +429,7 @@ describe("rebuild post-restore phase", () => {
     let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
       currentOnboardSession();
     vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
-    vi.mocked(shields.repairMutableConfigPerms).mockImplementation(() => {
+    vi.mocked(mutableConfigPerms.repairMutableConfigPerms).mockImplementation(() => {
       currentSession = {
         ...currentSession,
         harnessPackage: {
@@ -449,7 +446,7 @@ describe("rebuild post-restore phase", () => {
 
     await runRebuildPostRestorePhase(args);
 
-    expect(shields.repairMutableConfigPerms).toHaveBeenCalledOnce();
+    expect(mutableConfigPerms.repairMutableConfigPerms).toHaveBeenCalledOnce();
     expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
@@ -491,7 +488,6 @@ describe("rebuild post-restore phase", () => {
       rebuildHermesPostRestore.completeHermesCronRestoreAfterGatewayReplacement,
     ).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     const output = vi.mocked(console.error).mock.calls.flat().join("\n");
     expect(output).toContain("Hermes cron dispatch remains drained");
     expect(output).toContain("Backup is preserved at: /tmp/alpha-backup");
@@ -520,7 +516,6 @@ describe("rebuild post-restore phase", () => {
 
     expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
     expect(args.bail).toHaveBeenCalledWith(
       "Recreated sandbox agent identity did not match the authoritative rebuild target.",
@@ -591,7 +586,6 @@ describe("rebuild post-restore phase", () => {
       rebuildHermesPostRestore.completeHermesCronRestoreAfterGatewayReplacement,
     ).not.toHaveBeenCalled();
     expect(registry.updateSandboxIfCurrent).not.toHaveBeenCalled();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(args.bail).toHaveBeenCalledWith(
       "Recreated sandbox agent identity did not match the authoritative rebuild target.",
     );
@@ -650,7 +644,7 @@ describe("rebuild post-restore phase", () => {
 
     expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
     expect(rebuildMessaging.reapplyMessagingManifestAfterOpenClawDoctor).not.toHaveBeenCalled();
-    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.repairMutableConfigPerms).not.toHaveBeenCalled();
     expect(rebuildHermesPostRestore.restartHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
@@ -675,7 +669,7 @@ describe("rebuild post-restore phase", () => {
 
     await runRebuildPostRestorePhase(args);
 
-    expect(shields.repairMutableConfigPerms).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.repairMutableConfigPerms).not.toHaveBeenCalled();
     expect(rebuildMcp.restoreMcpAfterRebuild).not.toHaveBeenCalled();
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
     expect(args.bail).toHaveBeenCalledWith(
@@ -715,7 +709,6 @@ describe("rebuild post-restore phase", () => {
       rebuildConfigHash.refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
     ).toHaveBeenCalledOnce();
     expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).toHaveBeenCalledTimes(2);
-    expect(args.relockShieldsIfNeeded).toHaveBeenCalledWith(true);
     expect(args.bail).toHaveBeenCalledWith(
       "OpenClaw config integrity verification failed after rebuild.",
     );
@@ -733,12 +726,43 @@ describe("rebuild post-restore phase", () => {
     agentName = "hermes";
     const args = input();
 
-    await runRebuildPostRestorePhase(args);
+    const verification = await runRebuildPostRestorePhase(args);
 
     expect(args.bail).not.toHaveBeenCalled();
     expect(sessionModels.reconcileStalePinnedSessionModelsAfterRebuild).not.toHaveBeenCalled();
     expect(processRecovery.executeSandboxExecCommand).not.toHaveBeenCalled();
+    expect(mutableConfigPerms.inspectMutableHermesConfigPerms).toHaveBeenCalledWith("alpha");
+    expect(verification).toEqual({ mutableConfigPermissionsVerified: true });
   });
+
+  it("does not claim mutable Hermes posture without the exact sandbox proof", async () => {
+    agentName = "hermes";
+    vi.mocked(mutableConfigPerms.inspectMutableHermesConfigPerms).mockReturnValue({
+      verified: false,
+      errors: ["config.yaml remains read-only"],
+    });
+    const args = input();
+
+    const verification = await runRebuildPostRestorePhase(args);
+
+    expect(args.bail).not.toHaveBeenCalled();
+    expect(verification).toEqual({ mutableConfigPermissionsVerified: false });
+    expect(args.log).toHaveBeenCalledWith(
+      "Hermes mutable config posture was not verified: config.yaml remains read-only",
+    );
+  });
+
+  it.each(["langchain-deepagents-code", "pi"] as const)(
+    "proves the rebuilt %s terminal-agent posture from exact generic completion",
+    async (terminalAgent) => {
+      agentName = terminalAgent;
+
+      const verification = await runRebuildPostRestorePhase(input());
+
+      expect(verification).toEqual({ mutableConfigPermissionsVerified: true });
+      expect(mutableConfigPerms.inspectMutableHermesConfigPerms).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps cron dispatch blocked through replacement health verification (#8472)", async () => {
     agentName = "hermes";
@@ -1097,20 +1121,7 @@ describe("rebuild post-restore phase", () => {
     expect(output).toContain("Hermes API bearer token changed during rebuild");
   });
 
-  it("does not print the Hermes API token notice after a shields relock failure (#7175)", async () => {
-    agentName = "hermes";
-    const args = input();
-    args.relockShieldsIfNeeded = vi.fn(() => false);
-
-    await runRebuildPostRestorePhase(args);
-
-    const output = vi.mocked(console.log).mock.calls.flat().join("\n");
-    expect(output).not.toContain("Hermes API bearer token changed during rebuild");
-    expect(output).not.toContain("gateway-token --quiet");
-    expect(args.bail).toHaveBeenCalledWith("Failed to re-apply shields lockdown.");
-  });
-
-  it("reconciles the registry, relocks shields, then verifies host forwarding in that order (#8283)", async () => {
+  it("reconciles the registry before verifying host forwarding (#8283)", async () => {
     const observed: string[] = [];
     vi.mocked(registry.updateSandboxIfCurrent).mockImplementation((expected, updates) => {
       observed.push("registry");
@@ -1123,14 +1134,10 @@ describe("rebuild post-restore phase", () => {
       },
     );
     const args = input();
-    args.relockShieldsIfNeeded = vi.fn(() => {
-      observed.push("relock");
-      return true;
-    });
 
     await runRebuildPostRestorePhase(args);
 
-    expect(observed).toEqual(["registry", "relock", "forward"]);
+    expect(observed).toEqual(["registry", "forward"]);
     expect(args.bail).not.toHaveBeenCalled();
   });
 
@@ -1141,7 +1148,6 @@ describe("rebuild post-restore phase", () => {
     await runRebuildPostRestorePhase(args);
 
     expect(registry.updateSandboxIfCurrent).toHaveBeenCalledOnce();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
     expect(args.bail).toHaveBeenCalledWith(
       "Recreated sandbox agent identity did not match the authoritative rebuild target.",
@@ -1167,38 +1173,7 @@ describe("rebuild post-restore phase", () => {
     await runRebuildPostRestorePhase(args);
 
     expect(registry.updateSandboxIfCurrent).toHaveBeenCalledOnce();
-    expect(args.relockShieldsIfNeeded).not.toHaveBeenCalled();
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
-    expect(args.bail).toHaveBeenCalledWith(
-      "Recreated sandbox agent identity did not match the authoritative rebuild target.",
-    );
-    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain(
-      "rebuilt successfully",
-    );
-  });
-
-  it("stops host forwarding when Session authority drifts during shields relock", async () => {
-    const args = input();
-    let currentSession: NonNullable<ReturnType<typeof onboardSession.loadSession>> =
-      currentOnboardSession();
-    vi.mocked(onboardSession.loadSession).mockImplementation(() => currentSession);
-    args.relockShieldsIfNeeded = vi.fn(() => {
-      currentSession = {
-        ...currentSession,
-        harnessPackage: {
-          ...args.agentAuthority.harnessPackage!,
-          contentDigest: "b".repeat(64),
-        },
-      } as never;
-      return true;
-    });
-
-    await runRebuildPostRestorePhase(args);
-
-    expect(registry.updateSandboxIfCurrent).toHaveBeenCalledOnce();
-    expect(args.relockShieldsIfNeeded).toHaveBeenCalledWith(true);
-    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
-    expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).toHaveBeenCalledOnce();
     expect(args.bail).toHaveBeenCalledWith(
       "Recreated sandbox agent identity did not match the authoritative rebuild target.",
     );
@@ -1227,7 +1202,6 @@ describe("rebuild post-restore phase", () => {
 
     await runRebuildPostRestorePhase(args);
 
-    expect(args.relockShieldsIfNeeded).toHaveBeenCalledWith(true);
     expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).toHaveBeenCalledOnce();
     expect(rebuildConfigHash.verifyFinalMutableOpenClawConfigHash).toHaveBeenCalledOnce();
     expect(args.bail).toHaveBeenCalledWith(
@@ -1236,16 +1210,6 @@ describe("rebuild post-restore phase", () => {
     expect(vi.mocked(console.log).mock.calls.flat().join("\n")).not.toContain(
       "rebuilt successfully",
     );
-  });
-
-  it("leaves host forwarding unattempted when the shields relock fails (#8283)", async () => {
-    const args = input();
-    args.relockShieldsIfNeeded = vi.fn(() => false);
-
-    await runRebuildPostRestorePhase(args);
-
-    expect(messagingHostForward.ensureMessagingHostForwardAfterRebuild).not.toHaveBeenCalled();
-    expect(args.bail).toHaveBeenCalledWith("Failed to re-apply shields lockdown.");
   });
 
   it("names the connect recovery command when host forwarding is unverified (#8283)", async () => {
@@ -1260,27 +1224,15 @@ describe("rebuild post-restore phase", () => {
     expect(args.bail).not.toHaveBeenCalled();
   });
 
-  it("warns that a recreated sandbox starts unlocked when shields were previously enabled (#8283)", async () => {
-    const args = input();
-    args.recoveryRecreate = true;
-    args.staleSandboxWasLocked = true;
-
-    await runRebuildPostRestorePhase(args);
-
-    expect(vi.mocked(console.log).mock.calls.flat().join("\n")).toContain(
-      "Shields were previously enabled but the recreated sandbox starts unlocked",
-    );
-  });
-
   it("prints every incomplete OpenClaw recovery report in a fixed order (#8283)", async () => {
     vi.mocked(
       rebuildConfigHash.refreshMutableOpenClawConfigHashAfterPostRestoreWrites,
     ).mockReturnValue(false);
-    vi.mocked(shields.repairMutableConfigPerms).mockReturnValue({
-      applied: false,
-      reason: "config is unreadable",
-      skipReason: "unreadable",
-    } as never);
+    vi.mocked(mutableConfigPerms.repairMutableConfigPerms).mockReturnValue({
+      applied: true,
+      verified: false,
+      errors: ["config is unreadable"],
+    });
     vi.mocked(messagingHostForward.ensureMessagingHostForwardAfterRebuild).mockReturnValue(false);
     vi.mocked(rebuildMcp.restoreMcpAfterRebuild).mockResolvedValue(false);
     const args = {
@@ -1290,8 +1242,6 @@ describe("rebuild post-restore phase", () => {
       failedPresets: ["messaging-telegram"],
       failedPresetRemovals: ["messaging-discord"],
       policyPresetReconciliationVerified: false,
-      recoveryRecreate: true,
-      staleSandboxWasLocked: true,
     };
 
     await runRebuildPostRestorePhase(args);
@@ -1307,7 +1257,6 @@ describe("rebuild post-restore phase", () => {
       "Mutable OpenClaw config hash was not refreshed",
       "Messaging webhook forward was not verified",
       "MCP bridge definitions were preserved but not fully refreshed",
-      "Shields were previously enabled",
     ];
     const offsets = ordered.map((fragment) => output.indexOf(fragment));
     expect(offsets.every((offset) => offset >= 0)).toBe(true);

@@ -416,7 +416,7 @@ PYMESSAGINGSECRETS
 }
 
 _read_gateway_token() {
-  node - <<'NODETOKEN'
+  run_openclaw_config_as_owner /usr/local/bin/node - <<'NODETOKEN'
 const fs = require("fs");
 
 const configPath = "/sandbox/.openclaw/openclaw.json";
@@ -471,11 +471,12 @@ ensure_gateway_token() {
   fi
 
   if [ "$(id -u)" -eq 0 ]; then
-    prepare_openclaw_config_for_write "$config_file" "$hash_file"
+    normalize_mutable_config_perms || return 1
   fi
 
   local _write_rc=0
-  node - "$config_file" <<'NODETOKEN' || _write_rc=$?
+  run_openclaw_config_as_owner /usr/local/bin/node - \
+    "$config_file" <<'NODETOKEN' || _write_rc=$?
 const crypto = require("crypto");
 const fs = require("fs");
 const pathModule = require("path");
@@ -581,12 +582,12 @@ try {
 }
 NODETOKEN
 
-  if [ "$_write_rc" -eq 0 ]; then
-    (cd "$config_dir" && sha256sum openclaw.json fabric.json >"$hash_file") || _write_rc=$?
+  if [ "$_write_rc" -eq 0 ] && [ -f "$hash_file" ]; then
+    ensure_mutable_openclaw_config_hash || _write_rc=$?
   fi
 
   if [ "$(id -u)" -eq 0 ]; then
-    restore_openclaw_config_after_write "$config_file" "$hash_file" || _write_rc=$?
+    normalize_mutable_config_perms || _write_rc=$?
   fi
 
   [ "$_write_rc" -eq 0 ] || return "$_write_rc"
@@ -628,21 +629,6 @@ needs_gateway_token_for_current_command() {
 
 prepare_gateway_token_for_current_command() {
   if [ ${#NEMOCLAW_CMD[@]} -eq 0 ]; then
-    # OpenShell launches the persisted workload as the sandbox user. When
-    # Shields are up, the root-owned config seal deliberately prevents that
-    # identity from replacing openclaw.json. Preserve the sealed startup token
-    # rather than weakening the lock; mutable and root-owned startup paths keep
-    # rotating it. A sealed config without a token cannot be repaired safely by
-    # this identity, so fail before attempting a write.
-    if [ "$(id -u)" -ne 0 ] \
-      && [ "$(openclaw_config_dir_owner /sandbox/.openclaw)" = "root" ]; then
-      if [ -n "$(_read_gateway_token)" ]; then
-        printf '[token] Shields are up; preserving the sealed gateway token for startup\n' >&2
-        return 0
-      fi
-      printf '[SECURITY] Shields are up but the sealed OpenClaw config has no gateway token; lower Shields before restarting\n' >&2
-      return 1
-    fi
     ensure_gateway_token
     return $?
   fi
@@ -670,18 +656,6 @@ write_auth_profile() {
   # fallback in v0.0.90.
   # See: https://github.com/NVIDIA/NemoClaw/issues/1332
   local provider_key="${NEMOCLAW_INFERENCE_PROVIDER_ID:-${NEMOCLAW_PROVIDER_KEY:-inference}}"
-  local auth_profile_path="${HOME}/.openclaw/agents/main/agent/auth-profiles.json"
-
-  if [ "$(id -u)" -ne 0 ] \
-    && [ "$(openclaw_config_dir_owner "${HOME}/.openclaw")" = "root" ]; then
-    if [ -L "$auth_profile_path" ] || [ ! -f "$auth_profile_path" ]; then
-      printf '[SECURITY] Shields are up but the sealed OpenClaw auth profile is unavailable; lower Shields before restarting\n' >&2
-      return 1
-    fi
-    printf '[auth] Shields are up; preserving the sealed OpenClaw auth profile\n' >&2
-    return 0
-  fi
-
   python3 - "$provider_key" <<'PYAUTH'
 import json
 import os

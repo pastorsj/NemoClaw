@@ -157,7 +157,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
           ? liveSandboxGetResult("beta", cloneLiveIdentity)
           : captureCloneGateway(args),
       );
-      f.shieldsMock.repairMutableConfigPermsMock.mockImplementation(() => {
+      f.mutableConfigMock.repairMutableConfigPermsMock.mockImplementation(() => {
         runWhen(boundary === "gateway pairing", replaceCloneLiveIdentity);
         return { applied: true, verified: true, errors: [] };
       });
@@ -179,8 +179,8 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       ).rejects.toMatchObject({ exitCode: 1 });
 
       boundary === "config repair"
-        ? expect(f.shieldsMock.repairMutableConfigPermsMock).not.toHaveBeenCalled()
-        : expect(f.shieldsMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("beta");
+        ? expect(f.mutableConfigMock.repairMutableConfigPermsMock).not.toHaveBeenCalled()
+        : expect(f.mutableConfigMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("beta");
       expect(f.applyPresetMock).not.toHaveBeenCalled();
       expect(f.applyPresetContentMock).not.toHaveBeenCalled();
       expect(f.establishRestoredSandboxGatewayPairingMock).not.toHaveBeenCalled();

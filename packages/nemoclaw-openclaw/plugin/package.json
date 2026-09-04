@@ -22,7 +22,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.shared.json && tsc",
+    "build": "npm run clean && tsc -p tsconfig.shared.json && tsc",
     "dev": "tsc -p tsconfig.shared.json && tsc --watch",
     "test": "vitest run --config vitest.config.ts",
     "lint": "oxlint src && oxlint --config ../../../oxlint.type-aware.config.ts src",

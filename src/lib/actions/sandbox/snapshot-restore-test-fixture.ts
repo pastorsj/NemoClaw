@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isDeepStrictEqual } from "node:util";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { vi } from "vitest";
 import { resolveTestAgentBaselinePolicy } from "../../../../test/support/snapshot-policy-test-fixture";
 import type { AgentDefinition } from "../../agent/defs";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
+import type { MutableConfigRepairResult } from "../../sandbox/mutable-config-perms";
 import type { SyncOpenShellSandboxPolicyReader } from "../../adapters/openshell/sandbox-policy";
 import type {
   SandboxEntry,
@@ -104,42 +108,30 @@ export function defaultOpenshellResponses(args: string[]): OpenshellCaptureResul
   });
 }
 
-const shieldsMock = vi.hoisted(() => {
-  const isShieldsDownMock = vi.fn(() => true);
-  const repairMutableConfigPermsMock = vi.fn(() => ({
+const mutableConfigMock = vi.hoisted(() => {
+  const repairMutableConfigPermsMock = vi.fn<() => MutableConfigRepairResult>(() => ({
     applied: true,
     verified: true,
     errors: [],
   }));
-  const recoverCompletedAutoRestoreBeforeCommandMock = vi.fn(() => false);
-  const shieldsUpMock = vi.fn();
-  let isShieldsDownExport: unknown = isShieldsDownMock;
-  return {
-    isShieldsDownMock,
-    repairMutableConfigPermsMock,
-    recoverCompletedAutoRestoreBeforeCommandMock,
-    shieldsUpMock,
-    getIsShieldsDownExport: () => isShieldsDownExport,
-    setIsShieldsDownExport: (value: unknown) => {
-      isShieldsDownExport = value;
-    },
-  };
+  return { repairMutableConfigPermsMock };
 });
 
 const lifecycleMock = vi.hoisted(() => {
   const events: string[] = [];
-  return {
-    events,
-    cleanupShieldsDestroyArtifactsMock: vi.fn(() => events.push("cleanup-shields")),
-    readTimerMarkerMock: vi.fn(() => null as Record<string, unknown> | null),
-    withTimerBoundMock: vi.fn(
-      (_sandboxName: string, command: string, fn: () => unknown): unknown => {
-        events.push(`lock:${command}`);
-        return fn();
-      },
-    ),
-  };
+  return { events };
 });
+
+const mutationLockMock = vi.hoisted(() => ({
+  withMcpLifecycleLockSyncMock: vi.fn((_sandboxName: string, operation: () => unknown) =>
+    operation(),
+  ),
+  withSandboxMutationLockMock: vi.fn(
+    async (_sandboxName: string, operation: () => unknown) => await operation(),
+  ),
+}));
+
+let isolatedStateHome: string | null = null;
 
 export const backupSandboxStateMock = vi.fn();
 export const assertHermesPortableCommandUnavailableMock = vi.fn();
@@ -408,7 +400,7 @@ export const latestBackupFixture = {
   dir: "/sandbox",
 };
 
-export { lifecycleMock, shieldsMock };
+export { lifecycleMock, mutableConfigMock, mutationLockMock };
 
 vi.mock("../../adapters/docker", () => ({
   dockerCapture: vi.fn(() => ""),
@@ -495,28 +487,18 @@ vi.mock("../../onboard/initial-policy", () => ({
   prepareInitialSandboxCreatePolicy: prepareInitialSandboxCreatePolicyMock,
 }));
 
-vi.mock("../../shields", () => ({
-  get isShieldsDown() {
-    return shieldsMock.getIsShieldsDownExport();
-  },
-  repairMutableConfigPerms: shieldsMock.repairMutableConfigPermsMock,
-  recoverCompletedAutoRestoreBeforeCommand:
-    shieldsMock.recoverCompletedAutoRestoreBeforeCommandMock,
-  shieldsUp: shieldsMock.shieldsUpMock,
-}));
-
-vi.mock("../../shields/timer-bound-lock", () => ({
-  withTimerBoundShieldsMutationLock: lifecycleMock.withTimerBoundMock,
-}));
-
-vi.mock("../../shields/timer-control", () => ({
-  isProcessAlive: vi.fn(() => true),
-  readProcessStartIdentity: vi.fn(() => "snapshot-test-process-start"),
-  readTimerMarker: lifecycleMock.readTimerMarkerMock,
+vi.mock("../../sandbox/mutable-config-perms", () => ({
+  repairMutableConfigPerms: mutableConfigMock.repairMutableConfigPermsMock,
 }));
 
 vi.mock("../../sandbox/create-stream", () => ({
   streamSandboxCreate: streamSandboxCreateMock,
+}));
+
+vi.mock("../../state/mcp-lifecycle-lock", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/mcp-lifecycle-lock")>()),
+  withMcpLifecycleLockSync: mutationLockMock.withMcpLifecycleLockSyncMock,
+  withSandboxMutationLock: mutationLockMock.withSandboxMutationLockMock,
 }));
 
 vi.mock("../../state/gateway", () => ({
@@ -562,7 +544,6 @@ vi.mock("./destroy", async () => {
     typeof import("../../onboard/runtime-provider/access")
   >("../../onboard/runtime-provider/access");
   return {
-    cleanupShieldsDestroyArtifacts: lifecycleMock.cleanupShieldsDestroyArtifactsMock,
     removeSandboxRegistryEntry: vi.fn(() => true),
     removeSandboxRegistryEntryOutcome: removeSandboxRegistryEntryOutcomeMock,
     removeSandboxRegistryEntryIfCurrentOutcome: removeSandboxRegistryEntryIfCurrentOutcomeMock,
@@ -581,6 +562,9 @@ vi.mock("./restore-gateway-pairing", () => ({
 }));
 
 export function resetSnapshotRestoreMocks(): void {
+  isolatedStateHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-state-"));
+  vi.stubEnv("HOME", isolatedStateHome);
+  vi.stubEnv("NEMOCLAW_TEST_BASE_HOME", isolatedStateHome);
   vi.clearAllMocks();
   assertHermesPortableCommandUnavailableMock.mockReset();
   captureSnapshotRestoreAuthorityMock.mockReturnValue({
@@ -603,12 +587,18 @@ export function resetSnapshotRestoreMocks(): void {
         }
       : null;
   });
-  shieldsMock.setIsShieldsDownExport(shieldsMock.isShieldsDownMock);
-  shieldsMock.isShieldsDownMock.mockReturnValue(true);
-  shieldsMock.recoverCompletedAutoRestoreBeforeCommandMock.mockReturnValue(false);
-  shieldsMock.shieldsUpMock.mockImplementation(() => lifecycleMock.events.push("harden"));
+  mutableConfigMock.repairMutableConfigPermsMock.mockReturnValue({
+    applied: true,
+    verified: true,
+    errors: [],
+  });
+  mutationLockMock.withMcpLifecycleLockSyncMock.mockImplementation(
+    (_sandboxName: string, operation: () => unknown) => operation(),
+  );
+  mutationLockMock.withSandboxMutationLockMock.mockImplementation(
+    async (_sandboxName: string, operation: () => unknown) => await operation(),
+  );
   lifecycleMock.events.length = 0;
-  lifecycleMock.readTimerMarkerMock.mockReturnValue(null);
   captureOpenshellMock.mockImplementation((args) => defaultOpenshellResponses(args));
   readSandboxPolicyMock.mockReturnValue({
     ok: true,
@@ -712,4 +702,8 @@ export function resetSnapshotRestoreMocks(): void {
 export function cleanupSnapshotRestoreMocks(): void {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  if (isolatedStateHome) {
+    fs.rmSync(isolatedStateHome, { recursive: true, force: true });
+    isolatedStateHome = null;
+  }
 }

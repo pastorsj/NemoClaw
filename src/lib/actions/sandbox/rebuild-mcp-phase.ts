@@ -37,7 +37,6 @@ export async function prepareMcpForRebuild(
   sandboxName: string,
   staleRecovery: boolean,
   force: boolean,
-  relockShieldsIfNeeded: (sandboxStillExists: boolean) => boolean,
   bail: RebuildBail,
   agentDefinition?: AgentDefinition,
 ): Promise<McpRebuildPreparation | null> {
@@ -60,7 +59,6 @@ export async function prepareMcpForRebuild(
         ? prepareMcpBridgesForExecUnavailableRebuild(sandboxName, { agentDefinition })
         : prepareMcpBridgesForExecUnavailableRebuild(sandboxName));
     } catch (error) {
-      relockShieldsIfNeeded(true);
       bail(
         `Failed to preserve MCP bridges before rebuild (--force host-side recovery): ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -77,7 +75,6 @@ export async function prepareMcpForRebuild(
         ? prepareMcpBridgesForRebuild(sandboxName, { agentDefinition })
         : prepareMcpBridgesForRebuild(sandboxName));
   } catch (error) {
-    relockShieldsIfNeeded(!staleRecovery);
     bail(
       `Failed to preserve MCP bridges before rebuild: ${error instanceof Error ? error.message : String(error)}`,
     );

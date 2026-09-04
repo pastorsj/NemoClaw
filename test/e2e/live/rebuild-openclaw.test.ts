@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
+import { execTimeout } from "../../helpers/timeouts.ts";
+import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
 import { assertExitZero as expectExitZero, resultText } from "../fixtures/clients/command.ts";
@@ -56,6 +58,7 @@ const PRE_REBUILD_GATEWAY_TOKEN = `nemoclaw-e2e-old-gateway-token-${MARKER_CONTE
 const OLD_BASE_TAG = `nemoclaw-old-base:${SANDBOX_NAME.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-")}`;
 
 const ONBOARD_TIMEOUT_MS = 20 * 60_000;
+const LOCAL_ONBOARD_COMMAND_TIMEOUT_MS = execTimeout(ONBOARD_TIMEOUT_MS);
 const DOCKER_BUILD_TIMEOUT_MS = 35 * 60_000;
 const REBUILD_TIMEOUT_MS = 30 * 60_000;
 const OPENSHELL_TIMEOUT_MS = 2 * 60_000;
@@ -118,18 +121,18 @@ function createRebuildCommandEnvironments(
     cli(apiKey: string, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
       return {
         ...baseEnvironment,
-    COMPATIBLE_API_KEY: apiKey,
-    NVIDIA_INFERENCE_API_KEY: apiKey,
-    // Keep the recreate resume request aligned with the registry/session this
-    // test seeds below. The rebuild workflow supplies a hosted-compatible key
-    // through NVIDIA_INFERENCE_API_KEY, so record and request the matching
-    // compatible-endpoint route instead of NVIDIA Endpoints.
-    NEMOCLAW_COMPAT_MODEL: DEFAULT_MODEL,
-    NEMOCLAW_ENDPOINT_URL: HOSTED_ENDPOINT_URL,
-    NEMOCLAW_MODEL: DEFAULT_MODEL,
-    NEMOCLAW_PREFERRED_API: "openai-completions",
-    NEMOCLAW_PROVIDER: "custom",
-    ...extra,
+        COMPATIBLE_API_KEY: apiKey,
+        NVIDIA_INFERENCE_API_KEY: apiKey,
+        // Keep the recreate resume request aligned with the registry/session this
+        // test seeds below. The rebuild workflow supplies a hosted-compatible key
+        // through NVIDIA_INFERENCE_API_KEY, so record and request the matching
+        // compatible-endpoint route instead of NVIDIA Endpoints.
+        NEMOCLAW_COMPAT_MODEL: DEFAULT_MODEL,
+        NEMOCLAW_ENDPOINT_URL: HOSTED_ENDPOINT_URL,
+        NEMOCLAW_MODEL: DEFAULT_MODEL,
+        NEMOCLAW_PREFERRED_API: "openai-completions",
+        NEMOCLAW_PROVIDER: "custom",
+        ...extra,
       };
     },
   };
@@ -202,7 +205,7 @@ function pythonExecArgs(script: string): string[] {
 
 async function waitForSandboxReady(
   sandbox: {
-  list(options?: object): Promise<ShellProbeResult>;
+    list(options?: object): Promise<ShellProbeResult>;
   },
   env: NodeJS.ProcessEnv,
 ): Promise<void> {
@@ -535,7 +538,7 @@ test(
       artifactName: "phase-1-onboard-current",
       env: commandEnvironments.cli(apiKey, { NEMOCLAW_RECREATE_SANDBOX: "1" }),
       redactionValues: [apiKey],
-      timeoutMs: ONBOARD_TIMEOUT_MS,
+      timeoutMs: LOCAL_ONBOARD_COMMAND_TIMEOUT_MS,
     });
     sandboxDeleteGuard.observeLifecycleResult(onboard);
     if (onboard.exitCode !== 0) {

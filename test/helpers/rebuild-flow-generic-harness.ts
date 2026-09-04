@@ -10,7 +10,6 @@ import { makePreparedRecoveryManifest } from "../../src/lib/actions/sandbox/rebu
 import type { RebuildRecreateOnboardOpts } from "../../src/lib/actions/sandbox/rebuild-gpu-opt-out";
 import {
   agentDefs,
-  agentForwardStop,
   agentOnboard,
   agentRuntime,
   buildContextFingerprint,
@@ -21,6 +20,7 @@ import {
   dockerImage,
   dockerInspect,
   gatewayDrift,
+  forwardRecovery,
   gatewayRuntime,
   gatewayState,
   gatewayTeardownAuthority,
@@ -32,6 +32,7 @@ import {
   mcpBridge,
   messaging,
   messagingHostForwardLifecycle,
+  mutableConfigPerms,
   nim,
   onboardCredentialEnv,
   onboardSession,
@@ -51,7 +52,7 @@ import {
   rebuildOnboardDependencies,
   rebuildPreparedImageContext,
   rebuildRoutePreflight,
-  rebuildShields,
+  removedImmutabilityMigration,
   rebuildUsageNotice,
   registry,
   registryPersistence,
@@ -62,7 +63,6 @@ import {
   sandboxSession,
   sandboxState,
   sandboxVersion,
-  shields,
   sourceSandboxGateway,
 } from "./rebuild-flow-harness";
 
@@ -95,6 +95,12 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
   const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
   const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  const retireRemovedImmutabilityStateRecordSpy = vi
+    .spyOn(removedImmutabilityMigration, "retireRemovedImmutabilityStateRecord")
+    .mockReturnValue(true);
+  const enforceRemovedImmutabilityMigrationBoundarySpy = vi
+    .spyOn(removedImmutabilityMigration, "enforceRemovedImmutabilityMigrationBoundary")
+    .mockReturnValue({ stateRecord: null, recoveryArtifacts: [] });
   const backupPath = createHarnessTempDir("nemoclaw-rebuild-backup-");
   let latestValidatedRecoveryManifest: Record<string, unknown> | null = null;
   vi.spyOn(policyGet, "getSandboxPolicy").mockReturnValue({
@@ -135,7 +141,6 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   );
 
   const session = createRebuildFlowSession(onboardSession.MACHINE_SNAPSHOT_VERSION);
-  const rebuildShieldsWindow = { relocked: false, wasLocked: false };
   const agentName =
     overrides.agentName ??
     (typeof overrides.sandboxEntry?.agent === "string" ? overrides.sandboxEntry.agent : "openclaw");
@@ -153,13 +158,22 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     policyAdditionsPath = path.join(policyDir, "policy-additions.yaml");
     fs.writeFileSync(policyAdditionsPath, overrides.agentPolicyAdditionsContent);
   }
+  const runtimeKindByAgent: Record<string, "gateway" | "terminal"> = {
+    openclaw: "gateway",
+    hermes: "gateway",
+    "langchain-deepagents-code": "terminal",
+    deepagents: "terminal",
+    "deepagents-code": "terminal",
+    pi: "terminal",
+    nemocua: "terminal",
+  };
   const agentDef = {
     name: agentName,
     displayName: agentDisplayName,
     expectedVersion: "0.2.0",
     policyAdditionsPath,
     dockerfileBasePath: "/tmp/Dockerfile.base",
-    runtime: { kind: "terminal" },
+    runtime: { kind: runtimeKindByAgent[agentName] },
   };
   const harnessPackage = Object.hasOwn(overrides, "harnessPackage")
     ? (overrides.harnessPackage ?? null)
@@ -334,7 +348,7 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .spyOn(rebuildFlowHelpers, "warnUnpreservedUserManagedFiles")
     .mockImplementation(() => undefined);
   vi.spyOn(resolve, "resolveOpenshell").mockReturnValue(null);
-  vi.spyOn(agentForwardStop, "settleAgentForwardPortsForRebuild").mockReturnValue(true);
+  vi.spyOn(forwardRecovery, "teardownSandboxDashboardForward").mockReturnValue(true);
   vi.spyOn(agentDefs, "loadAgent").mockImplementation(() => {
     throw new Error("Rebuild reloaded an ambient agent definition after authority selection");
   });
@@ -401,6 +415,13 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     }
     (mutator as (value: typeof session) => typeof session | void)(session);
     return session;
+  });
+  vi.spyOn(onboardSession, "compareAndSwapSession").mockImplementation((...args: unknown[]) => {
+    const [matches, mutator] = args as [
+      (current: typeof session) => boolean,
+      (current: typeof session) => unknown,
+    ];
+    return matches(session) ? (mutator(session), "updated") : "mismatch";
   });
   const releaseOnboardLockSpy = vi
     .spyOn(onboardSession, "releaseOnboardLock")
@@ -628,16 +649,6 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
   vi.spyOn(rebuildManagedImage, "verifyPreparedDcodeRebuildImage").mockImplementation(
     () => imageVerificationResults.shift() ?? true,
   );
-  const openShieldsSpy = vi
-    .spyOn(rebuildShields, "openRebuildShieldsWindow")
-    .mockImplementation(overrides.openShieldsWindow ?? (() => rebuildShieldsWindow));
-  const relockSpy = vi
-    .spyOn(rebuildShields, "relockRebuildShieldsWindow")
-    .mockImplementation((...args: unknown[]) => {
-      const window = args[1] as typeof rebuildShieldsWindow;
-      window.relocked = true;
-      return true;
-    });
   const backupSandboxStateSpy = vi
     .spyOn(sandboxState, "backupSandboxState")
     .mockImplementation((...args: unknown[]) => {
@@ -1000,13 +1011,13 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     .mockImplementation(
       overrides.establishRestoredSandboxGatewayPairing ?? (() => Promise.resolve()),
     );
-  vi.spyOn(shields, "repairMutableConfigPerms").mockImplementation(
+  vi.spyOn(mutableConfigPerms, "repairMutableConfigPerms").mockImplementation(
     overrides.repairMutableConfigPerms ?? (() => ({ applied: true, verified: true, errors: [] })),
   );
-  vi.spyOn(shields, "isShieldsDown").mockReturnValue(true);
-  vi.spyOn(shields, "clearShieldsState").mockImplementation(
-    overrides.clearShieldsState ?? (() => undefined),
-  );
+  vi.spyOn(mutableConfigPerms, "inspectMutableHermesConfigPerms").mockReturnValue({
+    verified: true,
+    errors: [],
+  });
   const preflightMessagingConflictsSpy = vi
     .spyOn(rebuildMessagingConflict, "preflightRebuildMessagingConflicts")
     .mockImplementation(async () => {
@@ -1073,7 +1084,6 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
     logSpy,
     finalizeIncompleteOnboardStepSpy,
     onboardSpy,
-    openShieldsSpy,
     preflightAuthoritativeRebuildTargetSpy,
     preflightMessagingConflictsSpy,
     preflightDcodeRouteSpy,
@@ -1095,7 +1105,8 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       defaultSelectionRevision: currentDefaultSelectionRevision,
     }),
     releaseOnboardLockSpy,
-    relockSpy,
+    enforceRemovedImmutabilityMigrationBoundarySpy,
+    retireRemovedImmutabilityStateRecordSpy,
     restoreSandboxStateSpy,
     captureOpenshellSpy,
     captureResolvedOpenshellSpy,

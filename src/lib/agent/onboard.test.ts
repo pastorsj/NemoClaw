@@ -48,7 +48,6 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
       configFile: "/tmp/agent/config.yaml",
       envFile: null,
       format: "yaml",
-      shieldsFiles: [],
     },
     inferenceProviderOptions: [],
     mcpCapability: {
@@ -62,15 +61,6 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     backupStateDirPrefixes: [],
     nonBackupStateDirs: [],
     nonBackupStateDirPrefixes: [],
-    stateLockPlan: {
-      version: 1,
-      readOnlyRoots: [],
-      confidentialRoots: [],
-      readOnlyPrefixes: [],
-      confidentialPrefixes: [],
-      writableSubpaths: [],
-    },
-    stateLockPlanInImage: false,
     stateFiles: [],
     userManagedFiles: [],
     versionCommand: "agent --version",
@@ -81,7 +71,6 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
     dockerfilePath: null,
     startScriptPath: null,
     policyAdditionsPath: null,
-    policyPermissivePath: null,
     pluginDir: null,
     legacyPaths: null,
     agentDir: "/tmp/agent",
@@ -859,7 +848,15 @@ describe("handleAgentSetup guards", () => {
     expect(
       verifyAgentBinaryAvailable(
         "alpha",
-        makeAgent({ name: "pi", binary_path: "/usr/local/bin/pi" }),
+        makeAgent({
+          name: "example-agent",
+          binary_path: "/usr/local/bin/example-agent",
+          runtime: {
+            kind: "terminal",
+            interactive_command: "example-agent",
+            command_shell: "/bin/bash",
+          },
+        }),
         runCaptureOpenshell,
         "nemoclaw",
       ),

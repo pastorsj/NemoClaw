@@ -124,8 +124,7 @@ function stubRecreateJournal(): RebuildRecreateJournal {
     targetGeneration: "generation-1",
     targetIntentFingerprint: "intent-1",
     harnessPackage: null,
-    markDeleting: vi.fn(),
-    observeSourceForDelete: vi.fn(() => "source" as const),
+    beginDelete: vi.fn(() => "source" as const),
     confirmDeleted: vi.fn(),
     completeAcceptedTarget: vi.fn(),
   };
@@ -984,10 +983,10 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     });
     const onDeleted = vi.fn();
 
-    const result = await runRebuildDestroyPhase({
-      ...stubRebuildDestroyPhaseInput(),
-      sandboxEntry: before ?? { name: "alpha", agent: "openclaw" },
-      onDeleted,
+      const result = await runRebuildDestroyPhase({
+        ...stubRebuildDestroyPhaseInput(),
+        sandboxEntry: before ?? { name: "alpha", agent: "openclaw" },
+        onDeleted,
     });
 
     expect(result?.entries).toEqual([bridgeEntries.github]);
@@ -1051,10 +1050,10 @@ describe("authenticated MCP sandbox destroy lifecycle", () => {
     const onDeleted = vi.fn();
 
     await expect(
-      runRebuildDestroyPhase({
-        ...stubRebuildDestroyPhaseInput(),
-        sandboxEntry: beforeRegistry ?? { name: "alpha", agent: "openclaw" },
-        onDeleted,
+        runRebuildDestroyPhase({
+          ...stubRebuildDestroyPhaseInput(),
+          sandboxEntry: beforeRegistry ?? { name: "alpha", agent: "openclaw" },
+          onDeleted,
       }),
     ).rejects.toThrow("Failed to delete sandbox.");
 

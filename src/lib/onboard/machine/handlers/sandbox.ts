@@ -32,6 +32,7 @@ import type {
   OnboardCheckpoint,
 } from "../../../state/onboard-checkpoint-types";
 import type {
+  CompareAndSwapSessionResult,
   HermesAuthMethod,
   Session,
   SessionResourceProfile,
@@ -83,9 +84,9 @@ import {
 import type { SandboxCreateIntent as ResolvedSandboxCreateIntent } from "../../sandbox-create-intent-types";
 import {
   advanceSandboxRecreateTransaction,
-  beginSandboxRecreateTransaction,
   clearCompletedSandboxRecreateTransaction,
   fingerprintSandboxRecreateValue,
+  ownSandboxRecreateTransaction,
   type ReplacedSandboxSourceEntry,
   type ReplacedSandboxWorkloadCleanupResult,
   retireReplacedSandboxWorkload as retireReplacedSandboxWorkloadDefault,
@@ -256,7 +257,13 @@ export interface SandboxStateOptions<
     ): boolean;
     note(message: string): void;
     cliName(): string;
+    loadSession(): Session | null;
     updateSession(mutator: (session: Session) => Session | void): Session;
+    compareAndSwapSession(
+      matches: (session: Session) => boolean,
+      mutator: (session: Session) => Session | void,
+      command?: string,
+    ): CompareAndSwapSessionResult;
     getStoredMessagingChannelConfig(
       sandboxName: string | null,
       session: Session | null,
@@ -331,7 +338,6 @@ export interface SandboxStateOptions<
     }): Promise<readonly CheckpointProviderBinding[]>;
     promptValidatedSandboxName(agent: Agent): Promise<string>;
     selectResourceProfileForSandbox(): Promise<ResourceProfile | null>;
-    stopStaleDashboardListenersForSandbox(sandboxes: unknown[], sandboxName: string): void;
     listRegistrySandboxes(): { sandboxes: unknown[] };
     planRegisteredExtraProviders(
       gatewayName: string,
@@ -1885,73 +1891,70 @@ class SandboxStateFlow<
       );
     }
     if (!snapshotGateway) return null;
-    const observation = this.deps.getSandboxRecreateObservation(sandboxName);
-    let journalSourceEntry: SandboxEntry | null = null;
-    let journalSkipped = false;
-    const updated = this.deps.updateSession((current) => {
-      if (
-        current.sessionId !== ownerSnapshot.sessionId ||
-        !checkpointPackageOwnerAuthorityMatches(current, ownerSnapshot)
-      ) {
-        throw new Error("Cannot start sandbox recreate: owning Session authority changed");
-      }
-      const currentSourceEntry = this.deps.getSandboxRegistryEntry(sandboxName);
-      assertCheckpointPackageAuthorityChain(current, currentSourceEntry);
-      const existing = current.checkpoint?.sandboxRecreate ?? null;
-      const ownsPendingCreateReservation =
-        currentSourceEntry?.pendingRouteReservation === true &&
-        currentSourceEntry.reservationSessionId === current.sessionId;
-      if (
-        !this.options.resume &&
-        !existing &&
-        currentSourceEntry &&
-        !ownsPendingCreateReservation
-      ) {
-        journalSkipped = true;
-        return current;
-      }
-      const gateway = selectedGatewayForSandboxRecreate(
-        current.checkpoint,
-        this.options.gatewayName,
-      );
-      if (
-        existing &&
-        (!gateway ||
-          existing.gatewayName !== gateway.gatewayName ||
-          existing.gatewayPort !== gateway.gatewayPort)
-      ) {
-        throw new Error(
-          `Cannot resume sandbox '${existing.sandboxName}' recreation: journaled gateway '${existing.gatewayName}:${String(existing.gatewayPort)}' does not match the selected gateway authority.`,
-        );
-      }
-      if (!gateway) {
-        journalSkipped = true;
-        return current;
-      }
-      journalSourceEntry = currentSourceEntry;
-      beginSandboxRecreateTransaction(current, {
+    const sourceSnapshot = this.deps.getSandboxRegistryEntry(sandboxName);
+    const ownsPendingCreateReservation =
+      sourceSnapshot?.pendingRouteReservation === true &&
+      sourceSnapshot.reservationSessionId === ownerSnapshot.sessionId;
+    if (
+      !this.options.resume &&
+      !snapshotTransaction &&
+      sourceSnapshot &&
+      !ownsPendingCreateReservation
+    ) {
+      return null;
+    }
+    const targetIntentFingerprint = selectSandboxRecreateTargetIntentFingerprint(
+      snapshotTransaction,
+      this.sandboxRecreateTargetIntentFingerprint(
         sandboxName,
-        gatewayName: gateway.gatewayName,
-        gatewayPort: gateway.gatewayPort,
-        sourceEntry: currentSourceEntry,
-        observation,
-        targetIntentFingerprint: selectSandboxRecreateTargetIntentFingerprint(
-          existing,
-          this.sandboxRecreateTargetIntentFingerprint(
-            sandboxName,
-            createIntent,
-            current.harnessPackage,
-          ),
-          this.options.recreateJournalTargetIntentFingerprint,
-          fingerprintSandboxRecreateValue(
-            this.currentSandboxCreateFingerprint(sandboxName, createIntent.resolved),
-          ),
-        ),
-      });
-      return current;
+        createIntent,
+        ownerSnapshot.harnessPackage,
+      ),
+      this.options.recreateJournalTargetIntentFingerprint,
+      fingerprintSandboxRecreateValue(
+        this.currentSandboxCreateFingerprint(sandboxName, createIntent.resolved),
+      ),
+    );
+    const owned = ownSandboxRecreateTransaction({
+      sessionStore: {
+        loadSession: this.deps.loadSession,
+        updateSession: this.deps.updateSession,
+        compareAndSwapSession: this.deps.compareAndSwapSession,
+      },
+      sandboxName,
+      gatewayName: snapshotGateway.gatewayName,
+      gatewayPort: snapshotGateway.gatewayPort,
+      targetIntentFingerprint,
+      readRegistryEntry: () => this.deps.getSandboxRegistryEntry(sandboxName),
+      observe: () => this.deps.getSandboxRecreateObservation(sandboxName),
+      decorateCheckpoint: (current, checkpoint) => {
+        if (
+          current.sessionId !== ownerSnapshot.sessionId ||
+          !checkpointPackageOwnerAuthorityMatches(current, ownerSnapshot)
+        ) {
+          throw new Error("Cannot start sandbox recreate: owning Session authority changed");
+        }
+        assertCheckpointPackageAuthorityChain(
+          current,
+          this.deps.getSandboxRegistryEntry(sandboxName),
+        );
+        const currentGateway = selectedGatewayForSandboxRecreate(
+          checkpoint,
+          this.options.gatewayName,
+        );
+        if (
+          !currentGateway ||
+          currentGateway.gatewayName !== snapshotGateway.gatewayName ||
+          currentGateway.gatewayPort !== snapshotGateway.gatewayPort
+        ) {
+          throw new Error(
+            `Cannot journal sandbox '${sandboxName}': the selected gateway authority changed.`,
+          );
+        }
+        return checkpoint;
+      },
     });
-    const transaction = journalSkipped ? null : (updated.checkpoint?.sandboxRecreate ?? null);
-    return transaction ? { transaction, sourceEntry: journalSourceEntry } : null;
+    return { transaction: owned.transaction, sourceEntry: owned.registryEntry };
   }
 
   private sandboxRecreateTargetIntentFingerprint(
@@ -2054,7 +2057,9 @@ class SandboxStateFlow<
     return {
       transaction,
       sourceEntry:
-        sandboxRecreateSourceWorkloadEntry(transaction) ?? openedJournal?.sourceEntry ?? sourceEntry,
+        sandboxRecreateSourceWorkloadEntry(transaction) ??
+        openedJournal?.sourceEntry ??
+        sourceEntry,
       effectiveCreateIntent,
       repairMetadata,
     };
@@ -2252,12 +2257,6 @@ class SandboxStateFlow<
 
       let sandboxName: string;
       try {
-        if (this.options.fresh && !deferSandboxEffectsUntilIdentityVerification) {
-          this.deps.stopStaleDashboardListenersForSandbox(
-            this.deps.listRegistrySandboxes().sandboxes,
-            requestedSandboxName,
-          );
-        }
         sandboxName = await withSandboxPhaseTrace(
           requestedSandboxName,
           this.options.provider,
@@ -2304,12 +2303,6 @@ class SandboxStateFlow<
                 ? async (
                     verifiedContext: import("../../types").VerifiedSandboxCreateEffectsContext,
                   ) => {
-                    if (this.options.fresh) {
-                      this.deps.stopStaleDashboardListenersForSandbox(
-                        this.deps.listRegistrySandboxes().sandboxes,
-                        requestedSandboxName,
-                      );
-                    }
                     state = await activateVerifiedCredentialProviders(
                       state,
                       verifiedContext.revalidateSandboxIdentity,

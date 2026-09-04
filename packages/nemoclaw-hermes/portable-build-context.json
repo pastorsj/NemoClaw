@@ -14,6 +14,7 @@
     "packages/nemoclaw-hermes/compat/gateway-metadata.py",
     "packages/nemoclaw-hermes/compat/langfuse-credentials.mts",
     "packages/nemoclaw-hermes/compat/profile-policy.py",
+    "packages/nemoclaw-hermes/compat/runtime-boundaries.patch",
     "packages/nemoclaw-hermes/compat/security-dependencies.patch",
     "packages/nemoclaw-hermes/compat/session-preview.py",
     "packages/nemoclaw-hermes/compat/sqlite-store.py",
@@ -38,12 +39,6 @@
     "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
     "packages/nemoclaw-hermes/runtime/runtime-integrity.sh",
     "packages/nemoclaw-hermes/runtime/service-control.sh",
-    "packages/nemoclaw-hermes/runtime/state-gate.sh",
-    "packages/nemoclaw-hermes/runtime/state/control.py",
-    "packages/nemoclaw-hermes/runtime/state/plan.json",
-    "packages/nemoclaw-hermes/runtime/state/publisher.json",
-    "packages/nemoclaw-hermes/runtime/state/publisher.py",
-    "packages/nemoclaw-hermes/runtime/state/startup-gate.py",
     "packages/nemoclaw-hermes/runtime/tirith-marker.py",
     "packages/nemoclaw-hermes/start.sh",
     "packages/nemoclaw-openclaw/compat/npm-remediation.mts",
@@ -62,8 +57,6 @@
     "scripts/managed-startup-hold.sh",
     "scripts/patch-bundled-npm-brace-expansion.mts",
     "scripts/patch-bundled-npm-tar.mts",
-    "scripts/runtime-state-mutation-transport-broker.py",
-    "scripts/state-dir-guard.py",
     "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
     "src/lib/messaging/",
     "src/lib/messaging/channels/googlechat/runtime/hermes-adapter.py",
@@ -118,10 +111,6 @@
     },
     {
       "path": "nemoclaw-blueprint/model-specific-setup/schema.json",
-      "mode": "100644"
-    },
-    {
-      "path": "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
       "mode": "100644"
     },
     {
@@ -317,6 +306,10 @@
       "mode": "100755"
     },
     {
+      "path": "packages/nemoclaw-hermes/compat/runtime-boundaries.patch",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/compat/security-dependencies.patch",
       "mode": "100644"
     },
@@ -505,30 +498,6 @@
       "mode": "100644"
     },
     {
-      "path": "packages/nemoclaw-hermes/runtime/state-gate.sh",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime/state/control.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime/state/plan.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime/state/publisher.json",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime/state/publisher.py",
-      "mode": "100755"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/runtime/state/startup-gate.py",
-      "mode": "100755"
-    },
-    {
       "path": "packages/nemoclaw-hermes/runtime/tirith-marker.py",
       "mode": "100755"
     },
@@ -666,14 +635,6 @@
     },
     {
       "path": "scripts/patch-bundled-npm-tar.mts",
-      "mode": "100755"
-    },
-    {
-      "path": "scripts/runtime-state-mutation-transport-broker.py",
-      "mode": "100755"
-    },
-    {
-      "path": "scripts/state-dir-guard.py",
       "mode": "100755"
     },
     {

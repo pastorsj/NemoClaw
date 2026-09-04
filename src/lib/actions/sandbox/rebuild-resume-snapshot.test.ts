@@ -32,7 +32,6 @@ import * as rebuildImagePreflight from "./rebuild-custom-image-preflight";
 import { rebuildOnboardDependencies } from "./rebuild-onboard-dependencies";
 import * as rebuildRoutePreflight from "./rebuild-preflight-guards";
 import * as rebuildRecreateJournal from "./rebuild-recreate-journal";
-import * as rebuildShields from "./rebuild-shields";
 import * as rebuildUsageNotice from "./rebuild-usage-notice";
 import { makeRebuildAgentAuthority } from "./rebuild-flow-test-fixtures";
 import * as policyGet from "./policy-get";
@@ -195,6 +194,12 @@ describe("rebuild resume snapshot repair", () => {
       vi.spyOn(agentRuntime, "getAgentDisplayName").mockReturnValue("OpenClaw"),
       vi.spyOn(onboardSession, "loadSession").mockImplementation(loadSession),
       vi.spyOn(onboardSession, "updateSession").mockImplementation(updateSession),
+      vi.spyOn(onboardSession, "compareAndSwapSession").mockImplementation((matches, mutator) => {
+        const current = cloneSession(session);
+        return matches(current)
+          ? ((session = cloneSession(mutator(current) ?? current)), "updated")
+          : "mismatch";
+      }),
       vi.spyOn(onboardSession, "acquireOnboardLock").mockReturnValue({
         acquired: true,
         lockFile: "/tmp/nemoclaw-onboard.lock",
@@ -243,11 +248,6 @@ describe("rebuild resume snapshot repair", () => {
         expectedVersion: "0.1.0",
         sandboxVersion: "0.0.1",
       } as never),
-      vi.spyOn(rebuildShields, "openRebuildShieldsWindow").mockReturnValue({
-        relocked: false,
-        wasLocked: false,
-      }),
-      vi.spyOn(rebuildShields, "relockRebuildShieldsWindow").mockReturnValue(true),
       vi.spyOn(snapshotBackup, "backupSandboxStateWithManagedAuthority").mockReturnValue({
         success: true,
         backedUpDirs: [],

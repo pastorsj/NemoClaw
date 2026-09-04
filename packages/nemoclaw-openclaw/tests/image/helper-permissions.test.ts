@@ -95,8 +95,6 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
     const gatewaySupervisorPath = path.join(localLib, "gateway-supervisor.sh");
     const startupDirectory = path.join(localLib, "openclaw-startup");
     const startupModulePath = path.join(startupDirectory, "auto-pair.py");
-    const stateDirGuardPath = path.join(localLib, "state-dir-guard.py");
-    const stateLockPlanPath = path.join(localShare, "state-lock-plan.json");
     const configGuardPath = path.join(localLib, "openclaw-config-guard.py");
     const managedGatewayControlPath = path.join(localLib, "managed-gateway-control.py");
     const files = [
@@ -110,8 +108,6 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       path.join(localLib, "sandbox-rlimits.sh"),
       gatewaySupervisorPath,
       startupModulePath,
-      stateDirGuardPath,
-      stateLockPlanPath,
       configGuardPath,
       managedGatewayControlPath,
       path.join(localLib, "openclaw_device_approval_policy.py"),
@@ -208,8 +204,6 @@ describe("sandbox provisioning: copied OpenClaw helper permissions (#2861)", () 
       expect((fs.statSync(gatewaySupervisorPath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(startupDirectory).mode & 0o777).toString(8)).toBe("755");
       expect((fs.statSync(startupModulePath).mode & 0o777).toString(8)).toBe("444");
-      expect((fs.statSync(stateDirGuardPath).mode & 0o777).toString(8)).toBe("500");
-      expect((fs.statSync(stateLockPlanPath).mode & 0o777).toString(8)).toBe("444");
       expect((fs.statSync(configGuardPath).mode & 0o777).toString(8)).toBe("500");
       expect((fs.statSync(managedGatewayControlPath).mode & 0o777).toString(8)).toBe("500");
     } finally {

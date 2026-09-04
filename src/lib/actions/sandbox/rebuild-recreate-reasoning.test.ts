@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { restoreEnv } from "../../../../test/helpers/env-test-helpers";
-import * as shields from "../../shields";
 import { decisionSelected } from "../../state/onboard-checkpoint-decision";
 import { deriveCheckpointFromSession } from "../../state/onboard-checkpoint-migrate";
 import type { CheckpointGatewayAuthority } from "../../state/onboard-checkpoint-types";
@@ -99,8 +98,7 @@ const recreateJournal: RebuildRecreateJournal = {
   targetGeneration: "22222222-2222-4222-8222-222222222222",
   targetIntentFingerprint: "rebuild-reasoning-target",
   harnessPackage: null,
-  markDeleting: vi.fn(),
-  observeSourceForDelete: vi.fn((): "missing" => "missing"),
+  beginDelete: vi.fn((): "missing" => "missing"),
   confirmDeleted: vi.fn(),
   completeAcceptedTarget: vi.fn(),
 };
@@ -128,9 +126,6 @@ function makeInput(overrides: Partial<RebuildRecreatePhaseInput> = {}): RebuildR
     registryRollback: { recordRemoval: vi.fn(), restoreForRetry: vi.fn() },
     backupManifest: null,
     mcpEntries: [],
-    rebuildShieldsWindow: { relocked: false, wasLocked: false },
-    relockShieldsIfNeeded: vi.fn(() => true),
-    onCreated: vi.fn(),
     log: vi.fn(),
     bail: vi.fn((message: string): never => {
       throw new Error(`bail: ${message}`);
@@ -173,7 +168,6 @@ describe("rebuild recreate compatible-endpoint reasoning handoff (#7940)", () =>
     };
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
-    vi.spyOn(shields, "clearShieldsState").mockImplementation(() => undefined);
     vi.spyOn(onboardSession, "loadSession").mockImplementation(() => session);
     vi.spyOn(onboardSession, "updateSession").mockImplementation((mutator) => {
       session = mutator(session) ?? session;

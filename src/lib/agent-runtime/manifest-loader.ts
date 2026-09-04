@@ -15,14 +15,11 @@ import type {
   AgentMcpCapability,
   AgentStateDirectory,
   AgentStateFile,
-  AgentStateLockPlan,
   AgentVersionScheme,
   ManifestRecord,
 } from "./manifest-types";
 import {
   readBoolean,
-  readConfigMutableAccess,
-  readConfigShieldsFiles,
   readDashboard,
   readHealthProbe,
   readInference,
@@ -30,7 +27,6 @@ import {
   readObject,
   readPortArray,
   readStateFiles,
-  readStateLockPlanInImage,
   readString,
   readStringArray,
   readStringMap,
@@ -39,7 +35,6 @@ import {
 } from "./manifest-readers";
 import { readAgentRuntime } from "./runtime/manifest";
 import {
-  buildStateLockPlan,
   readStateDirectories,
   stateDirectoryPaths,
   stateDirectoryPrefixes,
@@ -249,8 +244,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const webAuth = readWebAuth(raw);
   const healthProbe = readHealthProbe(raw);
   const config = readObject(raw, "config");
-  const configShieldsFiles = readConfigShieldsFiles(config);
-  const configMutableAccess = readConfigMutableAccess(config);
   const inference = readInference(raw);
   const mcp = readMcpCapability(raw);
   if (raw.runtime_auth_state_dirs !== undefined) {
@@ -265,8 +258,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const backupStateDirPrefixes = stateDirectoryPrefixes(stateDirectories, { backup: true });
   const nonBackupStateDirs = stateDirectoryPaths(stateDirectories, { backup: false });
   const nonBackupStateDirPrefixes = stateDirectoryPrefixes(stateDirectories, { backup: false });
-  const stateLockPlan = buildStateLockPlan(stateDirectories);
-  const stateLockPlanInImage = readStateLockPlanInImage(raw);
   const stateFiles = readStateFiles(raw);
   const userManagedFiles = readUserManagedFiles(raw);
   const phoneHomeHosts = readStringArray(raw, "phone_home_hosts");
@@ -296,12 +287,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     "policy-additions.yaml",
     "Agent baseline policy",
   );
-  const policyPermissiveTarget = resolveOrdinaryAsset(
-    packageRoot,
-    agentDir,
-    "policies/permissive.yaml",
-    "Agent permissive policy",
-  );
   const pluginTarget = resolveOrdinaryAsset(
     packageRoot,
     agentDir,
@@ -330,7 +315,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     config,
     inference,
     mcp,
-    state_lock_plan_in_image: stateLockPlanInImage,
     state_files: stateFiles,
     user_managed_files: userManagedFiles,
     _legacy_paths: legacyPathConfig,
@@ -392,8 +376,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
         configFile: readString(config ?? {}, "config_file") ?? "config.json",
         envFile: readString(config ?? {}, "env_file") ?? null,
         format: readString(config ?? {}, "format") ?? "json",
-        shieldsFiles: configShieldsFiles,
-        mutableAccess: configMutableAccess,
       };
     },
 
@@ -431,14 +413,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
 
     get nonBackupStateDirPrefixes(): string[] {
       return nonBackupStateDirPrefixes;
-    },
-
-    get stateLockPlan(): AgentStateLockPlan {
-      return stateLockPlan;
-    },
-
-    get stateLockPlanInImage(): boolean {
-      return stateLockPlanInImage;
     },
 
     get stateFiles(): AgentStateFile[] {
@@ -492,14 +466,6 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
       return legacyPolicy
         ? readOptionalOrdinaryAsset(packageRoot, legacyPolicy, "Agent legacy baseline policy")
         : null;
-    },
-
-    get policyPermissivePath(): string | null {
-      return readOptionalOrdinaryAsset(
-        packageRoot,
-        policyPermissiveTarget,
-        "Agent permissive policy",
-      );
     },
 
     get pluginDir(): string | null {

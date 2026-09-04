@@ -85,15 +85,8 @@ function readPreparedPolicy(prepared: {
 
 describe("initial sandbox policy real preset merge", () => {
   const managedImagePolicyPathsByAgent = {
-    openclaw: [
-      ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
-      ["nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"],
-      ["packages", "nemoclaw-openclaw", "policies", "permissive.yaml"],
-    ],
-    hermes: [
-      ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
-      ["packages", "nemoclaw-hermes", "policies", "permissive.yaml"],
-    ],
+    openclaw: [["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"]],
+    hermes: [["packages", "nemoclaw-hermes", "policy-additions.yaml"]],
     "langchain-deepagents-code": [
       ["packages", "nemoclaw-langchain-deepagents-code", "policy-additions.yaml"],
     ],
@@ -123,18 +116,13 @@ describe("initial sandbox policy real preset merge", () => {
     MANAGED_STARTUP_SHARED_TRANSACTION_DIRECTORY,
     MANAGED_STARTUP_SHARED_COMMIT_RECEIPT_DIRECTORY,
   ] as const;
-  const hermesRuntimeStateMutationControl = {
-    receipts: "/var/lib/nemoclaw/runtime-state-mutation",
-    startupHandoff: "/run/nemoclaw/runtime-state-mutation-startup",
-  } as const;
-
   it("covers the complete shipped managed startup trust policy matrix", () => {
     const policyIdentities = managedImagePolicyCases.map(
       ({ path: policyPath, agent }) => `${agent}:${policyPath.join("/")}`,
     );
 
     expect(Object.keys(managedImagePolicyPathsByAgent)).toEqual([...SHIPPED_MANAGED_IMAGE_AGENTS]);
-    expect(policyIdentities).toHaveLength(6);
+    expect(policyIdentities).toHaveLength(3);
     expect(new Set(policyIdentities).size).toBe(policyIdentities.length);
     expect(managedStartupReadOnlyPaths.map(({ path: trustedPath }) => trustedPath)).toEqual([
       MANAGED_STARTUP_MERGED_CA_FILE,
@@ -171,26 +159,6 @@ describe("initial sandbox policy real preset merge", () => {
       ).toEqual([]);
     },
   );
-
-  it.each([
-    ["packages/nemoclaw-hermes/policy-additions.yaml", "restricted"],
-    ["packages/nemoclaw-hermes/policies/permissive.yaml", "permissive"],
-  ])("grants the exact Hermes state-mutation control channels in the %s policy", (policyPath) => {
-    const effective = readPreparedPolicy(
-      prepareInitialSandboxCreatePolicy(repoPath(...policyPath.split("/")), [], {
-        agentName: "hermes",
-      }),
-    );
-    const readOnly = effective.filesystem_policy?.read_only ?? [];
-    const readWrite = effective.filesystem_policy?.read_write ?? [];
-
-    expect(readOnly).toContain(hermesRuntimeStateMutationControl.receipts);
-    expect(readWrite).not.toContain(hermesRuntimeStateMutationControl.receipts);
-    expect(readWrite).toContain(hermesRuntimeStateMutationControl.startupHandoff);
-    expect(readOnly).not.toContain(hermesRuntimeStateMutationControl.startupHandoff);
-    expect([...readOnly, ...readWrite]).not.toContain("/var/lib/nemoclaw");
-    expect([...readOnly, ...readWrite]).not.toContain("/run/nemoclaw");
-  });
 
   it.each(
     managedImagePolicyCases.flatMap((policyCase) =>
@@ -312,8 +280,13 @@ describe("initial sandbox policy real preset merge", () => {
 
     const discordBinaries =
       policy.network_policies?.discord?.binaries?.map((binary) => binary.path) ?? [];
-    expect(discordBinaries).toContain("/usr/bin/python3*");
-    expect(discordBinaries).toContain("/opt/hermes/.venv/bin/python");
+    expect(discordBinaries).toEqual([
+      "/opt/hermes/.venv/bin/python3",
+      "/opt/hermes/.venv/bin/python",
+      "/usr/bin/python3",
+      "/usr/bin/python3.13",
+    ]);
+    expect(discordBinaries).not.toContain("/usr/bin/python3*");
     expect(discordBinaries).not.toContain("/usr/bin/node");
 
     const boundProviders =
@@ -420,37 +393,14 @@ describe("initial sandbox policy real preset merge", () => {
     },
   );
 
-  it.each([
-    "nemoclaw-blueprint/policies/openclaw-sandbox-permissive.yaml",
-    "packages/nemoclaw-openclaw/policies/permissive.yaml",
-  ])("preserves baseline writable paths in effective OpenClaw permissive policy %s", (policy) => {
-    const baseline = readPreparedPolicy(
-      prepareInitialSandboxCreatePolicy(
-        repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
-        [],
-        { agentName: "openclaw" },
-      ),
-    );
-    const baselineReadWrite = baseline.filesystem_policy?.read_write ?? [];
-    expect(baselineReadWrite).toContain("/home/linuxbrew");
-
-    const policyPath = repoPath(...policy.split("/"));
-    const effective = readPreparedPolicy(
-      prepareInitialSandboxCreatePolicy(policyPath, [], { agentName: "openclaw" }),
-    );
-    expect(effective.filesystem_policy?.read_write, policyPath).toEqual(
-      expect.arrayContaining(baselineReadWrite),
-    );
-  });
-
   it.each(
     [
       {
-        path: repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"),
+        path: repoPath("nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),
         agent: "openclaw",
       },
       {
-        path: repoPath("packages", "nemoclaw-hermes", "policies", "permissive.yaml"),
+        path: repoPath("packages", "nemoclaw-hermes", "policy-additions.yaml"),
         agent: "hermes",
       },
     ].flatMap((policyCase) =>
@@ -522,7 +472,10 @@ describe("initial sandbox policy real preset merge", () => {
         agent: "openclaw",
         path: ["nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"],
       },
-      { agent: "hermes", path: ["agents", "hermes", "policy-additions.yaml"] },
+      {
+        agent: "hermes",
+        path: ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
+      },
     ].flatMap((policyCase) =>
       ["idc-3.weixin.qq.com", "idc-37.weixin.qq.com"].map((idcHost) => ({
         ...policyCase,
@@ -689,23 +642,8 @@ describe("initial sandbox policy real preset merge", () => {
       agent: "openclaw",
     },
     {
-      label: "permissive OpenClaw blueprint policy",
-      path: ["nemoclaw-blueprint", "policies", "openclaw-sandbox-permissive.yaml"],
-      agent: "openclaw",
-    },
-    {
-      label: "permissive OpenClaw agent policy",
-      path: ["packages", "nemoclaw-openclaw", "policies", "permissive.yaml"],
-      agent: "openclaw",
-    },
-    {
       label: "Hermes policy additions",
       path: ["packages", "nemoclaw-hermes", "policy-additions.yaml"],
-      agent: "hermes",
-    },
-    {
-      label: "permissive Hermes policy",
-      path: ["packages", "nemoclaw-hermes", "policies", "permissive.yaml"],
       agent: "hermes",
     },
   ] as const)(

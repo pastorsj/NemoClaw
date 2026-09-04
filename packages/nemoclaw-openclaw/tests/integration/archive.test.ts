@@ -12,7 +12,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const PACKAGE_NAME = "@nvidia/nemoclaw-openclaw";
-const HARNESS = { id: "openclaw", runtimeFile: "runtime/openclaw/package.json" } as const;
+const HARNESS = {
+  id: "openclaw",
+  runtimeFile: "runtime/openclaw/package.json",
+} as const;
 const COMMON_PACKAGE_FILES = [
   "README.md",
   "package.json",
@@ -78,7 +81,11 @@ beforeAll(() => {
     execFileSync(
       "npm",
       ["pack", "--json", "--ignore-scripts", "--pack-destination", archiveDirectory],
-      { cwd: PACKAGE_ROOT, encoding: "utf8", maxBuffer: PACK_REPORT_MAX_BUFFER },
+      {
+        cwd: PACKAGE_ROOT,
+        encoding: "utf8",
+        maxBuffer: PACK_REPORT_MAX_BUFFER,
+      },
     ),
   ) as PackReport[];
   packedFiles = new Map(
@@ -156,13 +163,6 @@ describe("published OpenClaw package", () => {
     expect(statSync(path.join(installedPackageRoot, artifact)).mode & 0o111).not.toBe(0);
   });
 
-  it.each(["policies/permissive.yaml", "policies/permissive-default.yaml"])(
-    "ships OpenClaw package policy %s",
-    (artifact) => {
-      expect(packedFiles.has(artifact)).toBe(true);
-    },
-  );
-
   it.each(["runtime/backup-workspace.sh", "compat/npm-remediation.mts"])(
     "ships executable OpenClaw package helper %s",
     (artifact) => {
@@ -175,7 +175,11 @@ describe("published OpenClaw package", () => {
     const mcp = loadInstalledModule<{
       buildMcpRegistrationCommand(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
-        managedEntries: Array<{ server: string; url: string; headers: Record<string, string> }>;
+        managedEntries: Array<{
+          server: string;
+          url: string;
+          headers: Record<string, string>;
+        }>;
         replaceExisting: boolean;
         teardownRollback: boolean;
         configRoot: string | null;
@@ -203,7 +207,11 @@ describe("published OpenClaw package", () => {
       buildOpenclawAgentDeleteArgs(id: string): string[];
     }>("host/cli-grammar.cts");
     const openClawModel: Record<string, unknown> = {};
-    const mcpEntry = { server: "example", url: "https://example.test/mcp", headers: {} };
+    const mcpEntry = {
+      server: "example",
+      url: "https://example.test/mcp",
+      headers: {},
+    };
 
     expect(mcp.buildInspectCommand(mcpEntry, true)).toContain("example");
     expect(mcp.mcporterAvailabilityProbe("sandbox").command).toBe("command -v mcporter");

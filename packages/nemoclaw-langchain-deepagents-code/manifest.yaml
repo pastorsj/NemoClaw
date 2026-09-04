@@ -54,8 +54,13 @@ expected_version: "0.1.55"
 version_scheme: semver
 runtime:
   kind: terminal
+  command_shell: /bin/sh
   interactive_command: "dcode"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.deepagents/fabric.json"
+  smoke_boundary:
+    kind: managed-launcher
+    launcher: /usr/local/lib/nemoclaw/dcode-managed-exec
+    home: /usr/local/lib/nemoclaw
   smoke_commands:
     - "dcode --version"
     - "test -s /sandbox/.deepagents/config.toml && echo NEMOCLAW_DEEPAGENTS_CONFIG_OK"
@@ -80,13 +85,10 @@ config:
 # /sandbox/.deepagents. The built-in skill-creator writes user skills to
 # agent/skills (per its init_skill.py), so it must be backed up alongside
 # .state and skills — otherwise skills are silently lost on rebuild.
-state_lock_plan_in_image: false
 state_dirs:
   - .state
-  - path: skills
-    shields: read-only
-  - path: agent/skills
-    shields: read-only
+  - skills
+  - agent/skills
 
 # ── Top-level durable state files ───────────────────────────────
 # config.toml mixes DCode preferences with NemoClaw-managed model routing.

@@ -11,12 +11,6 @@ import { writeManagedGatewayDeclaration } from "../../helpers/gateway-management
 
 const require = createRequire(import.meta.url);
 const REPO_ROOT = path.join(import.meta.dirname, "../../..");
-const TAVILY_PROFILE_PATH = path.join(
-  REPO_ROOT,
-  "nemoclaw-blueprint",
-  "provider-profiles",
-  "tavily.yaml",
-);
 const COMMAND_PATHS = {
   common: path.join(REPO_ROOT, "dist", "lib", "credentials", "command-support.js"),
   credentials: path.join(REPO_ROOT, "dist", "commands", "credentials.js"),
@@ -439,34 +433,7 @@ describe("credentials oclif commands", () => {
 
       expect(calls).toEqual([
         {
-          args: [
-            "provider",
-            "profile",
-            "-g",
-            "nemoclaw",
-            "import",
-            "--file",
-            TAVILY_PROFILE_PATH,
-          ],
-          opts: {
-            env: expect.any(Object),
-            ignoreError: true,
-            replaceEnv: true,
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: 30_000,
-          },
-        },
-        {
-          args: [
-            "provider",
-            "profile",
-            "-g",
-            "nemoclaw",
-            "export",
-            "tavily",
-            "--output",
-            "json",
-          ],
+          args: ["provider", "profile", "-g", "nemoclaw", "export", "tavily", "--output", "json"],
           opts: {
             env: expect.any(Object),
             ignoreError: true,
@@ -499,10 +466,9 @@ describe("credentials oclif commands", () => {
         },
       ]);
       expect(calls[0]?.opts?.env?.TAVILY_API_KEY).toBeUndefined();
-      expect(calls[1]?.opts?.env?.TAVILY_API_KEY).toBeUndefined();
-      expect(calls[2]?.opts?.env?.UNRELATED_API_KEY).toBeUndefined();
-      expect(calls[2]?.opts?.env?.TAVILY_API_KEY).toBe("tvly-test-12345");
-      expect(calls[2]?.args).not.toContain("tvly-test-12345");
+      expect(calls[1]?.opts?.env?.UNRELATED_API_KEY).toBeUndefined();
+      expect(calls[1]?.opts?.env?.TAVILY_API_KEY).toBe("tvly-test-12345");
+      expect(calls[1]?.args).not.toContain("tvly-test-12345");
       expect(extraProviderCalls).toEqual(["tavily-search"]);
       expect(output.stdout).toContain("Registered provider 'tavily-search'");
       expect(output.stdout).toContain("rebuild");
@@ -629,7 +595,7 @@ describe("credentials oclif commands", () => {
     }
   });
 
-  it("credentials add stops before provider create when bundled profile import fails", async () => {
+  it("credentials add stops before provider create when bundled profile validation fails", async () => {
     process.env.TAVILY_API_KEY = "tvly-test-12345";
     const leakedTavilyValue = `tvly-${"leaked"}-9999`;
     const calls: OpenshellCall[] = [];
@@ -662,9 +628,10 @@ describe("credentials oclif commands", () => {
         "profile",
         "-g",
         "nemoclaw",
-        "import",
-        "--file",
-        TAVILY_PROFILE_PATH,
+        "export",
+        "tavily",
+        "--output",
+        "json",
       ]);
       expect(output.stderr).toContain("Could not import bundled provider profile 'tavily'");
       expect(output.stderr).not.toContain(leakedTavilyValue);

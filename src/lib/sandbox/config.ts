@@ -19,7 +19,6 @@ export type { AgentConfigTarget } from "./agent-config";
 
 const {
   DEFAULT_AGENT_CONFIG,
-  getProtectedConfigFileNames,
   resolveAgentConfig: resolveAgentConfigTarget,
 }: typeof import("./agent-config") = require("./agent-config");
 const {
@@ -36,17 +35,14 @@ const { validateName } = require("../runner");
 const { shellQuote } = require("../core/shell-quote");
 const credentialFilter: typeof import("../security/credential-filter") = require("../security/credential-filter");
 const { stripCredentials, isConfigObject, isConfigValue, isCredentialField } = credentialFilter;
-const { appendAuditEntry } = require("../shields/audit");
-const {
-  withTimerBoundShieldsMutationLock,
-}: typeof import("../shields/timer-bound-lock") = require("../shields/timer-bound-lock");
+const { appendAuditEntry } = require("../state/audit/operational");
 const {
   withSandboxMutationLock,
 }: typeof import("../state/mcp-lifecycle-lock") = require("../state/mcp-lifecycle-lock");
 const {
-  runOpenClawConfigGuard,
   validateOpenClawConfigCandidate,
-}: typeof import("../shields/openclaw-config-lock") = require("../shields/openclaw-config-lock");
+  writeOpenClawConfigCandidate,
+}: typeof import("./openclaw-config-guard") = require("./openclaw-config-guard");
 const {
   isAllowedOpenShellSandboxBridgeUrl,
   isPrivateHostname,
@@ -542,7 +538,7 @@ function readSandboxConfig(sandboxName: string, target: AgentConfigTarget): Conf
 
 type ValidatedOpenClawCandidate = {
   content: string;
-  privileged: import("../shields/state-dir-lock").PrivilegedExec;
+  privileged: import("./openclaw-config-guard").PrivilegedExec;
 };
 
 function isHermesCompatHashRecoveryError(error: unknown): boolean {
@@ -616,14 +612,10 @@ function writeSandboxConfig(
         "Refusing OpenClaw config write without the digest from the matching sandbox read.",
       );
     }
-    const result = runOpenClawConfigGuard(
+    const result = writeOpenClawConfigCandidate(
       validatedOpenClawCandidate?.privileged ?? openClawConfigGuardExec(sandboxName),
-      "write-config",
-      {
-        expectedConfigSha256,
-        input: content,
-        protectedFiles: getProtectedConfigFileNames(target),
-      },
+      content,
+      expectedConfigSha256,
     );
     if (result.issues.length > 0) {
       configFail(result.issues.map((issue) => `  ${issue}`));
@@ -860,7 +852,10 @@ function runHermesDashboardConfigSeed(
 function seedHermesDashboardConfig(
   sandboxName: string,
   target: AgentConfigTarget,
-  deps: HermesDashboardReseedDeps = { getOpenshellBinary, captureOpenshellCommand },
+  deps: HermesDashboardReseedDeps = {
+    getOpenshellBinary,
+    captureOpenshellCommand,
+  },
 ): HermesDashboardReseedResult {
   return runHermesDashboardConfigSeed(sandboxName, target, false, deps);
 }
@@ -868,7 +863,10 @@ function seedHermesDashboardConfig(
 function restoreHermesDashboardConfig(
   sandboxName: string,
   target: AgentConfigTarget,
-  deps: HermesDashboardReseedDeps = { getOpenshellBinary, captureOpenshellCommand },
+  deps: HermesDashboardReseedDeps = {
+    getOpenshellBinary,
+    captureOpenshellCommand,
+  },
 ): HermesDashboardReseedResult {
   return runHermesDashboardConfigSeed(sandboxName, target, true, deps);
 }
@@ -962,7 +960,11 @@ async function validateUrlValueWithDnsResult(
   assertPublicHost(hostname);
   const lookupHostname = hostnameForDnsLookup(hostname);
   if (isIP(lookupHostname)) {
-    return { protocol: parsed.protocol as "http:" | "https:", originalUrl, pinnedUrl: originalUrl };
+    return {
+      protocol: parsed.protocol as "http:" | "https:",
+      originalUrl,
+      pinnedUrl: originalUrl,
+    };
   }
 
   let addresses: Array<{ address: string; family?: number }>;
@@ -1158,7 +1160,10 @@ function parseConfigGetArgs(args: string[], cliName = "nemoclaw"): ConfigGetPars
     const flag = args[i];
     if (flag === "--key") {
       if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
-        return { ok: false, errors: ["  --key requires a value.", configGetUsage(cliName)] };
+        return {
+          ok: false,
+          errors: ["  --key requires a value.", configGetUsage(cliName)],
+        };
       }
       opts.key = args[++i];
     } else if (flag === "--format") {
@@ -1170,11 +1175,17 @@ function parseConfigGetArgs(args: string[], cliName = "nemoclaw"): ConfigGetPars
       }
       const format = args[++i];
       if (format !== "json" && format !== "yaml") {
-        return { ok: false, errors: [`  Unknown format: ${format}. Use json or yaml.`] };
+        return {
+          ok: false,
+          errors: [`  Unknown format: ${format}. Use json or yaml.`],
+        };
       }
       opts.format = format;
     } else {
-      return { ok: false, errors: [`  Unknown flag: ${flag}`, configGetUsage(cliName)] };
+      return {
+        ok: false,
+        errors: [`  Unknown flag: ${flag}`, configGetUsage(cliName)],
+      };
     }
   }
   return { ok: true, opts };
@@ -1260,15 +1271,6 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
       `  config set is not available for '${target.agentName}': its config is baked into the sandbox image at build time. To change it, re-onboard with the new selection (e.g. ${CLI_NAME} onboard --agent dcode --name ${shellQuote(sandboxName)} --fresh).`,
     );
   }
-  if (target.agentName === "openclaw" || target.agentName === "hermes") {
-    const { isShieldsDown }: typeof import("../shields") = require("../shields");
-    if (!isShieldsDown(sandboxName, false)) {
-      configFail(
-        `  ${target.agentName} config changes are unavailable while shields are up for '${sandboxName}'. Run 'nemoclaw ${sandboxName} shields down' first.`,
-      );
-    }
-  }
-
   // Read current config
   console.log(`  Reading ${target.agentName} config...`);
   const config = readSandboxConfig(sandboxName, target);
@@ -1378,54 +1380,42 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     }
   }
 
-  // Re-read under both mutation locks and enforce the source digest. For
+  // Re-read under the sandbox mutation lock and enforce the source digest. For
   // OpenClaw, also require the exact serialized bytes validated above.
-  await withSandboxMutationLock(sandboxName, () =>
-    withTimerBoundShieldsMutationLock(sandboxName, "config set write", () => {
-      const { isShieldsDown }: typeof import("../shields") = require("../shields");
+  await withSandboxMutationLock(sandboxName, () => {
+    const currentConfig = readSandboxConfig(sandboxName, target);
+    const currentConfigSha256 = (
+      currentConfig as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string }
+    )[CONFIG_SOURCE_SHA256];
+    if (currentConfigSha256 !== initialConfigSha256) {
+      configFail(
+        `  ${target.agentName} config changed while this update was being validated. Re-run config set against the current value.`,
+      );
+    }
+    setDotpath(currentConfig, opts.key!, safeValue);
+
+    if (target.agentName === "openclaw") {
+      const currentCandidateContent = composeSandboxConfigBody(currentConfig, target);
       if (
-        (target.agentName === "openclaw" || target.agentName === "hermes") &&
-        !isShieldsDown(sandboxName, true)
+        !validatedOpenClawCandidate ||
+        currentCandidateContent !== validatedOpenClawCandidate.content
       ) {
         configFail(
-          `  ${target.agentName} config changes are unavailable while shields are up for '${sandboxName}'. Run 'nemoclaw ${sandboxName} shields down' first.`,
+          "  OpenClaw config candidate changed after schema validation. Re-run config set against the current value.",
         );
       }
-      const currentConfig = readSandboxConfig(sandboxName, target);
-      const currentConfigSha256 = (
-        currentConfig as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string }
-      )[CONFIG_SOURCE_SHA256];
-      if (currentConfigSha256 !== initialConfigSha256) {
-        configFail(
-          `  ${target.agentName} config changed while this update was being validated. Re-run config set against the current value.`,
-        );
-      }
-      setDotpath(currentConfig, opts.key!, safeValue);
+    }
 
-      if (target.agentName === "openclaw") {
-        const currentCandidateContent = composeSandboxConfigBody(currentConfig, target);
-        if (
-          !validatedOpenClawCandidate ||
-          currentCandidateContent !== validatedOpenClawCandidate.content
-        ) {
-          configFail(
-            "  OpenClaw config candidate changed after schema validation. Re-run config set against the current value.",
-          );
-        }
-      }
-
-      console.log(`  Writing config to sandbox (${target.configPath})...`);
-      writeSandboxConfig(sandboxName, target, currentConfig, validatedOpenClawCandidate);
-      recomputeSandboxConfigHash(sandboxName, target);
-
-      appendAuditEntry({
-        action: "config_set",
-        sandbox: sandboxName,
-        timestamp: new Date().toISOString(),
-        reason: `config set ${target.agentName}:${opts.key}`,
-      });
-    }),
-  );
+    console.log(`  Writing config to sandbox (${target.configPath})...`);
+    writeSandboxConfig(sandboxName, target, currentConfig, validatedOpenClawCandidate);
+    recomputeSandboxConfigHash(sandboxName, target);
+    appendAuditEntry({
+      action: "config_set",
+      sandbox: sandboxName,
+      timestamp: new Date().toISOString(),
+      reason: `config set ${target.agentName}:${opts.key}`,
+    });
+  });
 
   console.log(`  ${target.agentName} config updated.`);
 

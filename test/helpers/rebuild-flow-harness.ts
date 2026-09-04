@@ -32,7 +32,6 @@ delete require.cache[requireDist.resolve(rebuildModulePath)];
 export const agentDefs = requireDist("../../agent/defs.js");
 export const agentOnboard = requireDist("../../agent/onboard.js");
 export const agentRuntime = requireDist("../../agent/runtime.js");
-export const agentForwardStop = requireDist("../../tunnel/agent-forward-stop.js");
 export const buildContextFingerprint = requireDist(
   "../../adapters/fs/build-context-fingerprint.js",
 );
@@ -42,6 +41,7 @@ export const dockerInspect = requireDist("../../adapters/docker/inspect.js");
 export const gatewayDrift = requireDist("../../adapters/openshell/gateway-drift.js");
 export const gatewayRuntime = requireDist("../../gateway-runtime-action.js");
 export const gatewayState = requireDist("./gateway-state.js");
+export const forwardRecovery = requireDist("./forward-recovery.js");
 export const gatewayTeardownAuthority = requireDist(
   "../../onboard/gateway-teardown-authority.js",
 ) as typeof import("../../src/lib/onboard/gateway-teardown-authority");
@@ -49,9 +49,13 @@ export const hermesProviderAuth = requireDist("../../hermes-provider-auth.js");
 export const mcpBridge = requireDist("./mcp-bridge.js");
 export const messaging = requireDist("../../messaging/index.js");
 export const messagingHostForwardLifecycle = requireDist("./messaging-host-forward-lifecycle.js");
+export const mutableConfigPerms = requireDist("../../sandbox/mutable-config-perms.js");
 export const nim = requireDist("../../inference/nim.js");
 export const onboardCredentialEnv = requireDist("../../onboard/credential-env.js");
 export const onboardSession = requireDist("../../state/onboard-session.js");
+export const removedImmutabilityMigration = requireDist(
+  "../../state/migrations/removed-immutability.js",
+);
 export const openshellRuntime = requireDist("../../adapters/openshell/runtime.js");
 export const policies = requireDist("../../policy/index.js");
 export const policyState = requireDist("../../adapters/openshell/policy-state.js");
@@ -68,7 +72,6 @@ export const rebuildManagedImage = requireDist("./rebuild-managed-image-prefligh
 export const rebuildMessagingConflict = requireDist("./rebuild-messaging-conflict-preflight.js");
 export const rebuildPreparedImageContext = requireDist("./rebuild-prepared-image-context.js");
 export const rebuildRoutePreflight = requireDist("./rebuild-preflight-guards.js");
-export const rebuildShields = requireDist("./rebuild-shields.js");
 export const rebuildUsageNotice = requireDist("./rebuild-usage-notice.js");
 export const registry = requireDist("../../state/registry.js");
 export const registryPersistence = requireDist("../../state/registry/persistence.js");
@@ -79,7 +82,6 @@ export const sandboxAgent = requireDist("../../onboard/sandbox-agent.js");
 export const sandboxSession = requireDist("../../state/sandbox-session.js");
 export const sandboxState = requireDist("../../state/sandbox.js");
 export const sandboxVersion = requireDist("../../sandbox/version.js");
-export const shields = requireDist("../../shields/index.js");
 export const tempFiles = requireDist("../../onboard/temp-files.js");
 
 export function purgeRebuildModule(): void {

@@ -2,12 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck shell=bash
 
-# ── Config integrity check (delegates to shared library) ────────
-# verify_config_integrity_if_locked is provided by sandbox-init.sh. OpenClaw
-# mutable-default startup skips strict hash enforcement until shields-up locks
-# .config-hash into a root-owned read-only trust anchor.
-
-# ── Mutable-default permission normalize (#2681) ─────────────────
+# ── Mutable config permission normalize (#2681) ─────────────────
 # OpenClaw's control-UI toggles (Enable Dreaming, account toggles, etc.)
 # write through mutateConfigFile to /sandbox/.openclaw/openclaw.json.
 # In root mode the gateway runs as the gateway UID; the file is owned
@@ -17,10 +12,7 @@
 # `gateway` (now a member of the sandbox group via Dockerfile.base
 # usermod -aG) and `sandbox` can write. Setgid means new files
 # inherit group=sandbox regardless of which UID created them, so the
-# agent keeps read access and shields-up locking still works the same.
-#
-# Idempotent. Skips when shields are UP (config dir owned by root) so
-# the lock is not weakened.
+# agent keeps read access.
 #
 # This also self-heals a sandbox whose mutable config tree was tightened to
 # single-user 700/600 by `openclaw doctor --fix` (#4538): every (re)start
@@ -97,8 +89,7 @@ PY_CLASSIFY_MUTABLE_CONFIG
     # root:root 0700/0600 fixture, under a sandbox:sandbox 0755 parent. That is
     # distinct from #6047's sandbox-owned mode collapse, which the owner-UID
     # normalizer below repairs. Every other root-owned state fails closed.
-    # Remove this path once the runtime preserves the declared ownership and
-    # the live shields-config regression proves that boundary.
+    # Remove this path once the runtime preserves the declared ownership.
     reclaim_collapsed_mutable_config "$config_dir" || return 1
     return 0
   fi
@@ -159,8 +150,8 @@ PY_CLASSIFY_MUTABLE_CONFIG
 # OpenClaw 2026.7.1 requires its startup migration checkpoint to complete
 # without warnings before the gateway reports readiness. Older NemoClaw images
 # persisted update-check.json as update polling and notification cache. Empty
-# placeholders fail JSON parsing, while nonempty files cannot be hardened and
-# archived by the separate gateway user when shields protect the parent.
+# placeholders fail JSON parsing, while nonempty files cannot be archived by
+# the separate gateway user when a stale root-owned parent remains.
 # NemoClaw pins OpenClaw in the image, so discard only a descriptor-pinned,
 # stable regular cache file before the mandatory checkpoint.
 # Remove this repair after every supported upgrade source stops seeding the
@@ -231,11 +222,9 @@ reclaim_collapsed_mutable_config() {
 # tree, while NemoClaw's separate sandbox and gateway UIDs require the mutable
 # 2770/660 group contract. The tightening originates at the OpenClaw command
 # boundary; NemoClaw owns restoring its multi-UID postcondition afterward.
-# Regression proof lives in tests/runtime/config-permissions.test.ts and the live
-# shields-config documented-exec phase. Issue #6047 tracks the boundary and its
-# removal condition: remove this wrapper only when the pinned OpenClaw preserves
-# 2770/660 after every command outcome; do not replace that upstream source fix
-# with a NemoClaw timeout or permission escape flag.
+# Regression proof lives in tests/runtime/config-permissions.test.ts. Issue
+# #6047 tracks the boundary and its removal condition: remove this wrapper only
+# when the pinned OpenClaw preserves 2770/660 after every command outcome.
 run_oneshot_command() {
   local _nemoclaw_runtime_env_file="${_RUNTIME_SHELL_ENV_FILE:-/tmp/nemoclaw-proxy-env.sh}"
   local _nemoclaw_oneshot_child_pid=""
@@ -300,149 +289,40 @@ openclaw_config_dir_owner() {
   stat -c '%U' "$config_dir" 2>/dev/null || stat -f '%Su' "$config_dir" 2>/dev/null || echo unknown
 }
 
-openclaw_locked_parent_is_protected() {
-  local owner mode
-  owner="$(stat -c '%U:%G' /sandbox 2>/dev/null || stat -f '%Su:%Sg' /sandbox 2>/dev/null || true)"
-  mode="$(stat -c '%a' /sandbox 2>/dev/null || stat -f '%Lp' /sandbox 2>/dev/null || true)"
-  case "${owner} ${mode}" in
-    "root:sandbox 1775" | "root:sandbox 01775") return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 prepare_openclaw_config_startup() {
   run_openclaw_config_guard revoke-startup-ready --startup-owner || return 1
 
-  # A persisted #6300 root:root 0700/0600 mutable tree overlaps one broad
-  # orphan-freeze discriminator in the transaction guard. Repair only that
-  # exact signature before recovery; sealed and indeterminate states remain
-  # untouched for the guard to verify or recover under its mutation mutex.
+  # Repair only the known #6300 root:root 0700/0600 mutable tree. Any other
+  # root-owned posture requires rebuild or recreation.
   if [ "$(openclaw_config_dir_owner /sandbox/.openclaw)" = "root" ]; then
     local seal_state=0
     classify_openclaw_config_seal /sandbox/.openclaw || seal_state=$?
     case "$seal_state" in
-      0 | 2) ;;
+      2) ;;
       1) reclaim_collapsed_mutable_config /sandbox/.openclaw || return 1 ;;
       *)
-        printf '[SECURITY] Refusing mutable config startup — invalid seal classification %s\n' \
-          "$seal_state" >&2
+        printf '[SECURITY] Existing OpenClaw config is not in the supported mutable posture. Rebuild or recreate the sandbox.\n' >&2
         return 1
         ;;
     esac
   fi
-
   run_openclaw_config_guard recover --startup-owner || return 1
-  local config_posture journal_posture state_lock_reason=""
-  config_posture="$(stat -c '%a %U:%G' /sandbox/.openclaw 2>/dev/null || true)"
-  journal_posture="$(stat -c '%f %U:%G' \
-    /sandbox/.openclaw/devices/pending.json.nemoclaw-self-approval-journal \
-    2>/dev/null || true)"
-  if [ "$config_posture" = "500 root:root" ]; then
-    state_lock_reason="resuming interrupted recursive OpenClaw state lock"
-  elif [ "$journal_posture" = "8180 root:sandbox" ]; then
-    # Shields created before the #8304 mode correction can retain this exact
-    # unreadable regular-file posture (GNU stat %f: 0x8000 | 0600). Re-run the
-    # descriptor-safe lock before the gateway reads it; current and future
-    # locks publish it group-readable.
-    state_lock_reason="repairing legacy unreadable OpenClaw state"
-  fi
-  if [ -n "$state_lock_reason" ]; then
-    printf '[config-guard] %s\n' "$state_lock_reason" >&2
-    timeout --signal=TERM --kill-after=5s 12m \
-      python3 -I "$_OPENCLAW_STATE_DIR_GUARD" lock \
-      --config-dir /sandbox/.openclaw \
-      --plan-file /usr/local/share/nemoclaw/state-lock-plan.json || return 1
-  fi
 }
 
-prepare_openclaw_config_for_write() {
-  local config_file="$1"
-  local hash_file="$2"
-  local config_dir
-  config_dir="$(dirname "$config_file")"
-
-  if [ -L "$config_dir" ] || [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing config override — config directory or file path is a symlink\n' >&2
-    return 1
-  fi
-
-  _NEMOCLAW_CONFIG_WRITE_MODE="locked"
-  if [ "$(openclaw_config_dir_owner "$config_dir")" != "root" ]; then
-    _NEMOCLAW_CONFIG_WRITE_MODE="mutable"
-    if [ "$(id -u)" -eq 0 ]; then
-      if ! chown root:sandbox "$config_dir"; then
-        printf '[SECURITY] Failed to take ownership of %s for write\n' "$config_dir" >&2
+run_openclaw_config_as_owner() {
+  if [ "$(id -u)" -eq 0 ]; then
+    case "${1:-}" in
+      /*) ;;
+      *)
+        printf '[SECURITY] Refusing privileged config I/O dispatch — executable path is not absolute\n' >&2
         return 1
-      fi
-      local f
-      for f in "$config_file" "$hash_file"; do
-        [ -e "$f" ] || continue
-        if ! chown root:sandbox "$f"; then
-          printf '[SECURITY] Failed to take ownership of %s for write\n' "$f" >&2
-          return 1
-        fi
-      done
-    fi
-    if ! chmod 2770 "$config_dir"; then
-      printf '[SECURITY] Failed to relax permissions on %s\n' "$config_dir" >&2
-      return 1
-    fi
-    local f
-    for f in "$config_file" "$hash_file"; do
-      [ -e "$f" ] || continue
-      if ! chmod 660 "$f"; then
-        printf '[SECURITY] Failed to relax permissions on %s\n' "$f" >&2
-        return 1
-      fi
-    done
-    return 0
+        ;;
+    esac
+    /usr/bin/env -i HOME=/sandbox PATH=/usr/local/bin:/usr/bin:/bin \
+      "${STEP_DOWN_PREFIX_SANDBOX[@]}" "$@"
+    return $?
   fi
-
-  relax_config_for_write "$config_file" "$hash_file"
-}
-
-restore_openclaw_config_after_write() {
-  local config_file="$1"
-  local hash_file="$2"
-  local config_dir
-  config_dir="$(dirname "$config_file")"
-
-  if [ -L "$config_dir" ] || [ -L "$config_file" ] || [ -L "$hash_file" ]; then
-    printf '[SECURITY] Refusing config override restore — config directory or file path is a symlink\n' >&2
-    return 1
-  fi
-
-  if [ "${_NEMOCLAW_CONFIG_WRITE_MODE:-locked}" = "mutable" ]; then
-    if [ "$(id -u)" -eq 0 ]; then
-      if ! chown sandbox:sandbox "$config_dir"; then
-        printf '[SECURITY] Failed to restore ownership of %s\n' "$config_dir" >&2
-        return 1
-      fi
-      local f
-      for f in "$config_file" "$hash_file"; do
-        [ -e "$f" ] || continue
-        if ! chown sandbox:sandbox "$f"; then
-          printf '[SECURITY] Failed to restore ownership of %s\n' "$f" >&2
-          return 1
-        fi
-      done
-    fi
-    if ! chmod 2770 "$config_dir"; then
-      printf '[SECURITY] Failed to restore permissions on %s\n' "$config_dir" >&2
-      return 1
-    fi
-    local f
-    for f in "$config_file" "$hash_file"; do
-      [ -e "$f" ] || continue
-      if ! chmod 660 "$f"; then
-        printf '[SECURITY] Failed to restore permissions on %s\n' "$f" >&2
-        return 1
-      fi
-    done
-    return 0
-  fi
-
-  lock_config_after_write "$config_file" "$hash_file"
+  "$@"
 }
 
 # ── Empty-config recovery and baseline (#3118) ──────────────────
@@ -455,10 +335,8 @@ restore_openclaw_config_after_write() {
 # These two functions are NemoClaw's defensive recovery — they don't fix the
 # upstream bugs (which still need to be filed against OpenShell and OpenClaw)
 # but they let a sandbox restart restore working state instead of leaving the
-# sandbox unusable. Both are scoped to mutable-default mode: in shields-up
-# mode openclaw.json is root-owned and immutable, so an empty file there
-# implies tampering (which integrity check should catch) rather than the
-# #3118 trigger (which requires a writable config).
+# sandbox unusable. The recovery applies only to the supported mutable config
+# posture required by the #3118 trigger.
 # Remove this recovery only after upstream writes can no longer truncate
 # openclaw.json and regression coverage proves the empty-config state cannot
 # recur at any supported inference-update boundary.
@@ -493,8 +371,7 @@ write_openclaw_config_baseline() {
 }
 
 # Restore openclaw.json from a baseline when the active file has been
-# truncated to 0 bytes / whitespace-only. Runs at startup before
-# verify_config_integrity_if_locked. Prefers OpenClaw's own
+# truncated to 0 bytes / whitespace-only. Prefers OpenClaw's own
 # openclaw.json.last-good (if it exists and is non-empty) over our
 # nemoclaw-baseline so we ride OpenClaw's recovery convention when both
 # are available. Recomputes .config-hash on success so subsequent
@@ -531,31 +408,25 @@ ensure_mutable_openclaw_config_hash() {
     return 1
   fi
 
-  # Locked/shields-up mode treats .config-hash as a root-owned trust anchor.
-  # verify_config_integrity_if_locked already fails closed when that anchor is
-  # missing, so only synthesize/refresh the mutable-default hash.
-  if [ "$(openclaw_config_dir_owner "$config_dir")" = "root" ]; then
-    return 0
-  fi
-
-  # Mutable-default mode: $config_dir is 2770 sandbox:sandbox and
+  # Mutable mode: $config_dir is 2770 sandbox:sandbox and
   # $hash_file is 660 sandbox:sandbox. Without CAP_DAC_OVERRIDE root
   # cannot bypass the sandbox-only write bit and the redirection
   # aborts with EACCES, so step down to the file's owner for the write.
   # shellcheck disable=SC2016  # positional params are expanded by the inner sh
   if [ "$(id -u)" -eq 0 ]; then
-    if ! "${STEP_DOWN_PREFIX_SANDBOX[@]}" sh -c '
+    if ! /usr/bin/env -i HOME=/sandbox PATH=/usr/local/bin:/usr/bin:/bin \
+      "${STEP_DOWN_PREFIX_SANDBOX[@]}" /bin/sh -c '
       cd "$1" || exit 1
-      sha256sum openclaw.json fabric.json >".config-hash" || exit 1
-      chmod 660 ".config-hash" 2>/dev/null || true
+      /usr/bin/sha256sum openclaw.json fabric.json >".config-hash" || exit 1
+      /usr/bin/chmod 660 ".config-hash" 2>/dev/null || true
     ' _ "$config_dir"; then
       printf '[SECURITY] Failed to refresh mutable OpenClaw config hash\n' >&2
       return 1
     fi
   elif ! sh -c '
     cd "$1" || exit 1
-    sha256sum openclaw.json fabric.json >".config-hash" || exit 1
-    chmod 660 ".config-hash" 2>/dev/null || true
+    /usr/bin/sha256sum openclaw.json fabric.json >".config-hash" || exit 1
+    /usr/bin/chmod 660 ".config-hash" 2>/dev/null || true
   ' _ "$config_dir"; then
     printf '[SECURITY] Failed to refresh mutable OpenClaw config hash\n' >&2
     return 1

@@ -86,7 +86,10 @@ ${body}`,
         ].join("\n"),
         { mode: 0o700 },
       );
-      return spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+      return spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
     };
 
     try {
@@ -219,7 +222,10 @@ describe("Slack secrets-on-disk tripwire (#2085)", () => {
         ].join("\n"),
         { mode: 0o700 },
       );
-      return spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+      return spawnSync("bash", [scriptPath], {
+        encoding: "utf-8",
+        timeout: 5000,
+      });
     };
 
     try {
@@ -258,9 +264,9 @@ describe("provider placeholder refresh (#4251)", () => {
       [
         "#!/usr/bin/env bash",
         "set -euo pipefail\nrefresh_openclaw_wechat_account_placeholder() { :; }",
-        "openclaw_config_dir_owner() { echo sandbox; }",
-        "prepare_openclaw_config_for_write() { :; }",
-        "restore_openclaw_config_after_write() { :; }",
+        'run_openclaw_config_as_owner() { "$@"; }',
+        "normalize_mutable_config_perms() { :; }",
+        `ensure_mutable_openclaw_config_hash() { (cd ${JSON.stringify(openclawDir)} && sha256sum openclaw.json fabric.json >.config-hash); }`,
         fn,
         "refresh_openclaw_provider_placeholders",
       ].join("\n"),
@@ -280,7 +286,9 @@ describe("provider placeholder refresh (#4251)", () => {
   function placeholderPlan(envKeys: string[]): string {
     return Buffer.from(
       JSON.stringify({
-        credentialBindings: envKeys.map((envKey) => ({ providerEnvKey: envKey })),
+        credentialBindings: envKeys.map((envKey) => ({
+          providerEnvKey: envKey,
+        })),
       }),
     ).toString("base64");
   }
@@ -529,8 +537,12 @@ describe("provider placeholder refresh (#4251)", () => {
         channels: {
           telegram: {
             accounts: {
-              a: { botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_A" },
-              b: { botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_B" },
+              a: {
+                botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_A",
+              },
+              b: {
+                botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_B",
+              },
             },
           },
         },
@@ -596,7 +608,9 @@ describe("provider placeholder refresh (#4251)", () => {
           telegram: {
             accounts: {
               default: { botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN" },
-              agentA: { botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_A" },
+              agentA: {
+                botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_A",
+              },
             },
           },
         },
@@ -625,7 +639,9 @@ describe("provider placeholder refresh (#4251)", () => {
           telegram: {
             accounts: {
               default: { botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN" },
-              agentA: { botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_A" },
+              agentA: {
+                botToken: "openshell:resolve:env:TELEGRAM_BOT_TOKEN_AGENT_A",
+              },
             },
           },
         },

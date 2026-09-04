@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { resolveAgentInferenceApi } from "../../../src/lib/inference/config.ts";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
+import { execTimeout } from "../../helpers/timeouts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { resultText } from "../fixtures/clients/index.ts";
@@ -681,7 +682,7 @@ export async function installHermes(
         cwd: REPO_ROOT,
         env: env(apiKey, installEnv, home),
         redactionValues: [apiKey],
-        timeoutMs: 25 * 60_000,
+        timeoutMs: execTimeout(25 * 60_000),
       },
     );
     const retry =

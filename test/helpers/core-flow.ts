@@ -259,7 +259,6 @@ export function createPhases(
       stageSandboxCredentialProviders: vi.fn(async () => []),
       promptValidatedSandboxName: vi.fn(async () => "my-sandbox"),
       selectResourceProfileForSandbox: vi.fn(async () => null),
-      stopStaleDashboardListenersForSandbox: vi.fn(),
       listRegistrySandboxes: () => ({ sandboxes: [] }),
       planRegisteredExtraProviders: vi.fn(() => ({
         extraProviders: [],
@@ -312,6 +311,15 @@ export function createPhases(
         throw new Error(`exit ${code}`);
       }) as (code: number) => never,
       ...overrides.sandboxDeps,
+      loadSession: overrides.sandboxDeps?.loadSession ?? (() => createSession()),
+      compareAndSwapSession:
+        overrides.sandboxDeps?.compareAndSwapSession ??
+        ((matches, mutator) => {
+          const session = createSession();
+          if (!matches(session)) return "mismatch";
+          mutator(session);
+          return "updated";
+        }),
       inspectGatewayCredential:
         overrides.sandboxDeps?.inspectGatewayCredential ?? (() => ({ kind: "missing" as const })),
       checkGatewayRouteCompatibility:

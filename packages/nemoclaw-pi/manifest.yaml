@@ -20,8 +20,13 @@ managed_image:
   startup_profile_contract_version: 1
 runtime:
   kind: terminal
+  # Pi's login profile verifies nproc as well as nofile. Ubuntu /bin/sh cannot
+  # inspect nproc, so every core-owned package probe uses this declared shell.
+  command_shell: /bin/bash
   interactive_command: "pi"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.pi/agent/fabric.json"
+  smoke_boundary:
+    kind: login-shell
   smoke_commands:
     - "pi --version"
     - "nemoclaw-fabric --version"
@@ -37,20 +42,14 @@ config:
   shields_files:
     - fabric.json
   format: json
-state_lock_plan_in_image: false
 state_dirs:
   - path: sessions
-    shields: confidential
   - path: prompts
-    shields: read-only
   - path: themes
-    shields: read-only
   - path: tools
     backup: false
-    shields: read-only
   - path: bin
     backup: false
-    shields: read-only
 state_files:
   - path: settings.json
     restore:

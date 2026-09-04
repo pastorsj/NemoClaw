@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { withSandboxMutationLock } from "../../state/mcp-lifecycle-lock";
+import { withMcpLifecycleLock as withSandboxMutationLock } from "../../state/mcp-lifecycle-lock-acquisition";
 import * as f from "./snapshot-restore-test-fixture";
 import {
   HERMES_PACKAGE,
@@ -19,7 +19,6 @@ import {
   legacyPackageMigration,
   packageManagedSandbox,
   packageManagedSnapshot,
-  runWhen,
 } from "./snapshot/lifecycle-test-fixture";
 
 const tempHomes: string[] = [];
@@ -168,7 +167,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
 
     expect(entries.get("alpha")).toEqual(replacement);
     expect(confirmProviderAuthority).toHaveBeenCalledOnce();
-    expect(f.shieldsMock.repairMutableConfigPermsMock).not.toHaveBeenCalled();
+    expect(f.mutableConfigMock.repairMutableConfigPermsMock).not.toHaveBeenCalled();
     expect(f.establishRestoredSandboxGatewayPairingMock).not.toHaveBeenCalled();
   });
 
@@ -275,91 +274,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     await runSandboxSnapshot("alpha", { kind: "restore" });
     expectSnapshotStateRestore("alpha");
     expect(f.restoreSandboxStateMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps active-timer state and permission repair serialized without replaying snapshot policy", async () => {
-    f.lifecycleMock.readTimerMarkerMock.mockReturnValue({
-      pid: 4242,
-      sandboxName: "alpha",
-      snapshotPath: "/tmp/policy.yaml",
-      restoreAt: "2026-06-27T06:00:00.000Z",
-      processToken: "a".repeat(32),
-    });
-    f.getLatestBackupMock.mockReturnValue({
-      ...f.latestBackupFixture,
-      policyPresets: ["github"],
-    });
-    f.getSandboxMock.mockReturnValue(packageManagedSandbox("alpha", OPENCLAW_PACKAGE));
-    f.restoreSandboxStateMock.mockReturnValue({
-      success: true,
-      restoredDirs: ["workspace"],
-      restoredFiles: ["openclaw.json"],
-      failedDirs: [],
-      failedFiles: [],
-    });
-    const { runSandboxSnapshot } = await import("./snapshot");
-
-    await runSandboxSnapshot("alpha", { kind: "restore" });
-
-    expect(f.lifecycleMock.events).toContain("lock:restore sandbox snapshot");
-    expectSnapshotStateRestore("alpha");
-    expect(f.shieldsMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
-    expect(f.applyPresetMock).not.toHaveBeenCalled();
-  });
-
-  it("hardens an active timer window before force-deleting a restore destination", async () => {
-    f.lifecycleMock.readTimerMarkerMock.mockReturnValue({
-      pid: 4242,
-      sandboxName: "beta",
-      snapshotPath: "/tmp/policy.yaml",
-      restoreAt: "2026-06-27T06:00:00.000Z",
-      processToken: "b".repeat(32),
-    });
-    const entries = new Map<string, f.SandboxRecord>([
-      ["alpha", packageManagedSandbox("alpha", OPENCLAW_PACKAGE)],
-      ["beta", packageManagedSandbox("beta", OPENCLAW_PACKAGE)],
-    ]);
-    configureCloneRegistry(entries.get("alpha")!, entries);
-    f.removeSandboxRegistryEntryOutcomeMock.mockImplementation((name) => {
-      entries.delete(name);
-      return { status: "complete", removed: true };
-    });
-    f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
-    f.captureOpenshellMock.mockImplementation((args) =>
-      f.openshellResponses(args, {
-        "sandbox exec": { status: 0, output: f.dcodeProbeOutput("no-runtime") },
-        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
-      }),
-    );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
-    f.restoreSandboxStateMock.mockReturnValue({
-      success: true,
-      restoredDirs: ["workspace"],
-      restoredFiles: ["user.md"],
-      failedDirs: [],
-      failedFiles: [],
-    });
-    const { runSandboxSnapshot } = await import("./snapshot");
-
-    await runSandboxSnapshot("alpha", {
-      kind: "restore",
-      to: "beta",
-      force: true,
-      yes: true,
-    });
-
-    expect(f.shieldsMock.shieldsUpMock).toHaveBeenCalledWith("beta", {
-      throwOnError: true,
-      allowLegacyHermesProtocol: true,
-    });
-    expect(f.lifecycleMock.events.indexOf("harden")).toBeLessThan(
-      f.lifecycleMock.events.indexOf("delete"),
-    );
-    expect(f.lifecycleMock.events.indexOf("delete")).toBeLessThan(
-      f.lifecycleMock.events.indexOf("cleanup-shields"),
-    );
-    expect(f.streamSandboxCreateMock).toHaveBeenCalled();
-    expectSnapshotStateRestore("beta");
   });
 
   it("pins forced destination proof, cleanup, and clone creation to captured gateways", async () => {
@@ -546,7 +460,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       expect(f.stopNimContainerMock).not.toHaveBeenCalled();
       expect(f.stopNimContainerByNameMock).not.toHaveBeenCalled();
       expect(f.lifecycleMock.events).not.toContain("delete");
-      expect(f.lifecycleMock.events).not.toContain("cleanup-shields");
       expect(f.runOpenshellMock).not.toHaveBeenCalledWith(
         expect.arrayContaining(["provider", "delete"]),
         expect.anything(),
@@ -555,126 +468,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
       expect(f.registerSandboxMock).not.toHaveBeenCalled();
     },
   );
-
-  it("rechecks cleanup authority inside the destination lock before every side effect", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    const destination = {
-      ...packageManagedSandbox("beta", OPENCLAW_PACKAGE),
-      workload: {
-        schemaVersion: 1 as const,
-        kind: "legacy-dockerfile" as const,
-        reference: "nemoclaw-beta:test",
-        shared: false as const,
-      },
-    };
-    let lockedDestination = destination;
-    const destinationAtLock = new Map<string, typeof destination>([
-      [
-        "delete snapshot restore destination",
-        {
-          ...destination,
-          workload: {
-            ...destination.workload,
-            reference: "nemoclaw-beta:changed-owner",
-          },
-        },
-      ],
-    ]);
-    f.getSandboxMock.mockImplementation((name) =>
-      name === "alpha"
-        ? packageManagedSandbox("alpha", OPENCLAW_PACKAGE)
-        : name === "beta"
-          ? lockedDestination
-          : null,
-    );
-    f.lifecycleMock.withTimerBoundMock.mockImplementation((_sandboxName, command, fn) => {
-      f.lifecycleMock.events.push(`lock:${command}`);
-      lockedDestination = destinationAtLock.get(command) ?? lockedDestination;
-      return fn();
-    });
-    f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
-    f.captureOpenshellMock.mockImplementation((args) =>
-      f.openshellResponses(args, {
-        "sandbox exec": { status: 0, output: f.dcodeProbeOutput("no-runtime") },
-        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
-      }),
-    );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
-    const { runSandboxSnapshot } = await import("./snapshot");
-
-    await expect(
-      runSandboxSnapshot("alpha", {
-        kind: "restore",
-        to: "beta",
-        force: true,
-        yes: true,
-      }),
-    ).rejects.toMatchObject({ exitCode: 1 });
-
-    expect(consoleError.mock.calls.flat().join("\n")).toContain("captured registry identity");
-    expect(f.stopNimContainerMock).not.toHaveBeenCalled();
-    expect(f.stopNimContainerByNameMock).not.toHaveBeenCalled();
-    expect(f.lifecycleMock.events).not.toContain("delete");
-    expect(f.lifecycleMock.events).not.toContain("cleanup-shields");
-    expect(f.runOpenshellMock).not.toHaveBeenCalledWith(
-      expect.arrayContaining(["provider", "delete"]),
-      expect.anything(),
-    );
-    expect(f.removeSandboxRegistryEntryOutcomeMock).not.toHaveBeenCalled();
-    expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
-    expect(f.registerSandboxMock).not.toHaveBeenCalled();
-  });
-
-  it("preserves a forced target replaced by the same package with a new lifecycle", async () => {
-    const expectedFingerprint = createHash("sha256").update("beta-live-id").digest("hex");
-    const destination: f.SandboxRecord = {
-      ...packageManagedSandbox("beta", OPENCLAW_PACKAGE),
-      lifecycleGeneration: "captured-generation",
-      lifecycleLiveIdentityFingerprint: expectedFingerprint,
-    };
-    const replacement: f.SandboxRecord = {
-      ...destination,
-      lifecycleGeneration: "replacement-generation",
-      lifecycleLiveIdentityFingerprint: "f".repeat(64),
-    };
-    const entries = new Map<string, f.SandboxRecord>([
-      ["alpha", packageManagedSandbox("alpha", OPENCLAW_PACKAGE)],
-      ["beta", destination],
-    ]);
-    f.getSandboxMock.mockImplementation((name) => entries.get(name ?? "") ?? null);
-    f.lifecycleMock.withTimerBoundMock.mockImplementation((_sandboxName, command, fn) => {
-      f.lifecycleMock.events.push(`lock:${command}`);
-      runWhen(command === "delete snapshot restore destination", () => {
-        entries.set("beta", replacement);
-      });
-      return fn();
-    });
-    f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
-    f.captureOpenshellMock.mockImplementation((args) =>
-      f.openshellResponses(args, {
-        "sandbox exec": { status: 0, output: f.dcodeProbeOutput("no-runtime") },
-        "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
-      }),
-    );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
-    const { runSandboxSnapshot } = await import("./snapshot");
-
-    await expect(
-      runSandboxSnapshot("alpha", {
-        kind: "restore",
-        to: "beta",
-        force: true,
-        yes: true,
-      }),
-    ).rejects.toMatchObject({ exitCode: 1 });
-
-    expect(entries.get("beta")).toEqual(replacement);
-    expect(f.lifecycleMock.events).not.toContain("delete");
-    expect(f.stopNimContainerMock).not.toHaveBeenCalled();
-    expect(f.stopNimContainerByNameMock).not.toHaveBeenCalled();
-    expect(f.removeSandboxRegistryEntryOutcomeMock).not.toHaveBeenCalled();
-    expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
-  });
 
   it("re-proves a forced target live identity immediately before NIM cleanup", async () => {
     const expectedFingerprint = createHash("sha256").update("beta-live-id").digest("hex");
@@ -722,7 +515,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(entries.get("beta")).toEqual(destination);
     expect(f.stopNimContainerMock).not.toHaveBeenCalled();
     expect(f.stopNimContainerByNameMock).not.toHaveBeenCalled();
-    expect(f.shieldsMock.shieldsUpMock).not.toHaveBeenCalled();
     expect(f.lifecycleMock.events).not.toContain("delete");
     expect(f.removeSandboxRegistryEntryOutcomeMock).not.toHaveBeenCalled();
   });
@@ -768,7 +560,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     expect(entries.get("beta")).toEqual(destination);
     expect(f.stopNimContainerMock).not.toHaveBeenCalled();
     expect(f.stopNimContainerByNameMock).not.toHaveBeenCalled();
-    expect(f.shieldsMock.shieldsUpMock).not.toHaveBeenCalled();
     expect(f.lifecycleMock.events).not.toContain("delete");
     expect(f.removeSandboxRegistryEntryOutcomeMock).not.toHaveBeenCalled();
   });
@@ -810,7 +601,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     ).rejects.toMatchObject({ exitCode: 1 });
 
     expect(f.lifecycleMock.events).toContain("delete");
-    expect(f.lifecycleMock.events).toContain("cleanup-shields");
     expect(consoleError.mock.calls.flat().join("\n")).toContain("registry entry was preserved");
     expect(f.getSandboxMock("beta")).toBe(destination);
     expect(f.streamSandboxCreateMock).not.toHaveBeenCalled();
@@ -861,7 +651,6 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     ).rejects.toMatchObject({ exitCode: 1 });
 
     expect(f.lifecycleMock.events).toContain("delete");
-    expect(f.lifecycleMock.events).toContain("cleanup-shields");
     expect(consoleError.mock.calls.flat().join("\n")).toContain(
       "changed after NemoClaw captured the destination ownership row",
     );

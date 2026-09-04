@@ -29,7 +29,7 @@ describe("checkTerminalAgentVersion (#6193)", () => {
     // Probes through the injected OpenShell runner (not a direct SSH spawn),
     // bounded by a timeout so a hung version command can't wedge onboarding.
     expect(runner).toHaveBeenCalledWith(
-      ["sandbox", "exec", "-n", "dcode-sb", "--", "sh", "-lc", "dcode --version"],
+      ["sandbox", "exec", "-n", "dcode-sb", "--", "/bin/sh", "-lc", "dcode --version"],
       expect.objectContaining({ ignoreError: true, timeout: expect.any(Number) }),
     );
   });
@@ -44,23 +44,28 @@ describe("checkTerminalAgentVersion (#6193)", () => {
     });
   });
 
-  it("uses Bash for Pi's exact resource-limit login profile", () => {
-    const runner = vi.fn(() => "pi 0.84.1");
+  it("uses the package-declared command shell for the version probe", () => {
+    const runner = vi.fn(() => "example-agent 0.84.1");
 
     expect(
       checkTerminalAgentVersion(
-        "pi-sb",
+        "example-sb",
         makeAgent({
-          name: "pi",
-          displayName: "Pi",
-          versionCommand: "pi --version",
+          name: "example-agent",
+          displayName: "Example Agent",
+          versionCommand: "example-agent --version",
           expectedVersion: "0.84.1",
+          runtime: {
+            kind: "terminal",
+            interactive_command: "example-agent",
+            command_shell: "/bin/bash",
+          },
         }),
         runner,
       ),
     ).toMatchObject({ status: "current", installedVersion: "0.84.1" });
     expect(runner).toHaveBeenCalledWith(
-      ["sandbox", "exec", "-n", "pi-sb", "--", "/bin/bash", "-lc", "pi --version"],
+      ["sandbox", "exec", "-n", "example-sb", "--", "/bin/bash", "-lc", "example-agent --version"],
       expect.objectContaining({ ignoreError: true, timeout: expect.any(Number) }),
     );
   });

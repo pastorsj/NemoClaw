@@ -188,7 +188,7 @@ repos:
         name: Repository checks
         entry: npm run checks:repository
         language: system
-        files: ^(\.pre-commit-config\.yaml$|\.github/workflows/e2e\.yaml$|Dockerfile(?:\.base)?$|packages/nemoclaw-openclaw/manifest\.yaml$|packages/nemoclaw-hermes/(?:Dockerfile(?:\.base)?|manifest\.yaml|runtime/mcp-transaction\.py)$|docs/resources/starter-prompt\.md$|nemoclaw-blueprint/blueprint\.yaml$|packages/nemoclaw-openclaw/plugin/package\.json$|package\.json$|packages/nemoclaw-hermes/checks/update-agent\.sh$|scripts/(?:brev-launchable-ci-cpu|check-installer-hash|install-openshell)\.sh$|src/lib/actions/sandbox/openshell-child-visible-credentials\.v[0-9]+\.[0-9]+\.[0-9]+\.json$|bin/.*\.(cjs|js|mjs)$|src/.*\.(cts|mts|ts|tsx)$|scripts/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$|test/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$|packages/nemoclaw-openclaw/plugin/src/.*\.(cts|mts|ts|tsx)$)
+        files: ^(\.pre-commit-config\.yaml$|\.github/workflows/e2e\.yaml$|Dockerfile(?:\.base)?$|packages/nemoclaw-openclaw/manifest\.yaml$|packages/nemoclaw-hermes/(?:Dockerfile(?:\.base)?|manifest\.yaml|runtime/mcp-transaction\.py)$|ci/e2e-assertion-budget\.json$|docs/resources/starter-prompt\.md$|nemoclaw-blueprint/blueprint\.yaml$|packages/nemoclaw-openclaw/plugin/package\.json$|package\.json$|packages/nemoclaw-hermes/checks/update-agent\.sh$|scripts/(?:brev-launchable-ci-cpu|check-installer-hash|install-openshell)\.sh$|src/lib/actions/sandbox/openshell-child-visible-credentials\.v[0-9]+\.[0-9]+\.[0-9]+\.json$|bin/.*\.(cjs|js|mjs)$|src/.*\.(cts|mts|ts|tsx)$|scripts/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$|test/.*\.(cjs|cts|js|mjs|mts|ts|tsx)$|packages/nemoclaw-openclaw/plugin/src/.*\.(cts|mts|ts|tsx)$)
         pass_filenames: false
         priority: 10
 
@@ -269,7 +269,9 @@ repos:
         pass_filenames: false
         files: ^(packages/nemoclaw-hermes|bin|scripts|src|test|tools|nemoclaw-blueprint/scripts)/.*\.(ts|tsx|mts|cts|json)$|^\.agents/skills/nemoclaw-maintainer-day/scripts/(check-gates|shared)\.ts$|^packages/nemoclaw-openclaw/plugin/src/(lib/subprocess-env|blueprint/private-networks)\.ts$|^(package(-lock)?\.json|tsconfig\.cli\.json|vitest\.config\.ts)$
         stages: [pre-push]
-        priority: 10
+        # build:cli removes stale dist output. When package or script inputs
+        # select both hooks, run this reader after tsc-js rebuilds the tree.
+        priority: 20
 
   # ── post-merge / post-checkout: warn about stale compiled dist/ ───────────
   # See #1958 — dist/ is gitignored, so git pull / checkout can leave stale

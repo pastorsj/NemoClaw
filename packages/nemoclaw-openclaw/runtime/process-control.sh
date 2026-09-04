@@ -654,7 +654,6 @@ cleanup_openclaw_on_signal() {
 
 OPENCLAW_RESTART_FAILURE_CODE=internal
 _OPENCLAW_CONFIG_GUARD=/usr/local/lib/nemoclaw/openclaw-config-guard.py
-_OPENCLAW_STATE_DIR_GUARD=/usr/local/lib/nemoclaw/state-dir-guard.py
 OPENCLAW_CONFIG_GUARD_LAST_OUTPUT=""
 run_openclaw_config_guard() {
   local action="$1"
@@ -945,8 +944,7 @@ handle_openclaw_gateway_control_request() {
 
   # Seal while the old healthy gateway is still serving. This fresh-replaces
   # the canonical config/hash pair and revokes old writable descriptors before
-  # any outage is introduced. The journal records whether the original posture
-  # was mutable or shields-locked so unseal restores it exactly.
+  # any outage is introduced. Unseal restores the mutable posture.
   if ! run_openclaw_config_guard seal-restart; then
     if ! restore_openclaw_restart_config; then
       echo "[SECURITY] OpenClaw restart seal failed and deterministic recovery also failed; stopping the old gateway to revoke stale config descriptors" >&2
@@ -984,7 +982,7 @@ handle_openclaw_gateway_control_request() {
 
   if ! restore_openclaw_restart_config; then
     # The replacement is healthy and the canonical pair remains fail-closed,
-    # but the original mutable/locked posture could not be restored. Keep the
+    # but the mutable posture could not be restored. Keep the
     # service running and make the host operation fail loudly for recovery.
     refresh_openclaw_supervised_child_pids
     gateway_control_fail unsafe-config "$old_pid"

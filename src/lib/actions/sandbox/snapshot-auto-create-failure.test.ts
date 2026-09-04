@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   hostLocalInferenceReceipt,
   serializedLlamaCppHostLocalInferenceReceipt,
@@ -178,6 +181,8 @@ const runtimeProvider = createInMemoryRuntimeProviderBundle({
   },
 });
 
+let isolatedStateHome = "";
+
 function managedHostLocalReceipt(): string {
   const receipt = hostLocalInferenceReceipt("mxc");
   return serializeHostLocalInferenceReceipt({
@@ -304,21 +309,8 @@ vi.mock("../../runtime-recovery", () => ({
   parseLiveSandboxNames: vi.fn(() => new Set(["alpha"])),
 }));
 vi.mock("../../sandbox/create-stream", () => ({ streamSandboxCreate: streamSandboxCreateMock }));
-vi.mock("../../shields", () => ({
-  get isShieldsDown() {
-    return true;
-  },
-  recoverCompletedAutoRestoreBeforeCommand: vi.fn(),
+vi.mock("../../sandbox/mutable-config-perms", () => ({
   repairMutableConfigPerms: vi.fn(() => ({ applied: true, verified: true, errors: [] })),
-  shieldsUp: vi.fn(),
-}));
-vi.mock("../../shields/timer-bound-lock", () => ({
-  withTimerBoundShieldsMutationLock: vi.fn((_sandbox, _command, fn) => fn()),
-}));
-vi.mock("../../shields/timer-control", () => ({
-  isProcessAlive: vi.fn(() => true),
-  readProcessStartIdentity: vi.fn(() => "snapshot-test-process-start"),
-  readTimerMarker: vi.fn(() => null),
 }));
 vi.mock("../../state/gateway", () => ({
   isGatewayHealthy: vi.fn(() => true),
@@ -328,6 +320,7 @@ vi.mock("../../state/gateway", () => ({
 }));
 vi.mock("../../state/mcp-lifecycle-lock", () => ({
   withMcpLifecycleLock: vi.fn((_key, fn) => fn()),
+  withMcpLifecycleLockSync: vi.fn((_key, fn) => fn()),
   withSandboxMutationLock: vi.fn((_sandbox, fn) => fn()),
 }));
 vi.mock("../../state/registry", () => ({
@@ -384,7 +377,6 @@ vi.mock("../../state/sandbox", () => ({
   ),
 }));
 vi.mock("./destroy", () => ({
-  cleanupShieldsDestroyArtifacts: vi.fn(),
   removeSandboxRegistryEntryOutcome: removeSandboxRegistryEntryOutcomeMock,
   removeSandboxRegistryEntryIfCurrentOutcome: removeSandboxRegistryEntryIfCurrentOutcomeMock,
   requireSandboxDestructiveCleanupAuthority: vi.fn(() => ({ provider: runtimeProvider })),
@@ -405,6 +397,9 @@ vi.mock("./snapshot/dependencies", async (importOriginal) => ({
 
 describe("snapshot restore auto-create failures", () => {
   beforeEach(() => {
+    isolatedStateHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-create-state-"));
+    vi.stubEnv("HOME", isolatedStateHome);
+    vi.stubEnv("NEMOCLAW_TEST_BASE_HOME", isolatedStateHome);
     vi.clearAllMocks();
     harness.entries.clear();
     harness.entries.set("alpha", sourceEntry());
@@ -419,6 +414,12 @@ describe("snapshot restore auto-create failures", () => {
       sawProgress: false,
       forcedReady: false,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(isolatedStateHome, { recursive: true, force: true });
+    isolatedStateHome = "";
   });
 
   it("does not register a ghost sandbox when auto-create fails", async () => {

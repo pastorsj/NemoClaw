@@ -15,7 +15,6 @@ function shellQuote(value: unknown): string {
 const HERMES_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 export const hermesStartPath = path.join(HERMES_PACKAGE_ROOT, "start.sh");
 export const hermesStartupModuleNames = [
-  "state-gate",
   "config-setup",
   "service-control",
   "runtime-integrity",
@@ -213,9 +212,6 @@ export function runHermesSandboxInitPreludeWithFakePath(
     const fakeBin = path.join(tmpDir, "bin");
     const fakeInit = path.join(tmpDir, "sandbox-init.sh");
     const fakeSupervisor = path.join(tmpDir, "gateway-supervisor.sh");
-    const fakeGatePython = path.join(tmpDir, "gate-python");
-    const fakeGateHelper = path.join(tmpDir, "runtime-state-mutation-startup-gate.py");
-    const fakeSetpriv = path.join(tmpDir, "setpriv");
     const marker = path.join(tmpDir, "dirname-called");
     const sourcePathLog = path.join(tmpDir, "source-path.log");
     const scriptPath = path.join(tmpDir, "run.sh");
@@ -233,21 +229,6 @@ export function runHermesSandboxInitPreludeWithFakePath(
       ].join("\n"),
     );
     fs.writeFileSync(fakeSupervisor, "# supervisor fixture\n");
-    fs.writeFileSync(fakeGatePython, "#!/usr/bin/env bash\nexit 0\n", { mode: 0o700 });
-    fs.writeFileSync(fakeGateHelper, "# startup gate fixture\n");
-    fs.writeFileSync(
-      fakeSetpriv,
-      [
-        "#!/usr/bin/env bash",
-        'while [ "$#" -gt 0 ]; do',
-        '  if [ "$1" = "--" ]; then shift; break; fi',
-        "  shift",
-        "done",
-        'exec "$@"',
-      ].join("\n"),
-      { mode: 0o700 },
-    );
-
     const rawSource = fs.readFileSync(startScript, "utf-8");
     const rawStart = rawSource.indexOf(
       "# SECURITY: Lock down PATH before resolving or sourcing root startup helpers.",
@@ -261,9 +242,6 @@ export function runHermesSandboxInitPreludeWithFakePath(
     const end = src.indexOf("\nif [ -d /opt/hermes/hermes_cli/web_dist ];", start);
     const prelude = src
       .slice(start, end)
-      .replaceAll("/opt/hermes/.venv/bin/python3", fakeGatePython)
-      .replaceAll("/usr/local/lib/nemoclaw/runtime-state-mutation-startup-gate.py", fakeGateHelper)
-      .replaceAll("/usr/bin/setpriv", fakeSetpriv)
       .replaceAll("/usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh", envWrapper)
       .replaceAll("/usr/local/lib/nemoclaw/sandbox-init.sh", fakeInit)
       .replaceAll("/usr/local/lib/nemoclaw/gateway-supervisor.sh", fakeSupervisor);

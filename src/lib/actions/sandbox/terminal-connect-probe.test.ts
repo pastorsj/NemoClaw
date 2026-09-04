@@ -10,8 +10,14 @@ const dcodeAgent = {
   name: "langchain-deepagents-code",
   runtime: {
     kind: "terminal",
+    command_shell: "/bin/sh",
     headless_command: "dcode -n",
     interactive_command: "dcode",
+    smoke_boundary: {
+      kind: "managed-launcher",
+      launcher: "/usr/local/lib/nemoclaw/dcode-managed-exec",
+      home: "/usr/local/lib/nemoclaw",
+    },
     smoke_commands: ["dcode --version"],
   },
 } as unknown as AgentDefinition;

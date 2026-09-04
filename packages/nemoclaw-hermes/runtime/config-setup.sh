@@ -2,7 +2,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Validate ports and prepare Hermes configuration, logs, and durable state.
-# shellcheck disable=SC2034,SC2153 # Globals are shared with the sourced workflow modules.
 
 truthy_env() {
   case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -29,7 +28,10 @@ validate_tcp_port() {
 validate_port_configuration() {
   validate_tcp_port PUBLIC_PORT "$PUBLIC_PORT"
   validate_tcp_port INTERNAL_PORT "$INTERNAL_PORT"
+  # Dashboard ports are defined by start.sh before this sourced module runs.
+  # shellcheck disable=SC2153
   validate_tcp_port DASHBOARD_PUBLIC_PORT "$DASHBOARD_PUBLIC_PORT"
+  # shellcheck disable=SC2153
   validate_tcp_port DASHBOARD_INTERNAL_PORT "$DASHBOARD_INTERNAL_PORT"
   if [ "$DASHBOARD_PUBLIC_PORT" -eq "$PUBLIC_PORT" ]; then
     echo "[gateway] ERROR: DASHBOARD_PUBLIC_PORT must not equal PUBLIC_PORT (${PUBLIC_PORT})" >&2
@@ -74,26 +76,62 @@ verify_hermes_config_integrity() {
   fi
   verify_config_integrity "${HERMES_DIR}" "${HERMES_HASH_FILE}" || return 1
   if ! inspect_hermes_mcp_integrity "${HERMES_HASH_FILE}"; then
+    # Consumed by gateway-control.sh after both modules are sourced.
+    # shellcheck disable=SC2034
     HERMES_RESTART_FAILURE_CODE=mcp-integrity
     return 1
   fi
 }
 
 prepare_hermes_lazy_dependencies() {
-  local -a installer=(
-    env
+  local lazy_target="$HERMES_SANDBOX_LAZY_INSTALL_TARGET"
+  local uv_cache_target="/sandbox/.hermes/cache/uv"
+  local root_separated=0
+  local env_name
+  local -a installer=(/usr/bin/env)
+
+  if [ "$(id -u)" -eq 0 ]; then
+    prepare_hermes_gateway_lazy_install_target || return 1
+    lazy_target="$HERMES_GATEWAY_LAZY_INSTALL_TARGET"
+    uv_cache_target="${HERMES_GATEWAY_LAZY_INSTALL_TARGET}/.uv-cache"
+    root_separated=1
+
+    # The gateway installer must not consume package-manager configuration or
+    # Python startup paths from the sandbox environment. In particular, uv
+    # discovers uv.toml from the current workspace and pip's fallback Python
+    # process imports from its current directory unless safe-path mode is
+    # inherited. Remove the complete input families before adding back only
+    # the fixed gateway values below.
+    while IFS= read -r env_name; do
+      case "$env_name" in
+        UV_* | PIP_* | PYTHON* | LD_* | DYLD_* | BASH_ENV | ENV | VIRTUAL_ENV) installer+=(-u "$env_name") ;;
+      esac
+    done < <(compgen -e)
+  fi
+
+  installer+=(
     HOME=/sandbox
-    UV_CACHE_DIR=/sandbox/.hermes/cache/uv
+    UV_CACHE_DIR="$uv_cache_target"
     UV_NO_CACHE=1
     HERMES_HOME="$HERMES_DIR"
-    HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages
+    HERMES_LAZY_INSTALL_TARGET="$lazy_target"
   )
+  if [ "$root_separated" -eq 1 ]; then
+    installer+=(
+      UV_NO_CONFIG=1
+      PIP_CONFIG_FILE=/dev/null
+      PIP_DISABLE_PIP_VERSION_CHECK=1
+      PYTHONSAFEPATH=1
+      PYTHONNOUSERSITE=1
+      PYTHONUTF8=1
+      PATH=/usr/local/bin:/opt/hermes/.venv/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    )
+  fi
 
-  # The separated gateway identity deliberately has no write access to the
-  # durable dependency tree. Route the allowlisted installer through sandbox;
-  # same-UID OpenShell startup is already running under that identity.
-  if [ "$(id -u)" -eq 0 ]; then
-    installer+=("${STEP_DOWN_PREFIX_SANDBOX[@]}")
+  # A root-separated gateway installs and consumes dependencies only through
+  # its private /run target. Same-UID startup keeps the sandbox-owned target.
+  if [ "$root_separated" -eq 1 ]; then
+    installer+=("${STEP_DOWN_PREFIX_GATEWAY[@]}")
   fi
   installer+=("$_HERMES_PYTHON" -I -c)
 
@@ -122,7 +160,7 @@ try:
 except Exception as exc:
     raise SystemExit(
         "[SECURITY] Unable to prepare the approved Hindsight dependency "
-        f"under the sandbox-owned lazy-install target: {exc}"
+        f"under the managed lazy-install target: {exc}"
     ) from exc
 '
 }
@@ -222,7 +260,7 @@ prepare_tirith_marker_retry() {
 
 # sourceBoundary: Hermes runtime fallback recreates download_failed when its background Tirith fetch fails.
 # whyNotSourceFix: Hermes is an upstream image dependency; this entrypoint owns restart recovery only.
-# regressionTest: tests/compat/tirith-retry.test.ts covers cleanup and unsafe-marker preservation.
+# regressionTest: packages/nemoclaw-hermes/tests/compat/tirith-retry.test.ts covers cleanup and unsafe-marker preservation.
 # removalCondition: Remove when Hermes no longer recreates the marker after a handled startup retry.
 finalize_tirith_marker_retry() {
   local marker="${HERMES_DIR}/.tirith-install-failed"
@@ -335,86 +373,10 @@ remove_stale_gateway_file() {
   fi
 }
 
-hermes_config_path_is_locked() {
-  local path="$1"
-  local owner mode
-
-  [ -f "$path" ] || return 1
-  [ ! -L "$path" ] || return 1
-
-  owner="$(stat -c '%U:%G' "$path" 2>/dev/null || stat -f '%Su:%Sg' "$path" 2>/dev/null || true)"
-  mode="$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path" 2>/dev/null || true)"
-  mode="${mode#0}"
-  [ -n "$mode" ] || return 1
-
-  [ "$owner" = "root:root" ] || return 1
-  (((8#$mode & 0222) == 0))
-}
-
-hermes_config_root_is_locked() {
-  local owner mode
-
-  owner="$(stat -c '%U:%G' "$HERMES_DIR" 2>/dev/null || stat -f '%Su:%Sg' "$HERMES_DIR" 2>/dev/null || true)"
-  mode="$(stat -c '%a' "$HERMES_DIR" 2>/dev/null || stat -f '%Lp' "$HERMES_DIR" 2>/dev/null || true)"
-
-  # The locked root is root-owned in the sandbox group and keeps the set-id and
-  # sticky bits so the gateway can still write its top-level runtime state while
-  # the sticky bit protects the sealed entries (#7865) — the same shape
-  # hermes_locked_parent_is_protected expects one level up. `root:root 755` is
-  # the pre-#7865 posture; keep detecting it so an existing shields-up sandbox
-  # still takes the locked branches until `shields up` repairs the root.
-  case "${owner} ${mode}" in
-    "root:sandbox 3770" | "root:sandbox 03770") ;;
-    "root:root 755" | "root:root 0755") ;;
-    *) return 1 ;;
-  esac
-
-  hermes_config_path_is_locked "${HERMES_DIR}/config.yaml" \
-    && hermes_config_path_is_locked "${HERMES_DIR}/.env"
-}
-
-hermes_locked_parent_is_protected() {
-  local owner mode
-  owner="$(stat -c '%U:%G' /sandbox 2>/dev/null || stat -f '%Su:%Sg' /sandbox 2>/dev/null || true)"
-  mode="$(stat -c '%a' /sandbox 2>/dev/null || stat -f '%Lp' /sandbox 2>/dev/null || true)"
-  case "${owner} ${mode}" in
-    "root:sandbox 1775" | "root:sandbox 01775") return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-apply_shields_up_runtime_env() {
-  local config_locked=0
-  if [ "${HERMES_RESTART_SEALED:-0}" -eq 1 ]; then
-    config_locked="${HERMES_RESTART_ORIGINAL_LOCKED:-0}"
-  elif hermes_config_root_is_locked; then
-    config_locked=1
-  fi
-
-  if [ "$config_locked" -eq 1 ]; then
-    if [ -z "${HERMES_KANBAN_DISPATCH_IN_GATEWAY:-}" ]; then
-      export HERMES_KANBAN_DISPATCH_IN_GATEWAY=0
-      _NEMOCLAW_SET_KANBAN_DISPATCH=1
-      echo "[gateway] Shields-up: HERMES_KANBAN_DISPATCH_IN_GATEWAY=0 (embedded kanban dispatcher suspended; kanban.db on locked config root is read-only)" >&2
-    fi
-    return 0
-  fi
-
-  if [ "${_NEMOCLAW_SET_KANBAN_DISPATCH:-0}" -eq 1 ]; then
-    unset HERMES_KANBAN_DISPATCH_IN_GATEWAY
-    _NEMOCLAW_SET_KANBAN_DISPATCH=0
-  fi
-}
-
 ensure_hermes_config_root_mode() {
   if [ -L "$HERMES_DIR" ] || [ ! -d "$HERMES_DIR" ]; then
     echo "[SECURITY] Refusing Hermes layout repair because ${HERMES_DIR} is not a safe directory" >&2
     return 1
-  fi
-
-  if hermes_config_root_is_locked; then
-    echo "[gateway] Hermes config root is locked; preserving shields-up permissions" >&2
-    return 0
   fi
 
   if [ "$(id -u)" -eq 0 ]; then
@@ -718,8 +680,8 @@ ensure_hermes_history_file() {
   local mode="$2"
 
   # Use a no-follow fd workflow instead of check-then-use shell path
-  # operations. /sandbox/.hermes is intentionally sandbox-writable while
-  # shields are down, so root must not validate the pathname and then later
+  # operations. /sandbox/.hermes is sandbox-writable, so root must not validate
+  # the pathname and then later
   # chown/chmod whatever an agent swaps into that path. Python gives us
   # O_NOFOLLOW + fstat/fchown/fchmod against the actual opened inode.
   NEMOCLAW_HERMES_HISTORY_FILE="$file" \
@@ -774,12 +736,8 @@ try:
         print(f"[SECURITY] Refusing Hermes layout repair because {path} is not a regular file", file=sys.stderr)
         sys.exit(1)
 
-    # Reject hard-linked targets. An attacker who controls the sandbox user
-    # before shields-up can pre-create .hermes_history as a hard link to
-    # config.yaml or .env. O_NOFOLLOW and regular-file checks pass, so without
-    # this guard fchown/fchmod would walk the shared inode and silently undo
-    # the shields-up root:root 0444 lock on the config file after
-    # verify_config_integrity has already passed.
+    # Reject hard-linked targets. O_NOFOLLOW and regular-file checks alone do
+    # not prevent fchown/fchmod from changing an aliased config inode.
     if st.st_nlink != 1:
         print(f"[SECURITY] Refusing Hermes layout repair because {path} has hard-link count {st.st_nlink}", file=sys.stderr)
         sys.exit(1)
@@ -811,12 +769,10 @@ PYHISTORY
 repair_hermes_startup_layout() {
   # The cron execution and Discord recovery ledgers are created by gateway and
   # backed up/restored by sandbox. Maintain their descriptor-verified,
-  # group-writable runtime and gateway parents even when the rest of the config
-  # root is locked while Shields up is active or was wiped. The cron directory
-  # contains cron job definitions and must remain sealed.
-  # The Fabric adapter writes artifacts as the sandbox identity. Provision its
-  # directory before checking the locked-root posture so the first Fabric turn
-  # after Shields up does not need to create a child beneath root-owned .hermes.
+  # group-writable runtime and gateway parents when the config root was wiped.
+  # The cron directory contains cron job definitions.
+  # Fabric artifacts are written by the sandbox identity and retained under
+  # the package-owned Hermes state root.
   if ! ensure_hermes_cross_uid_state_dir fabric-artifacts sandbox; then
     echo "[gateway] Hermes pre-launch layout repair failed at Fabric artifacts directory" >&2
     return 1
@@ -828,24 +784,6 @@ repair_hermes_startup_layout() {
   if ! ensure_hermes_cross_uid_state_dir runtime; then
     echo "[gateway] Hermes pre-launch layout repair failed at runtime state directory" >&2
     return 1
-  fi
-
-  if hermes_config_root_is_locked; then
-    # The locked-root posture seals config.yaml/.env, not the dir. The gateway
-    # and runtime state parents were maintained above; also bring a missing
-    # prompt_toolkit history file into existence as a sandbox-owned regular
-    # file. Sandboxes built before the precreate landed would otherwise stay
-    # broken until the next `shields down` cycle.
-    # Refusal (symlink, non-regular, create failure) is a hard stop: starting
-    # the gateway with an unsafe .hermes_history under a locked root would
-    # either let the TUI clobber an attacker-pointed path or repeat the
-    # original keypress traceback.
-    echo "[gateway] Hermes layout repair limited to history file because config root is locked" >&2
-    if ! ensure_hermes_history_file "${HERMES_DIR}/.hermes_history" 660; then
-      echo "[gateway] Hermes pre-launch layout repair failed at history file" >&2
-      return 1
-    fi
-    return 0
   fi
 
   ensure_hermes_config_root_mode || return 1
@@ -873,3 +811,29 @@ cleanup_stale_hermes_gateway_runtime() {
   remove_stale_gateway_file "${runtime_dir}/gateway.lock" "lock file"
   cleanup_orphan_socat_forwarders
 }
+
+# ── socat forwarders ─────────────────────────────────────────────
+# Hermes services bind to 127.0.0.1 for safety.
+# OpenShell needs the port accessible on 0.0.0.0 for port forwarding.
+# socat bridges 0.0.0.0:<public> to 127.0.0.1:<internal>.
+SOCAT_PID=""
+DASHBOARD_SOCAT_PID=""
+_HERMES_PROC_ROOT="/proc"
+# OpenShell owns container PID 1 and starts this script as the sandbox user in
+# its managed topology. Bind every child identity to this immutable supervisor
+# process rather than assuming the script itself is PID 1. Direct-container
+# root entrypoints still capture 1 here.
+readonly HERMES_STARTUP_SUPERVISOR_PID="$$"
+# These identities are consumed by service-control.sh and gateway-control.sh.
+# shellcheck disable=SC2034
+GATEWAY_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
+DASHBOARD_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
+SOCAT_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
+DASHBOARD_SOCAT_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
+GATEWAY_LOG_TAIL_PID_START_IDENTITY=""
+# shellcheck disable=SC2034
+DASHBOARD_LOG_TAIL_PID_START_IDENTITY=""

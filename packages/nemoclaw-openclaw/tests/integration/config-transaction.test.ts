@@ -43,7 +43,6 @@ installMock(source("agent", "defs.js"), {
       dir: "/sandbox/.openclaw",
       configFile: "openclaw.json",
       format: "json",
-      shieldsFiles: [],
     },
   }),
 });
@@ -51,17 +50,16 @@ installMock(source("adapters", "openshell", "client.js"), {
   captureOpenshellCommand: () => ({ status: 0, output: rawConfig }),
   runOpenshellCommand: () => ({ status: 0 }),
 });
-installMock(source("shields", "openclaw-config-lock.js"), {
+installMock(source("sandbox", "openclaw-config-guard.js"), {
   validateOpenClawConfigCandidate: () => {
     validatorCalls += 1;
     return [];
   },
-  runOpenClawConfigGuard: (_privileged, action, options) => {
-    captured = { action, options };
+  writeOpenClawConfigCandidate: (_privileged, input, expectedConfigSha256) => {
+    captured = { expectedConfigSha256, input };
     return {
       issues: [],
-      chattrApplied: false,
-      configSha256: crypto.createHash("sha256").update(options.input).digest("hex"),
+      configSha256: crypto.createHash("sha256").update(input).digest("hex"),
     };
   },
 });
@@ -83,12 +81,11 @@ process.stdout.write(JSON.stringify({ captured, validatorCalls }));
 
     expect(result.status, result.stderr).toBe(0);
     const proof = JSON.parse(result.stdout) as {
-      captured: { action: string; options: { expectedConfigSha256: string; input: string } };
+      captured: { expectedConfigSha256: string; input: string };
       validatorCalls: number;
     };
     expect(proof.validatorCalls).toBe(0);
-    expect(proof.captured.action).toBe("write-config");
-    expect(proof.captured.options.expectedConfigSha256).toBe(expectedDigest);
-    expect(proof.captured.options.input).toContain('"primary": "inference/new"');
+    expect(proof.captured.expectedConfigSha256).toBe(expectedDigest);
+    expect(proof.captured.input).toContain('"primary": "inference/new"');
   });
 });

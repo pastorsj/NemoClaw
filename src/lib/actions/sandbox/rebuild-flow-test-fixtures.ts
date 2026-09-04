@@ -13,11 +13,16 @@ export function makeRebuildAgentAuthority(
 ): ResolvedSandboxAgent {
   const effectiveAgentId = recordedAgent ?? "openclaw";
   const usesRepositoryAuthority = effectiveAgentId === "nemocua";
+  const runtimeKind =
+    effectiveAgentId === "langchain-deepagents-code" || effectiveAgentId === "pi"
+      ? "terminal"
+      : "gateway";
   return Object.freeze({
     recordedAgent,
     effectiveAgentId,
     definition: Object.freeze({
       name: effectiveAgentId,
+      runtime: { kind: runtimeKind },
       packageRoot: usesRepositoryAuthority
         ? "/test/repository"
         : `/test/harnesses/${effectiveAgentId}`,

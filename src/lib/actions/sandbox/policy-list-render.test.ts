@@ -11,32 +11,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const registryMocks = vi.hoisted(() => ({
   getSandbox: vi.fn<(sandboxName: string) => Record<string, unknown> | null>(),
-  getBaselineExclusions: vi.fn(),
-  getBaselineExclusionTransition: vi.fn(),
+}));
+
+type PresetInfo = { file: string; name: string; description: string };
+
+const policyMocks = vi.hoisted(() => ({
+  listPresets: vi.fn<(_options?: { agent?: string | null }) => PresetInfo[]>(),
+  listCustomPresets: vi.fn<(_sandboxName: string) => PresetInfo[]>(),
+  getGatewayPresets: vi.fn<(_sandboxName: string) => string[] | null>(),
 }));
 
 vi.mock("../../state/registry", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../state/registry")>()),
   getSandbox: registryMocks.getSandbox,
-  getBaselineExclusions: registryMocks.getBaselineExclusions,
-  getBaselineExclusionTransition: registryMocks.getBaselineExclusionTransition,
 }));
 
 vi.mock("../../policy", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../policy")>();
   return {
     ...actual,
-    listPresets: vi.fn(),
-    listCustomPresets: vi.fn(),
-    getAppliedPresets: vi.fn(),
-    getGatewayPresets: vi.fn(),
+    listPresets: policyMocks.listPresets,
+    listCustomPresets: policyMocks.listCustomPresets,
+    getGatewayPresets: policyMocks.getGatewayPresets,
   };
 });
 
-import * as policies from "../../policy";
 import { listSandboxPolicies } from "./policy-channel";
-
-const mocked = vi.mocked(policies);
 
 describe("listSandboxPolicies rendering (#5967)", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -47,7 +47,7 @@ describe("listSandboxPolicies rendering (#5967)", () => {
     logSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
       lines.push(args.join(" "));
     });
-    mocked.listPresets.mockReturnValue([
+    policyMocks.listPresets.mockReturnValue([
       {
         name: "discord",
         description: "Discord API, gateway, and CDN access",
@@ -60,14 +60,12 @@ describe("listSandboxPolicies rendering (#5967)", () => {
       },
       { name: "npm", description: "npm and Yarn registry access", file: "npm.yaml" },
     ]);
-    mocked.listCustomPresets.mockReturnValue([]);
+    policyMocks.listCustomPresets.mockReturnValue([]);
     registryMocks.getSandbox.mockReturnValue({
       name: "nemoclaw-5967",
       agent: "openclaw",
       policyTier: null,
     });
-    registryMocks.getBaselineExclusions.mockReturnValue([]);
-    registryMocks.getBaselineExclusionTransition.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -81,11 +79,10 @@ describe("listSandboxPolicies rendering (#5967)", () => {
   const lineFor = (preset: string) =>
     lines.find((line) => new RegExp(`[●○] ${preset}\\b`).test(line)) ?? "";
 
-  it("marks an enabled Discord preset applied (●) when it is in both registry and gateway", () => {
-    // The #5967 fix persists `discord` to registry.policies AND applies it to the
-    // gateway, so policy-list must render it as applied.
-    mocked.getAppliedPresets.mockReturnValue(["discord", "npm"]);
-    mocked.getGatewayPresets.mockReturnValue(["discord", "npm"]);
+  it("marks an enabled Discord preset applied when OpenShell reports it", () => {
+    // The #5967 fix applies `discord` to OpenShell, so policy-list must render
+    // the live state as applied.
+    policyMocks.getGatewayPresets.mockReturnValue(["discord", "npm"]);
 
     listSandboxPolicies("nemoclaw-5967");
 
@@ -96,11 +93,10 @@ describe("listSandboxPolicies rendering (#5967)", () => {
     expect(lineFor("slack")).not.toContain("● slack");
   });
 
-  it("renders the pre-fix regression (○ discord) when Discord is dropped from registry and gateway", () => {
-    // Before the fix the explicit-selection path dropped discord from both the
-    // persisted registry list and the reconciled gateway set.
-    mocked.getAppliedPresets.mockReturnValue(["npm", "pypi"]);
-    mocked.getGatewayPresets.mockReturnValue(["npm", "pypi"]);
+  it("renders the pre-fix regression when OpenShell does not report Discord", () => {
+    // Before the fix the explicit-selection path dropped Discord from the
+    // reconciled OpenShell policy set.
+    policyMocks.getGatewayPresets.mockReturnValue(["npm", "pypi"]);
 
     listSandboxPolicies("nemoclaw-5967");
 
@@ -108,9 +104,8 @@ describe("listSandboxPolicies rendering (#5967)", () => {
     expect(lineFor("discord")).not.toContain("● discord");
   });
 
-  it("does not invent local ownership when the two live policy views disagree", () => {
-    mocked.getAppliedPresets.mockReturnValue(["discord", "npm"]);
-    mocked.getGatewayPresets.mockReturnValue(["npm"]);
+  it("does not invent local ownership when OpenShell does not report the preset", () => {
+    policyMocks.getGatewayPresets.mockReturnValue(["npm"]);
 
     listSandboxPolicies("nemoclaw-5967");
 

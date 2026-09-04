@@ -209,6 +209,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
           ? {
               name: "alpha",
               agent: "openclaw",
+              harnessPackage: OPENCLAW_PACKAGE,
               imageTag: "nemoclaw-alpha:test",
               openshellDriver: "docker",
               provider: "nvidia-nim",
@@ -226,7 +227,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
           "sandbox list": { status: 0, output: "alpha Ready\n" },
         }),
       );
-      f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+      f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
       f.readSandboxPolicyMock.mockReturnValue({ ok: false, error: policyReadError });
       const secureTempFile = vi.spyOn(tempFiles, "secureTempFile");
       const { runSandboxSnapshot } = await import("./snapshot");
@@ -255,6 +256,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     f.getSandboxMock.mockImplementation((name) => ({
       name: name ?? "alpha",
       agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       imageTag: `nemoclaw-${name}:test`,
       openshellDriver: "docker",
       provider: "nvidia-nim",
@@ -282,7 +284,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const secureTempFile = vi.spyOn(tempFiles, "secureTempFile");
     const { runSandboxSnapshot } = await import("./snapshot");
 
@@ -320,15 +322,39 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         value: { document: latestPolicy, appliedRevision: null },
       });
     let createdPolicy = "";
-    f.getSandboxMock.mockImplementation((name) => ({
-      name: name ?? "alpha",
-      agent: "openclaw",
-      imageTag: `nemoclaw-${name}:test`,
-      openshellDriver: "docker",
-      provider: "nvidia-nim",
-      model: "nvidia/model-a",
-      dashboardPort: name === "alpha" ? 18790 : 18791,
-    }));
+    const entries = new Map<string, f.SandboxRecord>([
+      [
+        "alpha",
+        {
+          name: "alpha",
+          agent: "openclaw",
+          harnessPackage: OPENCLAW_PACKAGE,
+          imageTag: "nemoclaw-alpha:test",
+          openshellDriver: "docker",
+          provider: "nvidia-nim",
+          model: "nvidia/model-a",
+          dashboardPort: 18790,
+        },
+      ],
+      [
+        "beta",
+        {
+          name: "beta",
+          agent: "openclaw",
+          harnessPackage: OPENCLAW_PACKAGE,
+          imageTag: "nemoclaw-beta:test",
+          openshellDriver: "docker",
+          provider: "nvidia-nim",
+          model: "nvidia/model-a",
+          dashboardPort: 18791,
+        },
+      ],
+    ]);
+    f.modelPendingCloneRegistry((name) => entries.get(name ?? "") ?? null);
+    f.removeSandboxRegistryEntryOutcomeMock.mockImplementation((name) => {
+      entries.delete(name);
+      return { status: "complete", removed: true };
+    });
     f.parseLiveSandboxNamesMock.mockReturnValue(new Set(["alpha", "beta"]));
     f.captureOpenshellMock.mockImplementation((args) =>
       f.openshellResponses(args, {
@@ -336,7 +362,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     f.streamSandboxCreateMock.mockImplementation(async (_command, args) => {
       createdPolicy = fs.readFileSync(String(args[args.indexOf("--policy") + 1]), "utf8");
       return { status: 0, output: "", sawProgress: false, forcedReady: false };
@@ -373,6 +399,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
     f.getSandboxMock.mockImplementation((name) => ({
       name: name ?? "alpha",
       agent: "openclaw",
+      harnessPackage: OPENCLAW_PACKAGE,
       imageTag: `nemoclaw-${name}:test`,
       openshellDriver: "docker",
       provider: "nvidia-nim",
@@ -386,7 +413,7 @@ describe("runSandboxSnapshot restore: clone port identity", () => {
         "sandbox list": { status: 0, output: "alpha Ready\nbeta Ready\n" },
       }),
     );
-    f.getLatestBackupMock.mockReturnValue({ ...f.latestBackupFixture });
+    f.getLatestBackupMock.mockReturnValue(packageSnapshot(OPENCLAW_PACKAGE));
     const secureTempFile = vi.spyOn(tempFiles, "secureTempFile");
     const { runSandboxSnapshot } = await import("./snapshot");
 

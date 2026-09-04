@@ -61,11 +61,13 @@ launch_hermes_gateway() {
   # This function is called from an `if ! ...` recovery branch, where Bash
   # disables errexit throughout the function call. Propagate every security-
   # sensitive preparation failure explicitly before creating a child.
-  apply_shields_up_runtime_env || return 1
   if [ "$HERMES_RESTART_SEALED" -ne 1 ]; then
     cleanup_stale_hermes_gateway_runtime || return 1
   fi
   HERMES_HOME="${HERMES_DIR}" \
+    HOME=/sandbox \
+    HERMES_LAZY_INSTALL_TARGET="${HERMES_GATEWAY_LAZY_INSTALL_TARGET}" \
+    HERMES_BUNDLED_PLUGINS="${HERMES_MANAGED_BUNDLED_PLUGINS}" \
     nohup "${STEP_DOWN_PREFIX_GATEWAY[@]}" sh -c \
     'umask 0007; exec "$@" >>/tmp/gateway.log 2>&1' sh "$HERMES" gateway run &
   GATEWAY_PID=$!
@@ -381,19 +383,10 @@ handle_hermes_gateway_control_request() {
     return 1
   fi
   refresh_hermes_supervised_child_pids
-  nemoclaw_runtime_state_mutation_checkpoint || {
-    stop_hermes_gateway_fail_closed
-    gateway_control_fail internal "$old_pid"
-    return 1
-  }
   gateway_control_complete ok "$old_pid" "$GATEWAY_PID"
 }
 
 prepare_hermes_nonroot_runtime() {
-  if ! verify_config_integrity_if_locked "${HERMES_DIR}"; then
-    echo "[SECURITY] Config integrity check failed — refusing to start (non-root mode)" >&2
-    return 1
-  fi
   # Classify raw .env material at its dedicated boundary before the MCP
   # integrity guard authenticates the full config/env snapshot. Otherwise a
   # mutable default with a raw secret fails as generic MCP drift and bypasses
@@ -408,7 +401,6 @@ prepare_hermes_nonroot_runtime() {
   inspect_hermes_mcp_integrity "${HERMES_DIR}/.config-hash" || return 1
   prepare_hermes_lazy_dependencies || return 1
   ensure_hermes_runtime_api_server_key compat || return 1
-  apply_shields_up_runtime_env || return 1
   validate_hermes_env_secret_boundary || return 1
   validate_hermes_runtime_env_secret_boundary || return 1
   refresh_hermes_provider_placeholders compat || return 1
@@ -453,6 +445,39 @@ prepare_hermes_root_runtime_dir() {
   return 0
 }
 
+prepare_hermes_gateway_lazy_install_target() {
+  local target_metadata runtime_device target_device
+  prepare_hermes_root_runtime_dir || return 1
+  if [ -L "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" ]; then
+    echo "[SECURITY] Refusing Hermes startup because the gateway lazy-install target is a symbolic link" >&2
+    return 1
+  fi
+  if [ ! -e "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" ]; then
+    install -d -o gateway -g gateway -m 0700 -- "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" || {
+      echo "[SECURITY] Refusing Hermes startup because the gateway lazy-install target could not be created safely" >&2
+      return 1
+    }
+  fi
+  if [ ! -d "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" ] || [ -L "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" ]; then
+    echo "[SECURITY] Refusing Hermes startup because the gateway lazy-install target is not a real directory" >&2
+    return 1
+  fi
+  runtime_device="$(stat -c '%d' -- "$HERMES_RUNTIME_DIR" 2>/dev/null)" || runtime_device=""
+  target_device="$(stat -c '%d' -- "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" 2>/dev/null)" || target_device=""
+  if [ -z "$runtime_device" ] || [ "$target_device" != "$runtime_device" ]; then
+    echo "[SECURITY] Refusing Hermes startup because the gateway lazy-install target is outside the managed runtime filesystem" >&2
+    return 1
+  fi
+  chown gateway:gateway -- "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" 2>/dev/null || true
+  chmod 0700 -- "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" 2>/dev/null || true
+  target_metadata="$(stat -c '%U:%G:%a' -- "$HERMES_GATEWAY_LAZY_INSTALL_TARGET" 2>/dev/null)" || target_metadata=""
+  if [ "$target_metadata" != "gateway:gateway:700" ]; then
+    echo "[SECURITY] Refusing Hermes startup because the gateway lazy-install target must be gateway-owned with mode 0700" >&2
+    return 1
+  fi
+  return 0
+}
+
 publish_hermes_root_runtime_marker() {
   local marker_name="$1"
   local marker_value="$2"
@@ -484,7 +509,6 @@ prepare_hermes_root_runtime() {
   prepare_hermes_lazy_dependencies || return 1
   ensure_hermes_config_root_mode || return 1
   ensure_hermes_runtime_api_server_key both || return 1
-  apply_shields_up_runtime_env || return 1
   validate_hermes_env_secret_boundary || return 1
   validate_hermes_runtime_env_secret_boundary || return 1
   refresh_hermes_provider_placeholders both || return 1
@@ -495,6 +519,9 @@ prepare_hermes_root_runtime() {
 launch_hermes_gateway_current_user() {
   cleanup_stale_hermes_gateway_runtime || return 1
   HERMES_HOME="${HERMES_DIR}" \
+    HOME=/sandbox \
+    HERMES_LAZY_INSTALL_TARGET="${HERMES_SANDBOX_LAZY_INSTALL_TARGET}" \
+    HERMES_BUNDLED_PLUGINS="${HERMES_MANAGED_BUNDLED_PLUGINS}" \
     nohup "$HERMES" gateway run >>/tmp/gateway.log 2>&1 &
   GATEWAY_PID=$!
   if ! hermes_capture_tracked_role gateway "$GATEWAY_PID" current "$INTERNAL_PORT"; then
@@ -682,7 +709,6 @@ recover_hermes_gateway_current_user() {
             return 1
           fi
           refresh_hermes_supervised_child_pids
-          nemoclaw_runtime_state_mutation_checkpoint || return 1
           return 0
         fi
         echo "[gateway] Hermes auxiliary repair failed; retrying while the exact gateway remains healthy" >&2
@@ -775,7 +801,6 @@ bootstrap_hermes_gateway_current_user() {
       return 1
     fi
     refresh_hermes_supervised_child_pids
-    nemoclaw_runtime_state_mutation_checkpoint || return 1
     return 0
   fi
 
@@ -791,5 +816,4 @@ bootstrap_hermes_gateway_current_user() {
   sleep 2 || true
   recover_hermes_gateway_current_user || return 1
   refresh_hermes_supervised_child_pids
-  nemoclaw_runtime_state_mutation_checkpoint || return 1
 }

@@ -30,6 +30,7 @@ import { resolveLegacyBackupRecoveryOwner, resolveSandboxAgent } from "../onboar
 import * as sandboxVersion from "../sandbox/version";
 import { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } from "../sandbox-name-contract";
 import * as registry from "../state/registry";
+import { enforceRemovedImmutabilityMigrationBoundary } from "../state/migrations/removed-immutability";
 import * as sandboxState from "../state/sandbox";
 
 type RebuildModule = typeof import("./sandbox/rebuild");
@@ -561,6 +562,7 @@ export async function upgradeSandboxes(
       }
     }
     try {
+      enforceRemovedImmutabilityMigrationBoundary(sandbox.name, { allowStateRecord: true });
       await upgradeSandboxesDependencies.rebuildSandbox(sandbox.name, ["--yes"], {
         throwOnError: true,
         recoveryManifest: manifest ?? undefined,

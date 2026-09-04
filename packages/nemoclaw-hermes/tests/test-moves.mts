@@ -37,7 +37,6 @@ export const hermesPackageTestMoves = createTestMoveRecords({
   "test/hermes-openshell-runtime-env-boundary.test.ts": "tests/runtime/openshell-env.test.ts",
   "test/hermes-plugin-handlers.test.ts": "tests/runtime/plugin-handlers.test.ts",
   "test/hermes-profile-policy-defaults.test.ts": "tests/config/policy-defaults.test.ts",
-  "test/hermes-restart-config-seal-hostile-input.test.ts": "tests/runtime/seal-input.test.ts",
   "test/hermes-restart-config-seal-recovery.test.ts": "tests/runtime/seal-recovery.test.ts",
   "test/hermes-restart-config-seal-transition.test.ts": "tests/runtime/seal-transition.test.ts",
   "test/hermes-restart-config-seal-write-lock.test.ts": "tests/runtime/config-write.test.ts",
@@ -50,10 +49,6 @@ export const hermesPackageTestMoves = createTestMoveRecords({
   "test/hermes-wrapper-provider-merge.test.ts": "tests/runtime/provider-merge.test.ts",
   "test/package-contract/hermes-standalone-package.test.ts": "tests/integration/standalone.test.ts",
   "test/repro-2376.test.ts": "tests/image/shell-profile.test.ts",
-  "test/runtime-state-mutation-control.test.ts": "tests/runtime/state-control.test.ts",
-  "test/state/runtime-state-mutation-release-ack.test.ts": "tests/runtime/release-ack.test.ts",
-  "test/runtime-state-mutation-hermes-publisher.test.ts": "tests/runtime/state-publisher.test.ts",
-  "test/runtime-state-mutation-startup-gate.test.ts": "tests/runtime/startup-gate.test.ts",
   "test/seed-hermes-dashboard-config.test.ts": "tests/config/dashboard-seed.test.ts",
 });
 
@@ -67,7 +62,6 @@ export const hermesNemoclawTestMoves = createTestMoveRecords({
   "test/agents/hermes/hermes-kanban-snapshot.test.ts": "tests/integration/kanban-snapshot.test.ts",
   "test/agents/hermes/hermes-mcp-credential-revision.test.ts":
     "tests/runtime/credential-revision.test.ts",
-  "test/agents/hermes/hermes-mcp-shields-order.test.ts": "tests/integration/mcp-shields.test.ts",
   "test/agents/hermes/hermes-mcp-startup-probe.test.ts": "tests/integration/mcp-probe.test.ts",
   "test/agents/hermes/hermes-provider-foundation.test.ts":
     "tests/integration/provider-onboarding.test.ts",
@@ -103,7 +97,6 @@ export const hermesNemoclawTestMoves = createTestMoveRecords({
   "test/hermes-mcp-reload-convergence.test.ts": "tests/runtime/reload-convergence.test.ts",
   "test/hermes-mcp-rollback-pending.test.ts": "tests/runtime/rollback-pending.test.ts",
   "test/hermes-runtime-api-key.test.ts": "tests/runtime/api-key.test.ts",
-  "test/hermes-runtime-config-guard-topology.test.ts": "tests/runtime/guard-topology.test.ts",
   "test/hermes-runtime-config-guard.test.ts": "tests/runtime/config-guard.test.ts",
   "test/hermes-start-config-integrity.test.ts": "tests/runtime/start-integrity.test.ts",
   "test/hermes-start-path-shadow.test.ts": "tests/runtime/path-shadow.test.ts",

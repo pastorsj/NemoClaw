@@ -2,26 +2,6 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 # Track process identity and operate the dashboard and loopback relays.
-# shellcheck disable=SC2034,SC2153 # Globals are shared with the sourced workflow modules.
-
-# ── socat forwarders ─────────────────────────────────────────────
-# Hermes services bind to 127.0.0.1 for safety.
-# OpenShell needs the port accessible on 0.0.0.0 for port forwarding.
-# socat bridges 0.0.0.0:<public> to 127.0.0.1:<internal>.
-SOCAT_PID=""
-DASHBOARD_SOCAT_PID=""
-_HERMES_PROC_ROOT="/proc"
-# OpenShell owns container PID 1 and starts this script as the sandbox user in
-# its managed topology. Bind every child identity to this immutable supervisor
-# process rather than assuming the script itself is PID 1. Direct-container
-# root entrypoints still capture 1 here.
-readonly HERMES_STARTUP_SUPERVISOR_PID="$$"
-GATEWAY_PID_START_IDENTITY=""
-DASHBOARD_PID_START_IDENTITY=""
-SOCAT_PID_START_IDENTITY=""
-DASHBOARD_SOCAT_PID_START_IDENTITY=""
-GATEWAY_LOG_TAIL_PID_START_IDENTITY=""
-DASHBOARD_LOG_TAIL_PID_START_IDENTITY=""
 
 hermes_role_identity_value() {
   case "$1" in
@@ -273,6 +253,8 @@ start_socat_forwarder() {
     gateway) owner_role=gateway ;;
     sandbox) owner_role=dashboard ;;
     current)
+      # INTERNAL_PORT is defined by start.sh before this sourced module runs.
+      # shellcheck disable=SC2153
       if [ "$internal_port" = "$INTERNAL_PORT" ]; then
         owner_role=gateway
       elif [ "$internal_port" = "$DASHBOARD_INTERNAL_PORT" ]; then
@@ -555,3 +537,81 @@ restore_hermes_config_permissions_after_dashboard_start() {
     sleep 1
   done
 }
+
+# ── Messaging egress ─────────────────────────────────────────────
+# Hermes sends messaging traffic directly through the OpenShell L7 proxy.
+# OpenShell owns credential alias/body/WebSocket rewrite at the egress
+# boundary; NemoClaw must not start a local decode proxy, facade, or
+# placeholder-normalizing preload.
+
+# cleanup_on_signal is provided by sandbox-init.sh. It reads
+# SANDBOX_CHILD_PIDS (array of all PIDs) and SANDBOX_WAIT_PID (the
+# primary process whose exit status is returned).
+# Each code path below sets these before registering the trap.
+
+# ── Proxy environment ────────────────────────────────────────────
+PROXY_HOST="${NEMOCLAW_PROXY_HOST:-10.200.0.1}"
+PROXY_PORT="${NEMOCLAW_PROXY_PORT:-3128}"
+_PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
+_NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"
+export HTTP_PROXY="$_PROXY_URL"
+export HTTPS_PROXY="$_PROXY_URL"
+export NO_PROXY="$_NO_PROXY_VAL"
+export http_proxy="$_PROXY_URL"
+export https_proxy="$_PROXY_URL"
+export no_proxy="$_NO_PROXY_VAL"
+
+# Corporate proxy CA merge (NemoClaw#6210).
+# OpenShell injects SSL_CERT_FILE for its own L7 proxy CA at runtime. When a
+# separate corporate MITM proxy sits in front of the host and re-signs external
+# TLS with a different root, that root is absent from the OpenShell bundle, so
+# external endpoints (e.g. api.telegram.org) fail verification even when policy
+# allows the connection. If onboard baked an operator-supplied corporate CA
+# into the image, append it to the OpenShell bundle — never replace it (the
+# #1828 OpenShell CA behavior stays intact) — and repoint SSL_CERT_FILE at the
+# merged bundle before the CURL/REQUESTS/GIT derivation below picks it up.
+_NEMOCLAW_CORPORATE_CA_FILE="/usr/local/share/nemoclaw/corporate-ca.pem"
+_NEMOCLAW_CORPORATE_CA_HELPER="/usr/local/lib/nemoclaw/corporate-ca-runtime.sh"
+if [ ! -f "$_NEMOCLAW_CORPORATE_CA_HELPER" ]; then
+  _HERMES_START_SOURCE="${BASH_SOURCE[0]}"
+  _HERMES_START_DIR="${_HERMES_START_SOURCE%/*}"
+  if [ "$_HERMES_START_DIR" = "$_HERMES_START_SOURCE" ]; then
+    _HERMES_START_DIR="."
+  fi
+  _NEMOCLAW_CORPORATE_CA_HELPER="$(cd "$_HERMES_START_DIR" && pwd)/../../scripts/lib/corporate-ca-runtime.sh"
+  unset _HERMES_START_SOURCE _HERMES_START_DIR
+fi
+if [ ! -f "$_NEMOCLAW_CORPORATE_CA_HELPER" ] || [ -L "$_NEMOCLAW_CORPORATE_CA_HELPER" ]; then
+  echo "[nemoclaw] required corporate CA runtime helper is missing or unsafe" >&2
+  exit 1
+fi
+# shellcheck source=scripts/lib/corporate-ca-runtime.sh
+source "$_NEMOCLAW_CORPORATE_CA_HELPER"
+if [ "${NEMOCLAW_MANAGED_STARTUP_APPLIED:-0}" != "1" ]; then
+  merge_corporate_proxy_ca
+fi
+unset _NEMOCLAW_CORPORATE_CA_HELPER
+# OpenShell injects SSL_CERT_FILE/CURL_CA_BUNDLE for its L7 proxy CA. Persist
+# them into connect-session shells so Python Slack probes and Hermes tools trust
+# the same proxy CA that the entrypoint received at startup.
+if [ -n "${SSL_CERT_FILE:-}" ] && [ -f "${SSL_CERT_FILE}" ]; then
+  export CURL_CA_BUNDLE="${CURL_CA_BUNDLE:-$SSL_CERT_FILE}"
+  export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-$SSL_CERT_FILE}"
+  export GIT_SSL_CAINFO="${GIT_SSL_CAINFO:-$SSL_CERT_FILE}"
+fi
+
+# Resolve sandbox home dir early — used by proxy-env writing before the
+# non-root/root branch below.
+if [ "$(id -u)" -eq 0 ]; then
+  _SANDBOX_HOME=$(getent passwd sandbox 2>/dev/null | cut -d: -f6)
+  _SANDBOX_HOME="${_SANDBOX_HOME:-/sandbox}"
+else
+  _SANDBOX_HOME="${HOME:-/sandbox}"
+fi
+
+# SECURITY FIX: Write proxy config to a standalone file via
+# emit_sandbox_sourced_file() (444, root-owned when running as root) instead of
+# appending inline to .bashrc/.profile. The old approach rewrote files under
+# /sandbox during startup, which fails in non-root entrypoint postures.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/2277
+_PROXY_ENV_FILE="/tmp/nemoclaw-proxy-env.sh"

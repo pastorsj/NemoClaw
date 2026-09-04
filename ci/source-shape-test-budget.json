@@ -113,6 +113,11 @@
     },
     {
       "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "keeps cross-identity ledger probes consolidated below the Docker layer-depth ceiling",
+      "category": "compatibility"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
       "test": "uses a checked-in probe runner instead of builder-dependent heredocs [case %#] (#7981)",
       "category": "security"
     },
@@ -143,7 +148,7 @@
     },
     {
       "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "keeps the sandbox lazy-installer probe offline",
+      "test": "keeps the gateway installer offline and isolated from sandbox packages",
       "category": "security"
     },
     {
@@ -159,11 +164,6 @@
     {
       "file": "packages/nemoclaw-hermes/tests/runtime/discord-recovery.test.ts",
       "test": "build-probes Discord gateway creation, sandbox backup and replacement, then reopen",
-      "category": "security"
-    },
-    {
-      "file": "packages/nemoclaw-hermes/tests/runtime/state-publisher.test.ts",
-      "test": "publishes one exact image capability and checks the durable root gate before startup code",
       "category": "security"
     },
     {

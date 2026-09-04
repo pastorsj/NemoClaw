@@ -15,13 +15,10 @@
 # kill it or restart it with a tampered config. Config hash is verified at
 # startup to detect tampering.
 
-# shellcheck disable=SC2034 # Sourced Hermes runtime modules consume these globals.
-
 set -euo pipefail
 
 # SECURITY: Lock down PATH before resolving or sourcing root startup helpers.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-NEMOCLAW_RUNTIME_STATE_MUTATION_RETRY_ARGV=("$@")
 
 # Runtime modules hold the package-owned implementation. This file keeps their
 # execution order visible and owns every startup effect below the definitions.
@@ -41,21 +38,6 @@ fi
 readonly _HERMES_STARTUP_MODULE_DIR
 unset _HERMES_START_SOURCE _HERMES_START_DIR
 
-# 1. Authenticate startup against any active runtime-state mutation.
-# hermes-startup-module state-gate begin
-_HERMES_STATE_GATE_MODULE="${_HERMES_STARTUP_MODULE_DIR}/state-gate.sh"
-if [ ! -f "$_HERMES_STATE_GATE_MODULE" ] || [ -L "$_HERMES_STATE_GATE_MODULE" ]; then
-  printf '%s\n' '[SECURITY] Required Hermes state-gate module is missing or unsafe.' >&2
-  exit 1
-fi
-# shellcheck source=packages/nemoclaw-hermes/runtime/state-gate.sh
-source "$_HERMES_STATE_GATE_MODULE"
-unset _HERMES_STATE_GATE_MODULE
-# hermes-startup-module state-gate end
-
-# Normalize the managed OCI wrapper before any other package startup effect.
-# Keep this in the visible entrypoint because its argument rewrite applies to
-# every later module and command dispatch.
 # managed-entrypoint-env-wrapper begin
 _NEMOCLAW_ENTRYPOINT_ENV_WRAPPER="/usr/local/lib/nemoclaw/entrypoint-env-wrapper.sh"
 if [ ! -f "$_NEMOCLAW_ENTRYPOINT_ENV_WRAPPER" ]; then
@@ -163,7 +145,6 @@ exec > >(tee -a "$_START_LOG") 2> >(tee -a "$_START_LOG" >&2)
 drop_capabilities /usr/local/bin/nemoclaw-start "$@"
 
 NEMOCLAW_CMD=("$@")
-NEMOCLAW_RUNTIME_STATE_MUTATION_RETRY_ARGV=("$@")
 
 _chat_ui_url_dashboard_settings() {
   [ -n "${CHAT_UI_URL:-}" ] || return 2
@@ -305,11 +286,12 @@ HERMES="$(command -v hermes)" # Resolve once, use absolute path everywhere
 # root is mutable by the sandbox owner and readable by the gateway group. The
 # root directory is group-writable with sticky-bit protection so Hermes v0.14 can
 # create new top-level state while the gateway user cannot remove config files.
-# Immutability is opt-in via `shields up`.
 HERMES_DIR="/sandbox/.hermes"
-if [ -z "${HERMES_LAZY_INSTALL_TARGET+x}" ]; then
-  export HERMES_LAZY_INSTALL_TARGET="/sandbox/.hermes/lazy-packages"
-fi
+readonly HERMES_SANDBOX_LAZY_INSTALL_TARGET="/sandbox/.hermes/lazy-packages"
+readonly HERMES_GATEWAY_LAZY_INSTALL_TARGET="/run/nemoclaw/hermes-gateway-lazy-packages"
+readonly HERMES_MANAGED_BUNDLED_PLUGINS="/opt/hermes/plugins"
+export HERMES_LAZY_INSTALL_TARGET="$HERMES_SANDBOX_LAZY_INSTALL_TARGET"
+export HERMES_BUNDLED_PLUGINS="$HERMES_MANAGED_BUNDLED_PLUGINS"
 HERMES_HASH_FILE="/etc/nemoclaw/hermes.config-hash"
 
 # Resolve the standalone secret-boundary validator. The container ships it at
@@ -351,7 +333,6 @@ HERMES_CONFIG_MUTATION_LOCK="/run/nemoclaw/hermes-config-mutation.lock"
 HERMES_RESTART_ORPHAN_MARKER="/sandbox/.hermes/.nemoclaw-hermes-restart-seal"
 HERMES_STARTUP_READY_FILE="/run/nemoclaw/hermes-startup-ready"
 HERMES_RESTART_SEALED=0
-HERMES_RESTART_ORIGINAL_LOCKED=0
 HERMES_RESTART_UNSEALING=0
 HERMES_RESTART_SIGNAL_PENDING=0
 HERMES_MCP_RECONCILE_PENDING=0
@@ -377,7 +358,7 @@ fi
 # The list scans first-wins ordered most-preferred first (venv > local >
 # system) so the venv python3 is selected when present and falls back to
 # system python3 when the sandbox image has no venv yet. The same priority
-# is mirrored in `packages/nemoclaw-hermes/runtime/cli-wrapper.py:_TRUSTED_PYTHON3` and
+# is mirrored in `packages/nemoclaw-hermes/hermes-wrapper.py:_TRUSTED_PYTHON3` and
 # `src/lib/agent/hermes-recovery-boundary.ts:buildTrustedPython3Picker` so
 # all three entry points pick the same interpreter when several are present.
 # The deprecated `/opt/hermes/.venv/bin/python` symlink path is intentionally
@@ -393,7 +374,6 @@ for _candidate in /opt/hermes/.venv/bin/python3 /usr/local/bin/python3 /usr/bin/
 done
 unset _candidate
 
-# 2. Define configuration, log, and durable-state preparation.
 # hermes-startup-module config-setup begin
 _HERMES_CONFIG_SETUP_MODULE="${_HERMES_STARTUP_MODULE_DIR}/config-setup.sh"
 if [ ! -f "$_HERMES_CONFIG_SETUP_MODULE" ] || [ -L "$_HERMES_CONFIG_SETUP_MODULE" ]; then
@@ -405,7 +385,6 @@ source "$_HERMES_CONFIG_SETUP_MODULE"
 unset _HERMES_CONFIG_SETUP_MODULE
 # hermes-startup-module config-setup end
 
-# 3. Define process identity, dashboard, and loopback-relay control.
 # hermes-startup-module service-control begin
 _HERMES_SERVICE_CONTROL_MODULE="${_HERMES_STARTUP_MODULE_DIR}/service-control.sh"
 if [ ! -f "$_HERMES_SERVICE_CONTROL_MODULE" ] || [ -L "$_HERMES_SERVICE_CONTROL_MODULE" ]; then
@@ -417,83 +396,6 @@ source "$_HERMES_SERVICE_CONTROL_MODULE"
 unset _HERMES_SERVICE_CONTROL_MODULE
 # hermes-startup-module service-control end
 
-# ── Messaging egress ─────────────────────────────────────────────
-# Hermes sends messaging traffic directly through the OpenShell L7 proxy.
-# OpenShell owns credential alias/body/WebSocket rewrite at the egress
-# boundary; NemoClaw must not start a local decode proxy, facade, or
-# placeholder-normalizing preload.
-
-# cleanup_on_signal is provided by sandbox-init.sh. It reads
-# SANDBOX_CHILD_PIDS (array of all PIDs) and SANDBOX_WAIT_PID (the
-# primary process whose exit status is returned).
-# Each code path below sets these before registering the trap.
-
-# ── Proxy environment ────────────────────────────────────────────
-PROXY_HOST="${NEMOCLAW_PROXY_HOST:-10.200.0.1}"
-PROXY_PORT="${NEMOCLAW_PROXY_PORT:-3128}"
-_PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
-_NO_PROXY_VAL="localhost,127.0.0.1,::1,${PROXY_HOST}"
-export HTTP_PROXY="$_PROXY_URL"
-export HTTPS_PROXY="$_PROXY_URL"
-export NO_PROXY="$_NO_PROXY_VAL"
-export http_proxy="$_PROXY_URL"
-export https_proxy="$_PROXY_URL"
-export no_proxy="$_NO_PROXY_VAL"
-
-# Corporate proxy CA merge (NemoClaw#6210).
-# OpenShell injects SSL_CERT_FILE for its own L7 proxy CA at runtime. When a
-# separate corporate MITM proxy sits in front of the host and re-signs external
-# TLS with a different root, that root is absent from the OpenShell bundle, so
-# external endpoints (e.g. api.telegram.org) fail verification even when policy
-# allows the connection. If onboard baked an operator-supplied corporate CA
-# into the image, append it to the OpenShell bundle — never replace it (the
-# #1828 OpenShell CA behavior stays intact) — and repoint SSL_CERT_FILE at the
-# merged bundle before the CURL/REQUESTS/GIT derivation below picks it up.
-_NEMOCLAW_CORPORATE_CA_FILE="/usr/local/share/nemoclaw/corporate-ca.pem"
-_NEMOCLAW_CORPORATE_CA_HELPER="/usr/local/lib/nemoclaw/corporate-ca-runtime.sh"
-if [ ! -f "$_NEMOCLAW_CORPORATE_CA_HELPER" ]; then
-  _HERMES_START_SOURCE="${BASH_SOURCE[0]}"
-  _HERMES_START_DIR="${_HERMES_START_SOURCE%/*}"
-  if [ "$_HERMES_START_DIR" = "$_HERMES_START_SOURCE" ]; then
-    _HERMES_START_DIR="."
-  fi
-  _NEMOCLAW_CORPORATE_CA_HELPER="$(cd "$_HERMES_START_DIR" && pwd)/../../scripts/lib/corporate-ca-runtime.sh"
-  unset _HERMES_START_SOURCE _HERMES_START_DIR
-fi
-if [ ! -f "$_NEMOCLAW_CORPORATE_CA_HELPER" ] || [ -L "$_NEMOCLAW_CORPORATE_CA_HELPER" ]; then
-  echo "[nemoclaw] required corporate CA runtime helper is missing or unsafe" >&2
-  exit 1
-fi
-# shellcheck source=scripts/lib/corporate-ca-runtime.sh
-source "$_NEMOCLAW_CORPORATE_CA_HELPER"
-if [ "${NEMOCLAW_MANAGED_STARTUP_APPLIED:-0}" != "1" ]; then
-  merge_corporate_proxy_ca
-fi
-unset _NEMOCLAW_CORPORATE_CA_HELPER
-# OpenShell injects SSL_CERT_FILE/CURL_CA_BUNDLE for its L7 proxy CA. Persist
-# them into connect-session shells so Python Slack probes and Hermes tools trust
-# the same proxy CA that the entrypoint received at startup.
-if [ -n "${SSL_CERT_FILE:-}" ] && [ -f "${SSL_CERT_FILE}" ]; then
-  export CURL_CA_BUNDLE="${CURL_CA_BUNDLE:-$SSL_CERT_FILE}"
-  export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-$SSL_CERT_FILE}"
-  export GIT_SSL_CAINFO="${GIT_SSL_CAINFO:-$SSL_CERT_FILE}"
-fi
-
-# Resolve sandbox home dir early — used by proxy-env writing before the
-# non-root/root branch below.
-if [ "$(id -u)" -eq 0 ]; then
-  _SANDBOX_HOME=$(getent passwd sandbox 2>/dev/null | cut -d: -f6)
-  _SANDBOX_HOME="${_SANDBOX_HOME:-/sandbox}"
-else
-  _SANDBOX_HOME="${HOME:-/sandbox}"
-fi
-
-# SECURITY FIX: Write proxy config to a standalone file via
-# emit_sandbox_sourced_file() (444, root-owned when running as root) instead of
-# appending inline to .bashrc/.profile. The old approach rewrote files under
-# /sandbox during startup, which fails in non-root entrypoint postures.
-# Ref: https://github.com/NVIDIA/NemoClaw/issues/2277
-_PROXY_ENV_FILE="/tmp/nemoclaw-proxy-env.sh"
 write_runtime_shell_env() {
   {
     cat <<PROXYEOF
@@ -505,7 +407,8 @@ export http_proxy="$_PROXY_URL"
 export https_proxy="$_PROXY_URL"
 export no_proxy="$_NO_PROXY_VAL"
 export HERMES_HOME="${HERMES_DIR}"
-export HERMES_LAZY_INSTALL_TARGET="/sandbox/.hermes/lazy-packages"
+export HERMES_LAZY_INSTALL_TARGET="${HERMES_SANDBOX_LAZY_INSTALL_TARGET}"
+export HERMES_BUNDLED_PLUGINS="${HERMES_MANAGED_BUNDLED_PLUGINS}"
 export HERMES_FABRIC_API_KEY="nemoclaw-managed-inference"
 export NEMOCLAW_HERMES_ADAPTER_PYTHON="/opt/hermes/.venv/bin/python"
 PROXYEOF
@@ -546,7 +449,7 @@ write_runtime_shell_env
 # so startup never needs to rewrite files directly under /sandbox after caps drop.
 lock_rc_files "$_SANDBOX_HOME"
 
-# 4. Define migration, integrity, and restart-sealing behavior.
+# ── Legacy layout migration ──────────────────────────────────────
 # hermes-startup-module runtime-integrity begin
 _HERMES_RUNTIME_INTEGRITY_MODULE="${_HERMES_STARTUP_MODULE_DIR}/runtime-integrity.sh"
 if [ ! -f "$_HERMES_RUNTIME_INTEGRITY_MODULE" ] || [ -L "$_HERMES_RUNTIME_INTEGRITY_MODULE" ]; then
@@ -558,7 +461,6 @@ source "$_HERMES_RUNTIME_INTEGRITY_MODULE"
 unset _HERMES_RUNTIME_INTEGRITY_MODULE
 # hermes-startup-module runtime-integrity end
 
-# 5. Define gateway launch, recovery, and supervision behavior.
 # hermes-startup-module gateway-control begin
 _HERMES_GATEWAY_CONTROL_MODULE="${_HERMES_STARTUP_MODULE_DIR}/gateway-control.sh"
 if [ ! -f "$_HERMES_GATEWAY_CONTROL_MODULE" ] || [ -L "$_HERMES_GATEWAY_CONTROL_MODULE" ]; then
@@ -583,15 +485,16 @@ if [ "$(id -u)" -eq 0 ]; then
     echo "[SECURITY] HERMES_RESTART_SEAL_ORPHANED: restart recovery metadata was lost; restore from a trusted backup and recreate the sandbox" >&2
     exit 1
   fi
-  if hermes_config_root_is_locked && ! hermes_locked_parent_is_protected; then
-    echo "[SECURITY] HERMES_LOCKED_PARENT_UNPROTECTED: /sandbox must be root:sandbox 1775 while Hermes shields are up; restore from a trusted backup and recreate the sandbox (shields up cannot run while PID 1 refuses startup)" >&2
-    exit 1
-  fi
 elif [ -e "$HERMES_CONFIG_MUTATION_LOCK" ] \
   || [ -e "$HERMES_RESTART_SEAL_STATE" ] \
   || [ -e "$HERMES_RESTART_ORPHAN_MARKER" ] \
   || hermes_restart_seal_orphaned; then
   echo "[SECURITY] HERMES_RESTART_SEAL_ORPHANED: non-root startup cannot safely recover an interrupted root config transaction; restore from a trusted backup and recreate the sandbox" >&2
+  exit 1
+fi
+
+if [ "$(stat -c '%U' "$HERMES_DIR" 2>/dev/null || stat -f '%Su' "$HERMES_DIR" 2>/dev/null || echo unknown)" = "root" ]; then
+  echo "[SECURITY] Existing Hermes config is not in the supported mutable posture. Rebuild or recreate the sandbox." >&2
   exit 1
 fi
 
@@ -630,15 +533,16 @@ if [ "$(id -u)" -ne 0 ]; then
   bootstrap_hermes_gateway_current_user || exit 1
   print_dashboard_urls
 
-  if ! supervise_hermes_gateway_current_user; then
-    nemoclaw_runtime_state_mutation_hold_supervisor_failure || exit 1
-    exit 1
-  fi
+  supervise_hermes_gateway_current_user || exit 1
 fi
 
 # ── Root path (full privilege separation via setpriv) ──────────
 
 export HERMES_HOME="${HERMES_DIR}"
+publish_hermes_root_runtime_marker hermes-bundled-plugins-only 1 || exit 1
+if [ -n "$(find -P "$HERMES_DIR/plugins" -mindepth 1 -type d -print -quit 2>/dev/null)" ]; then
+  echo "[gateway] WARNING: root-separated Hermes ignores sandbox-owned user plugins; rebuild required plugins into /opt/hermes/plugins" >&2
+fi
 prepare_hermes_root_runtime
 
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
@@ -705,7 +609,6 @@ if ! "$_HERMES_PYTHON" -I "$_HERMES_RUNTIME_CONFIG_GUARD" publish-startup-ready 
   echo "[gateway-control] failed to publish Hermes startup readiness" >&2
   exit 1
 fi
-nemoclaw_runtime_state_mutation_checkpoint || exit 1
 print_dashboard_urls
 
 # PID 1 remains alive even when Hermes stops its gateway. Host recovery uses

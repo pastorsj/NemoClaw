@@ -274,10 +274,6 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "scripts", "managed-gateway-control.py"),
     path.join(stagedScriptsDir, "managed-gateway-control.py"),
   );
-  fs.copyFileSync(
-    path.join(rootDir, "scripts", "state-dir-guard.py"),
-    path.join(stagedScriptsDir, "state-dir-guard.py"),
-  );
   // Shared sandbox initialisation library sourced by the entrypoint (#2277)
   fs.mkdirSync(path.join(stagedScriptsDir, "lib"), { recursive: true });
   fs.copyFileSync(

@@ -34,7 +34,7 @@ Nested production projects use `npm-shrinkwrap.json`. npm publishes that standar
 | `compat/` | Holds upstream-version patches, legacy cleanup, and reviewed npm remediation. |
 | `plugin/` | Implements the NemoClaw commands that OpenClaw loads through its plugin mechanism. |
 | `checks/` | Validates build inputs, OpenClaw versions, Tool Search behavior, and the WeChat dependency graph. |
-| `policies/` | Holds OpenClaw policy presets and the policies used for Shields down. |
+| `policies/` | Holds OpenClaw policy presets. |
 | `model-specific-setup/` | Holds OpenClaw model compatibility manifests at the repository-defined path. |
 | `openclaw-plugins/` | Holds executable OpenClaw compatibility plugins at the repository-defined path. |
 

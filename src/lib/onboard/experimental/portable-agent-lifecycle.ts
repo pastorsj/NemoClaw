@@ -5,10 +5,8 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
-import {
-  isMcpLifecycleLockHeld,
-  withMcpLifecycleLock,
-} from "../../state/mcp-lifecycle-lock-acquisition";
+import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock-acquisition";
+import { isMcpLifecycleLockHeld } from "../../state/mcp-lifecycle-lock/inspection";
 import type { SandboxEntry } from "../../state/registry/types";
 import {
   assertHermesPortableSandboxLifecycleAuthority,
@@ -21,6 +19,7 @@ import {
   type HermesPortableLifecycleDeps,
 } from "./hermes-portable-lifecycle";
 import {
+  hasHermesPortableReceiptCandidate,
   inspectPortableAgentReceiptAuthority,
   inspectPortableAgentReceiptAuthorityForClassification,
   inspectPortableAgentReceiptAuthorityForRequalification,
@@ -85,12 +84,6 @@ const RAW_SANDBOX_NAME_COMMANDS = new Set([
 
 const MULTI_SANDBOX_LIFECYCLE_COMMANDS = new Set(["sandbox:snapshot:restore"]);
 
-const SANDBOX_COMMANDS_WITH_INTERNAL_LIFECYCLE_FENCE = new Set([
-  "sandbox:shields:down",
-  "sandbox:shields:status",
-  "sandbox:shields:up",
-]);
-
 const HERMES_PORTABLE_UNSUPPORTED_HOST_EFFECTS = new Set([
   "debug",
   "inference:get",
@@ -108,7 +101,6 @@ export type HermesPortableCommandPolicy = {
   readonly helpRequested: boolean;
   readonly hostFence: "read" | "deny" | null;
   readonly multiSandboxLifecycle: boolean;
-  readonly ownsLifecycleFence: boolean;
   readonly rawSandboxName: boolean;
 };
 
@@ -127,7 +119,6 @@ export function classifyHermesPortableCommand(
         ? "deny"
         : null,
     multiSandboxLifecycle: MULTI_SANDBOX_LIFECYCLE_COMMANDS.has(commandId),
-    ownsLifecycleFence: SANDBOX_COMMANDS_WITH_INTERNAL_LIFECYCLE_FENCE.has(commandId),
     rawSandboxName: RAW_SANDBOX_NAME_COMMANDS.has(commandId),
   };
 }
@@ -220,14 +211,27 @@ export function inspectPortableAgentReceiptDisposition(
   );
 }
 
-/** Classify copied Hermes authority while the probe owns its lifecycle fence. */
+/**
+ * Classify copied Hermes authority while the probe owns its lifecycle fence.
+ *
+ * A sandbox with no Hermes portable receipt directory has nothing for the
+ * requalifying reader to admit: the reader returns null on that directory's
+ * ENOENT before it consults any of its extra admission flags, so its answer is
+ * already the classifying reader's answer. Demanding its lifecycle-lock
+ * evidence therefore buys no information, and it cannot be satisfied off the
+ * default gateway: the evidence is keyed on the host-global portable receipt
+ * root while every acquisition keys on the per-gateway state root, so the held
+ * lock is invisible and a plain OpenClaw sandbox fails its probe (#10783).
+ */
 function inspectPortableAgentReceiptDispositionForRequalification(
   sandboxName: string,
   env: NodeJS.ProcessEnv = process.env,
   stateDir = defaultPortableDemoStateDir(env),
 ): PortableAgentReceiptDisposition {
   return receiptDisposition(
-    inspectPortableAgentReceiptAuthorityForRequalification(sandboxName, stateDir),
+    hasHermesPortableReceiptCandidate(sandboxName, stateDir)
+      ? inspectPortableAgentReceiptAuthorityForRequalification(sandboxName, stateDir)
+      : inspectPortableAgentReceiptAuthorityForClassification(sandboxName, stateDir),
   );
 }
 

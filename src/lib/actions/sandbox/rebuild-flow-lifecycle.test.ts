@@ -17,6 +17,9 @@ import {
 } from "../../../../test/helpers/rebuild-flow-generic-harness";
 import { installRebuildHarnessPackage } from "../../../../test/helpers/rebuild-flow-harness";
 import { makePreparedRecoveryManifest } from "./rebuild-flow-test-fixtures";
+import { enforceRemovedImmutabilityMigrationBoundary } from "../../state/migrations/removed-immutability";
+
+const enforceRemovedImmutabilityMigrationBoundaryReal = enforceRemovedImmutabilityMigrationBoundary;
 
 function expectPinnedAgentDefinition(agentName = "openclaw") {
   return expect.objectContaining({
@@ -62,6 +65,29 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expectNoSandboxDelete(harness.runOpenshellSpy);
   });
 
+  it("blocks an unsafe removed-immutability record before rebuild effects", async () => {
+    const stateDir = createHarnessTempDir("nemoclaw-rebuild-unsafe-retired-state-");
+    fs.mkdirSync(path.join(stateDir, "shields-alpha.json"));
+    const harness = createRebuildFlowHarness();
+    harness.enforceRemovedImmutabilityMigrationBoundarySpy.mockImplementation(
+      (sandboxName: string, options: { readonly allowStateRecord?: boolean } = {}) =>
+        enforceRemovedImmutabilityMigrationBoundaryReal(sandboxName, {
+          ...options,
+          stateDir,
+        }),
+    );
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).rejects.toThrow(/Blocking paths to quarantine/u);
+
+    expect(harness.backupSandboxStateSpy).not.toHaveBeenCalled();
+    expect(harness.onboardSpy).not.toHaveBeenCalled();
+    expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
+    expectNoSandboxDelete(harness.runOpenshellSpy);
+  });
+
   it("keeps the original sandbox when the workspace backup is incomplete (#10639)", async () => {
     const harness = createRebuildFlowHarness();
     harness.backupSandboxStateSpy.mockReturnValue({
@@ -83,13 +109,13 @@ describe("rebuildSandbox flow: lifecycle", () => {
     ).rejects.toThrow("Failed to back up sandbox state");
 
     expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
-    expect(harness.relockSpy).toHaveBeenCalledWith("alpha", expect.any(Object), true, "nemoclaw");
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
     expect(harness.onboardSpy).not.toHaveBeenCalled();
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
     expectNoSandboxDelete(harness.runOpenshellSpy);
   });
 
-  it("backs up once, recreates with the captured OpenShell policy, restores, and relocks on a successful OpenClaw rebuild", async ({
+  it("backs up once, recreates with the captured OpenShell policy, and restores a mutable OpenClaw sandbox", async ({
     onTestFinished,
   }) => {
     const restoreEnv = snapshotEnv(["NEMOCLAW_RECREATE_WITHOUT_BACKUP"]);
@@ -132,8 +158,14 @@ describe("rebuildSandbox flow: lifecycle", () => {
         recreatedPolicy = fs.readFileSync(rebuildPolicySourcePath, "utf8");
       },
     });
+    harness.enforceRemovedImmutabilityMigrationBoundarySpy.mockReturnValue({
+      stateRecord: "/tmp/shields-alpha.json",
+      recoveryArtifacts: [],
+    });
     await expect(
-      harness.rebuildSandbox("alpha", ["--yes", "--verbose"], { throwOnError: true }),
+      harness.rebuildSandbox("alpha", ["--yes", "--verbose"], {
+        throwOnError: true,
+      }),
     ).resolves.toBeUndefined();
 
     expect(harness.backupSandboxStateSpy).toHaveBeenCalledOnce();
@@ -228,11 +260,81 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expect(harness.restoreMcpBridgesAfterRebuildSpy.mock.invocationCallOrder[0]).toBeLessThan(
       harness.establishRestoredSandboxGatewayPairingSpy.mock.invocationCallOrder[0],
     );
-    expect(harness.relockSpy).toHaveBeenCalledWith("alpha", expect.any(Object), true, "nemoclaw");
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).toHaveBeenCalledWith(
+      "alpha",
+      "mutable-rebuild",
+    );
+    expect(harness.enforceRemovedImmutabilityMigrationBoundarySpy).toHaveBeenCalledWith("alpha", {
+      allowStateRecord: true,
+    });
+    expect(
+      harness.retireRemovedImmutabilityStateRecordSpy.mock.invocationCallOrder[0],
+    ).toBeGreaterThan(harness.restoreSandboxStateSpy.mock.invocationCallOrder[0]);
     expect(process.env.NEMOCLAW_SANDBOX_NAME).toBe(originalSandboxName);
     expect(harness.logSpy.mock.calls.map((call) => String(call[0])).join("\n")).toContain(
       "rebuild completed",
     );
+  });
+
+  it("retains removed immutability state when mutable config verification fails", async () => {
+    const harness = createRebuildFlowHarness({
+      sandboxEntry: {},
+      repairMutableConfigPerms: () => ({
+        applied: true,
+        verified: false,
+        errors: ["permission verification failed"],
+      }),
+    });
+    harness.enforceRemovedImmutabilityMigrationBoundarySpy.mockReturnValue({
+      stateRecord: "/tmp/shields-alpha.json",
+      recoveryArtifacts: [],
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).rejects.toThrow(/state was retained.*mutable config posture was not verified/u);
+
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
+  });
+
+  it("retires removed Shields state after a complete Pi terminal-agent rebuild", async () => {
+    const harness = createRebuildFlowHarness({ sandboxEntry: { agent: "pi" } });
+    harness.enforceRemovedImmutabilityMigrationBoundarySpy.mockReturnValue({
+      stateRecord: "/tmp/shields-alpha.json",
+      recoveryArtifacts: [],
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).resolves.toBeUndefined();
+
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).toHaveBeenCalledWith(
+      "alpha",
+      "mutable-rebuild",
+    );
+  });
+
+  it("retains removed Shields state when a Pi terminal-agent restore fails", async () => {
+    const harness = createRebuildFlowHarness({
+      sandboxEntry: { agent: "pi" },
+      restoreSandboxState: () => ({
+        success: false,
+        restoredDirs: [],
+        restoredFiles: [],
+        failedDirs: ["state"],
+        failedFiles: [],
+      }),
+    });
+    harness.enforceRemovedImmutabilityMigrationBoundarySpy.mockReturnValue({
+      stateRecord: "/tmp/shields-alpha.json",
+      recoveryArtifacts: [],
+    });
+
+    await expect(
+      harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
+    ).rejects.toThrow(/State restore remained incomplete/u);
+
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
   });
 
   it("publishes the delete-edge policy recapture without a transient source file", async () => {
@@ -278,6 +380,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expect(output).not.toContain("rebuilt successfully");
     expect(errors).toContain("Inner onboarding completed with exit code 1");
     expect(harness.restoreSandboxStateSpy).not.toHaveBeenCalled();
+    expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
 
@@ -349,11 +452,18 @@ describe("rebuildSandbox flow: lifecycle", () => {
     const probeSequence = [
       {
         event: "stale-live",
-        result: { status: 0, output: "Sandbox: alpha\nId: sbx-0d6f4c2a91\nPhase: Ready" },
+        result: {
+          status: 0,
+          output: "Sandbox: alpha\nId: sbx-0d6f4c2a91\nPhase: Ready",
+        },
       },
       {
         event: "absent",
-        result: { status: 1, output: "", stderr: "Error: sandbox alpha not found" },
+        result: {
+          status: 1,
+          output: "",
+          stderr: "Error: sandbox alpha not found",
+        },
       },
     ];
     const harness = createRebuildFlowHarness({
@@ -369,7 +479,9 @@ describe("rebuildSandbox flow: lifecycle", () => {
     });
 
     await expect(
-      harness.rebuildSandbox("alpha", ["--yes", "--verbose"], { throwOnError: true }),
+      harness.rebuildSandbox("alpha", ["--yes", "--verbose"], {
+        throwOnError: true,
+      }),
     ).resolves.toBeUndefined();
 
     // Open the journal against the live source, wait for absence, prove
@@ -500,7 +612,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
     });
   });
 
-  it("relocks as absent and keeps the journaled row when replacement creation fails (#7734)", async () => {
+  it("keeps the journaled row when replacement creation fails (#7734)", async () => {
     const harness = createRebuildFlowHarness({
       onboard: () => {
         throw new Error("recreate failed");
@@ -512,19 +624,16 @@ describe("rebuildSandbox flow: lifecycle", () => {
     ).rejects.toThrow("Recreate failed");
 
     expect(harness.removeSandboxRegistryEntryWithReceiptSpy).not.toHaveBeenCalled();
-    expect(harness.relockSpy).toHaveBeenLastCalledWith(
-      "alpha",
-      expect.any(Object),
-      false,
-      "nemoclaw",
-    );
   });
 
   it("disposes the base-image handoff when live-state preflight fails (#7144)", async () => {
     const disposeImageRef = vi.fn(() => true);
     const harness = createRebuildFlowHarness({
       sandboxInventory: { sandboxes: [] },
-      reconciledSandboxGatewayState: { state: "unknown", output: "indeterminate" },
+      reconciledSandboxGatewayState: {
+        state: "unknown",
+        output: "indeterminate",
+      },
       baseImagePreflight: {
         ok: true,
         imageRef: `nemoclaw-hermes-sandbox-base-local:rebuild-123-${"a".repeat(16)}-image-${"b".repeat(64)}`,

@@ -54,11 +54,10 @@ that exact metadata location.
 Managed startup invokes the fixed `/usr/local/lib/nemoclaw/generate-config` command. The package
 wrapper runs `config/generate-config.ts`, which writes Hermes-native configuration and
 `.hermes/fabric.json`. `start.sh` then
-loads five package-owned modules in execution order:
+loads four package-owned modules in execution order:
 
 | Module | Startup responsibility |
 | --- | --- |
-| `runtime/state-gate.sh` | Authenticates startup against an active runtime-state mutation. |
 | `runtime/config-setup.sh` | Validates ports and prepares configuration, logs, and durable state. |
 | `runtime/service-control.sh` | Tracks process identity and operates the dashboard and loopback relays. |
 | `runtime/runtime-integrity.sh` | Migrates legacy state and protects configuration across managed restarts. |
@@ -70,9 +69,9 @@ the entrypoint, put one coherent implementation responsibility in each runtime m
 moving Hermes behavior into NemoClaw core.
 
 The CLI wrapper and adapter preserve the managed Hermes command surface. The configuration guard,
-MCP transaction, cron control, and state-mutation subsystem reconcile mutable state without moving
-those protocols into NemoClaw core. Host helpers remain data- and integrity-bound entry points for
-the core operations that still need them.
+MCP transaction, and cron control reconcile mutable state without moving those protocols into
+NemoClaw core. Host helpers remain data- and integrity-bound entry points for the core operations
+that still need them.
 
 The native TUI and gateway continue to invoke Hermes directly. A plain prompt through
 `nemoclaw sandbox agent` uses the manifest's headless command and the generic `nemoclaw-fabric`
@@ -109,9 +108,7 @@ The remaining large files each hold one security or build protocol:
 | --- | --- |
 | `Dockerfile` | Assembles and attests the ordered Hermes image, including every pinned compatibility input. |
 | `runtime/config-guard.py` | Owns descriptor-pinned configuration validation, mutation, sealing, recovery, and rollback. |
-| `runtime/state/control.py` | Owns the authenticated runtime-state mutation transaction and its recovery state machine. |
 | `runtime/mcp-transaction.py` | Keeps native MCP inspection, apply, reload, verification, commit, and rollback in one transaction. |
-| `runtime/state/publisher.py` | Publishes and validates the candidate and release receipts used by the same state protocol. |
 | `portable-build-context.json` | Is a generated, mode-aware inventory consumed as one Portable build receipt. |
 
 Splitting these files before their protocols have a smaller proven boundary would separate checks

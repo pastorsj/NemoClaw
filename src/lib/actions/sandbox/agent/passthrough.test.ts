@@ -96,11 +96,6 @@ vi.mock("../../../agent/defs", () => ({
 vi.mock("../../../onboard/package/package-authority", () => ({
   resolveLifecycleEligibleSandboxAgent: resolveLifecycleEligibleSandboxAgentMock,
 }));
-// Default to no recent shields auto-restore so tests that don't inject
-// getRecentShieldsAutoRestore don't read ~/.nemoclaw/state/shields-audit.jsonl.
-vi.mock("../../../shields/audit", () => ({
-  readRecentShieldsAutoRestore: vi.fn(() => ({ kind: "none" })),
-}));
 vi.mock("../../../../../packages/nemoclaw-openclaw/plugin/src/onboard/config.js", () => ({
   loadOnboardConfig: vi.fn(() => null),
   describeOnboardEndpoint: vi.fn(() => "build.nvidia.com"),
@@ -477,7 +472,7 @@ describe("runAgentPassthrough", () => {
       runAgentPassthrough(
         "alpha",
         { extraArgs: ["--agent", "main", "-m", "ping"] },
-        { execNonJson, process: proc, getRecentShieldsAutoRestore: () => ({ kind: "none" }) },
+        { execNonJson, process: proc },
       ),
     ).rejects.toThrow("__exit:0");
 

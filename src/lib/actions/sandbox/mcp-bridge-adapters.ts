@@ -10,7 +10,6 @@ import {
   unregisterDeepAgentsAdapter,
 } from "./mcp-bridge-adapter-deepagents";
 import {
-  assertHermesMcpConfigMutationAllowed,
   assertHermesMcpMutationRuntimeCapability,
   inspectHermesAdapterRegistration,
   registerHermesAdapter,
@@ -23,7 +22,6 @@ import type {
 } from "./mcp-bridge-adapter-inspection";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import {
-  assertOpenClawMcpConfigMutationAllowed,
   inspectOpenClawAdapterRegistration,
   registerOpenClawAdapter,
   unregisterOpenClawAdapter,
@@ -102,51 +100,13 @@ export function inspectAgentAdapterRegistration(
   assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   switch (adapter) {
     case "mcporter":
-      return inspectOpenClawAdapterRegistration(
-        sandboxName,
-        entry,
-        agentDefinition ? openClawMcporterRoot(agentDefinition.configPaths.dir) : undefined,
-      );
+      return inspectOpenClawAdapterRegistration(sandboxName, entry);
     case "hermes-config":
       return inspectHermesAdapterRegistration(sandboxName, entry);
     case "deepagents-config":
       return inspectDeepAgentsAdapterRegistration(sandboxName, entry);
   }
   throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
-}
-
-/**
- * Refuse an in-sandbox adapter config mutation while the agent config is
- * locked. This host-side check intentionally runs before provider, policy,
- * attachment, or adapter work; the Hermes transaction helper repeats the
- * file-level check to close posture drift between this preflight and the
- * actual config write.
- *
- * Every path that mutates a managed adapter definition — `mcp add`, `mcp
- * remove`, `mcp restart`, rebuild preparation, and both destroy preflights —
- * funnels through this predicate, so covering an adapter here covers the whole
- * class for that adapter.
- *
- * Deep Agents is exempt: its managed projection is
- * `/sandbox/.deepagents/.nemoclaw-mcp.json`, the agent ships no
- * `state-lock-plan.json`, and no shields posture makes that path unwritable.
- * Teardown of a legacy Deep Agents entry must also remain possible on an image
- * that predates the managed launcher capability marker.
- */
-export function assertAgentMcpConfigMutationAllowed(
-  sandboxName: string,
-  adapter: AgentMcpAdapter,
-): void {
-  switch (adapter) {
-    case "hermes-config":
-      assertHermesMcpConfigMutationAllowed(sandboxName);
-      return;
-    case "mcporter":
-      assertOpenClawMcpConfigMutationAllowed(sandboxName);
-      return;
-    case "deepagents-config":
-      return;
-  }
 }
 
 export function assertAgentMcpMutationRuntimeCapability(
@@ -177,7 +137,6 @@ export function assertAgentMcpTeardownRuntimeCapability(
   sandboxName: string,
   adapter: AgentMcpAdapter,
 ): void {
-  assertAgentMcpConfigMutationAllowed(sandboxName, adapter);
   if (adapter === "hermes-config") {
     assertAgentMcpMutationRuntimeCapability(sandboxName, adapter);
   }
@@ -204,7 +163,6 @@ export function registerAgentAdapter(
         envValues,
         options.replaceExisting === true,
         options.credentialRevision,
-        agentDefinition ? openClawMcporterRoot(agentDefinition.configPaths.dir) : undefined,
       );
       return;
     case "hermes-config":
@@ -317,12 +275,7 @@ export function unregisterAgentAdapter(
   assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   switch (adapter) {
     case "mcporter":
-      unregisterOpenClawAdapter(
-        sandboxName,
-        entry,
-        options,
-        agentDefinition ? openClawMcporterRoot(agentDefinition.configPaths.dir) : undefined,
-      );
+      unregisterOpenClawAdapter(sandboxName, entry, options);
       return "removed";
     case "hermes-config":
       unregisterHermesAdapter(sandboxName, entry, options);

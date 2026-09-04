@@ -8,17 +8,14 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { extractShellFunctionFromSource } from "../helpers/shell-helpers";
 import { readOpenClawStartupSource } from "../helpers/startup-suite";
 
 describe("runtime model override (#759)", () => {
   const src = readOpenClawStartupSource();
 
   function extractShellFunction(name: string): string {
-    const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
-    if (!match) {
-      throw new Error(`Expected ${name} in OpenClaw start.sh`);
-    }
-    return `${name}() {${match[1]}\n}`;
+    return extractShellFunctionFromSource(src, name);
   }
 
   function runApplyModelOverride(env: Record<string, string> = {}) {
@@ -57,11 +54,7 @@ describe("runtime model override (#759)", () => {
     fs.chmodSync(fabricPath, 0o600);
     fs.chmodSync(hashPath, 0o660);
 
-    const helperFns = [
-      extractShellFunction("openclaw_config_dir_owner"),
-      extractShellFunction("prepare_openclaw_config_for_write"),
-      extractShellFunction("restore_openclaw_config_after_write"),
-    ]
+    const helperFns = [extractShellFunction("openclaw_config_dir_owner")]
       .join("\n")
       .replaceAll("/sandbox", root);
     const fn = extractShellFunction("apply_model_override").replaceAll("/sandbox", root);
@@ -69,10 +62,10 @@ describe("runtime model override (#759)", () => {
       "#!/usr/bin/env bash",
       "set -euo pipefail",
       "id() { echo 0; }",
-      "chown() { return 0; }",
+      "normalize_mutable_config_perms() { :; }",
+      'run_openclaw_config_as_owner() { "$@"; }',
+      `ensure_mutable_openclaw_config_hash() { (cd ${JSON.stringify(openclawDir)} && sha256sum openclaw.json fabric.json >.config-hash); }`,
       `stat() { if [ "$1" = "-c" ] && [ "$2" = "%U" ] && [ "$3" = ${JSON.stringify(openclawDir)} ]; then echo sandbox; return 0; fi; command stat "$@"; }`,
-      'relax_config_for_write() { chmod 644 "$@"; }',
-      'lock_config_after_write() { chmod 444 "$@"; }',
       helperFns,
       fn,
       "apply_model_override",
@@ -181,11 +174,7 @@ describe("runtime CORS origin override (#719)", () => {
   const src = readOpenClawStartupSource();
 
   function extractShellFunction(name: string): string {
-    const match = src.match(new RegExp(`${name}\\(\\) \\{([\\s\\S]*?)^\\}`, "m"));
-    if (!match) {
-      throw new Error(`Expected ${name} in OpenClaw start.sh`);
-    }
-    return `${name}() {${match[1]}\n}`;
+    return extractShellFunctionFromSource(src, name);
   }
 
   function runApplyCorsOverride(origin: string) {
@@ -194,7 +183,9 @@ describe("runtime CORS origin override (#719)", () => {
     fs.mkdirSync(openclawDir, { recursive: true });
     fs.writeFileSync(
       path.join(openclawDir, "openclaw.json"),
-      JSON.stringify({ gateway: { controlUi: { allowedOrigins: ["http://127.0.0.1:18789"] } } }),
+      JSON.stringify({
+        gateway: { controlUi: { allowedOrigins: ["http://127.0.0.1:18789"] } },
+      }),
     );
     const configPath = path.join(openclawDir, "openclaw.json");
     const fabricPath = path.join(openclawDir, "fabric.json");
@@ -206,11 +197,7 @@ describe("runtime CORS origin override (#719)", () => {
     fs.chmodSync(fabricPath, 0o600);
     fs.chmodSync(hashPath, 0o660);
 
-    const helperFns = [
-      extractShellFunction("openclaw_config_dir_owner"),
-      extractShellFunction("prepare_openclaw_config_for_write"),
-      extractShellFunction("restore_openclaw_config_after_write"),
-    ]
+    const helperFns = [extractShellFunction("openclaw_config_dir_owner")]
       .join("\n")
       .replaceAll("/sandbox", root);
     const fn = extractShellFunction("apply_cors_override").replaceAll("/sandbox", root);
@@ -221,10 +208,10 @@ describe("runtime CORS origin override (#719)", () => {
         "#!/usr/bin/env bash",
         "set -euo pipefail",
         "id() { echo 0; }",
-        "chown() { return 0; }",
+        "normalize_mutable_config_perms() { :; }",
+        'run_openclaw_config_as_owner() { "$@"; }',
+        `ensure_mutable_openclaw_config_hash() { (cd ${JSON.stringify(openclawDir)} && sha256sum openclaw.json fabric.json >.config-hash); }`,
         `stat() { if [ "$1" = "-c" ] && [ "$2" = "%U" ] && [ "$3" = ${JSON.stringify(openclawDir)} ]; then echo sandbox; return 0; fi; command stat "$@"; }`,
-        'relax_config_for_write() { chmod 644 "$@"; }',
-        'lock_config_after_write() { chmod 444 "$@"; }',
         helperFns,
         fn,
         "apply_cors_override",

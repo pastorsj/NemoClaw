@@ -52,15 +52,18 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
 
     const readToken = extractShellFunctionFromSource(src, "_read_gateway_token")
       .replaceAll("/sandbox/.openclaw/openclaw.json", configPath)
-      .replaceAll("/opt/nemoclaw", optNemoclaw);
+      .replaceAll("/opt/nemoclaw", optNemoclaw)
+      .replaceAll("/usr/local/bin/node", process.execPath);
     const ensureGatewayToken = extractShellFunctionFromSource(src, "ensure_gateway_token")
       .replaceAll("/sandbox/.openclaw/openclaw.json", configPath)
       .replaceAll("/sandbox/.openclaw/fabric.json", fabricPath)
       .replaceAll("/sandbox/.openclaw/.config-hash", hashPath)
-      .replaceAll("/opt/nemoclaw", optNemoclaw);
+      .replaceAll("/opt/nemoclaw", optNemoclaw)
+      .replaceAll("/usr/local/bin/node", process.execPath);
     const configWriteHelperStubs = [
-      "prepare_openclaw_config_for_write() { :; }",
-      "restore_openclaw_config_after_write() { :; }",
+      "normalize_mutable_config_perms() { :; }",
+      'run_openclaw_config_as_owner() { "$@"; }',
+      `ensure_mutable_openclaw_config_hash() { (cd ${JSON.stringify(openclawDir)} && sha256sum openclaw.json fabric.json >.config-hash); }`,
     ].join("\n");
     const exportToken = extractShellFunctionFromSource(src, "export_gateway_token");
     const printDashboard = extractShellFunctionFromSource(src, "print_dashboard_urls");
@@ -107,7 +110,10 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
       { mode: 0o700 },
     );
 
-    const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+    const result = spawnSync("bash", [scriptPath], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
     const envFile = fs.existsSync(proxyEnv) ? fs.readFileSync(proxyEnv, "utf-8") : "";
     const configAfter = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     const hashAfter = fs.readFileSync(hashPath, "utf-8");
@@ -307,7 +313,10 @@ describe("nemoclaw-start gateway token export (#1114)", () => {
       { mode: 0o700 },
     );
 
-    const result = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+    const result = spawnSync("bash", [scriptPath], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Refusing gateway token generation");
     expect(fs.readFileSync(realConfig, "utf-8")).toBe(configJson);
@@ -363,7 +372,10 @@ describe("nemoclaw-start configure guard behavior", () => {
     ].join("\n");
     const scriptPath = path.join(tmpDir, "write-env.sh");
     fs.writeFileSync(scriptPath, wrapper, { mode: 0o700 });
-    const write = spawnSync("bash", [scriptPath], { encoding: "utf-8", timeout: 5000 });
+    const write = spawnSync("bash", [scriptPath], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
     expect(write.status).toBe(0);
     return { tmpDir, fakeBin, proxyEnv, commandLog };
   }
@@ -383,7 +395,10 @@ describe("nemoclaw-start configure guard behavior", () => {
       ],
       {
         encoding: "utf-8",
-        env: { ...process.env, PATH: `${setup.fakeBin}:${process.env.PATH || ""}` },
+        env: {
+          ...process.env,
+          PATH: `${setup.fakeBin}:${process.env.PATH || ""}`,
+        },
         timeout: 5000,
       },
     );

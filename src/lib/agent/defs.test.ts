@@ -339,78 +339,6 @@ describe("agent definitions", () => {
     expect(() => loadAgent(agentName)).toThrow(/replaced.*backup: false/);
   });
 
-  it("derives protected configuration files from each agent manifest (#8006)", () => {
-    expect(loadAgent("hermes").configPaths.shieldsFiles).toEqual([".env", "fabric.json"]);
-    expect(loadAgent("openclaw").configPaths.shieldsFiles).toEqual(["fabric.json"]);
-    expect(loadAgent("langchain-deepagents-code").configPaths.shieldsFiles).toEqual([
-      "fabric.json",
-    ]);
-  });
-
-  it("derives the mutable config access contract without naming a harness in core", () => {
-    const fixture = candidateQualificationEnvironment();
-    qualificationFixtures.push(fixture);
-    authority.digests.push(fixture.receiptDigest);
-
-    expect(loadAgent("pi", fixture.env).configPaths.mutableAccess).toBe("private");
-    expect(loadAgent("langchain-deepagents-code").configPaths.mutableAccess).toBe("private");
-    expect(loadAgent("openclaw").configPaths.mutableAccess).toBeNull();
-    expect(loadAgent("hermes").configPaths.mutableAccess).toBeNull();
-  });
-
-  it("rejects an unknown mutable config access contract", () => {
-    const agentName = `invalid-mutable-access-${String(Date.now())}`;
-    writeTempAgentManifest(
-      agentName,
-      [
-        `name: ${agentName}`,
-        "config:",
-        "  dir: /sandbox/.invalid",
-        "  config_file: config.json",
-        "  mutable_access: everyone",
-      ].join("\n"),
-    );
-
-    expect(() => loadAgent(agentName)).toThrow(/config\.mutable_access.*private.*shared/);
-  });
-
-  it("derives image state-lock-plan support from each agent manifest (#8006)", () => {
-    expect(loadAgent("openclaw").stateLockPlanInImage).toBe(true);
-    expect(loadAgent("hermes").stateLockPlanInImage).toBe(true);
-    expect(loadAgent("langchain-deepagents-code").stateLockPlanInImage).toBe(false);
-  });
-
-  it("rejects a non-boolean image state-lock-plan declaration (#8006)", () => {
-    const agentName = `invalid-image-plan-${String(Date.now())}`;
-    writeTempAgentManifest(
-      agentName,
-      [`name: ${agentName}`, "state_lock_plan_in_image: yes-please"].join("\n"),
-    );
-
-    expect(() => loadAgent(agentName)).toThrow(/state_lock_plan_in_image.*boolean/);
-  });
-
-  it.each([
-    ["a scalar", "  shields_files: .env"],
-    ["a non-string entry", "  shields_files:\n    - 42"],
-    ["a nested path", "  shields_files:\n    - runtime/fabric.json"],
-  ])("rejects config.shields_files with %s", (_case, declaration) => {
-    const agentName = `invalid-shields-files-${String(Date.now())}-${_case.replaceAll(" ", "-")}`;
-    writeTempAgentManifest(
-      agentName,
-      [
-        `name: ${agentName}`,
-        "display_name: Invalid Shields Files",
-        "config:",
-        "  dir: /sandbox/.invalid",
-        "  config_file: config.json",
-        declaration,
-      ].join("\n"),
-    );
-
-    expect(() => loadAgent(agentName)).toThrow(/config\.shields_files/);
-  });
-
   it.each([1023, 70000])("rejects invalid forward_ports value %s in manifests", (port) => {
     const agentName = `invalid-forward-port-${String(port)}-${String(Date.now())}`;
     writeTempAgentManifest(
@@ -642,8 +570,13 @@ describe("agent definitions", () => {
         "version_command: terminal-agent --version",
         "runtime:",
         "  kind: terminal",
+        "  command_shell: /bin/bash",
         "  interactive_command: terminal-agent",
         "  headless_command: terminal-agent -n",
+        "  smoke_boundary:",
+        "    kind: managed-launcher",
+        "    launcher: /usr/local/lib/nemoclaw/terminal-managed-exec",
+        "    home: /usr/local/lib/nemoclaw",
         "  smoke_commands:",
         "    - terminal-agent --version",
       ].join("\n"),
@@ -653,8 +586,14 @@ describe("agent definitions", () => {
 
     expect(agent.runtime).toEqual({
       kind: "terminal",
+      command_shell: "/bin/bash",
       interactive_command: "terminal-agent",
       headless_command: "terminal-agent -n",
+      smoke_boundary: {
+        kind: "managed-launcher",
+        launcher: "/usr/local/lib/nemoclaw/terminal-managed-exec",
+        home: "/usr/local/lib/nemoclaw",
+      },
       smoke_commands: ["terminal-agent --version"],
     });
     expect(agent.healthProbe).toBeNull();
@@ -671,6 +610,41 @@ describe("agent definitions", () => {
     );
 
     expect(() => loadAgent(agentName)).toThrow(/runtime\.kind/);
+  });
+
+  it("rejects an unsupported runtime command shell", () => {
+    const agentName = `invalid-command-shell-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "runtime:",
+        "  kind: terminal",
+        "  interactive_command: invalid-shell",
+        "  command_shell: /usr/bin/zsh",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/runtime\.command_shell/);
+  });
+
+  it("rejects an incomplete managed smoke boundary", () => {
+    const agentName = `invalid-smoke-boundary-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "runtime:",
+        "  kind: terminal",
+        "  interactive_command: invalid-boundary",
+        "  smoke_boundary:",
+        "    kind: managed-launcher",
+        "    launcher: relative/launcher",
+        "    home: /usr/local/lib/nemoclaw",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/runtime\.smoke_boundary\.launcher/);
   });
 
   it("requires terminal manifests to declare a launch command", () => {
