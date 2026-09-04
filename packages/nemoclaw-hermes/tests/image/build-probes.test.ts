@@ -169,6 +169,7 @@ function runNeutralPlatformProbe(configuration: string) {
 }
 
 describe("Hermes image build probes", () => {
+  // source-shape-contract: security -- Digest and command order bind the reviewed A2A patch before privileged image application
   it("verifies the A2A neutralization patch before root applies it", () => {
     const digest = createHash("sha256").update(a2aNeutralPatch).digest("hex");
     const digestBinding = `ARG NEMOCLAW_HERMES_A2A_NEUTRAL_PATCH_SHA256=${digest}`;
@@ -205,6 +206,7 @@ describe("Hermes image build probes", () => {
     );
   });
 
+  // source-shape-contract: security -- The final image must remove the temporary reviewed Hindsight probe artifact
   it("removes the Hindsight probe wheel after staging its temporary copy", () => {
     const probeWheel = "/opt/nemoclaw-hermes-config/hindsight-probe-aiohttp-retry.whl";
     const copyIndex = dockerfile.indexOf(`cp ${probeWheel}`);
@@ -456,7 +458,6 @@ assert module._session_state_journal_mode(SimpleNamespace(_conn=Connection())) =
     expect(dockerfile).toContain("check_absent /sandbox/.hermes/runtime/state.db");
   });
 
-  // source-shape-contract: security -- The image must run reviewed checks from a checked-in probe and remove that probe from shipped bytes
   it("does not normalize modes on removed Hermes compatibility patchers", () => {
     const modeInstruction = dockerfileInstructions(dockerfile).find(({ text }) =>
       text.includes("chmod 755 /usr/local/bin/nemoclaw-start "),
@@ -471,6 +472,7 @@ assert module._session_state_journal_mode(SimpleNamespace(_conn=Connection())) =
     );
   });
 
+  // source-shape-contract: security -- The image must run reviewed checks from a checked-in probe and remove that probe from shipped bytes
   it.each(commands)(
     "uses a checked-in probe runner instead of builder-dependent heredocs [case %#] (#7981)",
     (command) => {

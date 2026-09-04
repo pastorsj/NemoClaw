@@ -113,6 +113,16 @@
     },
     {
       "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "verifies the A2A neutralization patch before root applies it",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "removes the Hindsight probe wheel after staging its temporary copy",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
       "test": "keeps cross-identity ledger probes consolidated below the Docker layer-depth ceiling",
       "category": "compatibility"
     },
@@ -139,6 +149,26 @@
     {
       "file": "packages/nemoclaw-hermes/tests/runtime/discord-recovery.test.ts",
       "test": "build-probes Discord gateway creation, sandbox backup and replacement, then reopen",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/runtime/hermes-secure-dir-skip-chmod-patch.test.ts",
+      "test": "binds exact source, patch, and output identities in the %s",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/runtime/hermes-secure-dir-skip-chmod-patch.test.ts",
+      "test": "accepts only the exact source or already-patched output in a final image",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/runtime/hermes-secure-dir-skip-chmod-patch.test.ts",
+      "test": "requires exact source input and exact patched output in the base image",
+      "category": "security"
+    },
+    {
+      "file": "packages/nemoclaw-hermes/tests/runtime/hermes-secure-dir-skip-chmod-patch.test.ts",
+      "test": "probes the exact shared modes before cron opens its runtime ledger",
       "category": "security"
     },
     {

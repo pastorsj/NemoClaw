@@ -143,6 +143,7 @@ namespace["_secure_dir"](pathlib.Path(sys.argv[2]))
     }
   });
 
+  // source-shape-contract: security -- Both images must bind the reviewed source patch and resulting Hermes configuration bytes
   it.each([
     ["base image", baseDockerfile],
     ["final image", dockerfile],
@@ -155,6 +156,7 @@ namespace["_secure_dir"](pathlib.Path(sys.argv[2]))
     expect(source).toContain(`NEMOCLAW_HERMES_SECURE_DIR_OUTPUT_SHA256=${outputSha256}`);
   });
 
+  // source-shape-contract: security -- The final image must reject an unreviewed Hermes configuration input
   it("accepts only the exact source or already-patched output in a final image", () => {
     expect(dockerfile).toContain(
       'secure_dir_source_sha" = "$NEMOCLAW_HERMES_SECURE_DIR_SOURCE_SHA256"',
@@ -164,6 +166,7 @@ namespace["_secure_dir"](pathlib.Path(sys.argv[2]))
     );
   });
 
+  // source-shape-contract: security -- The base image must verify both the reviewed input and patched output
   it("requires exact source input and exact patched output in the base image", () => {
     expect(baseDockerfile).toContain(
       '"$NEMOCLAW_HERMES_SECURE_DIR_SOURCE_SHA256" /opt/hermes/hermes_cli/config.py',
@@ -173,6 +176,7 @@ namespace["_secure_dir"](pathlib.Path(sys.argv[2]))
     );
   });
 
+  // source-shape-contract: security -- Image command order must verify shared-directory modes before cron opens persistent state
   it("probes the exact shared modes before cron opens its runtime ledger", () => {
     const modeProbe = dockerfile.indexOf("image-build-probes.py secure-directory-modes");
     const cronProbe = dockerfile.indexOf("image-build-probes.py cron-create");
