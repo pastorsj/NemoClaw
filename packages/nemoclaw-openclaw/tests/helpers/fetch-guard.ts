@@ -25,22 +25,24 @@ export function dockerRunCommandBetween(startMarker: string, endMarker: string):
   if (runIndex === -1 || runIndex > end) {
     throw new Error(`Expected RUN instruction after ${startMarker}`);
   }
-  return dockerfile
-    .slice(runIndex, end)
-    .trim()
-    .replace(/^RUN\s+/, "")
-    // BuildKit RUN options may share the RUN line or continue onto following
-    // lines. Remove the complete option prefix before executing the shell body.
-    .replace(/^(?:--[a-z-]+=[^\s\\]+(?:[ \t]*\\\r?\n[ \t]*|[ \t]+))+/u, "")
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("#"))
-    .join("\n")
-    .replace(/\\\n/g, " ")
-    .replace(/\\\s*$/, "")
-    .replaceAll(
-      "/usr/local/lib/nemoclaw/extract-semver",
-      JSON.stringify(OPENCLAW_VERSION_EXTRACTOR),
-    );
+  return (
+    dockerfile
+      .slice(runIndex, end)
+      .trim()
+      .replace(/^RUN\s+/, "")
+      // BuildKit RUN options may share the RUN line or continue onto following
+      // lines. Remove the complete option prefix before executing the shell body.
+      .replace(/^(?:--[a-z-]+=[^\s\\]+(?:[ \t]*\\\r?\n[ \t]*|[ \t]+))+/u, "")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n")
+      .replace(/\\\n/g, " ")
+      .replace(/\\\s*$/, "")
+      .replaceAll(
+        "/usr/local/lib/nemoclaw/extract-semver",
+        JSON.stringify(OPENCLAW_VERSION_EXTRACTOR),
+      )
+  );
 }
 
 function createSedWrapper(tmp: string): string {
