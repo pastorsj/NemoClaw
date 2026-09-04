@@ -335,10 +335,10 @@ describe("onboarding phase fixture", () => {
       agent: "langchain-deepagents-code",
       sandboxName: "e2e-dcode-local",
     });
-    expect(runner.calls[0]?.options?.env).toEqual(
+    expect(onboardingCalls(runner)[0]?.options?.env).toEqual(
       expect.objectContaining({ NEMOCLAW_AGENT: "langchain-deepagents-code" }),
     );
-    expect(runner.calls[0]?.options?.env).not.toHaveProperty(DCODE_BASE_IMAGE_ENV);
+    expect(onboardingCalls(runner)[0]?.options?.env).not.toHaveProperty(DCODE_BASE_IMAGE_ENV);
   });
 
   it("uses the contract-selected Deep Agents Code base image reference instead of the ambient publication index", async () => {

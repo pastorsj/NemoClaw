@@ -7,6 +7,11 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  listBundledAgentRuntimeSources,
+  makeManagedOutputWritable,
+  materializeBundledHarnesses,
+} from "../../scripts/build-harnesses.mts";
 import { runAgentPassthrough } from "../../src/lib/actions/sandbox/agent/passthrough";
 import { loadHarnessMcpAdapterHostModule } from "../../src/lib/agent-runtime/host-module";
 import {
@@ -35,33 +40,35 @@ const SOURCE_IDENTITY: BundledHarnessPackageSourceIdentity = Object.freeze({
 });
 
 let fixtureRoot = "";
+let authoringRoot = "";
 let bundledRoot = "";
 let storeRoot = "";
-let packageRoot = "";
+let authoringPackageRoot = "";
 
-function writePackageFile(relativePath: string, contents: string, mode: number = 0o600): void {
-  const target = path.join(packageRoot, ...relativePath.split("/"));
+function writeAuthoringPackageFile(
+  relativePath: string,
+  contents: string,
+  mode: number = 0o600,
+): void {
+  const target = path.join(authoringPackageRoot, ...relativePath.split("/"));
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   fs.writeFileSync(target, contents, { mode });
   fs.chmodSync(target, mode);
 }
 
-function writeFuturePackage(): void {
-  packageRoot = path.join(bundledRoot, PACKAGE_DIRECTORY);
-  fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
-  writePackageFile(
-    "nemoclaw-package.json",
+function writeFutureAuthoringPackage(): void {
+  authoringPackageRoot = path.join(authoringRoot, "packages", PACKAGE_DIRECTORY);
+  fs.mkdirSync(authoringPackageRoot, { recursive: true, mode: 0o700 });
+  writeAuthoringPackageFile(
+    "package.json",
     `${JSON.stringify({
-      schemaVersion: 1,
-      kind: "agent-runtime",
-      id: PACKAGE_ID,
-      displayName: "Future Terminal",
-      packageVersion: "1.0.0",
-      manifest: MANIFEST_PATH,
+      name: `@fixture/${PACKAGE_DIRECTORY}`,
+      version: "1.0.0",
+      nemoclaw: { harnessManifest: "manifest.yaml" },
     })}\n`,
   );
-  writePackageFile(
-    MANIFEST_PATH,
+  writeAuthoringPackageFile(
+    "manifest.yaml",
     [
       `name: ${PACKAGE_ID}`,
       "display_name: Future Terminal",
@@ -82,24 +89,14 @@ function writeFuturePackage(): void {
       "",
     ].join("\n"),
   );
-  writePackageFile(`packages/${PACKAGE_DIRECTORY}/Dockerfile.base`, "FROM scratch\n");
-  writePackageFile(
-    `packages/${PACKAGE_DIRECTORY}/Dockerfile`,
+  writeAuthoringPackageFile("Dockerfile.base", "FROM scratch\n");
+  writeAuthoringPackageFile(
+    "Dockerfile",
     `FROM scratch\nCOPY packages/${PACKAGE_DIRECTORY}/start.sh /usr/local/bin/nemoclaw-start\n`,
   );
-  writePackageFile(
-    `packages/${PACKAGE_DIRECTORY}/start.sh`,
-    "#!/bin/sh\nexec future-terminal\n",
-    0o700,
-  );
-  writePackageFile(
-    `packages/${PACKAGE_DIRECTORY}/policy-additions.yaml`,
-    "version: 1\nnetwork_policies: {}\n",
-  );
-  writePackageFile(
-    `packages/${PACKAGE_DIRECTORY}/fabric/future.fabric-adapter.json`,
-    '{"adapter":"future-terminal"}\n',
-  );
+  writeAuthoringPackageFile("start.sh", "#!/bin/sh\nexec future-terminal\n", 0o700);
+  writeAuthoringPackageFile("policy-additions.yaml", "version: 1\nnetwork_policies: {}\n");
+  writeAuthoringPackageFile("fabric/future.fabric-adapter.json", '{"adapter":"future-terminal"}\n');
 }
 
 beforeEach(() => {
@@ -107,19 +104,31 @@ beforeEach(() => {
     path.join(process.cwd(), "node_modules/.cache/nemoclaw-package-composition-"),
   );
   fs.chmodSync(fixtureRoot, 0o700);
+  authoringRoot = path.join(fixtureRoot, "repository");
   bundledRoot = path.join(fixtureRoot, "bundled");
   storeRoot = path.join(fixtureRoot, "store");
-  fs.mkdirSync(bundledRoot, { recursive: true, mode: 0o700 });
   fs.mkdirSync(storeRoot, { recursive: true, mode: 0o700 });
-  writeFuturePackage();
+  writeFutureAuthoringPackage();
 });
 
 afterEach(() => {
+  makeManagedOutputWritable(bundledRoot);
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
 describe("future harness package composition", () => {
-  it("installs and dispatches an unknown Dockerfile package through its Fabric command", async () => {
+  it("discovers, installs, and dispatches an unknown Dockerfile package through Fabric", async () => {
+    expect(listBundledAgentRuntimeSources(authoringRoot)).toMatchObject([
+      {
+        id: PACKAGE_ID,
+        displayName: "Future Terminal",
+        packageVersion: "1.0.0",
+        manifestPath: MANIFEST_PATH,
+      },
+    ]);
+    const [artifact] = materializeBundledHarnesses(bundledRoot, authoringRoot);
+    assert.equal(artifact?.id, PACKAGE_ID);
+
     const initialInventory = listHarnessPackageInventory({ bundledRoot, storeRoot });
     expect(initialInventory.available.map(({ id }) => id)).toEqual([PACKAGE_ID]);
     expect(initialInventory.installed).toEqual([]);
