@@ -226,53 +226,60 @@ Do not turn this planning table into a second registry.
 
 ## Definition of done: current phase
 
-- [ ] The architecture record states the core, package, and Fabric boundaries without a supported
+- [x] The architecture record states the core, package, and Fabric boundaries without a supported
       package API claim.
-- [ ] One typed loader owns fixed paths, exports, schemas, and byte limits.
-- [ ] The record states that package `.cts` implementations are runtime-validated, not compiled by
+- [x] One typed loader owns fixed paths, exports, schemas, and byte limits.
+- [x] The record states that package `.cts` implementations are runtime-validated, not compiled by
       the package TypeScript configurations.
-- [ ] Package-backed MCP starts from explicit package identity and a matching immutable receipt.
-- [ ] Hermes, OpenClaw, and Deep Agents Code own native MCP command construction and detailed
+- [x] Package-backed MCP starts from explicit package identity and a matching immutable receipt.
+- [x] Hermes, OpenClaw, and Deep Agents Code own native MCP command construction and detailed
       command tests.
-- [ ] Pi's disabled MCP capability returns a typed validation error before adapter load.
-- [ ] Package-backed MCP dispatch has no native core command fallback or agent-name switch.
-- [ ] The no-receipt MCP dispatcher and Deep Agents legacy configuration path remain named
+- [x] Pi's disabled MCP capability returns a typed validation error before adapter load.
+- [x] Package-backed MCP dispatch has no native core command fallback or agent-name switch.
+- [x] The no-receipt MCP dispatcher and Deep Agents legacy configuration path remain named
       compatibility debt.
-- [ ] Core retains authorization, credentials, policy, execution, transaction, inspection
+- [x] Core retains authorization, credentials, policy, execution, transaction, inspection
       authority, rollback, and redacted diagnostics.
-- [ ] Configuration adapters provide update, URL-policy, and mutable-file plans without owning
+- [x] Configuration adapters provide update, URL-policy, and mutable-file plans without owning
       core execution or SSRF validation.
-- [ ] Deep Agents Code and Pi report runtime configuration as `immutable`.
-- [ ] URL policy runs for each URL leaf, and sibling paths cannot inherit another leaf's
+- [x] Deep Agents Code and Pi report runtime configuration as `immutable`.
+- [x] URL policy runs for each URL leaf, and sibling paths cannot inherit another leaf's
       allowance.
-- [ ] Only configuration writes can use `config-transaction` proof; validation and mutable
+- [x] Only configuration writes can use `config-transaction` proof; validation and mutable
       commands require `exit-zero`.
-- [ ] OpenClaw configuration writes protect
+- [x] OpenClaw configuration writes protect
       `["openclaw.json", ".config-hash", "fabric.json"]`.
-- [ ] OpenClaw restore merge grammar runs through its receipt-pinned package adapter.
-- [ ] OpenClaw restore names `["openclaw.json", "fabric.json"]` as its configuration-hash inputs.
-- [ ] A package-backed missing or invalid configuration adapter fails closed. Only a legacy
+- [x] OpenClaw restore merge grammar runs through its receipt-pinned package adapter.
+- [x] OpenClaw restore names `["openclaw.json", "fabric.json"]` as its configuration-hash inputs.
+- [x] A package-backed missing or invalid configuration adapter fails closed. Only a legacy
       no-receipt sandbox uses the documented compatibility path.
-- [ ] Configuration writes retain the receipt-pinned definition and plan across validation, then
+- [x] Configuration writes retain the receipt-pinned definition and plan across validation, then
       verify both under the mutation lock. An ambient active pointer cannot redirect the write.
-- [ ] Synthetic unknown package IDs pass the MCP, configuration, and restore operations without a
+- [x] Synthetic unknown package IDs pass the MCP, configuration, and restore operations without a
       core agent ID branch.
-- [ ] Full startup remains identified as closed while `MANAGED_STARTUP_AGENTS`, core profile
+- [x] Full startup remains identified as closed while `MANAGED_STARTUP_AGENTS`, core profile
       mappings, and the coordinator select agent-runtime behavior.
-- [ ] Package-only tests need no NemoClaw source or root native fixture.
-- [ ] Revision-pinned composition binds one package candidate to one supplied NemoClaw commit.
-- [ ] The record states that package-only rehearsal does not build Docker images and names the
+- [x] Package-only source tests need no NemoClaw source or root native fixture.
+- [x] Revision-pinned composition binds one package candidate to one supplied NemoClaw commit.
+- [x] The record states that package-only rehearsal does not build Docker images and names the
       remaining root build-context inputs.
-- [ ] Root package-contract coverage is not reported as package-owned Pi archive proof.
-- [ ] Fabric stays package-selected and agent-neutral.
-- [ ] Package receipt and managed-image cohort receipt tests pass.
-- [ ] Source and suite-membership checks prevent ownership regression.
-- [ ] Deterministic tests pass before live qualification.
+- [x] Root package-contract coverage is not reported as package-owned Pi archive proof.
+- [x] Fabric stays package-selected and agent-neutral.
+- [x] Package installation receipt tests pass.
+- [ ] A current complete managed-image cohort receipt covers every changed shipped image input.
+- [x] Source and suite-membership checks prevent ownership regression.
+- [ ] The final aggregate deterministic and E2E-support gates pass on the exact candidate before
+      any live success claim.
 - [ ] The selected MCP and Fabric live edges pass, or the record classifies an infrastructure
       failure without claiming product success.
 - [ ] Qualification records exact identities, results, cleanup, move counts, and remaining core
       seams.
-- [ ] The remaining-file record includes the 2,320-line OpenClaw blueprint runner.
+- [x] The remaining-file record includes the 2,320-line OpenClaw blueprint runner.
+- [ ] A product decision with status `Accept` authorizes package-authored host code before this
+      candidate is treated as canonical or supported NemoClaw behavior.
+
+The checked items describe implemented local-prototype behavior. They do not override the open
+product, image, aggregate, or live gates.
 
 ## Later migration completion
 

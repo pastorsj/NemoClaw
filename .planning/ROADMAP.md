@@ -161,12 +161,12 @@ mutation while current runtime behavior and lifecycle ownership remain unchanged
 **Requirements:** PKG-06, PKG-07, AGENT-02, AGENT-03, AGENT-05, FABRIC-01, FABRIC-02,
 FABRIC-02A, FABRIC-03, TEST-01, TEST-02, TEST-04, TEST-06, TEST-07, TEST-08
 
-**Plans:** 1/4 plans executed
+**Plans:** 3/4 plans executed
 
 - [x] `03-01` — Add the generic Fabric runner, artifact validation, and DCode and Pi connections.
-- [ ] `03-02` — Connect OpenClaw through a package-owned adapter and shared config integrity.
-- [ ] `03-03` — Connect Hermes through the released adapter and atomic route projection.
-- [ ] `03-04` — Run common deterministic, Mac, and Brev non-messaging qualification.
+- [x] `03-02` — Connect OpenClaw through a package-owned adapter and shared config integrity.
+- [x] `03-03` — Connect Hermes through the released adapter and atomic route projection.
+- [ ] `03-04` — Run common deterministic, macOS, and Brev non-messaging qualification.
 
 **Implementation order:**
 
@@ -185,7 +185,8 @@ FABRIC-02A, FABRIC-03, TEST-01, TEST-02, TEST-04, TEST-06, TEST-07, TEST-08
 ### Phase 4: Agent Runtime Contract
 
 **Goal:** NemoClaw core composes explicit installed agent runtime packages through a closed typed
-contract and contains no native OpenClaw, Hermes, DCode, or Pi implementation.
+contract and contains no native OpenClaw, Hermes, LangChain Deep Agents Code, or Pi
+implementation.
 
 **Depends on:** Phase 3
 
@@ -193,13 +194,24 @@ contract and contains no native OpenClaw, Hermes, DCode, or Pi implementation.
 AGENT-03, AGENT-04, AGENT-05, FABRIC-03, TEST-01, TEST-02, TEST-03, TEST-04, TEST-05,
 TEST-06, TEST-07, TEST-08
 
-**Plans:** 0/5 plans executed
+**Plans:** 2/5 plans executed
 
-- [ ] `04-01` — Add the finite contract, receipt-bound loader, explicit identity, and source gates.
-- [ ] `04-02` — Move Hermes native behavior and detailed tests behind the contract.
-- [ ] `04-03` — Move OpenClaw native behavior and detailed tests behind the contract.
-- [ ] `04-04` — Close DCode and Pi ownership and remove transitional source mappings.
-- [ ] `04-05` — Remove remaining fallbacks and run deterministic, Mac, and Brev qualification.
+- [x] `04-01` — Add the finite contract, receipt-bound loader, explicit identity, and trust record.
+- [x] `04-02` — Move package-backed MCP translation behind fixed typed operations and preserve the
+  named no-receipt compatibility path.
+- [ ] `04-03` — Close synthetic conformance, package test ownership, and final-candidate source and
+  suite evidence.
+- [ ] `04-04` — Close Fabric, package-receipt, and changed managed-image evidence without treating
+  Pi as part of a cohort that excludes it.
+- [ ] `04-05` — Complete aggregate, macOS, and Brev qualification and record remaining native core
+  seams.
+
+**Current status:** The typed loader and package-backed MCP slice are implemented as a local
+prototype. Configuration and OpenClaw restore use the same boundary, and all four packages retain
+their Fabric paths. Final aggregate E2E-support, current managed-image receipts, and successful
+bounded macOS and Brev evidence are open. The accepted Phase 2 decision does not authorize
+package-authored host code as a supported product surface, so Phase 4 remains active and makes no
+release or support claim.
 
 **Implementation order:**
 
@@ -208,8 +220,8 @@ TEST-06, TEST-07, TEST-08
 2. Build one finite adapter contract and loader from the current MCP security mechanism.
 3. Require explicit `AgentDefinition` and exact package identity in ordinary paths; isolate legacy
    null-to-OpenClaw migration.
-4. Move Hermes first, OpenClaw second, then DCode and Pi. Delete each old implementation when its
-   package path becomes authoritative.
+4. Move Hermes first, OpenClaw second, then Deep Agents Code and Pi. Delete each old
+   implementation when its package path becomes authoritative.
 5. Move detailed native tests with their implementation. Keep generic composition, transaction,
    security, and E2E infrastructure in core.
 6. Enforce source and suite ownership, then run contract-first deterministic gates and bounded

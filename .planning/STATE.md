@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Phase 3 Fabric work is active; the generic foundation is complete, OpenClaw and Hermes
-  deterministic integration is in progress, and Mac and Brev qualification is pending
-last_updated: "2026-09-03T00:00:00.000Z"
+status: Phase 4 typed agent runtime contract work is active; the finite loader and package-backed
+  MCP slice are implemented locally, while aggregate, image, macOS, and Brev gates remain open
+last_updated: "2026-09-04T00:00:00.000Z"
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 33
-  completed_plans: 24
-  percent: 73
+  completed_plans: 28
+  percent: 85
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -20,26 +20,31 @@ progress:
 
 ## Current Position
 
-Phase: 3 of 9 — Agent Runtime Packages and Fabric Headless Integration
+Phase: 4 of 9 — Agent Runtime Contract
 
 Status: Phase 2 Plans 02-01 through 02-22 completed the package foundation. Plan 02-23 remains
-pending and shares its no-messaging environment work with Phase 3 Plan 03-04. Phase 3 Plan 03-01
-completed the generic runner, built-artifact conformance, released Deep Agents evaluation, Pi
-adapter, and package-selected headless dispatch. OpenClaw and Hermes implementation is present in
-the working tree. Their final deterministic rerun, Mac work, and Brev work remain open.
-This work does not activate or support an upstream product surface.
+pending and shares its no-messaging environment evidence with Phase 3 Plan 03-04. Phase 3 Plans
+03-01 through 03-03 completed the generic, OpenClaw, and Hermes Fabric implementation; Plan 03-04
+remains open. Phase 4 Plans 04-01 and 04-02 implemented the finite receipt-bound loader and
+package-backed Model Context Protocol slice as a local prototype. Plans 04-03 through 04-05 remain
+active because final aggregate evidence, independent package image inputs, current managed-image
+receipts, and successful bounded macOS and Brev evidence are not complete.
+
+This work does not activate or support an upstream product surface. The accepted Phase 2 decision
+covers the data, sandbox, and image package foundation. It does not accept package-authored host
+code as a supported extension surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
-Proposal revision: `5802308d09bdb64dba62dd541e42ad6bb223ceb0`
+Proposal revision: `5a8253a97a1496e3ddf03ff85826672e86635eb9`
 
 Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `78f0c9b7db15b22d83024bcda510ae0cebefb118`
-- Local upstream merge: `34ceb565734785bebb0229150fbde0bd5faf8a8f`
+- Exact base: `origin/main` at `3d754417b5f07f9ed61ff709c5bb107aaffff1dc`
+- Local upstream merge: `eef8ee45e54e39e540a10b2074a9ef4ed3dd1c26`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
 - Pushes: none
@@ -117,9 +122,29 @@ tree.
   evaluation evidence.
 - [x] Pi has a package-owned adapter, exact configuration, and package-owned tests through the same
   runner.
-- [ ] OpenClaw final deterministic gates and common live qualification are pending.
-- [ ] Hermes final deterministic gates and common live qualification are pending.
-- [ ] Mac and Brev non-messaging evidence is pending and must not be reported as release evidence.
+- [x] OpenClaw supplies its package-owned Fabric adapter and deterministic package, composition,
+  plugin, and Fabric lanes.
+- [x] Hermes supplies its package-owned released-adapter integration and deterministic package,
+  composition, subprocess, Python, and Fabric lanes.
+- [x] One finite typed loader owns fixed package paths, exports, TypeScript request and result
+  types, runtime schemas, value bounds, and receipt-pinned evaluation.
+- [x] Package-backed MCP dispatch uses Hermes, OpenClaw, and LangChain Deep Agents Code package
+  adapters without a core native fallback; Pi fails through typed capability validation.
+- [x] All four packages supply typed runtime-configuration plans; OpenClaw also supplies its
+  receipt-pinned restore merge grammar.
+- [x] Core retains credentials, SSRF validation, policy, OpenShell execution, state, transaction,
+  restart, verification, rollback, and redacted diagnostics.
+- [x] A synthetic unknown package exercises MCP, configuration, and restore operations without a
+  production catalogue row or agent-name branch.
+- [x] Two existing OpenClaw restore test files moved from core source into package-owned host tests,
+  retaining 28 declarations and 43 parameterized cases.
+- [x] Layer-boundary and suite-membership checks protect package ownership with one counted legacy
+  messaging build exception.
+- [ ] The final E2E-support aggregate rerun is pending after command-credential and package-install
+  fixture corrections.
+- [ ] Current managed-image evidence is pending after the reviewed runtime bundle changed; existing
+  Pi receipts bind older source bytes.
+- [ ] macOS and Brev non-messaging evidence is pending and must not be reported as release evidence.
 
 ## Architecture Recommendations
 
@@ -140,15 +165,22 @@ tree.
 
 ## Next Execution
 
-Finish Plans 03-02 and 03-03, then execute Plan 03-04. Record only rerun deterministic results and
-bounded Mac and Brev evidence in `03-QUALIFICATION.md`. Keep arbitrary installed host code, remote
-package discovery, product activation, and support claims outside this work. An upstream
-contribution still requires its own accepted NVIDIA/NemoClaw product decision.
+1. Obtain an `Accept` product decision before treating package-authored host code as canonical or
+   continuing implementation of a supported extension surface.
+2. Finish the final aggregate and E2E-support rerun on candidate `5a8253a97a`.
+3. Replace stale managed-image evidence for the changed reviewed runtime bundle. Keep Pi candidate
+   evidence separate from a shipped cohort that excludes Pi.
+4. Finish the isolated macOS run and the bounded Brev/Linux Hermes Fabric, Deep Agents Code Fabric,
+   and OpenClaw, Hermes, and Deep Agents Code MCP targets. Record identity, redaction, terminal
+   state, and cleanup without broad reruns or messaging-service coverage.
+5. Keep Plans 04-03 through 04-05 active until their exact evidence closes. Then migrate the named
+   native core seams one current consumer at a time rather than claiming full agent-runtime
+   independence.
 
-Phase 4 then finishes agent-runtime ownership in five reviewable slices: finite contract and
-explicit identity, Hermes, OpenClaw, DCode and Pi, then core closure and bounded qualification.
-The user's direction authorizes that local product-scope candidate; it does not make the result
-canonical or supported upstream behavior.
+The next native slices are the no-receipt MCP and configuration paths, remaining restore and CLI
+grammar, closed managed startup, pairing and messaging projection, gateway and dashboard
+protocols, optional agent features, shared root image inputs, Pi archive ownership, and the
+2,320-line OpenClaw blueprint runner.
 
 ## Preserved Local State
 
