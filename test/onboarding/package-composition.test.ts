@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -140,7 +141,7 @@ describe("future harness package composition", () => {
       prompt: async () => "1",
       storeRoot,
     });
-    if (selected.kind !== "package") throw new Error("Expected an installed package selection");
+    assert.equal(selected.kind, "package");
 
     expect(selected).toMatchObject({
       recordedAgent: PACKAGE_ID,
