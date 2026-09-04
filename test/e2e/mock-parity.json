@@ -47,6 +47,7 @@
         "test/e2e/support/base-image-publication.test.ts",
         "test/e2e/support/managed-image-multiarch-startup-helpers.test.ts",
         "test/inference/managed/managed-image-publication-workflow.test.ts",
+        "test/inference/managed/publication-promotion.test.ts",
         "test/automation/pull-requests/pr-risk-plan.test.ts",
         "test/platform/images/protected-managed-image-contract.test.ts"
       ]
@@ -73,6 +74,7 @@
         "test/e2e/support/public-fabric-turn.test.ts",
         "test/e2e/support/managed-image-activation-diagnostics.test.ts",
         "test/inference/managed/managed-image-publication-workflow.test.ts",
+        "test/inference/managed/publication-promotion.test.ts",
         "test/onboarding/onboard-managed-image-buildless-e2e.test.ts"
       ]
     },
@@ -478,6 +480,7 @@
       "live": "test/e2e/live/double-onboard.test.ts",
       "fast": [
         "src/lib/onboard/created-sandbox-finalization.test.ts",
+        "src/lib/onboard/sandbox-completion.test.ts",
         "src/lib/onboard/machine/core-flow-phases.test.ts",
         "src/lib/onboard/machine/handlers/sandbox-route-publication.test.ts",
         "src/lib/onboard/sandbox-registration.test.ts",

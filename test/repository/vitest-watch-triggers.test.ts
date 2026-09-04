@@ -233,6 +233,7 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy("packages/nemoclaw-hermes/Dockerfile.base")).toEqual([
       "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/runtime/sandbox/sandbox-provisioning.test.ts",
     ]);
     expect(triggeredBy("packages/nemoclaw-hermes/checks/image-probes.py")).toEqual([
@@ -252,6 +253,7 @@ describe("Vitest opaque-input watch triggers", () => {
     expect(triggeredBy("packages/nemoclaw-hermes/checks/download-source.sh")).toEqual([
       "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy("packages/nemoclaw-langchain-deepagents-code/Dockerfile")).toEqual([
       "src/lib/onboard/managed-startup-profile.test.ts",
@@ -302,29 +304,36 @@ describe("Vitest opaque-input watch triggers", () => {
       "test/platform/images/pi-candidate.test.ts",
       "test/inference/managed/managed-base-image-contract.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy(".github/workflows/managed-images.yaml")).toEqual([
       "test/platform/images/pi-candidate.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/e2e-runtime/pull-public-exact-digest.test.ts",
     ]);
     expect(triggeredBy("test/e2e/live/managed-image-activation-e2e-helpers.ts")).toEqual([
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy("scripts/export-managed-base-image-contract.sh")).toEqual([
       "test/inference/managed/managed-base-image-contract.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy(".github/actions/build-base-image-platform/action.yaml")).toEqual([
       "packages/nemoclaw-openclaw/tests/image/dependency-review.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy(".github/actions/publish-base-image-manifest/action.yaml")).toEqual([
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/platform/images/publish-base-image-manifest.test.ts",
     ]);
     expect(triggeredBy(".github/workflows/base-image-platform.yaml")).toEqual([
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/install/perl-critical-cve-remediation.test.ts",
       "test/platform/images/pi-candidate.test.ts",
     ]);
@@ -335,10 +344,12 @@ describe("Vitest opaque-input watch triggers", () => {
       "test/platform/images/retry-docker-imagetools-inspect.test.ts",
       "test/inference/managed/validate-managed-base-index.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy("scripts/checks/pull-public-exact-digest.sh")).toEqual([
       "test/e2e-runtime/pull-public-exact-digest.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ]);
     expect(triggeredBy("scripts/e2e/sanitize-trace-timing.py")).toEqual([
       "test/e2e/support/e2e-scorecard.test.ts",

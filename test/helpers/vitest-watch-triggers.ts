@@ -122,6 +122,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests(
       "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/runtime/sandbox/sandbox-provisioning.test.ts",
     ),
   },
@@ -240,30 +241,37 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests(
       "test/inference/managed/managed-base-image-contract.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ),
   },
   {
     pattern: /(?:^|\/)\.github\/workflows\/managed-images\.yaml$/,
     testsToRun: runTests(
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/e2e-runtime/pull-public-exact-digest.test.ts",
     ),
   },
   {
     pattern: /(?:^|\/)test\/e2e\/live\/managed-image-activation-e2e-helpers\.ts$/,
-    testsToRun: runTests("test/inference/managed/managed-image-publication-workflow.test.ts"),
+    testsToRun: runTests(
+      "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
+    ),
   },
   {
     pattern: /(?:^|\/)\.github\/actions\/build-base-image-platform\/action\.yaml$/,
     testsToRun: runTests(
       "packages/nemoclaw-openclaw/tests/image/dependency-review.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ),
   },
   {
     pattern: /(?:^|\/)\.github\/actions\/publish-base-image-manifest\//,
     testsToRun: runTests(
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/platform/images/publish-base-image-manifest.test.ts",
     ),
   },
@@ -271,6 +279,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     pattern: /(?:^|\/)\.github\/workflows\/base-image-platform\.yaml$/,
     testsToRun: runTests(
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
       "test/install/perl-critical-cve-remediation.test.ts",
       "test/platform/images/pi-candidate.test.ts",
     ),
@@ -284,6 +293,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests(
       "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ),
   },
   {
@@ -292,6 +302,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
       "test/platform/images/retry-docker-imagetools-inspect.test.ts",
       "test/inference/managed/validate-managed-base-index.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ),
   },
   {
@@ -299,6 +310,7 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     testsToRun: runTests(
       "test/e2e-runtime/pull-public-exact-digest.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
+      "test/inference/managed/publication-promotion.test.ts",
     ),
   },
   {
