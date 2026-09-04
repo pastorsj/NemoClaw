@@ -30,12 +30,19 @@ import {
   podmanExecutableAuthority,
   podmanExecutableAuthorityDeps,
   POLICY,
-  publishSuccessor,
   SANDBOX,
   SANDBOX_ID,
   sandboxListJson,
   stateDir,
 } from "./__test-helpers__/portable-fixture";
+
+function publishSuccessor(): void {
+  withMcpLifecycleLockSync(
+    SANDBOX,
+    () => publishHermesPortableSuccessorReceipt(SANDBOX, stateDir),
+    { stateDir: path.join(stateDir, "state") },
+  );
+}
 
 describe("Hermes portable lifecycle", () => {
   it("uses one entry and final qualification when the timing callback fails (#10423)", () => {
@@ -435,7 +442,9 @@ describe("Hermes portable lifecycle", () => {
       ],
       20_000,
     );
-    expect(captureOpenShell.mock.calls.flat(2)).toContain(hermesPortableContainerInternals.authenticatedHealthScript);
+    expect(captureOpenShell.mock.calls.flat(2)).toContain(
+      hermesPortableContainerInternals.authenticatedHealthScript,
+    );
   });
 
   it("starts through the exact OpenShell Stopped phase before proving Ready health (#9203)", () => {

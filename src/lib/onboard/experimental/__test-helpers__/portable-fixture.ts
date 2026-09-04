@@ -11,9 +11,8 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { fingerprintOpenShellSandboxLiveIdentity } from "../../../adapters/openshell/sandbox-identity";
 import type { HermesPortableOpenShellExecutableAuthority } from "../../../adapters/openshell/resolve-shared";
 import type { PodmanExecutableAuthorityDeps, PodmanExecutableStat } from "../../../adapters/podman";
-import { loadAgent } from "../../../agent/defs";
-import { withMcpLifecycleLockSync } from "../../../state/mcp-lifecycle-lock";
 import type { SandboxEntry } from "../../../state/registry";
+import { currentHermesPortableAgentDefinition } from "../../docker-startup-command-env";
 import { hermesPortableContainerInternals } from "../hermes-portable-container";
 import { resolveHermesPortableStartupContract } from "../hermes-portable-contract";
 import { hermesPortableLifecycleInternals } from "../hermes-portable-lifecycle";
@@ -22,7 +21,6 @@ import {
   captureHermesPortablePolicySource,
   publishHermesPortableDurablePolicySource,
   publishHermesPortableLifecycleReceipt,
-  publishHermesPortableSuccessorReceipt,
   type HermesPortableConfiguredReceipt,
   type HermesPortablePendingReceipt,
 } from "../hermes-portable-receipt";
@@ -206,7 +204,7 @@ export function activeReceipt(homeDir = "/home/test"): HermesPortableConfiguredR
       })),
     },
     startup: resolveHermesPortableStartupContract({
-      agent: loadAgent("hermes"),
+      agent: currentHermesPortableAgentDefinition(),
       sandboxName: SANDBOX,
       startupArgv: startupArgv(),
     }),
@@ -380,14 +378,6 @@ export function lifecycleDeps(
     assertOpenShellExecutableFileAuthority,
     capturePodmanExecutableFileAuthority,
   };
-}
-
-export function publishSuccessor(): void {
-  withMcpLifecycleLockSync(
-    SANDBOX,
-    () => publishHermesPortableSuccessorReceipt(SANDBOX, stateDir),
-    { stateDir: path.join(stateDir, "state") },
-  );
 }
 
 export function lifecycleContext() {
