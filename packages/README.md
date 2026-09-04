@@ -172,6 +172,34 @@ gives those packages one native configuration entry point, but it does not let a
 managed startup without a core change. Profile construction, environment projection, the startup
 coordinator, and post-plan application also use the closed agent set.
 
+### Generic composition and closed startup
+
+An in-tree package can use the generic bundled Dockerfile and Fabric terminal path without adding
+its ID to those components:
+
+1. `scripts/build-harnesses.mts` discovers each matching `packages/nemoclaw-<id>` package that
+   declares `nemoclaw.harnessManifest: "manifest.yaml"`. It materializes the package and its
+   Dockerfile inputs under `dist/harnesses`.
+2. `nemoclaw harness install <id>` installs that materialized package and records its receipt.
+3. A runtime that advertises legacy Dockerfile builds can select the package Dockerfile. NemoClaw
+   treats a source-checkout Dockerfile as package-managed only when its canonical path and bytes
+   match the installed Dockerfile, and the bundled and installed package identities match.
+4. `nemoclaw sandbox agent <sandbox> <prompt>` resolves the receipt-pinned
+   `runtime.headless_command`.
+5. For `nemoclaw-fabric-run`, NemoClaw sends the prompt through standard input. The generic runner
+   bounds the package-owned Fabric adapter result.
+
+Core does not need a known package ID for this path. The synthetic `future-terminal` test in
+[`package-composition.test.ts`](../test/onboarding/package-composition.test.ts) protects install,
+selection, Dockerfile workload selection, and Fabric dispatch for an unknown ID. The bundled
+artifact test and build-context tests protect discovery, copied inputs, identity, and staging.
+
+This path does not enable generic managed startup. Core must add the package and its contracts to
+the closed maps rooted at `MANAGED_STARTUP_AGENTS`. Buildless onboarding has a separate closed
+gate. Core must register the ID as a managed-image agent, define its runtime identity and image
+repository, and supply an accepted immutable catalog contract. Do not add an agent-name branch
+to the generic bundler, installer, Dockerfile selector, terminal dispatch, or Fabric runner.
+
 Static data and fixed commands are preferable to host adapters. Add a host operation only when
 core must retain authorization, credentials, transaction order, or rollback around package-native
 translation.
@@ -360,7 +388,7 @@ a live lifecycle.
 | Package artifact | Package; root package-contract for Pi today | Archive members, image inputs, file modes, locks, and fixed paths | Every package change |
 | Loader contract | Core | Receipt, schema, VM, size, mutation-race, and capability-refusal behavior | Every adapter change |
 | Synthetic composition | Core | An unknown package ID exercises covered operations without an agent switch | Every contract change |
-| Revision-pinned composition | Package | One package candidate works with one supplied NemoClaw commit | Package release candidate |
+| Revision-pinned composition | Package | The supplied commit builds the CLI, runs package tests, installs the candidate, and verifies its identity | Package release candidate |
 | Fabric | Package and runner | Package configuration works through the selected Fabric adapter | Fabric or headless change |
 | Live edge | Existing E2E registry | Docker, OpenShell, process, filesystem, policy, network, or inference behavior | Changed edge only |
 
@@ -471,6 +499,10 @@ not qualify Pi. A Pi live candidate needs its own exact image evidence.
 
 ## Add a package candidate
 
+DeepSeek and Haystack are proposed candidates, not supported integrations. Implement either only
+after an issue or design decision records `Accept`, its canonical ID, reason, placement,
+accountable maintainer, lifecycle, compatibility, security, and validation plan.
+
 1. Create `packages/nemoclaw-<id>` with the six required runtime files and a package README.
 2. Declare static capabilities and commands in `manifest.yaml`.
 3. Put build-time translation in `config/`.
@@ -481,20 +513,40 @@ not qualify Pi. A Pi live candidate needs its own exact image evidence.
 7. Implement only typed host operations that core already defines. Do not add no-op capability
    files.
 8. Add package unit, artifact, Fabric, and negative tests.
-9. Pass the package-only rehearsal.
-10. Pass revision-pinned composition.
-11. Add data and assertions to the existing typed E2E registry only for an external boundary that
-    needs live evidence.
+9. Pass `npm run typecheck`, `npm run test:package`, `npm run test:fabric`, and
+   `npm run test:fabric:composed` from the package root.
+10. Pass the package-only rehearsal.
+11. Pass revision-pinned composition. This gate builds the NemoClaw CLI at the supplied commit,
+    runs the package's `npm test`, installs the candidate, and verifies its healthy receipt-backed
+    identity with `nemoclaw harness list --json`.
+12. From the NemoClaw root, pass `npm run test:package` and
+    `npx vitest run --project integration test/onboarding/package-composition.test.ts`.
+
+After scope acceptance, add one focused live target for each new package. Register it in the typed
+E2E registry so shared fixtures drive the OpenShell lifecycle. Pass a
+`PublicFabricHarnessContract` to `runPublicFabricTurn` without an agent-ID branch. The target must:
+
+- Build or select the candidate image and onboard one sandbox.
+- Run one prompt through `nemoclaw sandbox agent <sandbox> <prompt>`.
+- Supply the package's typed values to `runPublicFabricTurn`.
+- Verify the package receipt, Fabric runner, adapter descriptor, generated configuration, exact
+  response, absence of credential values, and process cleanup.
+- Destroy the sandbox and remove its test-owned state.
+
+This one onboard-run-destroy journey is the live lifecycle and Fabric gate. Add a separate rebuild,
+restart, provider, operating-system, or hardware target only when that boundary has a distinct
+package risk. Package tests must prove native grammar and failure cases without repeating the live
+matrix.
 
 Discovery and the covered host operations must not require a new command option, core catalogue
-branch, or agent-name switch. Full onboarding still requires a core change while the managed
-startup profile and coordinator use a closed agent set. If a new package needs a semantic
-operation that core does not define, propose that operation with its consumer, trust boundary,
-result schema, and tests. Do not encode it as an arbitrary callback.
+branch, or agent-name switch. The bundled Dockerfile path requires no managed-startup entry. If a
+new package needs managed startup, buildless onboarding, or a semantic operation that core does not
+define, propose that capability with its consumer, trust boundary, result schema, and tests. Do not
+encode it as an arbitrary callback.
 
-External package download, separate repository ownership, and compatibility policy remain later
-work. They require an accepted design decision with an `Accept` outcome before NemoClaw presents
-them as supported behavior.
+External package download, PyPI discovery, separate repository ownership, publisher trust, and
+compatibility policy remain later work. No external distribution design has an accepted product
+decision. NemoClaw must not present those paths as supported behavior.
 
 ## Definition of done
 
