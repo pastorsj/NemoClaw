@@ -9,7 +9,7 @@ import {
 } from "../../../src/lib/agent/candidate.ts";
 import { CUA_FEATURE_ENV } from "../../../src/lib/cua/feature.ts";
 import { type ChildProcessProgress, spawnObservedChild } from "./observed-child-process.ts";
-import { buildChildEnv } from "./redaction.ts";
+import { buildChildEnv, isValidSecretEnvKey } from "./redaction.ts";
 import { superviseChild } from "./shell/supervisor.ts";
 import type { TrustedShellCommand } from "./shell/trusted-command.ts";
 
@@ -275,10 +275,16 @@ export class ShellProbe {
     const startedAtMs = Date.now();
     const commandOutputObserver =
       options.onOutput === this.progress.onOutput ? undefined : options.onOutput;
+    const environmentEntries = Object.entries(options.env ?? {});
+    const secretEnv = environmentEntries.map(([key]) => key).filter(isValidSecretEnvKey);
+    const secretEnvironment = Object.fromEntries(
+      environmentEntries.filter(([key]) => isValidSecretEnvKey(key)),
+    );
+    const fixtureOverlay = Object.fromEntries(
+      environmentEntries.filter(([key]) => !isValidSecretEnvKey(key)),
+    );
     const commandEnv = resolveLiveE2eWorkloadSourceEnv(
-      buildChildEnv(process.env, {
-        fixtureOverlay: options.env ?? {},
-      }),
+      buildChildEnv({ ...process.env, ...secretEnvironment }, { fixtureOverlay, secretEnv }),
     );
     const child = spawnObservedChild(command, args, {
       activityLabel: `command: ${activityName}`,
