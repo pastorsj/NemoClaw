@@ -36,6 +36,12 @@ runtime:
   command_shell: /bin/sh
   interactive_command: "hermes"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.hermes/fabric.json"
+  # These public constants must exist in the supervisor's initial environment.
+  # The authenticated recovery helper validates that exact process boundary.
+  startup_environment:
+    HERMES_BUNDLED_PLUGINS: /opt/hermes/plugins
+    HERMES_HOME: /sandbox/.hermes
+    HERMES_LAZY_INSTALL_TARGET: /sandbox/.hermes/lazy-packages
   smoke_boundary:
     kind: login-shell
   smoke_commands:

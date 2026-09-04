@@ -179,6 +179,26 @@ function runRuntimeEnvValidationAsGateway(lazyTarget: string) {
   );
 }
 
+function runRuntimeEnvValidationForSandboxSupervisor(lazyTarget: string) {
+  return spawnSync(
+    "python3",
+    [
+      "-I",
+      "-c",
+      [
+        "import runpy, sys",
+        "module = runpy.run_path(sys.argv[1], run_name='nemoclaw_sandbox_supervisor_env_test')",
+        "module['os'].geteuid = lambda: 0",
+        "environment = {'HERMES_LAZY_INSTALL_TARGET': sys.argv[2], 'HERMES_HOME': '/sandbox/.hermes', 'HERMES_BUNDLED_PLUGINS': '/opt/hermes/plugins'}",
+        "raise SystemExit(module['validate_runtime_env'](environment, runtime_identity='sandbox-supervisor'))",
+      ].join("; "),
+      VALIDATOR,
+      lazyTarget,
+    ],
+    { encoding: "utf-8", timeout: 5000 },
+  );
+}
+
 describe("Hermes env secret-boundary resource limits", () => {
   it("accepts the normal 0640 mutable env-file mode", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-env-mode-"));
@@ -539,6 +559,18 @@ describe("Hermes durable lazy-install target", () => {
     const gatewayTarget = "/run/nemoclaw/hermes-gateway-lazy-packages";
     const accepted = runRuntimeEnvValidationAsGateway(gatewayTarget);
     const refused = runRuntimeEnvValidationAsGateway("/sandbox/.hermes/lazy-packages");
+
+    expect(accepted.status, accepted.stderr).toBe(0);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("HERMES_LAZY_INSTALL_TARGET");
+  });
+
+  it("requires the sandbox-owned lazy target for the managed supervisor identity", () => {
+    const sandboxTarget = "/sandbox/.hermes/lazy-packages";
+    const accepted = runRuntimeEnvValidationForSandboxSupervisor(sandboxTarget);
+    const refused = runRuntimeEnvValidationForSandboxSupervisor(
+      "/run/nemoclaw/hermes-gateway-lazy-packages",
+    );
 
     expect(accepted.status, accepted.stderr).toBe(0);
     expect(refused.status).toBe(1);

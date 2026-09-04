@@ -21,6 +21,9 @@ const temporaryDirectories: string[] = [];
 function startupArgv(...extra: string[]): string[] {
   return [
     "env",
+    "HERMES_BUNDLED_PLUGINS=/opt/hermes/plugins",
+    "HERMES_HOME=/sandbox/.hermes",
+    "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
     "NEMOCLAW_HERMES_API_PORT=8642",
     `NEMOCLAW_SANDBOX_NAME=${SANDBOX}`,
     ...extra,
@@ -175,6 +178,9 @@ describe("Hermes portable startup contract", () => {
     {
       argv: [
         "env",
+        "HERMES_BUNDLED_PLUGINS=/opt/hermes/plugins",
+        "HERMES_HOME=/sandbox/.hermes",
+        "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
         `NEMOCLAW_SANDBOX_NAME=${SANDBOX}`,
         "NEMOCLAW_HERMES_API_PORT=8642",
         "/usr/local/bin/nemoclaw-start",
@@ -209,6 +215,34 @@ describe("Hermes portable startup contract", () => {
         startupArgv: startupArgv(assignment),
       }),
     ).toThrow("Hermes portable startup contract");
+  });
+
+  it.each([
+    "HERMES_BUNDLED_PLUGINS=/tmp/plugins",
+    "HERMES_HOME=/tmp/hermes",
+    "HERMES_LAZY_INSTALL_TARGET=/tmp/lazy-packages",
+  ])("rejects manifest-declared startup environment drift: %s (#9203)", (assignment) => {
+    const key = assignment.slice(0, assignment.indexOf("="));
+    const argv = startupArgv().filter((entry) => !entry.startsWith(`${key}=`));
+    argv.splice(-1, 0, assignment);
+
+    expect(() =>
+      resolveHermesPortableStartupContract({
+        agent: copyAgent(),
+        sandboxName: SANDBOX,
+        startupArgv: argv,
+      }),
+    ).toThrow(`package startup env '${key}' changed`);
+  });
+
+  it("requires every manifest-declared startup environment entry (#9203)", () => {
+    expect(() =>
+      resolveHermesPortableStartupContract({
+        agent: copyAgent(),
+        sandboxName: SANDBOX,
+        startupArgv: startupArgv().filter((entry) => !entry.startsWith("HERMES_HOME=")),
+      }),
+    ).toThrow("missing package startup env 'HERMES_HOME'");
   });
 
   it("rejects a credential-bearing proxy without persisting its value (#9203)", () => {

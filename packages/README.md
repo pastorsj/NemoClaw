@@ -152,6 +152,11 @@ Use `manifest.yaml` for bounded data that core can validate without executing pa
 declares identity, commands, ports, health, state, configuration paths, runtime metadata, and
 capabilities.
 
+Use `runtime.startup_environment` only for public package constants that must exist when the
+agent entrypoint first starts. NemoClaw validates the names and values, rejects credential-shaped
+or core-owned keys, and forwards only the selected package's entries. Credentials, proxy settings,
+OpenShell identity, and `NEMOCLAW_*` controls remain core-owned.
+
 Use a fixed command inside the sandbox when the package can perform the native operation there.
 For managed startup, the image installs `runtime/generate-config.sh` as:
 

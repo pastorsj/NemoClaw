@@ -208,7 +208,7 @@ function validateUrl(value: string, label: string): void {
 }
 
 function validateAssignment(key: string, value: string, sandboxName: string): void {
-  if (!ENV_NAME.test(key) || !ALLOWED_ENV.has(key)) fail(`argv contains unsupported env '${key}'`);
+  if (!ENV_NAME.test(key)) fail(`argv contains unsupported env '${key}'`);
   if (!value || value.length > 4096 || /[\u0000-\u001f\u007f]/u.test(value)) {
     fail(`argv env '${key}' has an invalid value`);
   }
@@ -233,7 +233,11 @@ function validateAssignment(key: string, value: string, sandboxName: string): vo
   }
 }
 
-function validateStartupArgv(argv: readonly string[], sandboxName: string): readonly string[] {
+function validateStartupArgv(
+  argv: readonly string[],
+  sandboxName: string,
+  startupEnvironment: Readonly<Record<string, string>> = {},
+): readonly string[] {
   if (
     argv.length < 4 ||
     argv.length > 64 ||
@@ -248,12 +252,21 @@ function validateStartupArgv(argv: readonly string[], sandboxName: string): read
     if (separator < 1) fail("argv contains a non-assignment before startup");
     const key = assignment.slice(0, separator);
     const value = assignment.slice(separator + 1);
+    if (!ALLOWED_ENV.has(key) && !Object.hasOwn(startupEnvironment, key)) {
+      fail(`argv contains unsupported env '${key}'`);
+    }
     if (seen.has(key)) fail(`argv contains duplicate env '${key}'`);
     seen.add(key);
     validateAssignment(key, value, sandboxName);
+    if (Object.hasOwn(startupEnvironment, key) && startupEnvironment[key] !== value) {
+      fail(`argv package startup env '${key}' changed`);
+    }
   }
   if (!seen.has("NEMOCLAW_SANDBOX_NAME") || !seen.has("NEMOCLAW_HERMES_API_PORT")) {
     fail("argv is missing the sandbox name or Hermes API port");
+  }
+  for (const key of Object.keys(startupEnvironment)) {
+    if (!seen.has(key)) fail(`argv is missing package startup env '${key}'`);
   }
   return [...argv];
 }
@@ -277,7 +290,8 @@ function rerenderCurrentStartupArgv(
   storedArgv: readonly string[],
   sandboxName: string,
 ): readonly string[] {
-  const argv = validateStartupArgv(storedArgv, sandboxName);
+  const agent = currentHermesPortableAgentDefinition();
+  const argv = validateStartupArgv(storedArgv, sandboxName, agent.runtime?.startup_environment);
   const assignments = startupAssignments(argv);
   const environment = Object.fromEntries(assignments);
   const extraPlaceholderKeys = (assignments.get("NEMOCLAW_EXTRA_PLACEHOLDER_KEYS") ?? "")
@@ -333,7 +347,11 @@ export function resolveHermesPortableStartupContract(
   ) {
     fail("current Hermes manifest does not match the accepted lifecycle contract");
   }
-  const argv = validateStartupArgv(input.startupArgv, sandboxName);
+  const argv = validateStartupArgv(
+    input.startupArgv,
+    sandboxName,
+    manifest.runtime.startup_environment,
+  );
   const stateIdentitySha256 = stateIdentity(manifest);
   return {
     manifestSha256: sha256(manifestBytes),

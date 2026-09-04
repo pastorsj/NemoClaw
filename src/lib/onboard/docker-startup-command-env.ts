@@ -78,6 +78,15 @@ function appendOpenClawMcpToolsListTimeoutRuntimeEnvArg(
   envArgs.push(formatEnvAssignment(OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV, String(timeoutMs)));
 }
 
+function appendAgentStartupEnvironment(
+  envArgs: string[],
+  agent: AgentDefinition | null,
+): void {
+  for (const [name, value] of Object.entries(agent?.runtime?.startup_environment ?? {})) {
+    envArgs.push(formatEnvAssignment(name, value));
+  }
+}
+
 export interface SandboxRuntimeEnvArgsInput {
   agent: AgentDefinition | null;
   chatUiUrl: string;
@@ -109,6 +118,7 @@ export function buildSandboxRuntimeEnvArgs(input: SandboxRuntimeEnvArgsInput): {
     }
   }
 
+  appendAgentStartupEnvironment(envArgs, agent);
   appendOpenClawRuntimeEnvArgs(envArgs, agent);
   appendOpenClawAutoPairRuntimeEnvArgs(envArgs, agent, env);
   appendOpenClawDiagnosticRuntimeEnvArgs(envArgs, agent, env);

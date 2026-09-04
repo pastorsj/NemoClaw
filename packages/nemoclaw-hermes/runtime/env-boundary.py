@@ -142,7 +142,11 @@ def _sandbox_identity() -> tuple[int, int] | None:
         return None
 
 
-def _expected_lazy_install_target() -> str:
+def _expected_lazy_install_target(runtime_identity: str = "current") -> str:
+    if runtime_identity == "sandbox-supervisor":
+        return "/sandbox/.hermes/lazy-packages"
+    if runtime_identity != "current":
+        raise ValueError("unsupported Hermes runtime identity")
     effective_uid = os.geteuid()
     if effective_uid == 0:
         return "/run/nemoclaw/hermes-gateway-lazy-packages"
@@ -537,11 +541,15 @@ def validate_env_file(path: str) -> int:
     return 1
 
 
-def validate_runtime_env(env: dict[str, str] | None = None) -> int:
+def validate_runtime_env(
+    env: dict[str, str] | None = None,
+    *,
+    runtime_identity: str = "current",
+) -> int:
     source = os.environ if env is None else env
     violations: list[str] = []
     violation_count = 0
-    expected_lazy_target = _expected_lazy_install_target()
+    expected_lazy_target = _expected_lazy_install_target(runtime_identity)
     if source.get("HERMES_LAZY_INSTALL_TARGET") != expected_lazy_target:
         violation_count += 1
         if len(violations) < MAX_VIOLATIONS:

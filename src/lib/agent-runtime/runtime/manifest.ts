@@ -24,6 +24,7 @@ export interface AgentRuntime {
   interactive_command?: string;
   headless_command?: string;
   command_shell?: AgentCommandShell;
+  startup_environment?: Readonly<Record<string, string>>;
   smoke_commands?: string[];
   smoke_boundary?: AgentSmokeBoundary;
 }
@@ -42,6 +43,58 @@ function readStringArray(record: RuntimeRecord, key: string): string[] | undefin
     throw new Error(`Agent manifest field 'runtime.${key}' must be an array of strings`);
   }
   return value as string[];
+}
+
+const STARTUP_ENVIRONMENT_KEY = /^[A-Z][A-Z0-9_]{0,127}$/u;
+const SECRET_ENVIRONMENT_KEY = /(?:^|_)(?:AUTH|CREDENTIAL|KEY|PASSWORD|SECRET|TOKEN)(?:_|$)/u;
+const CORE_ENVIRONMENT_KEYS = new Set([
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+]);
+
+/** Read public, package-owned constants needed before the agent entrypoint starts. */
+function readStartupEnvironment(
+  record: RuntimeRecord,
+): Readonly<Record<string, string>> | undefined {
+  const value = record.startup_environment;
+  if (value === undefined) return undefined;
+  if (!isObjectRecord(value)) {
+    throw new Error("Agent manifest field 'runtime.startup_environment' must be an object");
+  }
+
+  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+  for (const [key, rawValue] of entries) {
+    if (!STARTUP_ENVIRONMENT_KEY.test(key)) {
+      throw new Error(
+        `Agent manifest field 'runtime.startup_environment.${key}' must use an uppercase environment name`,
+      );
+    }
+    if (
+      key.startsWith("NEMOCLAW_") ||
+      key.startsWith("OPENSHELL_") ||
+      CORE_ENVIRONMENT_KEYS.has(key) ||
+      SECRET_ENVIRONMENT_KEY.test(key)
+    ) {
+      throw new Error(
+        `Agent manifest field 'runtime.startup_environment.${key}' cannot replace a core-owned or credential environment value`,
+      );
+    }
+    if (
+      typeof rawValue !== "string" ||
+      rawValue.length === 0 ||
+      rawValue.length > 4096 ||
+      /[\0\r\n]/u.test(rawValue)
+    ) {
+      throw new Error(
+        `Agent manifest field 'runtime.startup_environment.${key}' must be a non-empty single-line string of at most 4096 characters`,
+      );
+    }
+  }
+  return Object.freeze(Object.fromEntries(entries) as Record<string, string>);
 }
 
 function readCommandShell(record: RuntimeRecord): AgentCommandShell | undefined {
@@ -99,6 +152,7 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
   const interactiveCommand = readString(runtime, "interactive_command")?.trim();
   const headlessCommand = readString(runtime, "headless_command")?.trim();
   const commandShell = readCommandShell(runtime);
+  const startupEnvironment = readStartupEnvironment(runtime);
   const smokeCommands = readStringArray(runtime, "smoke_commands");
   const smokeBoundary = readSmokeBoundary(runtime);
 
@@ -113,6 +167,7 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
     ...(interactiveCommand ? { interactive_command: interactiveCommand } : {}),
     ...(headlessCommand ? { headless_command: headlessCommand } : {}),
     ...(commandShell ? { command_shell: commandShell } : {}),
+    ...(startupEnvironment ? { startup_environment: startupEnvironment } : {}),
     ...(smokeCommands && smokeCommands.length > 0 ? { smoke_commands: smokeCommands } : {}),
     ...(smokeBoundary ? { smoke_boundary: smokeBoundary } : {}),
   };

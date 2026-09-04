@@ -1589,7 +1589,11 @@ def _run_fixed_validator(
         raise ControlError("SECRET_BOUNDARY_REFUSED")
 
 
-def _validate_runtime_environment(script: str, environment: dict[str, str]) -> None:
+def _validate_runtime_environment(
+    script: str,
+    environment: dict[str, str],
+    runtime_identity: str = "current",
+) -> None:
     """Validate runtime values without execing a root process under them."""
 
     _validate_trusted_regular(script)
@@ -1602,8 +1606,8 @@ def _validate_runtime_environment(script: str, environment: dict[str, str]) -> N
     try:
         spec.loader.exec_module(module)
         validator = getattr(module, "validate_runtime_env")
-        result = validator(environment)
-    except (AttributeError, ImportError, OSError, RuntimeError) as exc:
+        result = validator(environment, runtime_identity=runtime_identity)
+    except (AttributeError, ImportError, OSError, RuntimeError, ValueError) as exc:
         raise ControlError("SECRET_BOUNDARY_REFUSED") from exc
     if result != 0:
         raise ControlError("SECRET_BOUNDARY_REFUSED")
@@ -1722,7 +1726,11 @@ def _hermes_preflight(
         MAX_ENV_BYTES,
         recovery_deadline,
     )
-    _validate_runtime_environment(validator, _parse_environment(raw_environment))
+    _validate_runtime_environment(
+        validator,
+        _parse_environment(raw_environment),
+        "sandbox-supervisor",
+    )
     _require_recovery_time(recovery_deadline)
     _verify_locked_hermes_hash()
     _require_recovery_time(recovery_deadline)
