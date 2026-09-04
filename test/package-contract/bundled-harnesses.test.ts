@@ -8,7 +8,6 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { listBundledAgentRuntimeSources } from "../../scripts/build-harnesses.mts";
-import { directDockerfileCopySources } from "../../scripts/lib/dockerfile-copy-sources.mts";
 import { buildAgentDefinition } from "../../dist/lib/agent-runtime/manifest-loader.js";
 import { parseHarnessPackageManifest } from "../../dist/lib/agent-runtime/package/manifest.js";
 import { validateHarnessPackageTree } from "../../dist/lib/agent-runtime/package/tree.js";
@@ -18,20 +17,15 @@ const BUNDLED_ROOT = path.join(REPOSITORY_ROOT, "dist", "harnesses");
 const TSX = path.join(REPOSITORY_ROOT, "node_modules", "tsx", "dist", "cli.mjs");
 const PRIVATE_BUILD_EXPRESSION = `
 import { materializeBundledHarnesses } from "./scripts/build-harnesses.mts";
-materializeBundledHarnesses(process.argv[1] ?? "");
+materializeBundledHarnesses(process.argv[1] ?? "", process.argv[2]);
 `;
-const EXPECTED_IDS = ["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const;
-const DOCKERFILES = {
-  openclaw: ["packages/nemoclaw-openclaw/Dockerfile", "packages/nemoclaw-openclaw/Dockerfile.base"],
-  hermes: ["packages/nemoclaw-hermes/Dockerfile", "packages/nemoclaw-hermes/Dockerfile.base"],
-  "langchain-deepagents-code": [
-    "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
-    "packages/nemoclaw-langchain-deepagents-code/Dockerfile.base",
-  ],
-  pi: ["packages/nemoclaw-pi/Dockerfile", "packages/nemoclaw-pi/Dockerfile.base"],
-} as const;
 
 type PackResult = Array<{ files: Array<{ path: string }> }>;
+type BundledAgentRuntimeSource = ReturnType<typeof listBundledAgentRuntimeSources>[number];
+
+function bundledPackageIds(): readonly string[] {
+  return listBundledAgentRuntimeSources().map(({ id }) => id);
+}
 
 function artifactRoot(id: string, outputRoot = BUNDLED_ROOT): string {
   return path.join(outputRoot, `nemoclaw-${id}`);
@@ -47,7 +41,7 @@ function relativePackageAsset(packageRoot: string, assetPath: string | null): st
 
 function packageTreeSnapshots(outputRoot: string): Readonly<Record<string, unknown>> {
   return Object.fromEntries(
-    EXPECTED_IDS.map((id) => {
+    bundledPackageIds().map((id) => {
       const packageRoot = artifactRoot(id, outputRoot);
       const validated = validateHarnessPackageTree(packageRoot);
       const entries = [
@@ -91,6 +85,36 @@ function makeTreeWritable(root: string): void {
   });
 }
 
+function writeFutureHarnessPackage(repositoryRoot: string): void {
+  const packageRoot = path.join(repositoryRoot, "packages", "nemoclaw-future-harness");
+  fs.mkdirSync(packageRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(packageRoot, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "@fixture/nemoclaw-future-harness",
+        version: "9.8.7",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  fs.writeFileSync(
+    path.join(packageRoot, "manifest.yaml"),
+    'name: future-harness\ndisplay_name: "Future Harness"\n',
+  );
+  fs.writeFileSync(path.join(packageRoot, "Dockerfile.base"), "FROM scratch\n");
+  fs.writeFileSync(
+    path.join(packageRoot, "Dockerfile"),
+    "FROM scratch\nCOPY packages/nemoclaw-future-harness/start.sh /usr/local/bin/nemoclaw-start\n",
+  );
+  fs.writeFileSync(path.join(packageRoot, "start.sh"), "#!/bin/sh\nexec future-harness\n", {
+    mode: 0o755,
+  });
+  fs.writeFileSync(path.join(packageRoot, "policy-additions.yaml"), "version: 1\n");
+}
+
 function runBundledBuild(...args: readonly string[]): void {
   const result = spawnSync(process.execPath, [TSX, "scripts/build-harnesses.mts", ...args], {
     cwd: REPOSITORY_ROOT,
@@ -99,10 +123,16 @@ function runBundledBuild(...args: readonly string[]): void {
   expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
 }
 
-function runPrivateBundledBuild(outputRoot: string): void {
+function runPrivateBundledBuild(outputRoot: string, authoringRepositoryRoot?: string): void {
   const result = spawnSync(
     process.execPath,
-    [TSX, "--eval", PRIVATE_BUILD_EXPRESSION, outputRoot],
+    [
+      TSX,
+      "--eval",
+      PRIVATE_BUILD_EXPRESSION,
+      outputRoot,
+      ...(authoringRepositoryRoot ? [authoringRepositoryRoot] : []),
+    ],
     {
       cwd: REPOSITORY_ROOT,
       encoding: "utf8",
@@ -122,46 +152,65 @@ function packedFileList(): readonly string[] {
   return result[0]?.files.map(({ path: filePath }) => filePath) ?? [];
 }
 
-function expandCopySource(sourcePath: string): readonly string[] {
-  const normalized = sourcePath.replace(/\/+$/u, "");
-  return /[*?[\]]/u.test(normalized)
-    ? fs.globSync(normalized, { cwd: REPOSITORY_ROOT }).sort()
-    : [normalized];
-}
-
-function localBuildAssets(id: (typeof EXPECTED_IDS)[number]): readonly string[] {
-  return [
-    ...DOCKERFILES[id],
-    ...DOCKERFILES[id].flatMap((dockerfile) =>
-      directDockerfileCopySources(path.join(REPOSITORY_ROOT, dockerfile), dockerfile).flatMap(
-        ({ source }) => expandCopySource(source),
-      ),
-    ),
-  ];
-}
-
 function missingPackedAssets(
-  id: (typeof EXPECTED_IDS)[number],
+  source: BundledAgentRuntimeSource,
   packed: readonly string[],
 ): string[] {
-  const prefix = `${artifactPackPrefix(id)}/`;
-  return localBuildAssets(id).filter((asset) => {
-    const repositoryAsset = path.join(REPOSITORY_ROOT, asset);
-    const expected = `${prefix}${asset}`;
-    return fs.statSync(repositoryAsset).isDirectory()
-      ? !packed.some((filePath) => filePath.startsWith(`${expected}/`))
-      : !packed.includes(expected);
+  const prefix = `${artifactPackPrefix(source.id)}/`;
+  return source.mappings.flatMap(({ sourcePath, destinationPath }) => {
+    const repositoryAsset = path.join(REPOSITORY_ROOT, sourcePath);
+    const expected = `${prefix}${destinationPath}`;
+    const isPacked = fs.statSync(repositoryAsset).isDirectory()
+      ? packed.some((filePath) => filePath.startsWith(`${expected}/`))
+      : packed.includes(expected);
+    return isPacked ? [] : [sourcePath];
   });
 }
 
 describe("bundled harness package artifacts", () => {
+  it("discovers and bundles a metadata-declared package without an ID registry", () => {
+    const temporaryRoot = fs.mkdtempSync(
+      path.join(fs.realpathSync.native(path.dirname(REPOSITORY_ROOT)), ".nemoclaw-discovery-"),
+    );
+    const fixtureRepositoryRoot = path.join(temporaryRoot, "repository");
+    const outputRoot = path.join(temporaryRoot, "bundled");
+    try {
+      fs.mkdirSync(path.join(fixtureRepositoryRoot, "packages"), { recursive: true });
+      writeFutureHarnessPackage(fixtureRepositoryRoot);
+
+      expect(listBundledAgentRuntimeSources(fixtureRepositoryRoot)).toMatchObject([
+        {
+          id: "future-harness",
+          displayName: "Future Harness",
+          packageVersion: "9.8.7",
+          manifestPath: "packages/nemoclaw-future-harness/manifest.yaml",
+        },
+      ]);
+
+      runPrivateBundledBuild(outputRoot, fixtureRepositoryRoot);
+      expect(fs.readdirSync(outputRoot)).toEqual(["nemoclaw-future-harness"]);
+      const packageRoot = artifactRoot("future-harness", outputRoot);
+      const parsed = parseHarnessPackageManifest(packageRoot);
+      expect(parsed.envelope).toMatchObject({
+        id: "future-harness",
+        displayName: "Future Harness",
+        packageVersion: "9.8.7",
+        manifest: "packages/nemoclaw-future-harness/manifest.yaml",
+      });
+      expect(validateHarnessPackageTree(packageRoot).contentDigest).toMatch(/^[a-f0-9]{64}$/u);
+    } finally {
+      makeTreeWritable(temporaryRoot);
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it("discovers each declared in-tree package and builds a valid closed envelope", () => {
     const sources = listBundledAgentRuntimeSources();
-    expect(sources.map(({ id }) => id).sort()).toEqual([...EXPECTED_IDS].sort());
+    const packageIds = sources.map(({ id }) => id);
     expect(fs.readdirSync(BUNDLED_ROOT).sort()).toEqual(
-      EXPECTED_IDS.map((id) => `nemoclaw-${id}`).sort(),
+      packageIds.map((id) => `nemoclaw-${id}`).sort(),
     );
-    const envelopeSummaries = EXPECTED_IDS.map((id) => {
+    const envelopeSummaries = packageIds.map((id) => {
       const parsed = parseHarnessPackageManifest(artifactRoot(id));
       const definition = buildAgentDefinition({
         manifest: parsed.manifest,
@@ -187,7 +236,7 @@ describe("bundled harness package artifacts", () => {
       };
     });
     expect(envelopeSummaries).toEqual(
-      EXPECTED_IDS.map((id) => {
+      packageIds.map((id) => {
         const source = sources.find((candidate) => candidate.id === id)!;
         const packagePath = `packages/nemoclaw-${id}`;
         return {
@@ -203,10 +252,10 @@ describe("bundled harness package artifacts", () => {
         };
       }),
     );
-    expect(EXPECTED_IDS.map((id) => fs.statSync(artifactRoot(id)).mode & 0o777)).toEqual(
-      EXPECTED_IDS.map(() => 0o555),
+    expect(packageIds.map((id) => fs.statSync(artifactRoot(id)).mode & 0o777)).toEqual(
+      packageIds.map(() => 0o555),
     );
-    const nonCanonicalModes = EXPECTED_IDS.flatMap((id) =>
+    const nonCanonicalModes = packageIds.flatMap((id) =>
       validateHarnessPackageTree(artifactRoot(id))
         .entries.filter(({ relativePath, type }) => {
           const mode = fs.statSync(path.join(artifactRoot(id), relativePath)).mode & 0o777;
@@ -251,8 +300,8 @@ describe("bundled harness package artifacts", () => {
       ];
       return required.filter((filePath) => !packed.includes(filePath));
     });
-    const missingAssets = EXPECTED_IDS.flatMap((id) =>
-      missingPackedAssets(id, packed).map((asset) => `${id}:${asset}`),
+    const missingAssets = listBundledAgentRuntimeSources().flatMap((source) =>
+      missingPackedAssets(source, packed).map((asset) => `${source.id}:${asset}`),
     );
 
     expect(missingArtifacts).toEqual([]);
@@ -285,7 +334,7 @@ describe("bundled harness package artifacts", () => {
         expect.stringContaining("nemoclaw-blueprint/router/llm-router/"),
       ]),
     );
-    const envelopeKeys = EXPECTED_IDS.flatMap((id) =>
+    const envelopeKeys = bundledPackageIds().flatMap((id) =>
       Object.keys(
         JSON.parse(fs.readFileSync(path.join(artifactRoot(id), "nemoclaw-package.json"), "utf8")),
       ),

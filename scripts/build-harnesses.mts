@@ -36,7 +36,6 @@ function loadHarnessPackageTreeModule(): HarnessPackageTreeModule {
 }
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const AUTHORING_PACKAGES_ROOT = path.join(REPOSITORY_ROOT, "packages");
 const DISTRIBUTION_ROOT = path.join(REPOSITORY_ROOT, "dist");
 export const BUNDLED_HARNESS_OUTPUT_ROOT = path.join(DISTRIBUTION_ROOT, "harnesses");
 const AGENT_RUNTIME_PACKAGE_PREFIX = "nemoclaw-";
@@ -136,10 +135,10 @@ function readManifestIdentity(manifestPath: string): { id: string; displayName: 
   return { id: record.name, displayName: displayName ?? record.name };
 }
 
-function expandBuildInput(source: string): readonly string[] {
+function expandBuildInput(source: string, repositoryRoot: string): readonly string[] {
   const normalized = source.replace(/\/+$/u, "");
   if (!/[*?[\]]/u.test(normalized)) return [normalized];
-  const matches = fs.globSync(normalized, { cwd: REPOSITORY_ROOT }).sort();
+  const matches = fs.globSync(normalized, { cwd: repositoryRoot }).sort();
   if (matches.length === 0) {
     throw new Error(`Agent runtime Dockerfile COPY source did not match any files: ${source}`);
   }
@@ -147,23 +146,24 @@ function expandBuildInput(source: string): readonly string[] {
 }
 
 function buildInputMappings(
+  repositoryRoot: string,
   packageRelativePath: string,
   dockerfiles: readonly string[],
 ): readonly BundledAgentRuntimeSourceMapping[] {
   const sourcePaths = new Set<string>([packageRelativePath]);
   for (const dockerfile of dockerfiles) {
     for (const { source } of directDockerfileCopySources(
-      path.join(REPOSITORY_ROOT, dockerfile),
+      path.join(repositoryRoot, dockerfile),
       dockerfile,
     )) {
-      for (const match of expandBuildInput(source)) sourcePaths.add(match);
+      for (const match of expandBuildInput(source, repositoryRoot)) sourcePaths.add(match);
     }
   }
 
   const candidates = [...sourcePaths]
     .sort((left, right) => left.localeCompare(right))
     .map((sourcePath) => {
-      const stat = fs.lstatSync(path.join(REPOSITORY_ROOT, sourcePath));
+      const stat = fs.lstatSync(path.join(repositoryRoot, sourcePath));
       if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
         throw new Error(
           `Agent runtime build input must be a regular file or directory: ${sourcePath}`,
@@ -189,10 +189,32 @@ function buildInputMappings(
   );
 }
 
+function assertAuthoringRepositoryRoot(repositoryRoot: string): string {
+  if (!path.isAbsolute(repositoryRoot) || path.resolve(repositoryRoot) !== repositoryRoot) {
+    throw new Error("Agent runtime authoring repository root must be one canonical absolute path");
+  }
+  const repositoryStat = fs.lstatSync(repositoryRoot);
+  const packagesRoot = path.join(repositoryRoot, "packages");
+  const packagesStat = fs.lstatSync(packagesRoot);
+  if (
+    repositoryStat.isSymbolicLink() ||
+    !repositoryStat.isDirectory() ||
+    packagesStat.isSymbolicLink() ||
+    !packagesStat.isDirectory()
+  ) {
+    throw new Error("Agent runtime authoring roots must be regular directories");
+  }
+  return repositoryRoot;
+}
+
 /** Discover every in-tree package that declares the data-only agent runtime contract. */
-export function listBundledAgentRuntimeSources(): readonly BundledAgentRuntimeSource[] {
+export function listBundledAgentRuntimeSources(
+  authoringRepositoryRoot = REPOSITORY_ROOT,
+): readonly BundledAgentRuntimeSource[] {
+  const repositoryRoot = assertAuthoringRepositoryRoot(authoringRepositoryRoot);
+  const authoringPackagesRoot = path.join(repositoryRoot, "packages");
   const sources = fs
-    .readdirSync(AUTHORING_PACKAGES_ROOT, { withFileTypes: true })
+    .readdirSync(authoringPackagesRoot, { withFileTypes: true })
     .filter(
       (entry) =>
         entry.isDirectory() &&
@@ -200,7 +222,7 @@ export function listBundledAgentRuntimeSources(): readonly BundledAgentRuntimeSo
         entry.name.startsWith(AGENT_RUNTIME_PACKAGE_PREFIX),
     )
     .flatMap((entry): BundledAgentRuntimeSource[] => {
-      const packageRoot = path.join(AUTHORING_PACKAGES_ROOT, entry.name);
+      const packageRoot = path.join(authoringPackagesRoot, entry.name);
       const packageJson = readAuthoringPackageJson(packageRoot);
       const declaredManifest = packageJson?.nemoclaw?.harnessManifest;
       if (declaredManifest === undefined) return [];
@@ -223,7 +245,7 @@ export function listBundledAgentRuntimeSources(): readonly BundledAgentRuntimeSo
         path.posix.join(packageRelativePath, "Dockerfile.base"),
       ];
       dockerfiles.forEach((dockerfile) => {
-        if (!fs.existsSync(path.join(REPOSITORY_ROOT, dockerfile))) {
+        if (!fs.existsSync(path.join(repositoryRoot, dockerfile))) {
           throw new Error(`Agent runtime package is missing ${dockerfile}`);
         }
       });
@@ -233,7 +255,7 @@ export function listBundledAgentRuntimeSources(): readonly BundledAgentRuntimeSo
           displayName: manifestIdentity.displayName,
           packageVersion: packageJson.version,
           manifestPath: path.posix.join(packageRelativePath, PACKAGE_MANIFEST_FILE),
-          mappings: buildInputMappings(packageRelativePath, dockerfiles),
+          mappings: buildInputMappings(repositoryRoot, packageRelativePath, dockerfiles),
         }),
       ];
     })
@@ -293,9 +315,9 @@ function resolveContained(root: string, relativePath: string, label: string): st
   return resolved;
 }
 
-function assertReviewedSourcePath(relativePath: string): string {
-  const resolved = resolveContained(REPOSITORY_ROOT, relativePath, "Bundled harness source");
-  const rootRealPath = fs.realpathSync.native(REPOSITORY_ROOT);
+function assertReviewedSourcePath(repositoryRoot: string, relativePath: string): string {
+  const resolved = resolveContained(repositoryRoot, relativePath, "Bundled harness source");
+  const rootRealPath = fs.realpathSync.native(repositoryRoot);
   const sourceRealPath = fs.realpathSync.native(resolved);
   const realRelative = path.relative(rootRealPath, sourceRealPath);
   if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
@@ -307,7 +329,7 @@ function assertReviewedSourcePath(relativePath: string): string {
       throw new Error(`Bundled harness source '${relativePath}' has a symbolic-link ancestor`);
     }
     return current;
-  }, REPOSITORY_ROOT);
+  }, repositoryRoot);
   return resolved;
 }
 
@@ -533,11 +555,12 @@ function assertMappingAuthority(mappings: readonly BundledAgentRuntimeSourceMapp
 }
 
 function copyMapping(
+  repositoryRoot: string,
   mapping: BundledAgentRuntimeSourceMapping,
   packageRoot: string,
   destinationFiles: Set<string>,
 ): void {
-  const sourcePath = assertReviewedSourcePath(mapping.sourcePath);
+  const sourcePath = assertReviewedSourcePath(repositoryRoot, mapping.sourcePath);
   const destinationRelativePath = normalizedRelativePath(
     mapping.destinationPath,
     "Bundled harness destination",
@@ -587,6 +610,7 @@ function buildEnvelope(source: BundledAgentRuntimeSource): HarnessPackageEnvelop
 }
 
 function buildArtifact(
+  repositoryRoot: string,
   source: BundledAgentRuntimeSource,
   outputRoot: string,
 ): BuiltHarnessArtifact {
@@ -594,7 +618,9 @@ function buildArtifact(
   ensureDirectory(packageRoot);
   assertMappingAuthority(source.mappings);
   const destinationFiles = new Set<string>();
-  for (const mapping of source.mappings) copyMapping(mapping, packageRoot, destinationFiles);
+  for (const mapping of source.mappings) {
+    copyMapping(repositoryRoot, mapping, packageRoot, destinationFiles);
+  }
 
   const metadataPath = path.join(packageRoot, "nemoclaw-package.json");
   assertUniqueDestination("nemoclaw-package.json", destinationFiles);
@@ -628,7 +654,11 @@ export function cleanBundledHarnesses(): void {
 }
 
 /** Materialize reviewed artifacts into one absent, caller-owned output root without replacing it. */
-export function materializeBundledHarnesses(outputRoot: string): readonly BuiltHarnessArtifact[] {
+export function materializeBundledHarnesses(
+  outputRoot: string,
+  authoringRepositoryRoot = REPOSITORY_ROOT,
+): readonly BuiltHarnessArtifact[] {
+  const repositoryRoot = assertAuthoringRepositoryRoot(authoringRepositoryRoot);
   const ancestors = captureAbsentCallerOwnedOutputRoot(outputRoot);
   fs.mkdirSync(outputRoot, { mode: 0o755 });
   fs.chmodSync(outputRoot, 0o755);
@@ -638,7 +668,9 @@ export function materializeBundledHarnesses(outputRoot: string): readonly BuiltH
   }
   assertOutputAncestorsUnchanged(ancestors);
   return Object.freeze(
-    listBundledAgentRuntimeSources().map((source) => buildArtifact(source, outputRoot)),
+    listBundledAgentRuntimeSources(repositoryRoot).map((source) =>
+      buildArtifact(repositoryRoot, source, outputRoot),
+    ),
   );
 }
 
