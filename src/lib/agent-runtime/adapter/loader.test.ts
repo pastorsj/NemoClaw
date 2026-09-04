@@ -28,7 +28,6 @@ const SOURCE_IDENTITY = Object.freeze({
   }),
 });
 const TEST_CONTRACT = defineHarnessAdapterContract({
-  capability: "test-plan",
   displayName: "test plan adapter",
   modulePath: "host/test-adapter.cts",
   manifestSchema: {

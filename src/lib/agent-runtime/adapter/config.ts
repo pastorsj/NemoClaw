@@ -443,7 +443,6 @@ const restoreResultSchema: AnySchemaObject = Object.freeze({
 });
 
 export const HARNESS_CONFIG_ADAPTER_CONTRACT = defineHarnessAdapterContract({
-  capability: "config",
   displayName: "configuration adapter",
   modulePath: "host/config-adapter.cts",
   manifestSchema: configManifestSchema,
@@ -479,7 +478,6 @@ export const HARNESS_CONFIG_ADAPTER_CONTRACT = defineHarnessAdapterContract({
 });
 
 export const HARNESS_CONFIG_RESTORE_CONTRACT = defineHarnessAdapterContract({
-  capability: "config-restore",
   displayName: "configuration restore adapter",
   modulePath: "host/restore-adapter.cts",
   manifestSchema: configManifestSchema,

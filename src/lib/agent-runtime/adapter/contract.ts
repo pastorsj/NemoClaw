@@ -26,7 +26,6 @@ export type HarnessAdapterOperations = Readonly<
  * Packages cannot supply this value or select another module path or export.
  */
 export interface HarnessAdapterContract<Operations extends HarnessAdapterOperations> {
-  readonly capability: string;
   readonly displayName: string;
   readonly modulePath: `host/${string}-adapter.cts`;
   readonly manifestSchema: AnySchemaObject;

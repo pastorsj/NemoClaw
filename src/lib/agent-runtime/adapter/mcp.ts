@@ -475,7 +475,6 @@ const mcpCapabilitySchema: AnySchemaObject = Object.freeze({
 
 /** The first fixed capability implemented through the generic harness adapter boundary. */
 export const HARNESS_MCP_ADAPTER_CONTRACT = defineHarnessAdapterContract({
-  capability: "mcp",
   displayName: "MCP adapter",
   modulePath: "host/mcp-adapter.cts",
   manifestSchema: mcpCapabilitySchema,
