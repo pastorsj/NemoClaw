@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isObjectRecord } from "../core/json-types";
+import { isAgentMcpAdapter } from "../agent-runtime/manifest-types";
 import { isIP } from "node:net";
 import { isBlockedMcpUrlTargetHost, MCP_SERVER_URL_MAX_LENGTH } from "../security/mcp-url-target";
 import {
@@ -58,7 +59,6 @@ const MCP_SERVER_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
 const MCP_ENV_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const MCP_SAFE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const MCP_PROVIDER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
-const MCP_ADAPTERS = new Set(["mcporter", "hermes-config", "deepagents-config"]);
 
 export function serializeSandboxMcpStateForDisk(value: unknown): SandboxMcpState | undefined {
   const state = normalizeSandboxMcpState(value);
@@ -205,7 +205,7 @@ function normalizeMcpBridgeEntry(server: string, value: unknown): McpBridgeEntry
       : null;
   if (!env) return null;
   const adapter = typeof value.adapter === "string" && value.adapter ? value.adapter : undefined;
-  if (adapter && !MCP_ADAPTERS.has(adapter)) return null;
+  if (adapter && !isAgentMcpAdapter(adapter)) return null;
   const providerName =
     typeof value.providerName === "string" && value.providerName ? value.providerName : undefined;
   if (providerName && !MCP_SAFE_NAME_RE.test(providerName)) return null;

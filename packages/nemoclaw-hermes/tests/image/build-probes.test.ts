@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
-import { dockerfileInstructions } from "../../../../src/lib/onboard/dockerfile-tool-disclosure-contract";
+import { readDockerfileInstructions } from "../helpers/dockerfile";
 
 const HERMES_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const dockerfile = fs.readFileSync(path.join(HERMES_PACKAGE_ROOT, "Dockerfile"), "utf8");
@@ -112,7 +112,7 @@ assert module._session_state_journal_mode(SimpleNamespace(_conn=Connection())) =
 
   // source-shape-contract: compatibility -- Exact Docker layer grouping keeps required cross-identity probes within the image layer limit
   it("keeps cross-identity ledger probes consolidated below the Docker layer-depth ceiling", () => {
-    const runInstructions = dockerfileInstructions(dockerfile).filter(({ text }) =>
+    const runInstructions = readDockerfileInstructions(dockerfile).filter(({ text }) =>
       text.startsWith("RUN "),
     );
     const layersFor = (family: "cron" | "discord") =>

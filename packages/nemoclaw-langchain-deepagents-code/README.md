@@ -26,14 +26,27 @@ code that implements each stage of that contract.
 | Path | Responsibility |
 | --- | --- |
 | `config/` | Translates NemoClaw inference selections into native Deep Agents Code configuration. |
+| `fabric/` | Selects the released Deep Agents adapter and pins its Fabric dependency graph. |
 | `runtime/` | Contains the sandbox launch chain, runtime guards, installed features, and dependency locks. |
-| `host/` | Exposes receipt-verified CommonJS helpers that NemoClaw core loads for identity, Model Context Protocol state, and base-image qualification. |
+| `host/` | Contains typed immutable-configuration and MCP adapters plus package identity and image-qualification helpers. |
 | `compat/` | Records and applies changes tied to the pinned upstream Deep Agents Code version. |
 | `plugin/` | Registers NemoClaw-managed model-profile aliases through the upstream plugin entry point. |
 | `checks/` | Validates the installed plugin, patched runtime, and managed runtime features while the image builds. |
 
 The package root keeps only the shared package contract: metadata, the agent manifest, image
 definitions, startup, and network policy additions.
+
+## Typed adapter boundary
+
+| Capability | Package file | Current behavior |
+| --- | --- | --- |
+| Runtime configuration | `host/config-adapter.cts` | Returns `immutable`; re-onboarding must materialize a changed configuration. |
+| MCP | `host/mcp-adapter.cts` | Implements the seven fixed MCP operations, including legacy native state rules. |
+| Configuration restore | None | Core retains the current key-allowlist restore behavior. |
+
+Only the configuration and MCP files use the generic typed loader.
+`host/managed-identity.cts` and `host/base-qualification.cts` have separate package consumers and
+are not current typed contract operations.
 
 ## Runtime flow
 
@@ -104,10 +117,13 @@ npm run test:fabric
 `npm run test:fabric` validates the generated configuration directly against the released Deep
 Agents adapter. It does not read a sibling NemoClaw checkout. Tests that exercise the composed
 build and current NemoClaw boundaries run through `npm run test:nemoclaw`; that command also runs
-`test:fabric:composed` with the generic runner at `../nemoclaw-fabric`. To prove both lanes from a
-separate candidate checkout, run the `package-only` and `composed` in-tree overlay rehearsals
-documented in [`packages/README.md`](../README.md) with package ID
-`langchain-deepagents-code`. The composed rehearsal builds an exact temporary NemoClaw revision,
-overlays only this package, runs the complete package command, and verifies
+`test:fabric:composed`. Those direct commands use the surrounding checkout and do not pin its
+revision. The Fabric command uses `NEMOCLAW_FABRIC_RUNNER_PATH` when set and otherwise uses
+`packages/nemoclaw-fabric` from that checkout. `npm test` does not run `test:fabric` separately
+because the composed lane includes its direct cases. To prove both lanes against a supplied core
+commit, run the `package-only` and `composed` in-tree overlay rehearsals documented in
+[`packages/README.md`](../README.md) with package ID `langchain-deepagents-code`. The composed
+rehearsal builds an exact temporary NemoClaw revision, overlays only this package, runs the complete
+package command, and verifies
 `nemoclaw harness install langchain-deepagents-code`, the human inventory, and the receipt-verified
 digest from `nemoclaw harness list --json`.

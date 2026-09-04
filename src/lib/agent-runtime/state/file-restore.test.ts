@@ -91,6 +91,25 @@ describe("state file restore ownership", () => {
     ]);
   });
 
+  it("parses the package-owned configuration restore strategy", () => {
+    const agentName = `restore-package-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Restore",
+        "state_files:",
+        "  - path: future.json",
+        "    restore:",
+        "      merge: package-config",
+      ].join("\n"),
+    );
+
+    expect(loadAgent(agentName).stateFiles).toEqual([
+      { path: "future.json", strategy: "copy", restore: { merge: "package-config" } },
+    ]);
+  });
+
   it("rejects an unknown state-file restore merge strategy (#6334)", () => {
     const agentName = `restore-badmerge-${String(Date.now())}`;
     writeTempAgentManifest(

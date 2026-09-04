@@ -67,6 +67,7 @@ export function toolDiscoveryReadinessSkipDetail(
 export function buildMcpToolDiscoveryCommand(
   entry: Pick<McpBridgeEntry, "server" | "url" | "env">,
   adapter: AgentMcpAdapter,
+  packageContext?: { readonly sandboxName: string; readonly agentName: string },
 ): McpToolDiscoveryCommand | null {
   const credentialEnv = entry.env[0];
   if (!credentialEnv) return null;
@@ -91,14 +92,18 @@ export function buildMcpToolDiscoveryCommand(
     truncated: false,
     detail: "sandbox image does not include the MCP tool discovery runtime; rebuild the sandbox",
   });
-  const runtimeCommand = wrapMcpRuntimeCommand(adapter, [
-    "/usr/local/bin/node",
-    MCP_TOOL_DISCOVERY_RUNTIME_PATH,
-    "--url",
-    entry.url,
-    "--credential-env",
-    credentialEnv,
-  ]);
+  const runtimeCommand = wrapMcpRuntimeCommand(
+    adapter,
+    [
+      "/usr/local/bin/node",
+      MCP_TOOL_DISCOVERY_RUNTIME_PATH,
+      "--url",
+      entry.url,
+      "--credential-env",
+      credentialEnv,
+    ],
+    packageContext,
+  );
   const body = [
     `if [ ! -r ${shellQuote(MCP_TOOL_DISCOVERY_RUNTIME_PATH)} ]; then`,
     `  printf '%s\\n' ${shellQuote(missingRuntimeResult)}`,
@@ -231,7 +236,10 @@ export function discoverMcpTools(
   if (entry.addState) return failure("tool discovery skipped: add transaction is incomplete");
   const readinessSkipDetail = toolDiscoveryReadinessSkipDetail(readiness);
   if (readinessSkipDetail) return failure(readinessSkipDetail);
-  const discoveryCommand = buildMcpToolDiscoveryCommand(entry, adapter);
+  const discoveryCommand = buildMcpToolDiscoveryCommand(entry, adapter, {
+    sandboxName,
+    agentName: entry.agent,
+  });
   if (!discoveryCommand) {
     return failure("tool discovery skipped: no valid managed endpoint is available");
   }

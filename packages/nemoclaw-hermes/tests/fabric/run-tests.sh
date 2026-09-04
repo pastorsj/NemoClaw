@@ -49,7 +49,7 @@ TEST_ARGS=(
 
 if [ "${TEST_MODE}" = "composed" ]; then
   REPOSITORY_ROOT="$(cd "${PACKAGE_ROOT}/../.." && pwd)"
-  RUNNER_SOURCE="${REPOSITORY_ROOT}/packages/nemoclaw-fabric"
+  RUNNER_SOURCE="${NEMOCLAW_FABRIC_RUNNER_PATH:-${REPOSITORY_ROOT}/packages/nemoclaw-fabric}"
   [ -f "${RUNNER_SOURCE}/pyproject.toml" ] || {
     printf 'composed Fabric tests require packages/nemoclaw-fabric in the NemoClaw checkout\n' >&2
     exit 66

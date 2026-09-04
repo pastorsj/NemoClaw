@@ -13,7 +13,7 @@
     "test:nemoclaw:subprocess": "vitest run --config vitest.nemoclaw.ts --maxWorkers=1 tests/host/package-paths.test.ts tests/integration/cli-alias.test.ts tests/integration/provider-onboarding.test.ts tests/integration/release-supplement.test.ts tests/runtime/agent-update.test.ts tests/runtime/startup.test.ts",
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && python3 -m unittest discover -s plugin -p 'test_*.py' && npm run test:nemoclaw:parallel -- --reporter=tree && npm run test:nemoclaw:subprocess -- --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
-    "test": "npm run test:package && npm run test:fabric && npm run test:nemoclaw",
+    "test": "npm run test:package && npm run test:nemoclaw",
     "typecheck": "tsc -p tsconfig.test.json"
   },
   "files": [

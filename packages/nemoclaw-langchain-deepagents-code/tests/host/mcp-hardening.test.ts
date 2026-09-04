@@ -6,12 +6,36 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadPackageHostModule } from "../helpers/host-module";
 
 const managedRuntimePath = path.join(
   path.resolve(import.meta.dirname, "../.."),
   "runtime",
   "managed-runtime.py",
 );
+const managedProjectionPath = "/sandbox/.deepagents/.nemoclaw-mcp.json";
+const mcpAdapter = loadPackageHostModule<{
+  buildStatusCommand(entry: {
+    server: string;
+    url: string;
+    headers: Record<string, string>;
+  }): string;
+}>("mcp-adapter.cts");
+
+function runPackageStatusCommand(configPath: string) {
+  const command = mcpAdapter
+    .buildStatusCommand({
+      server: "docs",
+      url: "https://example.test/mcp",
+      headers: {},
+    })
+    .replace("/opt/venv/bin/python3", "python3")
+    .replace(JSON.stringify(managedProjectionPath), JSON.stringify(configPath));
+  return spawnSync("/bin/sh", ["-c", command], {
+    encoding: "utf-8",
+    timeout: 5000,
+  });
+}
 
 function runManagedHelper(source: string) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-managed-mcp-"));
@@ -29,6 +53,66 @@ function runManagedHelper(source: string) {
 }
 
 describe("Deep Agents managed MCP runtime hardening", () => {
+  it("reports only a genuinely absent package projection as absent", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-status-"));
+    try {
+      const result = runPackageStatusCommand(path.join(tempDir, "missing.json"));
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.trim()).toBe("absent");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["symlink", "unsafe-mode", "hard-link", "invalid-json", "invalid-utf8"] as const)(
+    "fails closed for an unsafe or invalid package projection: %s",
+    (fixture) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-status-"));
+      const configPath = path.join(tempDir, "managed.json");
+      try {
+        if (fixture === "symlink") {
+          const target = path.join(tempDir, "target.json");
+          fs.writeFileSync(target, '{"mcpServers":{}}\n', { mode: 0o600 });
+          fs.symlinkSync(target, configPath);
+        } else if (fixture === "unsafe-mode") {
+          fs.writeFileSync(configPath, '{"mcpServers":{}}\n', { mode: 0o644 });
+        } else if (fixture === "hard-link") {
+          fs.writeFileSync(configPath, '{"mcpServers":{}}\n', { mode: 0o600 });
+          fs.linkSync(configPath, path.join(tempDir, "second-link.json"));
+        } else if (fixture === "invalid-json") {
+          fs.writeFileSync(configPath, "{not-json}\n", { mode: 0o600 });
+        } else {
+          fs.writeFileSync(configPath, Buffer.from([0xff, 0xfe, 0xfd]), { mode: 0o600 });
+        }
+
+        const result = runPackageStatusCommand(configPath);
+
+        expect(result.status).toBe(2);
+        expect(result.stdout).toBe("");
+        expect(result.stderr.trim()).toBe(
+          "Managed Deep Agents MCP projection is unsafe or invalid.",
+        );
+        expect(result.stderr).not.toContain(configPath);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("keeps ownership and read-stability checks in the package status boundary", () => {
+    const command = mcpAdapter.buildStatusCommand({
+      server: "docs",
+      url: "https://example.test/mcp",
+      headers: {},
+    });
+
+    expect(command).toContain("opened.st_uid == os.getuid()");
+    expect(command).toContain("opened.st_nlink == 1");
+    expect(command).toContain("managed_fingerprint(before) == managed_fingerprint(after)");
+    expect(command).toContain("managed_fingerprint(after) == managed_fingerprint(linked_after)");
+  });
+
   it.runIf(process.platform === "linux")(
     "rejects OpenShell supervisor TLS identity from the managed child runtime",
     () => {

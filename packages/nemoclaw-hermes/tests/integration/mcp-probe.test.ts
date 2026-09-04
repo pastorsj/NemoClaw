@@ -218,6 +218,6 @@ describe("Hermes managed MCP startup probe", () => {
     expect(result.calls).toBe(3);
     expect(result.recoveryActions).toEqual([{ action: "recover", timeout: 210_000 }]);
     expect(result.message).toContain("after managed gateway recovery");
-    expect(result.message).toContain("no controller result");
+    expect(result.message).toContain("did not return command output");
   });
 });

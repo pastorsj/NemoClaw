@@ -3,6 +3,8 @@
 
 import path from "node:path";
 import type { AgentDefinition } from "../agent-runtime/manifest-types";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
+import type { SandboxEntry } from "../state/registry/types";
 
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
 const SANDBOX_CONFIG_ROOT = "/sandbox/";
@@ -17,7 +19,9 @@ export interface AgentConfigTarget {
 }
 
 export interface AgentConfigDependencies {
-  getSandbox: (name: string) => { agent?: string } | null;
+  getSandbox: (
+    name: string,
+  ) => Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration"> | null;
   loadAgent: (name: string) => {
     configPaths: {
       dir: string;
@@ -26,6 +30,9 @@ export interface AgentConfigDependencies {
       format?: string;
     };
   };
+  resolveSandboxAgent: (
+    entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
+  ) => { readonly definition: AgentDefinition };
 }
 
 export const DEFAULT_AGENT_CONFIG: AgentConfigTarget = {
@@ -40,7 +47,18 @@ export const DEFAULT_AGENT_CONFIG: AgentConfigTarget = {
 function defaultDependencies(): AgentConfigDependencies {
   const registry = require("../state/registry");
   const agentDefs = require("../agent/defs");
-  return { getSandbox: registry.getSandbox, loadAgent: agentDefs.loadAgent };
+  const packageAuthority = require("../onboard/package/package-authority");
+  return {
+    getSandbox: registry.getSandbox,
+    loadAgent: agentDefs.loadAgent,
+    resolveSandboxAgent: packageAuthority.resolvePackageBackedSandboxAgent,
+  };
+}
+
+/** Read the package receipt through the config authority's existing registry boundary. */
+export function getAgentConfigPackageIdentity(sandboxName: string): HarnessPackageIdentity | null {
+  const registry: typeof import("../state/registry") = require("../state/registry");
+  return registry.getSandbox(sandboxName)?.harnessPackage ?? null;
 }
 
 function requireCanonicalConfigDir(value: string): string {
@@ -89,7 +107,11 @@ export function resolveAgentConfig(
       `Pinned agent definition '${pinnedAgentDefinition.name}' does not match sandbox '${sandboxName}' agent '${agentName}'`,
     );
   }
-  const agent = pinnedAgentDefinition ?? dependencies.loadAgent(agentName);
+  const agent =
+    pinnedAgentDefinition ??
+    (entry?.harnessPackage
+      ? dependencies.resolveSandboxAgent(entry).definition
+      : dependencies.loadAgent(agentName));
   const cfg = agent.configPaths;
 
   const dir = requireCanonicalConfigDir(cfg.dir);

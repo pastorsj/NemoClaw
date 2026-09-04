@@ -3,7 +3,12 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import {
+  listAgents,
+  loadAgent,
+  type AgentDefinition,
+  type AgentMcpAdapter,
+} from "../../agent/defs";
 import * as policies from "../../policy";
 import {
   assertTrustedPrivateEndpointCapability,
@@ -22,6 +27,7 @@ import {
   buildMcpBridgePolicyYaml,
 } from "./mcp-bridge-policy-render";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
+import { getSandboxAgent, getSandboxHarnessPackage, getSandboxOrThrow } from "./mcp-bridge-state";
 
 export { MCP_BRIDGE_POLICY_SOURCE } from "./mcp-bridge-contracts";
 export {
@@ -36,7 +42,7 @@ export function applyGeneratedPolicy(
   sandboxName: string,
   entry: McpBridgeEntry,
   target: McpBridgeTargetValidation,
-  options: { bindCredential?: boolean } = {},
+  options: { bindCredential?: boolean; agentDefinition?: AgentDefinition } = {},
 ): void {
   const addresses = assertMcpBridgePolicyTarget(entry, target);
   if (addresses.length === 0) {
@@ -44,17 +50,7 @@ export function applyGeneratedPolicy(
       `Refusing to apply generated MCP policy '${entry.policyName}' without address pins.`,
     );
   }
-  const adapter = isAgentMcpAdapter(entry.adapter) ? entry.adapter : "mcporter";
-  const content =
-    options.bindCredential === false
-      ? buildMcpBridgeCapabilityPolicyYaml(entry.server, entry.url, adapter, target)
-      : buildMcpBridgePolicyYaml(
-          entry.server,
-          entry.url,
-          adapter,
-          target,
-          entry.providerName ?? "",
-        );
+  const content = buildGeneratedMcpPolicyContent(sandboxName, entry, target, options);
   if (
     !policies.applyPresetContent(sandboxName, entry.policyName, content, {
       nonFatal: true,
@@ -63,6 +59,96 @@ export function applyGeneratedPolicy(
   ) {
     throw new McpBridgeError(`Failed to activate generated MCP policy '${entry.policyName}'.`);
   }
+}
+
+function policyBinariesFromDefinition(
+  agent: AgentDefinition,
+  entry: McpBridgeEntry,
+  adapter: AgentMcpAdapter,
+): readonly string[] {
+  if (entry.agent !== agent.name) {
+    throw new McpBridgeError(
+      `MCP server '${entry.server}' records agent '${entry.agent}', not policy owner '${agent.name}'.`,
+    );
+  }
+  if (
+    agent.mcpCapability.support !== "bridge" ||
+    agent.mcpCapability.adapter !== adapter ||
+    entry.adapter !== adapter
+  ) {
+    throw new McpBridgeError(
+      `MCP server '${entry.server}' does not match policy owner '${agent.name}' and adapter '${adapter}'.`,
+    );
+  }
+  const policyBinaries = agent.mcpCapability.policy_binaries;
+  if (!policyBinaries?.length) {
+    throw new McpBridgeError(`MCP adapter '${adapter}' has no manifest-declared policy binaries.`);
+  }
+  return policyBinaries;
+}
+
+function resolveMcpPolicyBinaryPaths(
+  sandboxName: string,
+  entry: McpBridgeEntry,
+  adapter: AgentMcpAdapter,
+  agentDefinition?: AgentDefinition,
+): readonly string[] {
+  const harnessPackage = getSandboxHarnessPackage(sandboxName);
+  if (harnessPackage) {
+    const agent = getSandboxAgent(getSandboxOrThrow(sandboxName));
+    if (agentDefinition && !isDeepStrictEqual(agentDefinition, agent)) {
+      throw new McpBridgeError(
+        `Sandbox '${sandboxName}' policy owner changed after its package definition was pinned.`,
+      );
+    }
+    if (harnessPackage.id !== agent.name) {
+      throw new McpBridgeError(
+        `Sandbox '${sandboxName}' package '${harnessPackage.id}' does not match policy owner '${agent.name}'.`,
+      );
+    }
+    return policyBinariesFromDefinition(agent, entry, adapter);
+  }
+
+  const matchingAgents = listAgents()
+    .map((name) => loadAgent(name))
+    .filter(
+      (agent) =>
+        agent.mcpCapability.support === "bridge" && agent.mcpCapability.adapter === adapter,
+    );
+  if (matchingAgents.length === 0) {
+    throw new McpBridgeError(`No installed agent manifest declares MCP adapter '${adapter}'.`);
+  }
+  if (matchingAgents.length > 1) {
+    throw new McpBridgeError(
+      `Multiple installed agent manifests declare MCP adapter '${adapter}'.`,
+    );
+  }
+  return policyBinariesFromDefinition(matchingAgents[0]!, entry, adapter);
+}
+
+export function buildGeneratedMcpPolicyContent(
+  sandboxName: string,
+  entry: McpBridgeEntry,
+  target: McpBridgeTargetValidation,
+  options: { bindCredential?: boolean; agentDefinition?: AgentDefinition } = {},
+): string {
+  assertMcpBridgePolicyTarget(entry, target);
+  const adapter = isAgentMcpAdapter(entry.adapter) ? entry.adapter : "mcporter";
+  const policyBinaries = resolveMcpPolicyBinaryPaths(
+    sandboxName,
+    entry,
+    adapter,
+    options.agentDefinition,
+  );
+  return options.bindCredential === false
+    ? buildMcpBridgeCapabilityPolicyYaml(entry.server, entry.url, target, policyBinaries)
+    : buildMcpBridgePolicyYaml(
+        entry.server,
+        entry.url,
+        target,
+        policyBinaries,
+        entry.providerName ?? "",
+      );
 }
 
 export function assertMcpBridgePolicyTarget(
@@ -123,18 +209,12 @@ function recordedMcpTarget(entry: McpBridgeEntry): McpBridgeTargetValidation {
 }
 
 function generatedPolicyContent(
+  sandboxName: string,
   entry: McpBridgeEntry,
-  adapter: AgentMcpAdapter = isAgentMcpAdapter(entry.adapter) ? entry.adapter : "mcporter",
   target: McpBridgeTargetValidation = recordedMcpTarget(entry),
+  agentDefinition?: AgentDefinition,
 ): string {
-  assertMcpBridgePolicyTarget(entry, target);
-  return buildMcpBridgePolicyYaml(
-    entry.server,
-    entry.url,
-    adapter,
-    target,
-    entry.providerName ?? "",
-  );
+  return buildGeneratedMcpPolicyContent(sandboxName, entry, target, { agentDefinition });
 }
 
 export function assertGeneratedPolicyMutationSafe(
@@ -147,13 +227,13 @@ export function assertGeneratedPolicyMutationSafe(
 }
 
 export function assertGeneratedPolicyRegistrationMutationSafe(
-  _sandboxName: string,
+  sandboxName: string,
   entry: McpBridgeEntry,
 ) {
-  assertGeneratedPolicyMutationSafe(_sandboxName, entry);
+  assertGeneratedPolicyMutationSafe(sandboxName, entry);
   return {
     name: entry.policyName,
-    content: generatedPolicyContent(entry),
+    content: generatedPolicyContent(sandboxName, entry),
     sourcePath: MCP_BRIDGE_POLICY_SOURCE,
   };
 }
@@ -175,14 +255,14 @@ export function removeGeneratedPolicy(
 }
 
 export function getRegisteredGeneratedPolicy(
-  _sandboxName: string,
+  sandboxName: string,
   entry: McpBridgeEntry | undefined,
 ) {
   if (!entry?.policyName) return undefined;
   try {
     return {
       name: entry.policyName,
-      content: generatedPolicyContent(entry),
+      content: generatedPolicyContent(sandboxName, entry),
       sourcePath: MCP_BRIDGE_POLICY_SOURCE,
     };
   } catch {

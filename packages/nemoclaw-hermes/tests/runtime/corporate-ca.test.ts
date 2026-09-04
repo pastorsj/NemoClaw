@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runCorporateCaHelperGuard, runShellLines, sliceBlock } from "../helpers/corporate-ca";
 
 const PACKAGE_ROOT = join(import.meta.dirname, "../..");
-const HERMES_START = join(PACKAGE_ROOT, "start.sh");
+const HERMES_SERVICE_CONTROL = join(PACKAGE_ROOT, "runtime", "service-control.sh");
 const OPENSHELL_PEM = "-----BEGIN CERTIFICATE-----\nOPENSHELL-ROOT\n-----END CERTIFICATE-----\n";
 const CORPORATE_PEM = "-----BEGIN CERTIFICATE-----\nCORPORATE-ROOT\n-----END CERTIFICATE-----\n";
 const MERGE_START = "# Corporate proxy CA merge (NemoClaw#6210).";
@@ -51,7 +51,7 @@ describe("corporate proxy CA runtime helper guard (#8292)", () => {
     "exits Hermes before sourcing or merging when the deployed helper is %s and fallback is unavailable",
     (mode) => {
       const dir = tmpDir(`nemoclaw-hermes-helper-${mode}-`);
-      const result = runCorporateCaHelperGuard(HERMES_START, dir, mode, MERGE_END);
+      const result = runCorporateCaHelperGuard(HERMES_SERVICE_CONTROL, dir, mode, MERGE_END);
 
       expect(result.status).not.toBe(0);
       expect(result.stderr).toContain("required corporate CA runtime helper is missing or unsafe");
@@ -74,7 +74,7 @@ describe("corporate proxy CA trust-anchor rejection (#8650)", () => {
 
     const diagnostic = mergeDiagnostic(
       dir,
-      mergeBlock(HERMES_START, MERGE_END, corporate, merged),
+      mergeBlock(HERMES_SERVICE_CONTROL, MERGE_END, corporate, merged),
       [`export SSL_CERT_FILE=${JSON.stringify(openshell)}`],
     );
 
@@ -97,7 +97,7 @@ describe("corporate proxy CA trust-anchor rejection (#8650)", () => {
       `rm -f ${JSON.stringify(corporate)}`,
       `ln -s ${JSON.stringify(planted)} ${JSON.stringify(corporate)}`,
     ].join("\n");
-    const raced = mergeBlock(HERMES_START, MERGE_END, corporate, merged).replace(
+    const raced = mergeBlock(HERMES_SERVICE_CONTROL, MERGE_END, corporate, merged).replace(
       `[ -s "$_NEMOCLAW_CORPORATE_CA_FILE" ] || return 0`,
       `[ -s "$_NEMOCLAW_CORPORATE_CA_FILE" ] || return 0\n${swap}`,
     );
@@ -128,7 +128,7 @@ describe("corporate proxy CA runtime merge (#6210)", () => {
 
     // Hermes' block ends at the OpenShell derivation comment; splice that in so
     // the CURL/REQUESTS/GIT vars derive from the merged SSL_CERT_FILE too.
-    const hermesMerge = mergeBlock(HERMES_START, MERGE_END, corp, merged);
+    const hermesMerge = mergeBlock(HERMES_SERVICE_CONTROL, MERGE_END, corp, merged);
 
     // Simulate OpenShell having pre-set CURL/REQUESTS/GIT to its own bundle;
     // the merge must override them, not leave them pointing at OpenShell-only.
@@ -164,7 +164,7 @@ describe("corporate proxy CA runtime merge (#6210)", () => {
 
     const out = runShellLines(dir, [
       `export SSL_CERT_FILE=${JSON.stringify(openshell)}`,
-      mergeBlock(HERMES_START, MERGE_END, corp, merged),
+      mergeBlock(HERMES_SERVICE_CONTROL, MERGE_END, corp, merged),
       'printf "SSL_CERT_FILE=%s\\n" "${SSL_CERT_FILE:-}"',
       'printf "MERGED=%s\\n" "${_NEMOCLAW_CORPORATE_CA_MERGED:-}"',
     ]);
@@ -185,7 +185,7 @@ describe("corporate proxy CA runtime merge (#6210)", () => {
     const out = runShellLines(dir, [
       "chmod() { return 1; }",
       `export SSL_CERT_FILE=${JSON.stringify(openshell)}`,
-      mergeBlock(HERMES_START, MERGE_END, corp, merged),
+      mergeBlock(HERMES_SERVICE_CONTROL, MERGE_END, corp, merged),
       'printf "SSL_CERT_FILE=%s\\n" "${SSL_CERT_FILE:-}"',
       'printf "MERGED=%s\\n" "${_NEMOCLAW_CORPORATE_CA_MERGED:-}"',
     ]);
@@ -206,7 +206,7 @@ describe("corporate proxy CA runtime merge (#6210)", () => {
     const out = runShellLines(dir, [
       "exec 2>&1",
       `export SSL_CERT_FILE=${JSON.stringify(openshell)}`,
-      mergeBlock(HERMES_START, MERGE_END, corp, merged),
+      mergeBlock(HERMES_SERVICE_CONTROL, MERGE_END, corp, merged),
     ]);
     expect(out).toContain("corporate proxy CA merge failed");
     expect(out).not.toContain("BEGIN CERTIFICATE");

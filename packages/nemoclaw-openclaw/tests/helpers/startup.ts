@@ -49,6 +49,16 @@ export function readOpenClawStartupBlock(startMarker: string, endMarker: string)
   return source.slice(start, end);
 }
 
+export function readOpenClawEntrypointBlock(startMarker: string, endMarker: string): string {
+  const source = fs.readFileSync(openClawStartPath, "utf8");
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  if (start < 0 || end < start) {
+    throw new Error(`OpenClaw entrypoint does not contain the block before ${endMarker}.`);
+  }
+  return source.slice(start, end);
+}
+
 export function readOpenClawModuleLoaderSource(): string {
   const entrypoint = fs.readFileSync(openClawStartPath, "utf8");
   const startMarker = "# startup-modules begin";

@@ -25,7 +25,7 @@ describe("Telegram diagnostics (#2766)", () => {
     const start =
       kind === "non-root"
         ? src.indexOf('if [ "$(id -u)" -ne 0 ]; then', nonRootMarker)
-        : src.indexOf("# Verify locked config integrity before starting anything.");
+        : src.indexOf("# ── Root path");
     const endMarker =
       kind === "non-root"
         ? "  # Start gateway in background, auto-pair, then wait"

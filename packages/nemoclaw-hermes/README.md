@@ -3,7 +3,7 @@
 
 # Hermes agent runtime package
 
-This package connects Hermes to the harness package contract described in
+This package connects Hermes to the agent runtime package contract described in
 [`packages/README.md`](../README.md). The package owns the Hermes image, native configuration,
 sandbox startup, runtime guards, upstream compatibility work, and package checks. NemoClaw core
 continues to own package discovery, onboarding, credential collection and selection, OpenShell
@@ -20,15 +20,17 @@ The workflow reads from top to bottom:
    policy, and compatibility files.
 4. `config/generate-config.ts` translates managed startup inputs into native Hermes configuration
    and the credential-free Fabric launch configuration.
-5. `start.sh` reads as the startup workflow: admit startup, load the package modules, configure the
+5. `host/config-adapter.cts` and `host/mcp-adapter.cts` translate typed core requests into bounded
+   Hermes plans.
+6. `start.sh` reads as the startup workflow: admit startup, load the package modules, configure the
    proxy boundary, and execute the root or non-root launch path.
-6. The shell modules in `runtime/` define each startup responsibility without hiding orchestration
+7. The shell modules in `runtime/` define each startup responsibility without hiding orchestration
    or effects inside a framework.
-7. `compat/` adapts the pinned upstream release where its native behavior does not yet meet the
+8. `compat/` adapts the pinned upstream release where its native behavior does not yet meet the
    NemoClaw contract.
-8. `plugin/__init__.py` registers Hermes tools and hooks, then delegates managed-tool compatibility
+9. `plugin/__init__.py` registers Hermes tools and hooks, then delegates managed-tool compatibility
    to `plugin/tool_broker.py`.
-9. `checks/` validates those build and compatibility boundaries.
+10. `checks/` validates those build and compatibility boundaries.
 
 ## Directory guide
 
@@ -37,7 +39,7 @@ The workflow reads from top to bottom:
 | `config/` | Builds Hermes `config.yaml`, `.env`, managed policy, model setup, and tool-gateway settings. |
 | `fabric/` | Selects the released Hermes adapter through a bounded package-owned process boundary and pins both Fabric dependency graphs. |
 | `runtime/` | Provides startup modules, commands, and guards installed into the sandbox. `runtime/state/` is the bounded state-mutation subsystem. |
-| `host/` | Provides integrity-verified helpers that NemoClaw core loads for managed routes, MCP, image qualification, and the tool gateway. |
+| `host/` | Contains the typed configuration and MCP adapters, package configuration helpers, image probes, and the host tool-broker process. |
 | `compat/` | Contains version-bound patches for the pinned Hermes release. |
 | `plugin/` | Registers Hermes tools and hooks. `tool_broker.py` contains managed tool-broker compatibility, while channel adapters stay separate. |
 | `checks/` | Provides build probes, the CLI contract validator, source download verification, and the release update command. |
@@ -45,9 +47,21 @@ The workflow reads from top to bottom:
 | `provider-profiles/` | Contains package-owned OpenShell provider profiles. |
 | `model-specific-setup/` | Reserves the package-owned location for future Hermes model compatibility declarations; no manifest is currently required. |
 
-`manifest.yaml`, the two Dockerfiles, `start.sh`, and `policy-additions.yaml` are the common package
-contract. `portable-build-context.json` stays at the root because the Portable context loader reads
-that exact metadata location.
+`package.json`, `manifest.yaml`, the two Dockerfiles, `start.sh`, and `policy-additions.yaml` are the
+common package contract. `portable-build-context.json` stays at the root because the Portable
+context loader reads that exact metadata location.
+
+## Typed adapter boundary
+
+| Capability | Package file | Current behavior |
+| --- | --- | --- |
+| Runtime configuration | `host/config-adapter.cts` | Returns a bounded Hermes configuration transaction and mutable-file probe. |
+| MCP | `host/mcp-adapter.cts` | Implements the seven fixed MCP operations. |
+| Configuration restore | None | Core retains the current Hermes restore strategy. |
+
+Only files named by the core contract use the typed adapter loader. `host/managed-route.cts`,
+`host/base-qualification.cts`, and the tool-broker files are existing package implementations with
+their own consumers. Their `.cts` or `host/` location does not make them typed adapter operations.
 
 ## Runtime flow
 
@@ -82,7 +96,8 @@ The package projects the managed model route into `fabric.json` and passes only 
 credential through the protected startup environment. NemoClaw core resolves the package command
 without importing Hermes-specific code.
 
-The host broker reads as one process workflow:
+The host broker is a separate fixed process workflow. It does not run through the typed adapter
+loader:
 
 | Module | Host broker responsibility |
 | --- | --- |
@@ -138,9 +153,12 @@ npm run test:fabric
 ```
 
 Tests that exercise the composed build and current NemoClaw boundaries run through
-`npm run test:nemoclaw`. To prove both lanes from a separate candidate checkout, run the
+`npm run test:nemoclaw`. That direct command uses the surrounding checkout. To pin core, run the
 `package-only` and `composed` in-tree overlay rehearsals documented in
 [`packages/README.md`](../README.md) with package ID `hermes`. The composed rehearsal builds an
 exact temporary NemoClaw revision, overlays only Hermes, runs the complete package command, and
 verifies `nemoclaw harness install hermes`, `nemoclaw harness list`, and the temporary-home
 installation inventory.
+
+`npm test` does not run `test:fabric` separately because the composed Fabric lane in
+`test:nemoclaw` includes its direct cases.

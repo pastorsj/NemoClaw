@@ -182,9 +182,10 @@ function curlCommand(url: string, authorization: string, httpMarker: string): st
 }
 
 export function buildCredentialResolutionProbeCommand(
-  entry: Pick<McpBridgeEntry, "server" | "url" | "env">,
+  entry: Pick<McpBridgeEntry, "server" | "url" | "env"> & Partial<Pick<McpBridgeEntry, "agent">>,
   adapter: AgentMcpAdapter,
   credentialRevision: McpAttachedCredentialRevision,
+  sandboxName?: string,
 ): CredentialResolutionProbeCommand | null {
   const authorization = authorizationValue(entry, credentialRevision);
   if (!authorization) return null;
@@ -205,10 +206,18 @@ export function buildCredentialResolutionProbeCommand(
     markers.controlHttp,
   );
   const probeBody = [
-    wrapMcpRuntimeCommand(adapter, placeholderCurl),
+    wrapMcpRuntimeCommand(
+      adapter,
+      placeholderCurl,
+      sandboxName && entry.agent ? { sandboxName, agentName: entry.agent } : undefined,
+    ),
     "rc=$?",
     `printf '\\n${markers.placeholderExit}%s\\n' "$rc"`,
-    wrapMcpRuntimeCommand(adapter, controlCurl),
+    wrapMcpRuntimeCommand(
+      adapter,
+      controlCurl,
+      sandboxName && entry.agent ? { sandboxName, agentName: entry.agent } : undefined,
+    ),
     "crc=$?",
     `printf '\\n${markers.controlExit}%s\\n' "$crc"`,
     // Always exit 0 so a nonzero SSH status unambiguously means transport
@@ -427,7 +436,12 @@ export function probeCredentialResolution(
         "probe skipped: a fresh OpenShell exec exposed an identityless credential placeholder instead of a revision-scoped placeholder",
     };
   }
-  const probeCommand = buildCredentialResolutionProbeCommand(entry, adapter, credentialRevision);
+  const probeCommand = buildCredentialResolutionProbeCommand(
+    entry,
+    adapter,
+    credentialRevision,
+    sandboxName,
+  );
   if (!probeCommand) return { ok: null, detail: "no credential binding or safe endpoint to probe" };
   const result = executeSandboxCommand(sandboxName, probeCommand.command);
   return classifyCredentialResolutionProbe(result, entry, probeCommand.resultMarker);

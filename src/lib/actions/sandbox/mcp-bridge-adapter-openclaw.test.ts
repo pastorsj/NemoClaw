@@ -582,7 +582,8 @@ process.stdout.write(JSON.stringify(commands));
   });
 
   it("uses one pinned OpenClaw workspace without loading an ambient definition", () => {
-    const projectRoot = "/sandbox/.installed-openclaw/workspace";
+    const configDirectory = "/sandbox/.installed-openclaw";
+    const projectRoot = `${configDirectory}/workspace`;
     const script = `
 const agentDefs = require("./src/lib/agent/defs.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
@@ -596,10 +597,10 @@ processRecovery.executeSandboxCommand = (_sandboxName, command) => {
 };
 const adapter = require("./src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.js");
 const entry = ${JSON.stringify(baseEntry)};
-const root = ${JSON.stringify(projectRoot)};
-adapter.inspectOpenClawAdapterRegistration("pinned-root-lifecycle", entry, root);
-adapter.registerOpenClawAdapter("pinned-root-lifecycle", entry, {}, false, undefined, root);
-adapter.unregisterOpenClawAdapter("pinned-root-lifecycle", entry, {}, root);
+const configDirectory = ${JSON.stringify(configDirectory)};
+adapter.inspectOpenClawAdapterRegistration("pinned-root-lifecycle", entry, configDirectory);
+adapter.registerOpenClawAdapter("pinned-root-lifecycle", entry, {}, false, undefined, configDirectory);
+adapter.unregisterOpenClawAdapter("pinned-root-lifecycle", entry, {}, configDirectory);
 process.stdout.write(JSON.stringify(commands));
 `;
     const result = spawnWithPrivateHome(script);

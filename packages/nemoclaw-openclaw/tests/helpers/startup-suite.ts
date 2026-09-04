@@ -228,27 +228,16 @@ export function startScriptLine(source: string, needle: string): string {
   return source.slice(start, end === -1 ? undefined : end);
 }
 
-export function nonRootIntegrityGateBlock(source: string): string {
-  const marker = source.indexOf("# ── Non-root fallback");
-  const start = source.indexOf('if [ "$(id -u)" -ne 0 ]; then', marker);
-  const end = source.indexOf("  apply_model_override", start);
-  if (start === -1 || end === -1 || end <= start) {
-    throw new Error("Expected non-root integrity gate in OpenClaw start.sh");
-  }
-  return `${extractShellFunctionFromSource(source, "_nemoclaw_capture_epoch_realtime")}\n${source.slice(start, end)}fi\n`;
-}
-
-export function rootIntegrityGateBlock(source: string): string {
-  const rootStart = source.indexOf("# ── Root path");
-  const verifyStart = source.indexOf(
-    "verify_config_integrity_if_locked /sandbox/.openclaw",
-    rootStart,
+export function startupConfigPreparationBlock(source: string): string {
+  const start = source.indexOf("# OpenClaw config so a prior config write or restart can recover");
+  const end = source.indexOf(
+    'if [ "$(openclaw_config_dir_owner /sandbox/.openclaw)" = "root" ]; then',
+    start,
   );
-  if (rootStart === -1 || verifyStart === -1) {
-    throw new Error("Expected root integrity check in OpenClaw start.sh");
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Expected startup config preparation block in OpenClaw start.sh");
   }
-  const lineEnd = source.indexOf("\n", verifyStart);
-  return source.slice(verifyStart, lineEnd === -1 ? undefined : lineEnd);
+  return source.slice(start, end);
 }
 
 export function extractShellFunctionFromSource(source: string, name: string): string {

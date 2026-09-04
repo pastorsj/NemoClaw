@@ -27,6 +27,7 @@ const COMMON_PACKAGE_FILES = [
 ] as const;
 const COMMON_WORKFLOW_DIRECTORIES = ["config", "runtime", "host", "compat", "plugin", "checks"];
 const RUNTIME_CONTRACTS = [
+  "host/config-adapter.cts",
   "host/base-qualification.cts",
   "host/managed-identity.cts",
   "host/mcp-adapter.cts",
@@ -149,6 +150,9 @@ describe("published LangChain Deep Agents Code package", () => {
   });
 
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
+    const configAdapter = loadInstalledModule<{
+      prepareConfigUpdate(request: Record<string, unknown>): { kind: string; reason?: string };
+    }>("host/config-adapter.cts");
     const identity = loadInstalledModule<{
       normalizeManagedDcodeModelName(model: string): string;
     }>("host/managed-identity.cts");
@@ -157,26 +161,47 @@ describe("published LangChain Deep Agents Code package", () => {
       getDeepAgentsCodeBaseImageInputPaths(): string[];
     }>("host/base-qualification.cts");
     const mcp = loadInstalledModule<{
-      buildMcpRegistrationCommand(request: {
+      buildMcpRegistrationPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         managedEntries: Array<{ server: string; url: string; headers: Record<string, string> }>;
         replaceExisting: boolean;
         teardownRollback: boolean;
-        configRoot: string | null;
-      }): string;
-      buildMcpRemovalCommand(request: {
+        configDirectory: string | null;
+      }): { execution: { command: string } };
+      buildMcpRemovalPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         force: boolean;
         adaptiveTeardown: boolean;
-        configRoot: string | null;
-      }): string;
+        configDirectory: string | null;
+      }): { execution: { command: string } };
       buildStatusCommand(entry: {
         server: string;
         url: string;
         headers: Record<string, string>;
       }): string;
+      buildMcpInspectionCommand(request: {
+        entry: { server: string; url: string; headers: Record<string, string> };
+        failOnMismatch: boolean;
+        configDirectory: string | null;
+      }): string;
+      buildMcpRuntimeCommand(request: { command: string[] }): string[];
+      describeMcpMutationCapability(request: { sandboxName: string }): {
+        kind: string;
+        command: string;
+        success: { kind: string; value: string };
+      };
+      describeMcpTeardownCapability(request: { sandboxName: string }): { kind: string };
+      describeMcpRuntimeIntentVerification(request: {
+        entries: Array<{ server: string; url: string; headers: Record<string, string> }>;
+        managedServerNames: string[];
+      }): { kind: string };
       getMutationCapability(sandboxName: string): { command: string; marker: string };
     }>("host/mcp-adapter.cts");
+
+    expect(configAdapter.prepareConfigUpdate({})).toMatchObject({
+      kind: "immutable",
+      reason: expect.stringContaining("Re-onboard"),
+    });
 
     expect(identity.normalizeManagedDcodeModelName("openrouter:model")).toBe("model");
     expect(qualification.getDeepAgentsCodeBaseImageInputPaths()).toEqual([
@@ -188,27 +213,56 @@ describe("published LangChain Deep Agents Code package", () => {
     );
     const mcpEntry = { server: "example", url: "https://example.test/mcp", headers: {} };
     expect(mcp.buildStatusCommand(mcpEntry)).toContain("example");
+    expect(
+      mcp.buildMcpInspectionCommand({
+        entry: mcpEntry,
+        failOnMismatch: false,
+        configDirectory: null,
+      }),
+    ).toContain("example");
+    expect(mcp.describeMcpMutationCapability({ sandboxName: "sandbox" })).toMatchObject({
+      kind: "command",
+      command: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
+      success: {
+        kind: "stdout-trimmed-equals",
+        value: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2",
+      },
+    });
+    expect(mcp.describeMcpTeardownCapability({ sandboxName: "sandbox" })).toEqual({
+      kind: "not-required",
+    });
+    expect(
+      mcp.describeMcpRuntimeIntentVerification({
+        entries: [mcpEntry],
+        managedServerNames: ["example"],
+      }),
+    ).toEqual({ kind: "not-required" });
+    expect(mcp.buildMcpRuntimeCommand({ command: ["python3", "probe.py"] })).toEqual(
+      expect.arrayContaining(["/opt/venv/bin/python3", "-I", "-c", "probe.py"]),
+    );
     expect(mcp.getMutationCapability("sandbox")).toMatchObject({
       command: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
       marker: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2",
     });
     expect(
-      mcp.buildMcpRegistrationCommand({
+      mcp.buildMcpRegistrationPlan({
         entry: mcpEntry,
         managedEntries: [mcpEntry],
         replaceExisting: false,
         teardownRollback: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toContain("expectedServers");
+    ).toMatchObject({ execution: { command: expect.stringContaining("expectedServers") } });
     expect(
-      mcp.buildMcpRemovalCommand({
+      mcp.buildMcpRemovalPlan({
         entry: mcpEntry,
         force: false,
         adaptiveTeardown: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toContain("NEMOCLAW_DEEPAGENTS_MCP_REMOVAL");
+    ).toMatchObject({
+      execution: { command: expect.stringContaining("NEMOCLAW_DEEPAGENTS_MCP_REMOVAL") },
+    });
   });
 
   it("omits langchain-deepagents-code package authoring files from archives", () => {

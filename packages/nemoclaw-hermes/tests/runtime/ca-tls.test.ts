@@ -18,7 +18,7 @@ import {
 } from "../helpers/corporate-ca";
 
 const PACKAGE_ROOT = path.join(import.meta.dirname, "../..");
-const HERMES_START = path.join(PACKAGE_ROOT, "start.sh");
+const HERMES_SERVICE_CONTROL = path.join(PACKAGE_ROOT, "runtime", "service-control.sh");
 const MERGE_END = "# OpenShell injects SSL_CERT_FILE/CURL_CA_BUNDLE for its L7 proxy CA.";
 const setup = resolveCaSetup("hermes-corporate-ca-tls");
 
@@ -29,7 +29,7 @@ describe.skipIf(!setup.ok)("Hermes corporate proxy CA TLS verification (#6210)",
 
   it("verifies a corporate-CA-signed endpoint only after the merge (#6210)", async () => {
     const merged = runMergeBlock(
-      HERMES_START,
+      HERMES_SERVICE_CONTROL,
       material.openshellCaCert,
       material.corporateCaCert,
       material.dir,
@@ -48,7 +48,7 @@ describe.skipIf(!setup.ok)("Hermes corporate proxy CA TLS verification (#6210)",
 
   it("still trusts the OpenShell root through the merged bundle (#6210)", async () => {
     const merged = runMergeBlock(
-      HERMES_START,
+      HERMES_SERVICE_CONTROL,
       material.openshellCaCert,
       material.corporateCaCert,
       material.dir,

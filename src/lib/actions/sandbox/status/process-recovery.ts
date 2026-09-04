@@ -6,6 +6,8 @@
 // fan-in budget while every consumer shares the same guarded implementation.
 export {
   checkAndRecoverSandboxProcesses,
+  executeGatewaySupervisorAction,
+  executeSandboxCommand,
   executeSandboxExecCommand,
   isSandboxGatewayRunningForStatus,
 } from "../process-recovery";

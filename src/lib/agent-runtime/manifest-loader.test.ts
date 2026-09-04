@@ -75,7 +75,6 @@ describe("buildAgentDefinition", () => {
       dockerfilePath: path.join(packageRoot, "Dockerfile"),
       startScriptPath: path.join(packageRoot, "start.sh"),
       policyAdditionsPath: path.join(packageRoot, "policy-additions.yaml"),
-      policyPermissivePath: path.join(packageRoot, "policies", "permissive.yaml"),
       pluginDir: path.join(packageRoot, "plugin"),
       legacyPaths: null,
     });

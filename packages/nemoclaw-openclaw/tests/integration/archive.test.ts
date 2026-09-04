@@ -27,9 +27,10 @@ const COMMON_PACKAGE_FILES = [
 ] as const;
 const COMMON_WORKFLOW_DIRECTORIES = ["config", "runtime", "host", "compat", "plugin", "checks"];
 const RUNTIME_CONTRACTS = [
+  "host/config-adapter.cts",
   "host/mcp-adapter.cts",
   "host/cli-grammar.cts",
-  "host/config-restore.cts",
+  "host/restore-adapter.cts",
   "host/config-runtime.cts",
 ] as const;
 const PUBLISHED_LOCKFILES = [
@@ -116,7 +117,7 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(temporaryRoot, { recursive: true, force: true });
-});
+}, ARCHIVE_SETUP_TIMEOUT_MS);
 
 describe("published OpenClaw package", () => {
   it.each([HARNESS])("ships the $id harness package metadata and runtime", (harness) => {
@@ -150,7 +151,7 @@ describe("published OpenClaw package", () => {
     expect(packedFiles.has("host/mcp-adapter.cts")).toBe(true);
   });
 
-  it.each(["cli-grammar.cts", "config-restore.cts", "config-runtime.cts"])(
+  it.each(["cli-grammar.cts", "restore-adapter.cts", "config-runtime.cts"])(
     "ships OpenClaw package runtime %s",
     (artifact) => {
       expect(packedFiles.has(`host/${artifact}`)).toBe(true);
@@ -172,8 +173,11 @@ describe("published OpenClaw package", () => {
   );
 
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
+    const configAdapter = loadInstalledModule<{
+      prepareConfigUpdate(request: Record<string, unknown>): { kind: string; content?: string };
+    }>("host/config-adapter.cts");
     const mcp = loadInstalledModule<{
-      buildMcpRegistrationCommand(request: {
+      buildMcpRegistrationPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         managedEntries: Array<{
           server: string;
@@ -182,18 +186,34 @@ describe("published OpenClaw package", () => {
         }>;
         replaceExisting: boolean;
         teardownRollback: boolean;
-        configRoot: string | null;
-      }): string;
-      buildMcpRemovalCommand(request: {
+        configDirectory: string | null;
+      }): { execution: { command: string } };
+      buildMcpRemovalPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         force: boolean;
         adaptiveTeardown: boolean;
-        configRoot: string | null;
-      }): string;
+        configDirectory: string | null;
+      }): { execution: { command: string } };
       buildInspectCommand(
         entry: { server: string; url: string; headers: Record<string, string> },
         failOnMismatch: boolean,
       ): string;
+      buildMcpInspectionCommand(request: {
+        entry: { server: string; url: string; headers: Record<string, string> };
+        failOnMismatch: boolean;
+        configDirectory: string | null;
+      }): string;
+      buildMcpRuntimeCommand(request: { command: string[] }): string[];
+      describeMcpMutationCapability(request: { sandboxName: string }): {
+        kind: string;
+        command: string;
+        success: { kind: string };
+      };
+      describeMcpTeardownCapability(request: { sandboxName: string }): { kind: string };
+      describeMcpRuntimeIntentVerification(request: {
+        entries: Array<{ server: string; url: string; headers: Record<string, string> }>;
+        managedServerNames: string[];
+      }): { kind: string };
       mcporterAvailabilityProbe(sandboxName: string): { command: string };
     }>("host/mcp-adapter.cts");
     const runtime = loadInstalledModule<{
@@ -201,8 +221,13 @@ describe("published OpenClaw package", () => {
       applyOpenClawAnthropicReplyBudget(config: Record<string, unknown>, inherited?: number): void;
     }>("host/config-runtime.cts");
     const restore = loadInstalledModule<{
+      mergeConfigState(request: Record<string, unknown>): {
+        kind: string;
+        content?: string;
+        write?: { kind: string };
+      };
       mergeOpenClawRestoredConfig(backup: unknown, current: unknown): unknown;
-    }>("host/config-restore.cts");
+    }>("host/restore-adapter.cts");
     const cli = loadInstalledModule<{
       buildOpenclawAgentDeleteArgs(id: string): string[];
     }>("host/cli-grammar.cts");
@@ -213,29 +238,92 @@ describe("published OpenClaw package", () => {
       headers: {},
     };
 
+    expect(
+      configAdapter.prepareConfigUpdate({
+        config: {},
+        serializedConfig: "{}",
+        expectedConfigSha256: "a".repeat(64),
+        target: {
+          directory: "/sandbox/.openclaw",
+          file: "openclaw.json",
+          format: "json",
+          sensitiveFiles: [],
+        },
+      }),
+    ).toMatchObject({ kind: "transaction", content: "{}" });
     expect(mcp.buildInspectCommand(mcpEntry, true)).toContain("example");
+    expect(
+      mcp.buildMcpInspectionCommand({
+        entry: mcpEntry,
+        failOnMismatch: true,
+        configDirectory: "/sandbox/.custom-openclaw",
+      }),
+    ).toContain("/sandbox/.custom-openclaw/workspace");
+    expect(mcp.describeMcpMutationCapability({ sandboxName: "sandbox" })).toMatchObject({
+      kind: "command",
+      command: "command -v mcporter",
+      success: { kind: "exit-zero" },
+    });
+    expect(mcp.describeMcpTeardownCapability({ sandboxName: "sandbox" })).toEqual({
+      kind: "not-required",
+    });
+    expect(
+      mcp.describeMcpRuntimeIntentVerification({
+        entries: [mcpEntry],
+        managedServerNames: ["example"],
+      }),
+    ).toEqual({ kind: "not-required" });
+    expect(mcp.buildMcpRuntimeCommand({ command: ["node", "probe.mjs"] })).toEqual(
+      expect.arrayContaining(["nemoclaw-start", "node", "-e", "probe.mjs"]),
+    );
+    const optionPrefixedRuntime = mcp.buildMcpRuntimeCommand({
+      command: ["--require", "child.mjs"],
+    });
+    expect(optionPrefixedRuntime.slice(0, 4)).toEqual([
+      "nemoclaw-start",
+      "node",
+      "-e",
+      expect.any(String),
+    ]);
+    expect(optionPrefixedRuntime.slice(4)).toEqual(["--", "--require", "child.mjs"]);
     expect(mcp.mcporterAvailabilityProbe("sandbox").command).toBe("command -v mcporter");
     expect(
-      mcp.buildMcpRegistrationCommand({
+      mcp.buildMcpRegistrationPlan({
         entry: mcpEntry,
         managedEntries: [mcpEntry],
         replaceExisting: false,
         teardownRollback: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toContain("config");
+    ).toMatchObject({ execution: { command: expect.stringContaining("config") } });
     expect(
-      mcp.buildMcpRemovalCommand({
+      mcp.buildMcpRemovalPlan({
         entry: mcpEntry,
         force: false,
         adaptiveTeardown: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toContain("example");
+    ).toMatchObject({ execution: { command: expect.stringContaining("example") } });
     runtime.applyOpenClawAnthropicReplyBudget(openClawModel, Number.NaN);
     expect(runtime.DEFAULT_OPENCLAW_MAX_TOKENS).toBe(4096);
     expect(openClawModel.maxTokens).toBe(4096);
     expect(restore.mergeOpenClawRestoredConfig({}, {})).toEqual({});
+    expect(
+      restore.mergeConfigState({
+        backupContent: "{}",
+        currentContent: "{}",
+        managedChannelNames: [],
+        previousImagePluginInstalls: null,
+        freshImagePluginInstalls: null,
+      }),
+    ).toEqual({
+      kind: "merged",
+      content: "{}\n",
+      write: {
+        kind: "config-anchors",
+        hashFiles: ["openclaw.json", "fabric.json"],
+      },
+    });
     expect(cli.buildOpenclawAgentDeleteArgs("example")).toEqual([
       "openclaw",
       "agents",

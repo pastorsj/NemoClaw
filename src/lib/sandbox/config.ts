@@ -25,6 +25,7 @@ const {
   stripAnsi,
 }: typeof import("../adapters/openshell/client") = require("../adapters/openshell/client");
 const { createHash } = require("node:crypto");
+const { isDeepStrictEqual } = require("node:util");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -58,9 +59,12 @@ const {
   buildHermesUpstreamHeader,
 }: typeof import("./hermes-upstream-header") = require("./hermes-upstream-header");
 const {
+  loadInstalledConfigAdapter,
   parseConfig,
   serializeConfig,
-}: typeof import("./config-format") = require("./config-format");
+  toHarnessConfigTarget,
+  validatePackageConfigCommandResult,
+}: typeof import("./config-boundary") = require("./config-boundary");
 const {
   OPENSHELL_OPERATION_TIMEOUT_MS,
 }: typeof import("../adapters/openshell/timeouts") = require("../adapters/openshell/timeouts");
@@ -106,6 +110,7 @@ interface ConfigUrlValidationOptions {
   allowOpenShellBridge?: boolean;
   allowOpenShellBridgePath?: (path: readonly string[]) => boolean;
   allowPrivateUrls?: boolean;
+  allowPrivateUrlsPath?: (path: readonly string[]) => boolean;
 }
 
 type ManagedGatewayRestart = (sandboxName: string) => { ok: boolean };
@@ -208,18 +213,18 @@ function privilegedSandboxExec(
   );
 }
 
-function openClawConfigGuardExec(sandboxName: string, expectedContainerId?: string) {
+function sandboxConfigPrivilegedExec(sandboxName: string, expectedContainerId?: string) {
   return {
-    run: (cmd: string[], input?: string) => {
+    run: (cmd: string[], input?: string, timeout = OPENCLAW_CONFIG_GUARD_TIMEOUT_MS) => {
       try {
-        return withPrivilegedSandboxExecutionLease(sandboxName, "OpenClaw config guard", () => {
+        return withPrivilegedSandboxExecutionLease(sandboxName, "sandbox config command", () => {
           const result = executePrivilegedSandboxCommand(sandboxName, cmd, {
             ...(input === undefined ? {} : { input }),
             sanitizeEnvironment: true,
             ...(expectedContainerId === undefined
               ? {}
               : { expectedResourceHandle: expectedContainerId }),
-            timeout: OPENCLAW_CONFIG_GUARD_TIMEOUT_MS,
+            timeout,
             maxOutputBytes: 2 * 1024 * 1024,
           });
           return {
@@ -541,6 +546,114 @@ type ValidatedOpenClawCandidate = {
   privileged: import("./openclaw-config-guard").PrivilegedExec;
 };
 
+type PreparedPackageConfigCandidate = {
+  selection: import("./package-config").InstalledConfigAdapterSelection;
+  plan: Extract<
+    import("../agent-runtime/config-module").HarnessConfigUpdatePlan,
+    { kind: "transaction" }
+  >;
+  privileged: ReturnType<typeof sandboxConfigPrivilegedExec>;
+};
+
+type ImmutablePackageConfigCandidate = Extract<
+  import("../agent-runtime/config-module").HarnessConfigUpdatePlan,
+  { kind: "immutable" }
+>;
+
+function packageConfigFailureLines(
+  command: import("../agent-runtime/config-module").HarnessConfigCommand,
+): string[] {
+  return [
+    `  ${command.failureMessage}`,
+    ...(command.recoveryGuidance ?? []).map((line) => `  ${line}`),
+  ];
+}
+
+function runPackageConfigCommand(
+  privileged: ReturnType<typeof sandboxConfigPrivilegedExec>,
+  command: import("../agent-runtime/config-module").HarnessConfigCommand,
+  content: string,
+): void {
+  const result = privileged.run([...command.command], content, command.timeoutSeconds * 1000);
+  if (!validatePackageConfigCommandResult(command, content, result)) {
+    configFail(packageConfigFailureLines(command));
+  }
+}
+
+function preparePackageConfigCandidate(
+  sandboxName: string,
+  target: AgentConfigTarget,
+  config: ConfigObject,
+  expectedContainerId?: string,
+  selectedAdapter?: import("./package-config").InstalledConfigAdapterSelection | null,
+): PreparedPackageConfigCandidate | ImmutablePackageConfigCandidate | null {
+  const selection =
+    selectedAdapter === undefined
+      ? loadInstalledConfigAdapter(sandboxName, target)
+      : selectedAdapter;
+  if (!selection) return null;
+  const { adapter } = selection;
+  const expectedConfigSha256 = (config as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string })[
+    CONFIG_SOURCE_SHA256
+  ];
+  if (!expectedConfigSha256) {
+    throw new Error(
+      `Refusing ${target.agentName} config write without the digest from the matching sandbox read.`,
+    );
+  }
+  let serializedConfig = "";
+  let serializationError: unknown;
+  try {
+    serializedConfig = serializeConfig(config, target.format);
+  } catch (error) {
+    serializationError = error;
+  }
+  const plan = adapter.prepareConfigUpdate({
+    config,
+    serializedConfig,
+    expectedConfigSha256,
+    target: toHarnessConfigTarget(target),
+  });
+  if (plan.kind === "immutable") return plan;
+  if (serializationError !== undefined) throw serializationError;
+  if (Buffer.byteLength(plan.content, "utf8") > MAX_OPENCLAW_CONFIG_BYTES) {
+    configFail(`  ${target.agentName} config candidate exceeds the 16 MiB size limit.`);
+  }
+  return {
+    selection,
+    plan,
+    privileged: sandboxConfigPrivilegedExec(sandboxName, expectedContainerId),
+  };
+}
+
+function validatePackageConfigCandidate(candidate: PreparedPackageConfigCandidate): void {
+  if (candidate.plan.validation) {
+    runPackageConfigCommand(
+      candidate.privileged,
+      candidate.plan.validation,
+      candidate.plan.content,
+    );
+  }
+}
+
+function writePackageConfigCandidate(
+  sandboxName: string,
+  target: AgentConfigTarget,
+  candidate: PreparedPackageConfigCandidate,
+): void {
+  runPackageConfigCommand(candidate.privileged, candidate.plan.write, candidate.plan.content);
+  const written = readSandboxConfig(sandboxName, target);
+  const writtenSha256 = (written as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string })[
+    CONFIG_SOURCE_SHA256
+  ];
+  const expectedSha256 = createHash("sha256").update(candidate.plan.content).digest("hex");
+  if (writtenSha256 !== expectedSha256) {
+    configFail(
+      `  ${target.agentName} config transaction did not commit the validated document exactly.`,
+    );
+  }
+}
+
 function isHermesCompatHashRecoveryError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /compat hash (does not match frozen Hermes inputs|verification failed)/iu.test(message);
@@ -561,7 +674,20 @@ function writeSandboxConfig(
   // Interactive config set supplies this after validating outside the mutation locks.
   // Other callers retain the existing digest-bound write behavior.
   validatedOpenClawCandidate?: ValidatedOpenClawCandidate,
+  preparedPackageCandidate?: PreparedPackageConfigCandidate,
 ): void {
+  const packageCandidate =
+    preparedPackageCandidate ?? preparePackageConfigCandidate(sandboxName, target, config);
+  if (packageCandidate) {
+    if ("kind" in packageCandidate) {
+      configFail(
+        `  config set is not available for '${target.agentName}': ${packageCandidate.reason}`,
+      );
+    }
+    if (!preparedPackageCandidate) validatePackageConfigCandidate(packageCandidate);
+    writePackageConfigCandidate(sandboxName, target, packageCandidate);
+    return;
+  }
   const content = validatedOpenClawCandidate?.content ?? composeSandboxConfigBody(config, target);
   if (target.agentName === "hermes") {
     const expectedConfigSha256 = (config as ConfigObject & { [CONFIG_SOURCE_SHA256]?: string })[
@@ -613,7 +739,7 @@ function writeSandboxConfig(
       );
     }
     const result = writeOpenClawConfigCandidate(
-      validatedOpenClawCandidate?.privileged ?? openClawConfigGuardExec(sandboxName),
+      validatedOpenClawCandidate?.privileged ?? sandboxConfigPrivilegedExec(sandboxName),
       content,
       expectedConfigSha256,
     );
@@ -919,7 +1045,12 @@ function validateUrlValue(
 ): void {
   const parsed = parseHttpUrl(value);
   if (!parsed) return;
-  if (options.allowPrivateUrls && isPrivateHostname(parsed.hostname)) return;
+  if (
+    (options.allowPrivateUrls || options.allowPrivateUrlsPath?.(pathSegments)) &&
+    isPrivateHostname(parsed.hostname)
+  ) {
+    return;
+  }
   if (
     (options.allowOpenShellBridge || options.allowOpenShellBridgePath?.(pathSegments)) &&
     isAllowedOpenShellSandboxBridgeUrl(parsed)
@@ -940,7 +1071,10 @@ async function validateUrlValueWithDnsResult(
   if (!parsed) return null;
 
   const hostname = parsed.hostname;
-  if (options.allowPrivateUrls && isPrivateHostname(hostname)) {
+  if (
+    (options.allowPrivateUrls || options.allowPrivateUrlsPath?.(pathSegments)) &&
+    isPrivateHostname(hostname)
+  ) {
     return {
       protocol: parsed.protocol as "http:" | "https:",
       originalUrl,
@@ -1256,7 +1390,14 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   }
 
   const target = resolveAgentConfig(sandboxName);
-  if (opts.restart && target.agentName !== "openclaw" && target.agentName !== "hermes") {
+  const installedConfigSelection = loadInstalledConfigAdapter(sandboxName, target);
+  const installedConfigAdapter = installedConfigSelection?.adapter;
+  if (
+    !installedConfigAdapter &&
+    opts.restart &&
+    target.agentName !== "openclaw" &&
+    target.agentName !== "hermes"
+  ) {
     configFail(
       `  --restart is supported only for OpenClaw and Hermes; '${target.agentName}' config was not changed.`,
     );
@@ -1265,7 +1406,7 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   // OpenClaw/Hermes — it has no host-side config-mutation path (the same reason
   // inference set refuses it, #6321). config get now reads TOML, but refuse
   // config set cleanly and point at the only way to change it: re-onboard. #6548
-  if (target.format === "toml") {
+  if (!installedConfigAdapter && target.format === "toml") {
     const { CLI_NAME } = require("../cli/branding");
     configFail(
       `  config set is not available for '${target.agentName}': its config is baked into the sandbox image at build time. To change it, re-onboard with the new selection (e.g. ${CLI_NAME} onboard --agent dcode --name ${shellQuote(sandboxName)} --fresh).`,
@@ -1351,9 +1492,26 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
   let safeValue: ConfigValue;
   try {
     safeValue = await rewriteConfigUrlsWithDnsPinning(parsedValue, dnsPromises.lookup as LookupFn, {
-      allowPrivateUrls: target.agentName === "hermes" && hermesConfigAllowsPrivateUrls(config),
-      allowOpenShellBridgePath: (relativePath) =>
-        configSetAllowsOpenShellBridge(target.agentName, configKey, relativePath),
+      allowPrivateUrls:
+        !installedConfigAdapter &&
+        target.agentName === "hermes" &&
+        hermesConfigAllowsPrivateUrls(config),
+      allowPrivateUrlsPath: (relativePath) =>
+        installedConfigAdapter?.classifyConfigUrl({
+          config,
+          key: configKey,
+          relativePath,
+        }).allowPrivateUrls === true,
+      allowOpenShellBridgePath: (relativePath) => {
+        if (installedConfigAdapter) {
+          return installedConfigAdapter.classifyConfigUrl({
+            config,
+            key: configKey,
+            relativePath,
+          }).allowOpenShellBridge;
+        }
+        return configSetAllowsOpenShellBridge(target.agentName, configKey, relativePath);
+      },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1364,12 +1522,44 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
 
   // Validation can take up to 30 seconds, so keep it outside both mutation locks.
   let validatedOpenClawCandidate: ValidatedOpenClawCandidate | undefined;
-  if (target.agentName === "openclaw") {
+  let preparedPackageCandidate: PreparedPackageConfigCandidate | undefined;
+  if (installedConfigAdapter) {
+    setDotpath(config, opts.key, safeValue);
+    let candidate: ReturnType<typeof preparePackageConfigCandidate>;
+    try {
+      const containerId = resolvePrivilegedSandboxTarget(sandboxName).resourceHandle;
+      candidate = preparePackageConfigCandidate(
+        sandboxName,
+        target,
+        config,
+        containerId,
+        installedConfigSelection,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      configFail(`  ${target.agentName} config validation could not start: ${message}`);
+    }
+    if (!candidate) {
+      configFail(
+        `  ${target.agentName} package configuration authority changed during validation.`,
+      );
+    }
+    if ("kind" in candidate) {
+      configFail(`  config set is not available for '${target.agentName}': ${candidate.reason}`);
+    }
+    if (opts.restart && candidate.plan.restart.kind !== "managed") {
+      configFail(
+        `  --restart is not managed for '${target.agentName}'; its config was not changed.`,
+      );
+    }
+    validatePackageConfigCandidate(candidate);
+    preparedPackageCandidate = candidate;
+  } else if (target.agentName === "openclaw") {
     setDotpath(config, opts.key, safeValue);
     const content = composeSandboxConfigBody(config, target);
     try {
       const containerId = resolvePrivilegedSandboxTarget(sandboxName).resourceHandle;
-      const privileged = openClawConfigGuardExec(sandboxName, containerId);
+      const privileged = sandboxConfigPrivilegedExec(sandboxName, containerId);
       const issues = validateOpenClawConfigCandidate(privileged, content);
       if (issues.length > 0) configFail(issues.map((issue) => `  ${issue}`));
       validatedOpenClawCandidate = { content, privileged };
@@ -1394,7 +1584,33 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     }
     setDotpath(currentConfig, opts.key!, safeValue);
 
-    if (target.agentName === "openclaw") {
+    if (preparedPackageCandidate) {
+      const currentSelection = loadInstalledConfigAdapter(sandboxName, target);
+      if (
+        !currentSelection ||
+        !isDeepStrictEqual(currentSelection.identity, preparedPackageCandidate.selection.identity)
+      ) {
+        configFail(
+          `  ${target.agentName} package authority changed after validation. Re-run config set against the current package.`,
+        );
+      }
+      const currentCandidate = preparePackageConfigCandidate(
+        sandboxName,
+        target,
+        currentConfig,
+        resolvePrivilegedSandboxTarget(sandboxName).resourceHandle,
+        currentSelection,
+      );
+      if (
+        !currentCandidate ||
+        "kind" in currentCandidate ||
+        !isDeepStrictEqual(currentCandidate.plan, preparedPackageCandidate.plan)
+      ) {
+        configFail(
+          `  ${target.agentName} config candidate changed after validation. Re-run config set against the current value.`,
+        );
+      }
+    } else if (target.agentName === "openclaw") {
       const currentCandidateContent = composeSandboxConfigBody(currentConfig, target);
       if (
         !validatedOpenClawCandidate ||
@@ -1407,8 +1623,17 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     }
 
     console.log(`  Writing config to sandbox (${target.configPath})...`);
-    writeSandboxConfig(sandboxName, target, currentConfig, validatedOpenClawCandidate);
-    recomputeSandboxConfigHash(sandboxName, target);
+    writeSandboxConfig(
+      sandboxName,
+      target,
+      currentConfig,
+      validatedOpenClawCandidate,
+      preparedPackageCandidate,
+    );
+    // A package transaction's structured success record and exact readback
+    // are the final write authority. Core must not add a legacy integrity-file
+    // mutation after the package has committed its own protected files.
+    if (!preparedPackageCandidate) recomputeSandboxConfigHash(sandboxName, target);
     appendAuditEntry({
       action: "config_set",
       sandbox: sandboxName,
@@ -1424,7 +1649,16 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     restartSandboxAgentAfterConfigSet(sandboxName, target.agentName);
   } else {
     console.log("");
-    for (const line of buildConfigSetRestartGuidance(sandboxName, target.agentName)) {
+    const { CLI_NAME } = require("../cli/branding") as typeof import("../cli/branding");
+    const guidance = preparedPackageCandidate
+      ? preparedPackageCandidate.plan.restart.kind === "external"
+        ? [...preparedPackageCandidate.plan.restart.guidance]
+        : [
+            ...preparedPackageCandidate.plan.restart.guidance,
+            `  Re-run with --restart or run: ${CLI_NAME} ${shellQuote(sandboxName)} gateway restart`,
+          ]
+      : buildConfigSetRestartGuidance(sandboxName, target.agentName);
+    for (const line of guidance) {
       console.log(line);
     }
   }

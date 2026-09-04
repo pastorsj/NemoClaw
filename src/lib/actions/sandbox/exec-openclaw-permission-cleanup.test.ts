@@ -45,7 +45,7 @@ function cleanupDeps(overrides: Partial<SandboxExecCleanupDeps> = {}): SandboxEx
   };
 }
 
-describe("runSandboxExecCommand mutable OpenClaw cleanup (#6047)", () => {
+describe("runSandboxExecCommand mutable config cleanup (#6047)", () => {
   it("preserves a nonzero command status when the mutable contract is already healthy", async () => {
     const repair = vi.fn(() => ({ applied: true as const, verified: true, errors: [] }));
     const completion = await runSandboxExecCommand(
@@ -121,9 +121,12 @@ describe("runSandboxExecCommand mutable OpenClaw cleanup (#6047)", () => {
   it.each([
     ["Hermes", { agent: "hermes" }],
     ["a custom agent", { agent: "langchain-deepagents-code" }],
-    ["an unregistered sandbox", null],
-  ])("does not apply OpenClaw cleanup to %s", async (_label, entry) => {
-    const inspect = vi.fn(() => HEALTHY_MUTABLE_CONFIG);
+  ])("does not broaden legacy OpenClaw cleanup to %s", async (_label, entry) => {
+    const inspect = vi.fn(() => ({
+      applies: false as const,
+      skipReason: "agent" as const,
+      reason: "the package does not require mutable configuration",
+    }));
     const repair = vi.fn(() => ({ applied: true as const, verified: true, errors: [] }));
 
     const completion = await runSandboxExecCommand(
@@ -142,6 +145,59 @@ describe("runSandboxExecCommand mutable OpenClaw cleanup (#6047)", () => {
     expect(completion).toEqual({ code: 0, commandCode: 0 });
     expect(inspect).not.toHaveBeenCalled();
     expect(repair).not.toHaveBeenCalled();
+  });
+
+  it("runs the generic inspection for a package-backed agent runtime", async () => {
+    const inspect = vi.fn(() => ({
+      applies: true as const,
+      ok: true,
+      inspectionMethod: "probe" as const,
+      configDir: "/sandbox/.future",
+      configFile: "config.json",
+      issues: [],
+    }));
+    const repair = vi.fn(() => ({ applied: true as const, verified: true, errors: [] }));
+
+    const completion = await runSandboxExecCommand(
+      "openshell",
+      "alpha",
+      ["true"],
+      {},
+      () => ({ status: 0 }),
+      cleanupDeps({
+        getSandbox: () => ({
+          agent: "future-runtime",
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-runtime",
+            packageVersion: "1.0.0",
+            contentDigest: "a".repeat(64),
+          },
+        }),
+        inspectMutableConfigPerms: inspect,
+        repairMutableConfigPerms: repair,
+      }),
+    );
+
+    expect(completion).toEqual({ code: 0, commandCode: 0 });
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(repair).not.toHaveBeenCalled();
+  });
+
+  it("does not inspect an unregistered sandbox", async () => {
+    const inspect = vi.fn(() => HEALTHY_MUTABLE_CONFIG);
+
+    const completion = await runSandboxExecCommand(
+      "openshell",
+      "alpha",
+      ["true"],
+      {},
+      () => ({ status: 0 }),
+      cleanupDeps({ getSandbox: () => null, inspectMutableConfigPerms: inspect }),
+    );
+
+    expect(completion).toEqual({ code: 0, commandCode: 0 });
+    expect(inspect).not.toHaveBeenCalled();
   });
 
   it("still verifies cleanup after an OpenShell transport failure", async () => {

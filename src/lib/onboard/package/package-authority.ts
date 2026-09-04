@@ -32,6 +32,14 @@ export interface HarnessPackageSessionAuthority {
   readonly harnessPackageMigration: HarnessPackageMigration | null;
 }
 
+/** Resolve one package-backed sandbox through its exact recorded receipt. */
+export function resolvePackageBackedSandboxAgent(
+  entry: Parameters<typeof resolveSandboxAgent>[0],
+  options?: ResolveSandboxAgentOptions,
+): ResolvedSandboxAgent {
+  return options === undefined ? resolveSandboxAgent(entry) : resolveSandboxAgent(entry, options);
+}
+
 /** Resolve exact package bytes and any release-candidate qualification together. */
 export function resolveLifecycleEligibleSandboxAgent(
   entry: Parameters<typeof resolveSandboxAgent>[0],

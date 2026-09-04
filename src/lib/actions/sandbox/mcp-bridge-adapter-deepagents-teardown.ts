@@ -21,10 +21,6 @@ import {
   deepAgentsManagedServerConfig,
   pythonJsonLiteral,
 } from "./mcp-bridge-adapter-status";
-import {
-  buildInstalledMcpRemovalCommand,
-  requireMcpShellCommand,
-} from "./mcp-bridge/package-command";
 
 export function buildDeepAgentsMcpRemoveCommand(
   entry: McpBridgeEntry,
@@ -186,21 +182,10 @@ export function unregisterDeepAgentsAdapter(
   entry: McpBridgeEntry,
   options: AdapterMutationOptions = {},
 ): AdapterRemovalOutcome {
-  const installedCommand = buildInstalledMcpRemovalCommand(
-    sandboxName,
-    "deepagents-config",
-    entry,
-    {
-      force: options.force === true,
-      adaptiveTeardown: options.teardown === true,
-    },
-  );
   const stdout = runDeepAgentsAdapterCommand(
     sandboxName,
     entry,
-    installedCommand === null
-      ? buildDeepAgentsMcpRemoveCommand(entry, options.force === true, options.teardown === true)
-      : requireMcpShellCommand(installedCommand),
+    buildDeepAgentsMcpRemoveCommand(entry, options.force === true, options.teardown === true),
     `Deep Agents Code MCP config removal failed for '${entry.server}'.`,
     options,
   );

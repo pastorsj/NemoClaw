@@ -20,9 +20,23 @@ type ImportRef = {
   column: number;
 };
 
+type AgentRuntimePackageDependency = {
+  packageName: string;
+  packageRoot: string;
+};
+
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SRC_ROOT = path.join(REPO_ROOT, "src");
+const PACKAGES_ROOT = path.join(REPO_ROOT, "packages");
 const SKIP_DIRS = new Set([".git", "coverage", "dist", "node_modules"]);
+// This build-time import predates the package contract. Remove the exception when messaging loads
+// agent runtime build support through that contract.
+const LEGACY_AGENT_RUNTIME_PACKAGE_IMPORTS = new Map([
+  [
+    "src/lib/messaging/applier/build/messaging-build-applier.mts\0../../../../../packages/nemoclaw-openclaw/compat/npm-remediation.mts",
+    1,
+  ],
+]);
 const PROVIDER_NEUTRAL_MANAGED_RUNTIME_MODULES = [
   "src/lib/actions/sandbox/connect.ts",
   "src/lib/actions/sandbox/destroy-presence.ts",
@@ -203,6 +217,85 @@ function resolveInternalImport(fromAbsPath: string, specifier: string): string |
     return toRepoPath(realpathSync(found));
   } catch {
     return toRepoPath(found);
+  }
+}
+
+function readAgentRuntimePackageDependencies(
+  packagesRoot: string,
+): readonly AgentRuntimePackageDependency[] {
+  const packages: AgentRuntimePackageDependency[] = [];
+  for (const entry of readdirSync(packagesRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const packageRoot = path.join(packagesRoot, entry.name);
+    const packageJsonPath = path.join(packageRoot, "package.json");
+    if (!existsSync(packageJsonPath)) continue;
+    const metadata = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      name?: unknown;
+      nemoclaw?: { harnessManifest?: unknown };
+    };
+    if (typeof metadata.nemoclaw?.harnessManifest !== "string") continue;
+    if (typeof metadata.name !== "string" || !metadata.name.trim()) {
+      throw new Error(
+        `Agent runtime package metadata has no package name: ${toRepoPath(packageRoot)}`,
+      );
+    }
+    packages.push({
+      packageName: metadata.name,
+      packageRoot: toRepoPath(realpathSync(packageRoot)),
+    });
+  }
+  return packages.sort((left, right) => left.packageName.localeCompare(right.packageName));
+}
+
+function importedAgentRuntimePackage(
+  fromAbsPath: string,
+  specifier: string,
+  packages: readonly AgentRuntimePackageDependency[],
+): AgentRuntimePackageDependency | null {
+  for (const dependency of packages) {
+    if (
+      specifier === dependency.packageName ||
+      specifier.startsWith(`${dependency.packageName}/`)
+    ) {
+      return dependency;
+    }
+  }
+  const target = resolveInternalImport(fromAbsPath, specifier);
+  if (!target) return null;
+  return (
+    packages.find(
+      (dependency) =>
+        target === dependency.packageRoot || target.startsWith(`${dependency.packageRoot}/`),
+    ) ?? null
+  );
+}
+
+function checkAgentRuntimePackageImports(
+  absPath: string,
+  repoPath: string,
+  imports: readonly ImportRef[],
+  packages: readonly AgentRuntimePackageDependency[],
+  usedLegacyImports: Map<string, number>,
+  violations: Violation[],
+): void {
+  for (const ref of imports) {
+    const dependency = importedAgentRuntimePackage(absPath, ref.specifier, packages);
+    if (!dependency) continue;
+    const exceptionKey = `${repoPath}\0${ref.specifier}`;
+    const exceptionLimit = LEGACY_AGENT_RUNTIME_PACKAGE_IMPORTS.get(exceptionKey) ?? 0;
+    const exceptionUseCount = usedLegacyImports.get(exceptionKey) ?? 0;
+    if (exceptionUseCount < exceptionLimit) {
+      usedLegacyImports.set(exceptionKey, exceptionUseCount + 1);
+      continue;
+    }
+    addViolation(
+      violations,
+      repoPath,
+      ref.line,
+      ref.column,
+      "core-no-agent-runtime-package-imports",
+      `core source must use the typed agent runtime package contract instead of importing ${dependency.packageName}`,
+    );
   }
 }
 
@@ -496,8 +589,13 @@ function checkCommandFile(
   }
 }
 
-export function findLayerImportBoundaryViolations(root = SRC_ROOT): Violation[] {
+export function findLayerImportBoundaryViolations(
+  root = SRC_ROOT,
+  packagesRoot = PACKAGES_ROOT,
+): Violation[] {
   const violations: Violation[] = [];
+  const agentRuntimePackages = readAgentRuntimePackageDependencies(packagesRoot);
+  const usedLegacyAgentRuntimeImports = new Map<string, number>();
   for (const absPath of walk(root)) {
     const repoPath = toRepoPath(absPath);
     const domainFile = isDomainFile(repoPath);
@@ -506,12 +604,20 @@ export function findLayerImportBoundaryViolations(root = SRC_ROOT): Violation[] 
     const messagingManifestFile = isMessagingManifestFile(repoPath);
     const commandFile = isCommandFile(repoPath);
     const source = readFileSync(absPath, "utf8");
+    const sourceFile = sourceFileFor(absPath, source);
+    const imports = collectImportRefs(sourceFile);
+    checkAgentRuntimePackageImports(
+      absPath,
+      repoPath,
+      imports,
+      agentRuntimePackages,
+      usedLegacyAgentRuntimeImports,
+      violations,
+    );
     if (!domainFile && !actionFile && !adapterFile && !messagingManifestFile && !commandFile) {
       checkNoBinLibShimImport(absPath, repoPath, collectPreprocessedImportRefs(source), violations);
       continue;
     }
-    const sourceFile = sourceFileFor(absPath, source);
-    const imports = collectImportRefs(sourceFile);
     checkNoBinLibShimImport(absPath, repoPath, imports, violations);
     if (domainFile) {
       checkDomainFile(absPath, repoPath, sourceFile, imports, violations);

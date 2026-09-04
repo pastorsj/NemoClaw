@@ -3,6 +3,8 @@
 
 import type { AgentMcpAdapter } from "../../agent/defs";
 
+export { isAgentMcpAdapter } from "../../agent-runtime/manifest-types";
+
 export { McpBridgeError } from "./mcp-bridge/error";
 export type { McpBridgeErrorReasonCode } from "./mcp-bridge/error";
 
@@ -84,8 +86,4 @@ export interface McpBridgeStatus {
   addState?: "prepared" | "preflighted";
   addedAt?: string;
   updatedAt?: string;
-}
-
-export function isAgentMcpAdapter(value: unknown): value is AgentMcpAdapter {
-  return typeof value === "string" && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value);
 }

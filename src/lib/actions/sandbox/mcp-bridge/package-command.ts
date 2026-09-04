@@ -4,8 +4,10 @@
 import type { AgentMcpAdapter } from "../../../agent/defs";
 import {
   loadHarnessMcpAdapterHostModule,
-  type HarnessMcpAdapterCommand,
   type HarnessMcpAdapterEntry,
+  type HarnessMcpCapabilityProbe,
+  type HarnessMcpRegistrationPlan,
+  type HarnessMcpRemovalPlan,
 } from "../../../agent-runtime/host-module";
 import { entryHeaders } from "../mcp-bridge-adapter-status";
 import type { McpAttachedCredentialRevision } from "../mcp-bridge-provider-readiness";
@@ -24,23 +26,25 @@ interface InstalledMcpRegistrationOptions {
   readonly replaceExisting?: boolean;
   readonly teardownRollback?: boolean;
   readonly credentialRevision?: McpAttachedCredentialRevision;
-  readonly configRoot?: string;
+  readonly configDirectory?: string;
 }
 
 interface InstalledMcpRemovalOptions {
   readonly force?: boolean;
   readonly adaptiveTeardown?: boolean;
-  readonly configRoot?: string;
+  readonly configDirectory?: string;
 }
 
-function installedMcpAdapter(
-  sandboxName: string,
-  adapter: AgentMcpAdapter,
-  entry: InstalledMcpEntry,
-) {
+interface InstalledMcpInspectionOptions {
+  readonly failOnMismatch?: boolean;
+  readonly credentialRevision?: McpAttachedCredentialRevision;
+  readonly configDirectory?: string;
+}
+
+function installedMcpAdapter(sandboxName: string, adapter: AgentMcpAdapter, agentName: string) {
   const harnessPackage = getSandboxHarnessPackage(sandboxName);
   if (!harnessPackage) return null;
-  if (harnessPackage.id !== entry.agent) {
+  if (harnessPackage.id !== agentName) {
     throw new McpBridgeError(
       `Installed MCP adapter '${adapter}' for sandbox '${sandboxName}' does not match its package agent.`,
     );
@@ -67,17 +71,17 @@ function packageEntry(
   });
 }
 
-export function buildInstalledMcpRegistrationCommand(
+export function buildInstalledMcpRegistrationPlan(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: InstalledMcpEntry,
   options: InstalledMcpRegistrationOptions = {},
-): HarnessMcpAdapterCommand | null {
-  const installed = installedMcpAdapter(sandboxName, adapter, entry);
+): HarnessMcpRegistrationPlan | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, entry.agent);
   if (!installed) return null;
   const managedEntries = options.managedEntries ?? [entry];
   try {
-    return installed.buildMcpRegistrationCommand({
+    return installed.buildMcpRegistrationPlan({
       entry: packageEntry(entry, options.credentialRevision),
       managedEntries: managedEntries.map((managedEntry) =>
         packageEntry(
@@ -87,47 +91,125 @@ export function buildInstalledMcpRegistrationCommand(
       ),
       replaceExisting: options.replaceExisting === true,
       teardownRollback: options.teardownRollback === true,
-      configRoot: options.configRoot ?? null,
+      configDirectory: options.configDirectory ?? null,
     });
   } catch (error) {
     throw new McpBridgeError(
-      `Installed MCP adapter '${adapter}' could not build its registration command: ${error instanceof Error ? error.message : String(error)}`,
+      `Installed MCP adapter '${adapter}' could not build its registration plan: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
 
-export function buildInstalledMcpRemovalCommand(
+export function buildInstalledMcpRemovalPlan(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: InstalledMcpEntry,
   options: InstalledMcpRemovalOptions = {},
-): HarnessMcpAdapterCommand | null {
-  const installed = installedMcpAdapter(sandboxName, adapter, entry);
+): HarnessMcpRemovalPlan | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, entry.agent);
   if (!installed) return null;
   try {
-    return installed.buildMcpRemovalCommand({
+    return installed.buildMcpRemovalPlan({
       entry: packageEntry(entry),
       force: options.force === true,
       adaptiveTeardown: options.adaptiveTeardown === true,
-      configRoot: options.configRoot ?? null,
+      configDirectory: options.configDirectory ?? null,
     });
   } catch (error) {
     throw new McpBridgeError(
-      `Installed MCP adapter '${adapter}' could not build its removal command: ${error instanceof Error ? error.message : String(error)}`,
+      `Installed MCP adapter '${adapter}' could not build its removal plan: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
 
-export function requireMcpShellCommand(command: HarnessMcpAdapterCommand): string {
-  if (typeof command === "string") return command;
-  throw new McpBridgeError(
-    "Installed MCP adapter returned argv where a shell command is required.",
-  );
+export function buildInstalledMcpInspectionCommand(
+  sandboxName: string,
+  adapter: AgentMcpAdapter,
+  entry: InstalledMcpEntry,
+  options: InstalledMcpInspectionOptions = {},
+): string | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, entry.agent);
+  if (!installed) return null;
+  try {
+    return installed.buildMcpInspectionCommand({
+      entry: packageEntry(entry, options.credentialRevision),
+      failOnMismatch: options.failOnMismatch === true,
+      configDirectory: options.configDirectory ?? null,
+    });
+  } catch (error) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' could not build its inspection command: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
-export function requireMcpArgvCommand(command: HarnessMcpAdapterCommand): readonly string[] {
-  if (Array.isArray(command)) return command;
-  throw new McpBridgeError(
-    "Installed MCP adapter returned a shell command where argv is required.",
-  );
+export function describeInstalledMcpMutationCapability(
+  sandboxName: string,
+  adapter: AgentMcpAdapter,
+  agentName: string,
+): HarnessMcpCapabilityProbe | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, agentName);
+  if (!installed) return null;
+  try {
+    return installed.describeMcpMutationCapability({ sandboxName });
+  } catch (error) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' could not describe its mutation capability: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function describeInstalledMcpTeardownCapability(
+  sandboxName: string,
+  adapter: AgentMcpAdapter,
+  agentName: string,
+): HarnessMcpCapabilityProbe | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, agentName);
+  if (!installed) return null;
+  try {
+    return installed.describeMcpTeardownCapability({ sandboxName });
+  } catch (error) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' could not describe its teardown capability: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function describeInstalledMcpRuntimeIntentVerification(
+  sandboxName: string,
+  adapter: AgentMcpAdapter,
+  agentName: string,
+  entries: readonly InstalledMcpEntry[],
+  managedServerNames: readonly string[],
+  credentialRevisions?: ReadonlyMap<string, McpAttachedCredentialRevision>,
+): HarnessMcpCapabilityProbe | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, agentName);
+  if (!installed) return null;
+  try {
+    return installed.describeMcpRuntimeIntentVerification({
+      entries: entries.map((entry) => packageEntry(entry, credentialRevisions?.get(entry.server))),
+      managedServerNames: [...managedServerNames],
+    });
+  } catch (error) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' could not describe its runtime intent verification: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function buildInstalledMcpRuntimeCommand(
+  sandboxName: string,
+  adapter: AgentMcpAdapter,
+  agentName: string,
+  command: readonly string[],
+): readonly string[] | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, agentName);
+  if (!installed) return null;
+  try {
+    return installed.buildMcpRuntimeCommand({ command });
+  } catch (error) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' could not build its runtime command: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }

@@ -3,7 +3,7 @@
 
 import crypto from "node:crypto";
 
-import type { AgentMcpAdapter } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import * as policies from "../../policy";
 import {
   normalizeTrustedPrivateHost,
@@ -11,23 +11,22 @@ import {
   replayTrustedPrivateEndpoint,
 } from "../../security/trusted-private-endpoint";
 import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock";
-import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { McpBridgeEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import { withMcpCredentialOwnershipLock } from "../../state/mcp-lifecycle-lock/credential-ownership";
 import {
+  assertAgentMcpRuntimeIntent,
   assertAgentMcpMutationRuntimeCapability,
   inspectAgentAdapterRegistration,
   registerAgentAdapter,
   unregisterAgentAdapter,
 } from "./mcp-bridge-adapters";
 import { type McpBridgeAddOptions, McpBridgeError } from "./mcp-bridge-contracts";
-import { assertHermesMcpRuntimeIntent } from "./mcp-bridge-hermes-reconciliation";
 import {
   applyGeneratedPolicy,
+  buildGeneratedMcpPolicyContent,
   buildMcpBridgePolicyKey,
   buildMcpBridgePolicyName,
-  buildMcpBridgePolicyYaml,
   removeGeneratedPolicy,
 } from "./mcp-bridge-policy";
 import {
@@ -59,6 +58,7 @@ import {
   nowIso,
   writeBridgeEntry,
 } from "./mcp-bridge-state";
+import { assertMcpCommandRuntimeAvailable } from "./mcp-bridge-runtime-capabilities";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
 import {
   assertAuthenticatedCredentialReference,
@@ -95,6 +95,7 @@ function assertPreparedMcpAddResourcesAbsent(
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
   target: McpBridgeTargetValidation,
+  agentDefinition: AgentDefinition,
 ): void {
   const adapterInspection = inspectAgentAdapterRegistration(sandboxName, adapter, entry);
   if (adapterInspection.state !== "absent") {
@@ -118,13 +119,9 @@ function assertPreparedMcpAddResourcesAbsent(
     );
   }
 
-  const policyContent = buildMcpBridgePolicyYaml(
-    entry.server,
-    entry.url,
-    adapter,
-    target,
-    entry.providerName ?? "",
-  );
+  const policyContent = buildGeneratedMcpPolicyContent(sandboxName, entry, target, {
+    agentDefinition,
+  });
   const policyState = policies.getPresetContentGatewayState(sandboxName, policyContent);
   if (policyState !== "absent") {
     throw new McpBridgeError(
@@ -138,7 +135,7 @@ export async function addMcpBridge(
   options: McpBridgeAddOptions,
 ): Promise<void> {
   return withMcpLifecycleLock(sandboxName, () => {
-    assertHermesPortableCommandUnavailable(sandboxName, "sandbox:mcp:add");
+    assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:add");
     return addMcpBridgeUnlocked(sandboxName, options);
   });
 }
@@ -353,7 +350,7 @@ async function addMcpBridgeUnlocked(
     }
 
     if (entry.addState === "prepared") {
-      assertPreparedMcpAddResourcesAbsent(sandboxName, adapter, entry, target);
+      assertPreparedMcpAddResourcesAbsent(sandboxName, adapter, entry, target, agent);
       entry = { ...entry, addState: "preflighted" };
       // This second durable boundary proves the derived resource names and the
       // adapter slot were absent before any side effect. After a crash, retries
@@ -382,7 +379,10 @@ async function addMcpBridgeUnlocked(
     // provider mutation. OpenShell requires the endpointless provider to be
     // attached before it accepts credential_binding.provider, and withholds
     // that provider's static credential until the bound policy is active.
-    applyGeneratedPolicy(sandboxName, entry, target, { bindCredential: false });
+    applyGeneratedPolicy(sandboxName, entry, target, {
+      bindCredential: false,
+      agentDefinition: agent,
+    });
     policyApplied = true;
     const providerResult = upsertMcpProvider(providerName ?? "", options.env, {
       // A first mutation must still observe the absence proven above. Only a
@@ -421,7 +421,7 @@ async function addMcpBridgeUnlocked(
     }
     providerAttachAttempted = true;
     attachProvider(sandboxName, entry);
-    applyGeneratedPolicy(sandboxName, entry, target);
+    applyGeneratedPolicy(sandboxName, entry, target, { agentDefinition: agent });
     let refreshedAfterObservedAbsence = false;
     let credentialRevision = waitForAttachedMcpCredential(sandboxName, entry, {
       ...(providerResult.action === "updated"
@@ -481,7 +481,7 @@ async function addMcpBridgeUnlocked(
       replaceExisting: resumingPreflightedAdd && adapterInspection.state === "registered",
       credentialRevision,
     });
-    if (adapter === "hermes-config") assertHermesMcpRuntimeIntent(sandboxName);
+    assertAgentMcpRuntimeIntent(sandboxName, adapter);
     const { addState: _completedAddState, ...committedEntry } = entry;
     writeBridgeEntry(sandboxName, committedEntry);
   } catch (error) {

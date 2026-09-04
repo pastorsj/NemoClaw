@@ -8,6 +8,10 @@ const DEEPAGENTS_MCP_CAPABILITY_MARKER = "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2";
 const DEEPAGENTS_MCP_CAPABILITY_COMMAND =
   "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability";
 
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 function getMutationCapability(sandboxName) {
   return {
     command: DEEPAGENTS_MCP_CAPABILITY_COMMAND,
@@ -266,15 +270,16 @@ function buildStatusCommand(entry) {
   const payload = { server: entry.server, expected: managedServerConfig(entry) };
   return [
     "/opt/venv/bin/python3 -I - <<'PY'",
-    "import json, os, pathlib, stat",
+    "import json, os, pathlib, stat, sys",
     "payload = json.loads(" + pythonJsonLiteral(payload) + ")",
     "config_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
     ...DEEPAGENTS_STRICT_JSON_HELPERS,
     ...DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
     "try:",
     "    data = read_managed_projection(config_path)[0]",
-    "except Exception:",
-    "    data = {}",
+    "except (OSError, UnicodeDecodeError, ValueError):",
+    "    print('Managed Deep Agents MCP projection is unsafe or invalid.', file=sys.stderr)",
+    "    raise SystemExit(2)",
     "servers = data.get('mcpServers') if isinstance(data, dict) else None",
     "present = isinstance(servers, dict) and payload['server'] in servers",
     "server = servers.get(payload['server']) if present else None",
@@ -409,6 +414,7 @@ function buildRollbackRegisterCommand(entry, expectedServers) {
     "if not restored:",
     "    fail_rollback(f'Managed MCP rollback verification failed at {config_path}')",
     "print('NEMOCLAW_DEEPAGENTS_MCP_ROLLBACK_RESTORED=1')",
+    "print('NEMOCLAW_MCP_ROLLBACK_RESTORED=1')",
     "PY",
   ].join("\n");
 }
@@ -529,6 +535,7 @@ function buildRemoveCommand(entry, force = false, adaptiveTeardown = false) {
     "def finish(outcome):",
     "    close_managed_projection_descriptor(managed_descriptor)",
     "    print('NEMOCLAW_DEEPAGENTS_MCP_REMOVAL=' + outcome)",
+    "    print('NEMOCLAW_MCP_REMOVAL_OUTCOME=' + outcome)",
     "    raise SystemExit(0)",
     "def fail_teardown(message):",
     "    close_managed_projection_descriptor(managed_descriptor)",
@@ -659,8 +666,71 @@ function buildMcpRegistrationCommand(request) {
   );
 }
 
+function buildMcpRegistrationPlan(request) {
+  const server = request.entry.server;
+  return {
+    execution: {
+      command: buildMcpRegistrationCommand(request),
+      timeoutSeconds: 15,
+      success: { kind: "exit-zero" },
+      failureMessage: `Deep Agents Code MCP config registration failed for '${server}'.`,
+    },
+    verification: request.teardownRollback
+      ? {
+          kind: "rollback-restored",
+          failureMessage: `Deep Agents Code MCP rollback verification failed for '${server}'.`,
+        }
+      : {
+          kind: "inspection",
+          failureMessage: `deepagents-config config verification failed after adding '${server}'`,
+        },
+    credentialConvergence: { kind: "none" },
+  };
+}
+
 function buildMcpRemovalCommand(request) {
   return buildRemoveCommand(request.entry, request.force, request.adaptiveTeardown);
+}
+
+function buildMcpRemovalPlan(request) {
+  return {
+    execution: {
+      command: buildMcpRemovalCommand(request),
+      timeoutSeconds: 15,
+      success: { kind: "exit-zero" },
+      failureMessage: `Deep Agents Code MCP config removal failed for '${request.entry.server}'.`,
+    },
+    outcome: { kind: "stdout-removal-outcome" },
+  };
+}
+
+function buildMcpInspectionCommand(request) {
+  return buildStatusCommand(request.entry);
+}
+
+function describeMcpMutationCapability(request) {
+  const capability = getMutationCapability(request.sandboxName);
+  return {
+    kind: "command",
+    command: capability.command,
+    success: { kind: "stdout-trimmed-equals", value: capability.marker },
+    timeoutSeconds: 30,
+    failureMessage: capability.failureMessage,
+  };
+}
+
+function describeMcpTeardownCapability() {
+  return { kind: "not-required" };
+}
+
+function describeMcpRuntimeIntentVerification() {
+  return { kind: "not-required" };
+}
+
+function buildMcpRuntimeCommand(request) {
+  const runner =
+    "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
+  return ["/opt/venv/bin/python3", "-I", "-c", runner, ...request.command];
 }
 
 module.exports = {
@@ -673,12 +743,19 @@ module.exports = {
   DEEPAGENTS_MCP_MAX_SERVERS,
   DEEPAGENTS_STRICT_JSON_HELPERS,
   MANAGED_HTTP_SERVER_MATCH_HELPERS,
+  buildMcpInspectionCommand,
   buildMcpRegistrationCommand,
+  buildMcpRegistrationPlan,
   buildMcpRemovalCommand,
+  buildMcpRemovalPlan,
+  buildMcpRuntimeCommand,
   buildRegisterCommand,
   buildRemoveCommand,
   buildRollbackRegisterCommand,
   buildStatusCommand,
+  describeMcpMutationCapability,
+  describeMcpRuntimeIntentVerification,
+  describeMcpTeardownCapability,
   getMutationCapability,
   hasRollbackRestoredMarker,
   managedServerConfig,

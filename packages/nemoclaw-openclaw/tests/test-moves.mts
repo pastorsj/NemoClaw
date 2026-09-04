@@ -190,6 +190,14 @@ export const openclawNemoclawTestMoves = createTestMoveRecords({
 // Package-only assertions split out of broader source suites.
 export const openclawPackageTestSplits: readonly PackageTestMove[] = [
   {
+    source: "src/lib/state/openclaw-config-merge.test.ts",
+    destination: "tests/host/config-merge.test.ts",
+  },
+  {
+    source: "src/lib/state/openclaw-config-merge-tool-search.test.ts",
+    destination: "tests/host/tool-merge.test.ts",
+  },
+  {
     source: "test/package-contract/harness-packages.test.ts",
     destination: "tests/integration/archive.test.ts",
   },

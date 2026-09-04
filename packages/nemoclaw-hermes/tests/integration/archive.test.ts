@@ -24,6 +24,7 @@ const COMMON_PACKAGE_FILES = [
 ] as const;
 const COMMON_WORKFLOW_DIRECTORIES = ["config", "runtime", "host", "compat", "plugin", "checks"];
 const RUNTIME_CONTRACTS = [
+  "host/config-adapter.cts",
   "host/managed-route.cts",
   "host/mcp-adapter.cts",
   "host/base-qualification.cts",
@@ -151,6 +152,9 @@ describe("published Hermes package", () => {
   });
 
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
+    const configAdapter = loadInstalledModule<{
+      prepareConfigUpdate(request: Record<string, unknown>): { kind: string; content?: string };
+    }>("host/config-adapter.cts");
     const managedRoute = loadInstalledModule<{
       buildHermesUpstreamHeader(config: Record<string, unknown>): string;
       hermesProviderKey(provider: string): string;
@@ -160,26 +164,74 @@ describe("published Hermes package", () => {
       parseHermesPinnedRemoteBaseRef(dockerfile: string): string | null;
     }>("host/base-qualification.cts");
     const mcp = loadInstalledModule<{
-      buildMcpRegistrationCommand(request: {
+      buildMcpRegistrationPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         managedEntries: Array<{ server: string; url: string; headers: Record<string, string> }>;
         replaceExisting: boolean;
         teardownRollback: boolean;
-        configRoot: string | null;
-      }): string[];
-      buildMcpRemovalCommand(request: {
+        configDirectory: string | null;
+      }): { execution: { command: string[] } };
+      buildMcpRemovalPlan(request: {
         entry: { server: string; url: string; headers: Record<string, string> };
         force: boolean;
         adaptiveTeardown: boolean;
-        configRoot: string | null;
-      }): string[];
+        configDirectory: string | null;
+      }): { execution: { command: string[] } };
       buildInspectCommand(payload: string): string[];
       buildStatusCommand(entry: {
         server: string;
         url: string;
         headers: Record<string, string>;
       }): string;
+      buildMcpInspectionCommand(request: {
+        entry: { server: string; url: string; headers: Record<string, string> };
+        failOnMismatch: boolean;
+        configDirectory: string | null;
+      }): string;
+      buildMcpRuntimeCommand(request: { command: string[] }): string[];
+      describeMcpMutationCapability(request: { sandboxName: string }): {
+        kind: string;
+        command: string[];
+        success: { kind: string };
+        retry: {
+          outputExact: string;
+          initialAttempts: number;
+          intervalMilliseconds: number;
+          recovery: { kind: string; timeoutSeconds: number; postRecoveryAttempts: number };
+        };
+      };
+      describeMcpTeardownCapability(request: { sandboxName: string }): {
+        kind: string;
+        command: string[];
+        success: { kind: string };
+      };
+      describeMcpRuntimeIntentVerification(request: {
+        entries: Array<{ server: string; url: string; headers: Record<string, string> }>;
+        managedServerNames: string[];
+      }): {
+        kind: string;
+        command: string[];
+        success: { kind: string };
+        retry: { outputExact: string; initialAttempts: number; intervalMilliseconds: number };
+      };
     }>("host/mcp-adapter.cts");
+
+    expect(
+      configAdapter.prepareConfigUpdate({
+        config: { _nemoclaw_upstream: { provider: "NVIDIA", model: "test/model" } },
+        serializedConfig: "model: {}\n",
+        expectedConfigSha256: "a".repeat(64),
+        target: {
+          directory: "/sandbox/.hermes",
+          file: "config.yaml",
+          format: "yaml",
+          sensitiveFiles: [],
+        },
+      }),
+    ).toMatchObject({
+      kind: "transaction",
+      content: expect.stringContaining("# Upstream provider: NVIDIA"),
+    });
 
     expect(managedRoute.hermesProviderKey("NVIDIA NIM")).toBe("nvidia-nim");
     expect(
@@ -197,6 +249,55 @@ describe("published Hermes package", () => {
     ).toContain("hermes-sandbox-base@sha256:");
     const mcpEntry = { server: "example", url: "https://example.test/mcp", headers: {} };
     expect(mcp.buildStatusCommand(mcpEntry)).toContain("example");
+    expect(
+      mcp.buildMcpInspectionCommand({
+        entry: mcpEntry,
+        failOnMismatch: false,
+        configDirectory: null,
+      }),
+    ).toContain("example");
+    expect(mcp.describeMcpMutationCapability({ sandboxName: "sandbox" })).toMatchObject({
+      kind: "command",
+      command: ["/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py", "probe"],
+      success: { kind: "last-json-line-ok" },
+      retry: {
+        outputExact: "Hermes gateway is not running for managed MCP reload",
+        initialAttempts: 3,
+        intervalMilliseconds: 1000,
+        recovery: {
+          kind: "agent-gateway",
+          timeoutSeconds: 210,
+          postRecoveryAttempts: 90,
+        },
+      },
+    });
+    expect(mcp.describeMcpTeardownCapability({ sandboxName: "sandbox" })).toMatchObject({
+      kind: "command",
+      success: { kind: "last-json-line-ok" },
+    });
+    expect(
+      mcp.describeMcpRuntimeIntentVerification({
+        entries: [mcpEntry],
+        managedServerNames: ["example", "removed"],
+      }),
+    ).toMatchObject({
+      kind: "command",
+      command: [
+        "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
+        "inspect",
+        "--payload",
+        expect.stringContaining('"absent":["removed"]'),
+      ],
+      success: { kind: "last-json-line-ok" },
+      retry: {
+        outputExact: "refusing raced Hermes MCP integrity snapshot",
+        initialAttempts: 6,
+        intervalMilliseconds: 500,
+      },
+    });
+    expect(mcp.buildMcpRuntimeCommand({ command: ["python", "probe.py"] })).toEqual(
+      expect.arrayContaining(["/opt/hermes/.venv/bin/python", "-I", "-c", "probe.py"]),
+    );
     expect(mcp.buildInspectCommand("payload")).toEqual([
       "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
       "inspect",
@@ -204,22 +305,22 @@ describe("published Hermes package", () => {
       "payload",
     ]);
     expect(
-      mcp.buildMcpRegistrationCommand({
+      mcp.buildMcpRegistrationPlan({
         entry: mcpEntry,
         managedEntries: [mcpEntry],
         replaceExisting: false,
         teardownRollback: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toEqual(expect.arrayContaining(["add", "--payload"]));
+    ).toMatchObject({ execution: { command: expect.arrayContaining(["add", "--payload"]) } });
     expect(
-      mcp.buildMcpRemovalCommand({
+      mcp.buildMcpRemovalPlan({
         entry: mcpEntry,
         force: false,
         adaptiveTeardown: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toEqual(expect.arrayContaining(["remove", "--payload"]));
+    ).toMatchObject({ execution: { command: expect.arrayContaining(["remove", "--payload"]) } });
   });
 
   it("omits hermes package authoring files from archives", () => {

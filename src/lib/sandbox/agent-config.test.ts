@@ -22,6 +22,9 @@ function dependencies(overrides: Partial<AgentConfigDependencies> = {}): AgentCo
     loadAgent: vi.fn(() => {
       throw new Error("unexpected agent load");
     }),
+    resolveSandboxAgent: vi.fn(() => {
+      throw new Error("unexpected sandbox agent resolution");
+    }),
     ...overrides,
   };
 }
@@ -151,6 +154,61 @@ describe("agent config resolution", () => {
         "/sandbox/.installed-hermes/.installed-secrets",
       ],
     });
+    expect(loadAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps receipt A authoritative after the active package advances to B", () => {
+    const receiptA = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
+    const receiptDefinitionA = {
+      name: "hermes",
+      configPaths: {
+        dir: "/sandbox/.receipt-a",
+        configFile: "receipt-a.yaml",
+        envFile: ".receipt-a.env",
+        format: "yaml",
+      },
+    } as AgentDefinition;
+    const activeDefinitionB = {
+      name: "hermes",
+      configPaths: {
+        dir: "/sandbox/.active-b",
+        configFile: "active-b.json",
+        envFile: null,
+        format: "json",
+      },
+    } as AgentDefinition;
+    const entry = {
+      agent: "hermes",
+      harnessPackage: receiptA,
+    };
+    const loadAgent = vi.fn(() => activeDefinitionB);
+    const resolveSandboxAgent = vi.fn<AgentConfigDependencies["resolveSandboxAgent"]>(() => ({
+      definition: receiptDefinitionA,
+    }));
+
+    expect(
+      resolveAgentConfig(
+        "alpha",
+        dependencies({
+          getSandbox: vi.fn(() => entry),
+          loadAgent,
+          resolveSandboxAgent,
+        }),
+      ),
+    ).toEqual({
+      agentName: "hermes",
+      configPath: "/sandbox/.receipt-a/receipt-a.yaml",
+      configDir: "/sandbox/.receipt-a",
+      format: "yaml",
+      configFile: "receipt-a.yaml",
+      sensitiveFiles: ["/sandbox/.receipt-a/.config-hash", "/sandbox/.receipt-a/.receipt-a.env"],
+    });
+    expect(resolveSandboxAgent).toHaveBeenCalledWith(entry);
     expect(loadAgent).not.toHaveBeenCalled();
   });
 });

@@ -3,7 +3,68 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mergeOpenClawRestoredConfig } from "./openclaw-config-merge";
+import { loadPackageHostModule } from "../helpers/host-module";
+
+interface ImagePluginInstall {
+  readonly id: string;
+  readonly installPath?: string;
+  readonly loadPaths?: readonly string[];
+}
+
+interface RestoreAdapterModule {
+  mergeOpenClawRestoredConfig(
+    backedUpConfig: unknown,
+    currentConfig: unknown,
+    options?: {
+      readonly previousImagePluginInstalls?: readonly ImagePluginInstall[];
+      readonly freshImagePluginInstalls?: readonly ImagePluginInstall[];
+    },
+    managedChannelNames?: readonly string[],
+  ): unknown;
+  mergeConfigState(request: {
+    readonly backupContent: string;
+    readonly currentContent: string | null;
+    readonly managedChannelNames: readonly string[];
+    readonly previousImagePluginInstalls: readonly ImagePluginInstall[] | null;
+    readonly freshImagePluginInstalls: readonly ImagePluginInstall[] | null;
+  }):
+    | {
+        readonly kind: "merged";
+        readonly content: string;
+        readonly write: {
+          readonly kind: "config-anchors";
+          readonly hashFiles: readonly string[];
+        };
+      }
+    | { readonly kind: "refused" };
+}
+
+const restoreAdapter = loadPackageHostModule<RestoreAdapterModule>("restore-adapter.cts");
+const MANAGED_CHANNEL_NAMES = [
+  "telegram",
+  "discord",
+  "openclaw-weixin",
+  "slack",
+  "whatsapp",
+  "msteams",
+  "googlechat",
+] as const;
+
+function mergeOpenClawRestoredConfig(
+  backedUpConfig: unknown,
+  currentConfig: unknown,
+  options?: {
+    readonly previousImagePluginInstalls?: readonly ImagePluginInstall[];
+    readonly freshImagePluginInstalls?: readonly ImagePluginInstall[];
+  },
+): unknown {
+  return restoreAdapter.mergeOpenClawRestoredConfig(
+    backedUpConfig,
+    currentConfig,
+    options,
+    MANAGED_CHANNEL_NAMES,
+  );
+}
 
 const WEATHER_V1_PATH = "/sandbox/.openclaw/extensions/weather";
 const WEATHER_V2_PATH = "/sandbox/.openclaw/extensions/weather-v2";
@@ -22,6 +83,31 @@ function imageInstall(id: string, installPath: string, loadPaths: string[] = [])
 }
 
 describe("mergeOpenClawRestoredConfig", () => {
+  it("exposes the serialized package restore contract", () => {
+    const result = restoreAdapter.mergeConfigState({
+      backupContent: JSON.stringify({
+        channels: { discord: { token: "stale" } },
+        mcpServers: { docs: { command: "npx" } },
+      }),
+      currentContent: JSON.stringify({ channels: { discord: { token: "fresh" } } }),
+      managedChannelNames: MANAGED_CHANNEL_NAMES,
+      previousImagePluginInstalls: null,
+      freshImagePluginInstalls: null,
+    });
+
+    expect(result.kind).toBe("merged");
+    if (result.kind === "merged") {
+      expect(result.write).toEqual({
+        kind: "config-anchors",
+        hashFiles: ["openclaw.json", "fabric.json"],
+      });
+      expect(JSON.parse(result.content)).toMatchObject({
+        channels: { discord: { token: "fresh" } },
+        mcpServers: { docs: { command: "npx" } },
+      });
+    }
+  });
+
   it("rejects non-plain top-level objects instead of treating every object as JSON", () => {
     class ConfigEnvelope {
       readonly gateway = { auth: { token: "stale-token" } };

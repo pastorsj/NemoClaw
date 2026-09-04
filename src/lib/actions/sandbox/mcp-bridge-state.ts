@@ -4,6 +4,7 @@
 import { type AgentDefinition, type AgentMcpAdapter, loadAgent } from "../../agent/defs";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import { recoverNamedGatewayRuntime } from "../../gateway-runtime-action";
+import { resolvePackageBackedSandboxAgent } from "../../onboard/package/package-authority";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import * as registry from "../../state/registry";
 import { getSandboxTargetGatewayName } from "./gateway-target";
@@ -24,6 +25,11 @@ export function getSandboxOrThrow(sandboxName: string): SandboxEntry {
     throw new McpBridgeError(`Sandbox '${sandboxName}' not found.`, 1);
   }
   return sandbox;
+}
+
+/** Read optional sandbox state through the MCP registry boundary. */
+export function findRegisteredSandbox(sandboxName: string): SandboxEntry | null {
+  return registry.getSandbox(sandboxName);
 }
 
 export function getSandboxHarnessPackage(sandboxName: string): HarnessPackageIdentity | null {
@@ -47,11 +53,33 @@ export function getSandboxAgent(
     }
     return agentDefinition;
   }
+  if (sandbox.harnessPackage || sandbox.harnessPackageMigration) {
+    try {
+      return resolvePackageBackedSandboxAgent(sandbox).definition;
+    } catch (error) {
+      throw new McpBridgeError(
+        `Sandbox '${sandbox.name}' package authority could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   return loadAgent(recordedAgentName);
 }
 
 /** Return the configured state directory for a registered agent. */
-export function getAgentConfigDir(agentName: string, defaultConfigDir?: string): string {
+export function getAgentConfigDir(
+  agentName: string,
+  defaultConfigDir?: string,
+  sandbox?: SandboxEntry,
+): string {
+  if (sandbox?.harnessPackage || sandbox?.harnessPackageMigration) {
+    const agent = getSandboxAgent(sandbox);
+    if (agent.name !== agentName) {
+      throw new McpBridgeError(
+        `Sandbox '${sandbox.name}' records agent '${agent.name}', not MCP entry agent '${agentName}'.`,
+      );
+    }
+    return agent.configPaths.dir;
+  }
   try {
     return loadAgent(agentName).configPaths.dir;
   } catch (error) {

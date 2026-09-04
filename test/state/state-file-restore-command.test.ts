@@ -41,8 +41,15 @@ describe("buildStateFileRestoreCommand (#5202)", () => {
     expect(anchorIdx).toBeGreaterThanOrEqual(0);
     expect(swapIdx).toBeGreaterThan(anchorIdx);
 
-    // The .config-hash is still refreshed after the swap.
-    expect(cmd).toContain("sha256sum -- 'openclaw.json' 'fabric.json'");
+    // The complete future .config-hash is staged from the incoming config and
+    // each protected companion before either live file changes.
+    expect(cmd).toContain('sha256sum -- "$tmp"');
+    expect(cmd).toContain('sha256sum -- "$protected_0"');
+    const hashStageIdx = cmd.indexOf('hash_tmp="$(mktemp');
+    const hashInstallIdx = cmd.indexOf('mv -f "$hash_tmp" "$hash_file"');
+    expect(hashStageIdx).toBeGreaterThanOrEqual(0);
+    expect(anchorIdx).toBeGreaterThan(hashStageIdx);
+    expect(hashInstallIdx).toBeGreaterThan(swapIdx);
     expect(cmd).toContain('chmod 660 "$tmp"');
 
     // Fabric is validated before either recovery anchor or live config moves.

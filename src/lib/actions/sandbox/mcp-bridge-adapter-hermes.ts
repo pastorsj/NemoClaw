@@ -6,10 +6,6 @@ import { getAgentBranding } from "../../cli/branding";
 import { waitUntil } from "../../core/wait";
 import type { McpBridgeEntry } from "../../state/registry";
 import {
-  classifyGatewayRestartFailure,
-  parseManagedGatewayControlCompletion,
-} from "./gateway-restart";
-import {
   type AdapterMutationOptions,
   type AdapterRegistrationInspection,
   inspectAdapterRegistrationCommand,
@@ -25,11 +21,7 @@ import {
 } from "./mcp-bridge-provider-readiness";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { commandOutput, redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
-import {
-  buildInstalledMcpRegistrationCommand,
-  buildInstalledMcpRemovalCommand,
-  requireMcpArgvCommand,
-} from "./mcp-bridge/package-command";
+import { inspectManagedMcpGatewayRecovery } from "./mcp-bridge/gateway-recovery";
 import { executeGatewaySupervisorAction } from "./process-recovery";
 
 const HERMES_MCP_EXEC_TIMEOUT_SECONDS = 620;
@@ -177,27 +169,12 @@ export function assertHermesMcpMutationRuntimeCapability(sandboxName: string): v
   } catch (error) {
     recoveryFailureDetail = error instanceof Error ? error.message : String(error);
   }
-  const recoveryCompleted = parseManagedGatewayControlCompletion(recovery) !== null;
-  if (!recoveryCompleted) {
-    recoveryFailureDetail ||= recovery ? commandOutput(recovery).trim() : "no controller result";
-    const classification = classifyGatewayRestartFailure(recovery);
-    const claimsInvalidCompletion =
-      recovery !== null && (recovery.status === 0 || recovery.stdout.trim().length > 0);
-    const terminalIntegrityFailure =
-      claimsInvalidCompletion ||
-      classification.layer === "secret-boundary refusal" ||
-      classification.layer === "unsafe config path" ||
-      classification.layer === "config hash mismatch" ||
-      classification.layer === "relaunch quarantined" ||
-      classification.layer === "health timeout" ||
-      recoveryFailureDetail.includes("SUPERVISOR_REBUILD_REQUIRED") ||
-      recoveryFailureDetail.includes("SUPERVISOR_UNSAFE_CONTROL_DIR") ||
-      recoveryFailureDetail.includes("SUPERVISOR_BUSY") ||
-      recoveryFailureDetail.includes("SUPERVISOR_INVALID_") ||
-      recoveryFailureDetail.includes("GATEWAY_GUARDS_MISSING");
-    if (terminalIntegrityFailure) {
+  const recoveryInspection = inspectManagedMcpGatewayRecovery(recovery, recoveryFailureDetail);
+  if (!recoveryInspection.completed) {
+    recoveryFailureDetail = recoveryInspection.detail;
+    if (recoveryInspection.terminal) {
       throw new McpBridgeError(
-        `Hermes sandbox '${sandboxName}' managed gateway recovery failed before MCP mutation: ${recoveryFailureDetail || classification.detail}.`,
+        `Hermes sandbox '${sandboxName}' managed gateway recovery failed before MCP mutation: ${recoveryFailureDetail}.`,
       );
     }
   }
@@ -296,18 +273,10 @@ export function registerHermesAdapter(
   replaceExisting = false,
   credentialRevision?: McpAttachedCredentialRevision,
 ): void {
-  const installedCommand = buildInstalledMcpRegistrationCommand(
-    sandboxName,
-    "hermes-config",
-    entry,
-    { replaceExisting, credentialRevision },
-  );
   runHermesAdapterCommand(
     sandboxName,
     entry,
-    installedCommand === null
-      ? buildHermesMcpRegisterCommand(entry, replaceExisting, credentialRevision)
-      : requireMcpArgvCommand(installedCommand),
+    buildHermesMcpRegisterCommand(entry, replaceExisting, credentialRevision),
     `Hermes MCP config registration failed for '${entry.server}'.`,
     { envValues, requireReload: true },
   );
@@ -320,18 +289,10 @@ export function registerHermesAdapter(
       `Hermes MCP credential revision was unavailable after reloading '${entry.server}'.`,
     );
   }
-  const convergedInstalledCommand = buildInstalledMcpRegistrationCommand(
-    sandboxName,
-    "hermes-config",
-    entry,
-    { replaceExisting: true, credentialRevision: afterReloadRevision },
-  );
   runHermesAdapterCommand(
     sandboxName,
     entry,
-    convergedInstalledCommand === null
-      ? buildHermesMcpRegisterCommand(entry, true, afterReloadRevision)
-      : requireMcpArgvCommand(convergedInstalledCommand),
+    buildHermesMcpRegisterCommand(entry, true, afterReloadRevision),
     `Hermes MCP config convergence failed for '${entry.server}'.`,
     { envValues, requireReload: true },
   );
@@ -348,15 +309,10 @@ export function unregisterHermesAdapter(
   entry: McpBridgeEntry,
   options: AdapterMutationOptions = {},
 ): void {
-  const installedCommand = buildInstalledMcpRemovalCommand(sandboxName, "hermes-config", entry, {
-    force: options.force === true,
-  });
   runHermesAdapterCommand(
     sandboxName,
     entry,
-    installedCommand === null
-      ? buildHermesMcpRemoveCommand(entry, options.force === true)
-      : requireMcpArgvCommand(installedCommand),
+    buildHermesMcpRemoveCommand(entry, options.force === true),
     `Hermes MCP config removal failed for '${entry.server}'.`,
     options,
   );

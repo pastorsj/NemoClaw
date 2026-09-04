@@ -3,6 +3,12 @@
 
 import type { AgentMcpAdapter } from "../../agent/defs";
 import { shellQuote } from "../../core/shell-quote";
+import { buildInstalledMcpRuntimeCommand } from "./mcp-bridge/package-command";
+
+export interface McpRuntimePackageContext {
+  readonly sandboxName: string;
+  readonly agentName: string;
+}
 
 /** Quote one argument for an MCP bridge-owned shell command. */
 export const quoteMcpBridgeShellArg = shellQuote;
@@ -54,7 +60,17 @@ function unsupportedAdapter(adapter: string): never {
 export function wrapMcpRuntimeCommand(
   adapter: AgentMcpAdapter,
   command: readonly string[],
+  packageContext?: McpRuntimePackageContext,
 ): string {
+  if (packageContext) {
+    const installedCommand = buildInstalledMcpRuntimeCommand(
+      packageContext.sandboxName,
+      adapter,
+      packageContext.agentName,
+      command,
+    );
+    if (installedCommand !== null) return installedCommand.map(shellQuote).join(" ");
+  }
   const quotedCommand = command.map(shellQuote).join(" ");
   switch (adapter) {
     case "mcporter": {

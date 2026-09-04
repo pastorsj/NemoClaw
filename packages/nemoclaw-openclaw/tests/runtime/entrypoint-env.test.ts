@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { readOpenClawStartupBlock } from "../helpers/startup";
+import { readOpenClawEntrypointBlock } from "../helpers/startup";
 
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "..", "..", "..", "..");
 const ENTRYPOINT_ENV_WRAPPER = path.join(
@@ -21,9 +21,9 @@ const ENTRYPOINT_ENV_WRAPPER = path.join(
 describe("OCI entrypoint env-wrapper normalization", () => {
   it("unwraps the sandbox-create env self-wrapper and applies dashboard port defaults", () => {
     const normalizer = fs.readFileSync(ENTRYPOINT_ENV_WRAPPER, "utf-8");
-    const openClawPortBlock = readOpenClawStartupBlock(
+    const openClawPortBlock = readOpenClawEntrypointBlock(
       'NEMOCLAW_CMD=("$@")',
-      "# ── Config integrity check",
+      "# startup-modules begin",
     );
     const snippet = [
       normalizer,
@@ -75,7 +75,7 @@ describe("OCI entrypoint env-wrapper normalization", () => {
       const injected = runScenario(
         "set -- env CHAT_UI_URL=https://chat.example.test NEMOCLAW_DASHBOARD_PORT=19000 nemoclaw-start openclaw agent --agent main",
       );
-      expect(injected.status).toBe(0);
+      expect(injected.status, injected.stderr).toBe(0);
       expect(injected.stdout).toContain("CHAT_UI_URL=http://127.0.0.1:19000");
       expect(injected.stdout).toContain("PUBLIC_PORT=19000");
       expect(injected.stdout).toContain("OPENCLAW_GATEWAY_PORT=19000");

@@ -81,7 +81,7 @@ export type SandboxExecSignalSource = {
 };
 
 export type SandboxExecCleanupDeps = {
-  getSandbox: (sandboxName: string) => Pick<SandboxEntry, "agent"> | null;
+  getSandbox: (sandboxName: string) => Pick<SandboxEntry, "agent" | "harnessPackage"> | null;
   inspectMutableConfigPerms: (sandboxName: string) => MutableConfigPermsInspection;
   repairMutableConfigPerms: (sandboxName: string) => MutableConfigRepairResult;
 };
@@ -185,20 +185,16 @@ function repairFailureDetail(
 }
 
 /**
- * Restore the mutable OpenClaw permission contract after the public
- * `nemoclaw <sandbox> exec` command boundary. OpenShell executes the requested
- * process directly, so the sandbox entrypoint's one-shot cleanup does not run
- * on this path. Hermes and custom agents are deliberately left unchanged.
- *
- * Each production inspect/repair call takes the cross-process sandbox mutation
- * lock. The repair is idempotent, and the host keeps lock authority outside the
- * sandbox-owned config tree.
+ * Reconcile a package-defined mutable configuration contract after the public
+ * `nemoclaw <sandbox> exec` command boundary. A package that does not require
+ * mutable configuration returns a typed skip from the shared inspector.
+ * Sandboxes without a package receipt retain the legacy OpenClaw behavior.
  */
-export function cleanupOpenClawAfterExec(
+export function cleanupMutableConfigAfterExec(
   sandboxName: string,
   deps: SandboxExecCleanupDeps,
 ): string | null {
-  let entry: Pick<SandboxEntry, "agent"> | null;
+  let entry: Pick<SandboxEntry, "agent" | "harnessPackage"> | null;
   try {
     entry = deps.getSandbox(sandboxName);
   } catch (error) {
@@ -206,7 +202,7 @@ export function cleanupOpenClawAfterExec(
     return `sandbox registry lookup failed: ${detail}`;
   }
   if (!entry) return null;
-  if ((entry.agent ?? "openclaw") !== "openclaw") return null;
+  if (!entry.harnessPackage && (entry.agent ?? "openclaw") !== "openclaw") return null;
 
   let inspection: MutableConfigPermsInspection;
   try {
@@ -215,7 +211,11 @@ export function cleanupOpenClawAfterExec(
     const detail = error instanceof Error ? error.message : String(error);
     return `permission inspection failed: ${detail}`;
   }
-  if (inspection.applies && inspection.ok) return null;
+  if (!inspection.applies) {
+    if (inspection.skipReason === "agent") return null;
+  } else if (inspection.ok) {
+    return null;
+  }
 
   let repair: MutableConfigRepairResult;
   try {
@@ -242,6 +242,9 @@ export function cleanupOpenClawAfterExec(
   }
   return null;
 }
+
+/** Retained export for callers compiled against the OpenClaw-specific name. */
+export const cleanupOpenClawAfterExec = cleanupMutableConfigAfterExec;
 
 const defaultSandboxExecSpawner: SandboxExecSpawner = (binary, args, options) =>
   spawn(binary, [...args], {
@@ -339,7 +342,7 @@ export async function runSandboxExecCommand(
   }
   try {
     const { code: commandCode, errorMessage: invocationError } = computeExitCode(result);
-    const cleanupError = cleanupOpenClawAfterExec(sandboxName, cleanupDeps) ?? undefined;
+    const cleanupError = cleanupMutableConfigAfterExec(sandboxName, cleanupDeps) ?? undefined;
     return {
       code: cleanupError ? 1 : commandCode,
       commandCode,

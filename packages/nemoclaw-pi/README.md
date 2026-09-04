@@ -25,12 +25,21 @@ package discovery, onboarding, OpenShell coordination, product state, and lifecy
 | --- | --- |
 | `config/` | Translates managed inference settings into Pi's native and Fabric configuration. |
 | `fabric/` | Adapts Fabric's released lifecycle contract to Pi's stable headless command. |
+| `host/` | Contains the typed immutable-configuration adapter. |
 | `runtime/` | Contains the fixed configuration command and the locked Pi dependency graph. |
 | `compat/` | Records the reviewed dependency baseline for the pinned Pi release. |
 | `tests/` | Verifies configuration, the Fabric adapter, shell entry points, and package discovery. |
 
 The package root contains the shared contract files: metadata, manifest, image definitions,
 startup entry point, and network policy additions.
+
+## Typed adapter boundary
+
+| Capability | Package file | Current behavior |
+| --- | --- | --- |
+| Runtime configuration | `host/config-adapter.cts` | Returns `immutable`; re-onboarding must materialize a changed model catalog. |
+| MCP | None | The manifest disables MCP, so core rejects the capability before adapter load. |
+| Configuration restore | None | Pi has no package configuration merge operation. |
 
 ## Runtime flow
 
@@ -62,8 +71,13 @@ npm run test:package
 npm run test:fabric
 ```
 
-Run `npm run test:nemoclaw` inside an exact NemoClaw checkout to verify that core discovers the Pi
-package and to exercise the package adapter through that checkout's generic Fabric runner.
+Run `npm run test:nemoclaw` inside a surrounding NemoClaw checkout to verify that core discovers the
+Pi package and to exercise the package adapter through that checkout's generic Fabric runner.
 `npm run test:fabric` stays checkout independent, while `npm run test:fabric:composed` names the
-exact-checkout boundary. `npm test` runs all three lanes. The in-tree overlay commands in
-[`packages/README.md`](../README.md) use package ID `pi` to rehearse a separate package checkout.
+ambient checkout boundary. `npm test` runs the package and ambient composition lanes; the composed
+Fabric lane includes the direct Fabric cases. Use the `composed` in-tree overlay rehearsal in
+[`packages/README.md`](../README.md) with package ID `pi` to pin a supplied core commit.
+
+Pi does not yet have a package-owned archive test. The root
+`test/package-contract/bundled-harnesses.test.ts` test verifies its materialized package and packed
+root artifact. Add a package-owned archive test before Pi moves to an independent repository.

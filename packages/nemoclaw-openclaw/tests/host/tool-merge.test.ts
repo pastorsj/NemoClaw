@@ -3,7 +3,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { mergeOpenClawRestoredConfig } from "./openclaw-config-merge";
+import { loadPackageHostModule } from "../helpers/host-module";
+
+const { mergeOpenClawRestoredConfig } = loadPackageHostModule<{
+  mergeOpenClawRestoredConfig(backedUpConfig: unknown, currentConfig: unknown): unknown;
+}>("restore-adapter.cts");
 
 describe("mergeOpenClawRestoredConfig Tool Search", () => {
   it("keeps the rebuilt tool-search selection while restoring other tool settings", () => {

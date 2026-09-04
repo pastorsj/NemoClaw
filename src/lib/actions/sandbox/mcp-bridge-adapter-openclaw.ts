@@ -32,13 +32,6 @@ function mcporterArgs(root: string, ...args: string[]): string[] {
   return ["mcporter", "--root", root, ...args];
 }
 
-/** Resolve the Mcporter project root owned by an MCP bridge entry's agent. */
-function mcporterRootForEntry(entry: McpBridgeEntry): string {
-  return entry.agent
-    ? openClawMcporterRoot(getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR))
-    : OPENCLAW_MCPORTER_ROOT;
-}
-
 function ensureMcporter(sandboxName: string): void {
   const check = executeSandboxCommand(sandboxName, "command -v mcporter");
   if (check?.status === 0 && check.stdout.trim()) return;
@@ -130,8 +123,11 @@ export function buildOpenClawMcporterRemoveCommand(
 export function inspectOpenClawAdapterRegistration(
   sandboxName: string,
   entry: McpBridgeEntry,
+  pinnedConfigDirectory?: string,
 ): AdapterRegistrationInspection {
-  const root = mcporterRootForEntry(entry);
+  const configDirectory =
+    pinnedConfigDirectory ?? getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR);
+  const root = openClawMcporterRoot(configDirectory);
   return inspectAdapterRegistrationCommand(
     sandboxName,
     entry,
@@ -145,9 +141,12 @@ export function registerOpenClawAdapter(
   envValues: Record<string, string> = {},
   replaceExisting = false,
   credentialRevision?: McpAttachedCredentialRevision,
+  pinnedConfigDirectory?: string,
 ): void {
   ensureMcporter(sandboxName);
-  const root = mcporterRootForEntry(entry);
+  const configDirectory =
+    pinnedConfigDirectory ?? getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR);
+  const root = openClawMcporterRoot(configDirectory);
   const result = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterRegisterCommand(entry, replaceExisting, root, credentialRevision),
@@ -189,8 +188,11 @@ export function unregisterOpenClawAdapter(
   sandboxName: string,
   entry: McpBridgeEntry,
   options: AdapterMutationOptions = {},
+  pinnedConfigDirectory?: string,
 ): void {
-  const root = mcporterRootForEntry(entry);
+  const configDirectory =
+    pinnedConfigDirectory ?? getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR);
+  const root = openClawMcporterRoot(configDirectory);
   const result = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterRemoveCommand(entry, options.force === true, root),

@@ -11,7 +11,7 @@ test_mode="${1:-adapter}"
 case "${test_mode}" in
   adapter | composed) ;;
   *)
-    printf 'usage: %s [adapter|composed] [nemoclaw-fabric-package]\n' "$0" >&2
+    printf 'usage: %s [adapter|composed]\n' "$0" >&2
     exit 64
     ;;
 esac
@@ -37,11 +37,8 @@ test_args=(
 )
 
 if [ "${test_mode}" = "composed" ]; then
-  runner_source="${NEMOCLAW_FABRIC_RUNNER_PATH:-${2:-}}"
-  [ -n "${runner_source}" ] || {
-    printf 'composed Fabric tests require an explicit nemoclaw-fabric package path\n' >&2
-    exit 64
-  }
+  repository_root="$(cd "${package_root}/../.." && pwd)"
+  runner_source="${NEMOCLAW_FABRIC_RUNNER_PATH:-${repository_root}/packages/nemoclaw-fabric}"
   [ -f "${runner_source}/pyproject.toml" ] || {
     printf 'composed Fabric runner package is unavailable: %s\n' "${runner_source}" >&2
     exit 66

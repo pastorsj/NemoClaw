@@ -40,6 +40,7 @@ vi.mock("./mcp-bridge-provider-readiness", async (importOriginal) => ({
 }));
 
 vi.mock("./mcp-bridge/timing", () => ({
+  sleepMcpBridgeRetry: vi.fn(),
   waitForMcpBridgeCondition: mocks.waitForMcpBridgeCondition,
 }));
 

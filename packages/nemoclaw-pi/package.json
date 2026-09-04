@@ -12,7 +12,7 @@
     "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm run test:fabric:composed",
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
-    "test": "npm run test:package && npm run test:nemoclaw && npm run test:fabric",
+    "test": "npm run test:package && npm run test:nemoclaw",
     "typecheck": "tsc -p tsconfig.test.json"
   },
   "files": [
@@ -26,6 +26,7 @@
     "fabric/requirements.in",
     "fabric/requirements.lock",
     "fabric/src/**/*.py",
+    "host/config-adapter.cts",
     "manifest.yaml",
     "policy-additions.yaml",
     "runtime/",

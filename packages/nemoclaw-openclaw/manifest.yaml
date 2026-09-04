@@ -105,7 +105,7 @@ state_dirs:
 state_files:
   - path: openclaw.json
     restore:
-      merge: openclaw-config
+      merge: package-config
 user_managed_files:
   - .env
   - .mcp.json

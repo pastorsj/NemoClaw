@@ -797,6 +797,26 @@ describe("config set helpers", () => {
       ).resolves.toBe("http://93.184.216.34/v1");
     });
 
+    it("limits private URL permission to the exact nested path", async () => {
+      const lookup = async () => {
+        throw new Error("lookup should not run for IP literals");
+      };
+
+      await expect(
+        rewriteConfigUrlsWithDnsPinning(
+          {
+            primary: "http://10.0.0.1/v1",
+            sibling: "http://10.0.0.2/v1",
+          },
+          lookup,
+          {
+            allowPrivateUrlsPath: (relativePath: readonly string[]) =>
+              relativePath.length === 1 && relativePath[0] === "primary",
+          },
+        ),
+      ).rejects.toThrow(/private/i);
+    });
+
     it("recursively rewrites nested HTTP URLs and leaves non-URLs unchanged", async () => {
       const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
       await expect(

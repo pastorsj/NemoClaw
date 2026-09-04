@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -58,5 +59,64 @@ describe("state-file restore modes", () => {
 
     expect(status).toBe(0);
     expect(mode(configPath)).toBe(0o640);
+  });
+
+  it("writes an exact hash record for every protected configuration file", () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-hash-"));
+    fixtures.push(fixture);
+    const stateDir = path.join(fixture, ".agent");
+    const configPath = path.join(stateDir, "config.json");
+    const fabricPath = path.join(stateDir, "fabric.json");
+    fs.mkdirSync(stateDir);
+    fs.writeFileSync(configPath, '{"state":"current"}\n');
+    fs.writeFileSync(fabricPath, '{"adapter":"selected"}\n');
+
+    const command = buildStateFileRestoreCommand(
+      stateDir,
+      { path: "config.json", strategy: "copy" },
+      true,
+      ["config.json", "fabric.json"],
+    );
+    const result = spawnSync("bash", ["-c", command], {
+      input: Buffer.from('{"state":"restored"}\n'),
+    });
+
+    expect(result.status).toBe(0);
+    const configDigest = createHash("sha256").update(fs.readFileSync(configPath)).digest("hex");
+    const fabricDigest = createHash("sha256").update(fs.readFileSync(fabricPath)).digest("hex");
+    expect(fs.readFileSync(path.join(stateDir, ".config-hash"), "utf8")).toBe(
+      `${configDigest}  config.json\n${fabricDigest}  fabric.json\n`,
+    );
+  });
+
+  it("refuses an unsafe hash target before changing config or recovery state", () => {
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-state-file-hash-refusal-"));
+    fixtures.push(fixture);
+    const stateDir = path.join(fixture, ".agent");
+    const configPath = path.join(stateDir, "config.json");
+    const lastGoodPath = `${configPath}.last-good`;
+    const fabricPath = path.join(stateDir, "fabric.json");
+    const redirectedHashPath = path.join(fixture, "outside-hash");
+    fs.mkdirSync(stateDir);
+    fs.writeFileSync(configPath, '{"state":"current"}\n');
+    fs.writeFileSync(lastGoodPath, '{"state":"last-good"}\n');
+    fs.writeFileSync(fabricPath, '{"adapter":"selected"}\n');
+    fs.writeFileSync(redirectedHashPath, "outside remains unchanged\n");
+    fs.symlinkSync(redirectedHashPath, path.join(stateDir, ".config-hash"));
+
+    const command = buildStateFileRestoreCommand(
+      stateDir,
+      { path: "config.json", strategy: "copy" },
+      true,
+      ["config.json", "fabric.json"],
+    );
+    const result = spawnSync("bash", ["-c", command], {
+      input: Buffer.from('{"state":"restored"}\n'),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(fs.readFileSync(configPath, "utf8")).toBe('{"state":"current"}\n');
+    expect(fs.readFileSync(lastGoodPath, "utf8")).toBe('{"state":"last-good"}\n');
+    expect(fs.readFileSync(redirectedHashPath, "utf8")).toBe("outside remains unchanged\n");
   });
 });

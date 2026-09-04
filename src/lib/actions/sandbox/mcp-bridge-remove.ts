@@ -3,14 +3,13 @@
 
 import type { AgentMcpAdapter } from "../../agent/defs";
 import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock";
-import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { McpBridgeEntry } from "../../state/registry";
 import {
+  assertAgentMcpRuntimeIntent,
   assertAgentMcpTeardownRuntimeCapability,
   unregisterAgentAdapter,
 } from "./mcp-bridge-adapters";
 import { isAgentMcpAdapter, McpBridgeError } from "./mcp-bridge-contracts";
-import { assertHermesMcpRuntimeIntent } from "./mcp-bridge-hermes-reconciliation";
 import { assertGeneratedPolicyMutationSafe, removeGeneratedPolicy } from "./mcp-bridge-policy";
 import {
   deleteProvider,
@@ -31,6 +30,7 @@ import {
   getSandboxOrThrow,
   removeBridgeEntry,
 } from "./mcp-bridge-state";
+import { assertMcpCommandRuntimeAvailable } from "./mcp-bridge-runtime-capabilities";
 import {
   assertAuthenticatedBridgeEntry,
   assertPersistedAuthenticatedBridgeEntry,
@@ -120,7 +120,7 @@ export async function removeMcpBridge(
   options: { force?: boolean; allowResidual?: boolean } = {},
 ): Promise<void> {
   return withMcpLifecycleLock(sandboxName, async () => {
-    assertHermesPortableCommandUnavailable(sandboxName, "sandbox:mcp:remove");
+    assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:remove");
     // #6376: capture the recoverable prepared-destroy phase BEFORE the removal.
     const before = getSandboxOrThrow(sandboxName).mcp;
     const recoverPreparedDestroy =
@@ -321,14 +321,12 @@ async function removeMcpBridgeUnlocked(
           `Could not prove removal of the exact managed adapter entry for MCP server '${entry.server}'. Preserved the provider and MCP bridge lifecycle record.`,
         );
       }
-      if (adapter === "hermes-config") {
-        assertHermesMcpRuntimeIntent(sandboxName, {
-          entries: Object.values(bridgeState(sandbox)).filter(
-            (candidate) => candidate.server !== server,
-          ),
-          managedServerNames: sandbox.mcp?.managedServerNames,
-        });
-      }
+      assertAgentMcpRuntimeIntent(sandboxName, adapter, {
+        entries: Object.values(bridgeState(sandbox)).filter(
+          (candidate) => candidate.server !== server,
+        ),
+        managedServerNames: sandbox.mcp?.managedServerNames,
+      });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       if (!options.force) throw new McpBridgeError(detail);

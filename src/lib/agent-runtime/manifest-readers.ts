@@ -17,6 +17,7 @@ import type {
   ManifestValue,
   StringMap,
 } from "./manifest-types";
+import { isAgentMcpAdapter } from "./manifest-types";
 import { isSnapshotControlPath } from "../state/snapshot/content-digest.js";
 import { readStateFileRestore } from "./state/file-restore";
 
@@ -320,7 +321,7 @@ export function readMcpCapability(record: ManifestRecord): AgentMcpCapability {
   }
 
   const adapter = readString(mcp, "adapter");
-  if (adapter !== undefined && !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(adapter)) {
+  if (adapter !== undefined && !isAgentMcpAdapter(adapter)) {
     throw new Error("Agent manifest field 'mcp.adapter' must be a canonical lowercase identifier");
   }
   if (support === "bridge" && !adapter) {
@@ -332,12 +333,15 @@ export function readMcpCapability(record: ManifestRecord): AgentMcpCapability {
 
   const policyBinaries = readMcpPolicyBinaryPaths(mcp, support);
   const reason = readString(mcp, "reason")?.trim();
-  return {
-    support,
-    ...(adapter ? { adapter } : {}),
-    ...(policyBinaries ? { policy_binaries: policyBinaries } : {}),
-    ...(reason ? { reason } : {}),
-  };
+  if (support === "bridge") {
+    return {
+      support,
+      adapter: adapter!,
+      ...(policyBinaries ? { policy_binaries: policyBinaries } : {}),
+      ...(reason ? { reason } : {}),
+    };
+  }
+  return { support, ...(reason ? { reason } : {}) };
 }
 
 function readMcpPolicyBinaryPaths(

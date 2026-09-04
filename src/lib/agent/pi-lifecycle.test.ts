@@ -27,6 +27,7 @@ import {
 import { candidateQualificationEnvironment } from "./candidate-test-fixture";
 import { loadAgent } from "./defs";
 import { resolveAgent } from "./onboard";
+import { getBridgeAdapter } from "../actions/sandbox/mcp-bridge-state";
 
 const QUALIFICATION = candidateQualificationEnvironment();
 const CANDIDATE_ENV = QUALIFICATION.env;
@@ -150,6 +151,13 @@ describe("Pi candidate lifecycle integration", () => {
     expect(agent.backupStateDirs).toEqual(["sessions", "prompts", "themes"]);
     expect(agent.nonBackupStateDirs).toEqual(["tools", "bin"]);
     expect(agent.stateFiles.map(({ path: statePath }) => statePath)).toEqual(["settings.json"]);
+  });
+
+  it("refuses Pi at the public MCP bridge gate", () => {
+    const agent = loadAgent("pi", CANDIDATE_ENV);
+
+    expect(agent.mcpCapability).toEqual({ support: "disabled" });
+    expect(() => getBridgeAdapter(agent)).toThrow(/does not support managed MCP servers yet/u);
   });
 
   it("restores Pi user preferences only through the allowlisted key contract (#7927)", () => {

@@ -41,7 +41,7 @@ test_args=(python tests/fabric/test_adapter.py OpenClawRuntimeTests ProcessWrapp
 
 if [ "${test_mode}" = composed ]; then
   repository_root="$(cd "${package_root}/../.." && pwd)"
-  runner_source="${repository_root}/packages/nemoclaw-fabric"
+  runner_source="${NEMOCLAW_FABRIC_RUNNER_PATH:-${repository_root}/packages/nemoclaw-fabric}"
   [ -f "${runner_source}/pyproject.toml" ] || {
     printf 'composed Fabric tests require packages/nemoclaw-fabric in the NemoClaw checkout\n' >&2
     exit 66

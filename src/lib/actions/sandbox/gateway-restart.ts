@@ -173,9 +173,14 @@ function gatewayRestartOutput(result: GatewayRestartCommandResult): string {
 const ANSI_CONTROL_RE =
   /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\)|[@-_])|[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g;
 
+/** Redact controller detail before another gateway workflow can display it. */
+export function redactGatewayRestartFailureDetail(detail: string): string {
+  return redactFullWithUrls(detail);
+}
+
 function sanitizeGatewayRestartFailureLine(line: string): string {
   const withoutControls = line.replace(ANSI_CONTROL_RE, "");
-  return redactFullWithUrls(withoutControls);
+  return redactGatewayRestartFailureDetail(withoutControls);
 }
 
 function sanitizeGatewayRestartFailureDetail(detail: string): string {

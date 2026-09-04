@@ -169,16 +169,77 @@ function buildMcpRegistrationCommand(request) {
   return buildRegisterCommand(
     request.entry,
     request.replaceExisting,
-    request.configRoot || OPENCLAW_MCPORTER_ROOT,
+    openClawMcporterRoot(request.configDirectory || DEFAULT_OPENCLAW_CONFIG_DIR),
   );
+}
+
+function buildMcpRegistrationPlan(request) {
+  return {
+    execution: {
+      command: buildMcpRegistrationCommand(request),
+      timeoutSeconds: 15,
+      success: { kind: "exit-zero" },
+      failureMessage: `mcporter config add failed for '${request.entry.server}'.`,
+    },
+    verification: {
+      kind: "inspection",
+      failureMessage: `mcporter config verification failed after adding '${request.entry.server}'`,
+    },
+    credentialConvergence: { kind: "none" },
+  };
 }
 
 function buildMcpRemovalCommand(request) {
   return buildRemoveCommand(
     request.entry,
     request.force,
-    request.configRoot || OPENCLAW_MCPORTER_ROOT,
+    openClawMcporterRoot(request.configDirectory || DEFAULT_OPENCLAW_CONFIG_DIR),
   );
+}
+
+function buildMcpRemovalPlan(request) {
+  return {
+    execution: {
+      command: buildMcpRemovalCommand(request),
+      timeoutSeconds: 15,
+      success: { kind: "exit-zero" },
+      failureMessage: `mcporter config remove failed for '${request.entry.server}'.`,
+    },
+    outcome: { kind: "removed" },
+  };
+}
+
+function buildMcpInspectionCommand(request) {
+  return buildInspectCommand(
+    request.entry,
+    request.failOnMismatch,
+    openClawMcporterRoot(request.configDirectory || DEFAULT_OPENCLAW_CONFIG_DIR),
+  );
+}
+
+function describeMcpMutationCapability(request) {
+  const probe = mcporterAvailabilityProbe(request.sandboxName);
+  return {
+    kind: "command",
+    command: probe.command,
+    success: { kind: "exit-zero" },
+    timeoutSeconds: 30,
+    failureMessage: probe.failureMessage,
+  };
+}
+
+function describeMcpTeardownCapability() {
+  return { kind: "not-required" };
+}
+
+function describeMcpRuntimeIntentVerification() {
+  return { kind: "not-required" };
+}
+
+function buildMcpRuntimeCommand(request) {
+  const runner =
+    'const { spawnSync } = require("node:child_process"); const result = spawnSync(process.argv[1], process.argv.slice(2), { stdio: "inherit" }); process.exit(result.status ?? 1);';
+  return ["nemoclaw-start", "node", "-e", runner, "--", ...request.command];
 }
 
 module.exports = {
@@ -186,10 +247,17 @@ module.exports = {
   MCPORTER_VERSION,
   OPENCLAW_MCPORTER_ROOT,
   buildInspectCommand,
+  buildMcpInspectionCommand,
   buildMcpRegistrationCommand,
+  buildMcpRegistrationPlan,
   buildMcpRemovalCommand,
+  buildMcpRemovalPlan,
+  buildMcpRuntimeCommand,
   buildRegisterCommand,
   buildRemoveCommand,
+  describeMcpMutationCapability,
+  describeMcpRuntimeIntentVerification,
+  describeMcpTeardownCapability,
   mcporterHeaderMatcherSource,
   mcporterHeadersMatchExpected,
   mcporterAvailabilityProbe,

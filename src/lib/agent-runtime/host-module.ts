@@ -4,10 +4,15 @@
 import { loadHarnessAdapter, HarnessAdapterError } from "./adapter/loader";
 import {
   HARNESS_MCP_ADAPTER_CONTRACT,
-  type HarnessMcpAdapterCommand,
-  type HarnessMcpAdapterEntry,
+  type HarnessMcpCapabilityProbe,
+  type HarnessMcpCapabilityRequest,
+  type HarnessMcpInspectionRequest,
   type HarnessMcpRegistrationRequest,
+  type HarnessMcpRegistrationPlan,
   type HarnessMcpRemovalRequest,
+  type HarnessMcpRemovalPlan,
+  type HarnessMcpRuntimeIntentRequest,
+  type HarnessMcpRuntimeRequest,
 } from "./adapter/mcp";
 import { readMcpCapability } from "./manifest-readers";
 import type { HarnessPackageStoreOptions } from "./package/store";
@@ -16,13 +21,32 @@ import type { HarnessPackageIdentity } from "./package/types";
 export type {
   HarnessMcpAdapterCommand,
   HarnessMcpAdapterEntry,
+  HarnessMcpCapabilityProbe,
+  HarnessMcpCapabilityRequest,
+  HarnessMcpCredentialConvergence,
+  HarnessMcpExecutionPlan,
+  HarnessMcpExecutionSuccess,
+  HarnessMcpInspectionRequest,
   HarnessMcpRegistrationRequest,
+  HarnessMcpRegistrationPlan,
+  HarnessMcpRegistrationVerification,
   HarnessMcpRemovalRequest,
+  HarnessMcpRemovalOutcome,
+  HarnessMcpRemovalPlan,
+  HarnessMcpRuntimeIntentRequest,
+  HarnessMcpRuntimeRequest,
 } from "./adapter/mcp";
 
 export interface HarnessMcpAdapterHostModule {
-  buildMcpRegistrationCommand(request: HarnessMcpRegistrationRequest): HarnessMcpAdapterCommand;
-  buildMcpRemovalCommand(request: HarnessMcpRemovalRequest): HarnessMcpAdapterCommand;
+  buildMcpRegistrationPlan(request: HarnessMcpRegistrationRequest): HarnessMcpRegistrationPlan;
+  buildMcpRemovalPlan(request: HarnessMcpRemovalRequest): HarnessMcpRemovalPlan;
+  buildMcpInspectionCommand(request: HarnessMcpInspectionRequest): string;
+  describeMcpMutationCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe;
+  describeMcpTeardownCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe;
+  describeMcpRuntimeIntentVerification(
+    request: HarnessMcpRuntimeIntentRequest,
+  ): HarnessMcpCapabilityProbe;
+  buildMcpRuntimeCommand(request: HarnessMcpRuntimeRequest): readonly string[];
 }
 
 export interface LoadHarnessMcpAdapterHostModuleOptions extends HarnessPackageStoreOptions {
@@ -89,11 +113,28 @@ export function loadHarnessMcpAdapterHostModule(
   }
 
   return Object.freeze({
-    buildMcpRegistrationCommand(request: HarnessMcpRegistrationRequest): HarnessMcpAdapterCommand {
+    buildMcpRegistrationPlan(request: HarnessMcpRegistrationRequest): HarnessMcpRegistrationPlan {
       return callMcpAdapter(() => adapter.register(request));
     },
-    buildMcpRemovalCommand(request: HarnessMcpRemovalRequest): HarnessMcpAdapterCommand {
+    buildMcpRemovalPlan(request: HarnessMcpRemovalRequest): HarnessMcpRemovalPlan {
       return callMcpAdapter(() => adapter.remove(request));
+    },
+    buildMcpInspectionCommand(request: HarnessMcpInspectionRequest): string {
+      return callMcpAdapter(() => adapter.inspect(request));
+    },
+    describeMcpMutationCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe {
+      return callMcpAdapter(() => adapter.mutationCapability(request));
+    },
+    describeMcpTeardownCapability(request: HarnessMcpCapabilityRequest): HarnessMcpCapabilityProbe {
+      return callMcpAdapter(() => adapter.teardownCapability(request));
+    },
+    describeMcpRuntimeIntentVerification(
+      request: HarnessMcpRuntimeIntentRequest,
+    ): HarnessMcpCapabilityProbe {
+      return callMcpAdapter(() => adapter.verifyRuntimeIntent(request));
+    },
+    buildMcpRuntimeCommand(request: HarnessMcpRuntimeRequest): readonly string[] {
+      return callMcpAdapter(() => adapter.runtime(request));
     },
   });
 }

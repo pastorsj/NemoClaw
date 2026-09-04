@@ -3,15 +3,16 @@
 
 import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import { withMcpLifecycleLock } from "../../state/mcp-lifecycle-lock";
-import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { McpBridgeEntry } from "../../state/registry";
-import { registerAgentAdapterAtCurrentCredentialRevision } from "./mcp-bridge-adapters";
+import {
+  assertAgentMcpRuntimeIntent,
+  registerAgentAdapterAtCurrentCredentialRevision,
+} from "./mcp-bridge-adapters";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import {
   assertMcpBridgeSnapshotCurrent,
   cloneMcpBridgeEntry,
 } from "./mcp-bridge-destroy-preflight";
-import { assertHermesMcpRuntimeIntent } from "./mcp-bridge-hermes-reconciliation";
 import { redactBridgeFailureForDisplay } from "./mcp-bridge-output";
 import { applyGeneratedPolicy, assertGeneratedPolicyMutationSafe } from "./mcp-bridge-policy";
 import {
@@ -31,6 +32,7 @@ import {
   waitForDetachedMcpCredential,
 } from "./mcp-bridge-provider";
 import {
+  assertMcpCommandRuntimeAvailable,
   assertMcpAdapterMutationRuntimeCapabilities,
   assertMcpAdapterTeardownRuntimeCapabilities,
 } from "./mcp-bridge-runtime-capabilities";
@@ -110,7 +112,7 @@ async function assertRestartCredentialsAvailable(
 
 export async function restartMcpBridge(sandboxName: string, server?: string): Promise<void> {
   return withMcpLifecycleLock(sandboxName, () => {
-    assertHermesPortableCommandUnavailable(sandboxName, "sandbox:mcp:restart");
+    assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:restart");
     return restartMcpBridgeUnlocked(sandboxName, server);
   });
 }
@@ -124,7 +126,7 @@ async function restartMcpBridgeUnlocked(sandboxName: string, server?: string): P
   const bridges = bridgeState(sandbox);
   const targets = server ? [[server, bridges[server]] as const] : Object.entries(bridges);
   if (targets.length === 0) {
-    if (adapter === "hermes-config") assertHermesMcpRuntimeIntent(sandboxName);
+    assertAgentMcpRuntimeIntent(sandboxName, adapter);
     console.log(`  No MCP servers for sandbox '${sandboxName}'.`);
     return;
   }
@@ -186,7 +188,10 @@ async function restartMcpBridgeUnlocked(sandboxName: string, server?: string): P
     // credentials. The temporary policy cannot bind the provider until an
     // endpointless profile is attached.
     ensureMcpBridgeProviderProfile();
-    applyGeneratedPolicy(sandboxName, entry, target, { bindCredential: false });
+    applyGeneratedPolicy(sandboxName, entry, target, {
+      bindCredential: false,
+      agentDefinition: agent,
+    });
     const providerResult = upsertMcpProvider(entry.providerName ?? "", envRefs, {
       allowExisting: true,
       expectedProviderId: entry.providerId,
@@ -217,7 +222,7 @@ async function restartMcpBridgeUnlocked(sandboxName: string, server?: string): P
       );
     }
     attachProvider(sandboxName, entry);
-    applyGeneratedPolicy(sandboxName, entry, target);
+    applyGeneratedPolicy(sandboxName, entry, target, { agentDefinition: agent });
     refreshMcpProviderEnvironment(entry);
     const entryAdapter = (entry.adapter as AgentMcpAdapter | undefined) ?? adapter;
     const credentialRevision = waitForAttachedMcpCredential(sandboxName, entry, {
@@ -240,7 +245,7 @@ async function restartMcpBridgeUnlocked(sandboxName: string, server?: string): P
     });
     console.log(`  Refreshed MCP server '${name}'.`);
   }
-  if (adapter === "hermes-config") assertHermesMcpRuntimeIntent(sandboxName);
+  assertAgentMcpRuntimeIntent(sandboxName, adapter);
 }
 
 export async function restoreExistingMcpBridgeRuntime(
@@ -314,11 +319,14 @@ export async function restoreExistingMcpBridgeRuntime(
     if (options.applyPolicy !== false) {
       applyGeneratedPolicy(sandboxName, entry, resolvedTargetPins(resolvedByServer, entry), {
         bindCredential: false,
+        ...(options.agentDefinition ? { agentDefinition: options.agentDefinition } : {}),
       });
     }
     attachProvider(sandboxName, entry);
     if (options.applyPolicy !== false) {
-      applyGeneratedPolicy(sandboxName, entry, resolvedTargetPins(resolvedByServer, entry));
+      applyGeneratedPolicy(sandboxName, entry, resolvedTargetPins(resolvedByServer, entry), {
+        ...(options.agentDefinition ? { agentDefinition: options.agentDefinition } : {}),
+      });
     }
     const adapter = (entry.adapter as AgentMcpAdapter | undefined) ?? defaultAdapter;
     refreshMcpProviderEnvironment(entry);
@@ -337,10 +345,5 @@ export async function restoreExistingMcpBridgeRuntime(
     );
     writeBridgeEntry(sandboxName, { ...entry, adapter, updatedAt: nowIso() });
   }
-  if (
-    defaultAdapter === "hermes-config" ||
-    entries.some((entry) => entry.adapter === "hermes-config")
-  ) {
-    assertHermesMcpRuntimeIntent(sandboxName, { entries });
-  }
+  assertAgentMcpRuntimeIntent(sandboxName, defaultAdapter, { entries });
 }

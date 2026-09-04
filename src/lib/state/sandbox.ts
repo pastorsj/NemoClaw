@@ -47,6 +47,11 @@ import { resolveOpenshell } from "../adapters/openshell/resolve.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentDefinition, AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
+import {
+  loadHarnessConfigRestoreHostModule,
+  type HarnessConfigRestoreHostModule,
+  type HarnessImagePluginInstall,
+} from "../agent-runtime/config-module.js";
 import { GATEWAY_PORT } from "../core/ports.js";
 import {
   BACKUP_FAILURE_ABSENT_AFTER_EXTRACTION,
@@ -2450,6 +2455,32 @@ function restoreSandboxStateFromTrustedTree(
     }
   }
 
+  let packageConfigRestoreAdapter: HarnessConfigRestoreHostModule | undefined;
+  if (
+    localFiles.some((file) => targetStateFiles.get(file.path)?.restore?.merge === "package-config")
+  ) {
+    const targetEntry = registry.getSandbox(sandboxName);
+    const identity = targetEntry?.harnessPackage;
+    if (identity) {
+      if (identity.id !== targetAgent.name) {
+        return failRestoreContract(
+          "Package configuration restore receipt does not match the target agent",
+        );
+      }
+      try {
+        packageConfigRestoreAdapter = loadHarnessConfigRestoreHostModule(identity);
+      } catch (error) {
+        return failRestoreContract(
+          `Package configuration restore adapter could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    } else if (targetAgent.name !== "openclaw") {
+      return failRestoreContract(
+        "Package configuration restore requires the target harness package receipt",
+      );
+    }
+  }
+
   let freshOpenClawImagePluginInstalls: readonly OpenClawImagePluginInstall[] | undefined;
   if (options.freshOpenClawImagePluginInstalls !== undefined) {
     const parsed = parseOpenClawImagePluginInstalls(
@@ -2521,6 +2552,10 @@ function restoreSandboxStateFromTrustedTree(
     previousOpenClawImagePluginInstalls !== undefined
       ? freshOpenClawImagePluginInstalls
       : undefined;
+  const asHarnessImagePluginInstalls = (
+    installs: readonly OpenClawImagePluginInstall[] | undefined,
+  ): readonly HarnessImagePluginInstall[] | undefined =>
+    installs?.map((install) => ({ id: install.id, loadPaths: [...(install.loadPaths ?? [])] }));
   try {
     const pluginRestorePlan = planOpenClawPluginRestore({
       agentType: manifest.agentType,
@@ -2708,18 +2743,38 @@ function restoreSandboxStateFromTrustedTree(
       if (!targetStateFile) throw new Error(`Validated target state file missing: ${spec.path}`);
       const backupContents = stagedStateFiles.get(spec.path);
       if (!backupContents) throw new Error(`Staged state file missing: ${spec.path}`);
+      const restoreOwnership =
+        targetStateFile.restore?.merge === "package-config" &&
+        !packageConfigRestoreAdapter &&
+        targetAgent.name === "openclaw"
+          ? ({ merge: "openclaw-config" } as const)
+          : targetStateFile.restore;
       if (
         restoreStateFile(
           sshArgs(configFile, sandboxName),
           dir,
           spec,
           backupContents,
-          targetStateFile.restore,
+          restoreOwnership,
           options.allowCustomImageWholeStateFileRestore === true,
           _log,
           configFreshOpenClawImagePluginInstalls,
           previousOpenClawImagePluginInstalls,
-          [targetAgent.configPaths.configFile],
+          restoreOwnership?.merge === "openclaw-config"
+            ? [targetAgent.configPaths.configFile, "fabric.json"]
+            : [targetAgent.configPaths.configFile],
+          packageConfigRestoreAdapter
+            ? {
+                agentName: targetAgent.name,
+                adapter: packageConfigRestoreAdapter,
+                freshImagePluginInstalls: asHarnessImagePluginInstalls(
+                  configFreshOpenClawImagePluginInstalls,
+                ),
+                previousImagePluginInstalls: asHarnessImagePluginInstalls(
+                  previousOpenClawImagePluginInstalls,
+                ),
+              }
+            : undefined,
         )
       ) {
         restoredFiles.push(spec.path);

@@ -54,7 +54,10 @@ export function buildConfigPermsCheck(
       group: "Sandbox",
       label: LABEL,
       status: "ok",
-      detail: `mutable contract intact (dir ${inspection.dirMode}, ${inspection.configFile} ${inspection.fileMode})`,
+      detail:
+        inspection.inspectionMethod === "probe"
+          ? `mutable contract intact (${inspection.configFile} package probe)`
+          : `mutable contract intact (dir ${inspection.dirMode}, ${inspection.configFile} ${inspection.fileMode})`,
     };
   }
 

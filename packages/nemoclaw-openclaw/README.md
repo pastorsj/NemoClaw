@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# OpenClaw harness package
+# OpenClaw agent runtime package
 
 This package is the OpenClaw integration layer for NemoClaw. The package owns OpenClaw-specific configuration, image contents, startup behavior, runtime helpers, plugins, and compatibility code. NemoClaw core owns package discovery, onboarding, credential collection and selection, OpenShell registration, policy requests, and product rollback decisions. OpenShell owns credential custody and delivery, sandbox lifecycle, and enforcement authority.
 
@@ -19,7 +19,9 @@ The package follows one sequence:
 7. Files in `compat/` adapt the pinned OpenClaw release where its native behavior is not sufficient.
 8. Files in `checks/` reject version, dependency, and generated-runtime drift during image builds.
 
-The fixed `runtime/generate-config.sh` command lets NemoClaw request native configuration without selecting an OpenClaw implementation in core.
+The fixed `runtime/generate-config.sh` command lets the existing managed-startup path invoke the
+package-owned native generator at one path. The planner still admits only the closed set of managed
+startup agent IDs.
 
 Nested production projects use `npm-shrinkwrap.json`. npm publishes that standard lockfile, and the image build copies it to the existing in-image `package-lock.json` paths consumed by integrity checks. This keeps a registry-installed harness reproducible without changing the runtime layout.
 
@@ -29,7 +31,7 @@ Nested production projects use `npm-shrinkwrap.json`. npm publishes that standar
 | --- | --- |
 | `config/` | Generates native OpenClaw configuration and holds the plugin manifest schema. |
 | `fabric/` | Implements the small OpenClaw adapter and pins its Fabric dependency graph. |
-| `host/` | Holds receipt-verified CommonJS helpers that NemoClaw core loads during transitions. |
+| `host/` | Contains typed configuration, MCP, and restore adapters plus package configuration and CLI helpers. |
 | `runtime/` | Holds in-sandbox commands, protection helpers, preloads, state plans, and locked dependency graphs. |
 | `compat/` | Holds upstream-version patches, legacy cleanup, and reviewed npm remediation. |
 | `plugin/` | Implements the NemoClaw commands that OpenClaw loads through its plugin mechanism. |
@@ -39,6 +41,18 @@ Nested production projects use `npm-shrinkwrap.json`. npm publishes that standar
 | `openclaw-plugins/` | Holds executable OpenClaw compatibility plugins at the repository-defined path. |
 
 The package root contains the files that NemoClaw and package tools discover directly. Each support file lives under the directory that names its execution responsibility.
+
+## Typed adapter boundary
+
+| Capability | Package file | Current behavior |
+| --- | --- | --- |
+| Runtime configuration | `host/config-adapter.cts` | Returns a bounded OpenClaw configuration transaction and mutable-file posture. |
+| MCP | `host/mcp-adapter.cts` | Implements the seven fixed MCP operations. |
+| Configuration restore | `host/restore-adapter.cts` | Merges package configuration and returns a finite write plan. |
+
+Only these adapter files use the generic typed loader. `host/config-runtime.cts` is an image
+configuration helper. `host/cli-grammar.cts` remains a package-owned transition helper and is not a
+current typed contract operation.
 
 ## Runtime flow
 
@@ -67,7 +81,10 @@ without importing the OpenClaw Fabric adapter.
 
 The `plugin/` code runs inside OpenClaw. Other `runtime/` helpers run as bounded commands in the sandbox.
 
-NemoClaw core loads `host/` helpers only after it verifies the installed package receipt. These helpers describe OpenClaw configuration grammar, restore behavior, CLI grammar, and MCP adapter commands. Core retains product authorization, transaction, rollback, credential selection, and OpenShell registration decisions around those operations. OpenShell retains credential custody and delivery, sandbox lifecycle, and enforcement authority.
+NemoClaw core loads the configuration, MCP, and restore adapter files only after it verifies the
+installed package receipt. Those files return bounded data or command plans. Core retains product
+authorization, transaction, rollback, credential selection, and OpenShell registration decisions.
+OpenShell retains credential custody and delivery, sandbox lifecycle, and enforcement authority.
 
 ## Compatibility debt
 
@@ -77,7 +94,7 @@ The files in `compat/` are not general package interfaces. Most patches target t
 
 ## Large-file boundaries
 
-The remaining large implementation files are deliberate boundaries, not hidden workflow files:
+Most remaining large implementation files are coherent security or build boundaries:
 
 | File | Why it remains whole |
 | --- | --- |
@@ -90,6 +107,12 @@ The remaining large implementation files are deliberate boundaries, not hidden w
 
 The package lockfiles are generated dependency inventories. Do not split or hand-edit them; refresh them through the owning dependency workflow. Split one of the implementation boundaries only when the new interface can preserve the same validation, mutation, and rollback evidence.
 
+`plugin/src/blueprint/runner.ts` is retained cleanup debt. At 2,320 lines, it combines blueprint
+parsing, policy application, OpenShell commands, run-plan persistence, and the apply, status,
+reconcile, and rollback actions. This adapter-contract slice does not refactor that plugin
+orchestrator. A later change should split it along those existing action boundaries while
+preserving its public exports, progress protocol, rollback behavior, and focused tests.
+
 ## Checks
 
 - `checks/base-inputs.json` defines the files that determine the OpenClaw base image identity.
@@ -99,7 +122,12 @@ The package lockfiles are generated dependency inventories. Do not split or hand
 
 ## Tests
 
-`tests/config`, `tests/runtime`, `tests/compat`, `tests/image`, and `tests/integration` follow the package workflow described above. Package-owned helpers stay under `tests/helpers`. Native plugin unit tests remain beside their source under `plugin/src`.
+`tests/config`, `tests/host`, `tests/runtime`, `tests/compat`, `tests/image`, and
+`tests/integration` follow the package workflow described above. `tests/e2e` contains package-owned
+assertions that depend on core E2E fixtures or scripts, so it runs in the composed
+`test:nemoclaw` lane. A test in that directory contacts a live boundary only when its explicit
+environment gate is enabled. Package-owned helpers stay under `tests/helpers`. Native plugin unit
+tests remain beside their source under `plugin/src`.
 
 Install the package and nested plugin locks, then run the checkout-independent lane:
 
@@ -110,8 +138,16 @@ npm run test:package
 npm run test:fabric
 ```
 
-The complete OpenClaw command also needs an exact NemoClaw checkout because the composed tests and plugin still consume named NemoClaw boundaries. To prove that layout from a separate candidate checkout, run the `package-only` and `composed` in-tree overlay rehearsals documented in [`packages/README.md`](../README.md) with package ID `openclaw`. The composed rehearsal installs the nested plugin lock, builds the temporary CLI and plugin, runs both package lanes, and verifies `nemoclaw harness install openclaw`, the human inventory, and the receipt-verified digest from `nemoclaw harness list --json`.
+The complete OpenClaw command needs a surrounding NemoClaw checkout because the composed tests and
+plugin consume named NemoClaw boundaries. A direct `npm test` does not pin that checkout. To prove
+the layout against a supplied commit, run the `package-only` and `composed` in-tree overlay
+rehearsals documented in [`packages/README.md`](../README.md) with package ID `openclaw`. The
+composed rehearsal installs the nested plugin lock, builds the temporary CLI and plugin, runs both
+package lanes, and verifies `nemoclaw harness install openclaw`, the human inventory, and the
+receipt-verified digest from `nemoclaw harness list --json`.
 
 `npm run test:fabric` tests the adapter without a NemoClaw source checkout.
 `npm run test:fabric:composed` additionally runs the same adapter through the generic runner from
-the exact surrounding NemoClaw checkout; `npm run test:nemoclaw` includes that composed proof.
+the surrounding NemoClaw checkout; `npm run test:nemoclaw` includes that composed proof.
+`npm test` does not run `test:fabric` separately because the composed lane includes its direct
+cases.

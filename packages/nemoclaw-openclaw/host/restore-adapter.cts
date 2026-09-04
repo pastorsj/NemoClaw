@@ -392,7 +392,58 @@ function mergeOpenClawRestoredConfig(
   return merged;
 }
 
+function mergeConfigState(request) {
+  if (request.currentContent === null) {
+    return {
+      kind: "refused",
+      reason: "Selective configuration restore requires the current rebuilt configuration",
+    };
+  }
+  if (
+    (request.previousImagePluginInstalls === null) !==
+    (request.freshImagePluginInstalls === null)
+  ) {
+    return {
+      kind: "refused",
+      reason: "Complete previous and fresh image plugin provenance is required",
+    };
+  }
+  try {
+    const backup = JSON.parse(request.backupContent);
+    const current = JSON.parse(request.currentContent);
+    const options =
+      request.previousImagePluginInstalls === null
+        ? {}
+        : {
+            previousImagePluginInstalls: request.previousImagePluginInstalls,
+            freshImagePluginInstalls: request.freshImagePluginInstalls,
+          };
+    const merged = mergeOpenClawRestoredConfig(
+      backup,
+      current,
+      options,
+      request.managedChannelNames,
+    );
+    return {
+      kind: "merged",
+      content: `${JSON.stringify(merged, null, 2)}\n`,
+      write: {
+        kind: "config-anchors",
+        hashFiles: ["openclaw.json", "fabric.json"],
+      },
+    };
+  } catch (error) {
+    return {
+      kind: "refused",
+      reason: `Selective configuration restore failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+}
+
 module.exports = {
   configRestoreOwnership,
+  mergeConfigState,
   mergeOpenClawRestoredConfig,
 };

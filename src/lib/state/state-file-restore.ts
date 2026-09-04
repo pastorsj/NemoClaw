@@ -4,7 +4,13 @@
 import { spawnSync } from "node:child_process";
 
 import type { StateFileRestoreOwnership } from "../agent/defs.js";
-import { shellQuote } from "../runner.js";
+import type {
+  HarnessConfigRestoreHostModule,
+  HarnessConfigRestoreWritePlan,
+  HarnessImagePluginInstall,
+} from "../agent-runtime/config-module.js";
+import { redactFull, shellQuote } from "../runner.js";
+import { listManagedChannelNames } from "./restore/managed-channels.js";
 import { buildOpenClawConfigRestoreInputFromSandbox } from "./openclaw-config-restore-input.js";
 import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
 import { buildKeyAllowlistMergeRestoreCommand } from "./state-file-key-merge.js";
@@ -12,6 +18,18 @@ import { buildKeyAllowlistMergeRestoreCommand } from "./state-file-key-merge.js"
 export interface StateFileRestoreSpec {
   path: string;
   strategy: "copy" | "sqlite_backup";
+}
+
+export interface PackageConfigRestoreContext {
+  readonly agentName: string;
+  readonly adapter: HarnessConfigRestoreHostModule;
+  readonly freshImagePluginInstalls?: readonly HarnessImagePluginInstall[];
+  readonly previousImagePluginInstalls?: readonly HarnessImagePluginInstall[];
+}
+
+interface PackageConfigRestoreInput {
+  readonly input: Buffer;
+  readonly write: HarnessConfigRestoreWritePlan;
 }
 
 const SQLITE_RESTORE_PY = [
@@ -44,6 +62,72 @@ const SQLITE_WRITE_CHECK_PY = [
 
 function stateFileRemotePath(dir: string, filePath: string): string {
   return `${dir.replace(/\/+$/, "")}/${filePath}`;
+}
+
+function readCurrentPackageConfig(
+  sshArgs: readonly string[],
+  dir: string,
+  specPath: string,
+  log: (message: string) => void,
+):
+  | { readonly kind: "read"; readonly content: Buffer }
+  | { readonly kind: "missing" }
+  | { readonly kind: "failed" } {
+  const remotePath = stateFileRemotePath(dir, specPath);
+  const command = [
+    `src=${shellQuote(remotePath)}`,
+    '[ ! -e "$src" ] && exit 2',
+    '[ -f "$src" ] && [ ! -L "$src" ] || { echo "unsafe state file: $src" >&2; exit 10; }',
+    'cat -- "$src"',
+  ].join("; ");
+  const result = spawnSync("ssh", [...sshArgs, command], {
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 120000,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+  if (result.status === 0 && !result.error && !result.signal) {
+    return { kind: "read", content: result.stdout };
+  }
+  if (result.status === 2 && !result.error && !result.signal) return { kind: "missing" };
+  const detail =
+    (result.stderr?.toString() || "").trim() ||
+    result.error?.message ||
+    (result.signal ? `signal ${result.signal}` : `exit ${String(result.status)}`);
+  log(`WARNING: state file current read ${specPath} failed: ${redactFull(detail).slice(0, 200)}`);
+  return { kind: "failed" };
+}
+
+function buildPackageConfigRestoreInput(
+  sshArgs: readonly string[],
+  dir: string,
+  specPath: string,
+  backupContents: Buffer,
+  context: PackageConfigRestoreContext,
+  log: (message: string) => void,
+): PackageConfigRestoreInput | null {
+  const current = readCurrentPackageConfig(sshArgs, dir, specPath, log);
+  if (current.kind === "failed") return null;
+  let result: ReturnType<HarnessConfigRestoreHostModule["mergeConfigState"]>;
+  try {
+    result = context.adapter.mergeConfigState({
+      backupContent: backupContents.toString("utf8"),
+      currentContent: current.kind === "read" ? current.content.toString("utf8") : null,
+      managedChannelNames: listManagedChannelNames(context.agentName),
+      previousImagePluginInstalls: context.previousImagePluginInstalls ?? null,
+      freshImagePluginInstalls: context.freshImagePluginInstalls ?? null,
+    });
+  } catch {
+    // Adapter execution, schema validation, and size validation all fail at
+    // this boundary. Do not disclose adapter-controlled error text or advance
+    // to the privileged write after any of those failures.
+    log("FAILED: package configuration restore adapter failed");
+    return null;
+  }
+  if (result.kind === "merged") {
+    return { input: Buffer.from(result.content, "utf8"), write: result.write };
+  }
+  log(`FAILED: ${redactFull(result.reason)}`);
+  return null;
 }
 
 function requireConfigHashFiles(
@@ -126,7 +210,7 @@ export function buildStateFileRestoreCommand(
     '[ ! -L "$dst" ] || { echo "refusing symlinked state target: $dst" >&2; exit 11; }',
     'mkdir -p "$parent"',
     'tmp="$(mktemp "${parent}/.nemoclaw-restore.XXXXXX")"',
-    'trap \'rm -f "$tmp" "${anchor_tmp:-}"\' EXIT',
+    'trap \'rm -f "$tmp" "${anchor_tmp:-}" "${hash_tmp:-}"\' EXIT',
     'cat > "$tmp"',
     // The managed OpenClaw restart preflight accepts only the exact mutable
     // sandbox:sandbox 0660 configuration posture. Apply that mode to the
@@ -149,6 +233,28 @@ export function buildStateFileRestoreCommand(
       );
     }
 
+    // Build the complete future integrity record before replacing any live
+    // file. This makes an unsafe hash target, missing companion, or hashing
+    // failure a refusal rather than a partial configuration transaction.
+    steps.push(
+      'hash_file="${parent}/.config-hash"',
+      '[ ! -L "$hash_file" ] || { echo "refusing symlinked config hash target: $hash_file" >&2; exit 12; }',
+      '[ ! -e "$hash_file" ] || [ -f "$hash_file" ] || { echo "config hash target is not a regular file: $hash_file" >&2; exit 12; }',
+      'hash_tmp="$(mktemp "${parent}/.nemoclaw-config-hash.XXXXXX")" || { echo "failed to stage config hash" >&2; exit 15; }',
+      'digest="$(sha256sum -- "$tmp")" || { echo "failed to hash restored config" >&2; exit 15; }',
+      'digest="${digest%% *}"',
+      `printf '%s  %s\\n' "$digest" ${shellQuote(protectedFiles[0])} > "$hash_tmp" || { echo "failed to stage config hash" >&2; exit 15; }`,
+    );
+    for (const [index, file] of protectedFiles.slice(1).entries()) {
+      const variable = `protected_${String(index)}`;
+      steps.push(
+        `digest="$(sha256sum -- "$${variable}")" || { echo "failed to hash protected config" >&2; exit 15; }`,
+        'digest="${digest%% *}"',
+        `printf '%s  %s\\n' "$digest" ${shellQuote(file)} >> "$hash_tmp" || { echo "failed to stage config hash" >&2; exit 15; }`,
+      );
+    }
+    steps.push('chmod 660 "$hash_tmp" 2>/dev/null || true');
+
     // Stage the OpenClaw recovery anchor before swapping the live config so
     // the integrity watcher can never observe a restored config paired with a
     // stale `.last-good` recovery target.
@@ -165,12 +271,8 @@ export function buildStateFileRestoreCommand(
   steps.push('mv -f "$tmp" "$dst"');
 
   if (refreshConfigRecoveryAnchors) {
-    const hashArguments = protectedFiles.map(shellQuote).join(" ");
     steps.push(
-      'hash_file="${parent}/.config-hash"',
-      '[ ! -L "$hash_file" ] || { echo "refusing symlinked config hash target: $hash_file" >&2; exit 12; }',
-      `(cd "$parent" && sha256sum -- ${hashArguments} > .config-hash)`,
-      'chmod 660 "$hash_file" 2>/dev/null || true',
+      'mv -f "$hash_tmp" "$hash_file" || { echo "failed to install config hash" >&2; exit 15; }',
     );
   }
 
@@ -188,12 +290,34 @@ export function restoreStateFile(
   freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
   configHashFiles?: readonly string[],
+  packageConfigRestore?: PackageConfigRestoreContext,
 ): boolean {
   log(`Restoring state file ${spec.path} (${spec.strategy})`);
 
   let command: string;
   let input: Buffer | null;
-  if (ownership?.merge === "openclaw-config") {
+  if (ownership?.merge === "package-config") {
+    if (!packageConfigRestore) {
+      log("FAILED: package configuration restore adapter is unavailable");
+      return false;
+    }
+    const prepared = buildPackageConfigRestoreInput(
+      sshArgs,
+      dir,
+      spec.path,
+      backupContents,
+      packageConfigRestore,
+      log,
+    );
+    if (!prepared) return false;
+    command = buildStateFileRestoreCommand(
+      dir,
+      spec,
+      prepared.write.kind === "config-anchors",
+      prepared.write.kind === "config-anchors" ? prepared.write.hashFiles : [spec.path],
+    );
+    input = prepared.input;
+  } else if (ownership?.merge === "openclaw-config") {
     command = buildStateFileRestoreCommand(dir, spec, true, configHashFiles ?? [spec.path]);
     const result = buildOpenClawConfigRestoreInputFromSandbox({
       backupContents,

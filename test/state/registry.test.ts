@@ -429,7 +429,7 @@ describe("registry", () => {
     expect(raw).not.toContain("secret-value");
   });
 
-  it("drops invalid persisted MCP bridge entries during registry serialization", () => {
+  it("keeps canonical future MCP adapters and drops invalid persisted entries", () => {
     registry.registerSandbox({ name: "mcp-safe", agent: "openclaw" });
     registry.updateSandbox("mcp-safe", {
       mcp: {
@@ -474,14 +474,34 @@ describe("registry", () => {
             policyName: "mcp-bridge-invalid-env",
             addedAt: new Date(0).toISOString(),
           },
-          unknownAdapter: {
-            server: "unknownAdapter",
+          futureAdapter: {
+            server: "futureAdapter",
             agent: "openclaw",
-            adapter: "unknown",
+            adapter: "future-config",
             url: "https://api.githubcopilot.com/mcp/",
             env: ["TOKEN"],
-            providerName: "mcp-safe-mcp-unknown",
-            policyName: "mcp-bridge-unknown",
+            providerName: "mcp-safe-mcp-future",
+            policyName: "mcp-bridge-future",
+            addedAt: new Date(0).toISOString(),
+          },
+          invalidUpperAdapter: {
+            server: "invalidUpperAdapter",
+            agent: "openclaw",
+            adapter: "Future-config",
+            url: "https://api.githubcopilot.com/mcp/",
+            env: ["TOKEN"],
+            providerName: "mcp-safe-mcp-invalid-upper",
+            policyName: "mcp-bridge-invalid-upper",
+            addedAt: new Date(0).toISOString(),
+          },
+          invalidSeparatorAdapter: {
+            server: "invalidSeparatorAdapter",
+            agent: "openclaw",
+            adapter: "future_config",
+            url: "https://api.githubcopilot.com/mcp/",
+            env: ["TOKEN"],
+            providerName: "mcp-safe-mcp-invalid-separator",
+            policyName: "mcp-bridge-invalid-separator",
             addedAt: new Date(0).toISOString(),
           },
           invalidProviderId: {
@@ -510,9 +530,10 @@ describe("registry", () => {
     });
 
     const bridges = registry.getSandbox("mcp-safe").mcp.bridges;
-    expect(Object.keys(bridges)).toEqual(["ok"]);
+    expect(Object.keys(bridges)).toEqual(["ok", "futureAdapter"]);
     expect(bridges.ok.url).toBe("https://api.githubcopilot.com/mcp/");
     expect(bridges.ok.env).toEqual(["GITHUB_TOKEN"]);
+    expect(bridges.futureAdapter.adapter).toBe("future-config");
   });
 
   it("updateSandbox returns false for nonexistent sandbox", () => {

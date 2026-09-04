@@ -2,13 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentMcpAdapter } from "../../agent/defs";
+import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import {
   assertAgentMcpMutationRuntimeCapability,
   assertAgentMcpTeardownRuntimeCapability,
 } from "./mcp-bridge-adapters";
 import { isAgentMcpAdapter } from "./mcp-bridge-contracts";
-import { getBridgeAdapter, getSandboxAgent } from "./mcp-bridge-state";
+import { getBridgeAdapter, getSandboxAgent, getSandboxHarnessPackage } from "./mcp-bridge-state";
+
+/** Retain the Hermes portable refusal only for sandboxes without package authority. */
+export function assertMcpCommandRuntimeAvailable(sandboxName: string, commandId: string): void {
+  if (getSandboxHarnessPackage(sandboxName)) return;
+  assertHermesPortableCommandUnavailable(sandboxName, commandId);
+}
 
 function adaptersForEntries(
   sandbox: SandboxEntry,

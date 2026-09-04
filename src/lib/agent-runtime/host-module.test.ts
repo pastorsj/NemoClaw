@@ -23,25 +23,78 @@ const SOURCE_IDENTITY = Object.freeze({
 
 const VALID_MODULE = `
 module.exports = {
-  buildMcpRegistrationCommand(request) {
-    return [
-      "future-register",
-      request.entry.server,
-      request.entry.headers.Authorization || "anonymous",
-      request.replaceExisting ? "replace" : "create",
-      String(request.managedEntries.length),
-      request.teardownRollback ? "rollback" : "active",
-      request.configRoot || "default-root",
-    ];
+  buildMcpRegistrationPlan(request) {
+    return {
+      execution: {
+        command: [
+          "future-register",
+          request.entry.server,
+          request.entry.headers.Authorization || "anonymous",
+          request.replaceExisting ? "replace" : "create",
+          String(request.managedEntries.length),
+          request.teardownRollback ? "rollback" : "active",
+          request.configDirectory || "default-directory",
+        ],
+        timeoutSeconds: 15,
+        success: { kind: "exit-zero" },
+        failureMessage: "Future registration failed",
+      },
+      verification: { kind: "inspection", failureMessage: "Future verification failed" },
+      credentialConvergence: { kind: "none" },
+    };
   },
-  buildMcpRemovalCommand(request) {
+  buildMcpRemovalPlan(request) {
+    return {
+      execution: {
+        command: [
+          "future-remove",
+          request.entry.server,
+          request.force ? "force" : "owned",
+          request.adaptiveTeardown ? "adaptive" : "current",
+          request.configDirectory || "default-directory",
+        ],
+        timeoutSeconds: 15,
+        success: { kind: "exit-zero" },
+        failureMessage: "Future removal failed",
+      },
+      outcome: { kind: "removed" },
+    };
+  },
+  buildMcpInspectionCommand(request) {
     return [
-      "future-remove",
+      "future-inspect",
       request.entry.server,
-      request.force ? "force" : "owned",
-      request.adaptiveTeardown ? "adaptive" : "current",
-      request.configRoot || "default-root",
-    ];
+      request.failOnMismatch ? "strict" : "observe",
+      request.configDirectory || "default-directory",
+    ].join(":");
+  },
+  describeMcpMutationCapability(request) {
+    return {
+      kind: "command",
+      command: ["future-probe", request.sandboxName],
+      success: { kind: "stdout-trimmed-equals", value: "FUTURE_MCP_READY" },
+      timeoutSeconds: 30,
+      failureMessage: "Future Harness MCP support is unavailable",
+    };
+  },
+  describeMcpTeardownCapability() {
+    return { kind: "not-required" };
+  },
+  describeMcpRuntimeIntentVerification(request) {
+    return {
+      kind: "command",
+      command: [
+        "future-verify",
+        String(request.entries.length),
+        request.managedServerNames.join(","),
+      ],
+      success: { kind: "exit-zero" },
+      timeoutSeconds: 10,
+      failureMessage: "Future runtime intent mismatch",
+    };
+  },
+  buildMcpRuntimeCommand(request) {
+    return ["future-runtime", ...request.command];
   },
 };
 `;
@@ -138,12 +191,12 @@ afterEach(() => {
 });
 
 describe("installed harness host module", () => {
-  it("loads a synthetic fourth harness through the fixed MCP command contract", () => {
+  it("loads a synthetic fourth harness through the fixed MCP plan contract", () => {
     const installed = installFuturePackage();
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
 
     expect(
-      module.buildMcpRegistrationCommand({
+      module.buildMcpRegistrationPlan({
         entry: {
           server: "docs",
           url: "https://example.test/mcp",
@@ -155,25 +208,70 @@ describe("installed harness host module", () => {
         ],
         replaceExisting: true,
         teardownRollback: false,
-        configRoot: "/sandbox/.future",
+        configDirectory: "/sandbox/.future",
       }),
-    ).toEqual([
-      "future-register",
-      "docs",
-      "Bearer placeholder",
-      "replace",
-      "2",
-      "active",
-      "/sandbox/.future",
-    ]);
+    ).toMatchObject({
+      execution: {
+        command: [
+          "future-register",
+          "docs",
+          "Bearer placeholder",
+          "replace",
+          "2",
+          "active",
+          "/sandbox/.future",
+        ],
+      },
+      verification: { kind: "inspection" },
+      credentialConvergence: { kind: "none" },
+    });
     expect(
-      module.buildMcpRemovalCommand({
+      module.buildMcpRemovalPlan({
         entry: { server: "docs", url: "https://example.test/mcp", headers: {} },
         force: true,
         adaptiveTeardown: true,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toEqual(["future-remove", "docs", "force", "adaptive", "default-root"]);
+    ).toMatchObject({
+      execution: {
+        command: ["future-remove", "docs", "force", "adaptive", "default-directory"],
+      },
+      outcome: { kind: "removed" },
+    });
+    expect(
+      module.buildMcpInspectionCommand({
+        entry: { server: "docs", url: "https://example.test/mcp", headers: {} },
+        failOnMismatch: true,
+        configDirectory: "/sandbox/.future",
+      }),
+    ).toBe("future-inspect:docs:strict:/sandbox/.future");
+    expect(module.describeMcpMutationCapability({ sandboxName: "future-sandbox" })).toEqual({
+      kind: "command",
+      command: ["future-probe", "future-sandbox"],
+      success: { kind: "stdout-trimmed-equals", value: "FUTURE_MCP_READY" },
+      timeoutSeconds: 30,
+      failureMessage: "Future Harness MCP support is unavailable",
+    });
+    expect(module.describeMcpTeardownCapability({ sandboxName: "future-sandbox" })).toEqual({
+      kind: "not-required",
+    });
+    expect(
+      module.describeMcpRuntimeIntentVerification({
+        entries: [{ server: "docs", url: "https://example.test/mcp", headers: {} }],
+        managedServerNames: ["docs", "search"],
+      }),
+    ).toEqual({
+      kind: "command",
+      command: ["future-verify", "1", "docs,search"],
+      success: { kind: "exit-zero" },
+      timeoutSeconds: 10,
+      failureMessage: "Future runtime intent mismatch",
+    });
+    expect(module.buildMcpRuntimeCommand({ command: ["node", "probe.mjs"] })).toEqual([
+      "future-runtime",
+      "node",
+      "probe.mjs",
+    ]);
   });
 
   it("rejects an installed package without the fixed MCP adapter file", () => {
@@ -215,34 +313,39 @@ describe("installed harness host module", () => {
     );
   });
 
-  it("rejects an MCP adapter that omits a required command builder", () => {
+  it("rejects an MCP adapter that omits a required plan builder", () => {
     const installed = installFuturePackage(
-      "module.exports = { buildMcpRegistrationCommand() { return 'register'; } };\n",
+      "module.exports = { buildMcpRegistrationPlan() { return {}; } };\n",
     );
 
     expect(() => loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot })).toThrow(
-      /must export buildMcpRemovalCommand/u,
+      /must export buildMcpRemovalPlan/u,
     );
   });
 
-  it("rejects a command builder that returns the wrong shape", () => {
+  it("rejects a plan builder that returns the wrong shape", () => {
     const installed = installFuturePackage(`
 module.exports = {
-  buildMcpRegistrationCommand() { return { command: "register" }; },
-  buildMcpRemovalCommand() { return ["remove"]; },
+  buildMcpRegistrationPlan() { return { command: "register" }; },
+  buildMcpRemovalPlan() { return { command: "remove" }; },
+  buildMcpInspectionCommand() { return "inspect"; },
+  describeMcpMutationCapability() { return { kind: "not-required" }; },
+  describeMcpTeardownCapability() { return { kind: "not-required" }; },
+  describeMcpRuntimeIntentVerification() { return { kind: "not-required" }; },
+  buildMcpRuntimeCommand() { return "runtime"; },
 };
 `);
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
 
     expect(() =>
-      module.buildMcpRegistrationCommand({
+      module.buildMcpRegistrationPlan({
         entry: { server: "docs", url: "https://example.test/mcp", headers: {} },
         managedEntries: [],
         replaceExisting: false,
         teardownRollback: false,
-        configRoot: null,
+        configDirectory: null,
       }),
-    ).toThrow(/returned an invalid command/u);
+    ).toThrow(/returned an invalid registration plan/u);
   });
 
   it("validates requests before package code receives them", () => {
@@ -253,23 +356,56 @@ module.exports = {
       managedEntries: [],
       replaceExisting: "yes",
       teardownRollback: false,
-      configRoot: null,
-    } as unknown as Parameters<typeof module.buildMcpRegistrationCommand>[0];
+      configDirectory: null,
+    } as unknown as Parameters<typeof module.buildMcpRegistrationPlan>[0];
 
-    expect(() => module.buildMcpRegistrationCommand(invalidRequest)).toThrow(
+    expect(() => module.buildMcpRegistrationPlan(invalidRequest)).toThrow(
       /request does not satisfy its schema/u,
+    );
+  });
+
+  it("rejects raw shell text from the runtime wrapper operation", () => {
+    const installed = installFuturePackage(
+      VALID_MODULE.replace(
+        'return ["future-runtime", ...request.command];',
+        'return ["future-runtime", ...request.command].join(" ");',
+      ),
+    );
+    const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() => module.buildMcpRuntimeCommand({ command: ["node", "probe.mjs"] })).toThrow(
+      /returned an invalid runtime argument vector/u,
     );
   });
 
   it("gives package code a detached frozen request and freezes its result", () => {
     const installed = installFuturePackage(`
 module.exports = {
-  buildMcpRegistrationCommand(request) {
+  buildMcpRegistrationPlan(request) {
     try { request.entry.server = "changed"; } catch {}
     try { request.managedEntries.push(request.entry); } catch {}
-    return [request.entry.server, String(request.managedEntries.length)];
+    return {
+      execution: {
+        command: [request.entry.server, String(request.managedEntries.length)],
+        timeoutSeconds: 15,
+        success: { kind: "exit-zero" },
+        failureMessage: "Future registration failed",
+      },
+      verification: { kind: "inspection", failureMessage: "Future verification failed" },
+      credentialConvergence: { kind: "none" },
+    };
   },
-  buildMcpRemovalCommand() { return ["remove"]; },
+  buildMcpRemovalPlan() {
+    return {
+      execution: { command: ["remove"], timeoutSeconds: 15, success: { kind: "exit-zero" }, failureMessage: "Future removal failed" },
+      outcome: { kind: "removed" },
+    };
+  },
+  buildMcpInspectionCommand() { return "inspect"; },
+  describeMcpMutationCapability() { return { kind: "not-required" }; },
+  describeMcpTeardownCapability() { return { kind: "not-required" }; },
+  describeMcpRuntimeIntentVerification() { return { kind: "not-required" }; },
+  buildMcpRuntimeCommand() { return "runtime"; },
 };
 `);
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
@@ -278,23 +414,38 @@ module.exports = {
       managedEntries: [],
       replaceExisting: false,
       teardownRollback: false,
-      configRoot: null,
+      configDirectory: null,
     };
 
-    const command = module.buildMcpRegistrationCommand(request);
+    const plan = module.buildMcpRegistrationPlan(request);
 
-    expect(command).toEqual(["docs", "0"]);
-    expect(Object.isFrozen(command)).toBe(true);
+    expect(plan.execution.command).toEqual(["docs", "0"]);
+    expect(Object.isFrozen(plan)).toBe(true);
+    expect(Object.isFrozen(plan.execution.command)).toBe(true);
     expect(request.entry.server).toBe("docs");
     expect(request.managedEntries).toEqual([]);
+  });
+
+  it("rejects capability data outside the fixed probe descriptions", () => {
+    const installed = installFuturePackage(
+      VALID_MODULE.replace(
+        'describeMcpTeardownCapability() {\n    return { kind: "not-required" };\n  }',
+        'describeMcpTeardownCapability() {\n    return { kind: "callback", module: "probe.js" };\n  }',
+      ),
+    );
+    const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() => module.describeMcpTeardownCapability({ sandboxName: "future-sandbox" })).toThrow(
+      /returned an invalid teardown capability probe/u,
+    );
   });
 
   it("rejects package modules that import host dependencies", () => {
     const installed = installFuturePackage(`
 require("node:fs");
 module.exports = {
-  buildMcpRegistrationCommand() { return "register"; },
-  buildMcpRemovalCommand() { return "remove"; },
+  buildMcpRegistrationPlan() { return {}; },
+  buildMcpRemovalPlan() { return {}; },
 };
 `);
 

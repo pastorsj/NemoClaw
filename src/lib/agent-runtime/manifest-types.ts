@@ -41,7 +41,7 @@ export type AgentStateDirectory = AgentStateDirectoryPath | AgentStateDirectoryP
 
 export type AgentStateFileStrategy = "copy" | "sqlite_backup";
 
-export type StateFileRestoreMerge = "key-allowlist" | "openclaw-config";
+export type StateFileRestoreMerge = "key-allowlist" | "package-config" | "openclaw-config";
 
 export type StateFileUserKeyType = "boolean" | "string" | "integer" | "number" | "enum";
 
@@ -73,8 +73,16 @@ export interface StateFileOpenClawRestoreOwnership {
   requireFreshHeaders?: never;
 }
 
+export interface StateFilePackageConfigRestoreOwnership {
+  merge: "package-config";
+  userKeys?: never;
+  requireFreshTables?: never;
+  requireFreshHeaders?: never;
+}
+
 export type StateFileRestoreOwnership =
   | StateFileKeyAllowlistRestoreOwnership
+  | StateFilePackageConfigRestoreOwnership
   | StateFileOpenClawRestoreOwnership;
 
 export interface AgentStateFile {
@@ -102,12 +110,26 @@ export interface AgentInference {
 export type AgentMcpSupport = "bridge" | "disabled";
 export type AgentMcpAdapter = string;
 
-export interface AgentMcpCapability {
-  support: AgentMcpSupport;
-  adapter?: AgentMcpAdapter;
-  policy_binaries?: readonly string[];
-  reason?: string;
+const AGENT_MCP_ADAPTER_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+
+/** Accept the canonical adapter identifier shared by manifests and durable state. */
+export function isAgentMcpAdapter(value: unknown): value is AgentMcpAdapter {
+  return typeof value === "string" && AGENT_MCP_ADAPTER_RE.test(value);
 }
+
+export type AgentMcpCapability =
+  | {
+      support: "bridge";
+      adapter: AgentMcpAdapter;
+      policy_binaries?: readonly string[];
+      reason?: string;
+    }
+  | {
+      support: "disabled";
+      adapter?: never;
+      policy_binaries?: never;
+      reason?: string;
+    };
 
 export interface AgentLegacyPaths {
   dockerfileBase: string | null;

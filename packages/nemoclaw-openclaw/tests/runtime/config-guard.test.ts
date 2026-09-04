@@ -7,12 +7,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { openRegularFileNoFollow } from "../../../../src/lib/adapters/fs/regular-file";
+import { loadPackageHostModule } from "../helpers/host-module";
+import { openFixtureRegularFile } from "../helpers/regular-file";
 
 const OPENCLAW_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const GUARD_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "runtime/config-guard.py");
 const JSON5_MODULE_PATH = path.join(OPENCLAW_PACKAGE_ROOT, "plugin/node_modules/json5");
 const fixtures: string[] = [];
+const configAdapter = loadPackageHostModule<{
+  prepareConfigUpdate(request: Record<string, unknown>): {
+    readonly kind: "immutable" | "transaction";
+    readonly write?: {
+      readonly success: {
+        readonly kind: string;
+        readonly protectedFiles?: readonly string[];
+      };
+    };
+  };
+}>("config-adapter.cts");
 const RUN_AS_CURRENT_USER = String.raw`
 import importlib.util
 import hashlib
@@ -415,10 +427,23 @@ describe("openclaw-config-guard", () => {
         status: "ok",
         configSha256: replacementDigest,
       });
+      const adapterPlan = configAdapter.prepareConfigUpdate({
+        config: {},
+        serializedConfig: replacement.toString("utf8"),
+        expectedConfigSha256: expected,
+        target: {
+          directory: "/sandbox/.openclaw",
+          file: "openclaw.json",
+          format: "json",
+          sensitiveFiles: [],
+        },
+      });
+      expect(adapterPlan.kind).toBe("transaction");
+      expect(result.lines.at(-1)?.files).toEqual(adapterPlan.write?.success.protectedFiles);
       expect(mode(root)).toBe(0o755);
       expect(mode(configDir)).toBe(0o2770);
-      const currentConfig = openRegularFileNoFollow(configPath);
-      const currentHash = openRegularFileNoFollow(hashPath);
+      const currentConfig = openFixtureRegularFile(configPath);
+      const currentHash = openFixtureRegularFile(hashPath);
       try {
         expect(currentConfig.stat().mode & 0o777).toBe(0o660);
         expect(currentHash.stat().mode & 0o777).toBe(0o660);
@@ -792,8 +817,8 @@ describe("openclaw-config-guard", () => {
       });
       expect(mode(root)).toBe(0o1775);
       expect(mode(configDir)).toBe(0o755);
-      const currentConfig = openRegularFileNoFollow(configPath);
-      const currentHash = openRegularFileNoFollow(hashPath);
+      const currentConfig = openFixtureRegularFile(configPath);
+      const currentHash = openFixtureRegularFile(hashPath);
       let sealedConfigInode = -1;
       let sealedHashInode = -1;
       try {

@@ -3,7 +3,6 @@
 
 import YAML from "yaml";
 
-import { listAgents, loadAgent, type AgentMcpAdapter } from "../../agent/defs";
 import {
   type McpBridgeTargetValidation,
   parseMcpUrlWithValidatedTarget,
@@ -11,6 +10,7 @@ import {
 import { validateMcpServerName } from "./mcp-bridge-validation";
 
 export const MCP_BRIDGE_POLICY_MAX_BODY_BYTES = 131_072;
+const MCP_POLICY_BINARY_PATH_RE = /^\/(?:[A-Za-z0-9._+-]+\/)*[A-Za-z0-9._+-]+\*?$/u;
 export const MCP_BRIDGE_ALLOWED_METHODS = [
   "initialize",
   "notifications/initialized",
@@ -57,33 +57,36 @@ function endpointPath(url: URL): string {
   return url.pathname || "/";
 }
 
-function resolveMcpPolicyBinaryPaths(adapter: AgentMcpAdapter): readonly string[] {
-  const matchingAgents = listAgents()
-    .map((name) => loadAgent(name))
-    .filter(
-      (agent) =>
-        agent.mcpCapability.support === "bridge" && agent.mcpCapability.adapter === adapter,
-    );
-
-  if (matchingAgents.length === 0) {
-    throw new Error(`No installed agent manifest declares MCP adapter '${adapter}'.`);
+function validatePolicyBinaryPaths(policyBinaries: readonly string[]): readonly string[] {
+  if (policyBinaries.length === 0) {
+    throw new Error("Generated MCP policy requires at least one manifest-declared binary path.");
   }
-  if (matchingAgents.length > 1) {
-    throw new Error(`Multiple installed agent manifests declare MCP adapter '${adapter}'.`);
-  }
-
-  const policyBinaries = matchingAgents[0]?.mcpCapability.policy_binaries;
-  if (!policyBinaries?.length) {
-    throw new Error(`MCP adapter '${adapter}' has no manifest-declared policy binaries.`);
-  }
-  return policyBinaries;
+  const seen = new Set<string>();
+  return policyBinaries.map((binaryPath, index) => {
+    const segments = typeof binaryPath === "string" ? binaryPath.slice(1).split("/") : [];
+    if (
+      typeof binaryPath !== "string" ||
+      !MCP_POLICY_BINARY_PATH_RE.test(binaryPath) ||
+      binaryPath.includes("\\") ||
+      segments.some((segment) => segment === "." || segment === "..")
+    ) {
+      throw new Error(
+        `Generated MCP policy binary path ${String(index)} must be canonical and absolute.`,
+      );
+    }
+    if (seen.has(binaryPath)) {
+      throw new Error(`Generated MCP policy binary path ${String(index)} is duplicated.`);
+    }
+    seen.add(binaryPath);
+    return binaryPath;
+  });
 }
 
 function renderMcpBridgePolicyYaml(
   server: string,
   url: string,
-  adapter: AgentMcpAdapter,
   target: McpBridgeTargetValidation,
+  policyBinaries: readonly string[],
   providerName?: string,
 ): string {
   const parsed = parseMcpUrlWithValidatedTarget(url, target);
@@ -116,7 +119,7 @@ function renderMcpBridgePolicyYaml(
             rules: MCP_BRIDGE_ALLOWED_METHODS.map((method) => ({ allow: { method } })),
           },
         ],
-        binaries: resolveMcpPolicyBinaryPaths(adapter).map((path) => ({ path })),
+        binaries: validatePolicyBinaryPaths(policyBinaries).map((path) => ({ path })),
       },
     },
   });
@@ -125,22 +128,22 @@ function renderMcpBridgePolicyYaml(
 export function buildMcpBridgePolicyYaml(
   server: string,
   url: string,
-  adapter: AgentMcpAdapter,
   target: McpBridgeTargetValidation,
+  policyBinaries: readonly string[],
   providerName: string,
 ): string {
   if (providerName.trim() !== providerName || providerName.length === 0) {
     throw new Error("Generated MCP credential binding requires an exact provider name.");
   }
-  return renderMcpBridgePolicyYaml(server, url, adapter, target, providerName);
+  return renderMcpBridgePolicyYaml(server, url, target, policyBinaries, providerName);
 }
 
 /** Render the temporary credential-free policy used before first provider attachment. */
 export function buildMcpBridgeCapabilityPolicyYaml(
   server: string,
   url: string,
-  adapter: AgentMcpAdapter,
   target: McpBridgeTargetValidation,
+  policyBinaries: readonly string[],
 ): string {
-  return renderMcpBridgePolicyYaml(server, url, adapter, target);
+  return renderMcpBridgePolicyYaml(server, url, target, policyBinaries);
 }

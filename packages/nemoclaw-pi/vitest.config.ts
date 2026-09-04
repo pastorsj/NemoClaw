@@ -23,6 +23,7 @@ export default defineConfig({
     maxWorkers: 4,
     include: [
       "tests/config/**/*.test.ts",
+      "tests/host/**/*.test.ts",
       "tests/image/**/*.test.ts",
       "tests/runtime/**/*.test.ts",
     ],

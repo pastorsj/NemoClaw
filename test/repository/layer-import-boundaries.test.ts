@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -32,10 +33,10 @@ function namedActionFixturePath(extension = ".mts"): string {
   );
 }
 
-function scanFixture(fixture: string, source: string) {
+function scanFixture(fixture: string, source: string, packagesRoot?: string) {
   try {
     fs.writeFileSync(fixture, source);
-    return findLayerImportBoundaryViolations(fixture);
+    return findLayerImportBoundaryViolations(fixture, packagesRoot);
   } finally {
     fs.rmSync(fixture, { force: true });
   }
@@ -48,6 +49,69 @@ describe("CLI layer import boundaries (#6245)", () => {
 
   it("keeps managed runtime orchestration provider-neutral (#9145)", () => {
     expect(findManagedRuntimeBoundaryViolations()).toEqual([]);
+  });
+
+  it.each([
+    ["a static import", 'import "@nvidia/nemoclaw-pi";\n'],
+    ["a re-export", 'export * from "@nvidia/nemoclaw-pi/runtime";\n'],
+    ["CommonJS require", 'require("@nvidia/nemoclaw-pi");\n'],
+    ["a dynamic import", 'void import("@nvidia/nemoclaw-pi/runtime");\n'],
+  ])("blocks %s from an agent runtime package", (_case, source) => {
+    expect(scanFixture(fixturePath("src/lib", "agent-runtime-package"), source)).toEqual([
+      expect.objectContaining({
+        rule: "core-no-agent-runtime-package-imports",
+        detail:
+          "core source must use the typed agent runtime package contract instead of importing @nvidia/nemoclaw-pi",
+      }),
+    ]);
+  });
+
+  it("blocks a relative import from an agent runtime package", () => {
+    const fixture = fixturePath("src/lib", "relative-agent-runtime-package");
+    const target = path.join(REPO_ROOT, "packages/nemoclaw-openclaw/compat/npm-remediation.mts");
+    const specifier = path.relative(path.dirname(fixture), target).split(path.sep).join("/");
+
+    expect(scanFixture(fixture, `import ${JSON.stringify(specifier)};\n`)).toEqual([
+      expect.objectContaining({
+        rule: "core-no-agent-runtime-package-imports",
+        detail: expect.stringContaining("@nvidia/nemoclaw-openclaw"),
+      }),
+    ]);
+  });
+
+  it("discovers an agent runtime package from package metadata", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-packages-"));
+    const packageRoot = path.join(packagesRoot, "custom-runtime");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/custom-runtime",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      }),
+    );
+    try {
+      expect(
+        scanFixture(
+          fixturePath("src/lib", "metadata-agent-runtime-package"),
+          'import "@example/custom-runtime";\n',
+          packagesRoot,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          rule: "core-no-agent-runtime-package-imports",
+          detail: expect.stringContaining("@example/custom-runtime"),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("does not classify shared NeMo Fabric infrastructure as an agent runtime package", () => {
+    expect(
+      scanFixture(fixturePath("src/lib", "fabric-package"), 'import "nemoclaw-fabric";\n'),
+    ).toEqual([]);
   });
 
   it("collects TypeScript import-equals references (#6245)", () => {
@@ -118,9 +182,7 @@ describe("CLI layer import boundaries (#6245)", () => {
     const violations = scanFixture(fixturePath("src/lib", "bin-lib-call"), source);
 
     expect(violations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ rule: "src-no-bin-lib-shims" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ rule: "src-no-bin-lib-shims" })]),
     );
   });
 
@@ -270,12 +332,8 @@ describe("CLI layer import boundaries (#6245)", () => {
         "src/lib/domain",
         `emitted-specifier-importer-${sourceExtension.slice(1)}`,
       );
-    const specifier = path
-      .relative(path.dirname(importer), target)
-      .split(path.sep)
-        .join("/");
-      const emittedSpecifier =
-        specifier.slice(0, -sourceExtension.length) + emittedExtension;
+      const specifier = path.relative(path.dirname(importer), target).split(path.sep).join("/");
+      const emittedSpecifier = specifier.slice(0, -sourceExtension.length) + emittedExtension;
       try {
         fs.writeFileSync(target, "export const value = true;\n");
         fs.writeFileSync(

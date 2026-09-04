@@ -3,12 +3,8 @@
 
 # Agent runtime packages
 
-This directory contains the in-tree agent runtime package implementation for NemoClaw.
-The implementation is a product-scope candidate, not an approved support or distribution policy.
-The registry discovers packages through data-only manifests and installation receipts.
-Onboarding and lifecycle commands can run package-owned helpers after receipt verification.
-
-Run these commands to inspect or install a package:
+An agent runtime package contains the native code and assets that connect one agent runtime to
+NemoClaw. The public install command retains `harness` in its literal name:
 
 ```bash
 nemoclaw harness list
@@ -16,23 +12,100 @@ nemoclaw harness install
 nemoclaw harness install <id>
 ```
 
-Installation copies a bundled package to `~/.nemoclaw/harnesses`.
-The bare install command presents packages that are available to install.
-`nemoclaw harness list` separates installed packages from packages that remain available.
-`nemoclaw agents list` and onboarding expose only installed agent runtime packages.
-Onboarding stops before configuration begins when no package is installed.
-Onboarding selects one installed agent runtime automatically and presents a picker when multiple
-agent runtimes are installed.
+This implementation is a local product-scope candidate. It does not establish a supported package
+API, external distribution policy, or compatibility promise. Those claims require an accepted
+design decision with an `Accept` outcome, accountable maintainer, and validation plan.
 
-## Package contract
+## Architecture thesis
 
-The common interface is deliberately small. NemoClaw discovers package metadata and a data-only
-manifest, builds the package images, starts the declared runtime, and invokes one fixed native
-configuration command. The package owns native translation, while core validates and coordinates
-the product transaction around it.
+NemoClaw composes an installed package. It does not implement the selected agent runtime.
 
-Each package must use the directory name `packages/nemoclaw-<id>`.
-Its `package.json` must contain these fields:
+- Core owns user intent, package identity, credentials, policy authorization, OpenShell mutation,
+  transaction order, rollback, durable state, platform readiness, runtime providers, and serving
+  runtimes.
+- A package owns every rule whose correct result changes when the selected agent runtime changes.
+- The manifest supplies validated data.
+- Fixed sandbox commands perform native work that belongs inside the image.
+- A finite typed host adapter returns a bounded plan when core must coordinate a protected
+  transaction.
+- NeMo Fabric supplies the package-selected headless invocation path. It does not replace the host
+  contract or NemoClaw control plane.
+
+For covered operations, this boundary lets OpenClaw, Hermes, LangChain Deep Agents Code, Pi, and
+later packages evolve without adding agent-name branches to core. Other lifecycle paths remain in
+the migration inventory.
+
+## Repository layout
+
+```text
+packages/
+├── README.md
+├── nemoclaw-fabric/                    generic headless Fabric runner
+├── nemoclaw-openclaw/                  OpenClaw package
+├── nemoclaw-hermes/                    Hermes package
+├── nemoclaw-langchain-deepagents-code/ Deep Agents Code package
+└── nemoclaw-pi/                        Pi package candidate
+```
+
+`nemoclaw-fabric` is shared runtime infrastructure. It reads a package-owned Fabric configuration
+and invokes the selected Fabric adapter. It does not discover packages or contain an agent
+catalogue.
+
+Each agent runtime package follows this workflow:
+
+```text
+package identity
+-> declarative manifest
+-> image assembly
+-> native configuration
+-> sandbox startup
+-> optional host plans
+-> package tests
+-> revision-pinned composition
+-> bounded live qualification
+```
+
+The shared folder names state responsibility. A package creates only the folders it uses.
+
+```text
+packages/nemoclaw-<id>/
+├── README.md              package workflow and compatibility notes
+├── package.json           package identity, scripts, and manifest location
+├── manifest.yaml          data-only capabilities and runtime metadata
+├── Dockerfile.base        pinned upstream dependency layer
+├── Dockerfile             NemoClaw image assembly
+├── start.sh               sandbox process entry point
+├── policy-additions.yaml  baseline network policy
+├── config/                native configuration generation
+├── host/                  typed adapters and other package-owned host code
+├── runtime/               fixed commands and guards inside the sandbox
+├── fabric/                released or package-owned Fabric adapter inputs
+├── compat/                upstream-version patches and workarounds
+├── plugin/                native runtime plugin, when required
+├── policies/              package-owned policy data
+├── provider-profiles/     package-owned provider profile data
+├── model-specific-setup/  package-owned compatibility data
+├── checks/                build and image checks
+└── tests/
+    ├── config/
+    ├── host/
+    ├── runtime/
+    ├── compat/
+    ├── image/
+    ├── fabric/
+    ├── integration/
+    ├── fixtures/
+    └── helpers/
+```
+
+File names use one or two words when those words identify the responsibility. Use a third word
+only when shorter text is ambiguous. Function names use enough words to state the semantic action
+and object. Do not add empty folders to make two packages look alike.
+
+## Package identity
+
+Each package uses the directory name `packages/nemoclaw-<id>`. Its `package.json` names the
+manifest:
 
 ```json
 {
@@ -42,183 +115,271 @@ Its `package.json` must contain these fields:
 }
 ```
 
-The package name can be scoped or unscoped, but its basename must be `nemoclaw-<id>`.
-The manifest must be `manifest.yaml` at the package root. The package directory, package-name
-basename, and manifest `name` must use the same ID.
-The registry rejects symbolic links, and normal discovery rejects invalid package metadata.
-A refresh can replace an older receipt-managed package when its tracked content matches its receipt.
-Receipt tracking ignores entries named `.git`, `.DS_Store`, `node_modules`, and `__pycache__`.
-Discovery reads package data without importing a package module.
-Package-owned host helpers must not load executable code from receipt-ignored paths.
-The registry rejects credential-shaped build-context paths before installation.
+The package name can be scoped or unscoped. Its basename, directory suffix, and manifest `name`
+must contain the same ID. The manifest stays at the package root.
 
-Treat each installed agent runtime package as trusted code.
-Package-owned helpers can receive NemoClaw-held credentials and use the current user's Docker or OpenShell control.
-The receipt detects tracked path, type, content, and executable-bit changes after installation.
-It does not authenticate the package publisher or validate package behavior.
+Every installable package contains these non-empty regular files:
 
-Every agent runtime package must include the agent manifest named by
-`nemoclaw.harnessManifest` and these files:
+- `package.json`
+- `manifest.yaml`
+- `Dockerfile.base`
+- `Dockerfile`
+- `start.sh`
+- `policy-additions.yaml`
 
-- `manifest.yaml` declares runtime identity, configuration paths, state, ports, and capabilities.
-- `Dockerfile.base` builds the sandbox base image.
-- `Dockerfile` builds the agent runtime image.
-- `start.sh` starts the agent runtime in the sandbox.
-- `policy-additions.yaml` defines the agent runtime's baseline network policy.
+`start.sh` must be executable. A package normally includes `README.md`, but the registry does not
+require or execute it. The registry rejects symbolic links, invalid metadata, and
+credential-shaped build-context paths.
 
-The bundled examples also include `README.md` at the package root. The registry does not execute or
-require that documentation, so adding it does not change installation compatibility.
+Installation copies reviewed package bytes into the private package store under
+`~/.nemoclaw/harnesses`. The store publishes three related records in order:
 
-The registry requires each file to be a non-empty regular file and requires `start.sh` to be
-executable. Packages can also include these optional paths:
+1. An immutable object addressed by its content digest.
+2. An immutable receipt that binds package ID, version, source identity, and content digest.
+3. An active pointer for the installed package ID.
 
-- `policies/permissive.yaml` optionally defines the agent runtime's Shields down policy.
-- `policies/presets/` optionally contains policy presets available only to this agent runtime.
-- `provider-profiles/` optionally contains package-owned OpenShell provider profiles.
-- `model-specific-setup/` optionally contains compatibility manifests for this agent runtime.
-- `plugin/` optionally contains an agent runtime plugin.
+The receipt detects changes to tracked paths, file types, file content, and executable bits. It
+does not authenticate the publisher or prove package behavior. Treat an installed package as
+trusted code. A host helper can receive credential placeholders and can influence a command that
+core later executes with the user's OpenShell authority.
 
-Use these responsibility directories when the package needs them:
+Receipt tracking ignores `.git`, `.DS_Store`, `node_modules`, and `__pycache__` entries. A package
+helper must not load executable code from those paths.
 
-- `config/` contains build-time native configuration code.
-- `fabric/` contains the Fabric dependency lock and package-owned adapter when the agent runtime
-  does not use a released adapter.
-- `runtime/` contains commands and helpers that run inside the sandbox.
-- `host/` contains receipt-verified transition helpers that NemoClaw core still executes.
-- `compat/` contains patches and workarounds bound to an upstream agent runtime version.
-- `checks/` contains package-owned build and behavior checks.
+## Manifest and fixed commands
 
-A package that participates in managed startup must provide an executable
-`runtime/generate-config.sh`. Its image installs that file as the root-owned,
-non-symbolic-link command `/usr/local/lib/nemoclaw/generate-config` with mode `0555`.
-The command translates NemoClaw's managed startup environment into the agent runtime's native
-configuration. NemoClaw core invokes the fixed command path and does not select the native
-generator by agent ID.
+Use `manifest.yaml` for bounded data that core can validate without executing package code. It
+declares identity, commands, ports, health, state, configuration paths, runtime metadata, and
+capabilities.
 
-Shared directory names describe shared responsibilities. Packages do not need empty directories or
-identical internal files. File names use the shortest one- or two-word name that states the
-responsibility; use a third word only when removing it makes the name ambiguous.
-
-Keep each bundled `start.sh` at or below 1,000 lines so it can read as a workflow, and move a
-cohesive implementation behind a descriptive module when it has an independent responsibility.
-Generated locks and inventories, version-bound source patches, and atomic security or rollback
-protocols can remain large when splitting them would separate validation from mutation. Name that
-debt in the package README instead of hiding it behind generic helper files.
-
-A complete package reads in this order:
+Use a fixed command inside the sandbox when the package can perform the native operation there.
+For managed startup, the image installs `runtime/generate-config.sh` as:
 
 ```text
-nemoclaw-<id>/
-├── README.md              package workflow and compatibility debt
-├── package.json           package identity and manifest location
-├── manifest.yaml          data-only runtime capabilities and paths
-├── Dockerfile.base        pinned upstream dependency layer
-├── Dockerfile             NemoClaw runtime image assembly
-├── start.sh               sandbox process entry point
-├── policy-additions.yaml  baseline network policy
-├── config/                native configuration translation
-├── fabric/                Fabric adapter or released-adapter dependency lock
-├── runtime/               commands and guards used inside the sandbox
-├── host/                  bounded receipt-verified transition helpers
-├── compat/                version-bound upstream adaptations
-├── plugin/                native plugin code, when the runtime supports it
-└── checks/                package-owned build and behavior checks
+/usr/local/lib/nemoclaw/generate-config
 ```
 
-Only the root contract is universal. A package adds a responsibility directory when it has that
-responsibility; it does not add empty folders to resemble another package.
+The installed command must be a root-owned regular file with mode `0555`. Core invokes that fixed
+path. It does not select a native generator by agent ID.
 
-## Package tests
+The current managed-startup planner accepts only IDs in `MANAGED_STARTUP_AGENTS`. The fixed command
+gives those packages one native configuration entry point, but it does not let a new package enter
+managed startup without a core change. Profile construction, environment projection, the startup
+coordinator, and post-plan application also use the closed agent set.
 
-Each package root exposes the same contributor commands:
+Static data and fixed commands are preferable to host adapters. Add a host operation only when
+core must retain authorization, credentials, transaction order, or rollback around package-native
+translation.
+
+## Typed host adapter
+
+The adapter API is a closed map of semantic operations. Core defines every host module path, export
+name, request type, result type, JSON Schema, and byte limit. The manifest can declare a
+capability, but it cannot select a host module or export.
+
+The current adapter contracts cover Model Context Protocol (MCP), runtime configuration, and
+configuration restore behavior.
+
+Here, *typed* describes the core operation map, its TypeScript request and result types, and its
+runtime JSON Schemas. Package adapter files use self-contained CommonJS source with the `.cts`
+extension. The package TypeScript configurations do not compile those files. Runtime schema
+validation and package behavior tests enforce their current boundary; compile-time checking of the
+package implementations remains future work.
+
+The current files are:
+
+```text
+src/lib/agent-runtime/adapter/
+├── contract.ts  typed contract and operation definitions
+├── schema.ts    bounded JSON clone, validation, and freezing
+├── loader.ts    receipt-bound module loading
+├── mcp.ts       MCP request, result, and operation definitions
+└── config.ts    configuration and restore definitions
+
+src/lib/agent-runtime/
+├── host-module.ts    typed MCP loader facade
+└── config-module.ts  typed configuration and restore loader facade
+```
+
+### MCP operations
+
+An MCP-capable package provides `host/mcp-adapter.cts` with these exports:
+
+| Operation | Fixed export | Result |
+| --- | --- | --- |
+| `register` | `buildMcpRegistrationPlan` | Registration execution, verification, and credential-convergence plan |
+| `remove` | `buildMcpRemovalPlan` | Removal execution and outcome plan |
+| `inspect` | `buildMcpInspectionCommand` | Inspection shell command |
+| `mutationCapability` | `describeMcpMutationCapability` | Typed capability probe |
+| `teardownCapability` | `describeMcpTeardownCapability` | Typed capability probe |
+| `verifyRuntimeIntent` | `describeMcpRuntimeIntentVerification` | Typed runtime-intent probe |
+| `runtime` | `buildMcpRuntimeCommand` | Typed argument vector for one runtime command |
+
+Read the implementation in this order:
+
+1. [`contract.ts`](../src/lib/agent-runtime/adapter/contract.ts) defines the closed typed map.
+2. [`mcp.ts`](../src/lib/agent-runtime/adapter/mcp.ts) defines the seven operations and schemas.
+3. [`loader.ts`](../src/lib/agent-runtime/adapter/loader.ts) enforces package identity and the
+   execution boundary.
+4. The [Hermes](nemoclaw-hermes/host/mcp-adapter.cts),
+   [OpenClaw](nemoclaw-openclaw/host/mcp-adapter.cts), and
+   [Deep Agents Code](nemoclaw-langchain-deepagents-code/host/mcp-adapter.cts) modules translate
+   the typed requests into native plans.
+5. [`package-command.ts`](../src/lib/actions/sandbox/mcp-bridge/package-command.ts) adapts those
+   plans to the existing core transaction.
+
+The builders must preserve the package's native grammar and all declared request semantics.
+Registration and removal return bounded transaction plans. Inspection returns shell source.
+`buildMcpRuntimeCommand` returns an argument vector; core quotes each argument before it constructs
+the bridge-owned shell command. Capability builders return either `not-required` or a bounded
+command probe with typed success criteria. None of these exports executes a command.
+
+Core reads the manifest capability before it loads this module. A package that does not declare
+MCP receives a typed validation error before adapter load. Direct loader calls also reject a
+manifest that does not declare the capability before module evaluation. There is no no-op adapter
+or alternate result contract.
+
+### Configuration operations
+
+A package can provide `host/config-adapter.cts` with three fixed exports:
+
+| Operation | Fixed export | Result |
+| --- | --- | --- |
+| `prepareUpdate` | `prepareConfigUpdate` | `immutable` result or bounded update transaction plan |
+| `classifyUrl` | `classifyConfigUrl` | URL policy flags for core SSRF validation |
+| `describeMutable` | `describeMutableConfig` | `not-required`, `stat`, or bounded probe plan |
+
+OpenClaw, Hermes, Deep Agents Code, and Pi provide this module. Deep Agents Code and Pi return
+`immutable` because their runtime configuration is materialized by the image. Core retains parsing,
+server-side request forgery (SSRF) checks, credential handling, privileged execution, locks, digest
+checks, readback verification, and restart coordination. A sandbox without a package receipt can
+still use the current legacy core compatibility path. When a package receipt exists, a missing,
+invalid, or receipt-mismatched module fails closed.
+
+Core calls `classifyConfigUrl` for each URL leaf in a nested value. The package receives the
+selected key and the leaf's relative path. An allowance for one leaf cannot authorize its sibling.
+Validation commands and mutable-configuration probe or repair commands can prove success only by
+exiting with status zero. Only the write command can use the structured `config-transaction`
+proof. OpenClaw's write proof protects
+`["openclaw.json", ".config-hash", "fabric.json"]`.
+
+OpenClaw also provides `host/restore-adapter.cts`. Its `mergeConfigState` export returns merged
+content with a finite write plan, or a typed refusal. The `config-anchors` write plan names
+`["openclaw.json", "fabric.json"]` as its hash inputs. Core retains snapshot authority, protected
+reads, atomic apply, and rollback. Other restore strategies remain core-owned, so configuration and
+restore extraction is not complete.
+
+Core applies this sequence for each adapter call:
+
+1. Resolve the exact package identity recorded for the sandbox.
+2. Resolve the immutable package object and receipt.
+3. Validate the package manifest against the core-owned capability schema.
+4. Validate the package tree and compare its digest with the receipt.
+5. Read the core-owned fixed module path as a bounded regular file.
+6. Revalidate tree authority after the read.
+7. Evaluate the self-contained module without passing host capabilities or an import loader.
+8. Clone, bound, validate, and freeze the request.
+9. Call the named export.
+10. Clone, bound, validate, and freeze the result.
+11. Let core authorize and execute the resulting transaction.
+
+A configuration write retains the selected package receipt, receipt-pinned agent definition, and
+returned plan across validation. Under the mutation lock, core reloads the same package identity,
+rebuilds the plan, and requires equality before it writes. An ambient active-pointer change cannot
+redirect the transaction. A changed sandbox receipt or plan stops it.
+
+Receipt-backed MCP calls also fail instead of using a core native translator. Sandboxes without a
+package receipt still use the compatibility dispatch in
+`src/lib/actions/sandbox/mcp-bridge/legacy-mutation.ts`. Retained source includes the legacy
+branches in `mcp-bridge-adapters.ts`, the `mcp-bridge-adapter-deepagents-*.ts` helpers,
+`mcp-bridge/deepagents-legacy-config.ts`, and their focused `*.test.ts` files. This is migration
+debt, not part of the typed package contract.
+
+The module must be synchronous and self-contained. The VM limits accidental capability access; it
+is not a security sandbox for hostile package code and cannot contain an abandoned rejected
+promise. Current in-tree adapters are integrity-verified trusted code. A future external package
+design must either preserve that trust requirement or isolate adapter execution in another
+process.
+
+Do not add a general lifecycle hook, callback registry, manifest-selected host module, or arbitrary
+command operation. A new semantic operation lands only with a current core consumer, at least one
+package implementation, negative boundary tests, and removal of the old native core branch.
+
+Some lifecycle paths still contain core-owned native translators. The current MCP, configuration,
+and restore adapters prove the finite boundary. They do not show that all agent-specific code has
+moved.
+
+## NeMo Fabric headless path
+
+NeMo Fabric is the sandbox-local data plane for one headless request:
+
+```text
+user prompt
+-> NemoClaw selects the receipt-pinned manifest command
+-> prompt enters the sandbox through standard input
+-> nemoclaw-fabric-run owns deadline and process cleanup
+-> nemoclaw-fabric validates the package-owned fabric.json
+-> NeMo Fabric invokes the selected adapter
+-> NemoClaw returns bounded, redacted output
+```
+
+The package owns:
+
+- The Fabric adapter or released-adapter dependency lock.
+- The generated `fabric.json` projection.
+- Credential environment-variable names.
+- The bounded `runtime.headless_command`.
+- Agent-native adapter tests and policy destinations.
+
+The generic runner owns Fabric configuration validation, credential-value rejection, input and
+output bounds, private request artifacts, redaction, deadline handling, and cleanup. It does not
+install adapters or branch on an adapter ID.
+
+Core owns package selection, prompt transport, credential custody, OpenShell lifecycle, policy,
+and user-visible command behavior. Fabric handles only headless request execution. It does not own
+startup, lifecycle, configuration updates, restore, MCP reconciliation, messaging, pairing,
+rollback, or durable NemoClaw state.
+
+Keep the native interactive or gateway command available when a Fabric adapter cannot preserve a
+runtime feature. A package can mark one generated Fabric composition unavailable. The generic
+runner then returns a typed `unsupported_configuration` result before it creates the Fabric client.
+
+## Test workflow
+
+Use the earliest stable boundary that can detect a failure. A package change should not start with
+a live lifecycle.
+
+| Lane | Owner | What it proves | When to run |
+| --- | --- | --- | --- |
+| Package unit | Package | Native configuration, grammar, guards, adapters, and failure cases | Every package change |
+| Package artifact | Package; root package-contract for Pi today | Archive members, image inputs, file modes, locks, and fixed paths | Every package change |
+| Loader contract | Core | Receipt, schema, VM, size, mutation-race, and capability-refusal behavior | Every adapter change |
+| Synthetic composition | Core | An unknown package ID exercises covered operations without an agent switch | Every contract change |
+| Revision-pinned composition | Package | One package candidate works with one supplied NemoClaw commit | Package release candidate |
+| Fabric | Package and runner | Package configuration works through the selected Fabric adapter | Fabric or headless change |
+| Live edge | Existing E2E registry | Docker, OpenShell, process, filesystem, policy, network, or inference behavior | Changed edge only |
+
+Each package root exposes the same primary commands:
 
 | Command | Scope |
 | --- | --- |
-| `npm run test:package` | Runs tests that need only the package checkout. |
-| `npm run test:fabric` | Runs the package's Fabric adapter or released-adapter contract tests. |
-| `npm run test:fabric:composed` | When declared, composes the package adapter with this exact NemoClaw runner checkout. |
-| `npm run test:nemoclaw` | Runs package-owned tests that need an exact NemoClaw checkout. |
-| `npm test` | Runs every test lane the package owns. |
+| `npm run test:package` | Runs package tests that do not need NemoClaw source. |
+| `npm run test:fabric` | Runs the package-owned Fabric adapter lane. |
+| `npm run test:fabric:composed` | Composes the adapter with the surrounding generic runner when declared. |
+| `npm run test:nemoclaw` | Runs package-owned composition tests against the surrounding NemoClaw checkout. |
+| `npm test` | Runs the package lane, then composition against the surrounding checkout. The composed Fabric lane includes the direct Fabric cases. |
 | `npm run test:watch` | Watches checkout-independent TypeScript tests. |
-| `npm run typecheck` | Type-checks package `.ts` and `.mts` source plus TypeScript tests. |
+| `npm run typecheck` | Type-checks package TypeScript and tests. |
 
-The test commands do not install dependencies. Install each package's development dependencies
-from its package-root lock before running a command:
+Install dependencies from each package lock before running its commands. OpenClaw also has a
+separate lock under `plugin/`.
 
-```bash
-npm --prefix packages/nemoclaw-openclaw ci --ignore-scripts
-npm --prefix packages/nemoclaw-hermes ci --ignore-scripts
-npm --prefix packages/nemoclaw-langchain-deepagents-code ci --ignore-scripts
-npm --prefix packages/nemoclaw-pi ci --ignore-scripts
-```
+Package-only tests must not import `src/lib`, traverse to root native fixtures, or rely on ambient
+credentials. A direct `test:nemoclaw` or `npm test` call uses the surrounding checkout and does not
+pin its revision. Only the `composed` rehearsal below verifies a supplied immutable commit SHA.
 
-OpenClaw also has a nested plugin lock. Install both OpenClaw locks before running its complete
-test command:
-
-```bash
-npm --prefix packages/nemoclaw-openclaw ci --ignore-scripts
-npm --prefix packages/nemoclaw-openclaw/plugin ci --ignore-scripts
-npm --prefix packages/nemoclaw-openclaw test
-```
-
-The exact-NemoClaw lane uses the package inside a checkout at an immutable commit SHA or release
-tag. It can use recorded core production or test support that the package-only lane cannot use.
-For package-owned adapters, `test:fabric` remains checkout independent while
-`test:fabric:composed` exercises the NemoClaw-owned runner and therefore belongs to the composed
-lane.
-Neither lane runs during `nemoclaw harness install`, and an agent manifest does not declare a test
-command.
-
-## Headless Fabric path
-
-An agent runtime can declare both `runtime.interactive_command` and `runtime.headless_command`.
-NemoClaw sends a plain prompt, or `-m`/`--message` with optional `--json`, to the receipt-pinned
-headless command. The bundled Fabric packages point that command at the generic
-`nemoclaw-fabric` runner and a package-owned `fabric.json`. NemoClaw adds `--stdin` and writes the
-prompt through a private pipe; prompt text is never appended to the host OpenShell process
-arguments. When the package declares an interactive command, a bare invocation, help, and
-option-first package commands use it, so packages keep their own command surface without core
-knowing its grammar. OpenClaw selector flags also keep the existing native passthrough.
-
-Every package lists generated sidecars such as `fabric.json` under `config.shields_files`, so the
-same Shields transition protects the native config, its hash, and the adapter configuration. A
-package whose mutable config is single-user declares `config.mutable_access: private`; the generic
-transition then restores its config directory to `0700` and every protected file to `0600`.
-Packages that need a shared gateway writer use their package-owned guard or declare `shared`.
-For other mutable configurations, `config_file`, `.config-hash`, and a protected `env_file` use the
-agent's shared mode. Other files in `config.shields_files` remain owner-only at `0600`.
-
-The package owns the remaining choices: whether to consume a released Fabric adapter or ship a
-small adapter, how managed configuration is projected into `fabric.json`, and how the image pins
-the runner and adapter dependency graphs. NemoClaw core resolves the receipt-pinned manifest
-command without importing a Fabric adapter.
-
-Fabric qualification follows the same layers for every package:
-
-1. `test:fabric` checks the adapter or released-adapter projection without NemoClaw core.
-2. `test:fabric:composed`, when declared, checks the exact adapter and generic runner together.
-3. Image smoke checks prove the pinned runner, descriptor, configuration, and permissions.
-4. Existing live targets prove a real native turn and a Fabric turn after fresh onboarding,
-   gateway restart, inference switching, Shields transitions, and rebuild where those lifecycle
-   operations apply.
-
-The deterministic package and composed lanes are the per-change gate. Live lifecycle targets are
-the environment qualification gate; messaging-provider tests remain separate because they require
-service credentials.
-
-### In-tree overlay rehearsal
-
-`scripts/packages/checkout.mts` rehearses the two lanes without changing the source checkout. The
-package-only mode copies one package authoring tree into a private temporary workspace, omits local
-dependencies and build output, installs its package-owned locks with lifecycle scripts disabled,
-and runs `test:package` plus `test:fabric` when the package declares it. For OpenClaw, those locks
-are the package-root lock and the nested plugin lock. The copied package has no NemoClaw `src/lib`
-or root test helpers around it, and every command receives a temporary home and a credential-free
-allowlisted environment.
-This contributor rehearsal runs reviewed package candidates. It narrows their environment and
-working tree, but it is not a sandbox for untrusted code.
-
-Run the package-only rehearsal from the NemoClaw root:
+Use `scripts/packages/checkout.mts` to rehearse both future repository layouts without changing the
+source checkout:
 
 ```bash
 PACKAGE_ID=openclaw
@@ -226,19 +387,9 @@ PACKAGE_ID=openclaw
 node --experimental-strip-types --no-warnings scripts/packages/checkout.mts package-only \
   --package "$PACKAGE_ID" \
   --candidate "packages/nemoclaw-$PACKAGE_ID"
-```
 
-Composed mode requires both a local NemoClaw checkout and its exact 40-character commit SHA. It
-archives that commit, overlays only the matching candidate package, installs the core, package, and
-OpenClaw nested-plugin locks with lifecycle scripts disabled, builds required artifacts, and runs
-the complete package command, which includes `test:package` and `test:nemoclaw`. It then uses the
-CLI built in that temporary checkout to install the bundled package by ID, list it, and verify its
-receipt in the temporary home.
-
-```bash
-PACKAGE_ID=openclaw
 NEMOCLAW_CHECKOUT="$(pwd)"
-NEMOCLAW_COMMIT="$(git -C "$NEMOCLAW_CHECKOUT" rev-parse HEAD)"
+NEMOCLAW_COMMIT="$(git rev-parse HEAD)"
 
 node --experimental-strip-types --no-warnings scripts/packages/checkout.mts composed \
   --package "$PACKAGE_ID" \
@@ -247,106 +398,117 @@ node --experimental-strip-types --no-warnings scripts/packages/checkout.mts comp
   --nemoclaw-commit "$NEMOCLAW_COMMIT"
 ```
 
-A future package repository keeps `npm ci --ignore-scripts`, `npm run test:package`, and its
-optional `npm run test:fabric` as the local lane. Its composed lane can call this script from an
-exact NemoClaw checkout and pass the package repository as `--candidate`. This is an in-tree
-overlay rehearsal. It does not prove external
-artifact installation or distribution, and it does not add an install-by-path command. If a locked
-dependency cannot install while lifecycle scripts are disabled, stop and make that dependency an
-explicit security decision instead of enabling scripts in this workflow.
+The rehearsal copies the package into a private workspace, installs locked dependencies with
+lifecycle scripts disabled, and uses a credential-free allowlisted environment. It runs reviewed
+package code. It is not a sandbox for untrusted code and does not prove external distribution.
 
-Organize TypeScript tests by the package workflow:
+### Current extraction limits
 
-```text
-tests/
-├── config/       native configuration generation
-├── runtime/      startup, wrappers, guards, and in-sandbox helpers
-├── host/         receipt-verified host adapters
-├── compat/       version-bound upstream patches
-├── image/        Dockerfiles, build inputs, and image layout
-├── integration/  package archive and composed NemoClaw boundaries
-├── fixtures/     inert package-owned test inputs
-└── helpers/      package-owned test support
-```
+The `package-only` rehearsal invokes `test:package` and `test:fabric`. It does not build a Docker
+image or require every package to create a standalone archive. OpenClaw, Hermes, and Deep Agents
+Code currently run package-owned archive tests. Pi relies on the root
+`test/package-contract/bundled-harnesses.test.ts` test for its materialized package and packed root
+artifact coverage.
 
-Create only the directories that the package uses. The responsibility directory supplies context
-for each test file name.
+The current Dockerfiles also require the NemoClaw repository as their build context. All four use
+shared root build or security scripts, the blueprint, the Fabric runner, or the reviewed managed
+runtime bundle. OpenClaw and Hermes also copy root messaging or tool-disclosure source. The
+`composed` rehearsal preserves these dependencies; it does not prove that the candidate can build
+from an independent repository.
 
-Two language-native test locations remain outside this tree:
+Before packages move to separate repositories, define versioned inputs for those shared assets or
+one reviewed build-context artifact. Add a package-owned Pi archive test at the same time. External
+distribution and its build contract still require an accepted product decision.
 
-- OpenClaw plugin tests stay beside their TypeScript source under `plugin/src/**/*.test.ts`.
-- Hermes plugin tests stay beside their Python source under `plugin/test_*.py` and use
-  `python3 -m unittest`.
+## Managed-image publication gate
 
-NemoClaw root tests retain command, package installation, orchestration, security, state, and E2E
-coverage. Package commands own detailed deterministic agent runtime behavior. Package test source,
-fixtures, helpers, configuration, and development locks are authoring files, not installed runtime
-files.
+An installation receipt and a managed-image cohort receipt prove different boundaries.
 
-## Core and package boundaries
-
-NemoClaw core owns the product workflow: command parsing, package discovery and receipts,
-onboarding, credential collection and selection, OpenShell registration, policy requests, rollback
-decisions, and persisted product state. OpenShell owns credential custody and delivery, sandbox
-lifecycle, and enforcement authority. The package owns the agent runtime translation: its image,
-native configuration, process startup, native plugin, runtime guards, compatibility patches, and
-build checks.
-
-The `host/` directory is a transition boundary, not a general plugin callback API. Core loads only
-named helpers from a receipt-verified package and retains the authorization, transaction, and
-rollback decision around each call. A package cannot register arbitrary host execution.
-
-Managed MCP mutation uses one fixed helper, `host/mcp-adapter.cts`. An installed package that
-declares MCP bridge support exports `buildMcpRegistrationCommand(request)` and
-`buildMcpRemovalCommand(request)` from that file. The request carries the validated server URL,
-opaque OpenShell credential placeholders, current managed entries, and the applicable mutation
-flags. A builder returns either one non-empty shell command or one non-empty argument vector.
-NemoClaw verifies the exact package receipt and module shape before calling either function, then
-keeps command execution, runtime inspection, credential custody, policy mutation, transaction
-ordering, rollback, and redacted diagnostics in core. The manifest cannot choose another module
-path or callback name.
-
-Package-owned sandboxes use this helper. Legacy registry rows continue through their existing core
-translation until the ordinary package-migration boundary records exact package authority, so the
-transition does not change their lifecycle behavior.
-
-MCP adapters remain package-specific because the current runtimes have different command,
-mutation, reload, and rollback behavior. Messaging keeps the existing common manifest pipeline in
-core while each package retains its runtime-specific configuration and startup implementation.
-Those boundaries can become smaller after two packages prove the same safer in-sandbox operation;
-this migration does not invent that operation in advance.
-
-The remaining named integration points are intentionally narrow:
-
-| Core boundary | Why core still owns it | Package-owned side |
+| Receipt | Scope | It does not prove |
 | --- | --- | --- |
-| Managed startup profile and environment | Selects credential material, validates the committed profile, and authorizes root or sandbox actions. | Generates the runtime's native configuration through the fixed command. |
-| Image qualification and managed identity | Decides whether an image is acceptable for the requested runtime and inference route. | Supplies receipt-verified probes and native identity rules from `host/`. |
-| Native configuration and provider routing | Selects the requested inference and provider state, holds credentials, and validates protected mutations. | Supplies native configuration grammar, identity, route, and tool gateway translations from `host/`. |
-| MCP reconciliation | Owns requested product state, authorization, transaction order, rollback, and redacted diagnostics. | Supplies native inspect, apply, reload, status, and removal translations from `host/`. |
-| Messaging configuration | Owns the shared channel manifest, credentials, policy, and onboarding workflow. | Implements the agent runtime's native configuration and startup behavior for each supported channel. |
-| Backup, restore, pairing, and configuration sealing | Mutates protected OpenShell or NemoClaw state and therefore remains in the trusted product workflow. | Supplies native grammar, merge, approval, and guard behavior from `host/` or `runtime/`. |
-| Dashboard, ports, and process lifecycle | Coordinates OpenShell resources and persisted sandbox state. | Declares static capabilities in `manifest.yaml` and implements startup in `start.sh`. |
+| Package installation receipt | The installed package tree matches one content digest and source identity. | Publisher authenticity, image publication, or runtime behavior. |
+| Managed-image cohort receipt | Every shipped agent and platform in one publication run resolves to immutable image digests with matching provenance. | A candidate package outside that cohort or successful runtime behavior. |
 
-Package-specific helpers, lockfiles, patches, schemas, and runtime plugins belong with these files.
-Package commands own detailed deterministic tests. NemoClaw root projects retain core integration
-and E2E coverage for the in-tree packages.
+Stock live onboarding must wait for the managed-image publication job. The job selects one
+publication run, downloads its immutable cohort artifact, and validates:
 
-## Add a bundled package
+- The source revision and workflow run identity.
+- The complete shipped-agent set.
+- `linux/amd64` and `linux/arm64` entries for each shipped agent.
+- Immutable image and base-image references.
+- Workload descriptors and recorded attestations.
 
-1. Add `packages/nemoclaw-<id>` with `README.md`, valid package metadata, and a data-only manifest.
-2. Add the two image definitions, startup entry point, and baseline policy at the package root.
-3. Put native configuration translation in `config/` and expose it through the executable
-   `runtime/generate-config.sh` command when the package uses managed startup.
-4. Add only the responsibility directories the integration needs. Keep upstream-version changes in
-   `compat/`, not mixed into configuration or startup code.
-5. Add package-owned image checks in `checks/`. Add detailed deterministic tests under `tests/`
-   and run them through the package commands.
-6. Add or extend one registered live E2E target for the agent runtime and exercise install,
-   onboarding, inference, lifecycle reconciliation, status, and cleanup.
+The gate emits one revision, cohort receipt, and optional candidate catalogue. Every stock E2E job
+must consume those same values. This prevents a test from mixing images from different publication
+runs or starting after only part of a cohort exists.
 
-The registry discovers the package without a new command option or catalogue entry. Full managed
-startup remains a closed, typed contract for the agent runtimes NemoClaw ships. A new package that
-needs managed startup, MCP, messaging, dashboard, pairing, or another specialized lifecycle must
-add the corresponding explicit core integration and tests.
-External package download and repository ownership are outside this in-tree migration.
+Pi is not part of the shipped managed-image cohort at this revision. Cohort success therefore does
+not qualify Pi. A Pi live candidate needs its own exact image evidence.
+
+## Ownership boundary
+
+| Responsibility | Core owns | Package owns |
+| --- | --- | --- |
+| Discovery and install | CLI flow, package store, receipts, active identity | Package metadata and immutable source bytes |
+| Onboarding | User intent, credentials, policy authorization, transaction, rollback | Native configuration translation and declared capabilities |
+| Images and startup | Selected build inputs and OpenShell lifecycle | Dockerfiles, `start.sh`, native process behavior |
+| Commands | Public CLI intent, execution, timeout, redaction | Interactive, headless, and native grammar |
+| MCP | Requested state, credential placeholders, policy, execution, rollback | Registration, removal, inspection, capability, and runtime command plans |
+| Messaging | Shared channel manifest, credentials, policy, transaction | Native configuration projection and startup behavior |
+| Runtime configuration | Parsing, SSRF checks, credentials, protected execution, locks, digest verification, restart | Update, URL-policy, and mutable-file plans |
+| Backup and restore | Snapshot authority, protected reads, atomic apply, rollback | Native merge grammar and package state declarations |
+| Platform composition | OS, hardware, runtime provider, serving runtime | Compatibility requirements declared by the package |
+| Fabric | Prompt transport and package command selection | Adapter, configuration projection, locks, and native tests |
+
+## Add a package candidate
+
+1. Create `packages/nemoclaw-<id>` with the six required runtime files and a package README.
+2. Declare static capabilities and commands in `manifest.yaml`.
+3. Put build-time translation in `config/`.
+4. Install managed startup at the fixed sandbox command path when the package uses it.
+5. Put sandbox commands and guards in `runtime/`.
+6. Add a Fabric configuration and adapter only when headless execution preserves required native
+   behavior.
+7. Implement only typed host operations that core already defines. Do not add no-op capability
+   files.
+8. Add package unit, artifact, Fabric, and negative tests.
+9. Pass the package-only rehearsal.
+10. Pass revision-pinned composition.
+11. Add data and assertions to the existing typed E2E registry only for an external boundary that
+    needs live evidence.
+
+Discovery and the covered host operations must not require a new command option, core catalogue
+branch, or agent-name switch. Full onboarding still requires a core change while the managed
+startup profile and coordinator use a closed agent set. If a new package needs a semantic
+operation that core does not define, propose that operation with its consumer, trust boundary,
+result schema, and tests. Do not encode it as an arbitrary callback.
+
+External package download, separate repository ownership, and compatibility policy remain later
+work. They require an accepted design decision with an `Accept` outcome before NemoClaw presents
+them as supported behavior.
+
+## Definition of done
+
+The local contract candidate is ready for review when:
+
+- One typed loader enforces fixed core-owned paths, exports, schemas, and byte limits.
+- MCP-capable installed packages provide all seven fixed MCP exports.
+- Package-backed MCP calls do not select behavior by agent ID or fall back to a native core
+  translator.
+- The qualification record names the no-receipt MCP and configuration compatibility paths that
+  remain in core.
+- A package that does not declare MCP receives a typed validation error before adapter load.
+- Synthetic package IDs pass MCP, configuration, and restore tests without a core agent ID branch.
+- Package-only, revision-pinned composition, Fabric, package-contract, and E2E-support lanes pass.
+- The existing MCP live target proves the changed external boundary with exact package and image
+  identities.
+- The qualification record names skipped live edges and explains why existing evidence covers
+  them.
+
+This list does not claim product support or full agent-runtime independence. Full startup still
+depends on `MANAGED_STARTUP_AGENTS`, core profile mappings, and the startup coordinator. Later
+package-by-package changes must remove no-receipt MCP and configuration compatibility paths,
+remaining restore and CLI grammar, pairing, messaging projection, gateway and dashboard protocols,
+and other agent-specific lifecycle behavior. Standalone package image builds and Pi-owned archive
+proof also remain. Each move must delete its native core fallback and move its detailed tests in
+the same change.

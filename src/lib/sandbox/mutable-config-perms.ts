@@ -1,11 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { dockerExecFileSync } from "../adapters/docker/exec";
+import type {
+  HarnessExitZeroCommand,
+  HarnessMutableConfigPlan,
+} from "../agent-runtime/config-module";
 import { validateName } from "../runner";
 import { withMcpLifecycleLockSync } from "../state/mcp-lifecycle-lock-acquisition";
 import { resolveAgentConfig, type AgentConfigTarget } from "./agent-config";
-import { privilegedSandboxExecArgv } from "./privileged-exec";
+import { loadInstalledConfigAdapter, toHarnessConfigTarget } from "./package-config";
+import {
+  capturePrivilegedSandboxCommand,
+  executePrivilegedSandboxCommand,
+  resolvePrivilegedSandboxTarget,
+} from "./privileged-exec";
 
 export const MUTABLE_OPENCLAW_DIR_MODE = "2770";
 export const MUTABLE_OPENCLAW_FILE_MODE = "660";
@@ -21,6 +29,7 @@ export type MutableConfigPermsInspection =
   | {
       applies: true;
       ok: boolean;
+      inspectionMethod?: "stat";
       dirMode: string;
       dirOwner: string;
       fileMode: string;
@@ -28,11 +37,49 @@ export type MutableConfigPermsInspection =
       configDir: string;
       configFile: string;
       issues: string[];
+    }
+  | {
+      applies: true;
+      ok: boolean;
+      inspectionMethod: "probe";
+      configDir: string;
+      configFile: string;
+      issues: string[];
+      dirMode?: never;
+      dirOwner?: never;
+      fileMode?: never;
+      fileOwner?: never;
     };
 
 export type MutableConfigRepairResult =
   | { applied: false; skipReason: "agent"; reason: string }
   | { applied: true; verified: boolean; errors: string[] };
+
+export interface MutableConfigPermsDependencies {
+  readonly resolveConfigTarget: typeof resolveAgentConfig;
+  readonly loadConfigAdapter: typeof loadInstalledConfigAdapter;
+  readonly resolveResourceHandle: (sandboxName: string) => string;
+  readonly captureSandboxCommand: typeof capturePrivilegedSandboxCommand;
+  readonly executeSandboxCommand: typeof executePrivilegedSandboxCommand;
+  readonly withMutationLock: <T>(sandboxName: string, operation: () => T) => T;
+}
+
+const DEFAULT_MUTABLE_CONFIG_DEPENDENCIES: MutableConfigPermsDependencies = Object.freeze({
+  resolveConfigTarget: resolveAgentConfig,
+  loadConfigAdapter: loadInstalledConfigAdapter,
+  resolveResourceHandle: (sandboxName: string) =>
+    resolvePrivilegedSandboxTarget(sandboxName).resourceHandle,
+  captureSandboxCommand: capturePrivilegedSandboxCommand,
+  executeSandboxCommand: executePrivilegedSandboxCommand,
+  withMutationLock: <T>(sandboxName: string, operation: () => T): T =>
+    withMcpLifecycleLockSync(sandboxName, operation),
+});
+
+function mutableConfigDependencies(
+  overrides: Partial<MutableConfigPermsDependencies>,
+): MutableConfigPermsDependencies {
+  return { ...DEFAULT_MUTABLE_CONFIG_DEPENDENCIES, ...overrides };
+}
 
 export function parseStatModeOwner(raw: string): { mode: string; owner: string } {
   const [mode, owner] = raw.trim().split(/\s+/);
@@ -112,6 +159,7 @@ export function inspectMutableConfigPermsForTarget(
   return {
     applies: true,
     ok: issues.length === 0,
+    inspectionMethod: "stat",
     dirMode: dir.mode,
     dirOwner: dir.owner,
     fileMode: file.mode,
@@ -120,6 +168,102 @@ export function inspectMutableConfigPermsForTarget(
     configFile: target.configFile,
     issues,
   };
+}
+
+function inspectMutableConfigStatPlan(
+  target: AgentConfigTarget,
+  plan: Extract<HarnessMutableConfigPlan, { kind: "stat" }>,
+  statModeOwner: (path: string) => string,
+): MutableConfigPermsInspection {
+  let dir: { mode: string; owner: string };
+  let file: { mode: string; owner: string };
+  try {
+    dir = parseStatModeOwner(statModeOwner(target.configDir));
+    file = parseStatModeOwner(statModeOwner(target.configPath));
+  } catch (error) {
+    return {
+      applies: false,
+      skipReason: "unavailable",
+      reason: `could not stat config (${error instanceof Error ? error.message : String(error)})`,
+    };
+  }
+  const issues: string[] = [];
+  if (dir.mode.padStart(4, "0") !== plan.directoryMode.padStart(4, "0")) {
+    issues.push(`${target.configDir} mode ${dir.mode} (expected ${plan.directoryMode})`);
+  }
+  if (dir.owner !== plan.directoryOwner) {
+    issues.push(`${target.configDir} owner ${dir.owner} (expected ${plan.directoryOwner})`);
+  }
+  const filePaths = [target.configPath, ...(target.sensitiveFiles ?? [])];
+  for (const filePath of filePaths) {
+    let actual: { mode: string; owner: string };
+    try {
+      actual = filePath === target.configPath ? file : parseStatModeOwner(statModeOwner(filePath));
+    } catch {
+      continue;
+    }
+    if (actual.mode.padStart(4, "0") !== plan.fileMode.padStart(4, "0")) {
+      issues.push(`${filePath} mode ${actual.mode} (expected ${plan.fileMode})`);
+    }
+    if (actual.owner !== plan.fileOwner) {
+      issues.push(`${filePath} owner ${actual.owner} (expected ${plan.fileOwner})`);
+    }
+  }
+  return {
+    applies: true,
+    ok: issues.length === 0,
+    inspectionMethod: "stat",
+    dirMode: dir.mode,
+    dirOwner: dir.owner,
+    fileMode: file.mode,
+    fileOwner: file.owner,
+    configDir: target.configDir,
+    configFile: target.configPath,
+    issues,
+  };
+}
+
+function inspectMutableConfigProbePlan(
+  target: AgentConfigTarget,
+  plan: Extract<HarnessMutableConfigPlan, { kind: "probe" }>,
+  executeProbe: (command: HarnessExitZeroCommand) => void,
+): Extract<MutableConfigPermsInspection, { inspectionMethod: "probe" }> {
+  try {
+    executeProbe(plan.probe);
+    return {
+      applies: true,
+      ok: true,
+      inspectionMethod: "probe",
+      configDir: target.configDir,
+      configFile: target.configFile,
+      issues: [],
+    };
+  } catch (error) {
+    return {
+      applies: true,
+      ok: false,
+      inspectionMethod: "probe",
+      configDir: target.configDir,
+      configFile: target.configFile,
+      issues: [error instanceof Error ? error.message : String(error)],
+    };
+  }
+}
+
+function inspectPackageMutableConfigPlan(
+  target: AgentConfigTarget,
+  plan: HarnessMutableConfigPlan,
+  statModeOwner: (path: string) => string,
+  executeProbe: (command: HarnessExitZeroCommand) => void,
+): MutableConfigPermsInspection {
+  switch (plan.kind) {
+    case "not-required":
+      return { applies: false, skipReason: "agent", reason: plan.reason };
+    case "stat":
+      return inspectMutableConfigStatPlan(target, plan, statModeOwner);
+    case "probe":
+      return inspectMutableConfigProbePlan(target, plan, executeProbe);
+  }
 }
 
 export function repairMutableConfigPermsForTarget(
@@ -239,77 +383,296 @@ export function verifyMutableHermesConfigForTarget(
   }
 }
 
-function privilegedExecCapture(sandboxName: string, command: string[]): string {
-  return dockerExecFileSync(privilegedSandboxExecArgv(sandboxName, command, false, true), {
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 15_000,
-  }).trim();
+function privilegedExecCapture(
+  sandboxName: string,
+  command: readonly string[],
+  expectedResourceHandle: () => string,
+  dependencies: MutableConfigPermsDependencies,
+): string {
+  return dependencies
+    .captureSandboxCommand(sandboxName, command, {
+      sanitizeEnvironment: true,
+      expectedResourceHandle: expectedResourceHandle(),
+      timeout: 15_000,
+      maxOutputBytes: 8 * 1024,
+    })
+    .toString("utf8")
+    .trim();
 }
 
-function sandboxIdentityId(sandboxName: string, flag: "-u" | "-g"): string {
-  const id = privilegedExecCapture(sandboxName, ["/usr/bin/id", flag, "sandbox"]);
+function executePackageMutableConfigCommand(
+  sandboxName: string,
+  command: HarnessExitZeroCommand,
+  expectedResourceHandle: () => string,
+  dependencies: MutableConfigPermsDependencies,
+): void {
+  let result: ReturnType<typeof executePrivilegedSandboxCommand>;
+  try {
+    result = dependencies.executeSandboxCommand(sandboxName, command.command, {
+      sanitizeEnvironment: true,
+      expectedResourceHandle: expectedResourceHandle(),
+      timeout: command.timeoutSeconds * 1000,
+      maxOutputBytes: 8 * 1024,
+    });
+  } catch (error) {
+    throw new Error(command.failureMessage, { cause: error });
+  }
+  if (result.status !== 0 || result.signal !== null || result.error) {
+    throw new Error(command.failureMessage, {
+      ...(result.error ? { cause: result.error } : {}),
+    });
+  }
+}
+
+function sandboxIdentityId(
+  sandboxName: string,
+  flag: "-u" | "-g",
+  expectedResourceHandle: () => string,
+  dependencies: MutableConfigPermsDependencies,
+): string {
+  const id = privilegedExecCapture(
+    sandboxName,
+    ["/usr/bin/id", flag, "sandbox"],
+    expectedResourceHandle,
+    dependencies,
+  );
   if (!/^[1-9][0-9]*$/.test(id)) {
     throw new Error(`sandbox identity lookup returned an invalid ${flag === "-u" ? "UID" : "GID"}`);
   }
   return id;
 }
 
-function normalizeMutableOpenClawConfig(sandboxName: string, configDir: string): void {
-  const sandboxUid = sandboxIdentityId(sandboxName, "-u");
-  const sandboxGid = sandboxIdentityId(sandboxName, "-g");
-  dockerExecFileSync(
-    privilegedSandboxExecArgv(
-      sandboxName,
-      [
-        ...MUTABLE_CONFIG_NORMALIZER_WATCHDOG,
-        "/usr/bin/python3",
-        "-I",
-        MUTABLE_CONFIG_NORMALIZER,
-        configDir,
-        sandboxUid,
-        sandboxGid,
-      ],
-      false,
-      true,
-    ),
+function normalizeMutableOpenClawConfig(
+  sandboxName: string,
+  configDir: string,
+  expectedResourceHandle: () => string,
+  dependencies: MutableConfigPermsDependencies,
+): void {
+  const sandboxUid = sandboxIdentityId(sandboxName, "-u", expectedResourceHandle, dependencies);
+  const sandboxGid = sandboxIdentityId(sandboxName, "-g", expectedResourceHandle, dependencies);
+  const result = dependencies.executeSandboxCommand(
+    sandboxName,
+    [
+      ...MUTABLE_CONFIG_NORMALIZER_WATCHDOG,
+      "/usr/bin/python3",
+      "-I",
+      MUTABLE_CONFIG_NORMALIZER,
+      configDir,
+      sandboxUid,
+      sandboxGid,
+    ],
     {
-      stdio: ["ignore", "pipe", "pipe"],
+      sanitizeEnvironment: true,
+      expectedResourceHandle: expectedResourceHandle(),
       timeout: MUTABLE_CONFIG_NORMALIZER_HOST_TIMEOUT_MS,
+      maxOutputBytes: 8 * 1024,
     },
   );
+  if (result.status !== 0 || result.signal !== null || result.error) {
+    throw new Error("OpenClaw mutable configuration permissions could not be repaired.", {
+      ...(result.error ? { cause: result.error } : {}),
+    });
+  }
 }
 
-export function inspectMutableConfigPerms(sandboxName: string): MutableConfigPermsInspection {
+export function inspectMutableConfigPerms(
+  sandboxName: string,
+  dependencyOverrides: Partial<MutableConfigPermsDependencies> = {},
+): MutableConfigPermsInspection {
   validateName(sandboxName, "sandbox name");
-  return withMcpLifecycleLockSync(sandboxName, () => {
-    const target = resolveAgentConfig(sandboxName);
-    return inspectMutableConfigPermsForTarget(target, (configPath) =>
-      privilegedExecCapture(sandboxName, ["stat", "-c", "%a %U:%G", configPath]),
-    );
+  const dependencies = mutableConfigDependencies(dependencyOverrides);
+  return dependencies.withMutationLock(sandboxName, () => {
+    const target = dependencies.resolveConfigTarget(sandboxName);
+    const selection = dependencies.loadConfigAdapter(sandboxName, target);
+    let resourceHandle: string | undefined;
+    const expectedResourceHandle = () =>
+      (resourceHandle ??= dependencies.resolveResourceHandle(sandboxName));
+    const statModeOwner = (configPath: string) =>
+      privilegedExecCapture(
+        sandboxName,
+        ["stat", "-c", "%a %U:%G", configPath],
+        expectedResourceHandle,
+        dependencies,
+      );
+    if (selection) {
+      const plan = selection.adapter.describeMutableConfig({
+        target: toHarnessConfigTarget(target),
+        sandboxUid: null,
+        sandboxGid: null,
+      });
+      return inspectPackageMutableConfigPlan(target, plan, statModeOwner, (command) =>
+        executePackageMutableConfigCommand(
+          sandboxName,
+          command,
+          expectedResourceHandle,
+          dependencies,
+        ),
+      );
+    }
+    return inspectMutableConfigPermsForTarget(target, statModeOwner);
   });
 }
 
-export function repairMutableConfigPerms(sandboxName: string): MutableConfigRepairResult {
+export function repairMutableConfigPerms(
+  sandboxName: string,
+  dependencyOverrides: Partial<MutableConfigPermsDependencies> = {},
+): MutableConfigRepairResult {
   validateName(sandboxName, "sandbox name");
-  return withMcpLifecycleLockSync(sandboxName, () => {
-    const target = resolveAgentConfig(sandboxName);
+  const dependencies = mutableConfigDependencies(dependencyOverrides);
+  return dependencies.withMutationLock(sandboxName, () => {
+    const target = dependencies.resolveConfigTarget(sandboxName);
+    const selection = dependencies.loadConfigAdapter(sandboxName, target);
+    let resourceHandle: string | undefined;
+    const expectedResourceHandle = () =>
+      (resourceHandle ??= dependencies.resolveResourceHandle(sandboxName));
+    if (selection) {
+      const initialPlan = selection.adapter.describeMutableConfig({
+        target: toHarnessConfigTarget(target),
+        sandboxUid: null,
+        sandboxGid: null,
+      });
+      if (initialPlan.kind === "not-required") {
+        return { applied: false, skipReason: "agent", reason: initialPlan.reason };
+      }
+      if (initialPlan.kind !== "stat") {
+        return {
+          applied: false,
+          skipReason: "agent",
+          reason: "the installed package does not define mutable configuration repair",
+        };
+      }
+      try {
+        const sandboxUid = sandboxIdentityId(
+          sandboxName,
+          "-u",
+          expectedResourceHandle,
+          dependencies,
+        );
+        const sandboxGid = sandboxIdentityId(
+          sandboxName,
+          "-g",
+          expectedResourceHandle,
+          dependencies,
+        );
+        const plan = selection.adapter.describeMutableConfig({
+          target: toHarnessConfigTarget(target),
+          sandboxUid,
+          sandboxGid,
+        });
+        if (plan.kind !== "stat" || !plan.repair) {
+          return {
+            applied: false,
+            skipReason: "agent",
+            reason: "the installed package does not define mutable configuration repair",
+          };
+        }
+        executePackageMutableConfigCommand(
+          sandboxName,
+          plan.repair,
+          expectedResourceHandle,
+          dependencies,
+        );
+        const verificationPlan = selection.adapter.describeMutableConfig({
+          target: toHarnessConfigTarget(target),
+          sandboxUid: null,
+          sandboxGid: null,
+        });
+        const verification = inspectPackageMutableConfigPlan(
+          target,
+          verificationPlan,
+          (configPath) =>
+            privilegedExecCapture(
+              sandboxName,
+              ["stat", "-c", "%a %U:%G", configPath],
+              expectedResourceHandle,
+              dependencies,
+            ),
+          (command) =>
+            executePackageMutableConfigCommand(
+              sandboxName,
+              command,
+              expectedResourceHandle,
+              dependencies,
+            ),
+        );
+        return {
+          applied: true,
+          verified: verification.applies && verification.ok,
+          errors:
+            verification.applies && !verification.ok
+              ? [...verification.issues]
+              : verification.applies
+                ? []
+                : [
+                    `mutable configuration posture could not be verified after repair: ${verification.reason}`,
+                  ],
+        };
+      } catch (error) {
+        return {
+          applied: true,
+          verified: false,
+          errors: [error instanceof Error ? error.message : String(error)],
+        };
+      }
+    }
     return repairMutableConfigPermsForTarget(target, () =>
-      normalizeMutableOpenClawConfig(sandboxName, target.configDir),
+      normalizeMutableOpenClawConfig(
+        sandboxName,
+        target.configDir,
+        expectedResourceHandle,
+        dependencies,
+      ),
     );
   });
 }
 
 export function inspectMutableHermesConfigPerms(
   sandboxName: string,
+  dependencyOverrides: Partial<MutableConfigPermsDependencies> = {},
 ): MutableHermesConfigVerification {
   validateName(sandboxName, "sandbox name");
-  return withMcpLifecycleLockSync(sandboxName, () => {
-    const target = resolveAgentConfig(sandboxName);
-    return verifyMutableHermesConfigForTarget(target, (command) => {
-      dockerExecFileSync(privilegedSandboxExecArgv(sandboxName, [...command], false, true), {
-        stdio: ["ignore", "pipe", "pipe"],
-        timeout: MUTABLE_HERMES_CONFIG_PROBE_TIMEOUT_MS,
+  const dependencies = mutableConfigDependencies(dependencyOverrides);
+  return dependencies.withMutationLock(sandboxName, () => {
+    const target = dependencies.resolveConfigTarget(sandboxName);
+    const selection = dependencies.loadConfigAdapter(sandboxName, target);
+    let resourceHandle: string | undefined;
+    const expectedResourceHandle = () =>
+      (resourceHandle ??= dependencies.resolveResourceHandle(sandboxName));
+    if (selection) {
+      const plan = selection.adapter.describeMutableConfig({
+        target: toHarnessConfigTarget(target),
+        sandboxUid: null,
+        sandboxGid: null,
       });
+      if (plan.kind === "not-required") return { verified: true, errors: [] };
+      if (plan.kind !== "probe") {
+        return {
+          verified: false,
+          errors: ["installed package does not define a mutable configuration probe"],
+        };
+      }
+      const inspection = inspectMutableConfigProbePlan(target, plan, (command) =>
+        executePackageMutableConfigCommand(
+          sandboxName,
+          command,
+          expectedResourceHandle,
+          dependencies,
+        ),
+      );
+      return { verified: inspection.ok, errors: inspection.issues };
+    }
+    return verifyMutableHermesConfigForTarget(target, (command) => {
+      const result = dependencies.executeSandboxCommand(sandboxName, command, {
+        sanitizeEnvironment: true,
+        expectedResourceHandle: expectedResourceHandle(),
+        timeout: MUTABLE_HERMES_CONFIG_PROBE_TIMEOUT_MS,
+        maxOutputBytes: 8 * 1024,
+      });
+      if (result.status !== 0 || result.signal !== null || result.error) {
+        throw new Error("Hermes mutable configuration probe failed.", {
+          ...(result.error ? { cause: result.error } : {}),
+        });
+      }
     });
   });
 }

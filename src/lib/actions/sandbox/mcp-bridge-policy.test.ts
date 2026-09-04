@@ -30,6 +30,22 @@ const entry: McpBridgeEntry = {
   addedAt: "2026-08-27T00:00:00.000Z",
 };
 
+const policyBinaries = {
+  mcporter: [
+    "/usr/local/bin/mcporter",
+    "/usr/bin/mcporter",
+    "/usr/local/bin/openclaw",
+    "/usr/local/bin/node",
+    "/usr/bin/node",
+  ],
+  "hermes-config": [
+    "/usr/local/bin/hermes",
+    "/usr/bin/python3*",
+    "/opt/hermes/.venv/bin/python*",
+  ],
+  "deepagents-config": ["/usr/local/bin/dcode", "/opt/venv/bin/python3*"],
+} as const;
+
 beforeEach(() => vi.restoreAllMocks());
 
 describe("generated MCP policy", () => {
@@ -81,8 +97,8 @@ describe("generated MCP policy", () => {
           buildMcpBridgePolicyYaml(
             "github",
             entry.url,
-            "mcporter",
             { addresses: ["8.8.8.8"] },
+            policyBinaries.mcporter,
             "mcp-github",
           ),
         ).network_policies.mcp_bridge_github,
@@ -114,8 +130,8 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "github",
         "https://api.githubcopilot.com/mcp",
-        "mcporter",
         { addresses: ["8.8.8.8"] },
+        policyBinaries.mcporter,
         "",
       ),
     ).toThrow(/requires an exact provider name/);
@@ -123,8 +139,8 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "github",
         "https://api.githubcopilot.com/mcp",
-        "mcporter",
         { addresses: ["8.8.8.8"] },
+        policyBinaries.mcporter,
         " provider ",
       ),
     ).toThrow(/requires an exact provider name/);
@@ -135,8 +151,8 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "GitHub_Server",
         "https://api.githubcopilot.com/mcp",
-        "mcporter",
         { addresses: ["2606:4700:4700::1111", "8.8.8.8"] },
+        policyBinaries.mcporter,
         "alpha-mcp-bound-provider",
       ),
     ) as {
@@ -186,12 +202,12 @@ describe("generated MCP policy", () => {
         buildMcpBridgePolicyYaml(
           "local",
           "https://10.20.30.40/mcp",
-          adapter,
           {
             addresses: [...replay.addresses],
             trustedPrivateCapability: replay.trustedPrivateCapability,
             trustedPrivateHost: replay.host,
           },
+          policyBinaries[adapter],
           "alpha-mcp-private-provider",
         ),
       ) as {
@@ -218,8 +234,8 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "local",
         "https://other.corp.internal/mcp",
-        "mcporter",
         target,
+        policyBinaries.mcporter,
         "alpha-mcp-private-provider",
       ),
     ).toThrow(/does not match URL host/);
@@ -227,8 +243,8 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "local",
         "https://mcp.corp.internal/mcp",
-        "mcporter",
         { addresses: ["10.20.30.40"], trustedPrivateHost: "mcp.corp.internal" },
+        policyBinaries.mcporter,
         "alpha-mcp-private-provider",
       ),
     ).toThrow(/no provenance-checked endpoint capability/);
@@ -236,7 +252,6 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "local",
         "https://mcp.corp.internal/mcp",
-        "mcporter",
         {
           addresses: ["10.20.30.40"],
           trustedPrivateHost: "mcp.corp.internal",
@@ -245,6 +260,7 @@ describe("generated MCP policy", () => {
             addresses: ["10.20.30.40"],
           },
         } as never,
+        policyBinaries.mcporter,
         "alpha-mcp-private-provider",
       ),
     ).toThrow(/does not match its host-bound endpoint capability/);
@@ -260,8 +276,8 @@ describe("generated MCP policy", () => {
       buildMcpBridgePolicyYaml(
         "local",
         `https://${host}:31337/mcp`,
-        "mcporter",
         { addresses: ["8.8.8.8"] },
+        policyBinaries.mcporter,
         "alpha-mcp-provider",
       ),
     ).toThrow(/does not expose an attested driver gateway address/);
@@ -273,8 +289,8 @@ describe("generated MCP policy", () => {
         buildMcpBridgePolicyYaml(
           "srv",
           "https://mcp.example.test/mcp",
-          adapter,
           { addresses: ["8.8.8.8"] },
+          policyBinaries[adapter],
           "alpha-mcp-provider",
         ),
       ) as {

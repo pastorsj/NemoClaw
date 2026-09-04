@@ -11,50 +11,43 @@ import { describe, expect, it } from "vitest";
 import {
   extractShellFunctionFromSource,
   nonRootFallbackBlock,
-  nonRootIntegrityGateBlock,
   readOpenClawStartupSource,
-  rootIntegrityGateBlock,
+  startupConfigPreparationBlock,
   startScriptLine,
 } from "../helpers/startup-suite";
 
 describe("nemoclaw-start non-root fallback", () => {
-  it("exits before startup work when locked config integrity fails in non-root mode", () => {
+  it("exits before startup work when root config preparation fails", () => {
     const src = readOpenClawStartupSource();
     const script = [
       "set -euo pipefail",
-      'id() { if [ "${1:-}" = "-u" ]; then printf "1000"; else command id "$@"; fi; }',
-      "recover_openclaw_config_if_empty() { :; }",
-      'verify_config_integrity_if_locked() { printf "verify:%s\\n" "$*"; return 1; }',
-      'apply_model_override() { echo "SHOULD_NOT_RUN"; exit 70; }',
-      nonRootIntegrityGateBlock(src),
+      'id() { if [ "${1:-}" = "-u" ]; then printf "0"; else command id "$@"; fi; }',
+      'prepare_openclaw_config_startup() { printf "prepare\\n"; return 1; }',
+      startupConfigPreparationBlock(src),
       'echo "SHOULD_NOT_CONTINUE"',
     ].join("\n");
 
     const result = spawnSync("bash", ["-c", script], { encoding: "utf-8", timeout: 5000 });
 
     expect(result.status).toBe(1);
-    expect(result.stdout).toContain("verify:/sandbox/.openclaw");
+    expect(result.stdout).toContain("prepare");
     expect(result.stdout).not.toContain("SHOULD_NOT");
-    expect(result.stderr).toContain("Config integrity check failed");
-    expect(result.stderr).not.toMatch(/proceeding anyway/i);
   });
 
-  it("verifies config integrity in both non-root and root startup paths", () => {
+  it("prepares protected config only on the root startup path", () => {
     const src = readOpenClawStartupSource();
     const nonRootScript = [
       "set -euo pipefail",
       'id() { if [ "${1:-}" = "-u" ]; then printf "1000"; else command id "$@"; fi; }',
-      "recover_openclaw_config_if_empty() { :; }",
-      'verify_config_integrity_if_locked() { printf "nonroot:%s\\n" "$*"; }',
-      "normalize_mutable_config_perms() { :; }",
-      nonRootIntegrityGateBlock(src),
+      'prepare_openclaw_config_startup() { printf "NONROOT_PREPARED\\n"; }',
+      startupConfigPreparationBlock(src),
       'echo "NONROOT_CONTINUED"',
     ].join("\n");
     const rootScript = [
       "set -euo pipefail",
-      "recover_openclaw_config_if_empty() { :; }",
-      'verify_config_integrity_if_locked() { printf "root:%s\\n" "$*"; }',
-      rootIntegrityGateBlock(src),
+      'id() { if [ "${1:-}" = "-u" ]; then printf "0"; else command id "$@"; fi; }',
+      'prepare_openclaw_config_startup() { printf "ROOT_PREPARED\\n"; }',
+      startupConfigPreparationBlock(src),
       'echo "ROOT_CONTINUED"',
     ].join("\n");
 
@@ -65,10 +58,10 @@ describe("nemoclaw-start non-root fallback", () => {
     const root = spawnSync("bash", ["-c", rootScript], { encoding: "utf-8", timeout: 5000 });
 
     expect(nonRoot.status).toBe(0);
-    expect(nonRoot.stdout).toContain("nonroot:/sandbox/.openclaw");
+    expect(nonRoot.stdout).not.toContain("NONROOT_PREPARED");
     expect(nonRoot.stdout).toContain("NONROOT_CONTINUED");
     expect(root.status).toBe(0);
-    expect(root.stdout).toContain("root:/sandbox/.openclaw");
+    expect(root.stdout).toContain("ROOT_PREPARED");
     expect(root.stdout).toContain("ROOT_CONTINUED");
   });
 

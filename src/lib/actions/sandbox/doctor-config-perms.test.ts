@@ -75,6 +75,24 @@ describe("buildConfigPermsCheck (#4538)", () => {
     expect(repair).not.toHaveBeenCalled();
   });
 
+  it("reports package probe evidence without inventing stat values", () => {
+    inspect.mockReturnValue({
+      applies: true,
+      ok: true,
+      inspectionMethod: "probe",
+      configDir: "/sandbox/.future",
+      configFile: "config.json",
+      issues: [],
+    });
+
+    const check = buildConfigPermsCheck("alpha", false, deps());
+
+    expect(check).toMatchObject({
+      status: "ok",
+      detail: "mutable contract intact (config.json package probe)",
+    });
+  });
+
   it("warns (without repairing) when tightened and --fix is not set", () => {
     inspect.mockReturnValue(tightened);
     const check = buildConfigPermsCheck("alpha", false, deps());

@@ -20,17 +20,103 @@ export interface HarnessMcpRegistrationRequest {
   readonly managedEntries: readonly HarnessMcpAdapterEntry[];
   readonly replaceExisting: boolean;
   readonly teardownRollback: boolean;
-  readonly configRoot: string | null;
+  readonly configDirectory: string | null;
 }
 
 export interface HarnessMcpRemovalRequest {
   readonly entry: HarnessMcpAdapterEntry;
   readonly force: boolean;
   readonly adaptiveTeardown: boolean;
-  readonly configRoot: string | null;
+  readonly configDirectory: string | null;
 }
 
 export type HarnessMcpAdapterCommand = string | readonly string[];
+
+export type HarnessMcpExecutionSuccess =
+  | { readonly kind: "exit-zero" }
+  | {
+      readonly kind: "lifecycle-json";
+      readonly requireReload: boolean;
+      readonly invalidResponseMessage: string;
+      readonly reloadRequiredMessage: string;
+    };
+
+export interface HarnessMcpExecutionPlan {
+  readonly command: HarnessMcpAdapterCommand;
+  readonly timeoutSeconds: number;
+  readonly success: HarnessMcpExecutionSuccess;
+  readonly failureMessage: string;
+}
+
+export type HarnessMcpRegistrationVerification =
+  | { readonly kind: "inspection"; readonly failureMessage: string }
+  | { readonly kind: "rollback-restored"; readonly failureMessage: string };
+
+export type HarnessMcpCredentialConvergence =
+  | { readonly kind: "none" }
+  | {
+      /** The mutation reloads its process and can advance OpenShell's credential revision. */
+      readonly kind: "after-runtime-reload";
+      readonly unavailableMessage: string;
+      readonly unstableMessage: string;
+    };
+
+export interface HarnessMcpRegistrationPlan {
+  readonly execution: HarnessMcpExecutionPlan;
+  readonly verification: HarnessMcpRegistrationVerification;
+  readonly credentialConvergence: HarnessMcpCredentialConvergence;
+}
+
+export type HarnessMcpRemovalOutcome =
+  | { readonly kind: "removed" }
+  | { readonly kind: "stdout-removal-outcome" };
+
+export interface HarnessMcpRemovalPlan {
+  readonly execution: HarnessMcpExecutionPlan;
+  readonly outcome: HarnessMcpRemovalOutcome;
+}
+
+export interface HarnessMcpInspectionRequest {
+  readonly entry: HarnessMcpAdapterEntry;
+  readonly failOnMismatch: boolean;
+  readonly configDirectory: string | null;
+}
+
+export interface HarnessMcpCapabilityRequest {
+  readonly sandboxName: string;
+}
+
+export type HarnessMcpCapabilityProbe =
+  | { readonly kind: "not-required" }
+  | {
+      readonly kind: "command";
+      readonly command: HarnessMcpAdapterCommand;
+      readonly success:
+        | { readonly kind: "exit-zero" }
+        | { readonly kind: "stdout-trimmed-equals"; readonly value: string }
+        | { readonly kind: "last-json-line-ok" };
+      readonly timeoutSeconds: number;
+      readonly failureMessage: string;
+      readonly retry?: {
+        readonly outputExact: string;
+        readonly initialAttempts: number;
+        readonly intervalMilliseconds: number;
+        readonly recovery?: {
+          readonly kind: "agent-gateway";
+          readonly timeoutSeconds: number;
+          readonly postRecoveryAttempts: number;
+        };
+      };
+    };
+
+export interface HarnessMcpRuntimeRequest {
+  readonly command: readonly string[];
+}
+
+export interface HarnessMcpRuntimeIntentRequest {
+  readonly entries: readonly HarnessMcpAdapterEntry[];
+  readonly managedServerNames: readonly string[];
+}
 
 const stringValueSchema = Object.freeze({ type: "string", maxLength: 65_536 });
 const mcpEntrySchema: AnySchemaObject = Object.freeze({
@@ -49,14 +135,17 @@ const mcpEntrySchema: AnySchemaObject = Object.freeze({
   },
 });
 
-const configRootSchema = Object.freeze({
-  anyOf: [{ type: "null" }, { type: "string", minLength: 1, maxLength: 4096 }],
+const configDirectorySchema = Object.freeze({
+  anyOf: [
+    { type: "null" },
+    { type: "string", minLength: 1, maxLength: 4096, pattern: "^/[^\\u0000]*$" },
+  ],
 });
 
 const mcpRegistrationRequestSchema: AnySchemaObject = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["entry", "managedEntries", "replaceExisting", "teardownRollback", "configRoot"],
+  required: ["entry", "managedEntries", "replaceExisting", "teardownRollback", "configDirectory"],
   properties: {
     entry: mcpEntrySchema,
     managedEntries: {
@@ -66,30 +155,305 @@ const mcpRegistrationRequestSchema: AnySchemaObject = Object.freeze({
     },
     replaceExisting: { type: "boolean" },
     teardownRollback: { type: "boolean" },
-    configRoot: configRootSchema,
+    configDirectory: configDirectorySchema,
   },
 });
 
 const mcpRemovalRequestSchema: AnySchemaObject = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["entry", "force", "adaptiveTeardown", "configRoot"],
+  required: ["entry", "force", "adaptiveTeardown", "configDirectory"],
   properties: {
     entry: mcpEntrySchema,
     force: { type: "boolean" },
     adaptiveTeardown: { type: "boolean" },
-    configRoot: configRootSchema,
+    configDirectory: configDirectorySchema,
+  },
+});
+
+const mcpInspectionRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["entry", "failOnMismatch", "configDirectory"],
+  properties: {
+    entry: mcpEntrySchema,
+    failOnMismatch: { type: "boolean" },
+    configDirectory: configDirectorySchema,
+  },
+});
+
+const mcpCapabilityRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["sandboxName"],
+  properties: {
+    sandboxName: {
+      type: "string",
+      minLength: 1,
+      maxLength: 256,
+      pattern: "^[^\\u0000\\r\\n]+$",
+    },
+  },
+});
+
+const mcpRuntimeRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["command"],
+  properties: {
+    command: {
+      type: "array",
+      minItems: 1,
+      maxItems: 512,
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: 65_536,
+        pattern: "^[^\\u0000]+$",
+      },
+    },
+  },
+});
+
+const mcpRuntimeIntentRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["entries", "managedServerNames"],
+  properties: {
+    entries: {
+      type: "array",
+      maxItems: 512,
+      items: mcpEntrySchema,
+    },
+    managedServerNames: {
+      type: "array",
+      maxItems: 512,
+      uniqueItems: true,
+      items: { type: "string", minLength: 1, maxLength: 256 },
+    },
   },
 });
 
 const mcpCommandSchema: AnySchemaObject = Object.freeze({
   anyOf: [
-    { type: "string", minLength: 1, maxLength: MCP_ADAPTER_RESULT_MAX_BYTES },
+    {
+      type: "string",
+      minLength: 1,
+      maxLength: MCP_ADAPTER_RESULT_MAX_BYTES,
+      pattern: "^[^\\u0000]+$",
+    },
     {
       type: "array",
       minItems: 1,
       maxItems: 512,
-      items: { type: "string", minLength: 1, maxLength: 65_536 },
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: 65_536,
+        pattern: "^[^\\u0000]+$",
+      },
+    },
+  ],
+});
+
+const mcpShellCommandSchema: AnySchemaObject = Object.freeze({
+  type: "string",
+  minLength: 1,
+  maxLength: MCP_ADAPTER_RESULT_MAX_BYTES,
+  pattern: "^[^\\u0000]+$",
+});
+
+const mcpArgumentVectorSchema: AnySchemaObject = Object.freeze({
+  type: "array",
+  minItems: 1,
+  maxItems: 512,
+  items: {
+    type: "string",
+    minLength: 1,
+    maxLength: 65_536,
+    pattern: "^[^\\u0000]+$",
+  },
+});
+
+const failureMessageSchema: AnySchemaObject = Object.freeze({
+  type: "string",
+  minLength: 1,
+  maxLength: 8192,
+});
+
+const mcpExecutionSuccessSchema: AnySchemaObject = Object.freeze({
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { const: "exit-zero" } },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "requireReload", "invalidResponseMessage", "reloadRequiredMessage"],
+      properties: {
+        kind: { const: "lifecycle-json" },
+        requireReload: { type: "boolean" },
+        invalidResponseMessage: failureMessageSchema,
+        reloadRequiredMessage: failureMessageSchema,
+      },
+    },
+  ],
+});
+
+const mcpExecutionPlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["command", "timeoutSeconds", "success", "failureMessage"],
+  properties: {
+    command: mcpCommandSchema,
+    timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
+    success: mcpExecutionSuccessSchema,
+    failureMessage: failureMessageSchema,
+  },
+});
+
+const mcpRegistrationPlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["execution", "verification", "credentialConvergence"],
+  properties: {
+    execution: mcpExecutionPlanSchema,
+    verification: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "failureMessage"],
+          properties: {
+            kind: { const: "inspection" },
+            failureMessage: failureMessageSchema,
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "failureMessage"],
+          properties: {
+            kind: { const: "rollback-restored" },
+            failureMessage: failureMessageSchema,
+          },
+        },
+      ],
+    },
+    credentialConvergence: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: { kind: { const: "none" } },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "unavailableMessage", "unstableMessage"],
+          properties: {
+            kind: { const: "after-runtime-reload" },
+            unavailableMessage: failureMessageSchema,
+            unstableMessage: failureMessageSchema,
+          },
+        },
+      ],
+    },
+  },
+});
+
+const mcpRemovalPlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["execution", "outcome"],
+  properties: {
+    execution: mcpExecutionPlanSchema,
+    outcome: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: { kind: { const: "removed" } },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: { kind: { const: "stdout-removal-outcome" } },
+        },
+      ],
+    },
+  },
+});
+
+const mcpCapabilityProbeSchema: AnySchemaObject = Object.freeze({
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { const: "not-required" } },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "command", "success", "timeoutSeconds", "failureMessage"],
+      properties: {
+        kind: { const: "command" },
+        command: mcpCommandSchema,
+        success: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["kind"],
+              properties: { kind: { const: "exit-zero" } },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["kind", "value"],
+              properties: {
+                kind: { const: "stdout-trimmed-equals" },
+                value: { type: "string", minLength: 1, maxLength: 65_536 },
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["kind"],
+              properties: { kind: { const: "last-json-line-ok" } },
+            },
+          ],
+        },
+        timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
+        failureMessage: { type: "string", minLength: 1, maxLength: 8192 },
+        retry: {
+          type: "object",
+          additionalProperties: false,
+          required: ["outputExact", "initialAttempts", "intervalMilliseconds"],
+          properties: {
+            outputExact: { type: "string", minLength: 1, maxLength: 8192 },
+            initialAttempts: { type: "integer", minimum: 1, maximum: 10 },
+            intervalMilliseconds: { type: "integer", minimum: 1, maximum: 60_000 },
+            recovery: {
+              type: "object",
+              additionalProperties: false,
+              required: ["kind", "timeoutSeconds", "postRecoveryAttempts"],
+              properties: {
+                kind: { const: "agent-gateway" },
+                timeoutSeconds: { type: "integer", minimum: 1, maximum: 900 },
+                postRecoveryAttempts: { type: "integer", minimum: 1, maximum: 600 },
+              },
+            },
+          },
+        },
+      },
     },
   ],
 });
@@ -121,18 +485,57 @@ export const HARNESS_MCP_ADAPTER_CONTRACT = defineHarnessAdapterContract({
   operations: {
     register: defineHarnessAdapterOperation<
       HarnessMcpRegistrationRequest,
-      HarnessMcpAdapterCommand
+      HarnessMcpRegistrationPlan
     >({
-      exportName: "buildMcpRegistrationCommand",
+      exportName: "buildMcpRegistrationPlan",
       requestSchema: mcpRegistrationRequestSchema,
-      resultSchema: mcpCommandSchema,
-      resultDescription: "command",
+      resultSchema: mcpRegistrationPlanSchema,
+      resultDescription: "registration plan",
     }),
-    remove: defineHarnessAdapterOperation<HarnessMcpRemovalRequest, HarnessMcpAdapterCommand>({
-      exportName: "buildMcpRemovalCommand",
+    remove: defineHarnessAdapterOperation<HarnessMcpRemovalRequest, HarnessMcpRemovalPlan>({
+      exportName: "buildMcpRemovalPlan",
       requestSchema: mcpRemovalRequestSchema,
-      resultSchema: mcpCommandSchema,
-      resultDescription: "command",
+      resultSchema: mcpRemovalPlanSchema,
+      resultDescription: "removal plan",
+    }),
+    inspect: defineHarnessAdapterOperation<HarnessMcpInspectionRequest, string>({
+      exportName: "buildMcpInspectionCommand",
+      requestSchema: mcpInspectionRequestSchema,
+      resultSchema: mcpShellCommandSchema,
+      resultDescription: "inspection command",
+    }),
+    mutationCapability: defineHarnessAdapterOperation<
+      HarnessMcpCapabilityRequest,
+      HarnessMcpCapabilityProbe
+    >({
+      exportName: "describeMcpMutationCapability",
+      requestSchema: mcpCapabilityRequestSchema,
+      resultSchema: mcpCapabilityProbeSchema,
+      resultDescription: "mutation capability probe",
+    }),
+    teardownCapability: defineHarnessAdapterOperation<
+      HarnessMcpCapabilityRequest,
+      HarnessMcpCapabilityProbe
+    >({
+      exportName: "describeMcpTeardownCapability",
+      requestSchema: mcpCapabilityRequestSchema,
+      resultSchema: mcpCapabilityProbeSchema,
+      resultDescription: "teardown capability probe",
+    }),
+    verifyRuntimeIntent: defineHarnessAdapterOperation<
+      HarnessMcpRuntimeIntentRequest,
+      HarnessMcpCapabilityProbe
+    >({
+      exportName: "describeMcpRuntimeIntentVerification",
+      requestSchema: mcpRuntimeIntentRequestSchema,
+      resultSchema: mcpCapabilityProbeSchema,
+      resultDescription: "runtime intent verification",
+    }),
+    runtime: defineHarnessAdapterOperation<HarnessMcpRuntimeRequest, readonly string[]>({
+      exportName: "buildMcpRuntimeCommand",
+      requestSchema: mcpRuntimeRequestSchema,
+      resultSchema: mcpArgumentVectorSchema,
+      resultDescription: "runtime argument vector",
     }),
   },
 });
