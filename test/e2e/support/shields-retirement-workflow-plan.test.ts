@@ -48,11 +48,21 @@ describe("Shields retirement upgrade workflow plan", () => {
       expect(selectedWorkflowJobs(targeted)).toEqual(["catalogue-github-read"]);
 
       const unfiltered = buildE2eWorkflowPlan();
-      expect(E2E_TARGET_CATALOGUE).toHaveLength(65);
-      expect(unfiltered.coverageMatrix).toHaveLength(90);
-      expect(unfiltered.coverageMatrix.filter((row) => row.unresolvedReason === "")).toHaveLength(
-        89,
-      );
+      expect(
+        E2E_TARGET_CATALOGUE.filter(
+          (entry) => entry.testFile === "test/e2e/live/shields-retirement-upgrade.test.ts",
+        ),
+      ).toEqual([target]);
+      expect(
+        unfiltered.coverageMatrix.filter(
+          (row) => row.source === "catalogue" && row.id === "shields-retirement-upgrade",
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          agentRuntime: "openclaw",
+          unresolvedReason: "",
+        }),
+      ]);
       expect(
         Object.values(unfiltered.catalogueMatrices)
           .flat()
