@@ -100,7 +100,7 @@ describe("rebuild filesystem restore", () => {
 
     runRebuildRestorePhase({
       sandboxName: "alpha",
-      targetAgentType: "openclaw",
+      agentDefinition: OPENCLAW_DEFINITION,
       targetImageIsCustom: false,
       backupManifest,
       runtimeSelection,
@@ -110,8 +110,12 @@ describe("rebuild filesystem restore", () => {
     expect(restore).toHaveBeenCalledWith(
       "alpha",
       backupManifest,
-      { targetAgentType: "openclaw", runtimeSelection },
-      { getSandbox: expect.any(Function) },
+      {
+        targetAgentType: "openclaw",
+        agentDefinition: OPENCLAW_DEFINITION,
+        runtimeSelection,
+      },
+      { getSandbox: expect.any(Function), captureOpenshell: expect.any(Function) },
     );
   });
 

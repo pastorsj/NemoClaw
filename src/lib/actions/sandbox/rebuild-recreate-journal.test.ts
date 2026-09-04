@@ -637,6 +637,7 @@ describe("rebuild replacement journal", () => {
       expectedGatewayAuthority: STANDALONE_GATEWAY_AUTHORITY,
       agentName: "langchain-deepagents-code",
       targetIntentFingerprint: fingerprintRebuildRecreateTargetIntent(recreateOptions),
+      packageAuthority: NULL_PACKAGE_AUTHORITY,
       log: vi.fn(),
       resolveRuntimeSelection,
     });
@@ -669,6 +670,7 @@ describe("rebuild replacement journal", () => {
       expectedGatewayAuthority: STANDALONE_GATEWAY_AUTHORITY,
       agentName: "langchain-deepagents-code",
       targetIntentFingerprint: fingerprintRebuildRecreateTargetIntent(recreateOptions),
+      packageAuthority: NULL_PACKAGE_AUTHORITY,
       log: vi.fn(),
       resolveRuntimeSelection,
     });
