@@ -1,10 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { installHarnessPackage } from "../agent-runtime/package/install";
+import { HarnessPackageStoreIntegrityError } from "../agent-runtime/package/store";
+import * as onboardSession from "../state/onboard-session";
+import * as registry from "../state/registry";
 import type { AgentDefinition } from "./defs";
 // Import source directly so tests cannot pass against a stale build.
-import { buildRecoveryScript, getRegisteredAgent } from "./runtime";
+import { buildRecoveryScript, getRegisteredAgent, getSessionAgent } from "./runtime";
 
 function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
   return {
@@ -70,6 +78,62 @@ const hermesAgent = makeAgent({
   },
 });
 
+const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-runtime-tests");
+const SOURCE_IDENTITY = {
+  kind: "bundled",
+  nemoclawBuildIdentity: {
+    nemoclawVersion: "0.0.113",
+    sourceRevision: "a".repeat(40),
+  },
+} as const;
+
+fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
+
+function writePackageFile(sourceRoot: string, relativePath: string, contents: string): void {
+  const target = path.join(sourceRoot, ...relativePath.split("/"));
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(target, contents, { mode: 0o600 });
+}
+
+function installRuntimePackageFixture(
+  sourceRoot: string,
+  storeRoot: string,
+  id = "future-harness",
+  displayName = "Receipt-pinned Future Harness",
+) {
+  const packageDirectory = `nemoclaw-${id}`;
+  writePackageFile(
+    sourceRoot,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id,
+      displayName,
+      packageVersion: "1.0.0",
+      manifest: `packages/${packageDirectory}/manifest.yaml`,
+    })}\n`,
+  );
+  writePackageFile(
+    sourceRoot,
+    `packages/${packageDirectory}/manifest.yaml`,
+    [
+      `name: ${id}`,
+      `display_name: ${displayName}`,
+      `binary_path: /usr/local/bin/${id}`,
+      "runtime:",
+      "  kind: terminal",
+      "  headless_command: nemoclaw-fabric run",
+      "",
+    ].join("\n"),
+  );
+  writePackageFile(sourceRoot, "runtime/payload.txt", "future harness package\n");
+  return installHarnessPackage(
+    { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+    { storeRoot },
+  );
+}
+
 describe("getRegisteredAgent", () => {
   it("does not invent an agent when the target registry row is absent or OpenClaw", () => {
     expect(getRegisteredAgent(null)).toBeNull();
@@ -91,6 +155,91 @@ describe("getRegisteredAgent", () => {
       expect(getRegisteredAgent({ agent })).toBeNull();
     },
   );
+});
+
+describe("package-backed runtime agent authority", () => {
+  let fixtureRoot = "";
+  let sourceRoot = "";
+  let storeRoot = "";
+
+  beforeEach(() => {
+    fixtureRoot = fs.mkdtempSync(path.join(TEST_PARENT, "fixture-"));
+    fs.chmodSync(fixtureRoot, 0o700);
+    sourceRoot = path.join(fixtureRoot, "source");
+    storeRoot = path.join(fixtureRoot, "store");
+    fs.mkdirSync(storeRoot, { mode: 0o700 });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  });
+
+  it("loads a registered harness from its exact installed package receipt", () => {
+    const installed = installRuntimePackageFixture(sourceRoot, storeRoot);
+
+    const agent = getRegisteredAgent(
+      { agent: "future-harness", harnessPackage: installed.identity },
+      { storeRoot },
+    );
+
+    expect(agent?.name).toBe("future-harness");
+    expect(agent?.displayName).toBe("Receipt-pinned Future Harness");
+    expect(agent?.packageRoot).toBe(installed.packageRoot);
+  });
+
+  it("resolves receipt-backed OpenClaw while preserving its legacy null sentinel", () => {
+    const installed = installRuntimePackageFixture(
+      sourceRoot,
+      storeRoot,
+      "openclaw",
+      "Receipt-pinned OpenClaw",
+    );
+
+    expect(getRegisteredAgent({ agent: null })).toBeNull();
+    expect(
+      getRegisteredAgent({ agent: null, harnessPackage: installed.identity }, { storeRoot })
+        ?.packageRoot,
+    ).toBe(installed.packageRoot);
+  });
+
+  it("fails closed instead of degrading damaged package authority to OpenClaw", () => {
+    const installed = installRuntimePackageFixture(sourceRoot, storeRoot);
+    const authority = { agent: "future-harness", harnessPackage: installed.identity } as const;
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "future", ...authority });
+    fs.rmSync(installed.packageRoot, { recursive: true });
+
+    expect(() => getRegisteredAgent(authority, { storeRoot })).toThrow(
+      HarnessPackageStoreIntegrityError,
+    );
+    expect(() => getSessionAgent("future", { storeRoot })).toThrow(
+      HarnessPackageStoreIntegrityError,
+    );
+  });
+
+  it("uses receipt-pinned authority for registry and current-session lookup", () => {
+    const installed = installRuntimePackageFixture(sourceRoot, storeRoot);
+    const registryAuthority = {
+      agent: "future-harness",
+      harnessPackage: installed.identity,
+    } as const;
+    const sessionAuthority = { ...registryAuthority, harnessPackageMigration: null } as const;
+    vi.spyOn(registry, "getSandbox").mockReturnValue({ name: "future", ...registryAuthority });
+    vi.spyOn(onboardSession, "loadSession").mockReturnValue(sessionAuthority as never);
+
+    expect(getSessionAgent("future", { storeRoot })?.packageRoot).toBe(installed.packageRoot);
+    expect(getSessionAgent(undefined, { storeRoot })?.packageRoot).toBe(installed.packageRoot);
+  });
+
+  it("does not hide invalid registry authority as legacy OpenClaw", () => {
+    vi.spyOn(registry, "getSandbox").mockImplementation(() => {
+      throw new Error("invalid harness package authority");
+    });
+
+    expect(() => getSessionAgent("future", { storeRoot })).toThrow(
+      "invalid harness package authority",
+    );
+  });
 });
 
 function extractGatewayProcessPattern(script: string | null): string {
