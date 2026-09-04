@@ -20,6 +20,7 @@ import { assertExitZero as expectExitZero, resultText } from "../fixtures/client
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import { type SandboxClient, trustedSandboxShellScript } from "../fixtures/clients/sandbox.ts";
 import { test as e2eTest, expect } from "../fixtures/e2e-test.ts";
+import { installHarnessPackage } from "../fixtures/harness-package.ts";
 import { MCP_BRIDGE_TEST_CREDENTIALS } from "../fixtures/mcp-bridge-credentials.ts";
 import { redactString } from "../fixtures/redaction.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
@@ -131,6 +132,7 @@ async function onboardAgent(
     envOverlay?: NodeJS.ProcessEnv;
   },
 ): Promise<void> {
+  await installHarnessPackage(host, options.agent);
   const corporateCaBundle = requireMcpBridgeTlsCaCert();
   await prepareOwnedSandboxForOnboard(host, sandbox, cleanup, options.sandboxName);
   const args = buildMcpBridgeOnboardArgs();
