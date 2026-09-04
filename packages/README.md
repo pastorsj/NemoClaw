@@ -191,8 +191,9 @@ its ID to those components:
 
 Core does not need a known package ID for this path. The synthetic `future-terminal` test in
 [`package-composition.test.ts`](../test/onboarding/package-composition.test.ts) protects install,
-selection, Dockerfile workload selection, and Fabric dispatch for an unknown ID. The bundled
-artifact test and build-context tests protect discovery, copied inputs, identity, and staging.
+selection, Dockerfile workload selection, Fabric command selection, and the private standard-input
+handoff for an unknown ID. The bundled artifact test and build-context tests protect discovery,
+copied inputs, identity, and staging.
 
 This path does not enable generic managed startup. Core must add the package and its contracts to
 the closed maps rooted at `MANAGED_STARTUP_AGENTS`. Buildless onboarding has a separate closed

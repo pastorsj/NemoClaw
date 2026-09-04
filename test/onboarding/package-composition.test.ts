@@ -117,7 +117,7 @@ afterEach(() => {
 });
 
 describe("future harness package composition", () => {
-  it("discovers, installs, and dispatches an unknown Dockerfile package through Fabric", async () => {
+  it("discovers, installs, and routes an unknown Dockerfile package to its Fabric command", async () => {
     expect(listBundledAgentRuntimeSources(authoringRoot)).toMatchObject([
       {
         id: PACKAGE_ID,
