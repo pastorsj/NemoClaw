@@ -18,6 +18,7 @@ const managedRecoveryCompleted = {
   stdout: `v1 ${"a".repeat(64)} complete ok 0 42\nGATEWAY_PID=42`,
   stderr: "",
 };
+const runtimeSelection = { gatewayName: "nemoclaw-8091", workspace: "default" } as const;
 
 function commandProbe(
   overrides: Partial<Extract<HarnessMcpCapabilityProbe, { kind: "command" }>> = {},
@@ -42,7 +43,12 @@ beforeEach(() => {
 describe("installed MCP capability probe", () => {
   it("accepts a capability that requires no runtime probe", () => {
     expect(() =>
-      assertInstalledMcpCapability("alpha", { kind: "not-required" }, dependencies),
+      assertInstalledMcpCapability(
+        "alpha",
+        { kind: "not-required" },
+        runtimeSelection,
+        dependencies,
+      ),
     ).not.toThrow();
     expect(dependencies.executeShellCommand).not.toHaveBeenCalled();
   });
@@ -53,10 +59,16 @@ describe("installed MCP capability probe", () => {
     assertInstalledMcpCapability(
       "alpha",
       commandProbe({ success: { kind: "stdout-trimmed-equals", value: "ready" } }),
+      runtimeSelection,
       dependencies,
     );
 
-    expect(dependencies.executeShellCommand).toHaveBeenCalledWith("alpha", "future-probe", 30);
+    expect(dependencies.executeShellCommand).toHaveBeenCalledWith(
+      "alpha",
+      "future-probe",
+      30,
+      runtimeSelection,
+    );
   });
 
   it("runs an argv command without converting it to shell source", () => {
@@ -72,6 +84,7 @@ describe("installed MCP capability probe", () => {
         command: ["future-probe", "--json"],
         success: { kind: "last-json-line-ok" },
       }),
+      runtimeSelection,
       dependencies,
     );
 
@@ -79,6 +92,7 @@ describe("installed MCP capability probe", () => {
       "alpha",
       ["future-probe", "--json"],
       30,
+      runtimeSelection,
     );
   });
 
@@ -104,11 +118,16 @@ describe("installed MCP capability probe", () => {
           },
         },
       }),
+      runtimeSelection,
       dependencies,
     );
 
     expect(dependencies.sleep).toHaveBeenCalledTimes(1);
-    expect(dependencies.recoverAgentGateway).toHaveBeenCalledWith("alpha", 15_000);
+    expect(dependencies.recoverAgentGateway).toHaveBeenCalledWith(
+      "alpha",
+      15_000,
+      runtimeSelection,
+    );
     expect(dependencies.executeArgvCommand).toHaveBeenCalledTimes(3);
   });
 
@@ -129,6 +148,7 @@ describe("installed MCP capability probe", () => {
             intervalMilliseconds: 5,
           },
         }),
+        runtimeSelection,
         dependencies,
       ),
     ).toThrow("Future runtime capability is unavailable.");
@@ -163,6 +183,7 @@ describe("installed MCP capability probe", () => {
             },
           },
         }),
+        runtimeSelection,
         dependencies,
       ),
     ).toThrow("Managed gateway recovery failed: recovered");
@@ -196,6 +217,7 @@ describe("installed MCP capability probe", () => {
             },
           },
         }),
+        runtimeSelection,
         dependencies,
       ),
     ).toThrow("HERMES_CONFIG_HASH_MISMATCH");

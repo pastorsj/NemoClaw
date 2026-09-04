@@ -23,6 +23,7 @@ import {
 } from "../adapters/openshell/sandbox-policy-cli";
 import { PolicyObservationError } from "../adapters/openshell/policy-state";
 export { isPolicyObservationError } from "../adapters/openshell/policy-state";
+import type { OpenShellRuntimeSelection } from "../adapters/openshell/runtime-selection";
 import { type AgentDefinition, loadAgent, requireAgentPolicyAdditionsPath } from "../agent/defs";
 import { CLI_NAME } from "../cli/branding";
 import {
@@ -759,8 +760,13 @@ export function inspectPolicyMutationContext(
  * Read the round-trippable base policy through the sandbox's recorded gateway.
  * Destructive lifecycle callers use this instead of the ambient CLI gateway.
  */
-export function captureRecordedSandboxBasePolicy(sandboxName: string, operation: string): string {
-  return inspectLivePolicyBoundary(sandboxName, operation).basePolicyDocument;
+export function captureRecordedSandboxBasePolicy(
+  sandboxName: string,
+  operation: string,
+  runtimeSelection?: OpenShellRuntimeSelection,
+): string {
+  return inspectLivePolicyBoundary(sandboxName, operation, runtimeSelection?.gatewayName)
+    .basePolicyDocument;
 }
 
 function preparePolicyMutationContext(
@@ -1749,7 +1755,11 @@ function removePresetFromPolicy(
 function removePreset(
   sandboxName: string,
   presetName: string,
-  options: { nonFatal?: boolean; presetContent?: string } = {},
+  options: {
+    nonFatal?: boolean;
+    presetContent?: string;
+    runtimeSelection?: OpenShellRuntimeSelection;
+  } = {},
 ): boolean {
   // Guard against truncated sandbox names — WSL can truncate hyphenated
   // names during argument parsing, e.g. "my-assistant" → "m"
@@ -1768,7 +1778,11 @@ function removePreset(
   }
 
   const operation = `remove policy preset '${presetName}'`;
-  const context = inspectLivePolicyForMutation(sandboxName, operation);
+  const context = inspectLivePolicyForMutation(
+    sandboxName,
+    operation,
+    options.runtimeSelection?.gatewayName,
+  );
   if (!context) return false;
 
   const currentPolicy = currentPolicyFromMutationContext(context);
@@ -2178,6 +2192,7 @@ function applyPresetContent(
     suppressDisclosure?: boolean;
     disclosedPresetState?: PresetPolicyState | null;
     includeMessagingCredentialBindings?: boolean;
+    runtimeSelection?: OpenShellRuntimeSelection;
   } = {},
 ): boolean {
   // Guard against truncated sandbox names — WSL can truncate hyphenated
@@ -2260,7 +2275,11 @@ function applyPresetContent(
   const operation = `apply policy preset '${presetName}'`;
   let context: PolicyMutationContext;
   try {
-    context = preparePolicyMutationContext(sandboxName, operation);
+    context = preparePolicyMutationContext(
+      sandboxName,
+      operation,
+      options.runtimeSelection?.gatewayName,
+    );
   } catch (error) {
     return reportPolicyObservationFailure(error);
   }
@@ -2781,9 +2800,11 @@ function getPresetContentGatewayState(
   sandboxName: string,
   presetContent: string,
   policyKey?: string,
+  runtimeSelection?: OpenShellRuntimeSelection,
 ): "match" | "absent" | "drift" | null {
   return inspectPresetContentGatewayState({
-    readPolicy: () => readCurrentSandboxPolicy(sandboxName) ?? "",
+    readPolicy: () =>
+      readCurrentSandboxPolicy(sandboxName, runtimeSelection?.gatewayName) ?? "",
     parseCurrentPolicy: parseCurrentPolicyOrEmpty,
     extractPresetEntries,
     presetContent,

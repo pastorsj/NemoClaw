@@ -6,10 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   executeSandboxCommand: vi.fn(),
   executeSandboxExecCommand: vi.fn(),
+  getMcpProviderInspectionRuntimeSelection: vi.fn(),
+  getSandbox: vi.fn(),
   prepareAbsent: vi.fn(),
   prepareExecUnavailable: vi.fn(),
   prepareLive: vi.fn(),
   restore: vi.fn(),
+}));
+
+vi.mock("../../state/registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/registry")>()),
+  getSandbox: mocks.getSandbox,
 }));
 
 vi.mock("./mcp-bridge", () => ({
@@ -28,8 +35,15 @@ vi.mock("./process-recovery", () => ({
 import {
   prepareMcpForRebuild,
   printMcpRebuildRetryCommand,
+  resolveMcpPreparationRuntimeSelection,
   restoreMcpAfterRebuild,
 } from "./rebuild-mcp-phase";
+vi.mock("./mcp-bridge-provider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./mcp-bridge-provider")>()),
+  getMcpProviderInspectionRuntimeSelection: mocks.getMcpProviderInspectionRuntimeSelection,
+}));
+
+const runtimeSelection = { gatewayName: "nemoclaw", workspace: "default" };
 
 const emptyPreparation = {
   entries: [],
@@ -45,6 +59,10 @@ describe("forced rebuild MCP preparation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.getSandbox.mockReturnValue({
+      mcp: { bridges: { github: { addState: undefined } } },
+    });
+    mocks.getMcpProviderInspectionRuntimeSelection.mockReturnValue(runtimeSelection);
     mocks.executeSandboxCommand.mockReturnValue({ status: 0, stdout: "", stderr: "" });
     mocks.executeSandboxExecCommand.mockReturnValue({ status: 0, stdout: "", stderr: "" });
     mocks.prepareAbsent.mockResolvedValue(emptyPreparation);
@@ -62,7 +80,10 @@ describe("forced rebuild MCP preparation", () => {
     await prepareMcpForRebuild("alpha", false, false, bail, agentDefinition);
     await restoreMcpAfterRebuild("alpha", [{} as never], agentDefinition);
 
-    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha", { agentDefinition });
+    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha", {
+      agentDefinition,
+      runtimeSelection,
+    });
     expect(mocks.restore).toHaveBeenCalledWith("alpha", [{}], { agentDefinition });
   });
 
@@ -75,7 +96,10 @@ describe("forced rebuild MCP preparation", () => {
 
     await prepareMcpForRebuild("alpha", false, true, bail, agentDefinition);
 
-    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { agentDefinition });
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", {
+      agentDefinition,
+      runtimeSelection,
+    });
   });
 
   it("uses host-side recovery when OpenShell exec fails even while SSH is healthy (#7062)", async () => {
@@ -90,9 +114,12 @@ describe("forced rebuild MCP preparation", () => {
 
     expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
       allowLocalDockerFallback: false,
+      runtimeSelection,
     });
-    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
-    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":", {
+      runtimeSelection,
+    });
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { runtimeSelection });
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     expect(mocks.prepareLive).not.toHaveBeenCalled();
   });
@@ -107,11 +134,14 @@ describe("forced rebuild MCP preparation", () => {
       emptyPreparation,
     );
 
-    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
+    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":", {
+      runtimeSelection,
+    });
     expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
       allowLocalDockerFallback: false,
+      runtimeSelection,
     });
-    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { runtimeSelection });
     expect(mocks.prepareLive).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
   });
@@ -132,8 +162,9 @@ describe("forced rebuild MCP preparation", () => {
 
     expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
       allowLocalDockerFallback: false,
+      runtimeSelection,
     });
-    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { runtimeSelection });
     expect(mocks.prepareLive).not.toHaveBeenCalled();
   });
 
@@ -153,7 +184,7 @@ describe("forced rebuild MCP preparation", () => {
         emptyPreparation,
       );
 
-      expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha");
+      expect(mocks.prepareExecUnavailable).toHaveBeenCalledWith("alpha", { runtimeSelection });
       expect(mocks.prepareLive).not.toHaveBeenCalled();
       expect(mocks.prepareAbsent).not.toHaveBeenCalled();
     },
@@ -169,10 +200,13 @@ describe("forced rebuild MCP preparation", () => {
       "Failed to preserve MCP bridges before rebuild: generated policy drifted",
     );
 
-    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha");
-    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":");
+    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha", { runtimeSelection });
+    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", ":", {
+      runtimeSelection,
+    });
     expect(mocks.executeSandboxExecCommand).toHaveBeenCalledWith("alpha", ":", undefined, {
       allowLocalDockerFallback: false,
+      runtimeSelection,
     });
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
   });
@@ -207,7 +241,7 @@ describe("forced rebuild MCP preparation", () => {
 
     expect(mocks.executeSandboxExecCommand).not.toHaveBeenCalled();
     expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
-    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha");
+    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha", { runtimeSelection });
     expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();
     expect(mocks.prepareAbsent).not.toHaveBeenCalled();
   });
@@ -226,6 +260,26 @@ describe("forced rebuild MCP preparation", () => {
     expect(mocks.prepareAbsent).toHaveBeenCalledWith("alpha");
     expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();
     expect(mocks.prepareLive).not.toHaveBeenCalled();
+  });
+
+  it("does not resolve or probe a runtime target for prepared-only MCP state", async () => {
+    mocks.getSandbox.mockReturnValue({
+      mcp: { bridges: { github: { addState: "prepared" } } },
+    });
+    const bail = vi.fn((message: string): never => {
+      throw new Error(message);
+    });
+
+    expect(resolveMcpPreparationRuntimeSelection("alpha")).toBeUndefined();
+    await expect(prepareMcpForRebuild("alpha", false, true, bail)).resolves.toEqual(
+      emptyPreparation,
+    );
+
+    expect(mocks.getMcpProviderInspectionRuntimeSelection).not.toHaveBeenCalled();
+    expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
+    expect(mocks.executeSandboxExecCommand).not.toHaveBeenCalled();
+    expect(mocks.prepareExecUnavailable).not.toHaveBeenCalled();
+    expect(mocks.prepareLive).toHaveBeenCalledWith("alpha");
   });
 });
 

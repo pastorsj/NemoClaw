@@ -4,9 +4,10 @@
     "defaultMax": 20,
     "maxByFile": {
       "src/lib/actions/sandbox/mcp-bridge-contracts.ts": 26,
-      "src/lib/actions/sandbox/process-recovery.ts": 27,
+      "src/lib/actions/sandbox/process-recovery.ts": 26,
       "src/lib/adapters/docker/index.ts": 42,
       "src/lib/adapters/openshell/client.ts": 21,
+      "src/lib/adapters/openshell/command-argv.ts": 23,
       "src/lib/adapters/openshell/resolve.ts": 25,
       "src/lib/adapters/openshell/runtime.ts": 55,
       "src/lib/adapters/openshell/timeouts.ts": 34,
@@ -33,7 +34,7 @@
       "src/lib/state/mcp-lifecycle-lock-acquisition.ts": 20,
       "src/lib/state/registry.ts": 96,
       "src/lib/state/state-root.ts": 22,
-      "src/lib/subprocess-env.ts": 23,
+      "src/lib/subprocess-env.ts": 22,
       "src/lib/validation.ts": 24
     }
   },
@@ -47,8 +48,8 @@
       "src/lib/actions/sandbox/gateway-state.ts": 21,
       "src/lib/actions/sandbox/status-snapshot.ts": 19,
       "src/lib/actions/sandbox/policy-channel.ts": 30,
-      "src/lib/actions/sandbox/process-recovery.ts": 19,
-      "src/lib/actions/sandbox/rebuild-pipeline.ts": 29,
+      "src/lib/actions/sandbox/process-recovery.ts": 20,
+      "src/lib/actions/sandbox/rebuild-pipeline.ts": 30,
       "src/lib/actions/sandbox/snapshot.ts": 36,
       "src/lib/actions/uninstall/run-plan.ts": 25,
       "src/lib/inference/local.ts": 22,
@@ -59,7 +60,8 @@
       "src/lib/onboard/sandbox-create/orchestration.ts": 22,
       "src/lib/policy/index.ts": 22,
       "src/lib/sandbox/config.ts": 19,
-      "src/lib/state/onboard-session.ts": 21
+      "src/lib/state/onboard-session.ts": 21,
+      "src/lib/state/sandbox.ts": 21
     }
   },
   "allowedCycles": [],

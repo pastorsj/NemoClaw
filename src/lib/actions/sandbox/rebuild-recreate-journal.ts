@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime-selection";
 import {
   inspectHarnessPackageState,
   type HarnessPackageIdentity,
@@ -636,6 +637,7 @@ export interface RebuildRecreateJournal {
   readonly targetGeneration: string;
   readonly targetIntentFingerprint: string;
   readonly harnessPackage: HarnessPackageIdentity | null;
+  readonly runtimeSelection?: OpenShellRuntimeSelection;
   beginDelete(): RebuildRecreateSourcePresence;
   confirmDeleted(): void;
   completeAcceptedTarget(): void;
@@ -722,6 +724,8 @@ export interface OpenRebuildRecreateJournalInput {
   readonly packageAuthority: RebuildPackageAuthority;
   readonly log: (message: string) => void;
   readonly observe?: RebuildSandboxObserver;
+  readonly runtimeSelection?: OpenShellRuntimeSelection;
+  readonly resolveRuntimeSelection?: () => OpenShellRuntimeSelection;
   /**
    * Invoked with ready-to-print lines when gateway authority cannot be
    * revalidated, so the command layer can fail cleanly (#8103).
@@ -733,7 +737,12 @@ export function openRebuildRecreateJournal(
   input: OpenRebuildRecreateJournalInput,
 ): RebuildRecreateJournal {
   const { target, agentName, targetIntentFingerprint, log } = input;
-  const observe = input.observe ?? observeRebuildSandbox;
+  const observeTarget = (
+    runtimeSelection = input.runtimeSelection,
+  ): ReturnType<RebuildSandboxObserver> =>
+    input.observe
+      ? input.observe(target)
+      : observeRebuildSandbox(target, undefined, runtimeSelection);
   const sourceEntry = assertCurrentRebuildPackageAuthority(
     target.sandboxName,
     input.packageAuthority,
@@ -840,6 +849,9 @@ export function openRebuildRecreateJournal(
     );
   }
 
+  const runtimeSelection = input.resolveRuntimeSelection
+    ? input.resolveRuntimeSelection()
+    : input.runtimeSelection;
   const owned = ownSandboxRecreateTransaction({
     sessionStore: {
       loadSession: onboardSession.loadSession,
@@ -863,7 +875,7 @@ export function openRebuildRecreateJournal(
       }
       return entry;
     },
-    observe: () => observe(target),
+    observe: () => observeTarget(runtimeSelection),
     decorateCheckpoint: (current, checkpoint, now) => ({
       ...checkpoint,
       machineState: current.machine.state,
@@ -921,6 +933,7 @@ export function openRebuildRecreateJournal(
       transaction.version === 2
         ? transaction.harnessPackage
         : input.packageAuthority.harnessPackage,
+    ...(runtimeSelection ? { runtimeSelection } : {}),
     beginDelete: () => {
       const begun = beginSandboxRecreateDelete({
         sessionStore: {
@@ -934,14 +947,14 @@ export function openRebuildRecreateJournal(
         revalidateGatewayAuthority,
         readRegistryEntry: () =>
           assertCurrentRebuildPackageAuthority(target.sandboxName, input.packageAuthority),
-        observe: () => observe(target),
+        observe: () => observeTarget(runtimeSelection),
       });
       currentTransaction = begun.transaction;
       phase = currentTransaction.phase;
       return begun.sourcePresence;
     },
     confirmDeleted: () => {
-      if (observe(target).state !== "missing") {
+      if (observeTarget(runtimeSelection).state !== "missing") {
         throw new Error(
           `Cannot continue sandbox '${target.sandboxName}' replacement: OpenShell still reports the journaled source after delete.`,
         );

@@ -3,6 +3,7 @@
 
 import type { HarnessMcpCapabilityProbe } from "../../../agent-runtime/host-module";
 import { commandOutput, type OpenShellCommandResult } from "../mcp-bridge-output";
+import type { McpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
 import {
   executeMcpArgvCommand,
   executeMcpShellCommand,
@@ -20,25 +21,27 @@ interface McpCapabilityProbeDependencies {
     sandboxName: string,
     command: readonly string[],
     timeoutSeconds: number,
+    runtimeSelection: McpProviderInspectionRuntimeSelection,
   ) => OpenShellCommandResult | null;
   readonly recoverAgentGateway: (
     sandboxName: string,
     timeoutMilliseconds: number,
+    runtimeSelection: McpProviderInspectionRuntimeSelection,
   ) => OpenShellCommandResult | null;
   readonly sleep: (milliseconds: number) => void;
 }
 
 const defaultDependencies: McpCapabilityProbeDependencies = {
   executeShellCommand: executeMcpShellCommand,
-  executeArgvCommand(sandboxName, command, timeoutSeconds) {
+  executeArgvCommand(sandboxName, command, timeoutSeconds, runtimeSelection) {
     try {
-      return executeMcpArgvCommand(sandboxName, command, timeoutSeconds);
+      return executeMcpArgvCommand(sandboxName, command, timeoutSeconds, runtimeSelection);
     } catch {
       return null;
     }
   },
-  recoverAgentGateway(sandboxName, timeoutMilliseconds) {
-    return recoverMcpAgentGateway(sandboxName, timeoutMilliseconds);
+  recoverAgentGateway(sandboxName, timeoutMilliseconds, runtimeSelection) {
+    return recoverMcpAgentGateway(sandboxName, timeoutMilliseconds, runtimeSelection);
   },
   sleep: sleepMcpBridgeRetry,
 };
@@ -74,11 +77,22 @@ function probeSucceeded(probe: CapabilityCommandProbe, result: OpenShellCommandR
 function executeCapabilityCommand(
   sandboxName: string,
   probe: CapabilityCommandProbe,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: McpCapabilityProbeDependencies,
 ): OpenShellCommandResult | null {
   return typeof probe.command === "string"
-    ? dependencies.executeShellCommand(sandboxName, probe.command, probe.timeoutSeconds)
-    : dependencies.executeArgvCommand(sandboxName, probe.command, probe.timeoutSeconds);
+    ? dependencies.executeShellCommand(
+        sandboxName,
+        probe.command,
+        probe.timeoutSeconds,
+        runtimeSelection,
+      )
+    : dependencies.executeArgvCommand(
+        sandboxName,
+        probe.command,
+        probe.timeoutSeconds,
+        runtimeSelection,
+      );
 }
 
 function runProbeAttempts(
@@ -86,10 +100,11 @@ function runProbeAttempts(
   probe: CapabilityCommandProbe,
   attempts: number,
   intervalMilliseconds: number,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: McpCapabilityProbeDependencies,
 ): boolean {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const result = executeCapabilityCommand(sandboxName, probe, dependencies);
+    const result = executeCapabilityCommand(sandboxName, probe, runtimeSelection, dependencies);
     if (result && probeSucceeded(probe, result)) return true;
     const retryable =
       result !== null &&
@@ -105,12 +120,13 @@ function recoverAgentGatewayForProbe(
   sandboxName: string,
   probe: CapabilityCommandProbe,
   timeoutMilliseconds: number,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: McpCapabilityProbeDependencies,
 ): void {
   let result: OpenShellCommandResult | null = null;
   let failureDetail = "";
   try {
-    result = dependencies.recoverAgentGateway(sandboxName, timeoutMilliseconds);
+    result = dependencies.recoverAgentGateway(sandboxName, timeoutMilliseconds, runtimeSelection);
   } catch (error) {
     failureDetail = error instanceof Error ? error.message : String(error);
   }
@@ -125,6 +141,7 @@ function recoverAgentGatewayForProbe(
 export function assertInstalledMcpCapability(
   sandboxName: string,
   probe: HarnessMcpCapabilityProbe,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: McpCapabilityProbeDependencies = defaultDependencies,
 ): void {
   if (probe.kind === "not-required") return;
@@ -135,6 +152,7 @@ export function assertInstalledMcpCapability(
       probe,
       retry?.initialAttempts ?? 1,
       retry?.intervalMilliseconds ?? 0,
+      runtimeSelection,
       dependencies,
     )
   ) {
@@ -145,6 +163,7 @@ export function assertInstalledMcpCapability(
     sandboxName,
     probe,
     retry.recovery.timeoutSeconds * 1000,
+    runtimeSelection,
     dependencies,
   );
   if (
@@ -153,6 +172,7 @@ export function assertInstalledMcpCapability(
       probe,
       retry.recovery.postRecoveryAttempts,
       retry.intervalMilliseconds,
+      runtimeSelection,
       dependencies,
     )
   ) {

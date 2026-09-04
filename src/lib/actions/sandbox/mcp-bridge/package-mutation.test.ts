@@ -55,6 +55,7 @@ const ENTRY: McpBridgeEntry = Object.freeze({
   policyName: "future-policy",
   addedAt: "2026-08-30T12:00:00.000Z",
 });
+const runtimeSelection = { gatewayName: "nemoclaw-8091", workspace: "default" } as const;
 
 function registrationPlan(
   overrides: Partial<HarnessMcpRegistrationPlan> = {},
@@ -115,6 +116,7 @@ describe("installed MCP package mutation", () => {
       "alpha",
       "future-config",
       ENTRY,
+      runtimeSelection,
       { FUTURE_TOKEN: "host-only-secret" },
       { credentialRevision: "v12", configDirectory: "/sandbox/.future" },
     );
@@ -132,9 +134,19 @@ describe("installed MCP package mutation", () => {
         ]),
       }),
     );
-    expect(mocks.executeShell).toHaveBeenCalledWith("alpha", "future-register", 15);
+    expect(mocks.executeShell).toHaveBeenCalledWith(
+      "alpha",
+      "future-register",
+      15,
+      runtimeSelection,
+    );
     expect(mocks.executeArgv).not.toHaveBeenCalled();
-    expect(mocks.inspectRegistration).toHaveBeenCalledWith("alpha", ENTRY, "future-inspect");
+    expect(mocks.inspectRegistration).toHaveBeenCalledWith(
+      "alpha",
+      ENTRY,
+      "future-inspect",
+      runtimeSelection,
+    );
   });
 
   it("executes argv lifecycle plans and requires a valid reload response", () => {
@@ -168,13 +180,19 @@ describe("installed MCP package mutation", () => {
       "alpha",
       "future-config",
       ENTRY,
+      runtimeSelection,
       {},
       {
         credentialRevision: "v12",
       },
     );
 
-    expect(mocks.executeArgv).toHaveBeenCalledWith("alpha", ["future-helper", "add"], 620);
+    expect(mocks.executeArgv).toHaveBeenCalledWith(
+      "alpha",
+      ["future-helper", "add"],
+      620,
+      runtimeSelection,
+    );
     expect(mocks.executeShell).not.toHaveBeenCalled();
   });
 
@@ -193,6 +211,7 @@ describe("installed MCP package mutation", () => {
       "alpha",
       "future-config",
       ENTRY,
+      runtimeSelection,
       {},
       {
         credentialRevision: "v12",
@@ -230,9 +249,9 @@ describe("installed MCP package mutation", () => {
       stderr: "",
     });
 
-    expect(() => registerInstalledMcpAdapter("alpha", "future-config", ENTRY, {})).toThrow(
-      "Future runtime did not reload.",
-    );
+    expect(() =>
+      registerInstalledMcpAdapter("alpha", "future-config", ENTRY, runtimeSelection, {}),
+    ).toThrow("Future runtime did not reload.");
     expect(mocks.inspectRegistration).not.toHaveBeenCalled();
   });
 
@@ -255,6 +274,7 @@ describe("installed MCP package mutation", () => {
       "alpha",
       "future-config",
       ENTRY,
+      runtimeSelection,
       {},
       {
         teardownRollback: true,
@@ -274,7 +294,9 @@ describe("installed MCP package mutation", () => {
       stderr: "",
     });
 
-    expect(unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY)).toBe("absent");
+    expect(unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, runtimeSelection)).toBe(
+      "absent",
+    );
   });
 
   it("redacts credentials from a package mutation failure", () => {
@@ -285,12 +307,12 @@ describe("installed MCP package mutation", () => {
     });
 
     expect(() =>
-      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, {
+      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, runtimeSelection, {
         envValues: { FUTURE_TOKEN: "host-only-secret" },
       }),
     ).toThrow("Authorization=Bearer ***REDACTED***");
     try {
-      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, {
+      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, runtimeSelection, {
         envValues: { FUTURE_TOKEN: "host-only-secret" },
       });
     } catch (error) {
@@ -302,14 +324,18 @@ describe("installed MCP package mutation", () => {
     mocks.executeShell.mockReturnValue({ status: 2, stdout: "", stderr: "failed" });
 
     expect(
-      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, { bestEffort: true }),
+      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, runtimeSelection, {
+        bestEffort: true,
+      }),
     ).toBe("removed");
 
     mocks.buildRemoval.mockReturnValue(
       removalPlan({ outcome: { kind: "stdout-removal-outcome" } }),
     );
     expect(
-      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, { bestEffort: true }),
+      unregisterInstalledMcpAdapter("alpha", "future-config", ENTRY, runtimeSelection, {
+        bestEffort: true,
+      }),
     ).toBe("unowned");
   });
 });

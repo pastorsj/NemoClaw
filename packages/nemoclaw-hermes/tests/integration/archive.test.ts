@@ -197,7 +197,6 @@ describe("published Hermes package", () => {
           outputExact: string;
           initialAttempts: number;
           intervalMilliseconds: number;
-          recovery: { kind: string; timeoutSeconds: number; postRecoveryAttempts: number };
         };
       };
       describeMcpTeardownCapability(request: { sandboxName: string }): {
@@ -256,7 +255,8 @@ describe("published Hermes package", () => {
         configDirectory: null,
       }),
     ).toContain("example");
-    expect(mcp.describeMcpMutationCapability({ sandboxName: "sandbox" })).toMatchObject({
+    const mutationCapability = mcp.describeMcpMutationCapability({ sandboxName: "sandbox" });
+    expect(mutationCapability).toMatchObject({
       kind: "command",
       command: ["/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py", "probe"],
       success: { kind: "last-json-line-ok" },
@@ -264,13 +264,9 @@ describe("published Hermes package", () => {
         outputExact: "Hermes gateway is not running for managed MCP reload",
         initialAttempts: 3,
         intervalMilliseconds: 1000,
-        recovery: {
-          kind: "agent-gateway",
-          timeoutSeconds: 210,
-          postRecoveryAttempts: 90,
-        },
       },
     });
+    expect(mutationCapability.retry).not.toHaveProperty("recovery");
     expect(mcp.describeMcpTeardownCapability({ sandboxName: "sandbox" })).toMatchObject({
       kind: "command",
       success: { kind: "last-json-line-ok" },

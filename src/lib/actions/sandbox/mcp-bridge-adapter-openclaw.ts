@@ -19,6 +19,7 @@ import {
 } from "./mcp-bridge-adapter-status";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
+import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
 import type { McpAttachedCredentialRevision } from "./mcp-bridge-provider-readiness";
 import { quoteMcpBridgeShellArg } from "./mcp-bridge-runtime-command";
 import { getAgentConfigDir } from "./mcp-bridge-state";
@@ -32,8 +33,11 @@ function mcporterArgs(root: string, ...args: string[]): string[] {
   return ["mcporter", "--root", root, ...args];
 }
 
-function ensureMcporter(sandboxName: string): void {
-  const check = executeSandboxCommand(sandboxName, "command -v mcporter");
+function ensureMcporter(
+  sandboxName: string,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
+): void {
+  const check = executeSandboxCommand(sandboxName, "command -v mcporter", { runtimeSelection });
   if (check?.status === 0 && check.stdout.trim()) return;
   throw new McpBridgeError(
     `mcporter is not available in sandbox '${sandboxName}'. Rebuild with a NemoClaw image that includes mcporter@${MCPORTER_VERSION}.`,
@@ -123,6 +127,7 @@ export function buildOpenClawMcporterRemoveCommand(
 export function inspectOpenClawAdapterRegistration(
   sandboxName: string,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   pinnedConfigDirectory?: string,
 ): AdapterRegistrationInspection {
   const configDirectory =
@@ -132,24 +137,27 @@ export function inspectOpenClawAdapterRegistration(
     sandboxName,
     entry,
     buildOpenClawMcporterInspectCommand(entry, false, root),
+    runtimeSelection,
   );
 }
 
 export function registerOpenClawAdapter(
   sandboxName: string,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   envValues: Record<string, string> = {},
   replaceExisting = false,
   credentialRevision?: McpAttachedCredentialRevision,
   pinnedConfigDirectory?: string,
 ): void {
-  ensureMcporter(sandboxName);
+  ensureMcporter(sandboxName, runtimeSelection);
   const configDirectory =
     pinnedConfigDirectory ?? getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR);
   const root = openClawMcporterRoot(configDirectory);
   const result = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterRegisterCommand(entry, replaceExisting, root, credentialRevision),
+    { runtimeSelection },
   );
   const output = redactBridgeSecretsForDisplay(
     [result?.stdout, result?.stderr].filter(Boolean).join("\n").trim(),
@@ -167,6 +175,7 @@ export function registerOpenClawAdapter(
   const verification = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterInspectCommand(entry, true, root, credentialRevision),
+    { runtimeSelection },
   );
   const verificationOutput = redactBridgeSecretsForDisplay(
     [verification?.stdout, verification?.stderr].filter(Boolean).join("\n").trim(),
@@ -187,6 +196,7 @@ export function registerOpenClawAdapter(
 export function unregisterOpenClawAdapter(
   sandboxName: string,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   options: AdapterMutationOptions = {},
   pinnedConfigDirectory?: string,
 ): void {
@@ -196,6 +206,7 @@ export function unregisterOpenClawAdapter(
   const result = executeSandboxCommand(
     sandboxName,
     buildOpenClawMcporterRemoveCommand(entry, options.force === true, root),
+    { runtimeSelection },
   );
   const output = redactBridgeSecretsForDisplay(
     [result?.stdout, result?.stderr].filter(Boolean).join("\n").trim(),

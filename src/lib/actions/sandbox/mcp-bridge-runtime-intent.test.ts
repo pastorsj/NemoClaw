@@ -52,6 +52,7 @@ const ENTRY = Object.freeze({
   policyName: "future-policy",
   addedAt: "2026-08-30T12:00:00.000Z",
 });
+const runtimeSelection = { gatewayName: "nemoclaw-8091", workspace: "default" } as const;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -74,7 +75,10 @@ beforeEach(() => {
 describe("package MCP runtime intent authority", () => {
   it("verifies a synthetic unknown package through its typed adapter", () => {
     const credentialRevisions = new Map([["docs", "v9" as const]]);
-    assertAgentMcpRuntimeIntent("alpha", "future-config", { credentialRevisions });
+    assertAgentMcpRuntimeIntent("alpha", "future-config", {
+      credentialRevisions,
+      runtimeSelection,
+    });
 
     expect(mocks.describeIntent).toHaveBeenCalledWith(
       "alpha",
@@ -84,13 +88,17 @@ describe("package MCP runtime intent authority", () => {
       ["docs"],
       credentialRevisions,
     );
-    expect(mocks.assertCapability).toHaveBeenCalledWith("alpha", {
-      kind: "command",
-      command: ["future-verify"],
-      success: { kind: "exit-zero" },
-      timeoutSeconds: 10,
-      failureMessage: "future intent mismatch",
-    });
+    expect(mocks.assertCapability).toHaveBeenCalledWith(
+      "alpha",
+      {
+        kind: "command",
+        command: ["future-verify"],
+        success: { kind: "exit-zero" },
+        timeoutSeconds: 10,
+        failureMessage: "future intent mismatch",
+      },
+      runtimeSelection,
+    );
     expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
 
@@ -99,9 +107,9 @@ describe("package MCP runtime intent authority", () => {
       throw new Error("invalid package result");
     });
 
-    expect(() => assertAgentMcpRuntimeIntent("alpha", "future-config")).toThrow(
-      /invalid package result/u,
-    );
+    expect(() =>
+      assertAgentMcpRuntimeIntent("alpha", "future-config", { runtimeSelection }),
+    ).toThrow(/invalid package result/u);
     expect(mocks.assertCapability).not.toHaveBeenCalled();
     expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
@@ -111,9 +119,9 @@ describe("package MCP runtime intent authority", () => {
       throw new Error("future intent mismatch");
     });
 
-    expect(() => assertAgentMcpRuntimeIntent("alpha", "future-config")).toThrow(
-      /future intent mismatch/u,
-    );
+    expect(() =>
+      assertAgentMcpRuntimeIntent("alpha", "future-config", { runtimeSelection }),
+    ).toThrow(/future intent mismatch/u);
     expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
 
@@ -125,9 +133,9 @@ describe("package MCP runtime intent authority", () => {
       mcp: { bridges: { docs: { ...ENTRY, agent: "other-harness" } } },
     });
 
-    expect(() => assertAgentMcpRuntimeIntent("alpha", "future-config")).toThrow(
-      /does not match the installed package runtime intent/u,
-    );
+    expect(() =>
+      assertAgentMcpRuntimeIntent("alpha", "future-config", { runtimeSelection }),
+    ).toThrow(/does not match the installed package runtime intent/u);
     expect(mocks.describeIntent).not.toHaveBeenCalled();
     expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });

@@ -43,7 +43,9 @@ import {
   isOpenShellSandboxPolicyCredentialFree,
   resolveOpenshellSandboxSshHost,
 } from "../adapters/openshell/client.js";
+import { buildSelectedOpenShellSubprocessEnv } from "../adapters/openshell/command-argv.js";
 import { resolveOpenshell } from "../adapters/openshell/resolve.js";
+import type { OpenShellRuntimeSelection } from "../adapters/openshell/runtime-selection.js";
 import { OPENSHELL_PROBE_TIMEOUT_MS } from "../adapters/openshell/timeouts.js";
 import type { AgentDefinition, AgentStateFile } from "../agent/defs.js";
 import { loadAgent } from "../agent/defs.js";
@@ -275,6 +277,8 @@ export interface RecreatedSandboxRestoreOptions extends SnapshotRestoreOptions {
   allowCustomImageWholeStateFileRestore?: true;
   /** Pre-captured baseline avoids a second remote read during onboarding finalization. */
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  /** Exact OpenShell target frozen by the enclosing rebuild transaction. */
+  runtimeSelection?: OpenShellRuntimeSelection;
 }
 
 interface InternalRestoreOptions {
@@ -283,6 +287,7 @@ interface InternalRestoreOptions {
   allowCustomImageWholeStateFileRestore?: true;
   discoverFreshOpenClawImagePluginInstalls?: true;
   freshOpenClawImagePluginInstalls?: readonly OpenClawImagePluginInstall[];
+  runtimeSelection?: OpenShellRuntimeSelection;
   authority?: SnapshotRestoreAuthority;
   preparedContent?: PreparedSnapshotRestoreContent;
   validateBeforeMutation?: () => void;
@@ -585,16 +590,36 @@ export function safeTarExtract(tarArchive: TarArchiveSource, targetDir: string):
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-export function getSshConfig(sandboxName: string): string | null {
+export function getSshConfig(
+  sandboxName: string,
+  runtimeOptions: {
+    env?: NodeJS.ProcessEnv;
+    gatewayName?: string;
+    replaceEnv?: boolean;
+  } = {},
+): string | null {
   const openshellBinary = resolveOpenshell();
   if (!openshellBinary) return null;
 
   const result = captureSandboxSshConfigCommand(openshellBinary, sandboxName, {
+    ...runtimeOptions,
     ignoreError: true,
     timeout: OPENSHELL_PROBE_TIMEOUT_MS,
   });
   if (result.status !== 0) return null;
   return result.output;
+}
+
+function selectedSshConfigOptions(
+  runtimeSelection?: OpenShellRuntimeSelection,
+): Parameters<typeof getSshConfig>[1] {
+  return runtimeSelection
+    ? {
+        env: buildSelectedOpenShellSubprocessEnv(runtimeSelection),
+        gatewayName: runtimeSelection.gatewayName,
+        replaceEnv: true,
+      }
+    : undefined;
 }
 
 export function sshArgs(configFile: string, sandboxName: string): string[] {
@@ -2121,7 +2146,7 @@ export function prepareSnapshotRestoreContent(
   };
 }
 
-function validateSnapshotRestoreMutation(
+function validatePreparedSnapshotRestoreMutation(
   selectedBackupPath: string,
   stagedBackupPath: string,
   options: Pick<InternalRestoreOptions, "authority" | "preparedContent" | "validateBeforeMutation">,
@@ -2153,6 +2178,30 @@ function validateSnapshotRestoreMutation(
       ) {
         return "Selected snapshot content changed before filesystem mutation";
       }
+    }
+  }
+  try {
+    options.validateBeforeMutation?.();
+    return null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return `Runtime authority changed before filesystem mutation: ${detail}`;
+  }
+}
+
+/** Validate public restore authority before a caller-owned remote mutation. */
+export function validateSnapshotRestoreMutation(
+  backupPath: string,
+  options: Pick<SnapshotRestoreOptions, "authority" | "validateBeforeMutation">,
+): string | null {
+  if (options.authority) {
+    const current = captureSnapshotRestoreAuthority(backupPath);
+    if (
+      !current ||
+      current.backupPath !== options.authority.backupPath ||
+      current.contentSha256 !== options.authority.contentSha256
+    ) {
+      return "Selected snapshot content changed before filesystem mutation";
     }
   }
   try {
@@ -2211,6 +2260,7 @@ export function restoreRecreatedSandboxState(
       ? { discoverFreshOpenClawImagePluginInstalls: true }
       : {}),
     freshOpenClawImagePluginInstalls: options.freshOpenClawImagePluginInstalls,
+    ...(options.runtimeSelection ? { runtimeSelection: options.runtimeSelection } : {}),
     ...(options.authority ? { authority: options.authority } : {}),
     ...(options.preparedContent ? { preparedContent: options.preparedContent } : {}),
     ...(options.validateBeforeMutation
@@ -2276,6 +2326,9 @@ function restoreSandboxStateFromTrustedTree(
   options: InternalRestoreOptions,
 ): RestoreResult {
   _log(`restoreSandboxState: sandbox=${sandboxName}, backupPath=${backupPath}`);
+  const selectedSshEnv = options.runtimeSelection
+    ? buildSelectedOpenShellSubprocessEnv(options.runtimeSelection)
+    : undefined;
   const manifest = readManifest(backupPath);
   if (!manifest) {
     _log("FAILED: Could not read rebuild-manifest.json");
@@ -2498,7 +2551,12 @@ function restoreSandboxStateFromTrustedTree(
   } else if (options.discoverFreshOpenClawImagePluginInstalls === true) {
     const discovery = discoverFreshOpenClawImagePluginInstalls(
       sandboxName,
-      { getSshConfig, sshArgs },
+      {
+        ...(selectedSshEnv ? { env: selectedSshEnv } : {}),
+        getSshConfig: (name) =>
+          getSshConfig(name, selectedSshConfigOptions(options.runtimeSelection)),
+        sshArgs,
+      },
       targetAgent.configPaths.dir,
     );
     if (!discovery.ok) {
@@ -2512,7 +2570,7 @@ function restoreSandboxStateFromTrustedTree(
   }
 
   if (cleanupStateDirs.length === 0 && localFiles.length === 0) {
-    const mutationAuthorityError = validateSnapshotRestoreMutation(
+    const mutationAuthorityError = validatePreparedSnapshotRestoreMutation(
       selectedBackupPath,
       backupPath,
       options,
@@ -2525,7 +2583,7 @@ function restoreSandboxStateFromTrustedTree(
   }
 
   _log("Getting SSH config for restore");
-  const sshConfig = getSshConfig(sandboxName);
+  const sshConfig = getSshConfig(sandboxName, selectedSshConfigOptions(options.runtimeSelection));
   if (!sshConfig) {
     _log("FAILED: Could not get SSH config for restore");
     return {
@@ -2631,7 +2689,7 @@ function restoreSandboxStateFromTrustedTree(
       return failRestoreContract(`Could not stage backup state files safely: ${detail}`);
     }
 
-    const mutationAuthorityError = validateSnapshotRestoreMutation(
+    const mutationAuthorityError = validatePreparedSnapshotRestoreMutation(
       selectedBackupPath,
       backupPath,
       options,
@@ -2655,6 +2713,7 @@ function restoreSandboxStateFromTrustedTree(
       );
       _log(`Cleaning target dirs before restore: ${rmCmd}`);
       const rmResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), rmCmd], {
+        ...(selectedSshEnv ? { env: selectedSshEnv } : {}),
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 30000,
       });
@@ -2678,6 +2737,7 @@ function restoreSandboxStateFromTrustedTree(
     if (restoreTar !== undefined) {
       const extractCmd = `tar --no-same-owner -xf - -C ${shellQuote(dir)}`;
       const sshResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), extractCmd], {
+        ...(selectedSshEnv ? { env: selectedSshEnv } : {}),
         input: restoreTar,
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 120000,
@@ -2693,6 +2753,7 @@ function restoreSandboxStateFromTrustedTree(
         const chownCmd = `chown -R sandbox:sandbox -- ${restoredPaths.map(shellQuote).join(" ")} 2>/dev/null || true`;
         _log(`Best-effort ownership repair: ${chownCmd}`);
         const chownResult = spawnSync("ssh", [...sshArgs(configFile, sandboxName), chownCmd], {
+          ...(selectedSshEnv ? { env: selectedSshEnv } : {}),
           stdio: ["ignore", "pipe", "pipe"],
           timeout: 30000,
         });
@@ -2716,6 +2777,7 @@ function restoreSandboxStateFromTrustedTree(
           "ssh",
           [...sshArgs(configFile, sandboxName), usabilityCmd],
           {
+            ...(selectedSshEnv ? { env: selectedSshEnv } : {}),
             stdio: ["ignore", "pipe", "pipe"],
             timeout: 30000,
           },
@@ -2775,6 +2837,7 @@ function restoreSandboxStateFromTrustedTree(
                 ),
               }
             : undefined,
+          selectedSshEnv,
         )
       ) {
         restoredFiles.push(spec.path);

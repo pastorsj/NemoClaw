@@ -15,20 +15,49 @@ import {
   reattachMcpProvidersAfterRebuildAbort,
   restoreMcpBridgesAfterRebuild,
 } from "./mcp-bridge";
+import { getMcpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider";
 import { executeSandboxCommand, executeSandboxExecCommand } from "./process-recovery";
 import type { RebuildBail } from "./rebuild-credential-preflight";
 import type { RebuildSandboxEntry } from "./rebuild-flow-helpers";
+import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider";
 
 export type McpRebuildPreparation = Awaited<ReturnType<typeof prepareMcpBridgesForRebuild>>;
 
-function canExecuteMcpPreparation(sandboxName: string): boolean {
+export function getMcpPreparationRuntimeSelection(
+  sandbox: RebuildSandboxEntry,
+): ReturnType<typeof getMcpProviderInspectionRuntimeSelection> {
+  return getMcpProviderInspectionRuntimeSelection(sandbox);
+}
+
+/** Prepared-only MCP adds own no external runtime state and need no target authority. */
+export function mcpRebuildRequiresRuntimeSelection(sandbox: RebuildSandboxEntry): boolean {
+  return Object.values(sandbox.mcp?.bridges ?? {}).some((entry) => entry.addState !== "prepared");
+}
+
+export function resolveMcpPreparationRuntimeSelection(
+  sandboxName: string,
+): ReturnType<typeof getMcpProviderInspectionRuntimeSelection> | undefined {
+  const sandbox = registry.getSandbox(sandboxName);
+  if (!sandbox || !mcpRebuildRequiresRuntimeSelection(sandbox)) return undefined;
+  try {
+    return getMcpPreparationRuntimeSelection(sandbox);
+  } catch {
+    return undefined;
+  }
+}
+
+function canExecuteMcpPreparation(
+  sandboxName: string,
+  runtimeSelection: ReturnType<typeof getMcpProviderInspectionRuntimeSelection>,
+): boolean {
   // Live MCP preparation uses both transports: SSH-backed adapter
   // inspection/mutation and OpenShell-mediated adapter/provider operations.
   // Prove both before any mutation. A direct Docker fallback would not prove
   // that the OpenShell transport itself can run.
-  const sshProbe = executeSandboxCommand(sandboxName, ":");
+  const sshProbe = executeSandboxCommand(sandboxName, ":", { runtimeSelection });
   const execProbe = executeSandboxExecCommand(sandboxName, ":", undefined, {
     allowLocalDockerFallback: false,
+    runtimeSelection,
   });
   return sshProbe !== null && sshProbe.status === 0 && execProbe !== null && execProbe.status === 0;
 }
@@ -39,7 +68,18 @@ export async function prepareMcpForRebuild(
   force: boolean,
   bail: RebuildBail,
   agentDefinition?: AgentDefinition,
+  frozenRuntimeSelection?: McpProviderInspectionRuntimeSelection,
 ): Promise<McpRebuildPreparation | null> {
+  const sandbox = staleRecovery ? undefined : registry.getSandbox(sandboxName);
+  const requiresRuntimeSelection = sandbox ? mcpRebuildRequiresRuntimeSelection(sandbox) : false;
+  const runtimeSelection =
+    frozenRuntimeSelection ??
+    (staleRecovery ? undefined : resolveMcpPreparationRuntimeSelection(sandboxName));
+  const bridgeOptions = {
+    ...(agentDefinition ? { agentDefinition } : {}),
+    ...(runtimeSelection ? { runtimeSelection } : {}),
+  };
+  const hasBridgeOptions = agentDefinition !== undefined || runtimeSelection !== undefined;
   // invalidState: OpenShell still reports a live sandbox, but the
   // side-effect-free `:` command cannot cross every transport required by live
   // MCP preparation. Every nonzero result is non-authoritative, so interpreting
@@ -52,12 +92,17 @@ export async function prepareMcpForRebuild(
   // nonzero results through this exact force-only branch.
   // removalCondition: remove this fallback only when OpenShell exposes an
   // attested read-only adapter snapshot that is safe without sandbox transport.
-  if (force && !staleRecovery && !canExecuteMcpPreparation(sandboxName)) {
+  if (
+    force &&
+    !staleRecovery &&
+    requiresRuntimeSelection &&
+    (!runtimeSelection || !canExecuteMcpPreparation(sandboxName, runtimeSelection))
+  ) {
     console.error(`  ${YW}⚠${R} MCP transport probe failed; --force using host-side MCP recovery`);
     try {
-      return await (agentDefinition
-        ? prepareMcpBridgesForExecUnavailableRebuild(sandboxName, { agentDefinition })
-        : prepareMcpBridgesForExecUnavailableRebuild(sandboxName));
+      return await prepareMcpBridgesForExecUnavailableRebuild(sandboxName, {
+        ...bridgeOptions,
+      });
     } catch (error) {
       bail(
         `Failed to preserve MCP bridges before rebuild (--force host-side recovery): ${error instanceof Error ? error.message : String(error)}`,
@@ -68,11 +113,11 @@ export async function prepareMcpForRebuild(
 
   try {
     return await (staleRecovery
-      ? agentDefinition
-        ? prepareMcpBridgesForAbsentSandboxRebuild(sandboxName, { agentDefinition })
+      ? hasBridgeOptions
+        ? prepareMcpBridgesForAbsentSandboxRebuild(sandboxName, bridgeOptions)
         : prepareMcpBridgesForAbsentSandboxRebuild(sandboxName)
-      : agentDefinition
-        ? prepareMcpBridgesForRebuild(sandboxName, { agentDefinition })
+      : hasBridgeOptions
+        ? prepareMcpBridgesForRebuild(sandboxName, bridgeOptions)
         : prepareMcpBridgesForRebuild(sandboxName));
   } catch (error) {
     bail(
@@ -87,12 +132,20 @@ export async function reattachMcpAfterDeleteFailure(
   entries: McpRebuildPreparation["detachedProviderEntries"],
   scrubbedAdapterEntries: McpRebuildPreparation["scrubbedAdapterEntries"],
   agentDefinition?: AgentDefinition,
+  runtimeSelection?: McpRebuildPreparation["runtimeSelection"],
 ): Promise<string | undefined> {
   try {
-    if (agentDefinition) {
-      await reattachMcpProvidersAfterRebuildAbort(sandboxName, entries, scrubbedAdapterEntries, {
-        agentDefinition,
-      });
+    const bridgeOptions = {
+      ...(agentDefinition ? { agentDefinition } : {}),
+      ...(runtimeSelection ? { runtimeSelection } : {}),
+    };
+    if (agentDefinition || runtimeSelection) {
+      await reattachMcpProvidersAfterRebuildAbort(
+        sandboxName,
+        entries,
+        scrubbedAdapterEntries,
+        bridgeOptions,
+      );
     } else {
       await reattachMcpProvidersAfterRebuildAbort(sandboxName, entries, scrubbedAdapterEntries);
     }
@@ -163,12 +216,17 @@ export async function restoreMcpAfterRebuild(
   sandboxName: string,
   entries: McpRebuildPreparation["entries"],
   agentDefinition?: AgentDefinition,
+  runtimeSelection?: McpRebuildPreparation["runtimeSelection"],
 ): Promise<boolean> {
   if (entries.length === 0) return true;
   console.log("  Restoring MCP bridges...");
   try {
-    if (agentDefinition) {
-      await restoreMcpBridgesAfterRebuild(sandboxName, entries, { agentDefinition });
+    const bridgeOptions = {
+      ...(agentDefinition ? { agentDefinition } : {}),
+      ...(runtimeSelection ? { runtimeSelection } : {}),
+    };
+    if (agentDefinition || runtimeSelection) {
+      await restoreMcpBridgesAfterRebuild(sandboxName, entries, bridgeOptions);
     } else {
       await restoreMcpBridgesAfterRebuild(sandboxName, entries);
     }

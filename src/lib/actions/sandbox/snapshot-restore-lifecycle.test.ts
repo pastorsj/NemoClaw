@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -10,7 +11,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 import { fingerprintSandboxRecreateValue } from "../../onboard/sandbox-recreate-transaction";
-import { withSandboxMutationLock } from "../../state/mcp-lifecycle-lock";
 import * as f from "./snapshot-restore-test-fixture";
 import {
   HERMES_PACKAGE,
@@ -29,6 +29,8 @@ import {
 } from "./snapshot/lifecycle-test-fixture";
 
 const tempHomes: string[] = [];
+const DCODE_PACKAGE = harnessPackage("langchain-deepagents-code", "c");
+
 beforeEach(() => {
   f.resetSnapshotRestoreMocks();
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-restore-home-"));
@@ -44,6 +46,12 @@ afterEach(() => {
 });
 describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   it("holds the per-sandbox mutation lock across snapshot creation", async () => {
+    const lifecycleLock = await vi.importActual<typeof import("../../state/mcp-lifecycle-lock")>(
+      "../../state/mcp-lifecycle-lock",
+    );
+    f.mutationLockMock.withSandboxMutationLockMock.mockImplementation((sandboxName, operation) =>
+      lifecycleLock.withSandboxMutationLock(sandboxName, operation),
+    );
     let releaseLock: (() => void) | undefined;
     let signalLocked: (() => void) | undefined;
     const locked = new Promise<void>((resolve) => {
@@ -52,7 +60,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     const release = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
-    const externalMutation = withSandboxMutationLock("alpha", async () => {
+    const externalMutation = lifecycleLock.withSandboxMutationLock("alpha", async () => {
       signalLocked?.();
       await release;
     });
@@ -107,12 +115,247 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
 
     await runSandboxSnapshot("alpha", { kind: "restore" });
 
-    expect(f.mutableConfigMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
     const output = consoleLog.mock.calls.flat().join("\n");
+    expect(f.mutableConfigMock.repairMutableConfigPermsMock).toHaveBeenCalledWith("alpha");
     expect(output).toContain("OpenClaw config permissions restored");
     expect(output).toContain("Restored 1 directories, 1 files");
     expect(output.indexOf("OpenClaw config permissions restored")).toBeLessThan(
       output.indexOf("Restored 1 directories, 1 files"),
+    );
+  });
+
+  it("repairs an empty managed projection but leaves custom-image MCP state to the image (#10756)", async () => {
+    f.getLatestBackupMock.mockReturnValue(packageManagedSnapshot(DCODE_PACKAGE));
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    f.getSandboxMock.mockReturnValue(packageManagedSandbox("alpha", DCODE_PACKAGE));
+    await runSandboxSnapshot("alpha", { kind: "restore" });
+    expect(f.restoreDeepAgentsManagedMcpProjectionMock).toHaveBeenCalledWith("alpha", [], {
+      gatewayName: "nemoclaw-8091",
+      workspace: "default",
+    });
+    expect(f.restoreSandboxStateMock).toHaveBeenCalledWith(
+      "alpha",
+      "/tmp/backup-alpha",
+      expect.objectContaining({
+        agentDefinition: expect.objectContaining({ name: "langchain-deepagents-code" }),
+      }),
+    );
+
+    f.restoreDeepAgentsManagedMcpProjectionMock.mockClear();
+    f.getSandboxMock.mockReturnValue({
+      ...packageManagedSandbox("alpha", DCODE_PACKAGE),
+      fromDockerfile: "/tmp/Dockerfile",
+      mcp: {
+        bridges: {
+          github: {
+            server: "github",
+            agent: "langchain-deepagents-code",
+            adapter: "deepagents-config",
+            url: "https://api.githubcopilot.com/mcp/",
+            env: ["GITHUB_TOKEN"],
+            providerName: "alpha-mcp-github",
+            policyName: "mcp-bridge-github",
+            addedAt: "2026-06-01T00:00:00.000Z",
+          },
+        },
+      },
+    });
+    await runSandboxSnapshot("alpha", { kind: "restore" });
+    expect(f.restoreDeepAgentsManagedMcpProjectionMock).not.toHaveBeenCalled();
+    expect(f.restoreSandboxStateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("repairs the managed Deep Agents MCP projection before restoring snapshot files (#10756)", async () => {
+    f.getLatestBackupMock.mockReturnValue(packageManagedSnapshot(DCODE_PACKAGE));
+    f.getSandboxMock.mockReturnValue({
+      ...packageManagedSandbox("alpha", DCODE_PACKAGE),
+      mcp: {
+        bridges: {
+          github: {
+            server: "github",
+            agent: "langchain-deepagents-code",
+            adapter: "deepagents-config",
+            url: "https://api.githubcopilot.com/mcp/",
+            env: ["GITHUB_TOKEN"],
+            providerName: "alpha-mcp-github",
+            policyName: "mcp-bridge-github",
+            addedAt: "2026-06-01T00:00:00.000Z",
+          },
+          jira: {
+            server: "jira",
+            agent: "langchain-deepagents-code",
+            adapter: "deepagents-config",
+            url: "https://mcp.atlassian.com/v1/",
+            env: ["JIRA_MCP_TOKEN"],
+            providerName: "alpha-mcp-jira",
+            policyName: "mcp-bridge-jira",
+            addedAt: "2026-06-01T00:00:00.000Z",
+          },
+          slack: {
+            server: "slack",
+            agent: "openclaw",
+            adapter: "mcporter",
+            url: "https://mcp.slack.com/v1/",
+            env: ["SLACK_MCP_TOKEN"],
+            providerName: "alpha-mcp-slack",
+            policyName: "mcp-bridge-slack",
+            addedAt: "2026-06-01T00:00:00.000Z",
+          },
+        },
+      },
+    });
+    f.restoreDeepAgentsManagedMcpProjectionMock.mockImplementation(() => {
+      f.lifecycleMock.events.push("restore-mcp-projection");
+    });
+    f.restoreSandboxStateMock.mockImplementation(() => {
+      f.lifecycleMock.events.push("restore-snapshot-state");
+      return {
+        success: true,
+        restoredDirs: [".state"],
+        restoredFiles: ["config.toml"],
+        failedDirs: [],
+        failedFiles: [],
+      };
+    });
+    const { runSandboxSnapshot } = await import("./snapshot");
+
+    await runSandboxSnapshot("alpha", { kind: "restore" });
+
+    expect(f.restoreDeepAgentsManagedMcpProjectionMock).toHaveBeenCalledWith(
+      "alpha",
+      [expect.objectContaining({ server: "github" }), expect.objectContaining({ server: "jira" })],
+      { gatewayName: "nemoclaw-8091", workspace: "default" },
+    );
+    expect(f.lifecycleMock.events).toEqual(["restore-mcp-projection", "restore-snapshot-state"]);
+  });
+
+  it("preserves an occupied recovery path and reports an unused location before retry (#10756)", async () => {
+    const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-recovery-"));
+    tempHomes.push(sandboxRoot);
+    const occupiedRecoveryPath = path.join(sandboxRoot, ".nemoclaw-mcp.json.recovery");
+    const projectionPath = path.join(sandboxRoot, ".deepagents", ".nemoclaw-mcp.json");
+    const sandboxName = "alpha $(printf injected)";
+    fs.mkdirSync(occupiedRecoveryPath, { recursive: true });
+    fs.writeFileSync(path.join(occupiedRecoveryPath, "keep.txt"), "existing recovery\n");
+    fs.mkdirSync(projectionPath, { recursive: true });
+    fs.writeFileSync(path.join(projectionPath, "managed.json"), '{"managed":true}\n');
+    f.parseLiveSandboxNamesMock.mockReturnValue(new Set([sandboxName]));
+    f.captureOpenshellMock.mockImplementation((args) =>
+      f.openshellResponses(args, {
+        "sandbox get": {
+          status: 0,
+          output: "Name: alpha\nId: recovery-live-id\nPhase: Ready\n",
+        },
+      }),
+    );
+    f.getLatestBackupMock.mockReturnValue({
+      ...packageManagedSnapshot(DCODE_PACKAGE),
+      sandboxName,
+    });
+    f.getSandboxMock.mockReturnValue({
+      ...packageManagedSandbox(sandboxName, DCODE_PACKAGE),
+      mcp: {
+        bridges: {
+          github: {
+            server: "github",
+            agent: "langchain-deepagents-code",
+            adapter: "deepagents-config",
+            url: "https://api.githubcopilot.com/mcp/",
+            env: ["GITHUB_TOKEN"],
+            providerName: "alpha-mcp-github",
+            policyName: "mcp-bridge-github",
+            addedAt: "2026-06-01T00:00:00.000Z",
+          },
+        },
+      },
+    });
+    f.restoreDeepAgentsManagedMcpProjectionMock
+      .mockImplementationOnce(() => {
+        throw new Error("managed MCP projection path is a directory");
+      })
+      .mockImplementationOnce(() => {});
+    const { runSandboxSnapshot, SnapshotCommandError } = await import("./snapshot");
+
+    const failure = await runSandboxSnapshot(sandboxName, { kind: "restore" }).catch(
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(SnapshotCommandError);
+    expect(failure).toMatchObject({
+      exitCode: 1,
+      lines: [
+        `Snapshot files were not restored into '${sandboxName}'.`,
+        expect.stringContaining("managed MCP projection path is a directory"),
+        expect.any(String),
+      ],
+    });
+    const recoveryGuidance = (failure as InstanceType<typeof SnapshotCommandError>).lines[2];
+    const recoveryAction = recoveryGuidance.match(/run `([^`]+)`/)?.[1] ?? "";
+    expect(recoveryAction).not.toBe("");
+    const recoveryActionPath = path.join(sandboxRoot, "run-recovery-action.sh");
+    fs.writeFileSync(
+      recoveryActionPath,
+      `nemoclaw() { printf "%s\\0" "$@"; }\n${recoveryAction}\n`,
+    );
+    const parsedRecoveryAction = spawnSync("sh", [recoveryActionPath]);
+    expect(parsedRecoveryAction.status, parsedRecoveryAction.stderr.toString()).toBe(0);
+    const recoveryArguments = parsedRecoveryAction.stdout.toString().split("\0").filter(Boolean);
+    expect(recoveryArguments).toEqual([sandboxName, "exec", "--", "sh", "-c", expect.any(String)]);
+
+    const recoveryScript = recoveryArguments[5].replaceAll("/sandbox", sandboxRoot);
+    const recoveryScriptPath = path.join(sandboxRoot, "run-recovery-script.sh");
+    fs.writeFileSync(recoveryScriptPath, recoveryScript);
+    fs.rmSync(projectionPath, { recursive: true });
+    const validProjection = '{"mcpServers":{}}\n';
+    fs.writeFileSync(projectionPath, validProjection, { mode: 0o600 });
+    const staleRecoveryResult = spawnSync("sh", [recoveryScriptPath], { encoding: "utf8" });
+    expect(staleRecoveryResult.status).toBe(1);
+    expect(staleRecoveryResult.stderr).toContain("is no longer a directory");
+    expect(fs.readFileSync(projectionPath, "utf8")).toBe(validProjection);
+    expect(
+      fs
+        .readdirSync(sandboxRoot)
+        .filter((entry) => entry.startsWith(".nemoclaw-mcp.json.recovery.")),
+    ).toEqual([]);
+
+    fs.rmSync(projectionPath);
+    fs.mkdirSync(projectionPath);
+    fs.writeFileSync(path.join(projectionPath, "managed.json"), '{"managed":true}\n');
+    const recoveryResult = spawnSync("sh", [recoveryScriptPath], { encoding: "utf8" });
+    expect(recoveryResult.status, recoveryResult.stderr).toBe(0);
+    expect(fs.existsSync(projectionPath)).toBe(false);
+    expect(fs.readFileSync(path.join(occupiedRecoveryPath, "keep.txt"), "utf8")).toBe(
+      "existing recovery\n",
+    );
+    const recoveryDirectories = fs
+      .readdirSync(sandboxRoot)
+      .filter((entry) => entry.startsWith(".nemoclaw-mcp.json.recovery."));
+    expect(recoveryDirectories).toHaveLength(1);
+    const recoveredProjectionPath = path.join(sandboxRoot, recoveryDirectories[0], "projection");
+    expect(fs.readFileSync(path.join(recoveredProjectionPath, "managed.json"), "utf8")).toBe(
+      '{"managed":true}\n',
+    );
+    expect(recoveryResult.stdout).toBe(
+      `Moved managed MCP projection to ${recoveredProjectionPath}\n`,
+    );
+    expect(recoveryScript).toContain(`recovery_dir=$(mktemp -d ${occupiedRecoveryPath}.XXXXXX)`);
+    expect(recoveryGuidance).toContain('mv -- "$projection" "$recovery_dir/projection"');
+    expect(recoveryGuidance).toContain(
+      'printf "Moved managed MCP projection to %s\\n" "$recovery_dir/projection"',
+    );
+    expect(recoveryGuidance).not.toContain(
+      "mv -- /sandbox/.deepagents/.nemoclaw-mcp.json /sandbox/.nemoclaw-mcp.json.recovery",
+    );
+    expect(f.restoreSandboxStateMock).not.toHaveBeenCalled();
+
+    await runSandboxSnapshot(sandboxName, { kind: "restore" });
+
+    expect(f.restoreSandboxStateMock).toHaveBeenCalledWith(
+      sandboxName,
+      "/tmp/backup-alpha",
+      expect.objectContaining({
+        agentDefinition: expect.objectContaining({ name: "langchain-deepagents-code" }),
+      }),
     );
   });
 

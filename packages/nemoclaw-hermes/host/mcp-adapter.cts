@@ -145,11 +145,6 @@ function describeMcpMutationCapability(request) {
       outputExact: "Hermes gateway is not running for managed MCP reload",
       initialAttempts: 3,
       intervalMilliseconds: 1000,
-      recovery: {
-        kind: "agent-gateway",
-        timeoutSeconds: 210,
-        postRecoveryAttempts: 90,
-      },
     },
   };
 }

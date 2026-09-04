@@ -13,6 +13,7 @@ import type {
   AdapterRemovalOutcome,
 } from "../mcp-bridge-adapter-inspection";
 import { registerOpenClawAdapter, unregisterOpenClawAdapter } from "../mcp-bridge-adapter-openclaw";
+import type { McpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
 import type { McpAttachedCredentialRevision } from "../mcp-bridge-provider-readiness";
 import { McpBridgeError } from "./error";
 
@@ -27,6 +28,7 @@ export function registerLegacyMcpAdapter(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   envValues: Record<string, string>,
   options: LegacyMcpRegistrationOptions,
   agentDefinition?: AgentDefinition,
@@ -36,6 +38,7 @@ export function registerLegacyMcpAdapter(
       registerOpenClawAdapter(
         sandboxName,
         entry,
+        runtimeSelection,
         envValues,
         options.replaceExisting === true,
         options.credentialRevision,
@@ -46,6 +49,7 @@ export function registerLegacyMcpAdapter(
       registerHermesAdapter(
         sandboxName,
         entry,
+        runtimeSelection,
         envValues,
         options.replaceExisting === true,
         options.credentialRevision,
@@ -55,6 +59,7 @@ export function registerLegacyMcpAdapter(
       registerDeepAgentsAdapter(
         sandboxName,
         entry,
+        runtimeSelection,
         envValues,
         options.replaceExisting === true,
         options.teardownRollback === true,
@@ -70,18 +75,25 @@ export function unregisterLegacyMcpAdapter(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   options: AdapterMutationOptions,
   agentDefinition?: AgentDefinition,
 ): AdapterRemovalOutcome {
   switch (adapter) {
     case "mcporter":
-      unregisterOpenClawAdapter(sandboxName, entry, options, agentDefinition?.configPaths.dir);
+      unregisterOpenClawAdapter(
+        sandboxName,
+        entry,
+        runtimeSelection,
+        options,
+        agentDefinition?.configPaths.dir,
+      );
       return "removed";
     case "hermes-config":
-      unregisterHermesAdapter(sandboxName, entry, options);
+      unregisterHermesAdapter(sandboxName, entry, runtimeSelection, options);
       return "removed";
     case "deepagents-config":
-      return unregisterDeepAgentsAdapter(sandboxName, entry, options);
+      return unregisterDeepAgentsAdapter(sandboxName, entry, runtimeSelection, options);
   }
   throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
 }

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime-selection";
 import type {
   HarnessPackageIdentity,
   HarnessPackageMigration,
@@ -128,6 +129,7 @@ export type RebuildRecreateOnboardOpts = {
   controlUiPort: number | null;
   targetGatewayName: string;
   targetGatewayPort: number;
+  runtimeSelection?: OpenShellRuntimeSelection;
   onboardLockAlreadyHeld: true;
   /** Internal outer-rebuild agent authority consumed before inner runtime effects. */
   authoritativeRebuildAgentAuthority?: ResolvedSandboxAgent;

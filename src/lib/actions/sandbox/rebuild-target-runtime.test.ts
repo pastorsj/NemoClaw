@@ -209,6 +209,11 @@ describe("preflightRebuildTargetRuntime GPU route", () => {
 describe("authoritative rebuild readiness", () => {
   it("passes the exact pinned agent definition and managed-vLLM intent to readiness", async () => {
     const authority = { checkpoint: "gateway-authority" };
+    const runtimeSelection = {
+      gatewayName: "nemoclaw",
+      localTlsDir: "/authority/tls",
+      workspace: "default",
+    };
     mocks.preflightAuthoritativeRebuildTarget.mockResolvedValue(authority);
     const packageDefinition = {
       ...OPENCLAW_DEFINITION,
@@ -217,6 +222,7 @@ describe("authoritative rebuild readiness", () => {
     const recreateOptions = {
       ...RECREATE_OPTIONS,
       allowDeferredN1xManagedVllm: true,
+      runtimeSelection,
     } as RebuildRecreateOnboardOpts;
     const bail = vi.fn((message: string): never => {
       throw new Error(message);
@@ -241,6 +247,7 @@ describe("authoritative rebuild readiness", () => {
         allowDeferredN1xManagedVllm: true,
         provider: "vllm-local",
         model: "test-model",
+        runtimeSelection,
         sandboxName: "alpha",
       }),
     );

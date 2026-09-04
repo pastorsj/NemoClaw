@@ -12,6 +12,7 @@ import {
   observeMcpCredentialRevision,
   type McpAttachedCredentialRevision,
 } from "./mcp-bridge-provider-readiness";
+import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
 import { getBridgeAdapter, getSandboxAgent } from "./mcp-bridge-state";
 
 export type McpScrubbedAdapterEntry = McpBridgeEntry & {
@@ -35,9 +36,10 @@ export function scrubManagedMcpAdapterOrThrow(
   sandboxName: string,
   sandbox: SandboxEntry,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   agentDefinition?: AgentDefinition,
 ): McpScrubbedAdapterEntry {
-  const observation = observeMcpCredentialRevision(sandboxName, entry);
+  const observation = observeMcpCredentialRevision(sandboxName, entry, runtimeSelection);
   if (observation === "absent" || observation === "canonical") {
     throw new McpBridgeError(
       `Could not prove a revision-scoped credential before removing the managed adapter entry for MCP server '${entry.server}'.`,
@@ -47,8 +49,15 @@ export function scrubManagedMcpAdapterOrThrow(
   const adapter = resolveManagedMcpAdapter(sandbox, entry, agentDefinition);
   const removalOptions = { envValues: {}, teardown: true };
   const removal = agentDefinition
-    ? unregisterAgentAdapter(sandboxName, adapter, entry, removalOptions, agentDefinition)
-    : unregisterAgentAdapter(sandboxName, adapter, entry, removalOptions);
+    ? unregisterAgentAdapter(
+        sandboxName,
+        adapter,
+        entry,
+        runtimeSelection,
+        removalOptions,
+        agentDefinition,
+      )
+    : unregisterAgentAdapter(sandboxName, adapter, entry, runtimeSelection, removalOptions);
   if (removal === "unowned") {
     throw new McpBridgeError(
       `Could not prove removal of the exact managed adapter entry for MCP server '${entry.server}'.`,
@@ -65,13 +74,14 @@ export function rollbackScrubbedMcpAdapters(
   sandboxName: string,
   sandbox: SandboxEntry,
   entries: readonly McpScrubbedAdapterEntry[],
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   agentDefinition?: AgentDefinition,
 ): string[] {
   const failures: string[] = [];
   for (const entry of entries) {
     let credentialRevision: McpAttachedCredentialRevision | undefined;
     try {
-      const current = observeMcpCredentialRevision(sandboxName, entry);
+      const current = observeMcpCredentialRevision(sandboxName, entry, runtimeSelection);
       if (current !== "absent" && current !== "canonical") credentialRevision = current;
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
@@ -91,6 +101,7 @@ export function rollbackScrubbedMcpAdapters(
           sandboxName,
           adapter,
           entry,
+          runtimeSelection,
           {},
           credentialRevision,
           registrationOptions,
@@ -101,6 +112,7 @@ export function rollbackScrubbedMcpAdapters(
           sandboxName,
           adapter,
           entry,
+          runtimeSelection,
           {},
           credentialRevision,
           registrationOptions,

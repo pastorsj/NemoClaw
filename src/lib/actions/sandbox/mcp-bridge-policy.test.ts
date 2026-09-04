@@ -29,6 +29,10 @@ const entry: McpBridgeEntry = {
   policyName: buildMcpBridgePolicyName("github"),
   addedAt: "2026-08-27T00:00:00.000Z",
 };
+const runtimeSelection = {
+  gatewayName: "nemoclaw-9090",
+  workspace: "default",
+};
 
 const policyBinaries = {
   mcporter: [
@@ -60,7 +64,7 @@ describe("generated MCP policy", () => {
 
   it("applies directly to live OpenShell policy without a custom-policy registry row", () => {
     const livePolicy: { network_policies: Record<string, unknown> } = { network_policies: {} };
-    vi.spyOn(policies, "applyPresetContent").mockImplementation(
+    const applySpy = vi.spyOn(policies, "applyPresetContent").mockImplementation(
       (_sandboxName, _presetName, content) => {
         Object.assign(
           livePolicy.network_policies,
@@ -69,7 +73,7 @@ describe("generated MCP policy", () => {
         return true;
       },
     );
-    vi.spyOn(policies, "getPresetContentGatewayState").mockImplementation(
+    const stateSpy = vi.spyOn(policies, "getPresetContentGatewayState").mockImplementation(
       (_sandboxName, content) => {
         const expected = (YAML.parse(content) as typeof livePolicy).network_policies;
         return Object.keys(expected).every((key) => key in livePolicy.network_policies)
@@ -78,7 +82,12 @@ describe("generated MCP policy", () => {
       },
     );
 
-    applyGeneratedPolicy("alpha", entry, { addresses: ["8.8.8.8"] });
+    applyGeneratedPolicy(
+      "alpha",
+      entry,
+      { addresses: ["8.8.8.8"] },
+      { runtimeSelection },
+    );
 
     expect(livePolicy.network_policies.mcp_bridge_github).toMatchObject({
       endpoints: [
@@ -88,6 +97,18 @@ describe("generated MCP policy", () => {
         }),
       ],
     });
+    expect(applySpy).toHaveBeenCalledWith(
+      "alpha",
+      entry.policyName,
+      expect.any(String),
+      expect.objectContaining({ runtimeSelection }),
+    );
+    expect(stateSpy).toHaveBeenCalledWith(
+      "alpha",
+      expect.any(String),
+      undefined,
+      runtimeSelection,
+    );
   });
 
   it("removes generated content from the live policy", () => {
@@ -104,7 +125,7 @@ describe("generated MCP policy", () => {
         ).network_policies.mcp_bridge_github,
       },
     };
-    vi.spyOn(policies, "removePreset").mockImplementation(
+    const removeSpy = vi.spyOn(policies, "removePreset").mockImplementation(
       (_sandboxName, _presetName, options) => {
         const removal = (YAML.parse(options?.presetContent ?? "") as typeof livePolicy)
           .network_policies;
@@ -114,14 +135,24 @@ describe("generated MCP policy", () => {
       },
     );
 
-    removeGeneratedPolicy("alpha", entry);
+    removeGeneratedPolicy("alpha", entry, { runtimeSelection });
 
     expect(livePolicy.network_policies).not.toHaveProperty("mcp_bridge_github");
+    expect(removeSpy).toHaveBeenCalledWith(
+      "alpha",
+      entry.policyName,
+      expect.objectContaining({ runtimeSelection }),
+    );
   });
 
   it("refuses generated policy without exact public address pins", () => {
     expect(() =>
-      applyGeneratedPolicy("alpha", { ...entry, allowedIps: [] }, { addresses: [] }),
+      applyGeneratedPolicy(
+        "alpha",
+        { ...entry, allowedIps: [] },
+        { addresses: [] },
+        { runtimeSelection },
+      ),
     ).toThrow(/without exact public address pins/);
   });
 

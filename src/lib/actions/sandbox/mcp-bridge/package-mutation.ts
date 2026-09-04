@@ -13,6 +13,7 @@ import type {
 } from "../mcp-bridge-adapter-inspection";
 import { inspectAdapterRegistrationCommand } from "../mcp-bridge-adapter-inspection";
 import { redactBridgeSecretsForDisplay, type OpenShellCommandResult } from "../mcp-bridge-output";
+import type { McpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
 import {
   type McpAttachedCredentialRevision,
   observeMcpCredentialRevision,
@@ -95,14 +96,25 @@ function executeMcpMutationPlan(
   execution: HarnessMcpExecutionPlan,
   envValues: Record<string, string>,
   bestEffort: boolean,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: InstalledMcpMutationDependencies,
 ): McpMutationCommandResult | null {
   let result: McpMutationCommandResult | null;
   try {
     result =
       typeof execution.command === "string"
-        ? dependencies.executeShellCommand(sandboxName, execution.command, execution.timeoutSeconds)
-        : dependencies.executeArgvCommand(sandboxName, execution.command, execution.timeoutSeconds);
+        ? dependencies.executeShellCommand(
+            sandboxName,
+            execution.command,
+            execution.timeoutSeconds,
+            runtimeSelection,
+          )
+        : dependencies.executeArgvCommand(
+            sandboxName,
+            execution.command,
+            execution.timeoutSeconds,
+            runtimeSelection,
+          );
   } catch (error) {
     if (bestEffort) return null;
     const detail = error instanceof Error ? error.message : String(error);
@@ -165,6 +177,7 @@ function verifyInstalledMcpRegistration(
   credentialRevision: McpAttachedCredentialRevision | undefined,
   configDirectory: string | undefined,
   result: McpMutationCommandResult,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: InstalledMcpMutationDependencies,
 ): void {
   if (plan.verification.kind === "rollback-restored") {
@@ -182,7 +195,12 @@ function verifyInstalledMcpRegistration(
       `Installed MCP adapter '${adapter}' for sandbox '${sandboxName}' is unavailable.`,
     );
   }
-  const inspection = dependencies.inspectRegistration(sandboxName, entry, command);
+  const inspection = dependencies.inspectRegistration(
+    sandboxName,
+    entry,
+    command,
+    runtimeSelection,
+  );
   if (inspection.state === "registered") return;
   const detail = inspection.state === "error" ? inspection.detail : inspection.state;
   throw new McpBridgeError(`${plan.verification.failureMessage}: ${detail}.`);
@@ -214,6 +232,7 @@ function convergeCredentialRevisionAfterReload(
   envValues: Record<string, string>,
   options: InstalledMcpRegistrationOptions,
   plan: HarnessMcpRegistrationPlan,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   dependencies: InstalledMcpMutationDependencies,
 ): void {
   const credentialRevision = options.credentialRevision;
@@ -223,7 +242,11 @@ function convergeCredentialRevisionAfterReload(
   ) {
     return;
   }
-  const observedRevision = dependencies.observeCredentialRevision(sandboxName, entry);
+  const observedRevision = dependencies.observeCredentialRevision(
+    sandboxName,
+    entry,
+    runtimeSelection,
+  );
   if (observedRevision === credentialRevision) return;
   if (observedRevision === "absent" || observedRevision === "canonical") {
     throw new McpBridgeError(plan.credentialConvergence.unavailableMessage);
@@ -240,6 +263,7 @@ function convergeCredentialRevisionAfterReload(
     convergedPlan.execution,
     envValues,
     false,
+    runtimeSelection,
     dependencies,
   );
   if (!result) throw new McpBridgeError(convergedPlan.execution.failureMessage);
@@ -251,9 +275,13 @@ function convergeCredentialRevisionAfterReload(
     observedRevision,
     options.configDirectory,
     result,
+    runtimeSelection,
     dependencies,
   );
-  if (dependencies.observeCredentialRevision(sandboxName, entry) !== observedRevision) {
+  if (
+    dependencies.observeCredentialRevision(sandboxName, entry, runtimeSelection) !==
+    observedRevision
+  ) {
     throw new McpBridgeError(plan.credentialConvergence.unstableMessage);
   }
 }
@@ -263,6 +291,7 @@ export function registerInstalledMcpAdapter(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   envValues: Record<string, string>,
   options: InstalledMcpRegistrationOptions = {},
   dependencies: InstalledMcpMutationDependencies = defaultDependencies,
@@ -274,6 +303,7 @@ export function registerInstalledMcpAdapter(
     plan.execution,
     envValues,
     false,
+    runtimeSelection,
     dependencies,
   );
   if (!result) throw new McpBridgeError(plan.execution.failureMessage);
@@ -285,6 +315,7 @@ export function registerInstalledMcpAdapter(
     options.credentialRevision,
     options.configDirectory,
     result,
+    runtimeSelection,
     dependencies,
   );
   convergeCredentialRevisionAfterReload(
@@ -294,6 +325,7 @@ export function registerInstalledMcpAdapter(
     envValues,
     options,
     plan,
+    runtimeSelection,
     dependencies,
   );
 }
@@ -303,6 +335,7 @@ export function unregisterInstalledMcpAdapter(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   options: InstalledMcpRemovalOptions = {},
   dependencies: InstalledMcpMutationDependencies = defaultDependencies,
 ): AdapterRemovalOutcome {
@@ -322,6 +355,7 @@ export function unregisterInstalledMcpAdapter(
     plan.execution,
     options.envValues ?? {},
     options.bestEffort === true,
+    runtimeSelection,
     dependencies,
   );
   if (plan.outcome.kind === "removed") return "removed";

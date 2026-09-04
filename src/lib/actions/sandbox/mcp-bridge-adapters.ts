@@ -36,6 +36,10 @@ import {
   getSandboxHarnessPackage,
   getSandboxOrThrow,
 } from "./mcp-bridge-state";
+import {
+  getMcpProviderInspectionRuntimeSelection,
+  type McpProviderInspectionRuntimeSelection,
+} from "./mcp-bridge-provider-inspection";
 import { waitForMcpBridgeCondition } from "./mcp-bridge/timing";
 import {
   buildInstalledMcpInspectionCommand,
@@ -110,6 +114,7 @@ export function inspectAgentAdapterRegistration(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   agentDefinition?: AgentDefinition,
 ): AdapterRegistrationInspection {
   assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
@@ -120,15 +125,25 @@ export function inspectAgentAdapterRegistration(
     configDirectory,
   });
   if (installedCommand !== null) {
-    return inspectAdapterRegistrationCommand(sandboxName, entry, installedCommand);
+    return inspectAdapterRegistrationCommand(
+      sandboxName,
+      entry,
+      installedCommand,
+      runtimeSelection,
+    );
   }
   switch (adapter) {
     case "mcporter":
-      return inspectOpenClawAdapterRegistration(sandboxName, entry, configDirectory);
+      return inspectOpenClawAdapterRegistration(
+        sandboxName,
+        entry,
+        runtimeSelection,
+        configDirectory,
+      );
     case "hermes-config":
-      return inspectHermesAdapterRegistration(sandboxName, entry);
+      return inspectHermesAdapterRegistration(sandboxName, entry, runtimeSelection);
     case "deepagents-config":
-      return inspectDeepAgentsAdapterRegistration(sandboxName, entry);
+      return inspectDeepAgentsAdapterRegistration(sandboxName, entry, runtimeSelection);
   }
   throw new McpBridgeError(`MCP adapter '${adapter}' is not installed.`);
 }
@@ -136,6 +151,7 @@ export function inspectAgentAdapterRegistration(
 export function assertAgentMcpMutationRuntimeCapability(
   sandboxName: string,
   adapter: AgentMcpAdapter,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
 ): void {
   const harnessPackage = getSandboxHarnessPackage(sandboxName);
   if (harnessPackage) {
@@ -145,15 +161,15 @@ export function assertAgentMcpMutationRuntimeCapability(
         `Installed MCP adapter '${adapter}' for sandbox '${sandboxName}' is unavailable.`,
       );
     }
-    assertInstalledMcpCapability(sandboxName, probe);
+    assertInstalledMcpCapability(sandboxName, probe, runtimeSelection);
     return;
   }
   switch (adapter) {
     case "deepagents-config":
-      assertDeepAgentsMcpMutationRuntimeCapability(sandboxName);
+      assertDeepAgentsMcpMutationRuntimeCapability(sandboxName, runtimeSelection);
       return;
     case "hermes-config":
-      assertHermesMcpMutationRuntimeCapability(sandboxName);
+      assertHermesMcpMutationRuntimeCapability(sandboxName, runtimeSelection);
       return;
     case "mcporter":
       return;
@@ -171,6 +187,7 @@ export function assertAgentMcpMutationRuntimeCapability(
 export function assertAgentMcpTeardownRuntimeCapability(
   sandboxName: string,
   adapter: AgentMcpAdapter,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
 ): void {
   const harnessPackage = getSandboxHarnessPackage(sandboxName);
   if (harnessPackage) {
@@ -180,11 +197,11 @@ export function assertAgentMcpTeardownRuntimeCapability(
         `Installed MCP adapter '${adapter}' for sandbox '${sandboxName}' is unavailable.`,
       );
     }
-    assertInstalledMcpCapability(sandboxName, probe);
+    assertInstalledMcpCapability(sandboxName, probe, runtimeSelection);
     return;
   }
   if (adapter === "hermes-config") {
-    assertAgentMcpMutationRuntimeCapability(sandboxName, adapter);
+    assertAgentMcpMutationRuntimeCapability(sandboxName, adapter, runtimeSelection);
   }
 }
 
@@ -192,6 +209,7 @@ export interface AgentMcpRuntimeIntentOptions {
   readonly entries?: readonly McpBridgeEntry[];
   readonly managedServerNames?: readonly string[];
   readonly credentialRevisions?: ReadonlyMap<string, McpAttachedCredentialRevision>;
+  readonly runtimeSelection?: McpProviderInspectionRuntimeSelection;
 }
 
 export type AgentMcpRuntimeIntentInspection =
@@ -217,7 +235,7 @@ export function inspectAgentMcpRuntimeIntent(
   adapter: AgentMcpAdapter,
   options: AgentMcpRuntimeIntentOptions = {},
 ): AgentMcpRuntimeIntentInspection | undefined {
-  const { entries, managedServerNames } = resolveRuntimeIntentState(sandboxName, options);
+  const { sandbox, entries, managedServerNames } = resolveRuntimeIntentState(sandboxName, options);
   const harnessPackage = getSandboxHarnessPackage(sandboxName);
   if (harnessPackage) {
     const incompatible = entries.find(
@@ -243,7 +261,11 @@ export function inspectAgentMcpRuntimeIntent(
     }
     if (verification.kind === "not-required") return undefined;
     try {
-      assertInstalledMcpCapability(sandboxName, verification);
+      assertInstalledMcpCapability(
+        sandboxName,
+        verification,
+        options.runtimeSelection ?? getMcpProviderInspectionRuntimeSelection(sandbox),
+      );
       return { ok: true, state: "matched" };
     } catch (error) {
       return {
@@ -258,6 +280,7 @@ export function inspectAgentMcpRuntimeIntent(
       entries,
       managedServerNames,
       ...(options.credentialRevisions ? { credentialRevisions: options.credentialRevisions } : {}),
+      ...(options.runtimeSelection ? { runtimeSelection: options.runtimeSelection } : {}),
     });
   }
   return undefined;
@@ -273,7 +296,11 @@ export function assertAgentMcpRuntimeIntent(
   if (!harnessPackage) {
     const { entries, managedServerNames } = resolveRuntimeIntentState(sandboxName, options);
     if (adapter === "hermes-config" || entries.some((entry) => entry.adapter === "hermes-config")) {
-      assertHermesMcpRuntimeIntent(sandboxName, { entries, managedServerNames });
+      assertHermesMcpRuntimeIntent(sandboxName, {
+        entries,
+        managedServerNames,
+        ...(options.runtimeSelection ? { runtimeSelection: options.runtimeSelection } : {}),
+      });
     }
     return;
   }
@@ -286,6 +313,7 @@ export function registerAgentAdapter(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   envValues: Record<string, string> = {},
   options: {
     replaceExisting?: boolean;
@@ -296,7 +324,7 @@ export function registerAgentAdapter(
 ): void {
   assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   if (getSandboxHarnessPackage(sandboxName)) {
-    registerInstalledMcpAdapter(sandboxName, adapter, entry, envValues, {
+    registerInstalledMcpAdapter(sandboxName, adapter, entry, runtimeSelection, envValues, {
       ...options,
       configDirectory:
         agentDefinition?.configPaths.dir ??
@@ -304,7 +332,15 @@ export function registerAgentAdapter(
     });
     return;
   }
-  registerLegacyMcpAdapter(sandboxName, adapter, entry, envValues, options, agentDefinition);
+  registerLegacyMcpAdapter(
+    sandboxName,
+    adapter,
+    entry,
+    runtimeSelection,
+    envValues,
+    options,
+    agentDefinition,
+  );
 }
 
 /** Register one adapter and converge it on the credential revision exposed by fresh execs. */
@@ -312,6 +348,7 @@ export function registerAgentAdapterAtCurrentCredentialRevision(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   envValues: Record<string, string>,
   initialCredentialRevision: McpAttachedCredentialRevision,
   options: { replaceExisting?: boolean; teardownRollback?: boolean } = {},
@@ -338,19 +375,27 @@ export function registerAgentAdapterAtCurrentCredentialRevision(
         sandboxName,
         adapter,
         entry,
+        runtimeSelection,
         envValues,
         registrationOptions,
         agentDefinition,
       );
     } else {
-      registerAgentAdapter(sandboxName, adapter, entry, envValues, registrationOptions);
+      registerAgentAdapter(
+        sandboxName,
+        adapter,
+        entry,
+        runtimeSelection,
+        envValues,
+        registrationOptions,
+      );
     }
     let candidateRevision: McpAttachedCredentialRevision | undefined;
     let stableObservations = 0;
     let observedRevision: McpAttachedCredentialRevision | undefined;
     const stable = waitForMcpBridgeCondition(
       () => {
-        const observation = observeMcpCredentialRevision(sandboxName, entry);
+        const observation = observeMcpCredentialRevision(sandboxName, entry, runtimeSelection);
         if (observation === "absent" || observation === "canonical") {
           throw mcpAdapterCredentialRevisionUnavailableError(entry.server);
         }
@@ -388,17 +433,25 @@ export function unregisterAgentAdapter(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   entry: McpBridgeEntry,
+  runtimeSelection: McpProviderInspectionRuntimeSelection,
   options: AdapterMutationOptions = {},
   agentDefinition?: AgentDefinition,
 ): AdapterRemovalOutcome {
   assertPinnedDefinitionMatchesEntry(adapter, entry, agentDefinition);
   if (getSandboxHarnessPackage(sandboxName)) {
-    return unregisterInstalledMcpAdapter(sandboxName, adapter, entry, {
+    return unregisterInstalledMcpAdapter(sandboxName, adapter, entry, runtimeSelection, {
       ...options,
       configDirectory:
         agentDefinition?.configPaths.dir ??
         getAgentConfigDir(entry.agent, undefined, getSandboxOrThrow(sandboxName)),
     });
   }
-  return unregisterLegacyMcpAdapter(sandboxName, adapter, entry, options, agentDefinition);
+  return unregisterLegacyMcpAdapter(
+    sandboxName,
+    adapter,
+    entry,
+    runtimeSelection,
+    options,
+    agentDefinition,
+  );
 }

@@ -52,6 +52,12 @@ export {
 
 const OPENCLAW_DOCTOR_TIMEOUT_MS = 5 * 60_000;
 
+function buildSelectedRuntimeOptions(
+  runtimeSelection: McpRebuildPreparation["runtimeSelection"],
+): { runtimeSelection?: McpRebuildPreparation["runtimeSelection"] } {
+  return runtimeSelection ? { runtimeSelection } : {};
+}
+
 export function printHermesCronRestoreRecoveryCommand(
   sandboxName: string,
   writeLine: (message: string) => void = console.error,
@@ -85,6 +91,7 @@ export interface RebuildPostRestorePhaseInput {
   messagingPlan: SandboxMessagingPlan | null;
   backupManifest: RebuildBackupManifest;
   mcpEntries: McpRebuildPreparation["entries"];
+  mcpRuntimeSelection?: McpRebuildPreparation["runtimeSelection"];
   restoreSucceeded: boolean;
   hermesCronRestoreIdentity?: HermesCronRestoreIdentity;
   preparedBackupRecovery: boolean;
@@ -142,6 +149,7 @@ export async function runRebuildPostRestorePhase(
     messagingPlan,
     backupManifest,
     mcpEntries,
+    mcpRuntimeSelection,
     restoreSucceeded,
     hermesCronRestoreIdentity,
     preparedBackupRecovery,
@@ -185,6 +193,11 @@ export async function runRebuildPostRestorePhase(
   if (!verifiedRecreatedEntry) return;
   const targetAgentName = agentAuthority.effectiveAgentId;
   const agentDef = agentAuthority.definition;
+  const selectedRuntimeOptions = buildSelectedRuntimeOptions(mcpRuntimeSelection);
+  const selectedAgentRuntimeOptions = {
+    agentDefinition: agentDef,
+    ...selectedRuntimeOptions,
+  };
   const rebuiltAgentName = agentDef.displayName;
   let mutablePermsRepairUnverified = false;
   let mutableConfigPermissionsVerified = false;
@@ -199,7 +212,10 @@ export async function runRebuildPostRestorePhase(
       sandboxName,
       "openclaw doctor --fix",
       OPENCLAW_DOCTOR_TIMEOUT_MS,
-      { allowLocalDockerFallback: false },
+      {
+        allowLocalDockerFallback: false,
+        ...selectedRuntimeOptions,
+      },
     );
     log(`doctor --fix: exit=${doctorResult?.status ?? "unverified"}`);
     if (doctorResult === null) {
@@ -221,7 +237,7 @@ export async function runRebuildPostRestorePhase(
 
     // #7102: clear stale per-session pinned models left over from an
     // `inference set` before this rebuild, while the gateway is still down.
-    reconcileStalePinnedSessionModelsAfterRebuild(sandboxName, log);
+    reconcileStalePinnedSessionModelsAfterRebuild(sandboxName, log, mcpRuntimeSelection);
 
     verifiedRecreatedEntry = requireCurrentAgentAuthority(
       "after OpenClaw session-model reconciliation",
@@ -229,7 +245,12 @@ export async function runRebuildPostRestorePhase(
     if (!verifiedRecreatedEntry) return;
 
     try {
-      await reapplyMessagingManifestAfterOpenClawDoctor(sandboxName, messagingPlan, log);
+      await reapplyMessagingManifestAfterOpenClawDoctor(
+        sandboxName,
+        messagingPlan,
+        log,
+        mcpRuntimeSelection,
+      );
     } catch (error) {
       log(
         `Messaging manifest reapply failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -271,6 +292,7 @@ export async function runRebuildPostRestorePhase(
     const finalizedMessagingPlan = finalizePendingMessagingRemovalsAfterRestore(
       effectiveMessagingPlan,
       log,
+      mcpRuntimeSelection,
     );
     if (finalizedMessagingPlan !== effectiveMessagingPlan && finalizedMessagingPlan) {
       verifiedRecreatedEntry = requireCurrentAgentAuthority(
@@ -304,7 +326,7 @@ export async function runRebuildPostRestorePhase(
   const hermesGatewayRestartState = restartHermesGatewayAfterStateRestore(
     sandboxName,
     targetAgentName,
-    { agentDefinition: agentDef },
+    selectedAgentRuntimeOptions,
   );
   verifiedRecreatedEntry = requireCurrentAgentAuthority("before managed MCP restoration");
   if (!verifiedRecreatedEntry) return;
@@ -312,6 +334,7 @@ export async function runRebuildPostRestorePhase(
     sandboxName,
     mcpEntries,
     agentDef,
+    mcpRuntimeSelection,
   ));
   verifiedRecreatedEntry = requireCurrentAgentAuthority("after managed MCP restoration");
   if (!verifiedRecreatedEntry) return;
@@ -319,14 +342,16 @@ export async function runRebuildPostRestorePhase(
     mutableConfigHashRefreshUnverified = true;
   } else if (targetAgentName === "openclaw") {
     log("Refreshing mutable OpenClaw config hash after MCP restoration");
-    if (!refreshMutableOpenClawConfigHashAfterPostRestoreWrites(sandboxName, log)) {
+    if (
+      !refreshMutableOpenClawConfigHashAfterPostRestoreWrites(sandboxName, log, mcpRuntimeSelection)
+    ) {
       mutableConfigHashRefreshUnverified = true;
     } else {
       verifiedRecreatedEntry = requireCurrentAgentAuthority(
         "after mutable OpenClaw config hash refresh",
       );
       if (!verifiedRecreatedEntry) return;
-      if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log)) {
+      if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log, mcpRuntimeSelection)) {
         finalMutableConfigHashUnverified = true;
       }
     }
@@ -346,14 +371,14 @@ export async function runRebuildPostRestorePhase(
         targetAgentName,
         hermesGatewayRestartState,
         hermesCronRestoreIdentity,
-        { agentDefinition: agentDef },
+        selectedAgentRuntimeOptions,
       )
     : {
         state: verifyHermesGatewayAfterStateRestore(
           sandboxName,
           targetAgentName,
           hermesGatewayRestartState,
-          { agentDefinition: agentDef },
+          selectedAgentRuntimeOptions,
         ),
         replacementIdentity: undefined,
       };
@@ -458,19 +483,26 @@ export async function runRebuildPostRestorePhase(
 
   verifiedRecreatedEntry = requireCurrentAgentAuthority("after final registry publication");
   if (!verifiedRecreatedEntry) return;
-  if (!ensureMessagingHostForwardAfterRebuild(sandboxName, effectiveMessagingPlan)) {
+  if (
+    !ensureMessagingHostForwardAfterRebuild(
+      sandboxName,
+      effectiveMessagingPlan,
+      mcpRuntimeSelection,
+    )
+  ) {
     messagingHostForwardUnverified = true;
   }
   if (
     targetAgentName === "openclaw" &&
     !mcpBridgeRestoreUnverified &&
-    !mutableConfigHashRefreshUnverified
+    !mutableConfigHashRefreshUnverified &&
+    !finalMutableConfigHashUnverified
   ) {
     verifiedRecreatedEntry = requireCurrentAgentAuthority(
       "before final OpenClaw config hash verification",
     );
     if (!verifiedRecreatedEntry) return;
-    if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log)) {
+    if (!verifyFinalMutableOpenClawConfigHash(sandboxName, log, mcpRuntimeSelection)) {
       finalMutableConfigHashUnverified = true;
     }
   }
@@ -496,8 +528,7 @@ export async function runRebuildPostRestorePhase(
     mutableConfigPermissionsVerified = true;
     log(`Verified the rebuilt ${targetAgentName} terminal-agent mutable posture`);
   }
-  const postRestoreComplete =
-    genericPostRestoreComplete && mutableConfigPermissionsVerified;
+  const postRestoreComplete = genericPostRestoreComplete && mutableConfigPermissionsVerified;
   if (postRestoreComplete) {
     console.log(`  ${G}✓${R} Sandbox '${sandboxName}' rebuild completed`);
     if (versionCheck.expectedVersion) {

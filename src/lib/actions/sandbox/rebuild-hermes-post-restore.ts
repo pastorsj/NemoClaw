@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { CLI_NAME } from "../../cli/branding";
+import type { OpenShellRuntimeSelection } from "../../adapters/openshell/runtime";
 import type { AgentDefinition } from "../../agent/defs";
 import { isDirectSandboxFallbackUnavailableError } from "../../sandbox/privileged-exec";
 import type { GatewayRestartResult } from "./gateway-restart";
@@ -103,16 +104,25 @@ interface HermesPostRestoreGatewayDeps {
   agentDefinition?: AgentDefinition;
   checkAndRecoverSandboxProcesses?: (
     sandboxName: string,
-    options: { quiet: boolean; agentDefinition?: AgentDefinition },
+    options: {
+      quiet: boolean;
+      agentDefinition?: AgentDefinition;
+      runtimeSelection?: OpenShellRuntimeSelection;
+    },
   ) => GatewayRecoveryObservation;
   restartSandboxGateway?: (
     sandboxName: string,
-    options: { quiet: boolean; agentDefinition?: AgentDefinition },
+    options: {
+      quiet: boolean;
+      agentDefinition?: AgentDefinition;
+      runtimeSelection?: OpenShellRuntimeSelection;
+    },
   ) => GatewayRestartResult;
   observeHermesCronReplacement?: (
     sandboxName: string,
     originalIdentity: HermesCronRestoreIdentity,
   ) => HermesCronRestoreIdentity;
+  runtimeSelection?: OpenShellRuntimeSelection;
 }
 
 export interface HermesPostRestoreGatewayVerification {
@@ -174,6 +184,7 @@ export function restartHermesGatewayAfterStateRestore(
   const result = restart(sandboxName, {
     quiet: true,
     ...(deps.agentDefinition ? { agentDefinition: deps.agentDefinition } : {}),
+    ...(deps.runtimeSelection ? { runtimeSelection: deps.runtimeSelection } : {}),
   });
   if (result.ok) return "restarted";
   const mcpRestoreCanSupersede =
@@ -244,6 +255,7 @@ function verifyHermesGatewayAfterStateRestoreImpl(
     const observation: GatewayRecoveryObservation = checkAndRecover(sandboxName, {
       quiet: true,
       ...(deps.agentDefinition ? { agentDefinition: deps.agentDefinition } : {}),
+      ...(deps.runtimeSelection ? { runtimeSelection: deps.runtimeSelection } : {}),
     });
     if (
       observation.forwardRecoveryFailed === true ||

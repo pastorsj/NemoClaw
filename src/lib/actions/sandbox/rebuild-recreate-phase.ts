@@ -114,12 +114,11 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
     return input.bail("Rebuild has no captured OpenShell policy source.");
   }
   if (
-    !rebuildPackageIdentityMatches(
-      recreateJournal.harnessPackage,
-      recreateOptions.harnessPackage,
-    )
+    !rebuildPackageIdentityMatches(recreateJournal.harnessPackage, recreateOptions.harnessPackage)
   ) {
-    return bail("Authoritative rebuild journal package identity changed before sandbox recreation.");
+    return bail(
+      "Authoritative rebuild journal package identity changed before sandbox recreation.",
+    );
   }
   console.log("");
   console.log("  Creating new sandbox with current image...");
@@ -144,7 +143,9 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
       harnessPackageMigration: recreateOptions.harnessPackageMigration,
     })
   ) {
-    return bail("Authoritative rebuild session package authority changed before sandbox recreation.");
+    return bail(
+      "Authoritative rebuild session package authority changed before sandbox recreation.",
+    );
   }
   const journaledCheckpoint = journaledSession.checkpoint;
   if (!journaledCheckpoint) {
@@ -302,11 +303,14 @@ export async function runRebuildRecreatePhase(input: RebuildRecreatePhaseInput):
   const savedExitCode = process.exitCode;
   process.exitCode = undefined;
   try {
-      await rebuildOnboardDependencies.onboard({
-        ...recreateOptions,
-        authoritativeRebuildAgentAuthority: resumeConfig.agentAuthority,
-        ...(preparedBackupRecovery ? { allowRemovedImmutabilityStateRecord: true } : {}),
-        rebuildGatewayAuthority,
+    await rebuildOnboardDependencies.onboard({
+      ...recreateOptions,
+      authoritativeRebuildAgentAuthority: resumeConfig.agentAuthority,
+      ...(recreateJournal.runtimeSelection
+        ? { runtimeSelection: recreateJournal.runtimeSelection }
+        : {}),
+      ...(preparedBackupRecovery ? { allowRemovedImmutabilityStateRecord: true } : {}),
+      rebuildGatewayAuthority,
       rebuildPolicySourcePath,
       ...(rebuildsHermesSandbox && backupManifest?.preservedEnv
         ? { rebuildPreservedEnv: backupManifest.preservedEnv }

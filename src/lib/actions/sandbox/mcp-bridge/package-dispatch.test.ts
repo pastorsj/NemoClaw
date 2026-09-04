@@ -41,6 +41,7 @@ const PACKAGE_IDENTITY = Object.freeze({
   packageVersion: "1.0.0",
   contentDigest: "a".repeat(64),
 });
+const runtimeSelection = { gatewayName: "nemoclaw-8091", workspace: "default" } as const;
 
 function entry(agent: string, adapter: AgentMcpAdapter): McpBridgeEntry {
   return {
@@ -78,6 +79,7 @@ describe("MCP package mutation dispatch", () => {
       "alpha",
       adapter,
       packageEntry,
+      runtimeSelection,
       { FUTURE_TOKEN: "host-only-secret" },
       { replaceExisting: true, credentialRevision: "v12" },
     );
@@ -86,6 +88,7 @@ describe("MCP package mutation dispatch", () => {
       "alpha",
       adapter,
       packageEntry,
+      runtimeSelection,
       { FUTURE_TOKEN: "host-only-secret" },
       {
         replaceExisting: true,
@@ -105,17 +108,23 @@ describe("MCP package mutation dispatch", () => {
     const packageEntry = entry(agent, adapter);
 
     expect(
-      unregisterAgentAdapter("alpha", adapter, packageEntry, {
+      unregisterAgentAdapter("alpha", adapter, packageEntry, runtimeSelection, {
         force: true,
         bestEffort: true,
       }),
     ).toBe("removed");
 
-    expect(mocks.unregisterInstalled).toHaveBeenCalledWith("alpha", adapter, packageEntry, {
-      force: true,
-      bestEffort: true,
-      configDirectory: "/sandbox/.package-agent",
-    });
+    expect(mocks.unregisterInstalled).toHaveBeenCalledWith(
+      "alpha",
+      adapter,
+      packageEntry,
+      runtimeSelection,
+      {
+        force: true,
+        bestEffort: true,
+        configDirectory: "/sandbox/.package-agent",
+      },
+    );
     expect(mocks.unregisterLegacy).not.toHaveBeenCalled();
   });
 
@@ -123,8 +132,10 @@ describe("MCP package mutation dispatch", () => {
     mocks.getPackage.mockReturnValue(null);
     const legacyEntry = entry("openclaw", "mcporter");
 
-    registerAgentAdapter("alpha", "mcporter", legacyEntry);
-    expect(unregisterAgentAdapter("alpha", "mcporter", legacyEntry)).toBe("removed");
+    registerAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection);
+    expect(unregisterAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection)).toBe(
+      "removed",
+    );
 
     expect(mocks.registerLegacy).toHaveBeenCalledOnce();
     expect(mocks.unregisterLegacy).toHaveBeenCalledOnce();
