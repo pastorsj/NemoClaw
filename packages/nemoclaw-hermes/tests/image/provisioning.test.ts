@@ -18,6 +18,7 @@ import { hermesStartupModuleNames } from "../helpers/shell-harness";
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const HERMES_DOCKERFILE = path.join(PACKAGE_ROOT, "Dockerfile");
 const HERMES_DOCKERFILE_BASE = path.join(PACKAGE_ROOT, "Dockerfile.base");
+const HERMES_FINALIZE_IMAGE_LAYOUT = path.join(PACKAGE_ROOT, "finalize-image-layout.sh");
 
 describe("Hermes sandbox provisioning", () => {
   it("stages privileged lifecycle helpers with root-only Hermes image modes", () => {
@@ -196,10 +197,16 @@ describe("Hermes sandbox provisioning", () => {
       fs.writeFileSync(path.join(hermesDir, "config.yaml"), "model: test\n");
       fs.writeFileSync(path.join(hermesDir, ".env"), "TOKEN=test\n");
     }
-    const command = dockerRunCommandBetween(dockerfile, startMarker, endMarker).replaceAll(
-      "/root/.cache/pip",
-      path.join(tmp, "root-cache", "pip"),
-    );
+    const finalizeImageLayout = path.join(tmp, "finalize-image-layout.sh");
+    fs.copyFileSync(HERMES_FINALIZE_IMAGE_LAYOUT, finalizeImageLayout);
+    const finalizeImageLayoutSha256 =
+      dockerfile.match(
+        /^ARG NEMOCLAW_HERMES_FINALIZE_IMAGE_LAYOUT_SHA256=([a-f0-9]{64})$/mu,
+      )?.[1] ?? "";
+    const command = dockerRunCommandBetween(dockerfile, startMarker, endMarker)
+      .replaceAll("/root/.cache/pip", path.join(tmp, "root-cache", "pip"))
+      .replaceAll("/opt/nemoclaw-hermes-config/finalize-image-layout.sh", finalizeImageLayout)
+      .replaceAll("$NEMOCLAW_HERMES_FINALIZE_IMAGE_LAYOUT_SHA256", finalizeImageLayoutSha256);
     const result = runDockerShell(command, sandboxRoot);
     return { ...result, tmp, sandboxRoot };
   }
