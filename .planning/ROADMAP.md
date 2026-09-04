@@ -194,12 +194,12 @@ implementation.
 AGENT-03, AGENT-04, AGENT-05, FABRIC-03, TEST-01, TEST-02, TEST-03, TEST-04, TEST-05,
 TEST-06, TEST-07, TEST-08
 
-**Plans:** 2/5 plans executed
+**Plans:** 3/5 plans executed
 
 - [x] `04-01` — Add the finite contract, receipt-bound loader, explicit identity, and trust record.
 - [x] `04-02` — Move package-backed MCP translation behind fixed typed operations and preserve the
   named no-receipt compatibility path.
-- [ ] `04-03` — Close synthetic conformance, package test ownership, and final-candidate source and
+- [x] `04-03` — Close synthetic conformance, package test ownership, and final-candidate source and
   suite evidence.
 - [ ] `04-04` — Close Fabric, package-receipt, and changed managed-image evidence without treating
   Pi as part of a cohort that excludes it.
@@ -208,10 +208,10 @@ TEST-06, TEST-07, TEST-08
 
 **Current status:** The typed loader and package-backed MCP slice are implemented as a local
 prototype. Configuration and OpenClaw restore use the same boundary, and all four packages retain
-their Fabric paths. Final aggregate E2E-support, current managed-image receipts, and successful
-bounded macOS and Brev evidence are open. The accepted Phase 2 decision does not authorize
-package-authored host code as a supported product surface, so Phase 4 remains active and makes no
-release or support claim.
+their Fabric paths. A package ID unknown to core passed deterministic composition plus bounded
+macOS and Brev runs through the bundled Dockerfile, terminal, and Fabric path. The broad root
+aggregate, current managed-image receipts, named managed-startup evidence, external distribution,
+and product acceptance remain open. Phase 4 makes no release or support claim.
 
 **Implementation order:**
 
@@ -226,6 +226,14 @@ release or support claim.
    security, and E2E infrastructure in core.
 6. Enforce source and suite ownership, then run contract-first deterministic gates and bounded
    external-edge E2E rather than a Cartesian matrix.
+
+**Next package author path:** After an accepted scope decision, DeepSeek, Haystack, or another
+agent runtime adds production code only under `packages/nemoclaw-<id>` for the ordinary bundled
+Dockerfile, terminal, and Fabric path. The package owns its metadata, manifest, image, startup,
+policy, optional adapters, and tests. It then adds one typed onboard-run-destroy E2E journey. Core
+changes are justified only for a new finite semantic operation, managed startup, buildless
+onboarding, or a distinct compatibility edge. External repository and package download support
+remain Phase 9 work.
 
 ### Phase 5: Runtime Provider Packages
 

@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: nemoclaw-component-composition
-status: Phase 4 typed agent runtime contract work is active; the finite loader and package-backed
-  MCP slice are implemented locally, while aggregate, image, macOS, and Brev gates remain open
+status: Phase 4 typed agent runtime contract work is active; generic Dockerfile, terminal, and
+  Fabric composition has local Mac and Brev evidence, while product, distribution, broad root aggregate,
+  managed-startup, managed-image, and named-package live gates remain open
 last_updated: "2026-09-04T00:00:00.000Z"
 progress:
   total_phases: 9
   completed_phases: 1
   total_plans: 33
-  completed_plans: 28
-  percent: 85
+  completed_plans: 29
+  percent: 88
 ---
 
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
@@ -25,10 +26,12 @@ Phase: 4 of 9 — Agent Runtime Contract
 Status: Phase 2 Plans 02-01 through 02-22 completed the package foundation. Plan 02-23 remains
 pending and shares its no-messaging environment evidence with Phase 3 Plan 03-04. Phase 3 Plans
 03-01 through 03-03 completed the generic, OpenClaw, and Hermes Fabric implementation; Plan 03-04
-remains open. Phase 4 Plans 04-01 and 04-02 implemented the finite receipt-bound loader and
-package-backed Model Context Protocol slice as a local prototype. Plans 04-03 through 04-05 remain
-active because final aggregate evidence, independent package image inputs, current managed-image
-receipts, and successful bounded macOS and Brev evidence are not complete.
+remains open. Phase 4 Plans 04-01 through 04-03 implemented the finite receipt-bound loader,
+package-backed Model Context Protocol slice, synthetic composition proof, and package test
+ownership as a local prototype. Plans 04-04 and 04-05 remain active because the broad root aggregate,
+current managed-image, and named-package live evidence is not complete. The ordinary bundled
+Dockerfile, terminal, and Fabric path has bounded macOS and Brev development evidence for an
+unknown package ID.
 
 This work does not activate or support an upstream product surface. The accepted Phase 2 decision
 covers the data, sandbox, and image package foundation. It does not accept package-authored host
@@ -36,26 +39,28 @@ code as a supported extension surface.
 
 Decision record: `.planning/PROJECT.md#phase-2-implementation-decision`
 
-Proposal revision: `5a8253a97a1496e3ddf03ff85826672e86635eb9`
+Accepted Phase 2 proposal revision: `5802308d09bdb64dba62dd541e42ad6bb223ceb0`
+
+Current implementation candidate: `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50`
 
 Decision record revision: `4fb6083cb02419d7a3768e9602220a00b361bc63`
 
 ## Repository Reconciliation
 
 - Active branch: `agent-runtime-composition-architecture`
-- Exact base: `origin/main` at `3d754417b5f07f9ed61ff709c5bb107aaffff1dc`
-- Local upstream merge: `eef8ee45e54e39e540a10b2074a9ef4ed3dd1c26`
+- Exact base: `origin/main` at `4b254b9bef3e0ba745af4859fc65700742f5317e`
+- Local upstream merge: `3a6786019e58ec9540754a285939236630559c7b`
 - Preserved candidate: `backup/agent-runtime-package-migration-pre-origin-main-20260827`
 - Preserved candidate tip: `e856215a07`
-- Pushes: none
+- Fork branch remains at `c5ef46cd65`; all later work remains local-only and must not be pushed
 
 At the Phase 1 baseline, the preserved candidate changed 1,773 files after its common base and main
 changed 1,806. A trial direct merge produced 2,189 unresolved paths, including 1,889 paths under
 `test/` and 213 under `packages/`. Phase 2 was then rebased and re-audited through the exact base
 above. The migration strategy remains semantic capability-slice replay onto current main.
 
-`packages/nemoclaw-fabric` is the first source package added during this replay. Other physical
-`packages/` directories remain ignored build leftovers from the preserved branch.
+The tracked source packages are `nemoclaw-fabric`, `nemoclaw-openclaw`, `nemoclaw-hermes`,
+`nemoclaw-langchain-deepagents-code`, and `nemoclaw-pi`.
 
 After Plan 02-03, the branch merged the three newer `origin/main` commits through
 `d63f7b037dbec3d34dba73ed75f09a330d36b36f`. The merge had no conflicts. Package-store,
@@ -136,15 +141,25 @@ tree.
   restart, verification, rollback, and redacted diagnostics.
 - [x] A synthetic unknown package exercises MCP, configuration, and restore operations without a
   production catalogue row or agent-name branch.
+- [x] One synthetic authoring package flows through metadata discovery, artifact materialization,
+  alias installation, receipt publication, onboarding selection, Dockerfile workload selection,
+  startup persistence, Fabric command selection, private standard-input handoff, and typed MCP
+  refusal without a production package-ID branch.
+- [x] The same unknown-package contract completed bounded macOS and Brev development runs. Its
+  receipt survived interrupted onboarding, resume, stop, and start; Fabric returned `PONG` before
+  and after a gateway restart; resource-scoped cleanup passed.
 - [x] Two existing OpenClaw restore test files moved from core source into package-owned host tests,
   retaining 28 declarations and 43 parameterized cases.
 - [x] Layer-boundary and suite-membership checks protect package ownership with one counted legacy
   messaging build exception.
-- [ ] The final E2E-support aggregate rerun is pending after command-credential and package-install
-  fixture corrections.
+- [x] The E2E-support aggregate passed: 265 files passed and 4 skipped; 3,874 tests passed and 39
+  skipped. The focused package-composition test passed 1/1; the relevant compiled package contracts
+  passed 14/14; CLI typecheck, assertion ratchet, 45/45 growth guard, and project membership for
+  2,476 candidates across 7 projects passed.
 - [ ] Current managed-image evidence is pending after the reviewed runtime bundle changed; existing
   Pi receipts bind older source bytes.
-- [ ] macOS and Brev non-messaging evidence is pending and must not be reported as release evidence.
+- [ ] The broad root aggregate and named managed-startup or package-specific live gates remain open.
+  The unknown-package Mac and Brev runs are development evidence, not release evidence.
 
 ## Architecture Recommendations
 
@@ -166,16 +181,16 @@ tree.
 ## Next Execution
 
 1. Obtain an `Accept` product decision before treating package-authored host code as canonical or
-   continuing implementation of a supported extension surface.
-2. Finish the final aggregate and E2E-support rerun on candidate `5a8253a97a`.
+   implementing DeepSeek, Haystack, or another supported extension surface.
+2. Finish the broad root aggregate from implementation candidate
+   `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50`. Record remaining platform or image
+   failures without repeating package lanes that passed.
 3. Replace stale managed-image evidence for the changed reviewed runtime bundle. Keep Pi candidate
    evidence separate from a shipped cohort that excludes Pi.
-4. Finish the isolated macOS run and the bounded Brev/Linux Hermes Fabric, Deep Agents Code Fabric,
-   and OpenClaw, Hermes, and Deep Agents Code MCP targets. Record identity, redaction, terminal
-   state, and cleanup without broad reruns or messaging-service coverage.
-5. Keep Plans 04-03 through 04-05 active until their exact evidence closes. Then migrate the named
-   native core seams one current consumer at a time rather than claiming full agent-runtime
-   independence.
+4. Run named managed-startup, MCP, or package-specific live edges only where their distinct risk is
+   still required. Keep messaging-service coverage excluded.
+5. Keep Plans 04-04 and 04-05 active until their evidence closes. Then migrate each remaining native
+   core seam with its current consumer rather than claiming full agent-runtime independence.
 
 The next native slices are the no-receipt MCP and configuration paths, remaining restore and CLI
 grammar, closed managed startup, pairing and messaging projection, gateway and dashboard

@@ -13,8 +13,9 @@ last_updated: 2026-09-04
 # Phase 4 Local Prototype Qualification
 
 This record qualifies neither a NemoClaw release nor a supported external package interface. It
-tracks evidence for a local architecture candidate at commit `5a8253a97a`, whose principal typed
-adapter implementation is `f3fe6928c2`.
+tracks evidence for implementation candidate `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50`.
+The principal typed adapter implementation is `f3fe6928c2`; later commits extend generic
+composition and qualification.
 
 ## Decision Gate
 
@@ -36,24 +37,31 @@ data.
 The current evidence supports this claim for the implemented operations. It does not support the
 broader claim that all agent-runtime behavior has left core.
 
+The ordinary in-tree path also discovers an unknown package from authoring metadata, materializes
+its artifact, installs its receipt, selects its Dockerfile, startup command, and Fabric command,
+and constructs the private standard-input handoff. This path does not enable generic managed
+startup, buildless onboarding, or external package download.
+
 ## Deterministic Evidence
 
 | Evidence | Recorded outcome | Gate status |
 | --- | --- | --- |
 | Loader, schemas, receipt drift, negative fixtures | Focused adapter tests passed | Pass |
 | Unknown package conformance | MCP, configuration, and restore use fixed operations without a production catalogue row | Pass |
-| Compiled package artifact | 9 package-contract tests passed | Pass |
+| Unknown package composition | Discovery, materialization, alias install, receipt, onboarding, Dockerfile and Fabric command selection, startup persistence, private standard-input handoff, and typed MCP refusal passed 1/1 | Pass |
+| Compiled package artifact | 14 package-contract tests passed | Pass |
 | Core focused behavior | CLI 271; integration 101 with 4 skipped; execution 48; MCP 22; registry 62 | Pass |
-| OpenClaw | Package 581/1 skip; composed 1,117/16 skip; plugin 1,072; Fabric 29/2 skip | Pass for recorded revision |
-| Hermes | Package 303/72 skip plus Python 5; composed 519/53 skip; serialized subprocess 92 | Pass for recorded revision |
+| OpenClaw | Package 581/1 skip; composed 1,117/16 skip; plugin 1,074; Fabric 29/2 skip | Pass for recorded revision |
+| Hermes | Package 314/72 skip plus Python 5; composed 502/53 skip; serialized subprocess 92; Fabric 12/1 skip | Pass for recorded revision |
 | LangChain Deep Agents Code | Package 399/25 skip; composed 476/41 skip; Fabric 11 | Pass for recorded revision |
 | Pi | Package 18; composition 3; Fabric 20/2 skip | Pass for recorded revision |
-| Static ownership | Layer boundaries, source graph, project membership, builds, type checks, format, and lint passed | Pass for recorded revision |
-| Full E2E support | Earlier run had 13 failures in 6 files; fixes address at least 8, final rerun absent | Open |
+| Static ownership | CLI typecheck; original live ratchet retained at 1,955 direct expects, 3,023 direct assertion points, and 4,621 unique points; 45/45 growth guard; project membership for 2,476 candidates across 7 projects | Pass for recorded revision |
+| Full E2E support | 265 files passed and 4 skipped; 3,874 tests passed and 39 skipped | Pass |
+| Broad root aggregate | No passing broad root result is recorded for `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50` | Open |
 | Repository checks | Stale Pi image receipt after reviewed runtime bundle changed | Blocked on new image evidence |
 
 Recorded package counts are development evidence from the implementation cycle. They are not a
-substitute for the final aggregate rerun on the exact candidate.
+substitute for a passing broad root aggregate on the exact candidate.
 
 ## Test Ownership Change
 
@@ -76,14 +84,17 @@ Generic security, transaction, receipt, rollback, and composition assertions rem
 | macOS isolated gateway, malformed endpoint attempt | `5a8253a97a` candidate | Gateway and package install passed; endpoint supplied as `/chat/completions` instead of a base URL, so onboarding stopped before sandbox creation | Gateway stopped; no sandbox created |
 | macOS isolated gateway, normalized endpoint attempt | `5a8253a97a` candidate | SSRF preflight correctly refused a hostname resolving to a private corporate address without explicit trust; no Fabric phase ran | Sandbox absent; cleanup missed one test-owned gateway, which was stopped explicitly and port 18290 was verified free |
 | Brev/Linux Hermes Fabric | Exact tracked tree for `5a8253a97a` | Local ARM64 image built; managed recovery rejected Hermes path variables absent from the supervisor's initial environment; no Fabric phase ran | Fixture, sandbox, and isolated gateway cleanup passed |
-| Brev/Linux Deep Agents Code Fabric | Exact tracked tree for `5a8253a97a` | Pending | Pending |
-| Brev/Linux MCP: OpenClaw, Hermes, Deep Agents Code | Exact tracked tree for `5a8253a97a` | Pending | Pending |
+| macOS unknown-package Dockerfile and Fabric path | Local candidate through `9761597cde`; package ID `contract-probe`; OpenShell 0.0.106 | Install and inventory passed. Receipt identity survived interrupted onboarding, resume, stop, and start. Fabric returned `PONG` before and after a gateway restart. | Sandbox, gateway, and test state cleanup passed. This run did not use managed startup or qualify a named package. |
+| Brev/Linux unknown-package Dockerfile and Fabric path | `9761597cde`; Ubuntu 22.04 ARM64; OpenShell 0.0.106; NeMo Fabric 0.2.0; digest `0b0c21672f55db5a3b9e15f056a0c9e04091c9e200c2a8ba37ea9a608e72f3b6` | The same install, interrupted-onboard, resume, stop, start, and two-turn Fabric sequence passed. | The configured endpoint returned 403. A deterministic authenticated test endpoint proved transport and composition, not that configured service. Cleanup removed the isolated sandbox, gateway, and private home. |
+| Brev/Linux Deep Agents Code Fabric | Not run on the current candidate | Pending | Pending |
+| Brev/Linux MCP: OpenClaw, Hermes, Deep Agents Code | Not run on the current candidate | Pending | Pending |
 | Pi live candidate | No new immutable image receipt | Not run and not qualified | Not applicable |
 
-The macOS results separate three host configuration issues: a Homebrew service failure, an endpoint
-shape error, and missing explicit trust for corporate private DNS. The Brev result identifies a
-managed lifecycle boundary mismatch that deterministic package tests did not model. None is a
-successful Fabric result. Messaging services are outside the selected matrix.
+The earlier macOS attempts separate three host configuration issues: a Homebrew service failure,
+an endpoint shape error, and missing explicit trust for corporate private DNS. The earlier Brev
+Hermes result identifies a managed lifecycle boundary mismatch. The later unknown-package runs
+prove only the ordinary bundled Dockerfile, terminal, and Fabric path. Messaging services are
+outside the selected matrix.
 
 ## Image Evidence
 
@@ -102,8 +113,10 @@ Status remains `active`.
 
 - The finite typed MCP, configuration, and restore boundary has strong deterministic local
   evidence.
-- Plans 04-01 and 04-02 are executed as local-prototype slices.
-- Plans 04-03, 04-04, and 04-05 remain active.
-- Product acceptance, final aggregate evidence, managed-image publication, and successful bounded
-  live evidence are missing.
+- Plans 04-01 through 04-03 are executed as local-prototype slices.
+- Plans 04-04 and 04-05 remain active.
+- Product acceptance, the broad root aggregate, managed-image publication, and named-package live
+  evidence are missing.
+- Bounded macOS and Brev development evidence exists for the generic Dockerfile, terminal, and
+  Fabric path. It does not qualify managed startup, external distribution, or a release.
 - Release qualification and full agent-runtime independence are not claimed.

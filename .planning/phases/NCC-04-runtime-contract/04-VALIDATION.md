@@ -46,6 +46,9 @@ and package behavior tests provide their current conformance evidence.
 - Return a bounded result that satisfies the operation schema.
 - Execute the returned plan through the core transaction owner.
 - Use an unknown package ID without a core catalogue or behavior branch.
+- Discover an unknown authoring package from `package.json`, materialize it, install it by alias,
+  select its receipt during onboarding, choose its package Dockerfile, startup command, and Fabric
+  command, and construct its private standard-input handoff.
 - Retain the selected receipt, receipt-pinned agent definition, and plan through configuration
   validation. Reload the same identity and plan under the mutation lock before writing.
 - Ignore an ambient active-pointer change when the sandbox still records the same package receipt.
@@ -120,6 +123,8 @@ and package behavior tests provide their current conformance evidence.
 - Success, adapter failure, timeout, cancellation, and forced stop remove private request artifacts.
 - An unavailable adapter composition returns `unsupported_configuration` before client creation.
 - Native and Fabric tests remain separate because their supported features can differ.
+- A new package starts with one public Fabric turn in its primary live journey. Lifecycle tests
+  repeat that turn only when the lifecycle transition changes Fabric behavior.
 
 ## Receipt cases
 
@@ -201,6 +206,10 @@ Each live record must contain:
 Live messaging services remain excluded. Deterministic messaging projection, policy, rollback, and
 redaction tests remain required if a later messaging migration changes them.
 
+For a new package, pass one typed `PublicFabricHarnessContract` to the shared
+onboard-run-destroy journey. Add a second live target only for a distinct package risk in rebuild,
+restart, provider, operating system, hardware, serving, or another external boundary.
+
 ### Retry rule
 
 Retry only a checked-in transient signature after state reconciliation proves the operation is
@@ -223,6 +232,26 @@ This table guides the current contract tests. The package manifest remains runti
 | Messaging | Package behavior | Package behavior | Absent | Absent |
 
 Do not turn this planning table into a second registry.
+
+## DeepSeek and Haystack author path
+
+DeepSeek and Haystack remain proposed packages, not supported integrations. After an accepted
+scope decision, either package uses this path:
+
+1. Create `packages/nemoclaw-<id>` with `package.json`, `manifest.yaml`, `Dockerfile.base`,
+   `Dockerfile`, `start.sh`, `policy-additions.yaml`, and only the optional folders it uses.
+2. Declare static capabilities and commands in the manifest. Put native behavior and detailed
+   tests in the package.
+3. Add a Fabric adapter only when headless execution preserves the required native behavior.
+4. Pass package unit, artifact, Fabric, negative, package-only, and revision-pinned composition
+   tests.
+5. Add one typed onboard-run-destroy Fabric E2E journey.
+
+The ordinary bundled Dockerfile, terminal, and Fabric path must not require a production core
+package-ID edit. A core change is justified only for a new finite semantic operation, managed
+startup, buildless onboarding, or a distinct compatibility edge. Current discovery and install are
+in-tree only. External repositories, package download, publisher trust, and compatibility policy
+remain separate work.
 
 ## Definition of done: current phase
 
@@ -268,10 +297,14 @@ Do not turn this planning table into a second registry.
 - [x] Package installation receipt tests pass.
 - [ ] A current complete managed-image cohort receipt covers every changed shipped image input.
 - [x] Source and suite-membership checks prevent ownership regression.
-- [ ] The final aggregate deterministic and E2E-support gates pass on the exact candidate before
-      any live success claim.
-- [ ] The selected MCP and Fabric live edges pass, or the record classifies an infrastructure
-      failure without claiming product success.
+- [x] The E2E-support aggregate passes: 265 files and 3,874 tests passed; 4 files and 39 tests
+      skipped.
+- [ ] The broad root aggregate passes from implementation candidate
+      `461e30e5d45aa97d58cfd9ce451f33b0c17f0f50`.
+- [x] One unknown package passes the generic Dockerfile and terminal lifecycle plus Fabric turns on
+      macOS and Brev with recorded cleanup.
+- [ ] Named managed-startup and selected package-specific live edges pass, or the record classifies
+      an infrastructure failure without claiming product success.
 - [ ] Qualification records exact identities, results, cleanup, move counts, and remaining core
       seams.
 - [x] The remaining-file record includes the 2,320-line OpenClaw blueprint runner.
@@ -279,7 +312,7 @@ Do not turn this planning table into a second registry.
       candidate is treated as canonical or supported NemoClaw behavior.
 
 The checked items describe implemented local-prototype behavior. They do not override the open
-product, image, aggregate, or live gates.
+product, image, broad root aggregate, or live gates.
 
 ## Later migration completion
 
@@ -324,5 +357,6 @@ support lifecycle require a separate accepted design decision with an `Accept` o
 7. Bounded macOS and Brev evidence when a changed external edge requires it.
 8. Completed-scope and later-migration report.
 
-Do not start live work while a deterministic contract, package, composition, publication, or
-E2E-support gate is failing.
+Do not start stock live work while a deterministic contract, package, composition, publication, or
+E2E-support gate is failing. An exact local candidate run can proceed after its deterministic gates
+pass, but it does not replace managed-image or release evidence.

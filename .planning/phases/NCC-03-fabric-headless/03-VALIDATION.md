@@ -20,7 +20,7 @@ created: 2026-08-30
 | Hermes | `packages/nemoclaw-hermes` | Package descriptor and supervisor, released adapter, composed runner, atomic route projection, integrity, recovery, MCP state, image, timeout, and redaction |
 | Core contract | NemoClaw | Data-only artifact validation, generic headless selection, multi-file restore, rebuild, and Shields behavior |
 | E2E support | Existing typed fixtures | Public Fabric turn, result parsing, artifact checks, redaction, target wiring, and semantic phase membership |
-| Live | Existing E2E registry | Mac and Brev managed activation, restart, inference switch, Shields, rebuild, and cleanup; no messaging |
+| Live | Existing E2E registry | A new package starts with one typed onboard-run-destroy Fabric journey; mature package lifecycle and security edges remain when risk is distinct; no messaging |
 
 ## Execution Order
 
@@ -29,7 +29,15 @@ created: 2026-08-30
 3. Run package and core lifecycle tests.
 4. Run E2E-support and registry checks.
 5. Build images after dependency or image changes.
-6. Run live Mac and Brev targets only after deterministic evidence passes.
+6. Run one public Fabric turn as a new package's baseline after deterministic evidence passes.
+7. Add another live target only when rebuild, restart, provider, operating system, hardware, or
+   serving behavior creates a distinct package risk.
 
 `03-QUALIFICATION.md` records current results. A passing deterministic contract reduces the live
 matrix, but it does not replace Docker, OpenShell, policy, process, or inference evidence.
+
+Package tests own native grammar, configuration, adapters, artifacts, and failure cases. Shared
+contract tests prove composition without an agent-name branch. After those lanes pass, a new
+package adds one typed `PublicFabricHarnessContract` journey for its cross-system evidence. A
+lifecycle test must not repeat the Fabric turn unless that lifecycle transition changes Fabric
+behavior.
