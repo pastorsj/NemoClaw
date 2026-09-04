@@ -6,8 +6,10 @@ import { isDeepStrictEqual } from "node:util";
 
 import type { AgentDefinition } from "../agent/defs";
 import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
-import { captureOpenshell } from "../adapters/openshell/runtime";
-import { restoreRecreatedSandboxStateWithManagedAuthority } from "../actions/sandbox/snapshot/restore-authority";
+import {
+  createManagedRestoreAuthorityDependencies,
+  restoreRecreatedSandboxStateWithManagedAuthority,
+} from "../actions/sandbox/snapshot/restore-authority";
 import * as buildContext from "../build-context";
 import { resolveSandboxImageTagFromCreateOutput } from "../domain/sandbox/image-tag";
 import type {
@@ -667,10 +669,14 @@ export function restoreSelectedOnboardSnapshot(
     };
   }
   return resolveTarget
-    ? dependencies.restoreManaged(sandboxName, latest, restoreOptions, {
-        getSandbox: (requestedName) => (requestedName === sandboxName ? resolveTarget() : null),
-        captureOpenshell,
-      })
+    ? dependencies.restoreManaged(
+        sandboxName,
+        latest,
+        restoreOptions,
+        createManagedRestoreAuthorityDependencies((requestedName) =>
+          requestedName === sandboxName ? resolveTarget() : null,
+        ),
+      )
     : dependencies.restore(sandboxName, backupPath, restoreOptions);
 }
 
