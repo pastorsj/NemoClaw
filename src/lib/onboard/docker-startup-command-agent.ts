@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import path from "node:path";
+
 import type { AgentDefinition } from "../agent/defs";
 import type { DockerUlimit } from "./docker-gpu-patch-types";
 import { isPortableExperimentalProfile } from "./experimental/portable-profile";
@@ -14,6 +16,24 @@ export const DCODE_DOCKER_ULIMITS: readonly DockerUlimit[] = [
   { name: "nproc", soft: 512, hard: 512 },
   { name: "nofile", soft: 65_536, hard: 65_536 },
 ];
+
+/** Recognize a definition produced from an authored or installed package manifest. */
+function isPackageOwnedAgentDefinition(
+  agent: AgentDefinition | null | undefined,
+): agent is AgentDefinition {
+  if (
+    !agent ||
+    typeof agent.manifestPath !== "string" ||
+    typeof agent.packageRoot !== "string"
+  ) {
+    return false;
+  }
+  const manifestPath = path.relative(agent.packageRoot, agent.manifestPath);
+  return (
+    manifestPath === "manifest.yaml" ||
+    manifestPath === path.join("packages", `nemoclaw-${agent.name}`, "manifest.yaml")
+  );
+}
 
 export function resolveDockerStartupCommandPatch(
   agent: AgentDefinition | null | undefined,
@@ -38,7 +58,10 @@ export function resolveDockerStartupCommandPatch(
   }
   return {
     persistStartupCommand:
-      agentName === "openclaw" || agentName === "hermes" || agentName === DCODE_AGENT_NAME,
+      isPackageOwnedAgentDefinition(agent) ||
+      agentName === "openclaw" ||
+      agentName === "hermes" ||
+      agentName === DCODE_AGENT_NAME,
     requiredUlimits,
   };
 }
