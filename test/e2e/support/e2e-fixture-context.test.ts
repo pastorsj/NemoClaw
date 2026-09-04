@@ -14,7 +14,7 @@ import { test as e2eTest } from "../fixtures/e2e-test.ts";
 import { startTestProgress, type TestProgress } from "../fixtures/progress.ts";
 import { SecretStore } from "../fixtures/secrets.ts";
 import {
-  normalizeLiveE2EAgentName,
+  requireCanonicalHarnessId,
   requireAgentDockerfilePath,
   resolveLiveE2eWorkloadSourceEnv,
   ShellProbe,
@@ -60,18 +60,19 @@ async function expectProcessToExit(pid: number, timeoutMs = 2_000): Promise<void
 }
 
 describe("E2E fixture primitives", () => {
-  it.each(["hermes", "langchain-deepagents-code", "nemocua", "openclaw", "pi"] as const)(
-    "normalizes the supported local Dockerfile agent selector %s",
-    (agentName) => {
-      expect(normalizeLiveE2EAgentName(agentName)).toBe(agentName);
+  it.each(["hermes", "langchain-deepagents-code", "nemocua", "openclaw", "pi", "future-harness"])(
+    "accepts the canonical local Dockerfile harness selector %s",
+    (harnessId) => {
+      expect(requireCanonicalHarnessId(harnessId)).toBe(harnessId);
     },
   );
 
-  it("rejects unknown local Dockerfile agent selectors before manifest lookup", () => {
+  it("rejects noncanonical local Dockerfile harness selectors before manifest lookup", () => {
     const canary = "ambient-secret-value";
-    expect(() => normalizeLiveE2EAgentName(canary)).toThrow(/Unsupported E2E agent selector/);
+    const selection = `../${canary}`;
+    expect(() => requireCanonicalHarnessId(selection)).toThrow(/canonical package id/);
     try {
-      normalizeLiveE2EAgentName(canary);
+      requireCanonicalHarnessId(selection);
     } catch (error) {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).not.toContain(canary);

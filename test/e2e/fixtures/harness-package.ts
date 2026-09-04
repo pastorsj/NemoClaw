@@ -5,12 +5,6 @@ import { buildAvailabilityProbeEnv } from "./availability-env.ts";
 import type { HostCliClient } from "./clients/host.ts";
 import type { ShellProbeResult } from "./shell-probe.ts";
 
-const STANDARD_HARNESS_IDS = new Set([
-  "openclaw",
-  "hermes",
-  "langchain-deepagents-code",
-  "pi",
-] as const);
 const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const PACKAGE_VERSION_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
@@ -25,6 +19,9 @@ const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const LIST_TIMEOUT_MS = 30_000;
 
 export type StandardHarnessId = "openclaw" | "hermes" | "langchain-deepagents-code" | "pi";
+
+/** Canonical package id selected through the public harness CLI. */
+export type HarnessPackageId = string;
 
 export interface HarnessPackageIdentity {
   readonly kind: "agent-runtime";
@@ -85,14 +82,6 @@ function requireHarnessId(value: unknown): string {
     throw new Error("Harness package id must be a canonical identifier");
   }
   return value;
-}
-
-function requireStandardHarnessId(value: unknown): StandardHarnessId {
-  const id = requireHarnessId(value);
-  if (!STANDARD_HARNESS_IDS.has(id as StandardHarnessId)) {
-    throw new Error("Harness package selection must use a canonical standard id");
-  }
-  return id as StandardHarnessId;
 }
 
 function requireDisplayName(value: unknown): string {
@@ -213,7 +202,7 @@ function parseHarnessInventory(source: string): HarnessInventory {
 
 function selectInstalledIdentity(
   source: string,
-  selectedId: StandardHarnessId,
+  selectedId: HarnessPackageId,
 ): HarnessPackageIdentity {
   const inventory = parseHarnessInventory(source);
   const installed = inventory.installed.filter((row) => row.id === selectedId);
@@ -240,10 +229,10 @@ function requireCommandSuccess(result: ShellProbeResult, operation: "install" | 
 /** Re-list one installed package through the public machine-output boundary. */
 export async function readInstalledHarnessPackage(
   host: HostCliClient,
-  selectedId: StandardHarnessId,
+  selectedId: HarnessPackageId,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<HarnessInventoryEvidence> {
-  const id = requireStandardHarnessId(selectedId);
+  const id = requireHarnessId(selectedId);
   const inventoryResult = await host.nemoclaw(["harness", "list", "--json"], {
     artifactName: `harness-list-${id}`,
     env: buildAvailabilityProbeEnv(environment),
@@ -256,13 +245,13 @@ export async function readInstalledHarnessPackage(
   });
 }
 
-/** Install one reviewed standard package, then prove its receipt-backed inventory identity. */
+/** Install one canonical package, then prove its receipt-backed inventory identity. */
 export async function installHarnessPackage(
   host: HostCliClient,
-  selectedId: StandardHarnessId,
+  selectedId: HarnessPackageId,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<HarnessPackageEvidence> {
-  const id = requireStandardHarnessId(selectedId);
+  const id = requireHarnessId(selectedId);
   const installResult = await host.nemoclaw(["harness", "install", id], {
     artifactName: `harness-install-${id}`,
     env: buildAvailabilityProbeEnv(environment),

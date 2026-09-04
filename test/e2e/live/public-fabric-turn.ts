@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
+import path from "node:path";
 
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
@@ -16,38 +17,53 @@ export type PublicFabricAgent = "hermes" | "openclaw";
 export type PublicFabricLifecyclePhase =
   | "after-gateway-restart"
   | "after-inference-switch"
+  | "after-onboard"
   | "after-rebuild"
   | "after-shields-down"
   | "after-shields-up"
   | "before-gateway-restart";
 
-interface PublicFabricAgentContract {
+export interface PublicFabricHarnessContract {
+  readonly packageId: string;
   readonly adapterId: string;
   readonly artifactRoot: string;
   readonly configPath: string;
   readonly descriptorGlob: string;
   readonly descriptorPathPrefix: string;
   readonly descriptorRunnerModule: string;
+  readonly processMarkers?: readonly string[];
 }
 
-const PUBLIC_FABRIC_AGENT_CONTRACTS: Record<PublicFabricAgent, PublicFabricAgentContract> = {
+const PUBLIC_FABRIC_AGENT_CONTRACTS: Record<PublicFabricAgent, PublicFabricHarnessContract> = {
   hermes: {
+    packageId: "hermes",
     adapterId: "nvidia.nemoclaw.hermes",
     artifactRoot: "/sandbox/.hermes/fabric-artifacts",
     configPath: "/sandbox/.hermes/fabric.json",
     descriptorGlob: "/usr/local/share/nemoclaw/hermes.fabric-adapter.json",
     descriptorPathPrefix: "/usr/local/share/nemoclaw",
     descriptorRunnerModule: "nemoclaw_hermes_fabric.adapter",
+    processMarkers: ["nemo_fabric_adapters.hermes"],
   },
   openclaw: {
+    packageId: "openclaw",
     adapterId: "nvidia.nemoclaw.openclaw",
     artifactRoot: "/sandbox/.openclaw/fabric-artifacts",
     configPath: "/sandbox/.openclaw/fabric.json",
     descriptorGlob: "/usr/local/share/nemoclaw/openclaw.fabric-adapter.json",
     descriptorPathPrefix: "/usr/local/share/nemoclaw",
     descriptorRunnerModule: "nemoclaw_openclaw_fabric.adapter",
+    processMarkers: ["nemoclaw-fabric-", ".nemoclaw-openclaw-prompt-"],
   },
 };
+
+const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const ADAPTER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
+const PYTHON_MODULE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/u;
+const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const CONTRACT_VALUE_MAX_BYTES = 512;
+const PROCESS_MARKER_LIMIT = 16;
+const PROCESS_MARKER_MAX_BYTES = 256;
 
 const CONFIG_PROBE_SCRIPT = String.raw`
 import grp
@@ -165,25 +181,14 @@ import json
 import os
 import sys
 
-agent, prompt_marker = sys.argv[1:]
-tokens = [
-    "nemoclaw-fabric",
-    "nemoclaw_fabric",
-    prompt_marker,
-]
-if agent == "openclaw":
-    tokens.extend((
-        "nemoclaw_openclaw_fabric",
-        "nemoclaw-fabric-",
-        ".nemoclaw-openclaw-prompt-",
-    ))
-else:
-    tokens.extend((
-        "nemoclaw_hermes_fabric",
-        "nemo_fabric_adapters.hermes",
-        "nvidia.nemoclaw.hermes",
-        "hermes.fabric-adapter.json",
-    ))
+tokens = json.loads(sys.argv[1])
+if (
+    not isinstance(tokens, list)
+    or not tokens
+    or len(tokens) > 32
+    or any(not isinstance(token, str) or not token for token in tokens)
+):
+    raise ValueError("invalid Fabric process markers")
 
 def parent_process_id(process_id):
     text = open(f"/proc/{process_id}/stat", "r", encoding="ascii").read()
@@ -262,7 +267,7 @@ interface FabricProcessProbe {
 export interface PublicFabricTurnProof {
   readonly schemaVersion: 1;
   readonly adapterId: string;
-  readonly agent: PublicFabricAgent;
+  readonly agent: string;
   readonly artifactEntryCount: number;
   readonly artifactRoot: string;
   readonly artifactRootExists: boolean;
@@ -281,8 +286,7 @@ export interface PublicFabricTurnProof {
   readonly sandboxName: string;
 }
 
-interface PublicFabricTurnOptions {
-  readonly agent: PublicFabricAgent;
+interface PublicFabricTurnBaseOptions {
   readonly artifacts: Pick<ArtifactSink, "writeJson">;
   readonly env: NodeJS.ProcessEnv;
   readonly host: Pick<HostCliClient, "nemoclaw">;
@@ -291,6 +295,100 @@ interface PublicFabricTurnOptions {
   readonly sandbox: SandboxClient;
   readonly sandboxName: string;
   readonly timeoutMs?: number;
+}
+
+export type PublicFabricTurnOptions = PublicFabricTurnBaseOptions &
+  (
+    | {
+        readonly agent: PublicFabricAgent;
+        readonly contract?: never;
+      }
+    | {
+        readonly agent?: never;
+        readonly contract: PublicFabricHarnessContract;
+      }
+  );
+
+function isBoundedSafeText(value: string, maxBytes = CONTRACT_VALUE_MAX_BYTES): boolean {
+  return (
+    value.length > 0 &&
+    Buffer.byteLength(value, "utf8") <= maxBytes &&
+    !UNSAFE_TEXT_PATTERN.test(value)
+  );
+}
+
+function isCanonicalAbsolutePath(value: string): boolean {
+  return (
+    isBoundedSafeText(value) &&
+    path.posix.isAbsolute(value) &&
+    path.posix.normalize(value) === value
+  );
+}
+
+function resolveFabricHarnessContract(options: PublicFabricTurnOptions): {
+  readonly agent: string;
+  readonly contract: PublicFabricHarnessContract;
+} {
+  const provided = options.contract;
+  const agent = provided?.packageId ?? options.agent ?? "";
+  const contract = provided ?? PUBLIC_FABRIC_AGENT_CONTRACTS[options.agent as PublicFabricAgent];
+  const markers = contract?.processMarkers ?? [];
+  const descriptorRelative = contract
+    ? contract.descriptorGlob.slice(contract.descriptorPathPrefix.length)
+    : "";
+  const descriptorName = contract
+    ? contract.descriptorGlob.slice(contract.descriptorGlob.lastIndexOf("/") + 1)
+    : "";
+  const invalid =
+    !contract ||
+    agent.length > 63 ||
+    !HARNESS_ID_PATTERN.test(agent) ||
+    (provided !== undefined && options.agent !== undefined) ||
+    (provided !== undefined && Object.hasOwn(PUBLIC_FABRIC_AGENT_CONTRACTS, agent)) ||
+    !isBoundedSafeText(contract.adapterId, PROCESS_MARKER_MAX_BYTES) ||
+    !ADAPTER_ID_PATTERN.test(contract.adapterId) ||
+    !isCanonicalAbsolutePath(contract.artifactRoot) ||
+    !isCanonicalAbsolutePath(contract.configPath) ||
+    !isCanonicalAbsolutePath(contract.descriptorGlob) ||
+    !isCanonicalAbsolutePath(contract.descriptorPathPrefix) ||
+    !descriptorRelative.startsWith("/") ||
+    !isBoundedSafeText(descriptorName, PROCESS_MARKER_MAX_BYTES) ||
+    !isBoundedSafeText(contract.descriptorRunnerModule, PROCESS_MARKER_MAX_BYTES) ||
+    !PYTHON_MODULE_PATTERN.test(contract.descriptorRunnerModule) ||
+    markers.length > PROCESS_MARKER_LIMIT ||
+    markers.some((marker) => !isBoundedSafeText(marker, PROCESS_MARKER_MAX_BYTES));
+  if (invalid) throw new Error("public Fabric proof contract is invalid");
+
+  return Object.freeze({
+    agent,
+    contract: Object.freeze({
+      packageId: agent,
+      adapterId: contract.adapterId,
+      artifactRoot: contract.artifactRoot,
+      configPath: contract.configPath,
+      descriptorGlob: contract.descriptorGlob,
+      descriptorPathPrefix: contract.descriptorPathPrefix,
+      descriptorRunnerModule: contract.descriptorRunnerModule,
+      ...(markers.length > 0 ? { processMarkers: Object.freeze([...markers]) } : {}),
+    }),
+  });
+}
+
+function fabricProcessMarkers(contract: PublicFabricHarnessContract): readonly string[] {
+  const descriptorName = contract.descriptorGlob.slice(
+    contract.descriptorGlob.lastIndexOf("/") + 1,
+  );
+  return Object.freeze(
+    [
+      "nemoclaw-fabric",
+      "nemoclaw_fabric",
+      PUBLIC_FABRIC_TURN_PROMPT,
+      contract.adapterId,
+      contract.descriptorRunnerModule,
+      descriptorName,
+      ...(contract.processMarkers ?? []),
+    ].filter((marker, index, markers) => markers.indexOf(marker) === index),
+  );
 }
 
 function outputRetainedCredential(
@@ -312,11 +410,9 @@ function requireSuccessfulProbe(
   if (outputRetainedCredential(result, redactionValues)) {
     throw new Error(`${label} retained a credential`);
   }
-  if (result.timedOut) {
-    throw new Error(`${label} timed out; inspect its redacted artifact`);
-  }
-  if (result.exitCode !== 0) {
-    throw new Error(`${label} failed; inspect its redacted artifact`);
+  if (result.timedOut || result.exitCode !== 0) {
+    const outcome = result.timedOut ? "timed out" : "failed";
+    throw new Error(`${label} ${outcome}; inspect its redacted artifact`);
   }
 }
 
@@ -348,7 +444,7 @@ function credentialFingerprints(redactionValues: readonly string[]): Array<{
 
 function requireConfigProbe(
   value: Record<string, unknown>,
-  contract: PublicFabricAgentContract,
+  contract: PublicFabricHarnessContract,
 ): FabricConfigProbe {
   const securePosture =
     (value.configOwner === "sandbox:sandbox" && value.configMode === "0600") ||
@@ -403,18 +499,21 @@ function requireProcessProbe(
   return value as unknown as FabricProcessProbe;
 }
 
-export async function runPublicFabricTurn({
-  agent,
-  artifacts,
-  env,
-  host,
-  lifecyclePhase,
-  redactionValues,
-  sandbox,
-  sandboxName,
-  timeoutMs = 3 * 60_000,
-}: PublicFabricTurnOptions): Promise<PublicFabricTurnProof> {
-  const contract = PUBLIC_FABRIC_AGENT_CONTRACTS[agent];
+export async function runPublicFabricTurn(
+  options: PublicFabricTurnOptions,
+): Promise<PublicFabricTurnProof> {
+  const {
+    artifacts,
+    env,
+    host,
+    lifecyclePhase,
+    redactionValues,
+    sandbox,
+    sandboxName,
+    timeoutMs = 3 * 60_000,
+  } = options;
+  const { agent, contract } = resolveFabricHarnessContract(options);
+  const processMarkers = fabricProcessMarkers(contract);
   const baselineResult = await sandbox.exec(
     sandboxName,
     [
@@ -422,8 +521,7 @@ export async function runPublicFabricTurn({
       "-I",
       "-c",
       PROCESS_PROBE_SCRIPT,
-      agent,
-      PUBLIC_FABRIC_TURN_PROMPT,
+      JSON.stringify(processMarkers),
     ],
     {
       artifactName: `fabric-${agent}-${lifecyclePhase}-process-baseline`,
@@ -469,7 +567,9 @@ export async function runPublicFabricTurn({
     [
       "/bin/bash",
       "-lc",
-      `set -eu; . /tmp/nemoclaw-proxy-env.sh; exec /usr/local/bin/nemoclaw-fabric doctor --config ${contract.configPath} --json`,
+      'set -eu; . /tmp/nemoclaw-proxy-env.sh; exec /usr/local/bin/nemoclaw-fabric doctor --config "$1" --json',
+      "nemoclaw-fabric-doctor",
+      contract.configPath,
     ],
     {
       artifactName: `fabric-${agent}-${lifecyclePhase}-doctor`,
@@ -521,8 +621,7 @@ export async function runPublicFabricTurn({
       "-I",
       "-c",
       PROCESS_PROBE_SCRIPT,
-      agent,
-      PUBLIC_FABRIC_TURN_PROMPT,
+      JSON.stringify(processMarkers),
     ],
     {
       artifactName: `fabric-${agent}-${lifecyclePhase}-process-cleanup`,

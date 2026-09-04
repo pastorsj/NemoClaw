@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ArtifactSink } from "./artifacts.ts";
-import { loadAgent } from "../../../src/lib/agent/defs.ts";
+import { listAgents, loadAgent } from "../../../src/lib/agent/defs.ts";
 import {
   CANDIDATE_AGENT_FEATURE_ENV,
   CANDIDATE_QUALIFICATION_RECEIPT_ENV,
@@ -48,38 +48,32 @@ export interface ShellProbeOutputEvent {
 export type { TrustedShellCommand, TrustedShellCommandInput } from "./shell/trusted-command.ts";
 export { trustedShellCommand } from "./shell/trusted-command.ts";
 
-export type LiveE2EAgentName =
-  | "hermes"
-  | "langchain-deepagents-code"
-  | "nemocua"
-  | "openclaw"
-  | "pi";
+const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
-export function normalizeLiveE2EAgentName(value: string): LiveE2EAgentName {
-  switch (value) {
-    case "hermes":
-    case "langchain-deepagents-code":
-    case "nemocua":
-    case "openclaw":
-    case "pi":
-      return value;
-    default:
-      throw new Error("Unsupported E2E agent selector.");
+export function requireCanonicalHarnessId(value: string): string {
+  if (value.length > 63 || !HARNESS_ID_PATTERN.test(value)) {
+    throw new Error("E2E harness selector must be a canonical package id.");
   }
+  return value;
 }
 
 export function requireAgentDockerfilePath(
   agentName: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  const agent = loadAgent(normalizeLiveE2EAgentName(agentName), {
+  const agentEnvironment = {
     [CANDIDATE_AGENT_FEATURE_ENV]:
       environment[CANDIDATE_AGENT_FEATURE_ENV] ?? process.env[CANDIDATE_AGENT_FEATURE_ENV],
     [CANDIDATE_QUALIFICATION_RECEIPT_ENV]:
       environment[CANDIDATE_QUALIFICATION_RECEIPT_ENV] ??
       process.env[CANDIDATE_QUALIFICATION_RECEIPT_ENV],
     [CUA_FEATURE_ENV]: environment[CUA_FEATURE_ENV] ?? process.env[CUA_FEATURE_ENV],
-  });
+  };
+  const id = requireCanonicalHarnessId(agentName);
+  if (!listAgents(agentEnvironment).includes(id)) {
+    throw new Error("E2E harness selector does not identify an available package.");
+  }
+  const agent = loadAgent(id, agentEnvironment);
   const dockerfilePath = agent.dockerfilePath ?? agent.legacyPaths?.dockerfile;
   if (!dockerfilePath) {
     throw new Error(`Agent '${agent.name}' has no Dockerfile for local E2E workload source.`);

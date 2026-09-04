@@ -8,7 +8,6 @@ import {
   type HarnessPackageIdentity,
   installHarnessPackage,
   readInstalledHarnessPackage,
-  type StandardHarnessId,
 } from "../fixtures/harness-package.ts";
 import type {
   ShellProbeResult,
@@ -22,28 +21,29 @@ interface RunnerCall {
   options?: ShellProbeRunOptions;
 }
 
-const DIGESTS: Record<StandardHarnessId, string> = {
+const DIGESTS: Record<string, string> = {
   openclaw: "a".repeat(64),
   hermes: "b".repeat(64),
   "langchain-deepagents-code": "c".repeat(64),
   pi: "d".repeat(64),
+  "future-harness": "e".repeat(64),
 };
 
 function packageIdentity(
-  id: StandardHarnessId,
+  id: string,
   overrides: Partial<HarnessPackageIdentity> = {},
 ): HarnessPackageIdentity {
   return {
     kind: "agent-runtime",
     id,
     packageVersion: "1.2.3",
-    contentDigest: DIGESTS[id],
+    contentDigest: DIGESTS[id] ?? "f".repeat(64),
     ...overrides,
   };
 }
 
 function inventoryJson(
-  selectedId: StandardHarnessId,
+  selectedId: string,
   identities: HarnessPackageIdentity[] = [packageIdentity(selectedId)],
 ): string {
   return JSON.stringify({
@@ -200,6 +200,22 @@ describe("harness package E2E evidence", () => {
     ]);
   });
 
+  it("installs a future canonical package without adding it to a fixture registry", async () => {
+    const identity = packageIdentity("future-harness");
+    const { host, runner } = createHost(
+      shellResult(0, "Installed.\n"),
+      shellResult(0, inventoryJson("future-harness")),
+    );
+
+    const evidence = await installHarnessPackage(host, "future-harness");
+
+    expect(evidence.identity).toEqual(identity);
+    expect(runner.calls.map(({ args }) => args)).toEqual([
+      ["harness", "install", "future-harness"],
+      ["harness", "list", "--json"],
+    ]);
+  });
+
   it("stops before inventory when public installation fails", async () => {
     const secret = "installation-secret-value";
     const { host, runner } = createHost(shellResult(1, "", `failed at /private/store/${secret}`));
@@ -308,11 +324,11 @@ describe("harness package E2E evidence", () => {
     await expect(readInstalledHarnessPackage(host, "openclaw")).rejects.toThrow();
   });
 
-  it("rejects an alias selection before running the CLI", async () => {
+  it("rejects a noncanonical selection before running the CLI", async () => {
     const { host, runner } = createHost();
 
-    await expect(installHarnessPackage(host, "dcode" as StandardHarnessId)).rejects.toThrow(
-      /canonical standard id/,
+    await expect(installHarnessPackage(host, "../future-harness")).rejects.toThrow(
+      /canonical identifier/,
     );
     expect(runner.calls).toEqual([]);
   });
