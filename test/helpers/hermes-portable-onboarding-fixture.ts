@@ -95,9 +95,12 @@ export function createHermesPortableContainerInspectResult(
   };
 }
 
-function startupArgv(sandboxName = "alpha") {
+export function hermesPortableTestStartupArgv(sandboxName = "alpha") {
   return [
     "env",
+    "HERMES_BUNDLED_PLUGINS=/opt/hermes/plugins",
+    "HERMES_HOME=/sandbox/.hermes",
+    "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
     "NEMOCLAW_HERMES_API_PORT=8642",
     `NEMOCLAW_SANDBOX_NAME=${sandboxName}`,
     "/usr/local/bin/nemoclaw-start",
@@ -205,8 +208,7 @@ function matchingRegistryEntry(
           harnessPackage: input.inferenceRouteReservation.harnessPackage,
           ...(input.inferenceRouteReservation.harnessPackageMigration
             ? {
-                harnessPackageMigration:
-                  input.inferenceRouteReservation.harnessPackageMigration,
+                harnessPackageMigration: input.inferenceRouteReservation.harnessPackageMigration,
               }
             : {}),
         }
@@ -236,7 +238,7 @@ export function createHermesPortableTestInput(stateDir: string, policyPath: stri
       "--policy",
       policyPath,
       "--",
-      ...startupArgv(),
+      ...hermesPortableTestStartupArgv(),
     ],
     runtimeAuthority: {
       schemaVersion: 1,
@@ -269,7 +271,7 @@ export function createHermesPortableTestInput(stateDir: string, policyPath: stri
     startup: {
       agent: loadAgent("hermes"),
       sandboxName: "alpha",
-      startupArgv: startupArgv(),
+      startupArgv: hermesPortableTestStartupArgv(),
     },
     inferenceRouteReservation: {
       sessionId: ROUTE_SESSION_ID,
@@ -295,8 +297,7 @@ export function hermesPortableReservationForOnboarding(
           harnessPackage: input.inferenceRouteReservation.harnessPackage,
           ...(input.inferenceRouteReservation.harnessPackageMigration
             ? {
-                harnessPackageMigration:
-                  input.inferenceRouteReservation.harnessPackageMigration,
+                harnessPackageMigration: input.inferenceRouteReservation.harnessPackageMigration,
               }
             : {}),
         }
@@ -406,8 +407,7 @@ export function createHermesPortableTransactionFixture(
         events.push("lock-exit");
       }
     },
-    revalidateHarnessPackageAuthority:
-      options.revalidateHarnessPackageAuthority ?? vi.fn(),
+    revalidateHarnessPackageAuthority: options.revalidateHarnessPackageAuthority ?? vi.fn(),
     captureSocketAuthority: (socketPath) => {
       const directories = directoryChain(path.dirname(socketPath));
       return {

@@ -92,8 +92,8 @@ vi.mock("../../adapters/openshell/runtime", async (importOriginal) => ({
       args[0] === "policy"
         ? "version: 1\nnetwork_policies: {}\n"
         : args[0] === "sandbox" && args[1] === "get"
-        ? "Name: alpha\nId: alpha-live-id\nPhase: Ready\n"
-        : "alpha Ready\n",
+          ? "Name: alpha\nId: alpha-live-id\nPhase: Ready\n"
+          : "alpha Ready\n",
   })),
   getOpenshellBinary: vi.fn(() => "openshell"),
   runOpenshell: vi.fn(() => ({ status: 0, output: "" })),
@@ -141,6 +141,7 @@ vi.mock("../../sandbox/mutable-config-perms", () => ({
 }));
 
 vi.mock("../../state/mcp-lifecycle-lock", () => ({
+  withMcpLifecycleLockSync: vi.fn((_name: string, callback: () => unknown) => callback()),
   withSandboxMutationLock: vi.fn((_name: string, callback: () => Promise<unknown>) => callback()),
 }));
 

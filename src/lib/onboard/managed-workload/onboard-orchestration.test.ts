@@ -554,6 +554,7 @@ describe("managed workload onboard orchestration", () => {
       legacy: {
         preparedBuildContext: null,
         buildAgent,
+        packageRoot: process.cwd(),
         fromDockerfile: trustedDockerfile,
         createAgentSandbox: (selectedAgent: AgentDefinition) => {
           expect(selectedAgent).toBe(buildAgent);

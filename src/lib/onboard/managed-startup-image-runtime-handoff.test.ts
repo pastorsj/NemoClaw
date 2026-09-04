@@ -390,9 +390,7 @@ describe("managed startup image runtime handoff and descriptor integrity", () =>
   });
 
   it("serializes the fixed Hermes paths into the validated supervisor environment", () => {
-    const mapped = mapManagedStartupProfileToAgentEnvironment(
-      managedStartupE2eProfile("hermes"),
-    );
+    const mapped = mapManagedStartupProfileToAgentEnvironment(managedStartupE2eProfile("hermes"));
     const script = serializeManagedStartupRuntimeEnvironment(
       mapped.runtimeEnvironment,
       false,
@@ -405,7 +403,7 @@ describe("managed startup image runtime handoff and descriptor integrity", () =>
         "--noprofile",
         "--norc",
         "-c",
-        `${script}exec /usr/bin/python3 -I agents/hermes/validate-env-secret-boundary.py runtime-env`,
+        `${script}exec /usr/bin/python3 -I packages/nemoclaw-hermes/runtime/env-boundary.py runtime-env`,
       ],
       {
         cwd: path.resolve(import.meta.dirname, "../../.."),

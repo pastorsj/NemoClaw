@@ -237,7 +237,12 @@ describe("rebuild post-restore phase", () => {
       "hermes",
       { agentDefinition },
     );
-    expect(rebuildMcp.restoreMcpAfterRebuild).toHaveBeenCalledWith("alpha", [], agentDefinition);
+    expect(rebuildMcp.restoreMcpAfterRebuild).toHaveBeenCalledWith(
+      "alpha",
+      [],
+      agentDefinition,
+      undefined,
+    );
     expect(rebuildHermesPostRestore.verifyHermesGatewayAfterStateRestore).toHaveBeenCalledWith(
       "alpha",
       "hermes",

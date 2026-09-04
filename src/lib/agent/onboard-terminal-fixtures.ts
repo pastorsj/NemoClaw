@@ -36,6 +36,9 @@ function recordDeepAgentsRuntimeCall(
   if (command.includes("nemoclaw-fabric --version")) {
     return "NEMOCLAW_AGENT_SMOKE_BEGIN\nnemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
   }
+  if (command.includes("/usr/local/bin/nemoclaw-fabric-run --help")) {
+    return "NEMOCLAW_AGENT_SMOKE_BEGIN\nNEMOCLAW_FABRIC_RUNNER_OK\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
+  }
   if (command.includes("timeout --version")) {
     return "NEMOCLAW_AGENT_SMOKE_BEGIN\ntimeout (GNU coreutils) 9.0\nNEMOCLAW_AGENT_SMOKE_EXIT:0";
   }

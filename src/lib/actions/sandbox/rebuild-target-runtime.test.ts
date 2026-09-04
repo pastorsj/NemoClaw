@@ -382,10 +382,7 @@ describe("preflightRebuildTargetRuntime web search credential", () => {
   });
 
   it("keeps the validation path for non-OpenClaw agents that never reuse the binding", async () => {
-    const hermesDefinition = {
-      name: "hermes",
-      webSearch: { supported: true, providers: ["tavily"] },
-    };
+    const hermesDefinition = loadAgent("hermes");
     const hermesTarget = {
       ...WEB_SEARCH_TARGET,
       durableConfig: { webSearchConfig: { fetchEnabled: true, provider: "tavily" } },

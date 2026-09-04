@@ -30,6 +30,7 @@ import {
   listHarnessRebuildBackups,
   loadRebuildSandbox,
   mcpBridge,
+  mcpBridgeProvider,
   messaging,
   messagingHostForwardLifecycle,
   mutableConfigPerms,
@@ -149,7 +150,9 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       ? "Deep Agents Code"
       : agentName === "hermes"
         ? "Hermes Agent"
-        : "OpenClaw";
+        : agentName === "pi"
+          ? "Pi"
+          : "OpenClaw";
   const agentBaseImageId = `sha256:${"a".repeat(64)}`;
   const agentBaseImageRef = `nemoclaw-${agentName}-sandbox-base-local:image-${agentBaseImageId.slice("sha256:".length)}`;
   let policyAdditionsPath: string | null = null;
@@ -748,6 +751,10 @@ export function createRebuildFlowHarness(overrides: RebuildFlowOverrides = {}): 
       contentSha256: "a".repeat(64),
     }),
   );
+  vi.spyOn(mcpBridgeProvider, "getMcpProviderInspectionRuntimeSelection").mockReturnValue({
+    gatewayName: "nemoclaw",
+    workspace: "default",
+  });
   const restoreSandboxStateSpy = vi
     .spyOn(sandboxState, "restoreRecreatedSandboxState")
     .mockImplementation((...args: unknown[]) => {

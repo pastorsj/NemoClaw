@@ -68,7 +68,8 @@ function transactionAt(
   sourceEntry: SandboxEntry = REGISTERED_SOURCE_ENTRY,
 ): CheckpointSandboxRecreateTransaction {
   return {
-    version: 1,
+    version: 2,
+    harnessPackage: null,
     id: TX_ID,
     revision: 3,
     sandboxName: "alpha",

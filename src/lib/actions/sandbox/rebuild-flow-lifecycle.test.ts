@@ -27,6 +27,20 @@ function expectPinnedAgentDefinition(agentName = "openclaw") {
   });
 }
 
+function qualifyPiForTest(onTestFinished: (cleanup: () => void) => void): void {
+  const restoreEnv = snapshotEnv([
+    "NEMOCLAW_CANDIDATE_AGENTS",
+    "NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT",
+  ]);
+  process.env.NEMOCLAW_CANDIDATE_AGENTS = "1";
+  process.env.NEMOCLAW_CANDIDATE_QUALIFICATION_RECEIPT = path.join(
+    process.cwd(),
+    "ci",
+    "pi-agent-qualification-v1-linux-arm64.json",
+  );
+  onTestFinished(restoreEnv);
+}
+
 describe("rebuildSandbox flow: lifecycle", () => {
   installRebuildFlowTestHooks();
 
@@ -297,7 +311,10 @@ describe("rebuildSandbox flow: lifecycle", () => {
     expect(harness.retireRemovedImmutabilityStateRecordSpy).not.toHaveBeenCalled();
   });
 
-  it("retires removed Shields state after a complete Pi terminal-agent rebuild", async () => {
+  it("retires removed Shields state after a complete Pi terminal-agent rebuild", async ({
+    onTestFinished,
+  }) => {
+    qualifyPiForTest(onTestFinished);
     const harness = createRebuildFlowHarness({ sandboxEntry: { agent: "pi" } });
     harness.enforceRemovedImmutabilityMigrationBoundarySpy.mockReturnValue({
       stateRecord: "/tmp/shields-alpha.json",
@@ -314,7 +331,10 @@ describe("rebuildSandbox flow: lifecycle", () => {
     );
   });
 
-  it("retains removed Shields state when a Pi terminal-agent restore fails", async () => {
+  it("retains removed Shields state when a Pi terminal-agent restore fails", async ({
+    onTestFinished,
+  }) => {
+    qualifyPiForTest(onTestFinished);
     const harness = createRebuildFlowHarness({
       sandboxEntry: { agent: "pi" },
       restoreSandboxState: () => ({
@@ -640,6 +660,7 @@ describe("rebuildSandbox flow: lifecycle", () => {
 
     expect(harness.prepareMcpBridgesForRebuildSpy).toHaveBeenCalledWith(
       "alpha",
+      expectPinnedAgentDefinition(),
     );
     expect(harness.onboardSpy).toHaveBeenCalledOnce();
   });

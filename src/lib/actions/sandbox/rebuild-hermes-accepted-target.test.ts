@@ -80,6 +80,7 @@ vi.mock("./rebuild-prepared-recovery", async (importOriginal) => ({
   revalidatePreparedRecoveryBeforeDelete: (
     _sandboxName: unknown,
     _sandboxEntry: unknown,
+    _agentAuthority: unknown,
     manifest: unknown,
     registrySnapshot: unknown,
   ) => ({ manifest, registrySnapshot }),

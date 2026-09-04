@@ -11,6 +11,7 @@ import type { HarnessPackageIdentity } from "../../src/lib/agent-runtime/package
 import {
   createHarnessPackageFixture,
   type HarnessPackageFixture,
+  type HarnessPackageFixtureId,
   type HarnessPackageFixtureOptions,
 } from "./harness-packages";
 import { type RebuildSandbox, snapshotEnv } from "./rebuild-flow-test-support";
@@ -165,14 +166,19 @@ export function createHarnessTempDir(prefix: string): string {
   return dir;
 }
 
-const STANDARD_REBUILD_HARNESS_IDS = new Set(["openclaw", "hermes", "langchain-deepagents-code"]);
+const REBUILD_HARNESS_PACKAGE_IDS = new Set([
+  "openclaw",
+  "hermes",
+  "langchain-deepagents-code",
+  "pi",
+]);
 
 /** Install exact standard-harness authority under an isolated rebuild-test home. */
 export function installRebuildHarnessPackage(
   agentName: string,
   options: Pick<HarnessPackageFixtureOptions, "agentPolicyAdditionsContent"> = {},
 ): HarnessPackageIdentity | null {
-  if (!STANDARD_REBUILD_HARNESS_IDS.has(agentName)) return null;
+  if (!REBUILD_HARNESS_PACKAGE_IDS.has(agentName)) return null;
   const testHome = process.env.HOME?.trim();
   if (!testHome) throw new Error("Rebuild harness tests require an isolated HOME.");
   const storeRoot = path.join(fs.realpathSync(testHome), ".nemoclaw", "harnesses");
@@ -192,9 +198,7 @@ export function installRebuildHarnessPackage(
   }
   const installed = state.identities.get(agentName);
   if (installed) return installed;
-  const identity = state.fixture.install(
-    agentName as "openclaw" | "hermes" | "langchain-deepagents-code",
-  ).identity;
+  const identity = state.fixture.install(agentName as HarnessPackageFixtureId).identity;
   state.identities.set(agentName, identity);
   return identity;
 }

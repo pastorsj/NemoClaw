@@ -30,6 +30,7 @@ import {
   HERMES_PORTABLE_TEST_LIVE_IDENTITY,
   hermesPortableDescendantNames,
   hermesPortableTestOpenShellAuthority,
+  hermesPortableTestStartupArgv,
   makeHermesPortableCheckoutPrivate,
 } from "../helpers/hermes-portable-onboarding-fixture";
 import { createHarnessPackageFixture } from "../helpers/harness-packages";
@@ -334,12 +335,7 @@ describe("Hermes portable installer admission", testTimeoutOptions(60_000), () =
         intent,
         fromRef: activeBuildContext.sourceDockerfilePath,
       });
-      const startupArgv = [
-        "env",
-        "NEMOCLAW_HERMES_API_PORT=8642",
-        `NEMOCLAW_SANDBOX_NAME=${sandboxName}`,
-        "/usr/local/bin/nemoclaw-start",
-      ];
+      const startupArgv = hermesPortableTestStartupArgv(sandboxName);
       const transactionInput = {
         sandboxName,
         gatewayName,

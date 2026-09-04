@@ -204,6 +204,9 @@ function startup(): HermesPortableStartupContract {
     startupDescriptorSha256: "d".repeat(64),
     argv: [
       "env",
+      "HERMES_BUNDLED_PLUGINS=/opt/hermes/plugins",
+      "HERMES_HOME=/sandbox/.hermes",
+      "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
       "NEMOCLAW_SANDBOX_NAME=alpha",
       "NEMOCLAW_HERMES_API_PORT=8642",
       "/usr/local/bin/nemoclaw-start",

@@ -599,9 +599,9 @@ processRecovery.executeSandboxCommand = (_sandboxName, command) => {
 const adapter = require("./src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.js");
 const entry = ${JSON.stringify(baseEntry)};
 const configDirectory = ${JSON.stringify(configDirectory)};
-adapter.inspectOpenClawAdapterRegistration("pinned-root-lifecycle", entry, configDirectory);
-adapter.registerOpenClawAdapter("pinned-root-lifecycle", entry, {}, false, undefined, configDirectory);
-adapter.unregisterOpenClawAdapter("pinned-root-lifecycle", entry, {}, configDirectory);
+adapter.inspectOpenClawAdapterRegistration("pinned-root-lifecycle", entry, {}, configDirectory);
+adapter.registerOpenClawAdapter("pinned-root-lifecycle", entry, {}, {}, false, undefined, configDirectory);
+adapter.unregisterOpenClawAdapter("pinned-root-lifecycle", entry, {}, {}, configDirectory);
 process.stdout.write(JSON.stringify(commands));
 `;
     const result = spawnWithPrivateHome(script);

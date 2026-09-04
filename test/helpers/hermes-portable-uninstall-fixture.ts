@@ -56,7 +56,10 @@ import {
   createPortablePodmanCapture,
   type PortablePodmanAuthorityState,
 } from "./hermes-portable-ollama-test-harness";
-import { hermesPortableTestOpenShellAuthority } from "./hermes-portable-onboarding-fixture";
+import {
+  hermesPortableTestOpenShellAuthority,
+  hermesPortableTestStartupArgv,
+} from "./hermes-portable-onboarding-fixture";
 
 const SANDBOX_NAME = "portable-hermes";
 const GATEWAY_NAME = "nemoclaw";
@@ -195,12 +198,7 @@ function publishLifecycleReceipt(
     startup: resolveHermesPortableStartupContract({
       agent: loadAgent("hermes"),
       sandboxName: SANDBOX_NAME,
-      startupArgv: [
-        "env",
-        "NEMOCLAW_HERMES_API_PORT=8642",
-        `NEMOCLAW_SANDBOX_NAME=${SANDBOX_NAME}`,
-        "/usr/local/bin/nemoclaw-start",
-      ],
+      startupArgv: hermesPortableTestStartupArgv(SANDBOX_NAME),
     }),
     policy,
   };

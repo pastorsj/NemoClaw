@@ -31,7 +31,7 @@ export function agentSupportsWebSearch(
   const candidates = [
     dockerfilePathOverride,
     agent?.dockerfilePath,
-    agent && packageRoot ? path.join(packageRoot, "Dockerfile") : null,
+    packageRoot ? path.join(packageRoot, "Dockerfile") : null,
   ].filter(
     (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );
@@ -66,7 +66,7 @@ export function agentSupportsWebSearchProvider(
   const candidates = [
     dockerfilePathOverride,
     agent?.dockerfilePath,
-    agent && packageRoot ? path.join(packageRoot, "Dockerfile") : null,
+    packageRoot ? path.join(packageRoot, "Dockerfile") : null,
   ].filter(
     (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
   );
