@@ -376,6 +376,10 @@ Each package root exposes the same primary commands:
 | `npm run test:watch` | Watches checkout-independent TypeScript tests. |
 | `npm run typecheck` | Type-checks package TypeScript and tests. |
 
+The root `test:packages` and `test:spec` commands discover packages from
+`nemoclaw.harnessManifest` in each package's `package.json`. A new package joins both commands when
+it declares that marker and the corresponding `test` and `test:spec` scripts.
+
 Install dependencies from each package lock before running its commands. OpenClaw also has a
 separate lock under `plugin/`.
 
