@@ -11,6 +11,8 @@ export type OpenShellSandboxCommandRequest = Readonly<{
   tty?: boolean | null;
   timeoutSeconds?: number;
   stdin?: boolean;
+  /** Private bytes delivered over stdin without placing them in process arguments. */
+  stdinInput?: string | Buffer;
 }>;
 
 export type OpenShellSandboxCommandError = Readonly<{

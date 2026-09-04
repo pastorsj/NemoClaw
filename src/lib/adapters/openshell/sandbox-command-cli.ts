@@ -19,6 +19,11 @@ import type { OpenShellGatewayTarget } from "./sandbox-observer";
 export type OpenShellCommandChild = {
   exitCode: number | null;
   signalCode: NodeJS.Signals | null;
+  stdin?: {
+    end(input: string | Buffer): void;
+    once(event: "error", listener: (error: Error) => void): unknown;
+    removeListener(event: "error", listener: (error: Error) => void): unknown;
+  } | null;
   kill: (signal: NodeJS.Signals) => boolean;
   once: {
     (event: "error", listener: (error: Error) => void): unknown;
@@ -42,6 +47,7 @@ export type OpenShellCommandSignalSource = {
 
 export type OpenShellCommandChildOptions = Readonly<{
   stdin?: boolean;
+  stdinInput?: string | Buffer;
   hostCwd?: string;
   hostEnv?: NodeJS.ProcessEnv;
 }>;
@@ -142,6 +148,11 @@ export async function runCliOpenShellStreamingCommand(
 
   return new Promise((resolve) => {
     let spawnError: Error | undefined;
+    const stdinStream = child.stdin;
+    const recordStdinError = (error: Error) => {
+      spawnError ??= new Error(`failed to deliver private sandbox stdin: ${error.message}`);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    };
     const forwardTerm = () => {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
     };
@@ -151,9 +162,22 @@ export async function runCliOpenShellStreamingCommand(
     signalSource.add("SIGTERM", forwardTerm);
     signalSource.add("SIGINT", holdInt);
     child.once("error", (error) => {
-      spawnError = error;
+      spawnError ??= error;
     });
+    if (options.stdinInput !== undefined) {
+      if (!stdinStream) {
+        recordStdinError(new Error("OpenShell stdin pipe is unavailable"));
+      } else {
+        stdinStream.once("error", recordStdinError);
+        try {
+          stdinStream.end(options.stdinInput);
+        } catch (error) {
+          recordStdinError(error instanceof Error ? error : new Error(String(error)));
+        }
+      }
+    }
     child.once("close", (status, signal) => {
+      stdinStream?.removeListener("error", recordStdinError);
       resolve({
         status,
         signal,
@@ -249,6 +273,7 @@ export function createCliOpenShellSandboxCommandExecutor(
         buildCliOpenShellSandboxExecArgs(request),
         {
           stdin: request.stdin,
+          stdinInput: request.stdinInput,
           hostCwd: deps.hostCwd,
           hostEnv: deps.hostEnv,
         },

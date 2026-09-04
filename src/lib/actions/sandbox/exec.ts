@@ -487,6 +487,7 @@ export async function execSandbox(
       tty: options.tty,
       timeoutSeconds: options.timeoutSeconds,
       stdin: options.stdin,
+      stdinInput: options.stdinInput,
     },
     deps.cleanupDeps ?? {
       getSandbox: (name) =>

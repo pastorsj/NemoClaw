@@ -94,6 +94,37 @@ describe("CLI OpenShell sandbox command executor", () => {
     completed.release();
   });
 
+  it("delivers private stdin without placing it in command arguments", async () => {
+    const privateInput = "Reply with exactly one word: PONG";
+    const child = completedChild(0);
+    child.stdin = {
+      end: vi.fn(),
+      once: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const spawnChild = vi.fn(() => child);
+    const executor = createCliOpenShellSandboxCommandExecutor({
+      resolveBinary: () => "/usr/bin/openshell",
+      spawnChild,
+    });
+
+    const completed = await executor.runStreaming({
+      sandboxName: "alpha",
+      target: selectedOpenShellGateway(),
+      command: ["nemoclaw-fabric", "run", "--stdin"],
+      stdinInput: privateInput,
+    });
+
+    expect(spawnChild).toHaveBeenCalledWith(
+      "/usr/bin/openshell",
+      ["sandbox", "exec", "--name", "alpha", "--", "nemoclaw-fabric", "run", "--stdin"],
+      expect.objectContaining({ stdinInput: privateInput }),
+    );
+    expect(child.stdin.end).toHaveBeenCalledWith(privateInput);
+    expect(completed.outcome).toEqual({ kind: "completed", exitCode: 0 });
+    completed.release();
+  });
+
   it("distinguishes an unavailable executable without spawning", async () => {
     const spawnChild = vi.fn();
     const executor = createCliOpenShellSandboxCommandExecutor({

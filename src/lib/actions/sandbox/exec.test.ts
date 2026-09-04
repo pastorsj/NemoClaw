@@ -3,6 +3,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { OpenShellSandboxCommandRequest } from "../../adapters/openshell/sandbox-command";
+
 const spawnMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", async (importOriginal) => ({
@@ -252,7 +254,9 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
       error?: Error;
       now?: () => number;
       onRun?: () => void;
+      onRequest?: (request: OpenShellSandboxCommandRequest) => void;
       probeError?: Error;
+      stdinInput?: string;
       cleanupDeps?: SandboxExecCleanupDeps;
       writeStderr?: (line: string) => void;
     } = {},
@@ -276,13 +280,14 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
     await execSandbox(
       "wire-sbx",
       ["curl", "-sS", "https://example.com/"],
-      {},
+      options.stdinInput === undefined ? {} : { stdinInput: options.stdinInput },
       {
         selectGateway: () => ({ outcome: "unregistered", gatewayName: null }),
         commandExecutor: {
           probeDirectory: async () => ({ state: "present" }),
-          runStreaming: async () => {
+          runStreaming: async (request) => {
             options.onRun?.();
+            options.onRequest?.(request);
             return {
               outcome: options.error
                 ? {
@@ -328,6 +333,22 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
     const { exitCode, stderr } = await runExec(0, DENIAL_LINE);
     expect(exitCode).toBe(0);
     expect(stderr).toHaveLength(0);
+  });
+
+  it("preserves private stdin across the public exec boundary", async () => {
+    const privateInput = "Reply with exactly one word: PONG";
+    let request: OpenShellSandboxCommandRequest | undefined;
+
+    const { exitCode } = await runExec(0, "", {
+      stdinInput: privateInput,
+      onRequest: (value) => {
+        request = value;
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(request?.stdinInput).toBe(privateInput);
+    expect(request?.command).not.toContain(privateInput);
   });
 
   it("stays silent and preserves the exit code on an unrelated failure", async () => {
