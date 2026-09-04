@@ -1004,6 +1004,7 @@ describe("sandbox inference route reservation", () => {
       const pending = registry.recordPendingSandboxCreateIdentity(create, checkpoint);
 
       expect(pending).toMatchObject({
+        agent: "hermes",
         pendingRouteReservation: true,
         reservationSessionId: "session-owner",
         pendingCreateIdentity: checkpoint,

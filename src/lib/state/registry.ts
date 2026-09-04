@@ -658,11 +658,16 @@ function getRoutePackageAuthority(
 }
 
 function persistedRoutePackageAuthority(authority: HarnessPackageAuthority | null): {
+  readonly agent?: string;
   readonly harnessPackage?: HarnessPackageIdentity;
   readonly harnessPackageMigration?: HarnessPackageMigration;
 } {
   if (!authority || authority.harnessPackage === null) return {};
   return {
+    // A pending package-owned row is not yet a published sandbox, but cleanup
+    // still needs its exact harness identity. Never let it inherit the legacy
+    // OpenClaw default while creation is incomplete.
+    agent: authority.harnessPackage.id,
     harnessPackage: authority.harnessPackage,
     ...(authority.harnessPackageMigration
       ? { harnessPackageMigration: authority.harnessPackageMigration }
@@ -690,9 +695,7 @@ export function reserveSandboxInferenceRoute(
       existing &&
       !entryMatchesPackageAuthority(routePackageAuthority, existing)
     ) {
-      throw new Error(
-        `Cannot replace sandbox '${name}': its harness package authority changed`,
-      );
+      throw new Error(`Cannot replace sandbox '${name}': its harness package authority changed`);
     }
     if (
       routePackageAuthority === null &&

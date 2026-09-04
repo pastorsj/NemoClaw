@@ -47,6 +47,7 @@ import {
   createAgentSmokeCommandVerifier,
   runAgentSmokeCommands,
 } from "../agent-runtime/runtime/terminal-smoke";
+import { getAgentSmokeBoundary } from "../agent-runtime/runtime/manifest";
 import { enforceTerminalAgentVersion } from "../agent-runtime/runtime/version-enforcement";
 import { printBearerTokenApiAccess } from "../agent-runtime/web-auth-ui";
 
@@ -373,7 +374,7 @@ export async function handleAgentSetup(
   } = ctx;
 
   const runSmokeCapture =
-    agent.name === "langchain-deepagents-code" && captureOpenshell
+    getAgentSmokeBoundary(agent).kind === "managed-launcher" && captureOpenshell
       ? captureOpenshell
       : runCaptureOpenshell;
   const runBinaryCapture = captureOpenshell ?? runCaptureOpenshell;

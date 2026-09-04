@@ -20,6 +20,14 @@ function makeDeepAgentsCodeAgent(): AgentDefinition {
   return loadAgent("langchain-deepagents-code");
 }
 
+function makeFutureManagedLauncherAgent(): AgentDefinition {
+  return {
+    ...makeDeepAgentsCodeAgent(),
+    name: "future-managed-launcher",
+    displayName: "Future Managed Launcher",
+  };
+}
+
 function makeNemoCuaAgent(): AgentDefinition {
   return loadAgent("nemocua", { NEMOCLAW_CUA_ENABLED: "1" });
 }
@@ -103,6 +111,37 @@ describe("NemoCUA terminal onboard acceptance", () => {
 });
 
 describe("Deep Agents Code terminal onboard acceptance", () => {
+  it("uses status-preserving capture for any managed-launcher smoke boundary", async () => {
+    const calls: string[] = [];
+    const runCaptureOpenshell = vi.fn((args: string[]) =>
+      recordSuccessfulDeepAgentsRuntimeCall(args, calls),
+    );
+    const captureOpenshell = vi.fn((args: string[]) => ({
+      status: 0,
+      output: runCaptureOpenshell(args),
+    }));
+    const context = createAgentSetupContext(runCaptureOpenshell, captureOpenshell);
+
+    await handleAgentSetup(
+      "future-managed-launcher",
+      "model-x",
+      "provider-x",
+      makeFutureManagedLauncherAgent(),
+      false,
+      null,
+      context,
+    );
+
+    expect(captureOpenshell).toHaveBeenCalled();
+    expect(
+      captureOpenshell.mock.calls.some(([args]) =>
+        args.join(" ").includes("NEMOCLAW_AGENT_SMOKE_BEGIN"),
+      ),
+    ).toBe(true);
+    expect(context.recordStepFailed).not.toHaveBeenCalled();
+    expect(context.recordStepComplete).toHaveBeenCalledOnce();
+  });
+
   it("retries only unobservable binary execs while a newly Ready sandbox settles", async () => {
     const calls: string[] = [];
     const runCaptureOpenshell = vi

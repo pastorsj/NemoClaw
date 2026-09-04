@@ -14,6 +14,7 @@ import { normalizePendingSandboxCreateIdentity } from "./pending-create-identity
 import type { PendingSandboxCreateIdentity, SandboxEntry } from "./types";
 
 const ROUTE_RESERVATION_KEYS = new Set<keyof SandboxEntry>([
+  "agent",
   "credentialEnv",
   "dashboardPort",
   "endpointSource",
@@ -330,6 +331,12 @@ export function classifySandboxInferenceRouteReservation(
       kind: "conflict",
       detail: "the inference route reservation has another harness package authority",
     };
+  }
+  if (
+    entry.agent !== undefined &&
+    (authority.harnessPackage === null || entry.agent !== authority.harnessPackage.id)
+  ) {
+    return { kind: "conflict", detail: "the inference route reservation has sandbox authority" };
   }
   if (Object.keys(entry).some((key) => !ROUTE_RESERVATION_KEYS.has(key as keyof SandboxEntry))) {
     return { kind: "conflict", detail: "the inference route reservation has sandbox authority" };
