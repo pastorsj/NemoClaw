@@ -52,6 +52,7 @@ export type LaunchReadinessObservationStage =
 export interface LaunchReadinessHealthDeps {
   listAgents?: typeof listAgents;
   loadAgent?: typeof loadAgent;
+  getRegisteredAgent?: typeof agentRuntime.getRegisteredAgent;
   capture?: LaunchReadinessBoundCapture;
   gatewayHealth?: (sandboxName: string, gatewayName: string) => Promise<boolean | null>;
   forwardsHealthy?: (sandboxName: string, gatewayName: string) => boolean | null;
@@ -172,13 +173,24 @@ export function resolveTrustedLaunchAgent(
   deps: LaunchReadinessHealthDeps,
   agentName = normalizedString(entry.agent) ?? "openclaw",
 ): AgentDefinition {
-  const available = (deps.listAgents ?? listAgents)();
-  if (!available.includes(agentName)) throw new LaunchReadinessObservationError("config");
   let agent: AgentDefinition;
-  try {
-    agent = (deps.loadAgent ?? loadAgent)(agentName);
-  } catch {
-    throw new LaunchReadinessEvidenceError();
+  if (entry.harnessPackage != null || entry.harnessPackageMigration != null) {
+    let registeredAgent: AgentDefinition | null;
+    try {
+      registeredAgent = (deps.getRegisteredAgent ?? agentRuntime.getRegisteredAgent)(entry);
+    } catch {
+      throw new LaunchReadinessEvidenceError();
+    }
+    if (!registeredAgent) throw new LaunchReadinessEvidenceError();
+    agent = registeredAgent;
+  } else {
+    const available = (deps.listAgents ?? listAgents)();
+    if (!available.includes(agentName)) throw new LaunchReadinessObservationError("config");
+    try {
+      agent = (deps.loadAgent ?? loadAgent)(agentName);
+    } catch {
+      throw new LaunchReadinessEvidenceError();
+    }
   }
   const interactive = resolveLaunchInteractiveCommand(agent, agentName);
   if (!interactive) throw new LaunchReadinessObservationError("session");
@@ -211,8 +223,10 @@ export async function requireLaunchSemanticHealth(
       sandboxName,
       agent,
       (args, options) =>
-        (deps.capture ?? ((captureArgs, captureOptions) =>
-          captureLaunchReadiness(captureArgs, captureOptions)))(args, options),
+        (
+          deps.capture ??
+          ((captureArgs, captureOptions) => captureLaunchReadiness(captureArgs, captureOptions))
+        )(args, options),
       gatewayName,
     );
     if (!smoke.ok) {

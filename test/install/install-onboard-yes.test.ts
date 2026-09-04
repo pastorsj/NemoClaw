@@ -138,9 +138,8 @@ function runOnboardWithSession(
 }
 
 type FailedPromptMode = "non-interactive" | "unreadable-tty" | "read-failure";
-type FailedSessionAgent = "" | "hermes" | "langchain-deepagents-code";
 
-function runFailedSessionRecovery(mode: FailedPromptMode, agent: FailedSessionAgent = "") {
+function runFailedSessionRecovery(mode: FailedPromptMode, agent = "") {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-failed-recovery-"));
   const home = path.join(tmp, "home");
   const promptInput = path.join(tmp, "prompt-input.txt");
@@ -508,12 +507,25 @@ describe("install.sh run_onboard — failed-session recovery", () => {
       freshCommand:
         "curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=langchain-deepagents-code bash -s -- --fresh",
     },
+    {
+      agent: "future-harness",
+      cliName: "nemoclaw",
+      freshCommand:
+        "curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=future-harness bash -s -- --fresh",
+    },
   ] as const)("preserves $agent in the fresh and resume commands", (testCase) => {
     const { argvLog, output, status } = runFailedSessionRecovery("non-interactive", testCase.agent);
     expect(status).not.toBe(0);
     expect(output).toContain(testCase.freshCommand);
     expect(output).toContain(`${testCase.cliName} onboard --resume`);
     expect(fs.existsSync(argvLog)).toBe(false);
+  });
+
+  it("does not interpolate a non-canonical harness id into the recovery command", () => {
+    const { output, status } = runFailedSessionRecovery("non-interactive", "future_harness");
+    expect(status).not.toBe(0);
+    expect(output).toContain("curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --fresh");
+    expect(output).not.toContain("NEMOCLAW_AGENT=future_harness");
   });
 });
 

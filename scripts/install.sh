@@ -144,6 +144,11 @@ canonical_agent_name() {
   esac
 }
 
+is_canonical_harness_id() {
+  local candidate="${1:-}"
+  [[ ${#candidate} -le 63 && "$candidate" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]]
+}
+
 # Resolve which Git ref to install from.
 # Priority: NEMOCLAW_INSTALL_TAG env var > lkg tag.
 resolve_release_tag() {
@@ -4168,18 +4173,13 @@ run_onboard() {
         # choice may be the cause, so auto-resuming would just loop.
         # Refuse in non-interactive mode (no safe default); prompt in
         # interactive mode so the user can pick resume vs. fresh.
-        local _fresh_install_cmd
-        case "${NEMOCLAW_AGENT:-openclaw}" in
-          hermes)
-            _fresh_install_cmd="curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=hermes bash -s -- --fresh"
-            ;;
-          langchain-deepagents-code)
-            _fresh_install_cmd="curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=langchain-deepagents-code bash -s -- --fresh"
-            ;;
-          *)
-            _fresh_install_cmd="curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --fresh"
-            ;;
-        esac
+        local _fresh_install_cmd _failed_agent
+        _failed_agent="${NEMOCLAW_AGENT:-openclaw}"
+        if [[ "$_failed_agent" != "openclaw" ]] && is_canonical_harness_id "$_failed_agent"; then
+          _fresh_install_cmd="curl -fsSL https://www.nvidia.com/nemoclaw.sh | NEMOCLAW_AGENT=${_failed_agent} bash -s -- --fresh"
+        else
+          _fresh_install_cmd="curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash -s -- --fresh"
+        fi
         if [ "${NON_INTERACTIVE:-}" = "1" ]; then
           error "Previous onboarding session failed. To discard it and start over, run '${_fresh_install_cmd}'. To retry the same session, run '${_CLI_BIN} onboard --resume'."
         fi
