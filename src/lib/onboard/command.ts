@@ -58,6 +58,7 @@ import { parseReadOnlyHostMounts, requireReadOnlyHostMountRuntimeSupport } from 
 import { DCODE_OBSERVABILITY_FEATURE } from "./observability-policy-presets";
 import { NOTICE_ACCEPT_ENV, NOTICE_ACCEPT_FLAG_NAME } from "./usage-notice";
 import {
+  OnboardRestoreSnapshotDriftError,
   OnboardResumeIntentError,
   isOnboardResumeIntentRaceError,
   resolveOnboardResumeIntent,
@@ -250,7 +251,10 @@ function resolveHostMounts(
     return fail(deps, `  ${error instanceof Error ? error.message : String(error)}`);
   }
   try {
-    requireReadOnlyHostMountRuntimeSupport(mounts, { ...deps, experimentalProfile });
+    requireReadOnlyHostMountRuntimeSupport(mounts, {
+      ...deps,
+      experimentalProfile,
+    });
   } catch (error) {
     fail(deps, `  ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -264,8 +268,10 @@ function validateObservabilityAgent(
 ): void {
   if (
     agent &&
-    managedSandboxFeatureIssue(DCODE_OBSERVABILITY_FEATURE, { agent, requested }) ===
-      "unsupported-request"
+    managedSandboxFeatureIssue(DCODE_OBSERVABILITY_FEATURE, {
+      agent,
+      requested,
+    }) === "unsupported-request"
   ) {
     fail(deps, "  --observability is supported only with --agent langchain-deepagents-code.");
   }
@@ -555,6 +561,9 @@ function handleOnboardCommandError(error: unknown, deps: RunOnboardCommandDeps):
   if (error instanceof PortableInferenceDescriptorError) {
     return reportOnboardCommandError(deps, `  ${error.message}`);
   }
+  if (error instanceof OnboardRestoreSnapshotDriftError) {
+    return reportOnboardCommandError(deps, `  ${error.message}`);
+  }
   // Gateway-authority refusals are reported, never rethrown. Recreation is not
   // selected in one place: `--recreate-sandbox` sets the flag, but `runOnboard`
   // independently honours NEMOCLAW_RECREATE_SANDBOX and reaches the same
@@ -634,7 +643,9 @@ async function activatePortableInference(
         expiresAt: descriptor.expiresAt,
       },
     },
-    credentialOverrides: { [PORTABLE_INFERENCE_CREDENTIAL_ENV]: descriptor.apiKey },
+    credentialOverrides: {
+      [PORTABLE_INFERENCE_CREDENTIAL_ENV]: descriptor.apiKey,
+    },
   };
 }
 
@@ -718,7 +729,10 @@ async function runOnboardCommandAttempt(
   attempt: number,
 ): Promise<OnboardCommandAttemptResult> {
   const resumeIntent = resolveCommandResumeIntent(deps);
-  const resolvedOptions = resolveOnboardOptions(deps.flags, { ...deps, resumeIntent });
+  const resolvedOptions = resolveOnboardOptions(deps.flags, {
+    ...deps,
+    resumeIntent,
+  });
   let restoreServingProfileEnvironment = () => {};
   const environmentSnapshot: OnboardCommandEnvironmentSnapshot = {
     agentsManifest: env.NEMOCLAW_EXTRA_AGENTS_JSON,

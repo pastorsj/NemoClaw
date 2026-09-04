@@ -37,6 +37,10 @@ export const hermesPackageTestMoves = createTestMoveRecords({
   "test/hermes-openshell-runtime-env-boundary.test.ts": "tests/runtime/openshell-env.test.ts",
   "test/hermes-plugin-handlers.test.ts": "tests/runtime/plugin-handlers.test.ts",
   "test/hermes-profile-policy-defaults.test.ts": "tests/config/policy-defaults.test.ts",
+  "test/agents/hermes/hermes-secure-dir-skip-chmod-patch.test.ts":
+    "tests/runtime/hermes-secure-dir-skip-chmod-patch.test.ts",
+  "test/agents/hermes/hermes-session-list-preview-patch.test.ts":
+    "tests/runtime/hermes-session-list-preview-patch.test.ts",
   "test/hermes-restart-config-seal-recovery.test.ts": "tests/runtime/seal-recovery.test.ts",
   "test/hermes-restart-config-seal-transition.test.ts": "tests/runtime/seal-transition.test.ts",
   "test/hermes-restart-config-seal-write-lock.test.ts": "tests/runtime/config-write.test.ts",
@@ -75,9 +79,7 @@ export const hermesNemoclawTestMoves = createTestMoveRecords({
   "test/generate-hermes-config.test.ts": "tests/config/generator.test.ts",
   "test/hermes-api-port-marker.test.ts": "tests/runtime/port-marker.test.ts",
   "test/hermes-cron-restore-control.test.ts": "tests/runtime/cron-restore.test.ts",
-  "test/hermes-dependency-review.test.ts": "tests/image/dependency-review.test.ts",
   "test/hermes-discord-recovery-permissions.test.ts": "tests/runtime/discord-recovery.test.ts",
-  "test/hermes-doctor-config-hash.test.ts": "tests/runtime/doctor-hash.test.ts",
   "test/hermes-env-secret-boundary-hardening.test.ts": "tests/config/secret-boundary.test.ts",
   "test/hermes-final-image-layout.test.ts": "tests/image/final-layout.test.ts",
   "test/hermes-gateway-auxiliary-retry.test.ts": "tests/runtime/gateway-retry.test.ts",

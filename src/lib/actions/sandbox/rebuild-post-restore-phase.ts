@@ -5,7 +5,7 @@ import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
 import type { SandboxMessagingPlan } from "../../messaging";
 import type { ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
-import type * as sandboxVersion from "../../sandbox/version";
+import * as sandboxVersion from "../../sandbox/version";
 import {
   inspectMutableHermesConfigPerms,
   repairMutableConfigPerms,
@@ -50,11 +50,18 @@ export {
   runHermesCronRestoreTransaction,
 } from "./rebuild-hermes-post-restore";
 
+/** Probe the recreated runtime instead of accepting its requested version metadata. */
+function probeRebuiltAgentVersion(
+  sandboxName: string,
+): ReturnType<typeof sandboxVersion.checkAgentVersion> {
+  return sandboxVersion.checkAgentVersion(sandboxName, { forceProbe: true });
+}
+
 const OPENCLAW_DOCTOR_TIMEOUT_MS = 5 * 60_000;
 
-function buildSelectedRuntimeOptions(
-  runtimeSelection: McpRebuildPreparation["runtimeSelection"],
-): { runtimeSelection?: McpRebuildPreparation["runtimeSelection"] } {
+function buildSelectedRuntimeOptions(runtimeSelection: McpRebuildPreparation["runtimeSelection"]): {
+  runtimeSelection?: McpRebuildPreparation["runtimeSelection"];
+} {
   return runtimeSelection ? { runtimeSelection } : {};
 }
 
@@ -384,6 +391,38 @@ export async function runRebuildPostRestorePhase(
       };
   const hermesGatewayRestoreState = hermesGatewayVerification.state;
   const hermesGatewayRestoreUnverified = hermesGatewayRestoreState === "unverified";
+  let verifiedAgentVersion: string | null = null;
+  if (versionCheck.expectedVersion) {
+    // The replacement runtime is the only authority for the completed rebuild
+    // version. Clear create-time bookkeeping before the forced live probe so a
+    // failed probe cannot leave the requested version recorded as observed.
+    registry.updateSandbox(sandboxName, { agentVersion: null });
+    const rebuiltVersion = probeRebuiltAgentVersion(sandboxName);
+    if (
+      rebuiltVersion.verificationFailed ||
+      rebuiltVersion.sandboxVersion !== versionCheck.expectedVersion
+    ) {
+      // checkAgentVersion caches a successful probe. Do not retain metadata
+      // from a replacement that this rebuild rejects.
+      registry.updateSandbox(sandboxName, { agentVersion: null });
+      const observed = rebuiltVersion.sandboxVersion ?? "unverified";
+      const detail = `  Replacement agent version did not match the rebuild target (expected ${versionCheck.expectedVersion}, observed ${observed}).`;
+      if (hermesCronRestoreIdentity) {
+        return bailAfterHermesCronRestoreFailure(
+          sandboxName,
+          backupManifest,
+          `${detail} Hermes cron dispatch remains drained.`,
+          "Replacement agent version did not match the authoritative rebuild target.",
+          bail,
+          mcpBridgeRestoreUnverified ? () => printMcpRestoreRecovery(sandboxName, true) : undefined,
+        );
+      }
+      console.error(detail);
+      bail("Replacement agent version did not match the authoritative rebuild target.");
+      return;
+    }
+    verifiedAgentVersion = rebuiltVersion.sandboxVersion;
+  }
   if (
     targetAgentName === "hermes" &&
     (hermesGatewayRestoreState === "healthy" || hermesGatewayRestoreState === "recovered")
@@ -467,7 +506,7 @@ export async function runRebuildPostRestorePhase(
   let publishedRegistryEntry: RebuildSandboxEntry | false;
   try {
     publishedRegistryEntry = registry.updateSandboxIfCurrent(verifiedRecreatedEntry, {
-      agentVersion: agentDef.expectedVersion || null,
+      agentVersion: verifiedAgentVersion,
     });
   } catch {
     publishedRegistryEntry = false;
@@ -479,7 +518,7 @@ export async function runRebuildPostRestorePhase(
     );
     return;
   }
-  log(`Registry updated: agentVersion=${agentDef.expectedVersion}`);
+  log(`Registry updated: agentVersion=${String(verifiedAgentVersion)}`);
 
   verifiedRecreatedEntry = requireCurrentAgentAuthority("after final registry publication");
   if (!verifiedRecreatedEntry) return;

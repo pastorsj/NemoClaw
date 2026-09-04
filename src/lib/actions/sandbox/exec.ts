@@ -1,7 +1,22 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
+
+import {
+  buildCliOpenShellSandboxExecArgs,
+  createCliOpenShellSandboxCommandExecutor,
+  type OpenShellCommandSignalSource,
+} from "../../adapters/openshell/sandbox-command-cli";
+import { buildSandboxCommandStdio } from "../../adapters/openshell/sandbox-command-stdio";
+import type {
+  OpenShellSandboxCommandExecutor,
+  OpenShellSandboxCommandRequest,
+} from "../../adapters/openshell/sandbox-command";
+import {
+  namedOpenShellGateway,
+  selectedOpenShellGateway,
+} from "../../adapters/openshell/sandbox-observer";
 import { spawnExitCode } from "../../core/process-exit";
 import { assertNoOpenShellGatewayEndpointOverride } from "../../openshell-gateway-endpoint-guard";
 import type {
@@ -10,11 +25,9 @@ import type {
 } from "../../sandbox/mutable-config-perms";
 import type { SandboxEntry } from "../../state/registry";
 import { type ExecPolicyHintDeps, preparePolicyHint } from "./exec-policy-hint-integration";
-import { buildSandboxExecStdio } from "./exec-stdio";
 import type { GatewaySelectResult } from "./gateway-select";
 import { wrapExecCommandWithRuntimeEnv } from "./runtime-env";
 
-export { buildSandboxExecStdio, shouldInheritSandboxExecStdin } from "./exec-stdio";
 export {
   wrapExecCommandWithRuntimeEnv,
   wrapOpenClawAgentCommandWithRuntimeEnv,
@@ -27,12 +40,12 @@ export type SandboxExecOptions = {
   stdin?: boolean;
   /** Private bytes written to OpenShell stdin without placing them in argv. */
   stdinInput?: string | Buffer;
-  subprocessEnv?: NodeJS.ProcessEnv;
 };
 
 export type SandboxExecChildOptions = SandboxExecOptions & {
   hostCwd?: string;
   hostEnv?: NodeJS.ProcessEnv;
+  subprocessEnv?: NodeJS.ProcessEnv;
 };
 
 export type SandboxExecGatewayRestart = (sandboxName: string) => { ok: boolean };
@@ -45,11 +58,6 @@ export type SpawnLikeResult = {
   error?: Error;
   releaseSignals?: () => void;
 };
-
-export type SandboxExecRunner = (
-  binary: string,
-  args: readonly string[],
-) => SpawnLikeResult | Promise<SpawnLikeResult>;
 
 export type SandboxExecChild = {
   exitCode: number | null;
@@ -75,10 +83,7 @@ export type SandboxExecSpawner = (
   options: SandboxExecChildOptions,
 ) => SandboxExecChild;
 
-export type SandboxExecSignalSource = {
-  add: (signal: "SIGTERM" | "SIGINT", listener: () => void) => void;
-  remove: (signal: "SIGTERM" | "SIGINT", listener: () => void) => void;
-};
+export type SandboxExecSignalSource = OpenShellCommandSignalSource;
 
 export type SandboxExecCleanupDeps = {
   getSandbox: (sandboxName: string) => Pick<SandboxEntry, "agent" | "harnessPackage"> | null;
@@ -93,42 +98,25 @@ export type SandboxExecCompletion = {
   cleanupError?: string;
 };
 
-export type WorkdirProbeResult = {
-  status: number | null;
-  error?: Error;
-};
-
-export type WorkdirProbeOutcome = "ok" | "missing" | "unclear";
-
-export type WorkdirProbeRunner = (binary: string, args: readonly string[]) => WorkdirProbeResult;
-
+/**
+ * Compatibility argv surface for buffered and interactive consumers tracked
+ * by #10991 and #10994. Remove it after those callers use typed executors.
+ */
 export function buildOpenshellExecArgs(
   sandboxName: string,
   command: readonly string[],
   options: SandboxExecOptions = {},
   gatewayName?: string,
 ): string[] {
-  const argv = ["sandbox", "exec", "--name", sandboxName];
-  if (gatewayName) argv.push("-g", gatewayName);
-  if (options.workdir) argv.push("--workdir", options.workdir);
-  if (options.tty === true) argv.push("--tty");
-  if (options.tty === false) argv.push("--no-tty");
-  if (typeof options.timeoutSeconds === "number") {
-    argv.push("--timeout", String(options.timeoutSeconds));
-  }
-  argv.push("--", ...command);
-  return argv;
-}
-
-export function buildWorkdirProbeArgs(
-  sandboxName: string,
-  workdir: string,
-  gatewayName?: string,
-): string[] {
-  const argv = ["sandbox", "exec", "--name", sandboxName];
-  if (gatewayName) argv.push("-g", gatewayName);
-  argv.push("--", "test", "-d", workdir);
-  return argv;
+  return buildCliOpenShellSandboxExecArgs({
+    sandboxName,
+    target: gatewayName ? namedOpenShellGateway(gatewayName) : selectedOpenShellGateway(),
+    command,
+    workdir: options.workdir,
+    tty: options.tty,
+    timeoutSeconds: options.timeoutSeconds,
+    stdin: options.stdin,
+  });
 }
 
 // OpenShell accepts LF/CR in command argv while retaining field-specific
@@ -152,13 +140,6 @@ function execInputError(command: readonly string[], workdir: string | undefined)
 
 export function workdirMissingMessage(workdir: string): string {
   return `error: --workdir: ${workdir} does not exist inside the sandbox`;
-}
-
-export function evaluateWorkdirProbe(probe: WorkdirProbeResult): WorkdirProbeOutcome {
-  if (probe.error) return "unclear";
-  if (probe.status === 0) return "ok";
-  if (probe.status === 1) return "missing";
-  return "unclear";
 }
 
 export function computeExitCode(result: SpawnLikeResult): {
@@ -248,7 +229,7 @@ export const cleanupOpenClawAfterExec = cleanupMutableConfigAfterExec;
 
 const defaultSandboxExecSpawner: SandboxExecSpawner = (binary, args, options) =>
   spawn(binary, [...args], {
-    stdio: buildSandboxExecStdio(options),
+    stdio: buildSandboxCommandStdio(options),
     ...(options.hostCwd ? { cwd: options.hostCwd } : {}),
     ...(options.hostEnv || options.subprocessEnv
       ? { env: options.hostEnv ?? options.subprocessEnv }
@@ -260,6 +241,10 @@ const defaultSandboxExecSignalSource: SandboxExecSignalSource = {
   remove: (signal, listener) => process.off(signal, listener),
 };
 
+/**
+ * Compatibility child-process surface for interactive consumers tracked by
+ * #10994. Remove it after those callers use a typed interactive executor.
+ */
 export async function runSandboxExecChild(
   binary: string,
   args: readonly string[],
@@ -325,67 +310,9 @@ export async function runSandboxExecChild(
   });
 }
 
-export async function runSandboxExecCommand(
-  binary: string,
-  sandboxName: string,
-  command: readonly string[],
-  options: SandboxExecOptions,
-  run: SandboxExecRunner,
-  cleanupDeps: SandboxExecCleanupDeps,
-  gatewayName?: string,
-): Promise<SandboxExecCompletion> {
-  let result: SpawnLikeResult;
-  try {
-    result = await run(binary, buildOpenshellExecArgs(sandboxName, command, options, gatewayName));
-  } catch (error) {
-    result = { status: null, error: error instanceof Error ? error : new Error(String(error)) };
-  }
-  try {
-    const { code: commandCode, errorMessage: invocationError } = computeExitCode(result);
-    const cleanupError = cleanupMutableConfigAfterExec(sandboxName, cleanupDeps) ?? undefined;
-    return {
-      code: cleanupError ? 1 : commandCode,
-      commandCode,
-      ...(invocationError ? { invocationError } : {}),
-      ...(cleanupError ? { cleanupError } : {}),
-    };
-  } finally {
-    result.releaseSignals?.();
-  }
-}
-
 export function cleanupFailureMessage(commandCode: number, detail: string): string {
   return `  OpenClaw permission cleanup failed (command exit ${commandCode}; cleanup exit 1): ${detail}`;
 }
-
-const defaultWorkdirProbeRunner: WorkdirProbeRunner = (binary, args) => {
-  const probe = spawnSync(binary, args, { stdio: ["ignore", "ignore", "ignore"] });
-  return { status: probe.status, error: probe.error };
-};
-
-export function validateWorkdirOrFail(
-  binary: string,
-  sandboxName: string,
-  workdir: string,
-  run: WorkdirProbeRunner = defaultWorkdirProbeRunner,
-  gatewayName?: string,
-  exit: (code: number) => never = process.exit,
-): void {
-  const outcome = evaluateWorkdirProbe(
-    run(binary, buildWorkdirProbeArgs(sandboxName, workdir, gatewayName)),
-  );
-  if (outcome === "missing") {
-    console.error(workdirMissingMessage(workdir));
-    exit(1);
-  }
-}
-
-export function resolveSandboxExecBinary(): string {
-  const { getOpenshellBinary } = require("../../adapters/openshell/runtime");
-  return getOpenshellBinary();
-}
-
-const defaultResolveBinary = resolveSandboxExecBinary;
 
 function defaultSelectGateway(sandboxName: string): GatewaySelectResult {
   return (
@@ -397,11 +324,9 @@ function defaultSelectGateway(sandboxName: string): GatewaySelectResult {
 // inject them so the dispatch path stays hermetic without spawning a real
 // process or hitting the process-exiting OpenShell binary lookup.
 export type ExecSandboxDeps = {
-  /** Host lookup and pre-dispatch workdir seams. */
-  resolveBinary?: () => string;
-  probeWorkdir?: WorkdirProbeRunner;
-  /** Command execution and post-command observability/cleanup seams. */
-  run?: SandboxExecRunner;
+  /** Typed command execution and pre-dispatch workdir observation. */
+  commandExecutor?: OpenShellSandboxCommandExecutor;
+  /** Post-command observability and cleanup seams. */
   policyHint?: ExecPolicyHintDeps;
   cleanupDeps?: SandboxExecCleanupDeps;
   /** Activate config written by a successful direct Google Chat pairing approval. */
@@ -413,6 +338,42 @@ export type ExecSandboxDeps = {
   /** Defer terminal process exit until an outer lifecycle lock is released. */
   exit?: (code: number) => never;
 };
+
+async function runSandboxExecRequest(
+  executor: OpenShellSandboxCommandExecutor,
+  request: OpenShellSandboxCommandRequest,
+  cleanupDeps: SandboxExecCleanupDeps,
+): Promise<SandboxExecCompletion> {
+  let completed: Awaited<ReturnType<OpenShellSandboxCommandExecutor["runStreaming"]>>;
+  try {
+    completed = await executor.runStreaming(request);
+  } catch (error) {
+    completed = {
+      outcome: {
+        kind: "failed",
+        error: {
+          kind: "invocation",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      },
+      release: () => {},
+    };
+  }
+  try {
+    const commandCode = completed.outcome.kind === "completed" ? completed.outcome.exitCode : 1;
+    const invocationError =
+      completed.outcome.kind === "failed" ? completed.outcome.error.message : undefined;
+    const cleanupError = cleanupOpenClawAfterExec(request.sandboxName, cleanupDeps) ?? undefined;
+    return {
+      code: cleanupError ? 1 : commandCode,
+      commandCode,
+      ...(invocationError ? { invocationError } : {}),
+      ...(cleanupError ? { cleanupError } : {}),
+    };
+  } finally {
+    completed.release();
+  }
+}
 
 export function isGoogleChatPairingApproval(command: readonly string[]): boolean {
   return (
@@ -479,7 +440,6 @@ export async function execSandbox(
     console.error(`  Error: ${error instanceof Error ? error.message : String(error)}`);
     exit(1);
   }
-  const binary = (deps.resolveBinary ?? defaultResolveBinary)();
   const gatewaySelection = (deps.selectGateway ?? defaultSelectGateway)(sandboxName);
   if (gatewaySelection.outcome === "failed") {
     console.error(
@@ -489,15 +449,26 @@ export async function execSandbox(
   }
   const gatewayName =
     gatewaySelection.outcome === "selected" ? gatewaySelection.gatewayName : undefined;
+  const target = gatewayName ? namedOpenShellGateway(gatewayName) : selectedOpenShellGateway();
+  const commandExecutor = deps.commandExecutor ?? createCliOpenShellSandboxCommandExecutor();
   if (options.workdir) {
-    validateWorkdirOrFail(
-      binary,
-      sandboxName,
-      options.workdir,
-      deps.probeWorkdir,
-      gatewayName,
-      exit,
-    );
+    let workdir: Awaited<ReturnType<OpenShellSandboxCommandExecutor["probeDirectory"]>>;
+    try {
+      workdir = await commandExecutor.probeDirectory({
+        sandboxName,
+        target,
+        path: options.workdir,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`  Failed to invoke openshell: ${detail}`);
+      console.error("  Ensure 'openshell' is installed and on PATH.");
+      return exit(1);
+    }
+    if (workdir.state === "missing") {
+      console.error(workdirMissingMessage(options.workdir));
+      exit(1);
+    }
   }
   const emitPolicyDenialHint = preparePolicyHint(
     CLI_NAME,
@@ -506,12 +477,17 @@ export async function execSandbox(
     deps.policyHint,
     gatewayName,
   );
-  const completion = await runSandboxExecCommand(
-    binary,
-    sandboxName,
-    wrapExecCommandWithRuntimeEnv(command),
-    options,
-    deps.run ?? ((runBinary, runArgs) => runSandboxExecChild(runBinary, runArgs, options)),
+  const completion = await runSandboxExecRequest(
+    commandExecutor,
+    {
+      sandboxName,
+      target,
+      command: wrapExecCommandWithRuntimeEnv(command),
+      workdir: options.workdir,
+      tty: options.tty,
+      timeoutSeconds: options.timeoutSeconds,
+      stdin: options.stdin,
+    },
     deps.cleanupDeps ?? {
       getSandbox: (name) =>
         (require("../../state/registry") as typeof import("../../state/registry")).getSandbox(name),
@@ -524,7 +500,6 @@ export async function execSandbox(
           require("../../sandbox/mutable-config-perms") as typeof import("../../sandbox/mutable-config-perms")
         ).repairMutableConfigPerms(name),
     },
-    gatewayName,
   );
   if (completion.invocationError) {
     console.error(`  Failed to invoke openshell: ${completion.invocationError}`);

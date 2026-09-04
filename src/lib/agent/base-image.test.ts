@@ -294,6 +294,26 @@ describe("agent base image provisioning", () => {
     });
   });
 
+  it("initializes the lazy Hermes MCP runtime before accepting a published base", () => {
+    const imageRef = "hermes-base:current";
+
+    withMockedDocker(({ ensureAgentBaseImage, dockerCaptureMock, resolveSandboxBaseImageMock }) => {
+      ensureAgentBaseImage(makeAgent());
+      const options = resolveSandboxBaseImageMock.mock.calls[0]?.[0] as {
+        validateImage?: (candidate: string) => boolean;
+      };
+
+      expect(options.validateImage?.(imageRef)).toBe(true);
+      expect(dockerCaptureMock.mock.calls[0]?.[0]).toEqual(
+        expect.arrayContaining([
+          "/opt/hermes/.venv/bin/python",
+          imageRef,
+          expect.stringContaining("mcp_tool._ensure_mcp_sdk() or sys.exit(1)"),
+        ]),
+      );
+    });
+  });
+
   it(
     "reuses a compatible resolved agent base image during normal onboarding",
     () => {
@@ -609,10 +629,11 @@ describe("agent base image provisioning", () => {
             path.join(agentPackageDir("langchain-deepagents-code"), "manifest.yaml"),
             path.join(agentPackageDir("langchain-deepagents-code"), "runtime/requirements.lock"),
             path.join(agentPackageDir("langchain-deepagents-code"), "fabric/requirements.lock"),
+            path.join(agentPackageDir("langchain-deepagents-code"), "checks/fabric-runtime.py"),
           ],
           validateImage: expect.any(Function),
           validationDescription:
-            "deepagents-code==0.1.55, dos2unix, Fabric 0.2.0 Deep Agents runtime, and the immutable security package inventory",
+            "deepagents-code==0.1.55, dos2unix, the package-qualified Fabric runtime, and the immutable security package inventory",
         }),
       );
     });
@@ -652,6 +673,17 @@ describe("agent base image provisioning", () => {
       });
     },
   );
+
+  it("omits corporate CA build inputs from Hermes base image builds (#8119)", () => {
+    vi.stubEnv("NEMOCLAW_CORPORATE_CA_BUNDLE", writeCa(tmpDir()));
+    withMockedDocker(({ ensureAgentBaseImage, dockerBuildMock }) => {
+      ensureAgentBaseImage(makeAgent(), { forceBaseImageRebuild: true });
+
+      expect(dockerBuildMock.mock.calls[0]?.[3]).toEqual(
+        expect.objectContaining({ buildArgs: undefined }),
+      );
+    });
+  });
 
   it("omits corporate CA build inputs when corporate CA import is disabled (#8119)", () => {
     vi.stubEnv("NEMOCLAW_CORPORATE_CA_BUNDLE", writeCa(tmpDir()));

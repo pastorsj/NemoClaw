@@ -65,6 +65,14 @@ export {
   type ResolvedOnboardResumeIntent,
 };
 
+/** Expected onboarding refusal when selected restore authority changes. */
+export class OnboardRestoreSnapshotDriftError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OnboardRestoreSnapshotDriftError";
+  }
+}
+
 export function resolveOnboardResumeIntent(options: {
   readonly explicitResume: boolean;
   readonly fresh: boolean;
@@ -180,8 +188,7 @@ export class OnboardDeferredExitError extends Error {
 
 export function isOnboardDeferredExitError(error: unknown): error is OnboardDeferredExitError {
   const candidate = error as
-    | (Error & { code?: unknown; [ONBOARD_DEFERRED_EXIT_ERROR]?: unknown })
-    | null;
+    (Error & { code?: unknown; [ONBOARD_DEFERRED_EXIT_ERROR]?: unknown }) | null;
   return (
     candidate instanceof Error &&
     candidate[ONBOARD_DEFERRED_EXIT_ERROR] === true &&

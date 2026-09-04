@@ -584,9 +584,37 @@ async function rebuildSandboxUnlocked(
         }
         rebuildPolicyHandoffManifest = recoveryBackup;
         retainPolicyHandoffForRecovery = true;
-        // The accepted replacement belongs to an earlier run. Its persisted
-        // gate is independent of the current backup's cron plan, so probe every
-        // Hermes target before retiring the replacement journal.
+        const restored = runRebuildRestorePhase({
+          sandboxName,
+          agentDefinition: targetConfig.agentDefinition,
+          targetImageIsCustom: Boolean(fromDockerfile),
+          backupManifest: recoveryBackup,
+          ...(recreateJournal.runtimeSelection
+            ? { runtimeSelection: recreateJournal.runtimeSelection }
+            : {}),
+          log,
+        });
+        const postRestoreVerification = await runRebuildPostRestorePhase({
+          sandboxName,
+          sandboxEntry,
+          agentAuthority: targetConfig.agentAuthority,
+          messagingPlan,
+          backupManifest: recoveryBackup,
+          mcpEntries,
+          ...(recreateJournal.runtimeSelection
+            ? { mcpRuntimeSelection: recreateJournal.runtimeSelection }
+            : {}),
+          restoreSucceeded: restored.restoreSucceeded,
+          preparedBackupRecovery: true,
+          versionCheck,
+          log,
+          bail,
+        });
+        if (!restored.restoreSucceeded) return;
+        // The accepted replacement belongs to an earlier run. Keep its
+        // persisted gate active until the backup and all post-restore state
+        // have been applied and verified, then validate the restored cron tree
+        // before reopening dispatch or retiring recovery records.
         if (rebuildAgent === "hermes") {
           try {
             const outcome = recoverHermesCronRestore(sandboxName);
@@ -618,32 +646,6 @@ async function rebuildSandboxUnlocked(
             );
           }
         }
-        const restored = runRebuildRestorePhase({
-          sandboxName,
-          agentDefinition: targetConfig.agentDefinition,
-          targetImageIsCustom: Boolean(fromDockerfile),
-          backupManifest: recoveryBackup,
-          ...(recreateJournal.runtimeSelection
-            ? { runtimeSelection: recreateJournal.runtimeSelection }
-            : {}),
-          log,
-        });
-        const postRestoreVerification = await runRebuildPostRestorePhase({
-          sandboxName,
-          sandboxEntry,
-          agentAuthority: targetConfig.agentAuthority,
-          messagingPlan,
-          backupManifest: recoveryBackup,
-          mcpEntries,
-          ...(recreateJournal.runtimeSelection
-            ? { mcpRuntimeSelection: recreateJournal.runtimeSelection }
-            : {}),
-          restoreSucceeded: restored.restoreSucceeded,
-          preparedBackupRecovery: true,
-          versionCheck,
-          log,
-          bail,
-        });
         if (retireRemovedImmutabilityState) {
           if (!postRestoreVerification?.mutableConfigPermissionsVerified) {
             return bail(

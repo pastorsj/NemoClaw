@@ -7,8 +7,10 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadAgent } from "../../../src/lib/agent/defs";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
+import type { SandboxMessagingPlan } from "../../../src/lib/messaging/manifest";
 import { readManagedWorkloadAuthority } from "../../../src/lib/onboard/workload/authority.ts";
 import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
+import { createSession } from "../../../src/lib/state/onboard-session.ts";
 import type { SandboxEntry } from "../../../src/lib/state/registry/types.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
@@ -348,7 +350,7 @@ function seedRegistryAndSession(
   registry.sandboxes = registry.sandboxes ?? {};
 
   const credentialHash = createHash("sha256").update(DISCORD_FAKE_TOKEN).digest("hex");
-  const messagingPlan = {
+  const messagingPlan: SandboxMessagingPlan = {
     schemaVersion: 1,
     sandboxName: SANDBOX_NAME,
     agent: "hermes",
@@ -416,7 +418,7 @@ function seedRegistryAndSession(
   registry.defaultSandbox = SANDBOX_NAME;
   writeJsonFile(statePaths.registryFile, registry);
 
-  const session = {
+  const session = createSession({
     sandboxName: SANDBOX_NAME,
     agent: "hermes" as const,
     status: "complete" as const,
@@ -424,19 +426,18 @@ function seedRegistryAndSession(
     model: HOSTED_MODEL,
     endpointUrl: HOSTED_ENDPOINT_URL,
     credentialEnv: "COMPATIBLE_API_KEY",
-    gatewayName,
-    gatewayPort,
+    metadata: { gatewayName, fromDockerfile: null },
     preferredInferenceApi: "openai-completions",
     messagingPlan,
-  };
+  });
   writeJsonFile(statePaths.sessionFile, session);
 
   return {
-    sandboxName: session.sandboxName,
-    agent: session.agent,
-    status: session.status,
-    provider: session.provider,
-    model: session.model,
+    sandboxName: SANDBOX_NAME,
+    agent: "hermes",
+    status: "complete",
+    provider: "compatible-endpoint",
+    model: HOSTED_MODEL,
     messagingPlan: {
       schemaVersion: messagingPlan.schemaVersion,
       channelIds: messagingPlan.channels.map((channel) => channel.channelId),

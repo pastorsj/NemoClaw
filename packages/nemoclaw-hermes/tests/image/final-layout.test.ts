@@ -1,103 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { requireSingleReviewedDockerfileRunCommand } from "../../../../test/helpers/dockerfile-run-commands";
-import {
-  dockerRunCommandBetween,
-  runDockerShell,
-} from "../../../../test/helpers/dockerfile-run-shell";
-import { expectManagedBootstrapNativeImageContract } from "../../../../test/support/managed-bootstrap-image-contract";
 
 const HERMES_PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
-const HERMES_DOCKERFILE = path.join(HERMES_PACKAGE_ROOT, "Dockerfile");
-const NPM_ROOT_ARGUMENTS = ["--npm-root", "/usr/local/lib/node_modules/npm"] as const;
-const HERMES_INTEGRITY_FILES = [
-  {
-    arg: "NEMOCLAW_HERMES_IMAGE_BUILD_PROBES_SHA256",
-    source: "packages/nemoclaw-hermes/checks/image-probes.py",
-    target: "/opt/nemoclaw-hermes-config/image-build-probes.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_SQLITE_TEMP_STORE_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/sqlite-store.py",
-    target: "/usr/local/lib/nemoclaw/patch-hermes-sqlite-temp-store.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_WRAPPER_SHA256",
-    source: "packages/nemoclaw-hermes/runtime/cli-wrapper.py",
-    target: "/usr/local/lib/nemoclaw/hermes-wrapper.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_CLI_ADAPTER_SHA256",
-    source: "packages/nemoclaw-hermes/runtime/cli-adapter.json",
-    target: "/usr/local/share/nemoclaw/hermes-cli-adapter-v1.json",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_CLI_ADAPTER_VALIDATOR_SHA256",
-    source: "packages/nemoclaw-hermes/checks/cli-adapter.py",
-    target: "/usr/local/lib/nemoclaw/validate-hermes-cli-adapter.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_VALIDATOR_SHA256",
-    source: "packages/nemoclaw-hermes/runtime/env-boundary.py",
-    target: "/usr/local/lib/nemoclaw/validate-hermes-env-secret-boundary.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_TIRITH_FINALIZER_SHA256",
-    source: "packages/nemoclaw-hermes/runtime/tirith-marker.py",
-    target: "/usr/local/lib/nemoclaw/finalize-tirith-marker.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_LANGFUSE_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/langfuse-credentials.mts",
-    target: "/usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_DISCORD_RECOVERY_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/discord-permissions.py",
-    target: "/usr/local/lib/nemoclaw/patch-hermes-discord-recovery-permissions.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_PROFILE_POLICY_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/profile-policy.py",
-    target: "/usr/local/lib/nemoclaw/patch-hermes-profile-policy-defaults.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_GATEWAY_RUNTIME_METADATA_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/gateway-metadata.py",
-    target: "/opt/nemoclaw-hermes-config/patch-gateway-runtime-metadata.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_GATEWAY_PROCESS_IDENTITY_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/gateway-identity.py",
-    target: "/opt/nemoclaw-hermes-config/patch-gateway-process-identity.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_CRON_RUNTIME_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/cron-execution.py",
-    target: "/opt/nemoclaw-hermes-config/patch-cron-execution-runtime.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_CRON_RESTORE_DRAIN_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/cron-drain.py",
-    target: "/opt/nemoclaw-hermes-config/patch-cron-restore-drain.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_CRON_RESTORE_CONTROLLER_SHA256",
-    source: "packages/nemoclaw-hermes/runtime/cron-control.py",
-    target: "/usr/local/lib/nemoclaw/hermes-cron-restore-control.py",
-  },
-  {
-    arg: "NEMOCLAW_HERMES_NEUTRAL_PLATFORM_PATCHER_SHA256",
-    source: "packages/nemoclaw-hermes/compat/env-activation.py",
-    target: "/opt/nemoclaw-hermes-config/patch-neutral-platform-env-activation.py",
-  },
-] as const;
+const FINALIZE_IMAGE_LAYOUT = path.join(HERMES_PACKAGE_ROOT, "finalize-image-layout.sh");
 
 type LegacyDataFixture =
   | "none"
@@ -163,12 +74,6 @@ function readText(filePath: string): string {
   return fs.readFileSync(filePath, "utf-8");
 }
 
-function indexOfRequired(haystack: string, needle: string): number {
-  const index = haystack.indexOf(needle);
-  expect(index).toBeGreaterThanOrEqual(0);
-  return index;
-}
-
 function runFinalLayout({
   legacyData = "none",
   openclaw = "none",
@@ -176,7 +81,6 @@ function runFinalLayout({
   legacyData?: LegacyDataFixture;
   openclaw?: OpenClawFixture;
 } = {}) {
-  const dockerfile = fs.readFileSync(HERMES_DOCKERFILE, "utf-8");
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-hermes-final-layout-"));
   const sandboxRoot = path.join(tmp, "sandbox");
   const hermesDir = path.join(sandboxRoot, ".hermes");
@@ -184,13 +88,10 @@ function runFinalLayout({
   const legacyTarget = path.join(tmp, "legacy-target");
   const openclawDir = path.join(sandboxRoot, ".openclaw");
   const openclawTarget = path.join(tmp, "openclaw-target");
-  const rootUvCache = path.join(tmp, "root-cache", "uv");
 
   fs.mkdirSync(hermesDir, { recursive: true });
   fs.writeFileSync(path.join(hermesDir, "config.yaml"), "model: test\n");
   fs.writeFileSync(path.join(hermesDir, ".env"), "TOKEN=test\n");
-  fs.mkdirSync(rootUvCache, { recursive: true });
-  fs.writeFileSync(path.join(rootUvCache, "build-artifact"), "remove\n");
 
   const fixturePaths = {
     hermesDir,
@@ -202,26 +103,22 @@ function runFinalLayout({
   legacyDataSetups[legacyData](fixturePaths);
   openclawSetups[openclaw](fixturePaths);
 
-  const layoutCommand = dockerRunCommandBetween(
-    dockerfile,
-    "# Flatten stale published base images",
-    "# Pin config hash at build time",
-  )
-    .replaceAll("/root/.cache/pip", path.join(tmp, "root-cache", "pip"))
-    .replaceAll("/root/.cache/uv", rootUvCache);
-  const { result } = runDockerShell(layoutCommand, sandboxRoot);
-  return { hermesDir, legacyTarget, openclawTarget, result, rootUvCache, sandboxRoot, tmp };
+  const result = spawnSync("bash", [FINALIZE_IMAGE_LAYOUT, sandboxRoot], {
+    encoding: "utf-8",
+    timeout: 5000,
+  });
+  return { hermesDir, legacyTarget, openclawTarget, result, sandboxRoot, tmp };
 }
 
 describe("Hermes final image layout", () => {
-  it("removes the build-only uv cache", () => {
-    const run = runFinalLayout();
-    try {
-      expect(run.result.status, run.result.stderr).toBe(0);
-      expect(fs.existsSync(run.rootUvCache)).toBe(false);
-    } finally {
-      fs.rmSync(run.tmp, { recursive: true, force: true });
-    }
+  it("rejects the filesystem root as the image layout root", () => {
+    const result = spawnSync("bash", [FINALIZE_IMAGE_LAYOUT, "/"], {
+      encoding: "utf-8",
+      timeout: 5000,
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("image layout root must not be /");
   });
 
   it("rejects retired OpenClaw state represented as a directory", () => {

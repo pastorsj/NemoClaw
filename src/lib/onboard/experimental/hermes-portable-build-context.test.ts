@@ -207,6 +207,11 @@ describe("Hermes portable staged build context", testTimeoutOptions(30_000), () 
         path.join(first.buildContextPath, "packages/nemoclaw-hermes/plugin/__pycache__"),
       ),
     ).toBe(false);
+    expect(
+      fs.existsSync(
+        path.join(first.buildContextPath, "agents/hermes/security-dependencies.patch"),
+      ),
+    ).toBe(false);
 
     const reused = plan.materialize(contextInput());
     expect(reused.buildContextPath).toBe(first.buildContextPath);

@@ -52,7 +52,6 @@ const chatUsage = (() => {
   return null;
 })();
 const responseText = process.env.NEMOCLAW_FAKE_OPENAI_RESPONSE_TEXT || chatContent;
-const launchReplyFromPrompt = process.env.NEMOCLAW_FAKE_OPENAI_LAUNCH_REPLY_FROM_PROMPT === "1";
 const workspaceWrite = (() => {
   try {
     const parsed = JSON.parse(process.env.NEMOCLAW_FAKE_OPENAI_WORKSPACE_WRITE || "null");
@@ -76,6 +75,7 @@ const workspaceWrite = (() => {
   }
   return null;
 })();
+const replyFromPrompt = process.env.NEMOCLAW_FAKE_OPENAI_REPLY_FROM_PROMPT === "1";
 const requestCanaryMarker = process.env.NEMOCLAW_FAKE_OPENAI_REQUEST_CANARY_MARKER || "";
 const forbiddenMarkers = (() => {
   try {
@@ -215,13 +215,32 @@ function latestUserPrompt(payload: JsonObject): string | null {
   return null;
 }
 
-function requestedLaunchReply(payload: JsonObject): string | null {
-  if (!launchReplyFromPrompt) return null;
+function requestedPromptReply(payload: JsonObject): string | null {
+  if (!replyFromPrompt) return null;
   const prompt = latestUserPrompt(payload);
-  const match = prompt?.match(
+  const launchMatch = prompt?.match(
     /^Join these four fragments with underscores and put only the result on its own line: NEMOCLAW, ([0-9A-F]{12}), (FIRST|SECOND), OK\. Do not use tools\.(?:\n\n[\s\S]+)?$/u,
   );
-  return match ? `NEMOCLAW_${match[1]}_${match[2]}_OK` : null;
+  if (launchMatch) return `NEMOCLAW_${launchMatch[1]}_${launchMatch[2]}_OK`;
+  if (
+    /^Remember this exact token: NEMOCLAW_5254_[0-9]+\. Reply with acknowledged\.(?:\n\n[\s\S]+)?$/u.test(
+      prompt ?? "",
+    )
+  ) {
+    return "acknowledged";
+  }
+  if (
+    /^(?:What is seven multiplied by eight\?|Multiply seven by eight\.) Reply with only the integer\.(?:\n\n[\s\S]+)?$/u.test(
+      prompt ?? "",
+    )
+  ) {
+    return "56";
+  }
+  const profileMarker = prompt?.match(
+    /^(N8011_[0-9a-z]{8,10}_PROFILE_(?:SEED|CONTINUE))(?:\n\n[\s\S]+)?$/u,
+  );
+  if (profileMarker) return profileMarker[1];
+  return null;
 }
 
 const WORKSPACE_WRITE_TOOL_CALL_ID = "call-nemoclaw-workspace-write";
@@ -343,7 +362,7 @@ const server = createServer(async (req, res) => {
       sendWorkspaceWriteResponse(res, requestedWorkspaceWritePhase);
       return;
     }
-    const content = requestedLaunchReply(payload) ?? chatContent;
+    const content = requestedPromptReply(payload) ?? chatContent;
     if (payload.stream) {
       sendChatSse(res, content);
       return;

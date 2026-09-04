@@ -54,13 +54,16 @@ const OPAQUE_INPUTS = [
   "tools/e2e/brev-launchable-e2e.sh",
   "managed-inference/models/example.yaml",
   "managed-inference/recipes/vllm.example.managed-cluster.v1.yaml",
-  "internal/security-reviews/hermes-0.19.0-dependency-review.md",
+  "internal/security-reviews/hermes-0.20.6-dependency-review.md",
   ".github/actions/resolve-hermes-base-image/action.yaml",
   ".github/actions/resolve-reviewed-hermes-platform/action.yaml",
   ".agents/skills/nemoclaw-contributor-update-dependencies/scripts/collect-hermes-release-supplement.py",
   "packages/nemoclaw-openclaw/Dockerfile",
   "packages/nemoclaw-openclaw/Dockerfile.base",
   "packages/nemoclaw-hermes/Dockerfile.base",
+  "packages/nemoclaw-hermes/checks/image-probes.py",
+  "packages/nemoclaw-hermes/compat/cron-drain.py",
+  "packages/nemoclaw-hermes/compat/session-preview.py",
   "packages/nemoclaw-hermes/Dockerfile",
   "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
   "packages/nemoclaw-pi/Dockerfile.base",
@@ -68,6 +71,7 @@ const OPAQUE_INPUTS = [
   "packages/nemoclaw-hermes/policy-additions.yaml",
   "src/lib/messaging/channels/telegram/policy/openclaw.yaml",
   "nemoclaw-blueprint/policies/presets/local-inference.yaml",
+  "nemoclaw-blueprint/policies/presets/nous-browser.yaml",
   "nemoclaw-blueprint/policies/presets/claude-code.yaml",
   "packages/nemoclaw-hermes/runtime/config-guard.py",
   "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
@@ -204,9 +208,7 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/inference/serving/resolver.test.ts",
       "test/inference/managed/managed-inference-catalog-compiler.test.ts",
     ]);
-    expect(triggeredBy("internal/security-reviews/hermes-0.19.0-dependency-review.md")).toEqual([
-      "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-    ]);
+    expect(triggeredBy("internal/security-reviews/hermes-0.20.6-dependency-review.md")).toEqual([]);
     expect(triggeredBy(".github/actions/resolve-hermes-base-image/action.yaml")).toEqual([
       "test/platform/images/base-image-resolver-helper.test.ts",
     ]);
@@ -229,12 +231,21 @@ describe("Vitest opaque-input watch triggers", () => {
       "src/lib/sandbox/optimized-build-context-copy-sources.test.ts",
     ]);
     expect(triggeredBy("packages/nemoclaw-hermes/Dockerfile.base")).toEqual([
-      "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
       "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
       "test/runtime/sandbox/sandbox-provisioning.test.ts",
     ]);
+    expect(triggeredBy("packages/nemoclaw-hermes/checks/image-probes.py")).toEqual([
+      "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-hermes/compat/cron-drain.py")).toEqual([
+      "packages/nemoclaw-hermes/tests/compat/cron-drain.test.ts",
+    ]);
+    expect(triggeredBy("packages/nemoclaw-hermes/compat/session-preview.py")).toEqual([
+      "packages/nemoclaw-hermes/tests/runtime/hermes-session-list-preview-patch.test.ts",
+    ]);
     expect(triggeredBy("packages/nemoclaw-hermes/Dockerfile")).toEqual([
+      "src/lib/onboard/experimental/hermes-portable-build-context.test.ts",
       "src/lib/onboard/managed-startup-profile.test.ts",
       "packages/nemoclaw-hermes/tests/image/mcp-runtime.test.ts",
     ]);
@@ -266,6 +277,9 @@ describe("Vitest opaque-input watch triggers", () => {
     ]);
     expect(triggeredBy("nemoclaw-blueprint/policies/presets/local-inference.yaml")).toEqual([
       "src/lib/onboard/inference-providers/compatible-endpoint-gateway-route.test.ts",
+    ]);
+    expect(triggeredBy("nemoclaw-blueprint/policies/presets/nous-browser.yaml")).toEqual([
+      "test/onboarding/effective-policy-contracts.test.ts",
     ]);
     expect(triggeredBy("nemoclaw-blueprint/policies/presets/claude-code.yaml")).toEqual([
       "test/onboarding/effective-policy-contracts.test.ts",

@@ -101,10 +101,6 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
-    pattern: /(?:^|\/)internal\/security-reviews\/hermes-0\.19\.0-dependency-review\.md$/,
-    testsToRun: runTests("packages/nemoclaw-hermes/tests/image/dependency-review.test.ts"),
-  },
-  {
     pattern: /(?:^|\/)\.github\/actions\/resolve-hermes-base-image\/action\.yaml$/,
     testsToRun: runTests("test/platform/images/base-image-resolver-helper.test.ts"),
   },
@@ -124,7 +120,6 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   {
     pattern: /(?:^|\/)packages\/nemoclaw-hermes\/Dockerfile\.base$/,
     testsToRun: runTests(
-      "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
       "packages/nemoclaw-hermes/tests/image/share-mount.test.ts",
       "test/inference/managed/managed-image-publication-workflow.test.ts",
       "test/runtime/sandbox/sandbox-provisioning.test.ts",
@@ -138,10 +133,25 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
     ),
   },
   {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/checks\/image-probes\.py$/,
+    testsToRun: runTests("packages/nemoclaw-hermes/tests/image/build-probes.test.ts"),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/compat\/cron-drain\.py$/,
+    testsToRun: runTests("packages/nemoclaw-hermes/tests/compat/cron-drain.test.ts"),
+  },
+  {
+    pattern: /(?:^|\/)packages\/nemoclaw-hermes\/compat\/session-preview\.py$/,
+    testsToRun: runTests(
+      "packages/nemoclaw-hermes/tests/runtime/hermes-session-list-preview-patch.test.ts",
+    ),
+  },
+  {
     pattern: /(?:^|\/)(packages\/nemoclaw-(?:hermes|langchain-deepagents-code)\/)Dockerfile$/,
     testsToRun: (_file, match) => {
       if (match[1] === "packages/nemoclaw-hermes/") {
         return [
+          "src/lib/onboard/experimental/hermes-portable-build-context.test.ts",
           "src/lib/onboard/managed-startup-profile.test.ts",
           "packages/nemoclaw-hermes/tests/image/mcp-runtime.test.ts",
         ];
@@ -182,6 +192,10 @@ export const vitestWatchTriggerPatterns: VitestWatchTriggerPattern[] = [
   },
   {
     pattern: /(?:^|\/)nemoclaw-blueprint\/policies\/presets\/local-memory\.yaml$/,
+    testsToRun: runTests("test/onboarding/effective-policy-contracts.test.ts"),
+  },
+  {
+    pattern: /(?:^|\/)nemoclaw-blueprint\/policies\/presets\/nous-browser\.yaml$/,
     testsToRun: runTests("test/onboarding/effective-policy-contracts.test.ts"),
   },
   {

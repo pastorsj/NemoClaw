@@ -588,7 +588,11 @@ describe("rebuildSandbox flow: recovery", () => {
       harness.rebuildSandbox("alpha", ["--yes"], { throwOnError: true }),
     ).resolves.toBeUndefined();
 
-    expect(harness.ensureMessagingHostForwardAfterRebuildSpy).toHaveBeenCalledWith("alpha", plan);
+    expect(harness.ensureMessagingHostForwardAfterRebuildSpy).toHaveBeenCalledWith(
+      "alpha",
+      plan,
+      undefined,
+    );
     expect(
       harness.ensureMessagingHostForwardAfterRebuildSpy.mock.invocationCallOrder[0],
     ).toBeGreaterThan(harness.onboardSpy.mock.invocationCallOrder[0]);

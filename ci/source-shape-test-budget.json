@@ -122,33 +122,8 @@
       "category": "security"
     },
     {
-      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "binds every active source identity to the reviewed release",
-      "category": "security"
-    },
-    {
-      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "preserves the reviewed authorization and state migrations",
-      "category": "security"
-    },
-    {
-      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "binds the CLI adapter version and source-fix constraints to target Hermes",
-      "category": "compatibility"
-    },
-    {
-      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "ships the reviewed Python dependency remediations and records residual debt",
-      "category": "security"
-    },
-    {
-      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "ships the reviewed external dashboard Host compatibility patch",
-      "category": "security"
-    },
-    {
-      "file": "packages/nemoclaw-hermes/tests/image/dependency-review.test.ts",
-      "test": "keeps the gateway installer offline and isolated from sandbox packages",
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "binds the runtime environment validator to its source digest",
       "category": "security"
     },
     {
@@ -289,6 +264,11 @@
     {
       "file": "test/automation/releases/release-lkg-brev-image.test.ts",
       "test": "keeps the LKG credential on the production-only dispatch step (#9798)",
+      "category": "security"
+    },
+    {
+      "file": "test/automation/releases/reviewed-npm-audit-workflow.test.ts",
+      "test": "passes the cache identity target root without interpolating it into shell source",
       "category": "security"
     },
     {

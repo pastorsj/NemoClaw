@@ -225,6 +225,10 @@ function stageOptimizedSandboxBuildContext(
     path.join(rootDir, "ci", "npm-audit-exceptions.json"),
     path.join(stagedCiDir, "npm-audit-exceptions.json"),
   );
+  fs.copyFileSync(
+    path.join(rootDir, "ci", "reviewed-npm-audit.json"),
+    path.join(stagedCiDir, "reviewed-npm-audit.json"),
+  );
   normalizeReadModesForDockerCopy(stagedCiDir);
 
   fs.mkdirSync(stagedBlueprintDir, { recursive: true });
@@ -348,6 +352,10 @@ function stageOptimizedSandboxBuildContext(
   fs.copyFileSync(
     path.join(rootDir, "scripts", "lib", "reviewed-npm-audit.mts"),
     path.join(stagedScriptsDir, "lib", "reviewed-npm-audit.mts"),
+  );
+  fs.copyFileSync(
+    path.join(rootDir, "scripts", "lib", "npm-audit-receipt.mts"),
+    path.join(stagedScriptsDir, "lib", "npm-audit-receipt.mts"),
   );
   normalizeReadModesForDockerCopy(stagedScriptsDir);
 

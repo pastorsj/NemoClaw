@@ -80,7 +80,6 @@ def _get_env_value(key, default=None):
         env_paths.append(os.path.join(hermes_home, ".env"))
     env_paths.extend(
         [
-            "/sandbox/.hermes-data/.env",
             "/sandbox/.hermes/.env",
             os.path.expanduser("~/.hermes/.env"),
         ],
@@ -109,9 +108,7 @@ def _load_hermes_dotenv():
     try:
         from hermes_cli.env_loader import load_hermes_dotenv
 
-        hermes_home = os.getenv("HERMES_HOME")
-        if not hermes_home and os.path.isdir("/sandbox/.hermes-data"):
-            hermes_home = "/sandbox/.hermes-data"
+        hermes_home = os.getenv("HERMES_HOME") or "/sandbox/.hermes"
         load_hermes_dotenv(hermes_home=hermes_home)
     except Exception:
         # Runtime env still works when Hermes' optional dotenv loader is absent.

@@ -3,7 +3,9 @@
   "schemaVersion": 1,
   "dockerfileCopySources": [
     "nemoclaw-blueprint/",
+    "packages/nemoclaw-hermes/a2a-neutral.patch",
     "packages/nemoclaw-hermes/checks/cli-adapter.py",
+    "packages/nemoclaw-hermes/checks/hindsight-requirements.txt",
     "packages/nemoclaw-hermes/checks/image-probes.py",
     "packages/nemoclaw-hermes/compat/cron-drain.py",
     "packages/nemoclaw-hermes/compat/cron-execution.py",
@@ -15,7 +17,6 @@
     "packages/nemoclaw-hermes/compat/langfuse-credentials.mts",
     "packages/nemoclaw-hermes/compat/profile-policy.py",
     "packages/nemoclaw-hermes/compat/runtime-boundaries.patch",
-    "packages/nemoclaw-hermes/compat/security-dependencies.patch",
     "packages/nemoclaw-hermes/compat/session-preview.py",
     "packages/nemoclaw-hermes/compat/sqlite-store.py",
     "packages/nemoclaw-hermes/config/",
@@ -34,6 +35,7 @@
     "packages/nemoclaw-hermes/runtime/env-boundary.py",
     "packages/nemoclaw-hermes/runtime/gateway-control.sh",
     "packages/nemoclaw-hermes/runtime/generate-config.sh",
+    "packages/nemoclaw-hermes/runtime/managed_policy.py",
     "packages/nemoclaw-hermes/runtime/managed_policy.py",
     "packages/nemoclaw-hermes/runtime/mcp-digest.py",
     "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
@@ -74,6 +76,9 @@
     "packages/nemoclaw-hermes/fabric/pyproject.toml",
     "packages/nemoclaw-hermes/fabric/src/",
     "packages/nemoclaw-hermes/fabric/hermes.fabric-adapter.json",
+    "packages/nemoclaw-hermes/finalize-image-layout.sh",
+    "packages/nemoclaw-hermes/hindsight-lazy-integrity.patch",
+    "packages/nemoclaw-hermes/secure-dir-skip-chmod.patch",
     "packages/nemoclaw-fabric/build-requirements.lock"
   ],
   "trackedFiles": [
@@ -266,6 +271,10 @@
       "mode": "100755"
     },
     {
+      "path": "packages/nemoclaw-hermes/checks/hindsight-requirements.txt",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/checks/image-probes.py",
       "mode": "100644"
     },
@@ -307,10 +316,6 @@
     },
     {
       "path": "packages/nemoclaw-hermes/compat/runtime-boundaries.patch",
-      "mode": "100644"
-    },
-    {
-      "path": "packages/nemoclaw-hermes/compat/security-dependencies.patch",
       "mode": "100644"
     },
     {
@@ -370,7 +375,19 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/a2a-neutral.patch",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/Dockerfile",
+      "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/finalize-image-layout.sh",
+      "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/hindsight-lazy-integrity.patch",
       "mode": "100644"
     },
     {
@@ -500,6 +517,10 @@
     {
       "path": "packages/nemoclaw-hermes/runtime/tirith-marker.py",
       "mode": "100755"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/secure-dir-skip-chmod.patch",
+      "mode": "100644"
     },
     {
       "path": "packages/nemoclaw-hermes/start.sh",

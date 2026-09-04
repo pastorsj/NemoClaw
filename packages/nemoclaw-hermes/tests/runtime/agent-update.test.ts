@@ -11,7 +11,7 @@ import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 const SCRIPT = path.join(import.meta.dirname, "../..", "checks", "update-agent.sh");
 const HERMES_BASE_DOCKERFILE = path.join(import.meta.dirname, "../..", "Dockerfile.base");
 const HERMES_MANIFEST = path.join(import.meta.dirname, "../..", "manifest.yaml");
-const TARGET_TAG = "v2026.7.20";
+const TARGET_TAG = "v2026.8.27";
 
 const CURRENT_INSTALLED_BASE = [
   "# Calver tag v2026.6.5 = Hermes Agent v0.16.0.",
@@ -141,7 +141,7 @@ printf 'fake archive' > "$output"
     );
     writeExecutable(
       path.join(fakeBin, "tar"),
-      "#!/usr/bin/env bash\nprintf 'version = \"0.19.0\"\\n'\n",
+      "#!/usr/bin/env bash\nprintf 'version = \"0.20.6\"\\n'\n",
     );
     writeExecutable(path.join(fakeBin, "npm"), "#!/usr/bin/env bash\nprintf 'sha512-test\\n'\n");
     writeExecutable(
@@ -160,7 +160,7 @@ esac
 set -euo pipefail
 printf '%s|%s\\n' "\${NEMOCLAW_HERMES_SANDBOX_BASE_IMAGE_REF:-}" "$*" >> "$FAKE_NEMOHERMES_LOG"
 if [[ "$*" == "hermes exec -- hermes --version" ]]; then
-  printf '0.19.0\\n'
+  printf '0.20.6\\n'
 fi
 `,
     );
@@ -185,8 +185,8 @@ fi
       expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
       expect(fs.readFileSync(dockerLog, "utf8")).toContain(`tag ${baseRef} ${pinnedRef}`);
       expect(fs.readFileSync(nemohermesLog, "utf8")).toContain(`${pinnedRef}|hermes rebuild`);
-      expect(run.stdout).toContain("OK: sandbox reports Hermes Agent v0.19.0");
-      // #9979: every archive fetch must reject protocol-downgrade redirects.
+      expect(run.stdout).toContain("OK: sandbox reports Hermes Agent v0.20.6");
+      // #9979: the curl fetch must fail closed on a protocol-downgrade redirect.
       const curlArgv = fs.readFileSync(curlLog, "utf8").trim();
       const curlCalls = curlArgv.split("\n").filter((line) => line.length > 0);
       expect(curlCalls.length).toBeGreaterThan(0);

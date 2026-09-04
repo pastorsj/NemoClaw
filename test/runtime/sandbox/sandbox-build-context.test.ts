@@ -128,6 +128,10 @@ describe("sandbox build context staging", () => {
       path.join("ci", "npm-audit-exceptions.json"),
       `${JSON.stringify({ schemaVersion: 1, exceptions: [] })}\n`,
     );
+    writeFixture(
+      path.join("ci", "reviewed-npm-audit.json"),
+      `${JSON.stringify({ npmVersion: "10.9.4" })}\n`,
+    );
     for (const runtimeName of ["messaging", "mcporter", "openclaw", "wechat"]) {
       for (const fileName of ["package.json", "npm-shrinkwrap.json"]) {
         writeFixture(
@@ -297,6 +301,7 @@ describe("sandbox build context staging", () => {
     writeFixture(path.join("scripts", "lib", "bundled-npm-package.mts"), "fixture\n", 0o700);
     writeFixture(path.join("scripts", "lib", "seed-reviewed-npm-cache.mts"), "fixture\n", 0o700);
     writeFixture(path.join("scripts", "lib", "reviewed-npm-audit.mts"), "fixture\n", 0o700);
+    writeFixture(path.join("scripts", "lib", "npm-audit-receipt.mts"), "fixture\n", 0o700);
     fs.chmodSync(path.join(sourceRoot, "scripts"), 0o700);
     fs.chmodSync(path.join(sourceRoot, "scripts", "lib"), 0o700);
   }
