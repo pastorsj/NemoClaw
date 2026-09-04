@@ -9,9 +9,10 @@ import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Install the package-store mocks before sandbox recreation loads sandbox-agent.
+import * as f from "./snapshot-restore-test-fixture";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 import { fingerprintSandboxRecreateValue } from "../../onboard/sandbox-recreate-transaction";
-import * as f from "./snapshot-restore-test-fixture";
 import {
   HERMES_PACKAGE,
   OPENCLAW_PACKAGE,

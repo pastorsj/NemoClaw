@@ -616,7 +616,7 @@ network_policies:
       const basePolicyPath =
         agent === "openclaw"
           ? path.join(process.cwd(), "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml")
-          : path.join(process.cwd(), "agents", "hermes", "policy-additions.yaml");
+          : path.join(process.cwd(), "packages", "nemoclaw-hermes", "policy-additions.yaml");
       const baseSource = fs.readFileSync(
         basePolicyPath,
         "utf8",

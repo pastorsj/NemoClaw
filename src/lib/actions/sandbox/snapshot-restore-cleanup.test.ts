@@ -7,7 +7,6 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { withMcpLifecycleLock as withSandboxMutationLock } from "../../state/mcp-lifecycle-lock-acquisition";
 import * as f from "./snapshot-restore-test-fixture";
 import {
   HERMES_PACKAGE,
@@ -33,6 +32,12 @@ afterEach(() => {
 });
 describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   it("holds the per-sandbox mutation lock across snapshot creation", async () => {
+    const lifecycleLock = await vi.importActual<typeof import("../../state/mcp-lifecycle-lock")>(
+      "../../state/mcp-lifecycle-lock",
+    );
+    f.mutationLockMock.withSandboxMutationLockMock.mockImplementation((sandboxName, operation) =>
+      lifecycleLock.withSandboxMutationLock(sandboxName, operation),
+    );
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-create-lock-"));
     tempHomes.push(tempHome);
     vi.stubEnv("HOME", tempHome);
@@ -44,7 +49,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
     const release = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
-    const externalMutation = withSandboxMutationLock("alpha", async () => {
+    const externalMutation = lifecycleLock.withSandboxMutationLock("alpha", async () => {
       signalLocked?.();
       await release;
     });
@@ -699,6 +704,12 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
   });
 
   it("holds the source and destination mutation locks until a cross-sandbox restore finishes (#7178)", async () => {
+    const lifecycleLock = await vi.importActual<typeof import("../../state/mcp-lifecycle-lock")>(
+      "../../state/mcp-lifecycle-lock",
+    );
+    f.mutationLockMock.withSandboxMutationLockMock.mockImplementation((sandboxName, operation) =>
+      lifecycleLock.withSandboxMutationLock(sandboxName, operation),
+    );
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snapshot-locks-"));
     tempHomes.push(tempHome);
     vi.stubEnv("HOME", tempHome);
@@ -745,7 +756,7 @@ describe("runSandboxSnapshot restore: lifecycle and destination safety", () => {
 
     const restore = runSandboxSnapshot("alpha", { kind: "restore", to: "beta" });
     await createStarted;
-    const sourceMutation = withSandboxMutationLock("alpha", () => {
+    const sourceMutation = lifecycleLock.withSandboxMutationLock("alpha", () => {
       events.push("source-mutation");
     });
     await new Promise((resolve) => setTimeout(resolve, 25));
