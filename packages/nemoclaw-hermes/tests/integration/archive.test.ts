@@ -189,7 +189,10 @@ describe("published Hermes package", () => {
         failOnMismatch: boolean;
         configDirectory: string | null;
       }): string;
-      buildMcpRuntimeCommand(request: { command: string[] }): string[];
+      buildMcpRuntimePlan(request: { command: string[] }): {
+        command: string[];
+        environmentVariablesToRemove: string[];
+      };
       describeMcpMutationCapability(request: { sandboxName: string }): {
         kind: string;
         command: string[];
@@ -292,9 +295,10 @@ describe("published Hermes package", () => {
         intervalMilliseconds: 500,
       },
     });
-    expect(mcp.buildMcpRuntimeCommand({ command: ["python", "probe.py"] })).toEqual(
+    expect(mcp.buildMcpRuntimePlan({ command: ["python", "probe.py"] }).command).toEqual(
       expect.arrayContaining(["/opt/hermes/.venv/bin/python", "-I", "-c", "probe.py"]),
     );
+    expect(mcp.buildMcpRuntimePlan({ command: ["true"] }).environmentVariablesToRemove).toEqual([]);
     expect(mcp.buildInspectCommand("payload")).toEqual([
       "/usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py",
       "inspect",

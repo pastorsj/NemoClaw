@@ -6,14 +6,18 @@ import { describe, expect, it } from "vitest";
 import { loadPackageHostModule } from "../helpers/host-module";
 
 const adapter = loadPackageHostModule<{
-  buildMcpRuntimeCommand(request: { readonly command: readonly string[] }): readonly string[];
+  buildMcpRuntimePlan(request: { readonly command: readonly string[] }): {
+    readonly command: readonly string[];
+    readonly environmentVariablesToRemove: readonly string[];
+  };
 }>("mcp-adapter.cts");
 
 describe("OpenClaw MCP runtime adapter", () => {
   it("preserves a child argument that begins with a dash", () => {
-    const command = adapter.buildMcpRuntimeCommand({ command: ["--require", "child.mjs"] });
+    const plan = adapter.buildMcpRuntimePlan({ command: ["--require", "child.mjs"] });
 
-    expect(command.slice(0, 3)).toEqual(["nemoclaw-start", "node", "-e"]);
-    expect(command.slice(4)).toEqual(["--", "--require", "child.mjs"]);
+    expect(plan.command.slice(0, 3)).toEqual(["nemoclaw-start", "node", "-e"]);
+    expect(plan.command.slice(4)).toEqual(["--", "--require", "child.mjs"]);
+    expect(plan.environmentVariablesToRemove).toContain("OPENCLAW_GATEWAY_TOKEN");
   });
 });

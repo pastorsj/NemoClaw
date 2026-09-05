@@ -236,10 +236,19 @@ function describeMcpRuntimeIntentVerification() {
   return { kind: "not-required" };
 }
 
-function buildMcpRuntimeCommand(request) {
+function buildMcpRuntimePlan(request) {
   const runner =
     'const { spawnSync } = require("node:child_process"); const result = spawnSync(process.argv[1], process.argv.slice(2), { stdio: "inherit" }); process.exit(result.status ?? 1);';
-  return ["nemoclaw-start", "node", "-e", runner, "--", ...request.command];
+  return {
+    command: ["nemoclaw-start", "node", "-e", runner, "--", ...request.command],
+    environmentVariablesToRemove: [
+      "OPENCLAW_GATEWAY_URL",
+      "OPENCLAW_GATEWAY_PORT",
+      "OPENCLAW_GATEWAY_TOKEN",
+      "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
+      "NEMOCLAW_OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
+    ],
+  };
 }
 
 function buildMcpSnapshotRestorePlan() {
@@ -256,7 +265,7 @@ module.exports = {
   buildMcpRegistrationPlan,
   buildMcpRemovalCommand,
   buildMcpRemovalPlan,
-  buildMcpRuntimeCommand,
+  buildMcpRuntimePlan,
   buildMcpSnapshotRestorePlan,
   buildRegisterCommand,
   buildRemoveCommand,

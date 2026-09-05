@@ -204,7 +204,10 @@ describe("published OpenClaw package", () => {
         failOnMismatch: boolean;
         configDirectory: string | null;
       }): string;
-      buildMcpRuntimeCommand(request: { command: string[] }): string[];
+      buildMcpRuntimePlan(request: { command: string[] }): {
+        command: string[];
+        environmentVariablesToRemove: string[];
+      };
       describeMcpMutationCapability(request: { sandboxName: string }): {
         kind: string;
         command: string;
@@ -274,12 +277,12 @@ describe("published OpenClaw package", () => {
         managedServerNames: ["example"],
       }),
     ).toEqual({ kind: "not-required" });
-    expect(mcp.buildMcpRuntimeCommand({ command: ["node", "probe.mjs"] })).toEqual(
+    expect(mcp.buildMcpRuntimePlan({ command: ["node", "probe.mjs"] }).command).toEqual(
       expect.arrayContaining(["nemoclaw-start", "node", "-e", "probe.mjs"]),
     );
-    const optionPrefixedRuntime = mcp.buildMcpRuntimeCommand({
+    const optionPrefixedRuntime = mcp.buildMcpRuntimePlan({
       command: ["--require", "child.mjs"],
-    });
+    }).command;
     expect(optionPrefixedRuntime.slice(0, 4)).toEqual([
       "nemoclaw-start",
       "node",
@@ -287,6 +290,9 @@ describe("published OpenClaw package", () => {
       expect.any(String),
     ]);
     expect(optionPrefixedRuntime.slice(4)).toEqual(["--", "--require", "child.mjs"]);
+    expect(mcp.buildMcpRuntimePlan({ command: ["true"] }).environmentVariablesToRemove).toContain(
+      "OPENCLAW_GATEWAY_TOKEN",
+    );
     expect(mcp.mcporterAvailabilityProbe("sandbox").command).toBe("command -v mcporter");
     expect(
       mcp.buildMcpRegistrationPlan({

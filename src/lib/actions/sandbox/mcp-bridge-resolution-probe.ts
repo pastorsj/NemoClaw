@@ -64,6 +64,7 @@ import {
   credentialResolutionReadinessSkipDetail,
 } from "./mcp-bridge-resolution-readiness";
 import {
+  collectMcpRuntimeEnvironmentVariablesToRemove,
   MCP_RUNTIME_SANITIZED_ENV_VARS,
   wrapMcpRuntimeCommand,
 } from "./mcp-bridge-runtime-command";
@@ -206,19 +207,19 @@ export function buildCredentialResolutionProbeCommand(
     `Bearer ${MCP_PROBE_CONTROL_BEARER}`,
     markers.controlHttp,
   );
+  const packageContext =
+    sandboxName && entry.agent ? { sandboxName, agentName: entry.agent } : undefined;
+  const placeholderRuntimePlan = wrapMcpRuntimeCommand(adapter, placeholderCurl, packageContext);
+  const controlRuntimePlan = wrapMcpRuntimeCommand(adapter, controlCurl, packageContext);
+  const environmentVariablesToRemove = collectMcpRuntimeEnvironmentVariablesToRemove(
+    placeholderRuntimePlan,
+    controlRuntimePlan,
+  );
   const probeBody = [
-    wrapMcpRuntimeCommand(
-      adapter,
-      placeholderCurl,
-      sandboxName && entry.agent ? { sandboxName, agentName: entry.agent } : undefined,
-    ),
+    placeholderRuntimePlan.command,
     "rc=$?",
     `printf '\\n${markers.placeholderExit}%s\\n' "$rc"`,
-    wrapMcpRuntimeCommand(
-      adapter,
-      controlCurl,
-      sandboxName && entry.agent ? { sandboxName, agentName: entry.agent } : undefined,
-    ),
+    controlRuntimePlan.command,
     "crc=$?",
     `printf '\\n${markers.controlExit}%s\\n' "$crc"`,
     // Always exit 0 so a nonzero SSH status unambiguously means transport
@@ -233,7 +234,7 @@ export function buildCredentialResolutionProbeCommand(
       // probe result, so preamble text cannot impersonate result markers.
       buildTrustedProxyEnvSourceShell(),
       // Must stay between the sourcing above and the first child below.
-      `unset ${PROBE_SANITIZED_ENV_VARS.join(" ")} || true`,
+      `unset ${environmentVariablesToRemove.join(" ")} || true`,
       buildSandboxExecMarkedCommand(probeBody, resultMarker),
     ].join("\n"),
   };

@@ -9,7 +9,7 @@ import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
 import type { CredentialResolutionProbeReadiness } from "./mcp-bridge-resolution-readiness";
 import {
-  MCP_RUNTIME_SANITIZED_ENV_VARS,
+  collectMcpRuntimeEnvironmentVariablesToRemove,
   wrapMcpRuntimeCommand,
 } from "./mcp-bridge-runtime-command";
 import { normalizeMcpServerUrl } from "./mcp-bridge-validation";
@@ -93,7 +93,7 @@ export function buildMcpToolDiscoveryCommand(
     truncated: false,
     detail: "sandbox image does not include the MCP tool discovery runtime; rebuild the sandbox",
   });
-  const runtimeCommand = wrapMcpRuntimeCommand(
+  const runtimePlan = wrapMcpRuntimeCommand(
     adapter,
     [
       "/usr/local/bin/node",
@@ -110,14 +110,15 @@ export function buildMcpToolDiscoveryCommand(
     `  printf '%s\\n' ${shellQuote(missingRuntimeResult)}`,
     "  exit 0",
     "fi",
-    runtimeCommand,
+    runtimePlan.command,
   ].join("\n");
+  const environmentVariablesToRemove = collectMcpRuntimeEnvironmentVariablesToRemove(runtimePlan);
 
   return {
     resultMarker,
     command: [
       buildTrustedProxyEnvSourceShell(),
-      `unset ${MCP_RUNTIME_SANITIZED_ENV_VARS.join(" ")} || true`,
+      `unset ${environmentVariablesToRemove.join(" ")} || true`,
       buildSandboxExecMarkedCommand(body, resultMarker),
     ].join("\n"),
   };

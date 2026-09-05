@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./mcp-bridge/package-command", () => ({
-  buildInstalledMcpRuntimeCommand: mocks.buildRuntimeCommand,
+  buildInstalledMcpRuntimePlan: mocks.buildRuntimeCommand,
 }));
 
 vi.mock("./mcp-bridge-state", () => ({
@@ -49,10 +49,10 @@ beforeEach(() => {
   });
   mocks.buildRuntimeCommand
     .mockReset()
-    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => [
-      "package-runtime",
-      ...command,
-    ]);
+    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => ({
+      command: ["package-runtime", ...command],
+      environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+    }));
 });
 
 function probeStdout(
@@ -98,6 +98,7 @@ describe("MCP credential-resolution probe command security", () => {
     expect(frameIndex).toBeGreaterThan(unsetIndex);
     expect(firstChildIndex).toBeGreaterThan(frameIndex);
     expect(command).toContain("'package-runtime'");
+    expect(command).toContain("FUTURE_RUNTIME_STATE");
     expect(command).toContain("'authorization: Bearer openshell:resolve:env:v11_GITHUB_TOKEN'");
     expect(command).not.toContain("'authorization: Bearer openshell:resolve:env:GITHUB_TOKEN'");
     expect(command).toContain(`'authorization: Bearer ${MCP_PROBE_CONTROL_BEARER}'`);

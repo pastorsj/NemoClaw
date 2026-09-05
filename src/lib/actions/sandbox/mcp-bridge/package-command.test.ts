@@ -28,7 +28,7 @@ import {
   buildInstalledMcpInspectionCommand,
   buildInstalledMcpRegistrationPlan,
   buildInstalledMcpRemovalPlan,
-  buildInstalledMcpRuntimeCommand,
+  buildInstalledMcpRuntimePlan,
   buildInstalledMcpSnapshotRestorePlan,
   describeInstalledMcpMutationCapability,
   describeInstalledMcpRuntimeIntentVerification,
@@ -85,7 +85,10 @@ beforeEach(() => {
   });
   mocks.describeTeardown.mockReset().mockReturnValue({ kind: "not-required" });
   mocks.describeIntent.mockReset().mockReturnValue({ kind: "not-required" });
-  mocks.buildRuntime.mockReset().mockReturnValue(["future-runtime"]);
+  mocks.buildRuntime.mockReset().mockReturnValue({
+    command: ["future-runtime"],
+    environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+  });
   mocks.buildSnapshotRestore.mockReset().mockReturnValue({ kind: "not-required" });
   mocks.loadHostModule.mockReturnValue({
     buildMcpRegistrationPlan: mocks.buildRegistration,
@@ -94,7 +97,7 @@ beforeEach(() => {
     describeMcpMutationCapability: mocks.describeMutation,
     describeMcpTeardownCapability: mocks.describeTeardown,
     describeMcpRuntimeIntentVerification: mocks.describeIntent,
-    buildMcpRuntimeCommand: mocks.buildRuntime,
+    buildMcpRuntimePlan: mocks.buildRuntime,
     buildMcpSnapshotRestorePlan: mocks.buildSnapshotRestore,
   });
 });
@@ -206,8 +209,11 @@ describe("installed MCP package command boundary", () => {
       ),
     ).toEqual({ kind: "not-required" });
     expect(
-      buildInstalledMcpRuntimeCommand("alpha", "future-config", ENTRY.agent, ["node", "probe.mjs"]),
-    ).toEqual(["future-runtime"]);
+      buildInstalledMcpRuntimePlan("alpha", "future-config", ENTRY.agent, ["node", "probe.mjs"]),
+    ).toEqual({
+      command: ["future-runtime"],
+      environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+    });
     expect(
       buildInstalledMcpSnapshotRestorePlan("alpha", "future-config", ENTRY.agent, [ENTRY]),
     ).toEqual({ kind: "not-required" });

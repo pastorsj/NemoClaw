@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./mcp-bridge/package-command", () => ({
-  buildInstalledMcpRuntimeCommand: mocks.buildInstalledRuntimeCommand,
+  buildInstalledMcpRuntimePlan: mocks.buildInstalledRuntimeCommand,
 }));
 
 vi.mock("./mcp-bridge-state", () => ({
@@ -35,19 +35,20 @@ describe("MCP runtime command", () => {
     ["langchain-deepagents-code", "deepagents-config"],
     ["future-agent", "future-config"],
   ] as const)("uses the selected %s package for adapter %s", (agentName, adapter) => {
-    mocks.buildInstalledRuntimeCommand.mockReturnValue([
-      "future-runtime",
-      "child",
-      "value with spaces",
-      "$(unsafe)",
-    ]);
+    mocks.buildInstalledRuntimeCommand.mockReturnValue({
+      command: ["future-runtime", "child", "value with spaces", "$(unsafe)"],
+      environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+    });
 
     expect(
       wrapMcpRuntimeCommand(adapter, ["child", "value with spaces", "$(unsafe)"], {
         sandboxName: "future-sandbox",
         agentName,
       }),
-    ).toBe("'future-runtime' 'child' 'value with spaces' '$(unsafe)'");
+    ).toEqual({
+      command: "'future-runtime' 'child' 'value with spaces' '$(unsafe)'",
+      environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+    });
     expect(mocks.buildInstalledRuntimeCommand).toHaveBeenCalledWith(
       "future-sandbox",
       adapter,

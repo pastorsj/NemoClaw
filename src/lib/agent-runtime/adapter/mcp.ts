@@ -11,6 +11,7 @@ import type {
   HarnessMcpRemovalPlan,
   HarnessMcpRemovalRequest,
   HarnessMcpRuntimeIntentRequest,
+  HarnessMcpRuntimePlan,
   HarnessMcpRuntimeRequest,
   HarnessMcpSnapshotRestorePlan,
   HarnessMcpSnapshotRestoreRequest,
@@ -38,6 +39,7 @@ export type {
   HarnessMcpRemovalPlan,
   HarnessMcpRemovalRequest,
   HarnessMcpRuntimeIntentRequest,
+  HarnessMcpRuntimePlan,
   HarnessMcpRuntimeRequest,
   HarnessMcpSnapshotApplicability,
   HarnessMcpSnapshotRestorePlan,
@@ -217,6 +219,26 @@ const mcpArgumentVectorSchema: AnySchemaObject = Object.freeze({
     minLength: 1,
     maxLength: 65_536,
     pattern: "^[^\\u0000]+$",
+  },
+});
+
+const mcpRuntimePlanSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["command", "environmentVariablesToRemove"],
+  properties: {
+    command: mcpArgumentVectorSchema,
+    environmentVariablesToRemove: {
+      type: "array",
+      maxItems: 128,
+      uniqueItems: true,
+      items: {
+        type: "string",
+        minLength: 1,
+        maxLength: 128,
+        pattern: "^[A-Z_][A-Z0-9_]*$",
+      },
+    },
   },
 });
 
@@ -530,11 +552,11 @@ export const HARNESS_MCP_ADAPTER_CONTRACT = defineHarnessAdapterContract({
       resultSchema: mcpCapabilityProbeSchema,
       resultDescription: "runtime intent verification",
     }),
-    runtime: defineHarnessAdapterOperation<HarnessMcpRuntimeRequest, readonly string[]>({
-      exportName: "buildMcpRuntimeCommand",
+    runtime: defineHarnessAdapterOperation<HarnessMcpRuntimeRequest, HarnessMcpRuntimePlan>({
+      exportName: "buildMcpRuntimePlan",
       requestSchema: mcpRuntimeRequestSchema,
-      resultSchema: mcpArgumentVectorSchema,
-      resultDescription: "runtime argument vector",
+      resultSchema: mcpRuntimePlanSchema,
+      resultDescription: "runtime plan",
     }),
     snapshotRestore: defineHarnessAdapterOperation<
       HarnessMcpSnapshotRestoreRequest,

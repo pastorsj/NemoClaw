@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./mcp-bridge/package-command", () => ({
-  buildInstalledMcpRuntimeCommand: mocks.buildRuntimeCommand,
+  buildInstalledMcpRuntimePlan: mocks.buildRuntimeCommand,
 }));
 
 vi.mock("./mcp-bridge-state", () => ({
@@ -44,10 +44,10 @@ beforeEach(() => {
   });
   mocks.buildRuntimeCommand
     .mockReset()
-    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => [
-      "package-runtime",
-      ...command,
-    ]);
+    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => ({
+      command: ["package-runtime", ...command],
+      environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+    }));
 });
 
 function framedResult(value: unknown) {
@@ -85,12 +85,14 @@ describe("MCP tool discovery host boundary (#6901)", () => {
         expect(built?.command).not.toContain("tools/call");
         expect(built?.command).toContain("rebuild the sandbox");
         expect(built?.command).toContain(`unset ${MCP_RUNTIME_SANITIZED_ENV_VARS.join(" ")}`);
+        expect(built?.command).toContain("FUTURE_RUNTIME_STATE");
       });
       expect(MCP_RUNTIME_SANITIZED_ENV_VARS).toEqual(
         expect.arrayContaining(["LD_PRELOAD", "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH"]),
       );
 
       expect(MCP_RUNTIME_SANITIZED_ENV_VARS).not.toContain(preserved);
+      expect(MCP_RUNTIME_SANITIZED_ENV_VARS).not.toContain("OPENCLAW_GATEWAY_TOKEN");
     },
   );
 

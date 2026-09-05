@@ -93,8 +93,8 @@ module.exports = {
       failureMessage: "Future runtime intent mismatch",
     };
   },
-  buildMcpRuntimeCommand(request) {
-    return ["future-runtime", ...request.command];
+  buildMcpRuntimePlan(request) {
+    return { command: ["future-runtime", ...request.command], environmentVariablesToRemove: [] };
   },
   buildMcpSnapshotRestorePlan() {
     return { kind: "not-required" };
@@ -271,11 +271,10 @@ describe("installed harness host module", () => {
       timeoutSeconds: 10,
       failureMessage: "Future runtime intent mismatch",
     });
-    expect(module.buildMcpRuntimeCommand({ command: ["node", "probe.mjs"] })).toEqual([
-      "future-runtime",
-      "node",
-      "probe.mjs",
-    ]);
+    expect(module.buildMcpRuntimePlan({ command: ["node", "probe.mjs"] })).toEqual({
+      command: ["future-runtime", "node", "probe.mjs"],
+      environmentVariablesToRemove: [],
+    });
     expect(module.buildMcpSnapshotRestorePlan({ sandboxName: "sandbox", entries: [] })).toEqual({
       kind: "not-required",
     });
@@ -339,7 +338,7 @@ module.exports = {
   describeMcpMutationCapability() { return { kind: "not-required" }; },
   describeMcpTeardownCapability() { return { kind: "not-required" }; },
   describeMcpRuntimeIntentVerification() { return { kind: "not-required" }; },
-  buildMcpRuntimeCommand() { return "runtime"; },
+  buildMcpRuntimePlan() { return "runtime"; },
   buildMcpSnapshotRestorePlan() { return { kind: "not-required" }; },
 };
 `);
@@ -375,14 +374,28 @@ module.exports = {
   it("rejects raw shell text from the runtime wrapper operation", () => {
     const installed = installFuturePackage(
       VALID_MODULE.replace(
-        'return ["future-runtime", ...request.command];',
-        'return ["future-runtime", ...request.command].join(" ");',
+        'return { command: ["future-runtime", ...request.command], environmentVariablesToRemove: [] };',
+        'return { command: ["future-runtime", ...request.command].join(" "), environmentVariablesToRemove: [] };',
       ),
     );
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
 
-    expect(() => module.buildMcpRuntimeCommand({ command: ["node", "probe.mjs"] })).toThrow(
-      /returned an invalid runtime argument vector/u,
+    expect(() => module.buildMcpRuntimePlan({ command: ["node", "probe.mjs"] })).toThrow(
+      /returned an invalid runtime plan/u,
+    );
+  });
+
+  it("rejects unsafe environment variable names from a runtime plan", () => {
+    const installed = installFuturePackage(
+      VALID_MODULE.replace(
+        "environmentVariablesToRemove: [] }",
+        'environmentVariablesToRemove: ["SAFE; touch /tmp/unsafe"] }',
+      ),
+    );
+    const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() => module.buildMcpRuntimePlan({ command: ["node", "probe.mjs"] })).toThrow(
+      /returned an invalid runtime plan/u,
     );
   });
 
@@ -413,7 +426,7 @@ module.exports = {
   describeMcpMutationCapability() { return { kind: "not-required" }; },
   describeMcpTeardownCapability() { return { kind: "not-required" }; },
   describeMcpRuntimeIntentVerification() { return { kind: "not-required" }; },
-  buildMcpRuntimeCommand() { return "runtime"; },
+  buildMcpRuntimePlan() { return "runtime"; },
   buildMcpSnapshotRestorePlan() { return { kind: "not-required" }; },
 };
 `);

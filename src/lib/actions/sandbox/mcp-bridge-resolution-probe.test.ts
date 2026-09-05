@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./mcp-bridge/package-command", () => ({
-  buildInstalledMcpRuntimeCommand: mocks.buildRuntimeCommand,
+  buildInstalledMcpRuntimePlan: mocks.buildRuntimeCommand,
 }));
 
 vi.mock("./mcp-bridge-state", () => ({
@@ -96,10 +96,10 @@ beforeEach(() => {
   });
   mocks.buildRuntimeCommand
     .mockReset()
-    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => [
-      "package-runtime",
-      ...command,
-    ]);
+    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => ({
+      command: ["package-runtime", ...command],
+      environmentVariablesToRemove: ["FUTURE_RUNTIME_STATE"],
+    }));
   mocks.executeSandboxCommand.mockReset();
   mocks.observeMcpCredentialRevision.mockReset();
   mocks.observeMcpCredentialRevision.mockReturnValue("v11");

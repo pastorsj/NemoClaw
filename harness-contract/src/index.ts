@@ -284,6 +284,11 @@ export interface HarnessMcpRuntimeRequest {
   readonly command: readonly string[];
 }
 
+export interface HarnessMcpRuntimePlan {
+  readonly command: readonly string[];
+  readonly environmentVariablesToRemove: readonly string[];
+}
+
 export interface HarnessMcpRuntimeIntentRequest {
   readonly entries: readonly HarnessMcpAdapterEntry[];
   readonly managedServerNames: readonly string[];
@@ -344,7 +349,7 @@ export interface HarnessMcpAdapterModule {
   readonly describeMcpRuntimeIntentVerification: (
     request: HarnessMcpRuntimeIntentRequest,
   ) => HarnessMcpCapabilityProbe;
-  readonly buildMcpRuntimeCommand: (request: HarnessMcpRuntimeRequest) => readonly string[];
+  readonly buildMcpRuntimePlan: (request: HarnessMcpRuntimeRequest) => HarnessMcpRuntimePlan;
   readonly buildMcpSnapshotRestorePlan: (
     request: HarnessMcpSnapshotRestoreRequest,
   ) => HarnessMcpSnapshotRestorePlan;

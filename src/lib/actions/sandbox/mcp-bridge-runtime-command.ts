@@ -5,11 +5,16 @@ import type { AgentMcpAdapter } from "../../agent/defs";
 import { shellQuote } from "../../core/shell-quote";
 import { McpBridgeError } from "./mcp-bridge-contracts";
 import { requireSandboxHarnessPackage } from "./mcp-bridge-state";
-import { buildInstalledMcpRuntimeCommand } from "./mcp-bridge/package-command";
+import { buildInstalledMcpRuntimePlan } from "./mcp-bridge/package-command";
 
 export interface McpRuntimePackageContext {
   readonly sandboxName: string;
   readonly agentName: string;
+}
+
+export interface McpWrappedRuntimePlan {
+  readonly command: string;
+  readonly environmentVariablesToRemove: readonly string[];
 }
 
 /** Quote one argument for an MCP bridge-owned shell command. */
@@ -37,11 +42,6 @@ export const MCP_RUNTIME_SANITIZED_ENV_VARS = [
   "OPENSSL_CONF_INCLUDE",
   "OPENSSL_ENGINES",
   "OPENSSL_MODULES",
-  "OPENCLAW_GATEWAY_URL",
-  "OPENCLAW_GATEWAY_PORT",
-  "OPENCLAW_GATEWAY_TOKEN",
-  "OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
-  "NEMOCLAW_OPENCLAW_ALLOW_INSECURE_PRIVATE_WS",
   "PYTHONHOME",
   "PYTHONINSPECT",
   "PYTHONPATH",
@@ -49,6 +49,18 @@ export const MCP_RUNTIME_SANITIZED_ENV_VARS = [
   "PYTHONUSERBASE",
   "SSLKEYLOGFILE",
 ] as const;
+
+/** Combine universal process hardening with package-owned runtime cleanup. */
+export function collectMcpRuntimeEnvironmentVariablesToRemove(
+  ...runtimePlans: readonly McpWrappedRuntimePlan[]
+): readonly string[] {
+  return [
+    ...new Set([
+      ...MCP_RUNTIME_SANITIZED_ENV_VARS,
+      ...runtimePlans.flatMap((plan) => plan.environmentVariablesToRemove),
+    ]),
+  ];
+}
 
 /**
  * OpenShell binds generated MCP policies to the configured adapter executable
@@ -59,7 +71,7 @@ export function wrapMcpRuntimeCommand(
   adapter: AgentMcpAdapter,
   command: readonly string[],
   packageContext?: McpRuntimePackageContext,
-): string {
+): McpWrappedRuntimePlan {
   if (!packageContext) {
     throw new McpBridgeError(
       "Managed MCP runtime commands require reconciled harness package authority. Re-run the NemoClaw installer to install and reconcile the sandbox's harness package, then retry.",
@@ -68,16 +80,19 @@ export function wrapMcpRuntimeCommand(
     );
   }
   requireSandboxHarnessPackage(packageContext.sandboxName);
-  const installedCommand = buildInstalledMcpRuntimeCommand(
+  const installedPlan = buildInstalledMcpRuntimePlan(
     packageContext.sandboxName,
     adapter,
     packageContext.agentName,
     command,
   );
-  if (installedCommand === null) {
+  if (installedPlan === null) {
     throw new McpBridgeError(
       `Installed MCP adapter '${adapter}' for sandbox '${packageContext.sandboxName}' is unavailable.`,
     );
   }
-  return installedCommand.map(shellQuote).join(" ");
+  return {
+    command: installedPlan.command.map(shellQuote).join(" "),
+    environmentVariablesToRemove: installedPlan.environmentVariablesToRemove,
+  };
 }

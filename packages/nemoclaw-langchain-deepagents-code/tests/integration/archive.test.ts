@@ -189,7 +189,10 @@ describe("published LangChain Deep Agents Code package", () => {
         failOnMismatch: boolean;
         configDirectory: string | null;
       }): string;
-      buildMcpRuntimeCommand(request: { command: string[] }): string[];
+      buildMcpRuntimePlan(request: { command: string[] }): {
+        command: string[];
+        environmentVariablesToRemove: string[];
+      };
       describeMcpMutationCapability(request: { sandboxName: string }): {
         kind: string;
         command: string;
@@ -246,9 +249,10 @@ describe("published LangChain Deep Agents Code package", () => {
         managedServerNames: ["example"],
       }),
     ).toEqual({ kind: "not-required" });
-    expect(mcp.buildMcpRuntimeCommand({ command: ["python3", "probe.py"] })).toEqual(
+    expect(mcp.buildMcpRuntimePlan({ command: ["python3", "probe.py"] }).command).toEqual(
       expect.arrayContaining(["/opt/venv/bin/python3", "-I", "-c", "probe.py"]),
     );
+    expect(mcp.buildMcpRuntimePlan({ command: ["true"] }).environmentVariablesToRemove).toEqual([]);
     expect(mcp.getMutationCapability("sandbox")).toMatchObject({
       command: "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability",
       marker: "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2",

@@ -895,10 +895,13 @@ function describeMcpRuntimeIntentVerification() {
   return { kind: "not-required" };
 }
 
-function buildMcpRuntimeCommand(request) {
+function buildMcpRuntimePlan(request) {
   const runner =
     "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
-  return ["/opt/venv/bin/python3", "-I", "-c", runner, ...request.command];
+  return {
+    command: ["/opt/venv/bin/python3", "-I", "-c", runner, ...request.command],
+    environmentVariablesToRemove: [],
+  };
 }
 
 module.exports = {
@@ -916,7 +919,7 @@ module.exports = {
   buildMcpRegistrationPlan,
   buildMcpRemovalCommand,
   buildMcpRemovalPlan,
-  buildMcpRuntimeCommand,
+  buildMcpRuntimePlan,
   buildMcpSnapshotRestorePlan,
   buildRegisterCommand,
   buildRemoveCommand,

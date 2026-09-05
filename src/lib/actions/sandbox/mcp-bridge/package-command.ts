@@ -8,6 +8,7 @@ import {
   type HarnessMcpCapabilityProbe,
   type HarnessMcpRegistrationPlan,
   type HarnessMcpRemovalPlan,
+  type HarnessMcpRuntimePlan,
   type HarnessMcpSnapshotRestorePlan,
 } from "../../../agent-runtime/host-module";
 import type { McpAttachedCredentialRevision } from "../mcp-bridge-provider-readiness";
@@ -198,16 +199,16 @@ export function describeInstalledMcpRuntimeIntentVerification(
   }
 }
 
-export function buildInstalledMcpRuntimeCommand(
+export function buildInstalledMcpRuntimePlan(
   sandboxName: string,
   adapter: AgentMcpAdapter,
   agentName: string,
   command: readonly string[],
-): readonly string[] | null {
+): HarnessMcpRuntimePlan | null {
   const installed = installedMcpAdapter(sandboxName, adapter, agentName);
   if (!installed) return null;
   try {
-    return installed.buildMcpRuntimeCommand({ command });
+    return installed.buildMcpRuntimePlan({ command });
   } catch (error) {
     throw new McpBridgeError(
       `Installed MCP adapter '${adapter}' could not build its runtime command: ${error instanceof Error ? error.message : String(error)}`,
