@@ -1,0 +1,11 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "packageId": "deepseek-harness",
+  "adapterId": "nvidia.nemoclaw.deepseek-harness",
+  "artifactRoot": "/sandbox/.deepseek-harness/fabric-artifacts",
+  "configPath": "/sandbox/.deepseek-harness/fabric.json",
+  "descriptorGlob": "/usr/local/share/nemoclaw/deepseek.fabric-adapter.json",
+  "descriptorPathPrefix": "/usr/local/share/nemoclaw",
+  "descriptorRunnerModule": "nemoclaw_deepseek_fabric.adapter",
+  "processMarkers": ["nemoclaw_deepseek_fabric.process", "deepseek-harness-sdk-runtime"]
+}
