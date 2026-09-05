@@ -42,3 +42,15 @@ npm run typecheck
 
 The composed test uses the sibling `packages/nemoclaw-fabric` checkout. Set
 `NEMOCLAW_FABRIC_RUNNER_PATH` when that generic runner lives elsewhere.
+
+With hosted-inference environment variables already set, run the complete
+install-to-destroy proof from the NemoClaw checkout:
+
+```bash
+npx tsx tools/e2e/fabric-package.mts run \
+  --contract packages/nemoclaw-deepseek-harness/tests/fixtures/live-contract.json
+```
+
+The same command accepts an absolute contract-fixture path from a package in a
+different checkout. The runner finds its own NemoClaw root, so the fixture—not a
+harness-specific core branch—selects the integration.

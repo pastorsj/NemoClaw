@@ -22,6 +22,12 @@ import {
   ONBOARD_RESUME_TARGET_TIMEOUT_MINUTES,
   ONBOARD_SINGLE_FINAL_HANDOFF_TARGET_TIMEOUT_MINUTES,
 } from "./onboard-timeout-contract.mts";
+import {
+  FABRIC_PACKAGE_LIVE_SELECTOR,
+  FABRIC_PACKAGE_LIVE_TEST_PATH,
+  fabricPackageJourneyEnvironment,
+  loadFabricPackageTarget,
+} from "./fabric-package.mts";
 import { normalizeE2eSelectorId } from "./selector-aliases.mts";
 
 export const E2E_EXECUTION_PROFILES = [
@@ -252,6 +258,46 @@ const nonInteractive = {
   NEMOCLAW_NON_INTERACTIVE: "1",
   NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
 } as const;
+
+interface FabricPackageTargetOptions {
+  readonly contractFixture: string;
+  readonly displayName: string;
+  readonly sandboxName: string;
+}
+
+function fabricPackageTarget(options: FabricPackageTargetOptions): E2eCatalogueTarget {
+  const packageTarget = loadFabricPackageTarget(options.contractFixture, {
+    sandboxName: options.sandboxName,
+  });
+  const contract = packageTarget.contract;
+  const id = `${contract.packageId}-fabric`;
+  return dockerOnlyTarget(id, {
+    displayName: options.displayName,
+    agentRuntime: contract.packageId as E2eAgentRuntime,
+    environmentOrInferenceEndpoint: "Ubuntu Docker; NVIDIA hosted inference",
+    profile: "nvidia-inference",
+    testFile: FABRIC_PACKAGE_LIVE_TEST_PATH,
+    selector: FABRIC_PACKAGE_LIVE_SELECTOR,
+    timeoutMinutes: 75,
+    installMode: "authenticated",
+    installNonInteractive: true,
+    restoreCli: true,
+    exposeCliBin: true,
+    compatibleApiKey: true,
+    owningPaths: [
+      `packages/nemoclaw-${contract.packageId}/`,
+      "packages/nemoclaw-fabric/",
+      options.contractFixture,
+      "test/e2e/live/public-fabric-turn.ts",
+      "test/e2e/fixtures/harness-package.ts",
+      "tools/e2e/fabric-contract.mts",
+      "tools/e2e/fabric-package.mts",
+    ],
+    environment: {
+      ...fabricPackageJourneyEnvironment(packageTarget, {}),
+    },
+  });
+}
 
 function isolatedGatewayEnvironment(port: number): Readonly<Record<string, string>> {
   if (!Number.isInteger(port) || port < 1024 || port > 65_535 || port === 8080) {
@@ -842,6 +888,16 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
       NEMOCLAW_SANDBOX_NAME: "e2e-full",
     },
   }),
+  fabricPackageTarget({
+    displayName: "Harness: runs DeepSeek through a package-owned Fabric lifecycle",
+    sandboxName: "e2e-deepseek",
+    contractFixture: "packages/nemoclaw-deepseek-harness/tests/fixtures/live-contract.json",
+  }),
+  fabricPackageTarget({
+    displayName: "Harness: runs Haystack through a package-owned Fabric lifecycle",
+    sandboxName: "e2e-haystack",
+    contractFixture: "packages/nemoclaw-haystack-agent/tests/fixtures/live-contract.json",
+  }),
   dockerOnlyTarget("gateway-guard-recovery", {
     displayName: "Gateway: restores the guard chain after recreation",
     agentRuntime: "openclaw",
@@ -1261,8 +1317,7 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
   }),
   ...GATEWAY_UPGRADE_TARGETS,
   dockerOnlyTarget("shields-retirement-upgrade", {
-    displayName:
-      "Upgrade: migrates a v0.0.115 Shields sandbox to the candidate image",
+    displayName: "Upgrade: migrates a v0.0.115 Shields sandbox to the candidate image",
     agentRuntime: "openclaw",
     environmentOrInferenceEndpoint:
       "x86-64 Ubuntu; pinned v0.0.115 install and candidate managed image; local compatible endpoint",
@@ -1285,8 +1340,7 @@ export const E2E_TARGET_CATALOGUE: readonly E2eCatalogueTarget[] = [
       ...nonInteractive,
       NEMOCLAW_AGENT: "openclaw",
       NEMOCLAW_OLD_NEMOCLAW_REF: "v0.0.115",
-      NEMOCLAW_OLD_NEMOCLAW_TAG_OBJECT:
-        "7503e700808655df1303ddc51888bb596c9afa34",
+      NEMOCLAW_OLD_NEMOCLAW_TAG_OBJECT: "7503e700808655df1303ddc51888bb596c9afa34",
       NEMOCLAW_OLD_NEMOCLAW_COMMIT: "324a886fd05b01f6756bae0371ea503c651fbd11",
       NEMOCLAW_OLD_INSTALLER_SHA256:
         "0ed77ba8cf176641bd3b22cfd89b4977b3d9a6f47b76da8b03bf4091a20d1251",

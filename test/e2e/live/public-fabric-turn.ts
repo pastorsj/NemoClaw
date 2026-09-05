@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from "node:crypto";
-import path from "node:path";
+
+import {
+  type FabricHarnessE2eContract,
+  validateFabricHarnessE2eContract,
+} from "../../../tools/e2e/fabric-contract.mts";
 
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
@@ -19,20 +23,12 @@ export type PublicFabricLifecyclePhase =
   | "after-inference-switch"
   | "after-onboard"
   | "after-rebuild"
+  | "after-sandbox-restart"
   | "after-shields-down"
   | "after-shields-up"
   | "before-gateway-restart";
 
-export interface PublicFabricHarnessContract {
-  readonly packageId: string;
-  readonly adapterId: string;
-  readonly artifactRoot: string;
-  readonly configPath: string;
-  readonly descriptorGlob: string;
-  readonly descriptorPathPrefix: string;
-  readonly descriptorRunnerModule: string;
-  readonly processMarkers?: readonly string[];
-}
+export type PublicFabricHarnessContract = FabricHarnessE2eContract;
 
 const PUBLIC_FABRIC_AGENT_CONTRACTS: Record<PublicFabricAgent, PublicFabricHarnessContract> = {
   hermes: {
@@ -56,14 +52,6 @@ const PUBLIC_FABRIC_AGENT_CONTRACTS: Record<PublicFabricAgent, PublicFabricHarne
     processMarkers: ["nemoclaw-fabric-", ".nemoclaw-openclaw-prompt-"],
   },
 };
-
-const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
-const ADAPTER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
-const PYTHON_MODULE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/u;
-const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-const CONTRACT_VALUE_MAX_BYTES = 512;
-const PROCESS_MARKER_LIMIT = 16;
-const PROCESS_MARKER_MAX_BYTES = 256;
 
 const CONFIG_PROBE_SCRIPT = String.raw`
 import grp
@@ -309,68 +297,39 @@ export type PublicFabricTurnOptions = PublicFabricTurnBaseOptions &
       }
   );
 
-function isBoundedSafeText(value: string, maxBytes = CONTRACT_VALUE_MAX_BYTES): boolean {
-  return (
-    value.length > 0 &&
-    Buffer.byteLength(value, "utf8") <= maxBytes &&
-    !UNSAFE_TEXT_PATTERN.test(value)
-  );
-}
-
-function isCanonicalAbsolutePath(value: string): boolean {
-  return (
-    isBoundedSafeText(value) &&
-    path.posix.isAbsolute(value) &&
-    path.posix.normalize(value) === value
-  );
-}
-
 function resolveFabricHarnessContract(options: PublicFabricTurnOptions): {
   readonly agent: string;
   readonly contract: PublicFabricHarnessContract;
 } {
   const provided = options.contract;
   const agent = provided?.packageId ?? options.agent ?? "";
-  const contract = provided ?? PUBLIC_FABRIC_AGENT_CONTRACTS[options.agent as PublicFabricAgent];
-  const markers = contract?.processMarkers ?? [];
-  const descriptorRelative = contract
-    ? contract.descriptorGlob.slice(contract.descriptorPathPrefix.length)
-    : "";
-  const descriptorName = contract
-    ? contract.descriptorGlob.slice(contract.descriptorGlob.lastIndexOf("/") + 1)
-    : "";
-  const invalid =
-    !contract ||
-    agent.length > 63 ||
-    !HARNESS_ID_PATTERN.test(agent) ||
+  const candidate = provided ?? PUBLIC_FABRIC_AGENT_CONTRACTS[options.agent as PublicFabricAgent];
+  if (
+    !candidate ||
     (provided !== undefined && options.agent !== undefined) ||
-    (provided !== undefined && Object.hasOwn(PUBLIC_FABRIC_AGENT_CONTRACTS, agent)) ||
-    !isBoundedSafeText(contract.adapterId, PROCESS_MARKER_MAX_BYTES) ||
-    !ADAPTER_ID_PATTERN.test(contract.adapterId) ||
-    !isCanonicalAbsolutePath(contract.artifactRoot) ||
-    !isCanonicalAbsolutePath(contract.configPath) ||
-    !isCanonicalAbsolutePath(contract.descriptorGlob) ||
-    !isCanonicalAbsolutePath(contract.descriptorPathPrefix) ||
-    !descriptorRelative.startsWith("/") ||
-    !isBoundedSafeText(descriptorName, PROCESS_MARKER_MAX_BYTES) ||
-    !isBoundedSafeText(contract.descriptorRunnerModule, PROCESS_MARKER_MAX_BYTES) ||
-    !PYTHON_MODULE_PATTERN.test(contract.descriptorRunnerModule) ||
-    markers.length > PROCESS_MARKER_LIMIT ||
-    markers.some((marker) => !isBoundedSafeText(marker, PROCESS_MARKER_MAX_BYTES));
-  if (invalid) throw new Error("public Fabric proof contract is invalid");
+    (provided !== undefined && Object.hasOwn(PUBLIC_FABRIC_AGENT_CONTRACTS, agent))
+  ) {
+    throw new Error("public Fabric proof contract is invalid");
+  }
+  let contract: FabricHarnessE2eContract;
+  try {
+    contract = validateFabricHarnessE2eContract({
+      packageId: candidate.packageId,
+      adapterId: candidate.adapterId,
+      artifactRoot: candidate.artifactRoot,
+      configPath: candidate.configPath,
+      descriptorGlob: candidate.descriptorGlob,
+      descriptorPathPrefix: candidate.descriptorPathPrefix,
+      descriptorRunnerModule: candidate.descriptorRunnerModule,
+      ...(candidate.processMarkers ? { processMarkers: candidate.processMarkers } : {}),
+    });
+  } catch {
+    throw new Error("public Fabric proof contract is invalid");
+  }
 
   return Object.freeze({
     agent,
-    contract: Object.freeze({
-      packageId: agent,
-      adapterId: contract.adapterId,
-      artifactRoot: contract.artifactRoot,
-      configPath: contract.configPath,
-      descriptorGlob: contract.descriptorGlob,
-      descriptorPathPrefix: contract.descriptorPathPrefix,
-      descriptorRunnerModule: contract.descriptorRunnerModule,
-      ...(markers.length > 0 ? { processMarkers: Object.freeze([...markers]) } : {}),
-    }),
+    contract,
   });
 }
 

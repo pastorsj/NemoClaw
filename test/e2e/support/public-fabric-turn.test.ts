@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import type { FabricHarnessE2eContract } from "../../../tools/e2e/fabric-contract.mts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
@@ -58,7 +59,7 @@ const FUTURE_CONTRACT = {
   descriptorPathPrefix: "/usr/local/share/nemoclaw",
   descriptorRunnerModule: "future_harness_fabric.adapter",
   processMarkers: ["future_harness_headless"],
-} as const satisfies PublicFabricHarnessContract & { readonly descriptorPath: string };
+} as const satisfies FabricHarnessE2eContract & { readonly descriptorPath: string };
 
 type TestFabricContract = PublicFabricHarnessContract & { readonly descriptorPath: string };
 

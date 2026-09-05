@@ -4,10 +4,10 @@
 import { describe, expect, it } from "vitest";
 
 import { listBundledAgentRuntimeSources } from "../../../../scripts/build-harnesses.mts";
-import type { PublicFabricHarnessContract } from "../../../../test/e2e/live/public-fabric-turn.ts";
+import type { FabricHarnessE2eContract } from "../../../../tools/e2e/fabric-contract.mts";
 import liveContractFixture from "../fixtures/live-contract.json";
 
-const liveContract: PublicFabricHarnessContract = liveContractFixture;
+const liveContract: FabricHarnessE2eContract = liveContractFixture;
 
 describe("Haystack Agent package discovery", () => {
   it("discovers the unknown package ID without a core catalogue branch", () => {

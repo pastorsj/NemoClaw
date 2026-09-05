@@ -10,7 +10,7 @@ import YAML from "yaml";
 
 import { listBundledAgentRuntimeSources } from "../../../../scripts/build-harnesses.mts";
 import { prepareInitialSandboxCreatePolicy } from "../../../../src/lib/onboard/initial-policy.ts";
-import type { PublicFabricHarnessContract } from "../../../../test/e2e/live/public-fabric-turn.ts";
+import type { FabricHarnessE2eContract } from "../../../../tools/e2e/fabric-contract.mts";
 import deepSeekFabricE2eContract from "../fixtures/live-contract.json";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
@@ -43,7 +43,7 @@ describe("DeepSeek Harness package discovery", () => {
   });
 
   it("fits the existing generic live proof through its explicit contract path", () => {
-    const contract: PublicFabricHarnessContract = deepSeekFabricE2eContract;
+    const contract: FabricHarnessE2eContract = deepSeekFabricE2eContract;
     expect(contract).toMatchObject({
       packageId: "deepseek-harness",
       adapterId: "nvidia.nemoclaw.deepseek-harness",

@@ -6,6 +6,8 @@ export const E2E_AGENT_RUNTIMES = [
   "hermes",
   "langchain-deepagents-code",
   "pi",
+  "deepseek-harness",
+  "haystack-agent",
   "none",
   "openclaw + hermes",
   "openclaw + langchain-deepagents-code",

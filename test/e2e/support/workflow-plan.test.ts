@@ -313,6 +313,8 @@ describe("E2E workflow plan", () => {
       ]).map(({ id }) => id),
     ).toEqual([
       "full-e2e",
+      "deepseek-harness-fabric",
+      "haystack-agent-fabric",
       "hermes-inference-switch",
       "openclaw-inference-switch",
       "pi-agent-qualification-amd64",

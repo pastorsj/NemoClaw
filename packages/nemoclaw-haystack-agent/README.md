@@ -44,3 +44,14 @@ npm run test:fabric:composed
 ```
 
 The successful inference edge still requires a real NemoClaw-managed route. The package-local live fixture in `tests/fixtures/live-contract.json` supplies the generic E2E runner fields without adding the package ID to a core switch.
+
+With hosted-inference environment variables already set, run the complete
+install-to-destroy proof from the NemoClaw checkout:
+
+```bash
+npx tsx tools/e2e/fabric-package.mts run \
+  --contract packages/nemoclaw-haystack-agent/tests/fixtures/live-contract.json
+```
+
+An external package can pass an absolute fixture path to this same command. The
+runner resolves the NemoClaw checkout from its own module location.
