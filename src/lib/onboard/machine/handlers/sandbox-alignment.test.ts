@@ -19,5 +19,5 @@ it("keeps sandbox creation arguments aligned when verified effects are absent", 
   const createCall = (calls.createSandbox.mock.calls[0] ?? []) as unknown[];
   expect(createCall).toHaveLength(17);
   expect(createCall[15]).toMatchObject({ recreate: false });
-  expect(createCall[16]).toBeNull();
+  expect(createCall[16]).toBeUndefined();
 });
