@@ -5,6 +5,7 @@ import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-co
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 import {
+  bindPackageManagedImageContract,
   isCandidateManagedImageAgent,
   isManagedImageAgent,
   isManagedImagePlatform,
@@ -13,9 +14,9 @@ import {
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
+  type ManagedImageAgent,
   type ManagedImagePlatform,
   type PackageManagedImageContract,
-  parsePackageManagedImageContract,
   parseStockManagedImageContract,
   qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
@@ -190,7 +191,7 @@ export function resolveSandboxWorkloadSource(
   const agentName = options.agentName;
   const stockManagedAgent = isManagedImageAgent(agentName);
   const receiptBackedPackage =
-    !stockManagedAgent && options.harnessPackage != null && options.managedImage != null;
+    options.harnessPackage != null && options.managedImage != null;
   if (!stockManagedAgent && !receiptBackedPackage) {
     return unavailableSource(
       options,
@@ -199,7 +200,7 @@ export function resolveSandboxWorkloadSource(
     );
   }
   const managedImage =
-    stockManagedAgent && options.managedImage === undefined
+    !receiptBackedPackage && stockManagedAgent && options.managedImage === undefined
       ? qualifiedManagedImageDeclaration(agentName)
       : (options.managedImage ?? null);
   if (managedImage === null) {
@@ -210,6 +211,7 @@ export function resolveSandboxWorkloadSource(
     );
   }
   if (
+    !receiptBackedPackage &&
     stockManagedAgent &&
     !isShippedManagedImageAgent(agentName) &&
     options.candidateAgentsEnabled !== true
@@ -243,11 +245,16 @@ export function resolveSandboxWorkloadSource(
   }
 
   try {
-    const contract = stockManagedAgent
-      ? parseStockManagedImageContract(candidate, agentName, managedImage, expectedPlatform)
-      : parsePackageManagedImageContract(
+    const contract = receiptBackedPackage
+      ? bindPackageManagedImageContract(
           candidate,
           options.harnessPackage!,
+          managedImage,
+          expectedPlatform,
+        )
+      : parseStockManagedImageContract(
+          candidate,
+          agentName as ManagedImageAgent,
           managedImage,
           expectedPlatform,
         );

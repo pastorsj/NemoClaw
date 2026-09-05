@@ -353,6 +353,41 @@ export function parsePackageManagedImageContract<TAgent extends string>(
 }
 
 /**
+ * Bind trusted image-publication evidence to the exact package receipt that
+ * selected it. Public catalogues are reusable and therefore cannot contain an
+ * install-specific content digest; an already-bound package contract is also
+ * accepted and must agree exactly.
+ */
+export function bindPackageManagedImageContract<TAgent extends string>(
+  value: unknown,
+  expectedHarnessPackage: HarnessPackageIdentity & { readonly id: TAgent },
+  declaration: HarnessManagedImageDeclaration,
+  expectedPlatform?: ManagedImagePlatform,
+): PackageManagedImageContract<TAgent> {
+  const contract = requireRecord(value, "contract");
+  if (Object.hasOwn(contract, "harnessPackage")) {
+    return parsePackageManagedImageContract(
+      contract,
+      expectedHarnessPackage,
+      declaration,
+      expectedPlatform,
+    );
+  }
+  const harnessPackage = requireHarnessPackageIdentity(
+    expectedHarnessPackage,
+    "expected harness package",
+  );
+  const parsed = parseDeclaredManagedImageContract(
+    contract,
+    harnessPackage.id as TAgent,
+    declaration,
+    MANAGED_IMAGE_CONTRACT_KEYS,
+    expectedPlatform,
+  );
+  return { ...parsed, harnessPackage };
+}
+
+/**
  * Validate legacy product-qualified evidence for NemoClaw's closed stock set.
  * Package integrations must use parsePackageManagedImageContract instead.
  */

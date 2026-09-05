@@ -98,6 +98,20 @@ function futureHarnessContract(
   };
 }
 
+function packageContractForKnownAgent(
+  agent: ManagedImageAgent,
+  harnessPackage: HarnessPackageIdentity,
+  declaration: HarnessManagedImageDeclaration,
+): PackageManagedImageContract {
+  const legacy = contractFor(agent);
+  return {
+    ...legacy,
+    image: declaration.repository,
+    reference: `${declaration.repository}@${legacy.digest}`,
+    harnessPackage,
+  };
+}
+
 function managedRuntime(driverName: string): SandboxWorkloadRuntimeCapabilities {
   return {
     driverName,
@@ -237,6 +251,42 @@ describe("sandbox workload source resolution", () => {
       contract,
     });
   });
+
+  it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
+    "lets receipt authority select the package contract for known agent %s",
+    (agent) => {
+      const harnessPackage = {
+        kind: "agent-runtime",
+        id: agent,
+        packageVersion: "1.2.3",
+        contentDigest: "9e".repeat(32),
+      } as const satisfies HarnessPackageIdentity;
+      const declaration = {
+        repository: `registry.example/team/${agent}`,
+        architectures: [MANAGED_IMAGE_PLATFORM],
+        runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+        startup_profile_contract_version: 1,
+        capability_contract_version: 1,
+      } as const satisfies HarnessManagedImageDeclaration;
+      const contract = packageContractForKnownAgent(agent, harnessPackage, declaration);
+
+      const source = resolveSandboxWorkloadSource({
+        agentName: agent,
+        harnessPackage,
+        managedImage: declaration,
+        legacyDockerfilePath: `/workspace/${agent}/Dockerfile`,
+        runtime: managedRuntime("podman"),
+        catalog: { [agent]: contract },
+        policy: "require-managed",
+      });
+
+      expect(source).toEqual({
+        kind: "managed-image",
+        reference: contract.reference,
+        contract,
+      });
+    },
+  );
 
   it("does not admit synthetic package qualification without its exact receipt", () => {
     const contract = futureHarnessContract();

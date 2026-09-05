@@ -380,6 +380,41 @@ describe("sandbox workload preparation", () => {
     });
   });
 
+  it("binds reusable stock publication evidence to an installed package receipt", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "9a".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+    const managedImage = {
+      repository: MANAGED_IMAGE_REPOSITORIES.openclaw,
+      architectures: [MANAGED_IMAGE_PLATFORM],
+      runtime_identity: { uid: 998, gid: 998, workdir: "/sandbox" },
+      workspace: { owner: "runtime", mode: "0755" },
+      state_root: { mount_target: "/sandbox/.openclaw", mode: "2770" },
+      startup_profile_contract_version: 1,
+      capability_contract_version: 1,
+    } as const satisfies HarnessManagedImageDeclaration;
+
+    const prepared = await prepareSandboxWorkloadSource({
+      ...input("openclaw"),
+      harnessPackage,
+      managedImage,
+      catalog: CATALOG,
+      expectedCatalogRevision: REVISION,
+    });
+
+    expect(prepared).toMatchObject({
+      source: {
+        kind: "managed-image",
+        contract: { agent: "openclaw", harnessPackage },
+      },
+      release: RELEASE,
+      fallbackDiagnostic: null,
+    });
+  });
+
   it("fails synthetic package preparation without its exact receipt", async () => {
     const contract = futureHarnessContract();
 

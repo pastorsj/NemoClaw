@@ -410,8 +410,9 @@ export async function prepareSandboxWorkloadSource(
   const policy = input.policy ?? input.runtime.managedImageSelectionPolicy;
   const stockManagedAgent = isManagedImageAgent(input.agentName);
   const receiptBackedPackageSelection =
-    !stockManagedAgent && input.harnessPackage != null && input.managedImage != null;
-  const acceptedCandidateContract = isCandidateManagedImageAgent(input.agentName)
+    input.harnessPackage != null && input.managedImage != null;
+  const acceptedCandidateContract =
+    !receiptBackedPackageSelection && isCandidateManagedImageAgent(input.agentName)
     ? (input.acceptedCandidateContract ?? null)
     : null;
   const candidateSelection = acceptedCandidateContract !== null;
@@ -419,7 +420,10 @@ export async function prepareSandboxWorkloadSource(
     input.customDockerfilePath != null ||
     input.managedImage === null ||
     (!stockManagedAgent && !receiptBackedPackageSelection) ||
-    (stockManagedAgent && !isShippedManagedImageAgent(input.agentName) && !candidateSelection) ||
+    (!receiptBackedPackageSelection &&
+      stockManagedAgent &&
+      !isShippedManagedImageAgent(input.agentName) &&
+      !candidateSelection) ||
     managedImageRuntimeSupportError(input.runtime) !== null;
   if (cannotSelectManaged) {
     return {
