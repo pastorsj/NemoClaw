@@ -14,6 +14,7 @@ import {
   readFabricPackageE2eTarget,
   validateFabricHarnessE2eContract,
   validateFabricPackageId,
+  validateFabricPackageSandboxName,
 } from "./fabric-contract.mts";
 
 export { fabricPackageE2eEnvironment, hasFabricPackageE2eTarget, readFabricPackageE2eTarget };
@@ -51,21 +52,13 @@ export function readFabricHarnessE2eFixture(
   return validateFabricHarnessE2eContract(value);
 }
 
-function validateSandboxName(value: string): string {
-  try {
-    validateFabricPackageId(value);
-  } catch {
-    throw new Error("Fabric package E2E sandbox name must be a canonical identifier");
-  }
-  return value;
-}
-
 export function defaultFabricPackageSandboxName(packageId: string): string {
   validateFabricPackageId(packageId);
   const candidate = `e2e-${packageId}`;
-  if (candidate.length <= 63) return candidate;
+  if (candidate.length <= 19) return candidate;
   const digest = createHash("sha256").update(packageId).digest("hex").slice(0, 10);
-  return `${candidate.slice(0, 52)}-${digest}`;
+  const prefix = candidate.slice(0, 10).replace(/-+$/u, "");
+  return `${prefix}-${digest.slice(0, 19 - prefix.length - 1)}`;
 }
 
 /** Load one reusable target from package-owned contract data and run-owned state. */
@@ -79,7 +72,7 @@ export function loadFabricPackageTarget(
   );
   return Object.freeze({
     contract,
-    sandboxName: validateSandboxName(
+    sandboxName: validateFabricPackageSandboxName(
       options.sandboxName ?? defaultFabricPackageSandboxName(contract.packageId),
     ),
   });

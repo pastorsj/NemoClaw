@@ -148,7 +148,7 @@ describe("generic Fabric package E2E", () => {
     const secondGateway = fabricPackageGatewayEnvironment(longPackageId);
 
     expect(sandboxName).toMatch(/^e2e-[a-z0-9-]+$/u);
-    expect(sandboxName.length).toBeLessThanOrEqual(63);
+    expect(sandboxName.length).toBeLessThanOrEqual(19);
     expect(firstGateway).toEqual(secondGateway);
     expect(Number(firstGateway.NEMOCLAW_GATEWAY_PORT)).toBeGreaterThanOrEqual(20_000);
     expect(Number(firstGateway.NEMOCLAW_GATEWAY_PORT)).toBeLessThan(40_000);

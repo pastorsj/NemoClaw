@@ -108,10 +108,8 @@ function parseProcessMarkers(source: string): readonly string[] {
   return validateProcessMarkers(value);
 }
 
-function validateSandboxName(value: string): string {
-  try {
-    validateFabricPackageId(value);
-  } catch {
+export function validateFabricPackageSandboxName(value: string): string {
+  if (value.length > 19 || !HARNESS_ID_PATTERN.test(value)) {
     throw new Error("Fabric package E2E sandbox name must be a canonical identifier");
   }
   return value;
@@ -195,7 +193,7 @@ export function readFabricPackageE2eTarget(
   });
   return Object.freeze({
     contract,
-    sandboxName: validateSandboxName(
+    sandboxName: validateFabricPackageSandboxName(
       requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.sandboxName),
     ),
   });
@@ -215,6 +213,6 @@ export function fabricPackageE2eEnvironment(
     [TARGET_ENVIRONMENT.descriptorPathPrefix]: contract.descriptorPathPrefix,
     [TARGET_ENVIRONMENT.descriptorRunnerModule]: contract.descriptorRunnerModule,
     [TARGET_ENVIRONMENT.processMarkers]: JSON.stringify(contract.processMarkers ?? []),
-    [TARGET_ENVIRONMENT.sandboxName]: validateSandboxName(target.sandboxName),
+    [TARGET_ENVIRONMENT.sandboxName]: validateFabricPackageSandboxName(target.sandboxName),
   });
 }
