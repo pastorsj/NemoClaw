@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   findLayerImportBoundaryViolations,
   findManagedRuntimeBoundaryViolations,
+  parseReceiptHarnessDecisionBaseline,
 } from "../../scripts/checks/layer-import-boundaries.mts";
 
 const REPO_ROOT = path.join(import.meta.dirname, "../..");
@@ -40,6 +41,14 @@ function scanFixture(fixture: string, source: string, packagesRoot?: string) {
   } finally {
     fs.rmSync(fixture, { force: true });
   }
+}
+
+function harnessDebtSource(entries: readonly unknown[]): string {
+  return JSON.stringify({
+    description: "Test receipt-backed harness debt.",
+    match: ["file", "function", "decisionKind", "packageId", "occurrences"],
+    entries,
+  });
 }
 
 describe("CLI layer import boundaries (#6245)", () => {
@@ -194,6 +203,131 @@ describe("CLI layer import boundaries (#6245)", () => {
     ]);
   });
 
+  it("blocks harness decisions through transitive package-authority imports", () => {
+    const authorityBridge = fixturePath("src/lib", "receipt-authority-bridge");
+    const featureBridge = fixturePath("src/lib", "receipt-feature-bridge");
+    const consumer = fixturePath("src/lib", "receipt-indirect-consumer");
+    const authority = path
+      .relative(
+        path.dirname(authorityBridge),
+        path.join(REPO_ROOT, "src/lib/onboard/package/package-authority"),
+      )
+      .split(path.sep)
+      .join("/");
+    const authoritySpecifier = authority.startsWith(".") ? authority : `./${authority}`;
+    const featureSpecifier = `./${path.basename(featureBridge, ".ts")}`;
+    const bridgeSpecifier = `./${path.basename(authorityBridge, ".ts")}`;
+    try {
+      fs.writeFileSync(
+        authorityBridge,
+        `export { resolvePackageBackedSandboxAgent } from ${JSON.stringify(authoritySpecifier)};\n`,
+      );
+      fs.writeFileSync(
+        featureBridge,
+        `export { resolvePackageBackedSandboxAgent } from ${JSON.stringify(bridgeSpecifier)};\n`,
+      );
+      fs.writeFileSync(
+        consumer,
+        `import { resolvePackageBackedSandboxAgent } from ${JSON.stringify(featureSpecifier)};\n` +
+          `export function decide(entry: Parameters<typeof resolvePackageBackedSandboxAgent>[0]) {\n` +
+          `  return resolvePackageBackedSandboxAgent(entry).definition.name === "pi";\n` +
+          `}\n`,
+      );
+
+      expect(findLayerImportBoundaryViolations(consumer)).toEqual([
+        expect.objectContaining({
+          file: path.relative(REPO_ROOT, consumer),
+          rule: "receipt-backed-harness-neutrality",
+          detail: expect.stringContaining("package ID 'pi' (equality decision in 'decide')"),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(consumer, { force: true });
+      fs.rmSync(featureBridge, { force: true });
+      fs.rmSync(authorityBridge, { force: true });
+    }
+  });
+
+  it("allows comments and diagnostics through transitive package-authority imports", () => {
+    const authorityBridge = fixturePath("src/lib", "receipt-diagnostic-bridge");
+    const consumer = fixturePath("src/lib", "receipt-indirect-diagnostic");
+    const authority = path
+      .relative(
+        path.dirname(authorityBridge),
+        path.join(REPO_ROOT, "src/lib/sandbox/command-agent"),
+      )
+      .split(path.sep)
+      .join("/");
+    const authoritySpecifier = authority.startsWith(".") ? authority : `./${authority}`;
+    const bridgeSpecifier = `./${path.basename(authorityBridge, ".ts")}`;
+    try {
+      fs.writeFileSync(
+        authorityBridge,
+        `export { resolveSandboxCommandAgent } from ${JSON.stringify(authoritySpecifier)};\n`,
+      );
+      fs.writeFileSync(
+        consumer,
+        `import { resolveSandboxCommandAgent } from ${JSON.stringify(bridgeSpecifier)};\n` +
+          `// openclaw is named only to explain a historical migration.\n` +
+          `export const diagnostic = "openclaw is a legacy example";\n` +
+          `export { resolveSandboxCommandAgent };\n`,
+      );
+
+      expect(findLayerImportBoundaryViolations(consumer)).toEqual([]);
+    } finally {
+      fs.rmSync(consumer, { force: true });
+      fs.rmSync(authorityBridge, { force: true });
+    }
+  });
+
+  it("rejects a malformed harness debt occurrence limit", () => {
+    expect(() =>
+      parseReceiptHarnessDecisionBaseline(
+        harnessDebtSource([["src/lib/example.ts", "decide", "equality", "openclaw", 0]]),
+        "test harness debt",
+      ),
+    ).toThrow("test harness debt entry 1 has an invalid occurrence count");
+  });
+
+  it("reports a stale harness debt occurrence limit", () => {
+    const fixture = fixturePath("src/lib", "receipt-stale-debt");
+    const authority = path
+      .relative(path.dirname(fixture), path.join(REPO_ROOT, "src/lib/sandbox/command-agent"))
+      .split(path.sep)
+      .join("/");
+    const specifier = authority.startsWith(".") ? authority : `./${authority}`;
+    const repoPath = path.relative(REPO_ROOT, fixture).split(path.sep).join("/");
+    const baseline = parseReceiptHarnessDecisionBaseline(
+      harnessDebtSource([[repoPath, "decide", "equality", "pi", 2]]),
+    );
+    try {
+      fs.writeFileSync(
+        fixture,
+        `import { resolveSandboxCommandAgent } from ${JSON.stringify(specifier)};\n` +
+          `export function decide(entry: Parameters<typeof resolveSandboxCommandAgent>[0]) {\n` +
+          `  return resolveSandboxCommandAgent(entry).name === "pi";\n` +
+          `}\n`,
+      );
+
+      expect(
+        findLayerImportBoundaryViolations(fixture, undefined, {
+          receiptHarnessDecisionBaseline: baseline,
+          verifyReceiptHarnessDecisionBaseline: true,
+        }),
+      ).toEqual([
+        expect.objectContaining({
+          file: "scripts/checks/harness-debt.json",
+          rule: "receipt-backed-harness-debt",
+          detail: expect.stringContaining(
+            `package ID 'pi' expects 2 equality decision occurrence(s) in 'decide' at ${repoPath}, but found 1`,
+          ),
+        }),
+      ]);
+    } finally {
+      fs.rmSync(fixture, { force: true });
+    }
+  });
+
   it("blocks inline harness membership decisions after package authority is resolved", () => {
     const fixture = fixturePath("src/lib", "receipt-harness-membership");
     const authority = path
@@ -220,6 +354,15 @@ describe("CLI layer import boundaries (#6245)", () => {
       scanFixture(
         fixturePath("src/lib", "catalogue-harness-ids"),
         'export const qualifiedHarnesses = new Set(["openclaw", "pi"]);\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it("allows exact harness decisions in legacy code without package authority", () => {
+    expect(
+      scanFixture(
+        fixturePath("src/lib/state", "legacy-harness-decision"),
+        'export function decodeLegacyAgent(agent: string) {\n  return agent === "openclaw";\n}\n',
       ),
     ).toEqual([]);
   });

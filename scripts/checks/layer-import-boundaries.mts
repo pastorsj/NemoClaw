@@ -85,19 +85,113 @@ const PACKAGE_AUTHORITY_MODULES = new Set([
   "src/lib/onboard/package/package-authority.ts",
   "src/lib/sandbox/command-agent.ts",
 ]);
-// These modules explicitly decode records written before package receipts existed. Keep the
-// compatibility ownership narrow; catalogue, qualification, and display modules do not need an
-// exception because the receipt-backed rule only applies to package-authority consumers.
-const RECEIPT_HARNESS_ID_COMPATIBILITY_MODULES = new Set([
-  // Existing passthrough translation retains native OpenClaw argv compatibility until its package
-  // adapter migration; this is the named legacy decoder, not a general actions-layer exception.
-  "src/lib/actions/sandbox/agent/passthrough.ts",
-  "src/lib/agent-runtime/package/identity.ts",
-  "src/lib/onboard/package/package-authority.ts",
-  // Sandbox creation owns product qualification and migration from pre-receipt onboarding rows.
-  "src/lib/onboard/sandbox-create/orchestration.ts",
-  "src/lib/state/harness-migration.ts",
+
+type ReceiptHarnessDecisionKind = "equality" | "membership" | "switch-case";
+
+type LayerImportBoundaryOptions = {
+  receiptHarnessDecisionBaseline?: ReadonlyMap<string, number>;
+  verifyReceiptHarnessDecisionBaseline?: boolean;
+};
+
+function receiptDecisionKey(
+  file: string,
+  owner: string,
+  kind: ReceiptHarnessDecisionKind,
+  packageId: string,
+): string {
+  return `${file}\0${owner}\0${kind}\0${packageId}`;
+}
+
+// The data file keeps audited compatibility debt separate from the enforcement logic.
+const RECEIPT_HARNESS_DECISION_KINDS = new Set<ReceiptHarnessDecisionKind>([
+  "equality",
+  "membership",
+  "switch-case",
 ]);
+const HARNESS_DEBT_MATCH = [
+  "file",
+  "function",
+  "decisionKind",
+  "packageId",
+  "occurrences",
+] as const;
+const HARNESS_DEBT_PATH = path.join(REPO_ROOT, "scripts/checks/harness-debt.json");
+
+export function parseReceiptHarnessDecisionBaseline(
+  source: string,
+  sourceName = "harness debt",
+): ReadonlyMap<string, number> {
+  let value: unknown;
+  try {
+    value = JSON.parse(source);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`${sourceName} is not valid JSON: ${detail}`);
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${sourceName} must contain a JSON object`);
+  }
+
+  const record = value as Record<string, unknown>;
+  if (typeof record.description !== "string" || !record.description.trim()) {
+    throw new Error(`${sourceName} must describe the audited debt`);
+  }
+  if (
+    !Array.isArray(record.match) ||
+    record.match.length !== HARNESS_DEBT_MATCH.length ||
+    record.match.some((field, index) => field !== HARNESS_DEBT_MATCH[index])
+  ) {
+    throw new Error(`${sourceName} match must be ${JSON.stringify(HARNESS_DEBT_MATCH)}`);
+  }
+  if (!Array.isArray(record.entries)) {
+    throw new Error(`${sourceName} entries must be an array`);
+  }
+
+  const baseline = new Map<string, number>();
+  record.entries.forEach((entry, index) => {
+    const label = `${sourceName} entry ${String(index + 1)}`;
+    if (!Array.isArray(entry) || entry.length !== HARNESS_DEBT_MATCH.length) {
+      throw new Error(`${label} must contain five fields`);
+    }
+    const [file, owner, kind, packageId, count] = entry;
+    if (
+      typeof file !== "string" ||
+      !file.startsWith("src/") ||
+      path.posix.normalize(file) !== file ||
+      !/\.(?:cts|mts|ts|tsx)$/u.test(file) ||
+      file.includes("\0")
+    ) {
+      throw new Error(`${label} has an invalid source file`);
+    }
+    if (typeof owner !== "string" || !owner.trim() || owner.includes("\0")) {
+      throw new Error(`${label} has an invalid owning function`);
+    }
+    if (
+      typeof kind !== "string" ||
+      !RECEIPT_HARNESS_DECISION_KINDS.has(kind as ReceiptHarnessDecisionKind)
+    ) {
+      throw new Error(`${label} has an invalid decision kind`);
+    }
+    if (typeof packageId !== "string" || !packageId.trim() || packageId.includes("\0")) {
+      throw new Error(`${label} has an invalid package ID`);
+    }
+    if (!Number.isSafeInteger(count) || (count as number) < 1) {
+      throw new Error(`${label} has an invalid occurrence count`);
+    }
+
+    const key = receiptDecisionKey(file, owner, kind as ReceiptHarnessDecisionKind, packageId);
+    if (baseline.has(key)) {
+      throw new Error(`${label} duplicates an earlier decision`);
+    }
+    baseline.set(key, count as number);
+  });
+  return baseline;
+}
+
+const RECEIPT_HARNESS_DECISION_BASELINE = parseReceiptHarnessDecisionBaseline(
+  readFileSync(HARNESS_DEBT_PATH, "utf8"),
+  toRepoPath(HARNESS_DEBT_PATH),
+);
 
 function toRepoPath(absPath: string): string {
   return path.relative(REPO_ROOT, absPath).split(path.sep).join("/");
@@ -246,6 +340,54 @@ function resolveInternalImport(fromAbsPath: string, specifier: string): string |
   }
 }
 
+/** Return every internal module that directly or transitively consumes package authority. */
+function collectPackageAuthorityConsumers(entryPaths: readonly string[]): ReadonlySet<string> {
+  const importsByModule = new Map<string, readonly string[]>();
+  const pending = [...entryPaths];
+  const queued = new Set(entryPaths.map(toRepoPath));
+
+  while (pending.length > 0) {
+    const absPath = pending.pop();
+    if (!absPath || !existsSync(absPath) || !isProductionTsFile(absPath)) continue;
+    const repoPath = toRepoPath(absPath);
+    const source = readFileSync(absPath, "utf8");
+    const sourceFile = sourceFileFor(absPath, source);
+    const targets = collectImportRefs(sourceFile).flatMap((ref) => {
+      const target = resolveInternalImport(absPath, ref.specifier);
+      return target?.startsWith("src/") ? [target] : [];
+    });
+    importsByModule.set(repoPath, targets);
+    for (const target of targets) {
+      if (queued.has(target)) continue;
+      const targetPath = path.join(REPO_ROOT, target);
+      if (!existsSync(targetPath) || !isProductionTsFile(targetPath)) continue;
+      queued.add(target);
+      pending.push(targetPath);
+    }
+  }
+
+  const importersByModule = new Map<string, Set<string>>();
+  for (const [importer, targets] of importsByModule) {
+    for (const target of targets) {
+      const importers = importersByModule.get(target) ?? new Set<string>();
+      importers.add(importer);
+      importersByModule.set(target, importers);
+    }
+  }
+
+  const consumers = new Set<string>();
+  const pendingConsumers = [...PACKAGE_AUTHORITY_MODULES];
+  while (pendingConsumers.length > 0) {
+    const target = pendingConsumers.pop();
+    if (!target || consumers.has(target)) continue;
+    consumers.add(target);
+    for (const importer of importersByModule.get(target) ?? []) {
+      pendingConsumers.push(importer);
+    }
+  }
+  return consumers;
+}
+
 function readAgentRuntimePackageDependencies(
   packagesRoot: string,
 ): readonly AgentRuntimePackageDependency[] {
@@ -318,19 +460,21 @@ function checkHarnessAgnosticRuntimeModule(
 }
 
 function checkReceiptBackedHarnessBranch(
-  absPath: string,
   repoPath: string,
   sourceFile: ts.SourceFile,
-  imports: readonly ImportRef[],
+  packageAuthorityConsumers: ReadonlySet<string>,
   packageIds: ReadonlySet<string>,
+  baseline: ReadonlyMap<string, number>,
+  usedAllowances: Map<string, number>,
   violations: Violation[],
 ): void {
-  if (RECEIPT_HARNESS_ID_COMPATIBILITY_MODULES.has(repoPath)) return;
-  const consumesPackageAuthority = imports.some((ref) => {
-    const target = resolveInternalImport(absPath, ref.specifier);
-    return target !== null && PACKAGE_AUTHORITY_MODULES.has(target);
-  });
-  if (!consumesPackageAuthority) return;
+  if (!packageAuthorityConsumers.has(repoPath)) return;
+  if (
+    repoPath.includes("/__test-helpers__/") ||
+    /(?:^|\/)[^/]*(?:test-fixture|test-helpers|test-support)\./u.test(repoPath)
+  ) {
+    return;
+  }
 
   const isEqualityOperator = (kind: ts.SyntaxKind): boolean =>
     kind === ts.SyntaxKind.EqualsEqualsToken ||
@@ -339,7 +483,40 @@ function checkReceiptBackedHarnessBranch(
     kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
   const isExactPackageId = (node: ts.Node): node is ts.StringLiteralLike =>
     ts.isStringLiteralLike(node) && packageIds.has(node.text);
-  const report = (node: ts.StringLiteralLike): void => {
+  const decisionOwner = (node: ts.Node): string => {
+    let current: ts.Node | undefined = node;
+    while (current) {
+      if (
+        ts.isFunctionDeclaration(current) ||
+        ts.isMethodDeclaration(current) ||
+        ts.isGetAccessorDeclaration(current) ||
+        ts.isSetAccessorDeclaration(current)
+      ) {
+        return current.name?.getText(sourceFile) ?? "<anonymous>";
+      }
+      if (ts.isArrowFunction(current) || ts.isFunctionExpression(current)) {
+        const parent = current.parent;
+        if (ts.isVariableDeclaration(parent)) return parent.name.getText(sourceFile);
+        if (ts.isPropertyAssignment(parent)) return parent.name.getText(sourceFile);
+      }
+      current = current.parent;
+    }
+    return "<module>";
+  };
+  const allowanceKey = (
+    owner: string,
+    kind: ReceiptHarnessDecisionKind,
+    packageId: string,
+  ): string => receiptDecisionKey(repoPath, owner, kind, packageId);
+  const report = (node: ts.StringLiteralLike, kind: ReceiptHarnessDecisionKind): void => {
+    const owner = decisionOwner(node);
+    const key = allowanceKey(owner, kind, node.text);
+    const allowance = baseline.get(key) ?? 0;
+    const used = usedAllowances.get(key) ?? 0;
+    if (used < allowance) {
+      usedAllowances.set(key, used + 1);
+      return;
+    }
     const pos = position(sourceFile, node);
     addViolation(
       violations,
@@ -347,7 +524,7 @@ function checkReceiptBackedHarnessBranch(
       pos.line,
       pos.column,
       "receipt-backed-harness-neutrality",
-      `receipt-backed production code must use package metadata instead of branching on package ID '${node.text}'`,
+      `receipt-backed production code must use package metadata instead of branching on package ID '${node.text}' (${kind} decision in '${owner}')`,
     );
   };
 
@@ -357,10 +534,10 @@ function checkReceiptBackedHarnessBranch(
       isEqualityOperator(node.operatorToken.kind) &&
       (isExactPackageId(node.left) || isExactPackageId(node.right))
     ) {
-      if (isExactPackageId(node.left)) report(node.left);
-      if (isExactPackageId(node.right)) report(node.right);
+      if (isExactPackageId(node.left)) report(node.left, "equality");
+      if (isExactPackageId(node.right)) report(node.right, "equality");
     } else if (ts.isCaseClause(node) && isExactPackageId(node.expression)) {
-      report(node.expression);
+      report(node.expression, "switch-case");
     } else if (
       ts.isCallExpression(node) &&
       ts.isPropertyAccessExpression(node.expression) &&
@@ -368,12 +545,32 @@ function checkReceiptBackedHarnessBranch(
       ts.isArrayLiteralExpression(node.expression.expression)
     ) {
       for (const element of node.expression.expression.elements) {
-        if (isExactPackageId(element)) report(element);
+        if (isExactPackageId(element)) report(element, "membership");
       }
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
+}
+
+function checkReceiptHarnessDecisionBaseline(
+  baseline: ReadonlyMap<string, number>,
+  usedAllowances: ReadonlyMap<string, number>,
+  violations: Violation[],
+): void {
+  for (const [key, expectedCount] of baseline) {
+    const actualCount = usedAllowances.get(key) ?? 0;
+    if (actualCount === expectedCount) continue;
+    const [file, owner, kind, packageId] = key.split("\0");
+    addViolation(
+      violations,
+      toRepoPath(HARNESS_DEBT_PATH),
+      1,
+      1,
+      "receipt-backed-harness-debt",
+      `package ID '${packageId}' expects ${String(expectedCount)} ${kind} decision occurrence(s) in '${owner}' at ${file}, but found ${String(actualCount)}`,
+    );
+  }
 }
 
 function importedAgentRuntimePackage(
@@ -721,6 +918,7 @@ function checkCommandFile(
 export function findLayerImportBoundaryViolations(
   root = SRC_ROOT,
   packagesRoot = PACKAGES_ROOT,
+  options: LayerImportBoundaryOptions = {},
 ): Violation[] {
   const violations: Violation[] = [];
   const agentRuntimePackages = readAgentRuntimePackageDependencies(packagesRoot);
@@ -730,7 +928,12 @@ export function findLayerImportBoundaryViolations(
       .filter((packageId): packageId is string => packageId !== undefined),
   );
   const usedLegacyAgentRuntimeImports = new Map<string, number>();
-  for (const absPath of walk(root)) {
+  const productionFiles = [...walk(root)];
+  const packageAuthorityConsumers = collectPackageAuthorityConsumers(productionFiles);
+  const receiptHarnessDecisionBaseline =
+    options.receiptHarnessDecisionBaseline ?? RECEIPT_HARNESS_DECISION_BASELINE;
+  const usedReceiptHarnessDecisionAllowances = new Map<string, number>();
+  for (const absPath of productionFiles) {
     const repoPath = toRepoPath(absPath);
     const domainFile = isDomainFile(repoPath);
     const actionFile = isActionFile(repoPath);
@@ -749,7 +952,15 @@ export function findLayerImportBoundaryViolations(
       violations,
     );
     checkHarnessAgnosticRuntimeModule(repoPath, sourceFile, packageIds, violations);
-    checkReceiptBackedHarnessBranch(absPath, repoPath, sourceFile, imports, packageIds, violations);
+    checkReceiptBackedHarnessBranch(
+      repoPath,
+      sourceFile,
+      packageAuthorityConsumers,
+      packageIds,
+      receiptHarnessDecisionBaseline,
+      usedReceiptHarnessDecisionAllowances,
+      violations,
+    );
     if (!domainFile && !actionFile && !adapterFile && !messagingManifestFile && !commandFile) {
       checkNoBinLibShimImport(absPath, repoPath, collectPreprocessedImportRefs(source), violations);
       continue;
@@ -764,6 +975,15 @@ export function findLayerImportBoundaryViolations(
       checkMessagingManifestFile(absPath, repoPath, imports, violations);
     }
     if (commandFile) checkCommandFile(absPath, repoPath, sourceFile, violations);
+  }
+  const verifyReceiptHarnessDecisionBaseline =
+    options.verifyReceiptHarnessDecisionBaseline ?? path.resolve(root) === SRC_ROOT;
+  if (verifyReceiptHarnessDecisionBaseline) {
+    checkReceiptHarnessDecisionBaseline(
+      receiptHarnessDecisionBaseline,
+      usedReceiptHarnessDecisionAllowances,
+      violations,
+    );
   }
   return violations;
 }
