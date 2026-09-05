@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { buildHermesMcpStatusCommand } from "../../../src/lib/actions/sandbox/mcp-bridge-adapter-status";
+import {
+  buildInstalledMcpInspectionCommand,
+} from "../../../src/lib/actions/sandbox/mcp-bridge/package-command";
 import { buildMcpCredentialRevisionObservationCommand } from "../../../src/lib/actions/sandbox/mcp-bridge-provider";
 import type { McpAttachedCredentialRevision } from "../../../src/lib/actions/sandbox/mcp-bridge-provider-readiness";
 import type { McpBridgeEntry } from "../../../src/lib/state/registry";
@@ -58,7 +60,6 @@ function normalizeHermesTransportDiagnostic(diagnostic: string): string {
     .filter(Boolean)
     .join("\n");
 }
-
 interface McpStatusCommandResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
@@ -345,13 +346,22 @@ export async function readConcurrentMcpStatusAndConfirmHermesRegistration(option
       ) {
         return { source: "direct-credential", result: revision } as const;
       }
+      const inspectionCommand = buildInstalledMcpInspectionCommand(
+        options.scenario.sandboxName,
+        options.scenario.expectedAdapter,
+        entry,
+        { credentialRevision: observedRevision as McpAttachedCredentialRevision },
+      );
+      if (inspectionCommand === null) {
+        throw new Error(
+          `Installed harness package for sandbox '${options.scenario.sandboxName}' does not provide MCP inspection.`,
+        );
+      }
       return {
         source: "direct-adapter",
         result: await options.clients.sandbox.execShell(
           options.scenario.sandboxName,
-          trustedSandboxShellScript(
-            buildHermesMcpStatusCommand(entry, observedRevision as McpAttachedCredentialRevision),
-          ),
+          trustedSandboxShellScript(inspectionCommand),
           {
             artifactName: `${options.scenario.artifactPrefix}-mcp-concurrent-status-restart-settlement-adapter-registration`,
             env: buildAvailabilityProbeEnv(),

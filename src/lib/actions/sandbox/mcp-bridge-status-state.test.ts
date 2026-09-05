@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { writeManagedGatewayDeclaration } from "../../../../test/helpers/gateway-management";
 import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
@@ -21,6 +22,15 @@ function createTempHome(prefix: string): string {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tempHomes.add(home);
   return home;
+}
+
+function childEnvironment(home: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: home,
+    NEMOCLAW_GATEWAY_MANAGEMENT: writeManagedGatewayDeclaration(home),
+    NODE_OPTIONS: sourceNodeOptions,
+  };
 }
 
 afterEach(() => {
@@ -70,7 +80,7 @@ bridge.addMcpBridge("openclaw-sandbox", {
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status).toBe(0);
@@ -109,7 +119,7 @@ process.stdout.write(JSON.stringify(markers.map((_, index) => registry.getSandbo
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status).toBe(0);
@@ -175,7 +185,7 @@ const status = require("./src/lib/actions/sandbox/mcp-bridge-status.js");
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -222,7 +232,7 @@ registry.registerSandbox({
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status).toBe(0);
@@ -252,12 +262,15 @@ process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
 const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\\nGateway: " + selectedGateway + "\\n"
+      : "Gateway: " + selectedGateway + "\\n",
+  };
+};
 let capturedCommand = "";
 processRecovery.executeSandboxCommand = (_sandboxName, command) => {
   capturedCommand = command;
@@ -289,7 +302,7 @@ status.statusMcpBridge("custom-root-status", "github").then(
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -308,12 +321,15 @@ process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
 const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\\nGateway: " + selectedGateway + "\\n"
+      : "Gateway: " + selectedGateway + "\\n",
+  };
+};
 processRecovery.executeSandboxCommand = () => ({ status: 0, stdout: "registered", stderr: "" });
 registry.registerSandbox({
   name: "persisted-status",
@@ -350,7 +366,7 @@ status.statusMcpBridge("persisted-status").then(
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status).toBe(0);

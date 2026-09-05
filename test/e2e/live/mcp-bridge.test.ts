@@ -5,11 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
-  buildDeepAgentsMcpStatusCommand,
-  buildHermesMcpStatusCommand,
-  buildOpenClawMcporterInspectCommand,
-  OPENCLAW_MCPORTER_ROOT,
-} from "../../../src/lib/actions/sandbox/mcp-bridge-adapter-status";
+  buildInstalledMcpInspectionCommand,
+} from "../../../src/lib/actions/sandbox/mcp-bridge/package-command";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import type { McpBridgeEntry } from "../../../src/lib/state/registry";
 import { execTimeout, testTimeout } from "../../helpers/timeouts.ts";
@@ -111,6 +108,7 @@ function mcpBridgeShardTest(shard: McpBridgeShard) {
 }
 const test = mcpBridgeShardTest("openclaw");
 type McpAgent = "openclaw" | "hermes" | "langchain-deepagents-code";
+const OPENCLAW_MCPORTER_ROOT = "/sandbox/.openclaw/workspace";
 function expectManagedImageQualificationReceipt(sandboxName: string, agent: McpAgent): void {
   const registry = JSON.parse(fs.readFileSync(REGISTRY_FILE, "utf8")) as {
     sandboxes?: Record<string, { workload?: Record<string, unknown> }>;
@@ -489,15 +487,19 @@ async function removeBridgeAndAssertEmpty(
     policyName: "mcp-bridge-fake",
     addedAt: "2026-06-01T00:00:00.000Z",
   };
-  const adapterStatusCommand =
-    options.adapter === "mcporter"
-      ? buildOpenClawMcporterInspectCommand(entry, true)
-      : options.adapter === "hermes-config"
-        ? buildHermesMcpStatusCommand(entry)
-        : buildDeepAgentsMcpStatusCommand(entry);
+  const adapterStatusCommand = buildInstalledMcpInspectionCommand(
+    options.sandboxName,
+    options.adapter,
+    entry,
+    { failOnMismatch: options.adapter === "mcporter" },
+  );
+  expect(
+    adapterStatusCommand,
+    `${options.artifactPrefix} installed package must provide MCP inspection`,
+  ).not.toBeNull();
   const adapterStatus = await sandbox.execShell(
     options.sandboxName,
-    trustedSandboxShellScript(["set -eu", adapterStatusCommand].join("\n")),
+    trustedSandboxShellScript(["set -eu", adapterStatusCommand!].join("\n")),
     {
       artifactName: `${options.artifactPrefix}-adapter-absent-after-mcp-remove`,
       env: buildAvailabilityProbeEnv(),
@@ -1315,7 +1317,6 @@ mcpBridgeShardTest("hermes")(
     );
   },
 );
-
 mcpBridgeShardTest("deepagents")(
   "mcp-bridge-deepagents",
   {

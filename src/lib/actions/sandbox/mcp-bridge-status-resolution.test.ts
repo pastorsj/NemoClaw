@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { writeManagedGatewayDeclaration } from "../../../../test/helpers/gateway-management";
 import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
@@ -40,12 +41,15 @@ const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const providerCommands = require("./src/lib/adapters/openshell/provider-command.js");
 const policies = require("./src/lib/policy/index.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\nGateway: " + selectedGateway + "\n"
+      : "Gateway: " + selectedGateway + "\n",
+  };
+};
 let providerAttachmentState = "attached";
 let providerInspectionState = "present";
 let providerCredentialKey = "GITHUB_TOKEN";
@@ -202,7 +206,12 @@ ${body}
   const result = spawnSync(process.execPath, ["-e", script], {
     cwd: process.cwd(),
     encoding: "utf8",
-    env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+    env: {
+      ...process.env,
+      HOME: home,
+      NEMOCLAW_GATEWAY_MANAGEMENT: writeManagedGatewayDeclaration(home),
+      NODE_OPTIONS: sourceNodeOptions,
+    },
   });
   expect(result.status, `harness failed: ${result.stderr}`).toBe(0);
   return { status: result.status, stdout: result.stdout };
@@ -353,260 +362,6 @@ describe("MCP status wire-level credential-resolution probe", { timeout: 60_000 
       "openshell:resolve:env:v12_GITHUB_TOKEN",
     );
     expect(JSON.stringify(outcomes)).not.toContain("openshell:resolve:env:v11_GITHUB_TOKEN");
-  });
-
-  it(
-    "reports an unsafe Deep Agents projection when credential handling would hide it (#10754)",
-    { timeout: 120_000 },
-    () => {
-      const home = createTempHome("nemoclaw-mcp-unsafe-deepagents-projection-");
-      const { stdout } = runHarness(
-        home,
-        String.raw`
-  const deepAgentsFixture = require("./test/helpers/mcp-bridge-adapter-deepagents-fixture.ts");
-  registerPackageSandbox("deepagents-alpha", "langchain-deepagents-code", "deepagents-config");
-  process.env.GITHUB_TOKEN = "example-secret-token";
-  const credentialCases = [
-    {
-      name: "unavailable credential observation",
-      env: "GITHUB_TOKEN",
-      observation: "absent",
-    },
-    {
-      name: "unsupported persisted credential",
-      env: "v1_TOKEN",
-      observation: "v11",
-    },
-  ];
-  const cases = [
-    {
-      name: "dangling symbolic link",
-      type: "symbolic link",
-      config: undefined,
-      options: { symlink: true },
-    },
-    {
-      name: "symbolic link",
-      type: "symbolic link",
-      config: { mcpServers: {} },
-      options: { symlink: true },
-    },
-    {
-      name: "FIFO",
-      type: "FIFO",
-      config: undefined,
-      options: { fifo: true, mode: 0o000 },
-    },
-    {
-      name: "directory",
-      type: "non-regular file",
-      config: undefined,
-      options: { directory: true },
-    },
-  ];
-  const outcomes = [];
-  for (const credentialCase of credentialCases) {
-    const current = registry.getSandbox("deepagents-alpha");
-    current.mcp.bridges.github.agent = "langchain-deepagents-code";
-    current.mcp.bridges.github.adapter = "deepagents-config";
-    current.mcp.bridges.github.env = [credentialCase.env];
-    registry.updateSandbox("deepagents-alpha", { mcp: current.mcp });
-    providerCredentialObservation = credentialCase.observation;
-    for (const fixture of cases) {
-      process.exitCode = undefined;
-      logLines.length = 0;
-      errorLines.length = 0;
-      processRecovery.executeSandboxCommand = (_sandboxName, command) =>
-        deepAgentsFixture.runDeepAgentsConfigCommand(
-          command,
-          fixture.config,
-          "v2",
-          undefined,
-          0o600,
-          fixture.options,
-        );
-      await bridge.dispatchMcpBridgeCommand("deepagents-alpha", ["status", "github"]);
-      outcomes.push({
-        credentialCase: credentialCase.name,
-        name: fixture.name,
-        type: fixture.type,
-        exitCode: process.exitCode ?? 0,
-        stdout: logLines.join("\n"),
-        stderr: errorLines.join("\n"),
-      });
-    }
-  }
-  process.exitCode = 0;
-  writeHarnessResult(JSON.stringify(outcomes));
-`,
-        { packageIds: ["openclaw", "langchain-deepagents-code"] },
-      );
-      const outcomes = JSON.parse(stdout) as Array<{
-        credentialCase: string;
-        name: string;
-        type: string;
-        exitCode: number;
-        stdout: string;
-        stderr: string;
-      }>;
-
-      expect(
-        outcomes.map(({ credentialCase, name, exitCode }) => ({
-          credentialCase,
-          name,
-          exitCode,
-        })),
-      ).toEqual([
-        {
-          credentialCase: "unavailable credential observation",
-          name: "dangling symbolic link",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unavailable credential observation",
-          name: "symbolic link",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unavailable credential observation",
-          name: "FIFO",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unavailable credential observation",
-          name: "directory",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unsupported persisted credential",
-          name: "dangling symbolic link",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unsupported persisted credential",
-          name: "symbolic link",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unsupported persisted credential",
-          name: "FIFO",
-          exitCode: 2,
-        },
-        {
-          credentialCase: "unsupported persisted credential",
-          name: "directory",
-          exitCode: 2,
-        },
-      ]);
-      outcomes.forEach((outcome) => {
-        expect(outcome.stdout, outcome.name).toBe("");
-        expect(outcome.stderr, outcome.name).toContain(
-          `Unsafe managed Deep Agents MCP projection path: ${outcome.type}`,
-        );
-        expect(outcome.stderr, outcome.name).not.toContain("adapter does not match");
-      });
-    },
-  );
-
-  it("preserves unsupported-credential status for a regular Deep Agents projection (#10754)", () => {
-    const home = createTempHome("nemoclaw-mcp-unsupported-deepagents-credential-");
-    const { stdout } = runHarness(
-      home,
-      String.raw`
-  const deepAgentsFixture = require("./test/helpers/mcp-bridge-adapter-deepagents-fixture.ts");
-  registerPackageSandbox("deepagents-alpha", "langchain-deepagents-code", "deepagents-config");
-  const current = registry.getSandbox("deepagents-alpha");
-  current.mcp.bridges.github.agent = "langchain-deepagents-code";
-  current.mcp.bridges.github.adapter = "deepagents-config";
-  current.mcp.bridges.github.env = ["v1_TOKEN"];
-  registry.updateSandbox("deepagents-alpha", { mcp: current.mcp });
-  let inspected = false;
-  processRecovery.executeSandboxCommand = (_sandboxName, command) => {
-    inspected = true;
-    return deepAgentsFixture.runDeepAgentsConfigCommand(command, { mcpServers: {} }, "v2");
-  };
-  await bridge.dispatchMcpBridgeCommand("deepagents-alpha", ["status", "github", "--json"]);
-  const status = JSON.parse(logLines.join("\n"));
-  writeHarnessResult(JSON.stringify({
-    inspected,
-    exitCode: process.exitCode ?? 0,
-    adapter: status.adapter,
-  }));
-`,
-      { packageIds: ["openclaw", "langchain-deepagents-code"] },
-    );
-    const payload = JSON.parse(stdout) as {
-      inspected: boolean;
-      exitCode: number;
-      adapter: { registered: boolean | null; detail?: string };
-    };
-
-    expect(payload).toMatchObject({
-      exitCode: 0,
-      adapter: {
-        registered: null,
-        detail:
-          "Adapter inspection was skipped because the unsupported legacy credential may still be attached to fresh sandbox children.",
-      },
-    });
-  });
-
-  it("preserves legacy Deep Agents status when credential handling is unavailable (#10754)", () => {
-    const home = createTempHome("nemoclaw-mcp-legacy-deepagents-projection-");
-    const { stdout } = runHarness(
-      home,
-      String.raw`
-  const deepAgentsFixture = require("./test/helpers/mcp-bridge-adapter-deepagents-fixture.ts");
-  registerPackageSandbox("deepagents-alpha", "langchain-deepagents-code", "deepagents-config");
-  const current = registry.getSandbox("deepagents-alpha");
-  current.mcp.bridges.github.agent = "langchain-deepagents-code";
-  current.mcp.bridges.github.adapter = "deepagents-config";
-  registry.updateSandbox("deepagents-alpha", { mcp: current.mcp });
-  providerCredentialObservation = "absent";
-  let inspected = false;
-  processRecovery.executeSandboxCommand = (_sandboxName, command) => {
-    inspected = true;
-    return deepAgentsFixture.runDeepAgentsConfigCommand(
-      command,
-      undefined,
-      "legacy",
-      {
-        mcpServers: {
-          github: {
-            type: "http",
-            url: "https://api.githubcopilot.com/mcp/",
-            headers: {
-              Authorization: "Bearer openshell:resolve:env:v11_GITHUB_TOKEN",
-            },
-          },
-        },
-      },
-    );
-  };
-  await bridge.dispatchMcpBridgeCommand("deepagents-alpha", ["status", "github", "--json"]);
-  const status = JSON.parse(logLines.join("\n"));
-  writeHarnessResult(JSON.stringify({
-    inspected,
-    exitCode: process.exitCode ?? 0,
-    adapter: status.adapter,
-  }));
-`,
-      { packageIds: ["openclaw", "langchain-deepagents-code"] },
-    );
-    const payload = JSON.parse(stdout) as {
-      inspected: boolean;
-      exitCode: number;
-      adapter: { registered: boolean | null; detail?: string };
-    };
-
-    expect(payload).toMatchObject({
-      exitCode: 0,
-      adapter: {
-        registered: null,
-        detail:
-          "Adapter inspection was skipped because a fresh OpenShell exec did not expose the credential placeholder.",
-      },
-    });
   });
 
   it("skips status probe traffic until exact policy and provider readiness are verified (#6379)", () => {

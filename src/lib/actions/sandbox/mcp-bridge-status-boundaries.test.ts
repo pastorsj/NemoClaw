@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { writeManagedGatewayDeclaration } from "../../../../test/helpers/gateway-management";
 import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
@@ -21,6 +22,15 @@ function createTempHome(prefix: string): string {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tempHomes.add(home);
   return home;
+}
+
+function childEnvironment(home: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: home,
+    NEMOCLAW_GATEWAY_MANAGEMENT: writeManagedGatewayDeclaration(home),
+    NODE_OPTIONS: sourceNodeOptions,
+  };
 }
 
 afterEach(() => {
@@ -63,12 +73,15 @@ providerCommands.setProviderCommandRuntimeHooksForTest({ runOpenshell: (args, op
   }
   throw new Error("Unexpected OpenShell call: " + args.join(" "));
 } });
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\nGateway: " + selectedGateway + "\n"
+      : "Gateway: " + selectedGateway + "\n",
+  };
+};
 processRecovery.executeSandboxExecCommand = () => ({ status: 0, stdout: "v11", stderr: "" });
 processRecovery.executeSandboxCommand = () => ({ status: 0, stdout: "registered", stderr: "" });
 registry.registerSandbox({
@@ -103,7 +116,7 @@ require("./src/lib/actions/sandbox/mcp-bridge-status.js").statusMcpBridge("alpha
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -137,12 +150,15 @@ const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const providerCommands = require("./src/lib/adapters/openshell/provider-command.js");
 const policies = require("./src/lib/policy/index.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\nGateway: " + selectedGateway + "\n"
+      : "Gateway: " + selectedGateway + "\n",
+  };
+};
 providerCommands.runOpenshellProviderCommand = (args) => {
   if (args[0] === "provider" && args[1] === "get") {
     return {
@@ -202,7 +218,7 @@ const bridge = require("./src/lib/actions/sandbox/mcp-bridge.js");
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -260,7 +276,7 @@ bridge.dispatchMcpBridgeCommand("hermes-sandbox", ["status", "--json"]).then(
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: childEnvironment(home),
     });
 
     expect(result.status).toBe(0);

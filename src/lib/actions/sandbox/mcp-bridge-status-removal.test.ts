@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { writeManagedGatewayDeclaration } from "../../../../test/helpers/gateway-management";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
@@ -38,12 +39,15 @@ const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const policies = require("./src/lib/policy/index.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
 agentDefs.loadAgent = () => { throw new Error("current agent must not be consulted"); };
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\\nGateway: " + selectedGateway + "\\n"
+      : "Gateway: " + selectedGateway + "\\n",
+  };
+};
 providerCommands.runOpenshellProviderCommand = (args) => {
   if (args.join(" ") === "status --output json") {
     return {
@@ -87,7 +91,12 @@ bridge.removeMcpBridge("legacy-sandbox", "github").then(
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: {
+        ...process.env,
+        HOME: home,
+        NEMOCLAW_GATEWAY_MANAGEMENT: writeManagedGatewayDeclaration(home),
+        NODE_OPTIONS: sourceNodeOptions,
+      },
     });
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -115,12 +124,15 @@ const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const policies = require("./src/lib/policy/index.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
 agentDefs.loadAgent = () => { throw new Error("current agent must not be consulted"); };
-gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
-  recovered: true,
-  attempted: false,
-  before: { state: "healthy_named" },
-  after: { state: "healthy_named" },
-});
+gatewayRuntime.gatewayRuntimeDependencies.captureOpenshell = (args, options = {}) => {
+  const selectedGateway = options.env?.OPENSHELL_GATEWAY || "nemoclaw";
+  return {
+    status: 0,
+    output: args[0] === "status"
+      ? "Status: Connected\\nGateway: " + selectedGateway + "\\n"
+      : "Gateway: " + selectedGateway + "\\n",
+  };
+};
 providerCommands.runOpenshellProviderCommand = (args) => {
   if (args.join(" ") === "status --output json") {
     return {
@@ -164,7 +176,12 @@ bridge.removeMcpBridge("legacy-sandbox", "github", { force: true }).then(
     const result = spawnSync(process.execPath, ["-e", script], {
       cwd: process.cwd(),
       encoding: "utf8",
-      env: { ...process.env, HOME: home, NODE_OPTIONS: sourceNodeOptions },
+      env: {
+        ...process.env,
+        HOME: home,
+        NEMOCLAW_GATEWAY_MANAGEMENT: writeManagedGatewayDeclaration(home),
+        NODE_OPTIONS: sourceNodeOptions,
+      },
     });
 
     expect(result.status).toBe(0);

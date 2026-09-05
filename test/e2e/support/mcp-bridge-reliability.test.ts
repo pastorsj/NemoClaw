@@ -7,6 +7,14 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+const mcpPackageMocks = vi.hoisted(() => ({
+  buildInstalledInspection: vi.fn(() => "package-owned-hermes-inspection"),
+}));
+
+vi.mock("../../../src/lib/actions/sandbox/mcp-bridge/package-command", () => ({
+  buildInstalledMcpInspectionCommand: mcpPackageMocks.buildInstalledInspection,
+}));
+
 import { ArtifactSink } from "../fixtures/artifacts.ts";
 import { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
@@ -433,6 +441,12 @@ describe("MCP bridge transient classification", () => {
     expect(outcome.registered).toBe(true);
     expect(status).toHaveBeenCalledOnce();
     expect(execShell).toHaveBeenCalledTimes(2);
+    expect(mcpPackageMocks.buildInstalledInspection).toHaveBeenCalledWith(
+      "e2e-mcp-hermes",
+      "hermes-config",
+      expect.objectContaining({ agent: "hermes", server: "concurrent" }),
+      { credentialRevision: "v4" },
+    );
     expect(sleep).toHaveBeenCalledWith(5_000);
     expect(writeJson).toHaveBeenCalledOnce();
     expect(writeJson).toHaveBeenCalledWith(
