@@ -76,7 +76,11 @@ function mapManagedStartupProfileToAgentEnvironment(
     profile,
     {},
     {
-      adapterSource: { filename, source: fs.readFileSync(filename, "utf8") },
+      adapterSource: {
+        filename,
+        source: fs.readFileSync(filename, "utf8"),
+        ...("profileKind" in profile ? { harnessPackage: profile.harnessPackage } : {}),
+      },
     },
   );
 }
@@ -219,7 +223,13 @@ describe("managed workload onboard orchestration", () => {
     ).toBe(false);
   });
 
-  it("keeps the Hermes browser URL separate from its loopback managed forward", () => {
+  it("keeps the Hermes browser URL in its receipt-backed package startup profile", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "hermes",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    };
     const runtime = createManagedWorkloadOnboardRuntime(
       {
         computePlan: { driverName: "docker" },
@@ -228,6 +238,7 @@ describe("managed workload onboard orchestration", () => {
         stockManagedRuntime: true,
         tempManagedRuntimeCatalog: null,
         agentName: "hermes",
+        harnessPackage,
         legacyDockerfilePath: "packages/nemoclaw-hermes/Dockerfile",
         customDockerfilePath: null,
         rootDir: releaseRoot,
@@ -276,18 +287,29 @@ describe("managed workload onboard orchestration", () => {
     const built = runtime.ensurePreparedProfile({
       source: { kind: "managed-image" },
     } as never);
+    if (!built || !("profileKind" in built.profile)) {
+      throw new Error("Expected a receipt-backed package startup profile.");
+    }
 
-    expect(built?.profile.dashboard).toEqual({
+    expect(built.profile).toMatchObject({
       agent: "hermes",
-      mode: "loopback-forwarded",
-      url: "http://127.0.0.1:19189",
-      browserUrl: "https://hermes.example.test:19189",
-      publicPort: 19_189,
-      internalPort: 29_189,
-      tuiEnabled: false,
+      harnessPackage,
+      packageConfig: {
+        settings: {
+          dashboard: {
+            agent: "hermes",
+            mode: "loopback-forwarded",
+            url: "http://127.0.0.1:19189",
+            browserUrl: "https://hermes.example.test:19189",
+            publicPort: 19_189,
+            internalPort: 29_189,
+            tuiEnabled: false,
+          },
+        },
+      },
     });
     expect(
-      mapManagedStartupProfileToAgentEnvironment(built!.profile).runtimeEnvironment.CHAT_UI_URL,
+      mapManagedStartupProfileToAgentEnvironment(built.profile).runtimeEnvironment.CHAT_UI_URL,
     ).toBe("https://hermes.example.test:19189");
   });
 

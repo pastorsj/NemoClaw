@@ -1767,6 +1767,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
         tempManagedRuntimeCatalog,
         agentName: requestedAgentName,
         agentDefinition: effectiveAgent,
+        harnessPackage: harnessPackageSession?.harnessPackage ?? null,
         legacyDockerfilePath,
         customDockerfilePath:
           fromDockerfile ?? (preparedBuildContext ? preparedBuildContext.stagedDockerfile : null),
@@ -1820,6 +1821,9 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           runtimeProvider: managedWorkloadRuntime.runtimeProvider,
         });
       }
+      revalidateHarnessPackageAuthority(
+        `preparing managed state storage for sandbox '${sandboxName}'`,
+      );
       const managedImage = effectiveAgent.managedImage;
       if (!managedImage || effectiveAgent.name !== workload.source.contract.agent) {
         throw new Error(

@@ -119,6 +119,25 @@ describe("sandbox registry package startup profile", () => {
     expect(registry.getSandbox("alpha")?.workload).toEqual(workload);
   });
 
+  it("persists receipt-backed OpenClaw with an explicit canonical agent", async () => {
+    const registry = await loadRegistryDocument({ sandboxes: {}, defaultSandbox: null });
+    const openClawPackage = { ...HARNESS_PACKAGE, id: "openclaw" };
+    const workload = packageWorkload(openClawPackage);
+
+    registry.registerSandbox({
+      name: "openclaw-sandbox",
+      agent: "openclaw",
+      harnessPackage: openClawPackage,
+      imageTag: workload.reference,
+      workload,
+    });
+
+    expect(registry.getSandbox("openclaw-sandbox")).toMatchObject({
+      agent: "openclaw",
+      harnessPackage: openClawPackage,
+    });
+  });
+
   it.each([
     ["no package authority", undefined],
     [

@@ -33,6 +33,10 @@ import {
   serializeManagedStartupProfile,
   validateManagedStartupPackageProfile,
 } from "./profile";
+import {
+  buildManagedStartupPackageProfile,
+  managedStartupSettingsFromProfile,
+} from "./package-profile";
 
 const FUTURE_PACKAGE_ID = "future-harness";
 const FUTURE_PACKAGE_IDENTITY = {
@@ -179,6 +183,54 @@ describe("managed startup package profile", () => {
     expect(replayed.adapterApplied).toBe(false);
     expect(replayed.application.fingerprint).toBe(first.application.fingerprint);
     expect(mappedPlans).toHaveLength(1);
+  });
+
+  it("builds a receipt-backed transport from finite startup settings", () => {
+    const legacyProfile = managedStartupE2eProfile("pi");
+    const settings = managedStartupSettingsFromProfile(legacyProfile);
+    const built = buildManagedStartupPackageProfile({
+      harnessPackage: FUTURE_PACKAGE_IDENTITY,
+      settings: {
+        ...settings,
+        configuration: { agent: FUTURE_PACKAGE_ID },
+        dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
+      },
+      credentialProxyReplayRequired: false,
+      dashboardRemoteBindPrepared: false,
+    });
+
+    expect(decodeManagedStartupDurableProfile(built.encodedProfile)).toEqual(built.profile);
+    expect(built.profile).toMatchObject({
+      agent: FUTURE_PACKAGE_ID,
+      harnessPackage: FUTURE_PACKAGE_IDENTITY,
+      packageConfig: {
+        settings: {
+          configuration: { agent: FUTURE_PACKAGE_ID },
+          dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
+        },
+      },
+    });
+    expect(built.startupProfileSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(built.dashboardRemoteBindPrepared).toBe(false);
+  });
+
+  it("rejects credentials before a package startup transport is created", () => {
+    const settings = managedStartupSettingsFromProfile(managedStartupE2eProfile("pi"));
+    expect(() =>
+      buildManagedStartupPackageProfile({
+        harnessPackage: FUTURE_PACKAGE_IDENTITY,
+        settings: {
+          ...settings,
+          configuration: {
+            agent: FUTURE_PACKAGE_ID,
+            apiKey: "not-a-real-credential",
+          } as never,
+          dashboard: { agent: FUTURE_PACKAGE_ID, mode: "disabled" },
+        },
+        credentialProxyReplayRequired: false,
+        dashboardRemoteBindPrepared: false,
+      }),
+    ).toThrow(/credential-shaped field name/u);
   });
 
   it("binds package configuration to the full receipt identity", () => {

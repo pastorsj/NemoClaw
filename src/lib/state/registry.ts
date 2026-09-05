@@ -540,7 +540,14 @@ export function registerSandbox(
         (entry.webSearchProvider === "brave" || entry.webSearchProvider === "tavily")
           ? entry.webSearchProvider
           : null,
-      agent: entry.agent === "openclaw" ? null : entry.agent || null,
+      // New receipt-backed rows persist the canonical package ID. A null agent
+      // remains a read-only compatibility encoding for pre-package OpenClaw
+      // records and must not be produced for current package authority.
+      agent: normalizedPolicyEntry.harnessPackage
+        ? normalizedPolicyEntry.harnessPackage.id
+        : entry.agent === "openclaw"
+          ? null
+          : entry.agent || null,
       ...normalizeSandboxHarnessPackageAuthority(normalizedPolicyEntry),
       agentVersion: entry.agentVersion || null,
       openclawImagePluginInstalls: Array.isArray(entry.openclawImagePluginInstalls)

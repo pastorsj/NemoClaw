@@ -34,6 +34,11 @@ import {
   buildManagedStartupOnboardProfile,
   type ManagedStartupOnboardProfileInput,
 } from "../managed-startup/onboard-profile";
+import {
+  buildManagedStartupPackageProfile,
+  type BuiltManagedStartupPackageProfile,
+  managedStartupSettingsFromProfile,
+} from "../managed-startup/package-profile";
 import { createManagedStartupRootApplyRequest } from "../managed-startup/root-apply";
 import {
   managedStartupStateRoots,
@@ -161,6 +166,10 @@ export interface CreateManagedWorkloadOnboardRuntimeInput {
   readonly agentName: string;
   /** Receipt-pinned definition selected for this exact onboarding transaction. */
   readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
+  /** Exact installed package selected for this onboarding transaction. */
+  readonly harnessPackage?:
+    | import("../../agent-runtime/package/types").HarnessPackageIdentity
+    | null;
   readonly legacyDockerfilePath: string;
   readonly customDockerfilePath: string | null;
   readonly rootDir: string;
@@ -179,7 +188,7 @@ export interface ManagedWorkloadOnboardRuntime {
   ensurePreparedWorkload(): Promise<PreparedSandboxWorkloadSource>;
   ensurePreparedProfile(
     workload: PreparedSandboxWorkloadSource,
-  ): BuiltManagedStartupOnboardProfile | null;
+  ): BuiltManagedStartupOnboardProfile | BuiltManagedStartupPackageProfile | null;
 }
 
 export function shouldActivateStockManagedRuntime(input: {
@@ -271,6 +280,9 @@ export function createManagedWorkloadOnboardRuntime(
   if (agentDefinition.name !== input.agentName) {
     throw new Error("Managed workload package definition does not match the selected agent.");
   }
+  if (input.harnessPackage && input.harnessPackage.id !== input.agentName) {
+    throw new Error("Managed workload package receipt does not match the selected agent.");
+  }
   const discoveredRuntimeCapabilities = resolveSandboxWorkloadRuntimeCapabilities(
     input.computePlan,
   );
@@ -293,7 +305,10 @@ export function createManagedWorkloadOnboardRuntime(
   );
   let preparedWorkloadPromise: Promise<PreparedSandboxWorkloadSource> | null = null;
   let fallbackReported = false;
-  let preparedProfile: BuiltManagedStartupOnboardProfile | null = null;
+  let preparedProfile:
+    | BuiltManagedStartupOnboardProfile
+    | BuiltManagedStartupPackageProfile
+    | null = null;
 
   const ensurePreparedWorkload = async (): Promise<PreparedSandboxWorkloadSource> => {
     const liveCatalogRevision = input.stockManagedRuntime
@@ -346,7 +361,7 @@ export function createManagedWorkloadOnboardRuntime(
 
   const ensurePreparedProfile = (
     workload: PreparedSandboxWorkloadSource,
-  ): BuiltManagedStartupOnboardProfile | null => {
+  ): BuiltManagedStartupOnboardProfile | BuiltManagedStartupPackageProfile | null => {
     if (workload.source.kind !== "managed-image") return null;
     requireBootstrapProvider(runtimeProvider);
     if (input.managedWorkloadRebuild) {
@@ -371,7 +386,7 @@ export function createManagedWorkloadOnboardRuntime(
       selectedProvider,
       inferenceApi,
     );
-    preparedProfile = buildManagedStartupOnboardProfile({
+    const builtProfile = buildManagedStartupOnboardProfile({
       agentName: input.agentName,
       inference: {
         routeProvider: inference.providerKey,
@@ -390,6 +405,19 @@ export function createManagedWorkloadOnboardRuntime(
       ...input.startupProfile,
       corporateCa: resolveCorporateCa(input.startupProfile.environment),
     });
+    preparedProfile = input.harnessPackage
+      ? buildManagedStartupPackageProfile({
+          harnessPackage: input.harnessPackage,
+          settings: managedStartupSettingsFromProfile(builtProfile.profile),
+          ...(builtProfile.corporateCaB64 === undefined
+            ? {}
+            : { corporateCaB64: builtProfile.corporateCaB64 }),
+          credentialProxyReplayRequired: builtProfile.credentialProxyReplayRequired,
+          dashboardRemoteBindPrepared:
+            builtProfile.profile.dashboard.agent === "openclaw" &&
+            builtProfile.profile.dashboard.mode === "remote",
+        })
+      : builtProfile;
     return preparedProfile;
   };
 
@@ -554,7 +582,10 @@ export async function prepareOnboardSandboxWorkloadLaunch(
     const profile = input.runtime.ensurePreparedProfile(input.workload);
     if (!profile) throw new Error("Managed sandbox workload is missing its startup profile.");
     dashboardRemoteBindPrepared =
-      profile.profile.dashboard.agent === "openclaw" && profile.profile.dashboard.mode === "remote";
+      "dashboardRemoteBindPrepared" in profile
+        ? profile.dashboardRemoteBindPrepared
+        : profile.profile.dashboard.agent === "openclaw" &&
+          profile.profile.dashboard.mode === "remote";
     const rootApplyRequest = createManagedStartupRootApplyRequest({
       agent: profile.profile.agent,
       encodedProfile: profile.encodedProfile,
