@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Keep historical OpenClaw protocol selection outside receipt-backed package
+ * dispatch. A future package cannot opt into these native protocols through a
+ * generic manifest boolean.
+ */
+export function usesOpenClawPairingProtocol(
+  recordedAgent: string | null | undefined,
+  resolvedAgent: string,
+  pairingDeclared: boolean,
+): boolean {
+  const effectiveAgent = recordedAgent?.trim() || "openclaw";
+  return effectiveAgent === "openclaw" && resolvedAgent === "openclaw" && pairingDeclared;
+}
+
+/** Portable lifecycle receipts predate package receipts and require an explicit agent value. */
+export function ownsPortableOpenClawReceipt(
+  recordedAgent: string | null | undefined,
+  resolvedAgent: string,
+): boolean {
+  return recordedAgent === "openclaw" && resolvedAgent === "openclaw";
+}
+
+/** A valid explicit non-OpenClaw agent does not own a stale portable receipt. */
+export function canIgnorePortableOpenClawReceipt(
+  recordedAgent: string | null | undefined,
+): boolean {
+  return (
+    typeof recordedAgent === "string" &&
+    recordedAgent.length > 0 &&
+    recordedAgent === recordedAgent.trim() &&
+    recordedAgent !== "openclaw"
+  );
+}

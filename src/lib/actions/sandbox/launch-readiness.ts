@@ -73,6 +73,11 @@ import {
   resolveTrustedLaunchAgent,
 } from "./launch-readiness/health";
 import {
+  canIgnorePortableOpenClawReceipt,
+  ownsPortableOpenClawReceipt,
+  usesOpenClawPairingProtocol,
+} from "./launch-compat";
+import {
   observeOpenClawPairingQualification,
   observeOpenClawPairingRepairSettlement,
   observeOpenClawPairingSettlement,
@@ -757,14 +762,17 @@ async function captureLaunchIdentity(
   // compatibility protocols. A generic `device_pairing` flag cannot safely
   // opt another harness into OpenClaw's state-file format. Keep this selection
   // explicit until the package contract supplies a typed pairing operation.
-  const requiresOpenClawPairing =
-    agentName === "openclaw" && agent.name === "openclaw" && agent.hasDevicePairing;
-  const ownsPortableOpenClawReceipt = entry.agent === "openclaw" && agent.name === "openclaw";
+  const requiresOpenClawPairing = usesOpenClawPairingProtocol(
+    entry.agent,
+    agent.name,
+    agent.hasDevicePairing,
+  );
+  const ownsPortableReceipt = ownsPortableOpenClawReceipt(entry.agent, agent.name);
   const portableReceipt = (
     deps.classifyPortableLifecycleReceipt ?? classifyPortableLifecycleReceipt
   )(sandboxName);
   let portableRuntimeAuthoritySha256: string | null = null;
-  if (ownsPortableOpenClawReceipt) {
+  if (ownsPortableReceipt) {
     if (portableReceipt.kind === "invalid-or-legacy") throw new ObservationError("config");
     if (portableReceipt.kind === "current") {
       if (entry.lifecycleGeneration !== portableReceipt.registryGeneration) {
@@ -772,15 +780,7 @@ async function captureLaunchIdentity(
       }
       portableRuntimeAuthoritySha256 = launchReadinessDigest(portableReceipt.runtimeAuthority);
     }
-  } else if (
-    portableReceipt.kind !== "absent" &&
-    !(
-      typeof entry.agent === "string" &&
-      entry.agent.length > 0 &&
-      entry.agent === entry.agent.trim() &&
-      entry.agent !== "openclaw"
-    )
-  ) {
+  } else if (portableReceipt.kind !== "absent" && !canIgnorePortableOpenClawReceipt(entry.agent)) {
     throw new ObservationError("config");
   }
   const projection = buildLaunchReadinessRegistryProjection(
