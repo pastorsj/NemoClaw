@@ -28,6 +28,7 @@ export default defineConfig({
     include: [
       ...openclawPackageTestMoves.map(({ destination }) => destination),
       ...openclawPackageSplitTests,
+      "tests/host/adapter-build.test.ts",
       "tests/host/config-url.test.ts",
       "tests/host/mcp-adapter.test.ts",
       "tests/image/fabric-runtime.test.ts",

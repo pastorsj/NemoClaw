@@ -220,10 +220,16 @@ The current adapter contracts cover Model Context Protocol (MCP), runtime config
 configuration restore behavior.
 
 Here, *typed* describes the core operation map, its TypeScript request and result types, and its
-runtime JSON Schemas. Package adapter files use self-contained CommonJS source with the `.cts`
-extension. The package TypeScript configurations do not compile those files. Runtime schema
-validation and package behavior tests enforce their current boundary; compile-time checking of the
-package implementations remains future work.
+runtime JSON Schemas. The `@nvidia/nemoclaw-harness-contract` package is the canonical
+authoring surface for manifest, configuration, restore, and MCP types. Core imports and re-exports
+those types while keeping schemas, package loading, authorization, and execution authority.
+
+OpenClaw is the first source/artifact example. Its typed source lives under `host/source/`, imports
+the contract as a development dependency, and is checked with TypeScript. The contract build tool
+emits the existing self-contained CommonJS `host/config-adapter.cts` artifact that the runtime
+loader already consumes. Packaging verifies that source and artifact agree, includes the artifact,
+and omits `host/source/`. Other adapters retain their current form until they adopt the same
+workflow.
 
 The current files are:
 

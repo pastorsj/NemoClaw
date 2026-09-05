@@ -2,6 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AnySchemaObject } from "ajv";
+import type {
+  HarnessConfigCommand,
+  HarnessConfigRestoreRequest,
+  HarnessConfigRestoreResult,
+  HarnessConfigTransactionCommand,
+  HarnessConfigUpdatePlan,
+  HarnessConfigUpdateRequest,
+  HarnessConfigUrlPolicy,
+  HarnessConfigUrlRequest,
+  HarnessExitZeroCommand,
+  HarnessMutableConfigPlan,
+  HarnessMutableConfigRequest,
+} from "@nvidia/nemoclaw-harness-contract";
 
 import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract";
 
@@ -9,119 +22,23 @@ const CONFIG_ADAPTER_SOURCE_MAX_BYTES = 1024 * 1024;
 const CONFIG_ADAPTER_VALUE_MAX_BYTES = 40 * 1024 * 1024;
 const CONFIG_DOCUMENT_MAX_BYTES = 16 * 1024 * 1024;
 
-export interface HarnessConfigTarget {
-  readonly directory: string;
-  readonly file: string;
-  readonly format: string;
-  readonly sensitiveFiles: readonly string[];
-}
-
-interface HarnessConfigCommandFields {
-  readonly command: readonly string[];
-  readonly timeoutSeconds: number;
-  readonly failureMessage: string;
-  readonly recoveryGuidance?: readonly string[];
-}
-
-export interface HarnessExitZeroCommand extends HarnessConfigCommandFields {
-  readonly success: { readonly kind: "exit-zero" };
-}
-
-export interface HarnessConfigTransactionCommand extends HarnessConfigCommandFields {
-  readonly success: {
-    readonly kind: "config-transaction";
-    readonly action: string;
-    readonly configDirectory: string;
-    readonly protectedFiles: readonly string[];
-  };
-}
-
-export type HarnessConfigCommand = HarnessExitZeroCommand | HarnessConfigTransactionCommand;
-
-export type HarnessConfigCommandSuccess = HarnessConfigCommand["success"];
-
-export interface HarnessConfigUpdateRequest {
-  readonly config: Readonly<Record<string, unknown>>;
-  readonly serializedConfig: string;
-  readonly expectedConfigSha256: string;
-  readonly target: HarnessConfigTarget;
-}
-
-export type HarnessConfigUpdatePlan =
-  | {
-      readonly kind: "immutable";
-      readonly reason: string;
-    }
-  | {
-      readonly kind: "transaction";
-      readonly content: string;
-      readonly validation: HarnessExitZeroCommand | null;
-      readonly write: HarnessConfigCommand;
-      readonly restart: {
-        readonly kind: "managed" | "external";
-        readonly guidance: readonly string[];
-      };
-    };
-
-export interface HarnessConfigUrlRequest {
-  readonly config: Readonly<Record<string, unknown>>;
-  readonly key: string;
-  readonly relativePath: readonly string[];
-}
-
-export interface HarnessConfigUrlPolicy {
-  readonly allowPrivateUrls: boolean;
-  readonly allowOpenShellBridge: boolean;
-}
-
-export interface HarnessMutableConfigRequest {
-  readonly target: HarnessConfigTarget;
-  readonly sandboxUid: string | null;
-  readonly sandboxGid: string | null;
-}
-
-export type HarnessMutableConfigPlan =
-  | { readonly kind: "not-required"; readonly reason: string }
-  | {
-      readonly kind: "stat";
-      readonly directoryMode: string;
-      readonly directoryOwner: string;
-      readonly fileMode: string;
-      readonly fileOwner: string;
-      readonly repair: HarnessExitZeroCommand | null;
-    }
-  | {
-      readonly kind: "probe";
-      readonly probe: HarnessExitZeroCommand;
-    };
-
-export interface HarnessConfigRestoreRequest {
-  readonly backupContent: string;
-  readonly currentContent: string | null;
-  readonly managedChannelNames: readonly string[];
-  readonly previousImagePluginInstalls: readonly HarnessImagePluginInstall[] | null;
-  readonly freshImagePluginInstalls: readonly HarnessImagePluginInstall[] | null;
-}
-
-export interface HarnessImagePluginInstall {
-  readonly id: string;
-  readonly loadPaths: readonly string[];
-}
-
-export type HarnessConfigRestoreWritePlan =
-  | { readonly kind: "atomic" }
-  | {
-      readonly kind: "config-anchors";
-      readonly hashFiles: readonly string[];
-    };
-
-export type HarnessConfigRestoreResult =
-  | {
-      readonly kind: "merged";
-      readonly content: string;
-      readonly write: HarnessConfigRestoreWritePlan;
-    }
-  | { readonly kind: "refused"; readonly reason: string };
+export type {
+  HarnessConfigCommand,
+  HarnessConfigCommandSuccess,
+  HarnessConfigRestoreRequest,
+  HarnessConfigRestoreResult,
+  HarnessConfigRestoreWritePlan,
+  HarnessConfigTarget,
+  HarnessConfigTransactionCommand,
+  HarnessConfigUpdatePlan,
+  HarnessConfigUpdateRequest,
+  HarnessConfigUrlPolicy,
+  HarnessConfigUrlRequest,
+  HarnessExitZeroCommand,
+  HarnessImagePluginInstall,
+  HarnessMutableConfigPlan,
+  HarnessMutableConfigRequest,
+} from "@nvidia/nemoclaw-harness-contract";
 
 const canonicalAbsolutePathSchema: AnySchemaObject = Object.freeze({
   type: "string",

@@ -1,13 +1,32 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type {
+  HarnessManifestRecord,
+  HarnessManifestScalar,
+  HarnessManifestValue,
+  HarnessMcpAdapter,
+  HarnessMcpCapability,
+  HarnessMcpSupport,
+} from "@nvidia/nemoclaw-harness-contract";
+
 import type { AgentDashboardUi } from "./dashboard-ui";
 import type { AgentRuntime } from "./runtime/manifest";
 import type { AgentWebAuth } from "./web-auth";
 
-export type ManifestScalar = string | number | boolean | null | Date;
-export type ManifestValue = ManifestScalar | ManifestRecord | ManifestValue[];
-export type ManifestRecord = { [key: string]: ManifestValue };
+export type {
+  HarnessAgentManifest,
+  HarnessManifestRecord,
+  HarnessManifestScalar,
+  HarnessManifestValue,
+  HarnessMcpAdapter,
+  HarnessMcpCapability,
+  HarnessMcpSupport,
+} from "@nvidia/nemoclaw-harness-contract";
+
+export type ManifestScalar = HarnessManifestScalar;
+export type ManifestValue = HarnessManifestValue;
+export type ManifestRecord = HarnessManifestRecord;
 export type StringMap = { [key: string]: string };
 
 export interface AgentHealthProbe {
@@ -99,8 +118,8 @@ export interface AgentInference {
   default_model?: string;
 }
 
-export type AgentMcpSupport = "bridge" | "disabled";
-export type AgentMcpAdapter = string;
+export type AgentMcpSupport = HarnessMcpSupport;
+export type AgentMcpAdapter = HarnessMcpAdapter;
 
 const AGENT_MCP_ADAPTER_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
@@ -109,19 +128,7 @@ export function isAgentMcpAdapter(value: unknown): value is AgentMcpAdapter {
   return typeof value === "string" && AGENT_MCP_ADAPTER_RE.test(value);
 }
 
-export type AgentMcpCapability =
-  | {
-      support: "bridge";
-      adapter: AgentMcpAdapter;
-      policy_binaries?: readonly string[];
-      reason?: string;
-    }
-  | {
-      support: "disabled";
-      adapter?: never;
-      policy_binaries?: never;
-      reason?: string;
-    };
+export type AgentMcpCapability = HarnessMcpCapability;
 
 export interface AgentLegacyPaths {
   dockerfileBase: string | null;

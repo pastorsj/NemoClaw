@@ -374,6 +374,10 @@ describe("bundled harness package artifacts", () => {
         expect.stringContaining("nemoclaw-blueprint/router/llm-router/"),
       ]),
     );
+    expect(artifactFiles).toContain(
+      `${artifactPackPrefix("openclaw")}/packages/nemoclaw-openclaw/host/config-adapter.cts`,
+    );
+    expect(artifactFiles.some((filePath) => filePath.includes("/host/source/"))).toBe(false);
     const envelopeKeys = bundledPackageIds().flatMap((id) =>
       Object.keys(
         JSON.parse(fs.readFileSync(path.join(artifactRoot(id), "nemoclaw-package.json"), "utf8")),

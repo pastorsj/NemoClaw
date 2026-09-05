@@ -1,14 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export interface HarnessPackageEnvelope {
-  readonly schemaVersion: 1;
-  readonly kind: "agent-runtime";
-  readonly id: string;
-  readonly displayName: string;
-  readonly packageVersion: string;
-  readonly manifest: string;
-}
+export type { HarnessPackageEnvelope } from "@nvidia/nemoclaw-harness-contract";
 
 export interface HarnessPackageIdentity {
   readonly kind: "agent-runtime";

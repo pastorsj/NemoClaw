@@ -2,6 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AnySchemaObject } from "ajv";
+import type {
+  HarnessMcpCapabilityProbe,
+  HarnessMcpCapabilityRequest,
+  HarnessMcpInspectionRequest,
+  HarnessMcpRegistrationPlan,
+  HarnessMcpRegistrationRequest,
+  HarnessMcpRemovalPlan,
+  HarnessMcpRemovalRequest,
+  HarnessMcpRuntimeIntentRequest,
+  HarnessMcpRuntimeRequest,
+} from "@nvidia/nemoclaw-harness-contract";
 
 import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract";
 
@@ -9,114 +20,24 @@ const MCP_ADAPTER_SOURCE_MAX_BYTES = 512 * 1024;
 const MCP_ADAPTER_REQUEST_MAX_BYTES = 1024 * 1024;
 const MCP_ADAPTER_RESULT_MAX_BYTES = 1024 * 1024;
 
-export interface HarnessMcpAdapterEntry {
-  readonly server: string;
-  readonly url: string;
-  readonly headers: Readonly<Record<string, string>>;
-}
-
-export interface HarnessMcpRegistrationRequest {
-  readonly entry: HarnessMcpAdapterEntry;
-  readonly managedEntries: readonly HarnessMcpAdapterEntry[];
-  readonly replaceExisting: boolean;
-  readonly teardownRollback: boolean;
-  readonly configDirectory: string | null;
-}
-
-export interface HarnessMcpRemovalRequest {
-  readonly entry: HarnessMcpAdapterEntry;
-  readonly force: boolean;
-  readonly adaptiveTeardown: boolean;
-  readonly configDirectory: string | null;
-}
-
-export type HarnessMcpAdapterCommand = string | readonly string[];
-
-export type HarnessMcpExecutionSuccess =
-  | { readonly kind: "exit-zero" }
-  | {
-      readonly kind: "lifecycle-json";
-      readonly requireReload: boolean;
-      readonly invalidResponseMessage: string;
-      readonly reloadRequiredMessage: string;
-    };
-
-export interface HarnessMcpExecutionPlan {
-  readonly command: HarnessMcpAdapterCommand;
-  readonly timeoutSeconds: number;
-  readonly success: HarnessMcpExecutionSuccess;
-  readonly failureMessage: string;
-}
-
-export type HarnessMcpRegistrationVerification =
-  | { readonly kind: "inspection"; readonly failureMessage: string }
-  | { readonly kind: "rollback-restored"; readonly failureMessage: string };
-
-export type HarnessMcpCredentialConvergence =
-  | { readonly kind: "none" }
-  | {
-      /** The mutation reloads its process and can advance OpenShell's credential revision. */
-      readonly kind: "after-runtime-reload";
-      readonly unavailableMessage: string;
-      readonly unstableMessage: string;
-    };
-
-export interface HarnessMcpRegistrationPlan {
-  readonly execution: HarnessMcpExecutionPlan;
-  readonly verification: HarnessMcpRegistrationVerification;
-  readonly credentialConvergence: HarnessMcpCredentialConvergence;
-}
-
-export type HarnessMcpRemovalOutcome =
-  | { readonly kind: "removed" }
-  | { readonly kind: "stdout-removal-outcome" };
-
-export interface HarnessMcpRemovalPlan {
-  readonly execution: HarnessMcpExecutionPlan;
-  readonly outcome: HarnessMcpRemovalOutcome;
-}
-
-export interface HarnessMcpInspectionRequest {
-  readonly entry: HarnessMcpAdapterEntry;
-  readonly failOnMismatch: boolean;
-  readonly configDirectory: string | null;
-}
-
-export interface HarnessMcpCapabilityRequest {
-  readonly sandboxName: string;
-}
-
-export type HarnessMcpCapabilityProbe =
-  | { readonly kind: "not-required" }
-  | {
-      readonly kind: "command";
-      readonly command: HarnessMcpAdapterCommand;
-      readonly success:
-        | { readonly kind: "exit-zero" }
-        | { readonly kind: "stdout-trimmed-equals"; readonly value: string }
-        | { readonly kind: "last-json-line-ok" };
-      readonly timeoutSeconds: number;
-      readonly failureMessage: string;
-      readonly retry?: {
-        readonly outputExact: string;
-        readonly initialAttempts: number;
-        readonly intervalMilliseconds: number;
-        readonly recovery?: {
-          readonly kind: "agent-gateway";
-          readonly timeoutSeconds: number;
-          readonly postRecoveryAttempts: number;
-        };
-      };
-    };
-
-export interface HarnessMcpRuntimeRequest {
-  readonly command: readonly string[];
-}
-
-export interface HarnessMcpRuntimeIntentRequest {
-  readonly entries: readonly HarnessMcpAdapterEntry[];
-  readonly managedServerNames: readonly string[];
-}
+export type {
+  HarnessMcpAdapterCommand,
+  HarnessMcpAdapterEntry,
+  HarnessMcpCapabilityProbe,
+  HarnessMcpCapabilityRequest,
+  HarnessMcpCredentialConvergence,
+  HarnessMcpExecutionPlan,
+  HarnessMcpExecutionSuccess,
+  HarnessMcpInspectionRequest,
+  HarnessMcpRegistrationPlan,
+  HarnessMcpRegistrationRequest,
+  HarnessMcpRegistrationVerification,
+  HarnessMcpRemovalOutcome,
+  HarnessMcpRemovalPlan,
+  HarnessMcpRemovalRequest,
+  HarnessMcpRuntimeIntentRequest,
+  HarnessMcpRuntimeRequest,
+} from "@nvidia/nemoclaw-harness-contract";
 
 const stringValueSchema = Object.freeze({ type: "string", maxLength: 65_536 });
 const mcpEntrySchema: AnySchemaObject = Object.freeze({

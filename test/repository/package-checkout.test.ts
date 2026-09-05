@@ -124,7 +124,7 @@ describe("package checkout cleanup", () => {
     const commandPurposes: string[] = [];
     const createGeneratedArtifactsByPurpose: Record<string, (workingDirectory: string) => void> = {
       "install candidate package dependencies": (workingDirectory) => {
-        const rehearsalRoot = path.dirname(workingDirectory);
+        const rehearsalRoot = path.resolve(workingDirectory, "..", "..", "..");
         const artifactRoot = path.join(
           rehearsalRoot,
           "nemoclaw",
@@ -166,6 +166,46 @@ describe("package checkout cleanup", () => {
         "run candidate package-only tests",
       ]);
       expect(fs.readdirSync(parent).filter((entry) => entry.startsWith("nc-"))).toEqual([]);
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
+
+  it("stages the public harness contract without exposing NemoClaw core source", () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-contract-checkout-"));
+    const candidateRoot = path.join(parent, "independent-package");
+    fs.mkdirSync(candidateRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(candidateRoot, "package.json"),
+      `${JSON.stringify({
+        name: "@nvidia/nemoclaw-example",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+        devDependencies: { "@nvidia/nemoclaw-harness-contract": "^0.1.0" },
+      })}\n`,
+    );
+    fs.writeFileSync(path.join(candidateRoot, "package-lock.json"), "{}\n");
+    fs.writeFileSync(path.join(candidateRoot, "manifest.yaml"), "name: example\n");
+    try {
+      runPackageCheckoutRehearsal(
+        {
+          mode: "package-only",
+          packageId: "example",
+          candidatePackageDir: candidateRoot,
+          temporaryParentDir: parent,
+          parentEnvironment: { PATH: process.env.PATH },
+        },
+        {
+          runCommand: (command) => {
+            const workspaceRoot = path.resolve(command.cwd, "..", "..");
+            expect(command.cwd).toBe(path.join(workspaceRoot, "packages", "nemoclaw-example"));
+            expect(
+              fs.existsSync(path.join(workspaceRoot, "harness-contract", "src", "index.ts")),
+            ).toBe(true);
+            expect(fs.existsSync(path.join(workspaceRoot, "src", "lib"))).toBe(false);
+            return { stdout: "" };
+          },
+        },
+      );
     } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }

@@ -171,6 +171,7 @@
     "url": "https://github.com/NVIDIA/NemoClaw.git"
   },
   "devDependencies": {
+    "@nvidia/nemoclaw-harness-contract": "file:harness-contract",
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
     "@earendil-works/pi-coding-agent": "0.80.6",

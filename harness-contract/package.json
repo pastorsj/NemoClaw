@@ -1,0 +1,33 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
+  "name": "@nvidia/nemoclaw-harness-contract",
+  "version": "0.1.0",
+  "description": "Type-only authoring contract and deterministic adapter builder for NemoClaw harness packages",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "scripts": {
+    "test": "tsc -p tsconfig.json"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts"
+    },
+    "./build-adapters": {
+      "import": "./build-adapters.mts"
+    }
+  },
+  "bin": {
+    "nemoclaw-build-adapters": "./build-adapters.mts"
+  },
+  "files": ["src/index.ts", "build-adapters.mts"],
+  "peerDependencies": {
+    "typescript": ">=6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

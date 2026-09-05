@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 
+import { assertHarnessAdapterArtifactsCurrent } from "../harness-contract/build-adapters.mts";
 import type { HarnessPackageEnvelope } from "../src/lib/agent-runtime/package/types";
 import { directDockerfileCopySources } from "./lib/dockerfile-copy-sources.mts";
 
@@ -228,6 +229,7 @@ export function listBundledAgentRuntimeSources(
       const packageJson = readAuthoringPackageJson(packageRoot);
       const declaredManifest = packageJson?.nemoclaw?.harnessManifest;
       if (declaredManifest === undefined) return [];
+      assertHarnessAdapterArtifactsCurrent(packageRoot);
       if (
         declaredManifest !== PACKAGE_MANIFEST_FILE ||
         typeof packageJson?.name !== "string" ||
@@ -357,6 +359,7 @@ function isOmittedAuthoringPath(relativePath: string, type: "directory" | "file"
   const name = path.posix.basename(relativePath);
   const normalizedName = name.toLowerCase();
   if (relativePath === TRANSITIONAL_GITLINK_PATH) return true;
+  if (/^packages\/nemoclaw-[^/]+\/host\/source(?:\/|$)/u.test(relativePath)) return true;
   if (type === "directory") {
     return (
       OMITTED_DIRECTORY_NAMES.has(normalizedName) ||

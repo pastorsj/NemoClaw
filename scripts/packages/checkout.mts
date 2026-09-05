@@ -25,6 +25,7 @@ const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 const MANIFEST_MAX_BYTES = 256 * 1024;
 const NON_SECRET_BASE_IMAGE =
   "ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HARNESS_CONTRACT_ROOT = path.resolve(import.meta.dirname, "..", "..", "harness-contract");
 const OMITTED_DIRECTORY_NAMES = new Set([
   ".git",
   ".cache",
@@ -86,6 +87,7 @@ interface CredentialFreeEnvironmentOptions {
 
 interface CandidatePackageMetadata {
   readonly hasFabricTestScript: boolean;
+  readonly usesHarnessContract: boolean;
 }
 
 /** Restore write access only within the generated agent runtime artifact tree. */
@@ -228,12 +230,25 @@ function assertCandidatePackageMetadata(
     throw new Error(`Candidate manifest must identify '${packageId}': ${manifestPath}`);
   }
   const scripts = metadata.scripts;
+  const devDependencies = metadata.devDependencies;
+  const harnessContractDependency =
+    devDependencies !== null &&
+    typeof devDependencies === "object" &&
+    !Array.isArray(devDependencies)
+      ? (devDependencies as Record<string, unknown>)["@nvidia/nemoclaw-harness-contract"]
+      : undefined;
+  if (harnessContractDependency !== undefined && harnessContractDependency !== "^0.1.0") {
+    throw new Error(
+      "Candidate package must use the published @nvidia/nemoclaw-harness-contract range",
+    );
+  }
   return {
     hasFabricTestScript:
       scripts !== null &&
       typeof scripts === "object" &&
       !Array.isArray(scripts) &&
       typeof (scripts as Record<string, unknown>)["test:fabric"] === "string",
+    usesHarnessContract: harnessContractDependency !== undefined,
   };
 }
 
@@ -609,8 +624,14 @@ function runPackageOnlyRehearsal(
   env: NodeJS.ProcessEnv,
   runCommand: CheckoutCommandRunner,
   hasFabricTestScript: boolean,
+  usesHarnessContract: boolean,
 ): PackageCheckoutResult {
-  const packageRoot = path.join(rehearsalRoot, "package");
+  const workspaceRoot = path.join(rehearsalRoot, "workspace");
+  const packageRoot = path.join(workspaceRoot, "packages", `nemoclaw-${packageId}`);
+  if (usesHarnessContract) {
+    assertRegularDirectory(HARNESS_CONTRACT_ROOT, "Harness contract package");
+    copyCandidatePackage(HARNESS_CONTRACT_ROOT, path.join(workspaceRoot, "harness-contract"));
+  }
   copyCandidatePackage(candidatePackageDir, packageRoot);
   installPackageDevelopmentDependencies(packageId, packageRoot, env, runCommand);
   runCommand(
@@ -767,6 +788,7 @@ export function runPackageCheckoutRehearsal(
         env,
         runCommand,
         candidateMetadata.hasFabricTestScript,
+        candidateMetadata.usesHarnessContract,
       );
     }
     return runComposedRehearsal(options, rehearsalRoot, env, runCommand);

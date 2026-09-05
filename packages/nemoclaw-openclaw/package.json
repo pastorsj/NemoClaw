@@ -5,7 +5,9 @@
   "description": "OpenClaw agent runtime package for NemoClaw",
   "license": "Apache-2.0",
   "scripts": {
-    "test:package": "vitest run --config vitest.config.ts",
+    "build:adapters": "nemoclaw-build-adapters .",
+    "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
+    "test:package": "npm run check:adapters && vitest run --config vitest.config.ts",
     "test:fabric": "bash tests/fabric/run-tests.sh",
     "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
     "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm --prefix plugin test && npm run test:fabric:composed",
@@ -13,7 +15,7 @@
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree && npm --prefix plugin test -- --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
     "test": "npm run test:package && npm run test:nemoclaw",
-    "typecheck": "tsc -p tsconfig.test.json && tsc -p jsconfig.json && npm --prefix plugin run typecheck"
+    "typecheck": "tsc -p tsconfig.test.json && tsc -p tsconfig.adapters.json && tsc -p jsconfig.json && npm --prefix plugin run typecheck"
   },
   "files": [
     "**/*",
@@ -23,6 +25,8 @@
     "!jsconfig.json",
     "!tests/**",
     "!package-lock.json",
+    "!host/source/**",
+    "!tsconfig.adapters.json",
     "!tsconfig.test.json",
     "!vitest.config.ts",
     "!vitest.coverage.mts",
@@ -42,6 +46,7 @@
     "node": ">=22.19.0"
   },
   "devDependencies": {
+    "@nvidia/nemoclaw-harness-contract": "^0.1.0",
     "@vitest/coverage-v8": "^4.1.0",
     "@types/node": "^25.5.2",
     "typescript": "6.0.3",
