@@ -67,7 +67,7 @@ test.skipIf(!hasFabricPackageE2eTarget())(
     const inference = requireHostedInferenceConfig(secrets);
     const redactionValues = [inference.apiKey];
     const runtime = createIsolatedTestRuntime(".nemoclaw-fabric-package-home-");
-    const registryPath = path.join(runtime.home, ".nemoclaw", "sandboxes.json");
+    const registryPath = path.join(runtime.stateRoot, "sandboxes.json");
     const env = runtime.environment({
       ...inference.env,
       NEMOCLAW_ACCEPT_THIRD_PARTY_SOFTWARE: "1",
