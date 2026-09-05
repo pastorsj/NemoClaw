@@ -13,6 +13,7 @@ import {
   fabricPackageJourneyEnvironment,
   loadFabricPackageTarget,
   parseFabricPackageCliOptions,
+  readBundledFabricHarnessE2eFixture,
   readFabricHarnessE2eFixture,
   readFabricPackageE2eTarget,
 } from "../../../tools/e2e/fabric-package.mts";
@@ -36,6 +37,20 @@ const PACKAGE_CASES = [
 ] as const;
 
 describe("generic Fabric package E2E", () => {
+  it.each(["openclaw", "hermes"] as const)(
+    "loads the conventional %s contract from its package",
+    (packageId) => {
+      const contract = readBundledFabricHarnessE2eFixture(packageId);
+
+      expect(contract).toEqual(
+        readFabricHarnessE2eFixture(
+          `packages/nemoclaw-${packageId}/tests/fixtures/live-contract.json`,
+        ),
+      );
+      expect(contract.packageId).toBe(packageId);
+    },
+  );
+
   it.each(PACKAGE_CASES)("reads the $id contract from its package fixture", (fixture) => {
     const contract = readFabricHarnessE2eFixture(fixture.fixture);
 

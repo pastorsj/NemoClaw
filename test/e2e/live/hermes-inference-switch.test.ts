@@ -12,6 +12,7 @@ import {
 import { expect, test } from "../fixtures/e2e-test.ts";
 import { startFakeOpenAiCompatibleServer } from "../fixtures/fake-openai-compatible.ts";
 import { trackIsolatedGatewayCleanup } from "../fixtures/gateway-cleanup.ts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import { DEFAULT_HOSTED_INFERENCE_BASE_URL } from "../fixtures/hosted-inference.ts";
 import { inferenceResponseModel } from "../fixtures/inference-switch-retry.ts";
 import {
@@ -62,6 +63,7 @@ import {
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const TIMEOUT_MS = testTimeout(45 * 60_000);
+const HERMES_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("hermes");
 const MOCK_BASELINE_API_KEY = "hermes-inference-switch-baseline-credential";
 const MOCK_BASELINE_MODEL = "hermes-inference-switch-baseline-model";
 const HERMES_DASHBOARD_INTERNAL_PORT =
@@ -442,14 +444,15 @@ test(
     expect(inferenceResponseModel(chat.stdout)).toBe(SWITCH_MODEL);
 
     await runPublicFabricTurn({
-      agent: "hermes",
       artifacts,
+      contract: HERMES_FABRIC_CONTRACT,
       env: commandEnv(),
       host,
       lifecyclePhase: "after-inference-switch",
       redactionValues,
       sandbox,
       sandboxName: SANDBOX_NAME,
+      scanPrivateState: false,
     });
 
     progress.phase("run Hermes CLI adapter forms against switched provider");

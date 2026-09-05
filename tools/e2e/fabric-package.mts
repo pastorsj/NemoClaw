@@ -52,6 +52,22 @@ export function readFabricHarnessE2eFixture(
   return validateFabricHarnessE2eContract(value);
 }
 
+/** Load the conventional package-owned fixture without maintaining a central harness map. */
+export function readBundledFabricHarnessE2eFixture(
+  packageId: string,
+  repositoryRoot = FABRIC_PACKAGE_REPOSITORY_ROOT,
+): FabricHarnessE2eContract {
+  validateFabricPackageId(packageId);
+  const contract = readFabricHarnessE2eFixture(
+    path.join("packages", `nemoclaw-${packageId}`, "tests", "fixtures", "live-contract.json"),
+    repositoryRoot,
+  );
+  if (contract.packageId !== packageId) {
+    throw new Error(`Fabric package fixture identity does not match '${packageId}'`);
+  }
+  return contract;
+}
+
 export function defaultFabricPackageSandboxName(packageId: string): string {
   validateFabricPackageId(packageId);
   const candidate = `e2e-${packageId}`;

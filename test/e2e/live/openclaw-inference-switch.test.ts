@@ -54,6 +54,7 @@ import {
 import { CLI_ENTRYPOINT, REPO_ROOT } from "../fixtures/paths.ts";
 import { parseOpenClawAgentText } from "../fixtures/openclaw-agent-output.ts";
 import { runBoundedRetry } from "../../../tools/e2e/retry-evidence.mts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
   agentReplyContainsToken,
@@ -71,6 +72,7 @@ import {
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-oc-inf-switch";
+const OPENCLAW_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("openclaw");
 const SWITCH_PROVIDER = process.env.NEMOCLAW_SWITCH_PROVIDER ?? PUBLIC_NVIDIA_SWITCH_PROVIDER;
 const SWITCH_MODEL = process.env.NEMOCLAW_SWITCH_MODEL ?? PUBLIC_NVIDIA_SWITCH_MODEL;
 const SWITCH_INFERENCE_API = process.env.NEMOCLAW_SWITCH_INFERENCE_API ?? "openai-completions";
@@ -1106,14 +1108,15 @@ test(
     }
 
     await runPublicFabricTurn({
-      agent: "openclaw",
       artifacts,
+      contract: OPENCLAW_FABRIC_CONTRACT,
       env: commandEnv(home),
       host,
       lifecyclePhase: "after-inference-switch",
       redactionValues,
       sandbox,
       sandboxName: SANDBOX_NAME,
+      scanPrivateState: false,
     });
 
     progress.phase("apply sandbox retention and record the result");

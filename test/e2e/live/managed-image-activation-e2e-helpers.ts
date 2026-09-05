@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote.ts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
@@ -449,14 +450,15 @@ async function qualifyAgent(
   await runAgentTurn(sandbox, agent, sandboxName, "before", env);
   if (agent === "openclaw" || agent === "hermes") {
     await runPublicFabricTurn({
-      agent,
       artifacts,
+      contract: readBundledFabricHarnessE2eFixture(agent),
       env,
       host,
       lifecyclePhase: "before-gateway-restart",
       redactionValues: [API_KEY],
       sandbox,
       sandboxName,
+      scanPrivateState: false,
     });
   }
   const marker = `managed-activation-${agent}-${Date.now()}`;
@@ -495,14 +497,15 @@ async function qualifyAgent(
   await runAgentTurn(sandbox, agent, sandboxName, "after", env);
   if (agent === "openclaw" || agent === "hermes") {
     await runPublicFabricTurn({
-      agent,
       artifacts,
+      contract: readBundledFabricHarnessE2eFixture(agent),
       env,
       host,
       lifecyclePhase: "after-gateway-restart",
       redactionValues: [API_KEY],
       sandbox,
       sandboxName,
+      scanPrivateState: false,
     });
   }
 

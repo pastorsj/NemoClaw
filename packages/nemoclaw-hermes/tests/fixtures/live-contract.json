@@ -1,0 +1,11 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "packageId": "hermes",
+  "adapterId": "nvidia.nemoclaw.hermes",
+  "artifactRoot": "/sandbox/.hermes/fabric-artifacts",
+  "configPath": "/sandbox/.hermes/fabric.json",
+  "descriptorGlob": "/usr/local/share/nemoclaw/hermes.fabric-adapter.json",
+  "descriptorPathPrefix": "/usr/local/share/nemoclaw",
+  "descriptorRunnerModule": "nemoclaw_hermes_fabric.adapter",
+  "processMarkers": ["nemo_fabric_adapters.hermes"]
+}

@@ -1,0 +1,11 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "packageId": "openclaw",
+  "adapterId": "nvidia.nemoclaw.openclaw",
+  "artifactRoot": "/sandbox/.openclaw/fabric-artifacts",
+  "configPath": "/sandbox/.openclaw/fabric.json",
+  "descriptorGlob": "/usr/local/share/nemoclaw/openclaw.fabric-adapter.json",
+  "descriptorPathPrefix": "/usr/local/share/nemoclaw",
+  "descriptorRunnerModule": "nemoclaw_openclaw_fabric.adapter",
+  "processMarkers": ["nemoclaw-fabric-", ".nemoclaw-openclaw-prompt-"]
+}

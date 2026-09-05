@@ -11,6 +11,7 @@ import type { SandboxMessagingPlan } from "../../../src/lib/messaging/manifest";
 import { readManagedWorkloadAuthority } from "../../../src/lib/onboard/workload/authority.ts";
 import { readSandboxBaseImageResolutionMetadata } from "../../../src/lib/sandbox-base-image";
 import { createSession } from "../../../src/lib/state/onboard-session.ts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import type { SandboxEntry } from "../../../src/lib/state/registry/types.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
 import { trackGuardedSandboxNameDelete } from "../fixtures/cleanup.ts";
@@ -93,6 +94,7 @@ process.env.NEMOCLAW_CLI_BIN ??= CLI_ENTRYPOINT;
 // Literal interactive issue #3025 reproduction paths (`hermes rebuild`, modal
 // prompt, and `Y` confirmation) remain outside this Vitest migration.
 const OLD_HERMES_VERSION = `v${REBUILD_HERMES_OLD_BASE_FIXTURE.hermesCalver}`;
+const HERMES_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("hermes");
 const OLD_HERMES_REGISTRY_VERSION = OLD_HERMES_VERSION.slice(1);
 const STALE_BASE_REBUILD = process.env.NEMOCLAW_HERMES_STALE_BASE_REBUILD_E2E === "1";
 const TEST_SANDBOX_PREFIX = STALE_BASE_REBUILD ? "e2e-rebuild-base" : "e2e-rebuild-hermes";
@@ -1310,14 +1312,15 @@ test(
       ...finalBaseEvidence,
     });
     await runPublicFabricTurn({
-      agent: "hermes",
       artifacts,
+      contract: HERMES_FABRIC_CONTRACT,
       env: testEnv(apiKey),
       host,
       lifecyclePhase: "after-rebuild",
       redactionValues,
       sandbox,
       sandboxName: SANDBOX_NAME,
+      scanPrivateState: false,
     });
 
     const inferencePayload = JSON.stringify({

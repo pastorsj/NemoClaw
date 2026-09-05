@@ -17,7 +17,6 @@ export const PUBLIC_FABRIC_TURN_PROMPT = "Reply with exactly one word: PONG";
 export const PUBLIC_FABRIC_TURN_RESPONSE = "PONG";
 export const PUBLIC_FABRIC_RUNNER_IDENTITY = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)";
 
-export type PublicFabricAgent = "hermes" | "openclaw";
 export type PublicFabricLifecyclePhase =
   | "after-gateway-restart"
   | "after-inference-switch"
@@ -29,29 +28,6 @@ export type PublicFabricLifecyclePhase =
   | "before-gateway-restart";
 
 export type PublicFabricHarnessContract = FabricHarnessE2eContract;
-
-const PUBLIC_FABRIC_AGENT_CONTRACTS: Record<PublicFabricAgent, PublicFabricHarnessContract> = {
-  hermes: {
-    packageId: "hermes",
-    adapterId: "nvidia.nemoclaw.hermes",
-    artifactRoot: "/sandbox/.hermes/fabric-artifacts",
-    configPath: "/sandbox/.hermes/fabric.json",
-    descriptorGlob: "/usr/local/share/nemoclaw/hermes.fabric-adapter.json",
-    descriptorPathPrefix: "/usr/local/share/nemoclaw",
-    descriptorRunnerModule: "nemoclaw_hermes_fabric.adapter",
-    processMarkers: ["nemo_fabric_adapters.hermes"],
-  },
-  openclaw: {
-    packageId: "openclaw",
-    adapterId: "nvidia.nemoclaw.openclaw",
-    artifactRoot: "/sandbox/.openclaw/fabric-artifacts",
-    configPath: "/sandbox/.openclaw/fabric.json",
-    descriptorGlob: "/usr/local/share/nemoclaw/openclaw.fabric-adapter.json",
-    descriptorPathPrefix: "/usr/local/share/nemoclaw",
-    descriptorRunnerModule: "nemoclaw_openclaw_fabric.adapter",
-    processMarkers: ["nemoclaw-fabric-", ".nemoclaw-openclaw-prompt-"],
-  },
-};
 
 const FABRIC_STATE_ENTRY_LIMIT = 4096;
 const FABRIC_STATE_BYTE_LIMIT = 64 * 1024 * 1024;
@@ -432,41 +408,25 @@ export interface PublicFabricTurnProof {
 
 interface PublicFabricTurnBaseOptions {
   readonly artifacts: Pick<ArtifactSink, "writeJson">;
+  readonly contract: PublicFabricHarnessContract;
   readonly env: NodeJS.ProcessEnv;
   readonly host: Pick<HostCliClient, "nemoclaw">;
   readonly lifecyclePhase: PublicFabricLifecyclePhase;
   readonly redactionValues: readonly string[];
   readonly sandbox: SandboxClient;
   readonly sandboxName: string;
+  /** Scan the complete private state root. Fresh package-contract journeys use this by default. */
+  readonly scanPrivateState?: boolean;
   readonly timeoutMs?: number;
 }
 
-export type PublicFabricTurnOptions = PublicFabricTurnBaseOptions &
-  (
-    | {
-        readonly agent: PublicFabricAgent;
-        readonly contract?: never;
-      }
-    | {
-        readonly agent?: never;
-        readonly contract: PublicFabricHarnessContract;
-      }
-  );
+export type PublicFabricTurnOptions = PublicFabricTurnBaseOptions;
 
 function resolveFabricHarnessContract(options: PublicFabricTurnOptions): {
   readonly agent: string;
   readonly contract: PublicFabricHarnessContract;
 } {
-  const provided = options.contract;
-  const agent = provided?.packageId ?? options.agent ?? "";
-  const candidate = provided ?? PUBLIC_FABRIC_AGENT_CONTRACTS[options.agent as PublicFabricAgent];
-  if (
-    !candidate ||
-    (provided !== undefined && options.agent !== undefined) ||
-    (provided !== undefined && Object.hasOwn(PUBLIC_FABRIC_AGENT_CONTRACTS, agent))
-  ) {
-    throw new Error("public Fabric proof contract is invalid");
-  }
+  const candidate = options.contract;
   let contract: FabricHarnessE2eContract;
   try {
     contract = validateFabricHarnessE2eContract({
@@ -484,7 +444,7 @@ function resolveFabricHarnessContract(options: PublicFabricTurnOptions): {
   }
 
   return Object.freeze({
-    agent,
+    agent: contract.packageId,
     contract,
   });
 }
@@ -647,10 +607,10 @@ export async function runPublicFabricTurn(
     sandboxName,
     timeoutMs = 3 * 60_000,
   } = options;
-  // A package-contract journey starts from one fresh, finite private state root.
-  // Established agent journeys can own larger compatibility trees; their package
-  // suites retain responsibility for scanning those deliberately broader roots.
-  const stateScanRequired = options.contract !== undefined;
+  // A fresh package-contract journey owns one finite private state root and scans
+  // it by default. Broader lifecycle journeys can skip that duplicate scan when
+  // the package suite already owns equivalent private-state coverage.
+  const stateScanRequired = options.scanPrivateState ?? true;
   const { agent, contract } = resolveFabricHarnessContract(options);
   const processMarkers = fabricProcessMarkers(contract);
   const baselineResult = await sandbox.exec(

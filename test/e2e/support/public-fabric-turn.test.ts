@@ -19,43 +19,29 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { FabricHarnessE2eContract } from "../../../tools/e2e/fabric-contract.mts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import type { HostCliClient } from "../fixtures/clients/host.ts";
 import type { SandboxClient } from "../fixtures/clients/sandbox.ts";
 import type { ShellProbeResult } from "../fixtures/shell-probe.ts";
 import {
-  type PublicFabricAgent,
   type PublicFabricHarnessContract,
-  type PublicFabricTurnOptions,
   PUBLIC_FABRIC_RUNNER_IDENTITY,
   PUBLIC_FABRIC_TURN_PROMPT,
   PUBLIC_FABRIC_TURN_RESPONSE,
   runPublicFabricTurn,
 } from "../live/public-fabric-turn.ts";
 
+type TestFabricContract = PublicFabricHarnessContract & { readonly descriptorPath: string };
+
+function loadBundledTestContract(packageId: string): TestFabricContract {
+  const contract = readBundledFabricHarnessE2eFixture(packageId);
+  return Object.freeze({ ...contract, descriptorPath: contract.descriptorGlob });
+}
+
 const CONTRACTS = {
-  hermes: {
-    packageId: "hermes",
-    adapterId: "nvidia.nemoclaw.hermes",
-    artifactRoot: "/sandbox/.hermes/fabric-artifacts",
-    configPath: "/sandbox/.hermes/fabric.json",
-    descriptorGlob: "/usr/local/share/nemoclaw/hermes.fabric-adapter.json",
-    descriptorPath: "/usr/local/share/nemoclaw/hermes.fabric-adapter.json",
-    descriptorPathPrefix: "/usr/local/share/nemoclaw",
-    descriptorRunnerModule: "nemoclaw_hermes_fabric.adapter",
-    processMarkers: ["nemo_fabric_adapters.hermes"],
-  },
-  openclaw: {
-    packageId: "openclaw",
-    adapterId: "nvidia.nemoclaw.openclaw",
-    artifactRoot: "/sandbox/.openclaw/fabric-artifacts",
-    configPath: "/sandbox/.openclaw/fabric.json",
-    descriptorGlob: "/usr/local/share/nemoclaw/openclaw.fabric-adapter.json",
-    descriptorPath: "/usr/local/share/nemoclaw/openclaw.fabric-adapter.json",
-    descriptorPathPrefix: "/usr/local/share/nemoclaw",
-    descriptorRunnerModule: "nemoclaw_openclaw_fabric.adapter",
-    processMarkers: ["nemoclaw-fabric-", ".nemoclaw-openclaw-prompt-"],
-  },
+  hermes: loadBundledTestContract("hermes"),
+  openclaw: loadBundledTestContract("openclaw"),
 } as const;
 
 const FUTURE_CONTRACT = {
@@ -70,7 +56,7 @@ const FUTURE_CONTRACT = {
   processMarkers: ["future_harness_headless"],
 } as const satisfies FabricHarnessE2eContract & { readonly descriptorPath: string };
 
-type TestFabricContract = PublicFabricHarnessContract & { readonly descriptorPath: string };
+type BundledFabricPackage = keyof typeof CONTRACTS;
 
 function shellResult(overrides: Partial<ShellProbeResult> = {}): ShellProbeResult {
   return {
@@ -90,11 +76,10 @@ function shellResult(overrides: Partial<ShellProbeResult> = {}): ShellProbeResul
 }
 
 function configProbe(
-  selected: PublicFabricAgent | TestFabricContract,
+  contract: TestFabricContract,
   overrides: Record<string, unknown> = {},
+  scanPrivateState = true,
 ): ShellProbeResult {
-  const contract = typeof selected === "string" ? CONTRACTS[selected] : selected;
-  const stateScanRequired = typeof selected !== "string";
   return shellResult({
     stdout: `${JSON.stringify({
       adapterId: contract.adapterId,
@@ -118,12 +103,12 @@ function configProbe(
       expectedAdapterId: contract.adapterId,
       expectedRunnerModule: contract.descriptorRunnerModule,
       schemaVersion: "fabric.agent/v1alpha1",
-      stateBytesScanned: stateScanRequired ? 128 : null,
-      stateCredentialFree: stateScanRequired ? true : null,
-      stateEntryCount: stateScanRequired ? 4 : null,
-      stateScanComplete: stateScanRequired ? true : null,
-      stateScanRequired,
-      stateTreeBounded: stateScanRequired ? true : null,
+      stateBytesScanned: scanPrivateState ? 128 : null,
+      stateCredentialFree: scanPrivateState ? true : null,
+      stateEntryCount: scanPrivateState ? 4 : null,
+      stateScanComplete: scanPrivateState ? true : null,
+      stateScanRequired: scanPrivateState,
+      stateTreeBounded: scanPrivateState ? true : null,
       ...overrides,
     })}\n`,
   });
@@ -140,22 +125,15 @@ function processProbe(overrides: Record<string, unknown> = {}): ShellProbeResult
   });
 }
 
-function successfulSandboxResults(agent: PublicFabricAgent): ShellProbeResult[] {
+function successfulSandboxResults(
+  contract: TestFabricContract,
+  scanPrivateState: boolean,
+): ShellProbeResult[] {
   return [
     processProbe(),
     shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
     shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-    configProbe(agent),
-    processProbe(),
-  ];
-}
-
-function successfulContractResults(contract: TestFabricContract): ShellProbeResult[] {
-  return [
-    processProbe(),
-    shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
-    shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-    configProbe(contract),
+    configProbe(contract, {}, scanPrivateState),
     processProbe(),
   ];
 }
@@ -184,16 +162,22 @@ function fixture(
   };
 }
 
-function runTurn(agent: PublicFabricAgent, harness: ReturnType<typeof fixture>) {
+function runTurn(
+  packageId: BundledFabricPackage,
+  harness: ReturnType<typeof fixture>,
+  scanPrivateState: boolean,
+) {
+  const contract = CONTRACTS[packageId];
   return runPublicFabricTurn({
-    agent,
     artifacts: harness.artifacts,
+    contract,
     env: { PATH: "/test/bin" },
     host: harness.host,
     lifecyclePhase: "before-gateway-restart",
     redactionValues: ["fixture-credential"],
     sandbox: harness.sandbox,
-    sandboxName: `fabric-${agent}`,
+    sandboxName: `fabric-${packageId}`,
+    scanPrivateState,
     timeoutMs: 45_000,
   });
 }
@@ -201,14 +185,16 @@ function runTurn(agent: PublicFabricAgent, harness: ReturnType<typeof fixture>) 
 describe("public Fabric live turn", () => {
   it.each(["openclaw", "hermes"] as const)(
     "proves one plain %s turn and its pinned runtime integrity",
-    async (agent) => {
-      const contract = CONTRACTS[agent];
-      const harness = fixture({ sandboxResults: successfulSandboxResults(agent) });
+    async (packageId) => {
+      const contract = CONTRACTS[packageId];
+      const harness = fixture({
+        sandboxResults: successfulSandboxResults(contract, false),
+      });
 
-      await expect(runTurn(agent, harness)).resolves.toEqual({
+      await expect(runTurn(packageId, harness, false)).resolves.toEqual({
         schemaVersion: 1,
         adapterId: contract.adapterId,
-        agent,
+        agent: packageId,
         artifactEntryCount: 0,
         artifactRoot: contract.artifactRoot,
         artifactRootExists: true,
@@ -224,7 +210,7 @@ describe("public Fabric live turn", () => {
         outcome: "succeeded",
         responseSha256: createHash("sha256").update(PUBLIC_FABRIC_TURN_RESPONSE).digest("hex"),
         runnerIdentity: PUBLIC_FABRIC_RUNNER_IDENTITY,
-        sandboxName: `fabric-${agent}`,
+        sandboxName: `fabric-${packageId}`,
         stateBytesScanned: null,
         stateCredentialFree: null,
         stateEntryCount: null,
@@ -233,9 +219,9 @@ describe("public Fabric live turn", () => {
       });
 
       expect(harness.nemoclaw).toHaveBeenCalledExactlyOnceWith(
-        ["sandbox", "agent", `fabric-${agent}`, PUBLIC_FABRIC_TURN_PROMPT],
+        ["sandbox", "agent", `fabric-${packageId}`, PUBLIC_FABRIC_TURN_PROMPT],
         {
-          artifactName: `fabric-${agent}-before-gateway-restart-public-agent-turn`,
+          artifactName: `fabric-${packageId}-before-gateway-restart-public-agent-turn`,
           env: { PATH: "/test/bin" },
           redactionValues: ["fixture-credential"],
           timeoutMs: 45_000,
@@ -244,7 +230,7 @@ describe("public Fabric live turn", () => {
       expect(harness.sandboxExec).toHaveBeenCalledTimes(5);
       expect(harness.sandboxExec).toHaveBeenNthCalledWith(
         1,
-        `fabric-${agent}`,
+        `fabric-${packageId}`,
         [
           "/opt/nemoclaw-fabric-venv/bin/python3",
           "-I",
@@ -253,15 +239,15 @@ describe("public Fabric live turn", () => {
           expect.any(String),
         ],
         expect.objectContaining({
-          artifactName: `fabric-${agent}-before-gateway-restart-process-baseline`,
+          artifactName: `fabric-${packageId}-before-gateway-restart-process-baseline`,
         }),
       );
       expect(harness.sandboxExec).toHaveBeenNthCalledWith(
         2,
-        `fabric-${agent}`,
+        `fabric-${packageId}`,
         ["/usr/local/bin/nemoclaw-fabric", "--version"],
         expect.objectContaining({
-          artifactName: `fabric-${agent}-before-gateway-restart-runner-version`,
+          artifactName: `fabric-${packageId}-before-gateway-restart-runner-version`,
         }),
       );
 
@@ -309,10 +295,10 @@ describe("public Fabric live turn", () => {
         ]),
       );
       expect(harness.writeJson).toHaveBeenCalledWith(
-        `fabric-${agent}-before-gateway-restart-proof.json`,
+        `fabric-${packageId}-before-gateway-restart-proof.json`,
         expect.objectContaining({
           adapterId: contract.adapterId,
-          agent,
+          agent: packageId,
           descriptorRunnerModule: contract.descriptorRunnerModule,
           noLingeringProcesses: true,
           outcome: "succeeded",
@@ -322,8 +308,10 @@ describe("public Fabric live turn", () => {
     },
   );
 
-  it("proves a future package from one finite package-owned contract", async () => {
-    const harness = fixture({ sandboxResults: successfulContractResults(FUTURE_CONTRACT) });
+  it("proves a future package with an explicit private-state scan", async () => {
+    const harness = fixture({
+      sandboxResults: successfulSandboxResults(FUTURE_CONTRACT, true),
+    });
 
     await expect(
       runPublicFabricTurn({
@@ -335,6 +323,7 @@ describe("public Fabric live turn", () => {
         redactionValues: ["fixture-credential"],
         sandbox: harness.sandbox,
         sandboxName: "fabric-future-harness",
+        scanPrivateState: true,
       }),
     ).resolves.toMatchObject({
       adapterId: FUTURE_CONTRACT.adapterId,
@@ -365,11 +354,27 @@ describe("public Fabric live turn", () => {
     );
   });
 
+  it("scans private state by default for a package contract journey", async () => {
+    const harness = fixture({
+      sandboxResults: successfulSandboxResults(FUTURE_CONTRACT, true),
+    });
+
+    await expect(
+      runPublicFabricTurn({
+        artifacts: harness.artifacts,
+        contract: FUTURE_CONTRACT,
+        env: { PATH: "/test/bin" },
+        host: harness.host,
+        lifecyclePhase: "after-onboard",
+        redactionValues: [],
+        sandbox: harness.sandbox,
+        sandboxName: "fabric-future-harness",
+      }),
+    ).resolves.toMatchObject({ stateScanRequired: true });
+    expect(harness.sandboxExec.mock.calls[3]![1][11]).toBe("required");
+  });
+
   it.each([
-    {
-      ...FUTURE_CONTRACT,
-      packageId: "hermes",
-    },
     {
       ...FUTURE_CONTRACT,
       packageId: "../future-harness",
@@ -412,28 +417,11 @@ describe("public Fabric live turn", () => {
     expect(harness.sandboxExec).not.toHaveBeenCalled();
   });
 
-  it("rejects an unknown package without its explicit proof contract", async () => {
-    const harness = fixture();
-    const malformed = {
-      agent: "future-harness",
-      artifacts: harness.artifacts,
-      env: { PATH: "/test/bin" },
-      host: harness.host,
-      lifecyclePhase: "after-onboard",
-      redactionValues: [],
-      sandbox: harness.sandbox,
-      sandboxName: "fabric-future-harness",
-    } as unknown as PublicFabricTurnOptions;
-
-    await expect(runPublicFabricTurn(malformed)).rejects.toThrow(
-      "public Fabric proof contract is invalid",
-    );
-    expect(harness.sandboxExec).not.toHaveBeenCalled();
-  });
-
   it("uses an immutable proof-contract snapshot across asynchronous probes", async () => {
     const mutableContract = structuredClone(FUTURE_CONTRACT);
-    const harness = fixture({ sandboxResults: successfulContractResults(FUTURE_CONTRACT) });
+    const harness = fixture({
+      sandboxResults: successfulSandboxResults(FUTURE_CONTRACT, true),
+    });
     const pending = runPublicFabricTurn({
       artifacts: harness.artifacts,
       contract: mutableContract,
@@ -454,12 +442,16 @@ describe("public Fabric live turn", () => {
   });
 
   it("accepts the exact root-owned read-only Shields posture and a warning-only doctor", async () => {
-    const results = successfulSandboxResults("openclaw");
+    const results = successfulSandboxResults(CONTRACTS.openclaw, false);
     results[2] = shellResult({ stdout: '{"checks":[],"status":"warn"}\n' });
-    results[3] = configProbe("openclaw", { configMode: "0444", configOwner: "root:root" });
+    results[3] = configProbe(
+      CONTRACTS.openclaw,
+      { configMode: "0444", configOwner: "root:root" },
+      false,
+    );
     const harness = fixture({ sandboxResults: results });
 
-    await expect(runTurn("openclaw", harness)).resolves.toMatchObject({
+    await expect(runTurn("openclaw", harness, false)).resolves.toMatchObject({
       configMode: "0444",
       configOwner: "root:root",
       doctorStatus: "warn",
@@ -467,8 +459,10 @@ describe("public Fabric live turn", () => {
   });
 
   it("executes the bounded private state probe without publishing credential evidence", async () => {
-    const harness = fixture({ sandboxResults: successfulSandboxResults("openclaw") });
-    await runTurn("openclaw", harness);
+    const harness = fixture({
+      sandboxResults: successfulSandboxResults(CONTRACTS.openclaw, false),
+    });
+    await runTurn("openclaw", harness, false);
     const configCommand = harness.sandboxExec.mock.calls[3]![1];
     const processCommand = harness.sandboxExec.mock.calls[4]![1];
     const configScript = configCommand[3]!;
@@ -644,8 +638,10 @@ describe("public Fabric live turn", () => {
   it.runIf(process.platform === "linux")(
     "reports a detached Hermes process without treating transport as harness state",
     async () => {
-      const harness = fixture({ sandboxResults: successfulSandboxResults("hermes") });
-      await runTurn("hermes", harness);
+      const harness = fixture({
+        sandboxResults: successfulSandboxResults(CONTRACTS.hermes, false),
+      });
+      await runTurn("hermes", harness, false);
       const processScript = harness.sandboxExec.mock.calls[4]![1][3]!;
       const leaked = spawn(
         "python3",
@@ -680,7 +676,7 @@ describe("public Fabric live turn", () => {
               CONTRACTS.hermes.adapterId,
               CONTRACTS.hermes.descriptorRunnerModule,
               "hermes.fabric-adapter.json",
-              ...CONTRACTS.hermes.processMarkers,
+              ...(CONTRACTS.hermes.processMarkers ?? []),
             ]),
           ],
           { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
@@ -720,7 +716,7 @@ describe("public Fabric live turn", () => {
   ])("rejects %s after only the clean process baseline", async (_label, turnResult, message) => {
     const harness = fixture({ turnResult });
 
-    await expect(runTurn("hermes", harness)).rejects.toThrow(message);
+    await expect(runTurn("hermes", harness, false)).rejects.toThrow(message);
     expect(harness.sandboxExec).toHaveBeenCalledTimes(1);
     expect(harness.writeJson).not.toHaveBeenCalled();
   });
@@ -740,7 +736,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe("hermes", { configCredentialFree: false }),
+        configProbe(CONTRACTS.hermes, { configCredentialFree: false }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -750,7 +746,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe("hermes", { descriptorRunnerModule: "unreviewed.adapter" }),
+        configProbe(CONTRACTS.hermes, { descriptorRunnerModule: "unreviewed.adapter" }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -760,7 +756,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe("hermes", { artifactTreeBounded: false }),
+        configProbe(CONTRACTS.hermes, { artifactTreeBounded: false }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -770,7 +766,7 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe("hermes", { artifactRootExists: false }),
+        configProbe(CONTRACTS.hermes, { artifactRootExists: false }, false),
       ],
       message: "config, state, or artifact integrity",
     },
@@ -789,14 +785,14 @@ describe("public Fabric live turn", () => {
         processProbe(),
         shellResult({ stdout: `${PUBLIC_FABRIC_RUNNER_IDENTITY}\n` }),
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
-        configProbe("hermes", { artifactEntryCount: 1 }),
+        configProbe(CONTRACTS.hermes, { artifactEntryCount: 1 }, false),
       ],
       message: "config, state, or artifact integrity",
     },
     {
       label: "a lingering adapter process",
       results: [
-        ...successfulSandboxResults("hermes").slice(0, 4),
+        ...successfulSandboxResults(CONTRACTS.hermes, false).slice(0, 4),
         processProbe({ matchingPids: [321] }),
       ],
       message: "left a known runner, adapter, or harness process",
@@ -804,7 +800,7 @@ describe("public Fabric live turn", () => {
     {
       label: "an unreadable process during cleanup inspection",
       results: [
-        ...successfulSandboxResults("hermes").slice(0, 4),
+        ...successfulSandboxResults(CONTRACTS.hermes, false).slice(0, 4),
         processProbe({ inspectionComplete: false, unreadablePids: [321] }),
       ],
       message: "left a known runner, adapter, or harness process",
@@ -812,7 +808,7 @@ describe("public Fabric live turn", () => {
   ])("rejects $label without writing a success proof", async ({ results, message }) => {
     const harness = fixture({ sandboxResults: results });
 
-    await expect(runTurn("hermes", harness)).rejects.toThrow(message);
+    await expect(runTurn("hermes", harness, false)).rejects.toThrow(message);
     expect(harness.writeJson).not.toHaveBeenCalled();
   });
 
@@ -821,7 +817,7 @@ describe("public Fabric live turn", () => {
     ["an incomplete scan", { stateScanComplete: false }],
     ["an unbounded tree", { stateTreeBounded: false }],
   ])("rejects package-native state with %s", async (_label, stateOverride) => {
-    const results = successfulContractResults(FUTURE_CONTRACT);
+    const results = successfulSandboxResults(FUTURE_CONTRACT, true);
     results[3] = configProbe(FUTURE_CONTRACT, stateOverride);
     const harness = fixture({ sandboxResults: results });
 

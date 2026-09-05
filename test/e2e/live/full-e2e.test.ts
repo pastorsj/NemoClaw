@@ -7,6 +7,7 @@ import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
 import { GATEWAY_STOP_SCRIPT } from "../../../src/lib/tunnel/gateway-stop-script.ts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import { execTimeout, testTimeout } from "../../helpers/timeouts.ts";
 import type { ArtifactSink } from "../fixtures/artifacts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
@@ -55,6 +56,7 @@ import { bindApprovedPrBaseForBaseImageComparison } from "./pr-base-comparison.t
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
 const SANDBOX_NAME = process.env.NEMOCLAW_SANDBOX_NAME ?? "e2e-full";
+const OPENCLAW_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("openclaw");
 const FULL_E2E_TARGET_ID = process.env.E2E_TARGET_ID ?? "full-e2e";
 const SETUP_MODE = process.env.NEMOCLAW_E2E_SETUP_MODE ?? "source-install";
 const USE_PREINSTALLED_LAUNCHABLE = SETUP_MODE === "preinstalled-launchable";
@@ -159,14 +161,15 @@ async function runOpenClawLaunchTurnAfterRecovery(input: {
   expect(recovery.exitCode, resultText(recovery)).toBe(0);
 
   await runPublicFabricTurn({
-    agent: "openclaw",
     artifacts: input.artifacts,
+    contract: OPENCLAW_FABRIC_CONTRACT,
     env: env(),
     host: input.host,
     lifecyclePhase: "after-gateway-restart",
     redactionValues: input.redactionValues,
     sandbox: input.sandbox,
     sandboxName: SANDBOX_NAME,
+    scanPrivateState: false,
   });
 
   await runOpenClawLaunchReadinessLeaseTurns({
@@ -616,14 +619,15 @@ test("full e2e: install, onboard, inference, cli operations, and cleanup", {
   expect(sandboxInference.outcome, sandboxInferenceDiagnostic).toBe("passed");
 
   await runPublicFabricTurn({
-    agent: "openclaw",
     artifacts,
+    contract: OPENCLAW_FABRIC_CONTRACT,
     env: env(),
     host,
     lifecyclePhase: "before-gateway-restart",
     redactionValues,
     sandbox,
     sandboxName: SANDBOX_NAME,
+    scanPrivateState: false,
   });
 
   await (process.platform === "linux"

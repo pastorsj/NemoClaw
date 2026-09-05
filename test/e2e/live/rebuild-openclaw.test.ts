@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { shellQuote } from "../../../src/lib/core/shell-quote";
 import { nemoclawStateRoot } from "../../../src/lib/state/state-root.ts";
+import { readBundledFabricHarnessE2eFixture } from "../../../tools/e2e/fabric-package.mts";
 import { execTimeout } from "../../helpers/timeouts.ts";
 import { buildAvailabilityProbeEnv } from "../fixtures/availability-env.ts";
 import { assertCleanupSucceededOrAbsent } from "../fixtures/cleanup-resources.ts";
@@ -35,6 +36,7 @@ import { createOldBaseBuildContext } from "./rebuild-openclaw-old-base-context.t
 // Simplicity boundary: no new registry, fixture family, or migration ledger.
 
 const OLD_OPENCLAW_VERSION = "2026.3.11";
+const OPENCLAW_FABRIC_CONTRACT = readBundledFabricHarnessE2eFixture("openclaw");
 const MARKER_FILE = "/sandbox/.openclaw/workspace/rebuild-marker.txt";
 const HOSTED_ENDPOINT_URL =
   process.env.NEMOCLAW_ENDPOINT_URL ?? "https://inference-api.nvidia.com/v1";
@@ -883,14 +885,15 @@ print(json.dumps({'seeded': saved == os.environ['PRE_REBUILD_GATEWAY_TOKEN'], 'h
     expect(registryVersion).not.toBe(OLD_OPENCLAW_VERSION);
     expect(registryVersion).toEqual(expect.any(String));
     await runPublicFabricTurn({
-      agent: "openclaw",
       artifacts,
+      contract: OPENCLAW_FABRIC_CONTRACT,
       env: commandEnvironments.cli(apiKey),
       host,
       lifecyclePhase: "after-rebuild",
       redactionValues: [apiKey, PRE_REBUILD_GATEWAY_TOKEN],
       sandbox,
       sandboxName: SANDBOX_NAME,
+      scanPrivateState: false,
     });
 
     const tokenCheck = await sandbox.exec(
