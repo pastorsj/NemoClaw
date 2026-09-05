@@ -3516,6 +3516,5 @@ module.exports = {
   ensureOllamaAuthProxy,
   fetchGatewayAuthTokenFromSandbox,
   getProbeAuthMode,
-  getValidationProbeCurlArgs,
   verifyCompatibleEndpointSandboxSmoke,
 };
