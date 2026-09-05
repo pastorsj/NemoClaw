@@ -41,6 +41,46 @@ verify_state_root || {
 # for the managed inference hostname.
 export NO_PROXY=localhost,127.0.0.1,::1
 export no_proxy="$NO_PROXY"
+unset ALL_PROXY all_proxy OPENAI_PROXY
+
+write_export_if_set() {
+  local name="$1"
+  local value="${!name:-}"
+  [ -n "$value" ] || return 0
+  printf 'export %s=%q\n' "$name" "$value"
+}
+
+write_runtime_environment() {
+  # OpenShell starts PID 1 with the managed proxy environment, but later
+  # sandbox execs are independent processes. Persist only public routing and
+  # CA values so NemoClaw's generic exec wrapper can recreate that environment.
+  local target=/tmp/nemoclaw-proxy-env.sh
+  local staged
+  staged="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"
+  {
+    printf '%s\n' 'export HOME=/sandbox'
+    printf '%s\n' 'export PATH="/usr/local/bin:/opt/nemoclaw-fabric-venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"'
+    printf '%s\n' 'export DSH_HOME=/sandbox/.deepseek-harness'
+    printf '%s\n' 'export DSH_TELEMETRY_MODE=DISABLED'
+    printf '%s\n' 'export DSH_TELEMETRY_DISABLED=1'
+    printf '%s\n' 'unset ALL_PROXY all_proxy OPENAI_PROXY'
+    write_export_if_set HTTP_PROXY
+    write_export_if_set HTTPS_PROXY
+    write_export_if_set NO_PROXY
+    write_export_if_set http_proxy
+    write_export_if_set https_proxy
+    write_export_if_set no_proxy
+    write_export_if_set SSL_CERT_FILE
+    write_export_if_set CURL_CA_BUNDLE
+    write_export_if_set REQUESTS_CA_BUNDLE
+    write_export_if_set GIT_SSL_CAINFO
+    write_export_if_set NODE_EXTRA_CA_CERTS
+  } >"$staged"
+  chmod 0444 "$staged"
+  mv -f "$staged" "$target"
+}
+
+write_runtime_environment
 
 if [ "$#" -eq 0 ]; then
   printf '%s\n' 'Setting up NemoClaw DeepSeek Harness runtime...'
