@@ -21,8 +21,12 @@ function wireFixtureStore(): void {
   vi.spyOn(harnessRemoveCommandDependencies, "readInstalledHarnessPackage").mockImplementation(
     (id) => readInstalledHarnessPackage(id, { storeRoot: fixture.storeRoot }),
   );
-  vi.spyOn(harnessRemoveCommandDependencies, "removeHarnessPackage").mockImplementation((id) =>
-    removeHarnessPackage(id, { storeRoot: fixture.storeRoot }),
+  vi.spyOn(harnessRemoveCommandDependencies, "removeHarnessPackage").mockImplementation(
+    (id, options) =>
+      removeHarnessPackage(id, {
+        storeRoot: fixture.storeRoot,
+        ...options,
+      }),
   );
   vi.spyOn(harnessRemoveCommandDependencies, "isStdinTty").mockReturnValue(false);
   vi.spyOn(harnessRemoveCommandDependencies, "prompt").mockResolvedValue("");
@@ -43,7 +47,7 @@ describe("harness remove oclif command", () => {
     expect(PUBLIC_DISPLAY_ENTRIES["harness:remove"]).toEqual([
       {
         usage: "nemoclaw harness remove",
-        description: "Remove a harness package when it has no retained owners",
+        description: "Deactivate a harness package for new sandboxes",
         flags: "<id> [--yes|-y] [--json]",
         group: "Getting Started",
         deprecated: undefined,
@@ -82,23 +86,38 @@ describe("harness remove oclif command", () => {
     ).toEqual(installed.identity);
   });
 
-  it("keeps refusing an active package after --yes because owner proof is unavailable", async () => {
+  it("deactivates an active package after --yes and retains immutable history", async () => {
     const installed = fixture.install("openclaw");
     const pointerPath = path.join(fixture.storeRoot, "active", "openclaw.json");
-    const pointerBytes = fs.readFileSync(pointerPath);
-
-    await expect(HarnessRemoveCommand.run(["openclaw", "--yes"], process.cwd())).rejects.toThrow(
-      "cannot yet prove every durable owner is clear",
+    const receiptPath = path.join(
+      fixture.storeRoot,
+      "receipts",
+      "openclaw",
+      "sha256",
+      `${installed.identity.contentDigest}.json`,
     );
+    const objectPath = path.join(
+      fixture.storeRoot,
+      "objects",
+      "sha256",
+      installed.identity.contentDigest,
+    );
+    const receiptBytes = fs.readFileSync(receiptPath);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
+    await HarnessRemoveCommand.run(["openclaw", "--yes"], process.cwd());
+
+    expect(log).toHaveBeenCalledWith(
+      "Deactivated harness package 'openclaw'. Immutable package history was retained.",
+    );
     expect(harnessRemoveCommandDependencies.removeHarnessPackage).toHaveBeenCalledOnce();
-    expect(fs.readFileSync(pointerPath)).toEqual(pointerBytes);
-    expect(
-      readInstalledHarnessPackage("openclaw", { storeRoot: fixture.storeRoot })?.identity,
-    ).toEqual(installed.identity);
+    expect(fs.existsSync(pointerPath)).toBe(false);
+    expect(fs.readFileSync(receiptPath)).toEqual(receiptBytes);
+    expect(fs.statSync(objectPath).isDirectory()).toBe(true);
+    expect(readInstalledHarnessPackage("openclaw", { storeRoot: fixture.storeRoot })).toBeNull();
   });
 
-  it("cancels an interactive removal before the refusal-only action", async () => {
+  it("cancels an interactive removal before deactivation", async () => {
     const installed = fixture.install("openclaw");
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.mocked(harnessRemoveCommandDependencies.isStdinTty).mockReturnValue(true);

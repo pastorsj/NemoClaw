@@ -446,6 +446,41 @@ export function assertCanonicalStoreFileUnchanged<T>(
   }
 }
 
+/**
+ * Remove one previously verified mutable store record without following a
+ * replacement path. Immutable objects and receipts use separate publication
+ * helpers and must never call this function.
+ */
+export function removeCanonicalStoreFile<T>(
+  file: VerifiedStoreFile<T>,
+  authority: HarnessPackageStoreAuthority,
+): void {
+  assertHarnessPackageStoreAuthority(authority);
+  const descriptor = fs.openSync(
+    file.absolutePath,
+    fs.constants.O_RDONLY | requireNoFollow() | NONBLOCK,
+  );
+  try {
+    const opened = fs.fstatSync(descriptor, { bigint: true });
+    const named = fs.lstatSync(file.absolutePath, { bigint: true });
+    assertPrivateFile(opened, authority.uid, Number(file.stat.size));
+    if (!sameFileSnapshot(file.stat, opened) || !sameFileSnapshot(file.stat, named)) {
+      throw new Error("Harness package store record changed before removal");
+    }
+    assertHarnessPackageStoreAuthority(authority);
+    fs.unlinkSync(file.absolutePath);
+    if (fs.fstatSync(descriptor, { bigint: true }).nlink !== 0n) {
+      throw new Error("Harness package store record remained linked after removal");
+    }
+    fsyncHarnessPackageDirectory(path.dirname(file.absolutePath));
+    if (!storePathIsMissing(file.absolutePath)) {
+      throw new Error("Harness package store record removal did not persist");
+    }
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
 function assertStagedStoreFile(file: StagedStoreFile, uid: bigint): void {
   const current = fs.lstatSync(file.absolutePath, { bigint: true });
   assertPrivateFile(current, uid, Number(file.stat.size));

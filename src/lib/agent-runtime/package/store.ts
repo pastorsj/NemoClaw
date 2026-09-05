@@ -45,6 +45,7 @@ import {
   publishAbsentStagedStoreFile,
   publishStagedPackageDirectory,
   publishStagedStoreFile,
+  removeCanonicalStoreFile,
   readCanonicalStoreFile,
   readCanonicalStoreFileRecord,
   removeStagedStoreFile,
@@ -84,7 +85,14 @@ export interface HarnessPackageStoreOptions {
 }
 
 export interface HarnessPackagePointerMutationOptions extends HarnessPackageStoreOptions {
+  /** Optional compare-and-swap guard supplied by an earlier user confirmation. */
+  readonly expectedIdentity?: HarnessPackageIdentity;
   readonly dependencies?: HarnessPackagePointerMutationDependencies;
+}
+
+export interface DeactivatedHarnessPackage {
+  readonly state: "deactivated";
+  readonly identity: HarnessPackageIdentity;
 }
 
 export interface PublishHarnessPackageInput extends HarnessPackageStoreOptions {
@@ -720,6 +728,52 @@ export function activateHarnessPackage(
         );
       }
       return activated;
+    } finally {
+      releaseProcessBoundLock(lock);
+    }
+  } catch (error) {
+    return integrityFailure(error);
+  }
+}
+
+/**
+ * Stop selecting a package for new sandboxes while retaining its immutable
+ * object and receipt for existing sandboxes and later rollback.
+ */
+export function deactivateHarnessPackage(
+  idValue: unknown,
+  options: HarnessPackagePointerMutationOptions = {},
+): DeactivatedHarnessPackage | null {
+  try {
+    const id = parseHarnessPackageId(idValue);
+    const paths = harnessPackageStorePaths(selectedStoreRoot(options), id);
+    if (
+      storePathIsMissing(paths.root) ||
+      storePathIsMissing(paths.active) ||
+      storePathIsMissing(pointerPath(paths, id))
+    ) {
+      return null;
+    }
+    const authority = captureMutableStoreAuthority(paths);
+    const lock = acquireProcessBoundLockAt(paths.lock);
+    try {
+      const current = validateCurrentPointer(paths, authority);
+      if (current === null) return null;
+      if (
+        options.expectedIdentity !== undefined &&
+        !sameIdentity(
+          current.installed.identity,
+          parseHarnessPackageIdentity(options.expectedIdentity),
+        )
+      ) {
+        throw new HarnessPackageStoreIntegrityError(
+          "Harness package active identity changed before deactivation",
+        );
+      }
+      options.dependencies?.onPointerMutationCheckpoint?.("before-active-pointer-replacement");
+      assertCanonicalStoreFileUnchanged(current.pointerRecord, authority);
+      removeCanonicalStoreFile(current.pointerRecord, authority);
+      return Object.freeze({ state: "deactivated", identity: current.installed.identity });
     } finally {
       releaseProcessBoundLock(lock);
     }

@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copyVerifiedPackageTree } from "./copy";
 import {
   activateHarnessPackage,
+  deactivateHarnessPackage,
   getHarnessPackageStoreRoot,
   HarnessPackageStoreIntegrityError,
   HarnessPackageVersionConflictError,
@@ -529,6 +530,83 @@ describe("harness package store", () => {
       }),
     ).toThrow(HarnessPackageStoreIntegrityError);
     expect(requiredActive().identity).toEqual(second.identity);
+  });
+
+  it("deactivates selection while retaining the exact object and receipt for rollback", () => {
+    const installed = publish();
+    const receiptBytes = fs.readFileSync(receiptPath(installed));
+
+    expect(
+      deactivateHarnessPackage("openclaw", {
+        storeRoot,
+        expectedIdentity: installed.identity,
+      }),
+    ).toEqual({ state: "deactivated", identity: installed.identity });
+    expect(readInstalledHarnessPackage("openclaw", { storeRoot })).toBeNull();
+    expect(listActiveHarnessPackageIds({ storeRoot })).toEqual([]);
+    expect(fs.readFileSync(receiptPath(installed))).toEqual(receiptBytes);
+    expect(fs.statSync(objectPath(installed)).isDirectory()).toBe(true);
+    expect(resolvePinnedHarnessPackage(installed.identity, { storeRoot }).identity).toEqual(
+      installed.identity,
+    );
+
+    expect(
+      activateHarnessPackage("openclaw", installed.identity.contentDigest, { storeRoot }).identity,
+    ).toEqual(installed.identity);
+  });
+
+  it("returns null when deactivation has no active pointer", () => {
+    expect(deactivateHarnessPackage("openclaw", { storeRoot })).toBeNull();
+    const installed = publish();
+    expect(deactivateHarnessPackage("openclaw", { storeRoot })).not.toBeNull();
+    expect(deactivateHarnessPackage("openclaw", { storeRoot })).toBeNull();
+    expect(resolvePinnedHarnessPackage(installed.identity, { storeRoot }).identity).toEqual(
+      installed.identity,
+    );
+  });
+
+  it("does not deactivate a package that changed after user confirmation", () => {
+    const confirmed = publish();
+    writePackage("1.1.0", "replacement payload\n");
+    const replacement = publish();
+
+    expect(() =>
+      deactivateHarnessPackage("openclaw", {
+        storeRoot,
+        expectedIdentity: confirmed.identity,
+      }),
+    ).toThrow(HarnessPackageStoreIntegrityError);
+    expect(requiredActive().identity).toEqual(replacement.identity);
+  });
+
+  it("does not unlink an active pointer that changes at the deactivation checkpoint", () => {
+    const first = publish();
+    writePackage("1.1.0", "second payload\n");
+    const second = publish();
+    const firstPointer = Buffer.from(
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          id: first.identity.id,
+          contentDigest: first.identity.contentDigest,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    expect(() =>
+      deactivateHarnessPackage("openclaw", {
+        storeRoot,
+        expectedIdentity: second.identity,
+        dependencies: {
+          onPointerMutationCheckpoint: () => {
+            fs.writeFileSync(activePointerPath(), firstPointer, { mode: 0o600 });
+          },
+        },
+      }),
+    ).toThrow(HarnessPackageStoreIntegrityError);
+    expect(requiredActive().identity).toEqual(first.identity);
   });
 
   it("rejects a missing activation receipt without changing the active pointer", () => {

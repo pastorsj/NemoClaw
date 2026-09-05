@@ -23,9 +23,9 @@ export default class HarnessRemoveCommand extends NemoClawCommand {
   static id = "harness:remove";
   static strict = true;
   static enableJsonFlag = true;
-  static summary = "Remove a harness package when it has no retained owners";
+  static summary = "Deactivate a harness package for new sandboxes";
   static description =
-    "Remove a harness package only after NemoClaw can prove that no durable owner references it.";
+    "Stop selecting a harness package for new sandboxes while retaining immutable history for existing sandboxes and rollback.";
   static usage = ["harness remove <id> [--yes]"];
   static examples = ["<%= config.bin %> harness remove openclaw --yes"];
   static args = {
@@ -62,8 +62,18 @@ export default class HarnessRemoveCommand extends NemoClawCommand {
         return;
       }
     }
-    const result = harnessRemoveCommandDependencies.removeHarnessPackage(id);
+    const result = harnessRemoveCommandDependencies.removeHarnessPackage(id, {
+      ...(installed === null ? {} : { expectedIdentity: installed.identity }),
+    });
     if (this.jsonEnabled()) return result;
-    this.log(`Harness package '${result.id}' is already inactive; no package history was deleted.`);
+    if (result.state === "deactivated") {
+      this.log(
+        `Deactivated harness package '${result.identity.id}'. Immutable package history was retained.`,
+      );
+    } else {
+      this.log(
+        `Harness package '${result.id}' is already inactive; no package history was deleted.`,
+      );
+    }
   }
 }

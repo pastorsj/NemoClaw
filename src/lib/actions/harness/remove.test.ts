@@ -10,7 +10,7 @@ import {
   createHarnessPackageFixture,
   type HarnessPackageFixture,
 } from "../../../../test/helpers/harness-packages";
-import { HarnessPackageRemovalBlockedError, removeHarnessPackage } from "./remove";
+import { removeHarnessPackage } from "./remove";
 
 let fixture: HarnessPackageFixture;
 
@@ -34,7 +34,7 @@ describe("removeHarnessPackage", () => {
     expect(fs.readdirSync(fixture.storeRoot)).toEqual(before);
   });
 
-  it("refuses an active package and leaves its pointer and immutable history unchanged", () => {
+  it("deactivates an active package and retains its immutable history", () => {
     const installed = fixture.install("openclaw");
     const pointerPath = path.join(fixture.storeRoot, "active", "openclaw.json");
     const receiptPath = path.join(
@@ -50,45 +50,34 @@ describe("removeHarnessPackage", () => {
       "sha256",
       installed.identity.contentDigest,
     );
-    const pointerBytes = fs.readFileSync(pointerPath);
     const receiptBytes = fs.readFileSync(receiptPath);
 
-    let failure: unknown;
-    try {
-      removeHarnessPackage("openclaw", { storeRoot: fixture.storeRoot });
-    } catch (error) {
-      failure = error;
-    }
-
-    expect(failure).toBeInstanceOf(HarnessPackageRemovalBlockedError);
-    expect((failure as HarnessPackageRemovalBlockedError).inspection).toEqual({
-      status: "indeterminate",
-      id: "openclaw",
-      reason: "complete-owner-scan-unavailable",
-      activeIdentity: installed.identity,
+    expect(removeHarnessPackage("openclaw", { storeRoot: fixture.storeRoot })).toEqual({
+      schemaVersion: 1,
+      state: "deactivated",
+      identity: installed.identity,
     });
-    expect(fs.readFileSync(pointerPath)).toEqual(pointerBytes);
+    expect(fs.existsSync(pointerPath)).toBe(false);
     expect(fs.readFileSync(receiptPath)).toEqual(receiptBytes);
     expect(fs.statSync(objectPath).isDirectory()).toBe(true);
-    expect(JSON.stringify(failure)).not.toContain(fixture.fixtureRoot);
   });
 
   it("rejects a noncanonical id before consulting package state", () => {
-    const readInstalledHarnessPackage = vi.fn();
+    const deactivateHarnessPackage = vi.fn();
 
     expect(() =>
       removeHarnessPackage(
         "OpenClaw",
         { storeRoot: fixture.storeRoot },
-        { readInstalledHarnessPackage },
+        { deactivateHarnessPackage },
       ),
     ).toThrow("lowercase hyphen-separated identifier");
-    expect(readInstalledHarnessPackage).not.toHaveBeenCalled();
+    expect(deactivateHarnessPackage).not.toHaveBeenCalled();
     expect(fs.readdirSync(fixture.storeRoot)).toEqual([]);
   });
 
   it("propagates an indeterminate store read without attempting a mutation", () => {
-    const readInstalledHarnessPackage = vi.fn(() => {
+    const deactivateHarnessPackage = vi.fn(() => {
       throw new Error("store authority changed");
     });
 
@@ -96,10 +85,10 @@ describe("removeHarnessPackage", () => {
       removeHarnessPackage(
         "openclaw",
         { storeRoot: fixture.storeRoot },
-        { readInstalledHarnessPackage },
+        { deactivateHarnessPackage },
       ),
     ).toThrow("store authority changed");
-    expect(readInstalledHarnessPackage).toHaveBeenCalledOnce();
+    expect(deactivateHarnessPackage).toHaveBeenCalledOnce();
     expect(fs.readdirSync(fixture.storeRoot)).toEqual([]);
   });
 });

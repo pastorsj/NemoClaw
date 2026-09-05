@@ -45,7 +45,7 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
     {
       group: "Getting Started",
       order: 1.64,
-      description: "Remove a harness package when it has no retained owners",
+      description: "Deactivate a harness package for new sandboxes",
       flags: "<id> [--yes|-y] [--json]",
     },
   ],
