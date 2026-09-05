@@ -156,6 +156,15 @@ function stageManagedStartupRuntimeSources(rootDir: string, buildCtx: string): v
   );
 }
 
+function stageReviewedNpmAuditPolicy(rootDir: string, buildCtx: string): void {
+  const stagedCiDir = path.join(buildCtx, "ci");
+  fs.mkdirSync(stagedCiDir, { recursive: true });
+  for (const fileName of ["npm-audit-exceptions.json", "reviewed-npm-audit.json"]) {
+    fs.copyFileSync(path.join(rootDir, "ci", fileName), path.join(stagedCiDir, fileName));
+  }
+  normalizeReadModesForDockerCopy(stagedCiDir);
+}
+
 function stageLegacySandboxBuildContext(
   rootDir: string,
   tmpDir: string = os.tmpdir(),
@@ -171,6 +180,7 @@ function stageLegacySandboxBuildContext(
   );
   stageOpenClawPackage(rootDir, buildCtx);
   stageFabricRunnerPackage(rootDir, buildCtx);
+  stageReviewedNpmAuditPolicy(rootDir, buildCtx);
   stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
   fs.cpSync(path.join(rootDir, "nemoclaw-blueprint"), path.join(buildCtx, "nemoclaw-blueprint"), {
     recursive: true,
@@ -205,7 +215,6 @@ function stageOptimizedSandboxBuildContext(
   const stagedDockerfile = path.join(buildCtx, "Dockerfile");
   const sourceBlueprintDir = path.join(rootDir, "nemoclaw-blueprint");
   const stagedBlueprintDir = path.join(buildCtx, "nemoclaw-blueprint");
-  const stagedCiDir = path.join(buildCtx, "ci");
   const stagedScriptsDir = path.join(buildCtx, "scripts");
 
   fs.copyFileSync(
@@ -220,16 +229,7 @@ function stageOptimizedSandboxBuildContext(
   stageFabricRunnerPackage(rootDir, buildCtx);
   stageMcpToolDiscoveryRuntime(rootDir, buildCtx);
 
-  fs.mkdirSync(stagedCiDir, { recursive: true });
-  fs.copyFileSync(
-    path.join(rootDir, "ci", "npm-audit-exceptions.json"),
-    path.join(stagedCiDir, "npm-audit-exceptions.json"),
-  );
-  fs.copyFileSync(
-    path.join(rootDir, "ci", "reviewed-npm-audit.json"),
-    path.join(stagedCiDir, "reviewed-npm-audit.json"),
-  );
-  normalizeReadModesForDockerCopy(stagedCiDir);
+  stageReviewedNpmAuditPolicy(rootDir, buildCtx);
 
   fs.mkdirSync(stagedBlueprintDir, { recursive: true });
   fs.copyFileSync(

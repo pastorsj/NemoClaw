@@ -146,14 +146,8 @@ function fakeGatewayRunOpenshell() {
   };
 
   const exactProfileExports = new Map([
-    [
-      "provider profile -g nemoclaw export brave --output json",
-      EXACT_BRAVE_PROFILE,
-    ],
-    [
-      "provider profile -g nemoclaw export nemoclaw-mcp-v1 --output json",
-      EXACT_MESSAGING_PROFILE,
-    ],
+    ["provider profile -g nemoclaw export brave --output json", EXACT_BRAVE_PROFILE],
+    ["provider profile -g nemoclaw export nemoclaw-mcp-v1 --output json", EXACT_MESSAGING_PROFILE],
   ]);
   const rejectUnexpectedProfileCommand = (args: string[]): never => {
     throw new Error(`Unexpected provider profile command: ${args.join(" ")}`);
@@ -1011,7 +1005,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
 
     expect(calls.skipped).not.toHaveBeenCalledWith("sandbox", "my-assistant");
     expect(calls.createSandbox).toHaveBeenCalledTimes(1);
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({ recreate: true });
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ recreate: true });
   });
 
   it.each([["build", defaultCreateFingerprint("v0.0.108")]] as const)(
@@ -1035,7 +1029,7 @@ describe("sandbox crash-recovery replay (#5961, #6228)", () => {
       });
 
       expect(calls.createSandbox).toHaveBeenCalledOnce();
-      expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toEqual(
+      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toEqual(
         expect.objectContaining({ recreate: true }),
       );
       expect(calls.error).not.toHaveBeenCalled();

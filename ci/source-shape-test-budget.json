@@ -137,6 +137,11 @@
       "category": "security"
     },
     {
+      "file": "packages/nemoclaw-hermes/tests/image/build-probes.test.ts",
+      "test": "binds the Hermes wrapper to its source digest",
+      "category": "security"
+    },
+    {
       "file": "packages/nemoclaw-hermes/tests/runtime/discord-recovery.test.ts",
       "test": "hash-binds and executes the patcher in the final image",
       "category": "security"

@@ -1589,12 +1589,10 @@ def _run_fixed_validator(
         raise ControlError("SECRET_BOUNDARY_REFUSED")
 
 
-def _validate_runtime_environment(
-    script: str,
-    environment: dict[str, str],
-    runtime_identity: str = "current",
+def _validate_managed_gateway_environment(
+    script: str, supervisor_environment: dict[str, str]
 ) -> None:
-    """Validate runtime values without execing a root process under them."""
+    """Validate supervisor input after the validator applies managed launcher paths."""
 
     _validate_trusted_regular(script)
     spec = importlib.util.spec_from_file_location(
@@ -1605,9 +1603,9 @@ def _validate_runtime_environment(
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
-        validator = getattr(module, "validate_runtime_env")
-        result = validator(environment, runtime_identity=runtime_identity)
-    except (AttributeError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        validator = getattr(module, "validate_managed_gateway_env")
+        result = validator(supervisor_environment)
+    except (AttributeError, ImportError, OSError, RuntimeError) as exc:
         raise ControlError("SECRET_BOUNDARY_REFUSED") from exc
     if result != 0:
         raise ControlError("SECRET_BOUNDARY_REFUSED")
@@ -1726,10 +1724,8 @@ def _hermes_preflight(
         MAX_ENV_BYTES,
         recovery_deadline,
     )
-    _validate_runtime_environment(
-        validator,
-        _parse_environment(raw_environment),
-        "sandbox-supervisor",
+    _validate_managed_gateway_environment(
+        validator, _parse_environment(raw_environment)
     )
     _require_recovery_time(recovery_deadline)
     _verify_locked_hermes_hash()

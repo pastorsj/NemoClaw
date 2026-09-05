@@ -85,7 +85,7 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
-      null,
+      undefined,
     );
     expect(calls.finalizeRouteReservation).not.toHaveBeenCalled();
     expect(calls.updateSandbox).toHaveBeenCalledWith(
@@ -132,7 +132,7 @@ describe("handleSandboxState", () => {
       hostLocalInferenceRouteOnly: true,
     });
 
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({ endpointSource: null });
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({ endpointSource: null });
   });
 
   it("records credential-provider bindings and the resource-profile decision in the checkpoint (#7022)", async () => {
@@ -233,7 +233,7 @@ describe("handleSandboxState", () => {
       authoritativeResumeConfig: true,
     });
 
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({});
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({});
   });
 
   it("does not persist an authoritative policy tier in sandbox create state", async () => {
@@ -246,7 +246,7 @@ describe("handleSandboxState", () => {
     });
 
     expect(calls.resolveCreateIntent.mock.calls[0]?.[0]).not.toHaveProperty("policyTier");
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).not.toHaveProperty("policyTier");
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).not.toHaveProperty("policyTier");
   });
 
   it("rejects observability for a selected non-DCode agent", async () => {
@@ -281,7 +281,7 @@ describe("handleSandboxState", () => {
       sandboxName: "saved",
     });
 
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       observabilityEnabled: true,
     });
     expect(session.observabilityEnabled).toBe(true);
@@ -358,7 +358,7 @@ describe("handleSandboxState", () => {
       requestedObservabilityEnabled: false,
     });
 
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       observabilityEnabled: false,
       observabilityRequestedExplicitly: true,
     });
@@ -416,7 +416,7 @@ describe("handleSandboxState", () => {
         requestedObservabilityEnabled: requested,
       });
 
-      expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
+      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
         recreate: true,
         observabilityEnabled: requested,
       });
@@ -455,7 +455,7 @@ describe("handleSandboxState", () => {
         sandboxName: "saved",
       });
 
-      expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
+      expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
         recreate: true,
         observabilityEnabled: requested,
       });
@@ -513,7 +513,7 @@ describe("handleSandboxState", () => {
       requestedObservabilityEnabled: false,
     });
 
-    expect((calls.createSandbox.mock.calls[0] as unknown[] | undefined)?.[15]).toMatchObject({
+    expect(calls.createSandbox.mock.calls[0]?.at(-2)).toMatchObject({
       recreate: true,
       observabilityEnabled: false,
     });
@@ -556,7 +556,7 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
-      null,
+      undefined,
     );
     expect(result.hermesToolGateways).toEqual(["nous-audio"]);
     expect(calls.note).toHaveBeenCalledWith(
@@ -850,7 +850,7 @@ describe("handleSandboxState", () => {
         endpointSource: null,
         extraProviders: [],
       },
-      null,
+      undefined,
     );
   });
 
@@ -1025,7 +1025,7 @@ describe("handleSandboxState", () => {
           targetIntentFingerprint: expect.any(String),
         }),
       }),
-      null,
+      undefined,
     );
     expect(result.webSearchConfigChanged).toBe(true);
   });
@@ -1159,7 +1159,7 @@ describe("handleSandboxState", () => {
           targetIntentFingerprint: expect.any(String),
         }),
       }),
-      null,
+      undefined,
     );
     expect(result.webSearchConfig).toBeNull();
   });

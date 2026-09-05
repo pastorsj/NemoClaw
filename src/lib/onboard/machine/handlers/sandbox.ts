@@ -375,7 +375,10 @@ export interface SandboxStateOptions<
       hermesAuthMethod: HermesAuthMethod | null,
       inferenceRouteReservationAuthority: InferenceRouteReservationAuthority | null,
       createIntent: CompleteSandboxCreateIntent,
-      runVerifiedSandboxCreateEffects: import("../../types").VerifiedSandboxCreateEffects | null,
+      runVerifiedSandboxCreateEffects:
+        | import("../../types").VerifiedSandboxCreateEffects
+        | null
+        | undefined,
     ): Promise<string>;
     finalizeSandboxRouteReservation(
       sandboxName: string,
@@ -2308,7 +2311,7 @@ class SandboxStateFlow<
                       verifiedContext.revalidateSandboxIdentity,
                     );
                   }
-                : null,
+                : undefined,
             ),
         );
       } catch (error) {
