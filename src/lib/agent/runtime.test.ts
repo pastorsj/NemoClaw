@@ -112,6 +112,7 @@ function installRuntimePackageFixture(
       id,
       displayName,
       packageVersion: "1.0.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: `packages/${packageDirectory}/manifest.yaml`,
     })}\n`,
   );

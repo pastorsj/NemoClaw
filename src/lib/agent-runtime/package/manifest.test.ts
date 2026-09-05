@@ -27,6 +27,7 @@ function validEnvelope(overrides: Record<string, unknown> = {}): Record<string, 
     id: "openclaw",
     displayName: "OpenClaw",
     packageVersion: "1.2.3",
+    minimumNemoClawVersion: "0.0.113",
     manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     ...overrides,
   };
@@ -75,6 +76,7 @@ describe("parseHarnessPackageManifest", () => {
       id: "openclaw",
       displayName: "OpenClaw",
       packageVersion: "1.2.3-rc.1+build.9",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     });
     expect(result.manifest.name).toBe("openclaw");
@@ -113,7 +115,7 @@ describe("parseHarnessPackageManifest", () => {
     (duplicateMembers) => {
       const root = makeRoot();
       writePackage(root, {
-        metadata: `{"schemaVersion":1,"kind":"agent-runtime",${duplicateMembers},"displayName":"OpenClaw","packageVersion":"1.2.3","manifest":"packages/nemoclaw-openclaw/manifest.yaml"}`,
+        metadata: `{"schemaVersion":1,"kind":"agent-runtime",${duplicateMembers},"displayName":"OpenClaw","packageVersion":"1.2.3","minimumNemoClawVersion":"0.0.113","manifest":"packages/nemoclaw-openclaw/manifest.yaml"}`,
       });
 
       expect(() => parseHarnessPackageManifest(root)).toThrow(

@@ -79,6 +79,7 @@ function installTestPackage(moduleSource: string): InstalledHarnessPackage {
       id: "future-harness",
       displayName: "Future Harness",
       packageVersion: "1.0.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-future-harness/manifest.yaml",
     })}\n`,
   );

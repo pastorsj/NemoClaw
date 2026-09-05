@@ -52,6 +52,7 @@ interface BundledAgentRuntimeSource {
   readonly id: string;
   readonly displayName: string;
   readonly packageVersion: string;
+  readonly minimumNemoClawVersion: string;
   readonly manifestPath: string;
   readonly mappings: readonly BundledAgentRuntimeSourceMapping[];
 }
@@ -97,8 +98,11 @@ interface AuthoringPackageJson {
   readonly version?: unknown;
   readonly nemoclaw?: {
     readonly harnessManifest?: unknown;
+    readonly minimumNemoClawVersion?: unknown;
   };
 }
+
+const EXACT_CORE_VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 
 function readAuthoringPackageJson(packageRoot: string): AuthoringPackageJson | null {
   const packageJsonPath = path.join(packageRoot, "package.json");
@@ -228,13 +232,16 @@ export function listBundledAgentRuntimeSources(
       const packageRoot = path.join(authoringPackagesRoot, entry.name);
       const packageJson = readAuthoringPackageJson(packageRoot);
       const declaredManifest = packageJson?.nemoclaw?.harnessManifest;
+      const minimumNemoClawVersion = packageJson?.nemoclaw?.minimumNemoClawVersion;
       if (declaredManifest === undefined) return [];
       assertHarnessAdapterArtifactsCurrent(packageRoot);
       if (
         declaredManifest !== PACKAGE_MANIFEST_FILE ||
         typeof packageJson?.name !== "string" ||
         packageNameBase(packageJson.name) !== entry.name ||
-        typeof packageJson.version !== "string"
+        typeof packageJson.version !== "string" ||
+        typeof minimumNemoClawVersion !== "string" ||
+        !EXACT_CORE_VERSION_PATTERN.test(minimumNemoClawVersion)
       ) {
         throw new Error(`Agent runtime package contract is invalid: ${entry.name}`);
       }
@@ -258,6 +265,7 @@ export function listBundledAgentRuntimeSources(
           id,
           displayName: manifestIdentity.displayName,
           packageVersion: packageJson.version,
+          minimumNemoClawVersion,
           manifestPath: path.posix.join(packageRelativePath, PACKAGE_MANIFEST_FILE),
           mappings: buildInputMappings(repositoryRoot, packageRelativePath, dockerfiles),
         }),
@@ -609,6 +617,7 @@ function buildEnvelope(source: BundledAgentRuntimeSource): HarnessPackageEnvelop
     id: source.id,
     displayName: source.displayName,
     packageVersion: source.packageVersion,
+    minimumNemoClawVersion: source.minimumNemoClawVersion,
     manifest: source.manifestPath,
   };
 }

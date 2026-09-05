@@ -78,6 +78,7 @@ function writeReviewedBundle(): void {
         id: declaration.id,
         displayName: declaration.displayName,
         packageVersion: declaration.packageVersion,
+        minimumNemoClawVersion: "0.0.113",
         manifest: manifestPath,
       })}\n`,
     );

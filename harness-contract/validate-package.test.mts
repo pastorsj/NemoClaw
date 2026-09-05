@@ -28,6 +28,7 @@ interface FixtureOptions {
   readonly name?: string;
   readonly scripts?: Readonly<Record<string, string>>;
   readonly version?: string;
+  readonly minimumNemoClawVersion?: string;
 }
 
 function writeFile(root: string, relativePath: string, contents: string, mode = 0o644): void {
@@ -45,7 +46,10 @@ function createPackageFixture(options: FixtureOptions = {}): string {
     version: options.version ?? "3.2.1-beta.2+build.7",
     scripts: options.scripts ?? {},
     files: options.files ?? [...REQUIRED_RUNTIME_FILES, "host/*-adapter.cts"],
-    nemoclaw: { harnessManifest: "manifest.yaml" },
+    nemoclaw: {
+      harnessManifest: "manifest.yaml",
+      minimumNemoClawVersion: options.minimumNemoClawVersion ?? "0.0.113",
+    },
   };
   writeFile(packageRoot, "package.json", `${JSON.stringify(packageJson, null, 2)}\n`);
   writeFile(packageRoot, "Dockerfile.base", "FROM scratch\n");
@@ -141,6 +145,7 @@ test("accepts a synthetic harness package and reports its published runtime file
     assert.equal(report.harnessId, "future-terminal");
     assert.equal(report.packageName, "@example/nemoclaw-future-terminal");
     assert.equal(report.packageVersion, "3.2.1-beta.2+build.7");
+    assert.equal(report.minimumNemoClawVersion, "0.0.113");
     assert.deepEqual(report.adapterArtifacts, ["host/config-adapter.cts"]);
     assert.ok(report.packedFiles.includes("manifest.yaml"));
     assert.ok(report.packedFiles.includes("host/config-adapter.cts"));
@@ -198,6 +203,32 @@ test("rejects package identity and manifest identity mismatches before packing",
       }
     });
   }
+});
+
+test("requires one exact minimum compatible NemoClaw version", async (t) => {
+  for (const minimumNemoClawVersion of ["0.0", "v0.0.113", "00.0.113", "0.0.113-beta"]) {
+    await t.test(`rejects ${minimumNemoClawVersion}`, () => {
+      const packageRoot = createPackageFixture({ minimumNemoClawVersion });
+      try {
+        expectDiagnostic(packageRoot, "metadata", "package.json");
+      } finally {
+        removeFixture(packageRoot);
+      }
+    });
+  }
+
+  await t.test("rejects a missing declaration", () => {
+    const packageRoot = createPackageFixture();
+    try {
+      updatePackageJson(packageRoot, (value) => {
+        const nemoclaw = value.nemoclaw as Record<string, unknown>;
+        delete nemoclaw.minimumNemoClawVersion;
+      });
+      expectDiagnostic(packageRoot, "metadata", "package.json");
+    } finally {
+      removeFixture(packageRoot);
+    }
+  });
 });
 
 test("rejects aliases and deeply nested values in the bounded manifest", async (t) => {
@@ -302,6 +333,59 @@ test("rejects an adapter artifact omitted from the npm archive", () => {
     expectDiagnostic(packageRoot, "archive-membership", "host/config-adapter.cts");
   } finally {
     removeFixture(packageRoot);
+  }
+});
+
+test("requires compiled adapters for the capabilities declared by the manifest", async (t) => {
+  const cases = [
+    {
+      name: "the universal configuration boundary",
+      manifest: "name: future-terminal\nmcp:\n  support: disabled\n",
+      artifact: "host/config-adapter.cts",
+    },
+    {
+      name: "MCP bridge support",
+      manifest: "name: future-terminal\nmcp:\n  support: bridge\n",
+      artifact: "host/mcp-adapter.cts",
+    },
+    {
+      name: "managed image startup",
+      manifest: "name: future-terminal\nmanaged_image: {}\nmcp:\n  support: disabled\n",
+      artifact: "host/startup-adapter.cts",
+    },
+    {
+      name: "package-owned configuration restore",
+      manifest: [
+        "name: future-terminal",
+        "state_files:",
+        "  - path: config.json",
+        "    restore:",
+        "      merge: package-config",
+        "mcp:",
+        "  support: disabled",
+        "",
+      ].join("\n"),
+      artifact: "host/restore-adapter.cts",
+    },
+  ] as const;
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, () => {
+      const packageRoot = createPackageFixture({ manifest: fixture.manifest });
+      try {
+        fs.rmSync(path.join(packageRoot, "host/config-adapter.cts"));
+        if (fixture.artifact !== "host/config-adapter.cts") {
+          writeFile(
+            packageRoot,
+            "host/config-adapter.cts",
+            '"use strict";\nmodule.exports = Object.freeze({});\n',
+          );
+        }
+        expectDiagnostic(packageRoot, "adapter-artifact", fixture.artifact);
+      } finally {
+        removeFixture(packageRoot);
+      }
+    });
   }
 });
 

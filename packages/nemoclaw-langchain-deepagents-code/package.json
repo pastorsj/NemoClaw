@@ -30,7 +30,8 @@
     "!**/*.pyc"
   ],
   "nemoclaw": {
-    "harnessManifest": "manifest.yaml"
+    "harnessManifest": "manifest.yaml",
+    "minimumNemoClawVersion": "0.0.113"
   },
   "engines": {
     "node": ">=22.19.0"

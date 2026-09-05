@@ -64,7 +64,10 @@ function writeFutureAuthoringPackage(): void {
     `${JSON.stringify({
       name: `@fixture/${PACKAGE_DIRECTORY}`,
       version: "1.0.0",
-      nemoclaw: { harnessManifest: "manifest.yaml" },
+      nemoclaw: {
+        harnessManifest: "manifest.yaml",
+        minimumNemoClawVersion: "0.0.113",
+      },
     })}\n`,
   );
   writeAuthoringPackageFile(

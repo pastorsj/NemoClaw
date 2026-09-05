@@ -70,6 +70,7 @@ function packageEnvelope(packageVersion: string): Record<string, unknown> {
     id: "openclaw",
     displayName: "OpenClaw",
     packageVersion,
+    minimumNemoClawVersion: "0.0.113",
     manifest: "packages/nemoclaw-openclaw/manifest.yaml",
   };
 }

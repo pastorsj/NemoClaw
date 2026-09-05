@@ -35,6 +35,7 @@ export interface MaterializedHarnessPackage {
   readonly harnessId: string;
   readonly displayName: string;
   readonly packageVersion: string;
+  readonly minimumNemoClawVersion: string;
   readonly manifestPath: "manifest.yaml";
   readonly fileCount: number;
   readonly readOnly: true;
@@ -325,6 +326,7 @@ function buildEnvelope(report: HarnessPackageConformanceReport): HarnessPackageE
     id: report.harnessId,
     displayName: report.displayName,
     packageVersion: report.packageVersion,
+    minimumNemoClawVersion: report.minimumNemoClawVersion,
     manifest: "manifest.yaml",
   });
 }
@@ -444,6 +446,7 @@ export function materializeHarnessPackageArtifact(
       harnessId: report.harnessId,
       displayName: report.displayName,
       packageVersion: report.packageVersion,
+      minimumNemoClawVersion: report.minimumNemoClawVersion,
       manifestPath: "manifest.yaml",
       fileCount: report.publishedFiles.length + 1,
       readOnly: true,

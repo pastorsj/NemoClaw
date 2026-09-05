@@ -36,6 +36,7 @@ function writeValidArtifact(): void {
       id: "example-runtime",
       displayName: "Example Runtime",
       packageVersion: "1.2.3",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "agents/example-runtime/manifest.yaml",
     })}\n`,
   );

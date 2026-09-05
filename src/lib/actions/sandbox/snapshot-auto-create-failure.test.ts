@@ -270,6 +270,7 @@ vi.mock("../../agent-runtime/package/store", () => ({
         id: "openclaw",
         displayName: "OpenClaw",
         packageVersion: "1.0.0-test",
+        minimumNemoClawVersion: "0.0.113",
         manifest: "manifest.yaml",
       },
       manifest: { name: "openclaw" },

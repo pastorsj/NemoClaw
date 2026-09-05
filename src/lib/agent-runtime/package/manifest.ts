@@ -20,6 +20,7 @@ const DISPLAY_NAME_MAX_BYTES = 512;
 const DESCRIPTION_MAX_LENGTH = 2048;
 const DESCRIPTION_MAX_BYTES = 8192;
 const PACKAGE_VERSION_MAX_LENGTH = 128;
+const NEMOCLAW_VERSION_MAX_LENGTH = 128;
 const MANIFEST_PATH_MAX_BYTES = 512;
 const MANIFEST_PATH_MAX_DEPTH = 32;
 const MANIFEST_DATA_MAX_DEPTH = 64;
@@ -37,6 +38,7 @@ const ENVELOPE_FIELDS = new Set([
   "id",
   "displayName",
   "packageVersion",
+  "minimumNemoClawVersion",
   "manifest",
 ]);
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
@@ -210,6 +212,17 @@ function requirePackageVersion(value: unknown): string {
   return value;
 }
 
+function requireMinimumNemoClawVersion(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length > NEMOCLAW_VERSION_MAX_LENGTH ||
+    !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(value)
+  ) {
+    throw new Error("Harness package minimumNemoClawVersion must be one exact x.y.z version");
+  }
+  return value;
+}
+
 function requireManifestPath(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -269,6 +282,7 @@ function parseEnvelope(source: string): HarnessPackageEnvelope {
     id: requireHarnessId(value.id),
     displayName: requireDisplayName(value.displayName),
     packageVersion: requirePackageVersion(value.packageVersion),
+    minimumNemoClawVersion: requireMinimumNemoClawVersion(value.minimumNemoClawVersion),
     manifest: requireManifestPath(value.manifest),
   };
 }

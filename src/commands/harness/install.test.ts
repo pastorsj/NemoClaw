@@ -66,6 +66,7 @@ function writeReviewedBundle(): void {
         id: declaration.id,
         displayName: declaration.displayName,
         packageVersion: declaration.packageVersion,
+        minimumNemoClawVersion: "0.0.113",
         manifest: manifestPath,
       })}\n`,
     );
@@ -104,6 +105,7 @@ function writePiBundle(): void {
       id: "pi",
       displayName: "Pi",
       packageVersion: "0.1.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: manifestPath,
     })}\n`,
   );
@@ -128,6 +130,7 @@ function writeLocalPackage(id = "future-harness"): string {
       id,
       displayName: "Future Harness",
       packageVersion: "1.0.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: manifestPath,
     })}\n`,
   );

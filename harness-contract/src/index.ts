@@ -7,6 +7,7 @@ export interface HarnessPackageEnvelope {
   readonly id: string;
   readonly displayName: string;
   readonly packageVersion: string;
+  readonly minimumNemoClawVersion: string;
   readonly manifest: string;
 }
 

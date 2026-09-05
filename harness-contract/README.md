@@ -43,6 +43,20 @@ nemoclaw-<id>/
 └── tests/
 ```
 
+Declare the package manifest and the oldest compatible NemoClaw build in `package.json`:
+
+```json
+{
+  "nemoclaw": {
+    "harnessManifest": "manifest.yaml",
+    "minimumNemoClawVersion": "0.0.113"
+  }
+}
+```
+
+`minimumNemoClawVersion` is one exact `x.y.z` lower bound. NemoClaw compares it with the leading
+`x.y.z` of its running build identity before it changes the package store.
+
 ## Authoring commands
 
 Install this package as a development dependency. Then expose these scripts from the harness
@@ -75,7 +89,9 @@ NemoClaw evaluates an adapter.
 
 `nemoclaw-validate-package` checks identity, required files, adapter freshness, file types, modes,
 credential-shaped paths, and the npm publish set. It runs `npm pack` with lifecycle scripts
-disabled.
+disabled. Every package publishes `host/config-adapter.cts`. A package also publishes
+`host/mcp-adapter.cts` for MCP bridge support, `host/startup-adapter.cts` for a managed image, and
+`host/restore-adapter.cts` when a state-file restore uses `merge: package-config`.
 
 `nemoclaw-build-package` copies the validated publish set into a new read-only directory. It does
 not replace an existing output.
@@ -112,4 +128,3 @@ Install a local package only after you review and trust its complete contents.
 
 NeMo Fabric is the sandbox-local headless data plane. It does not replace this host contract or the
 NemoClaw control plane.
-

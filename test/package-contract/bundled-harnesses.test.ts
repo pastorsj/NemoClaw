@@ -94,7 +94,10 @@ function writeFutureHarnessPackage(repositoryRoot: string): void {
       {
         name: "@fixture/nemoclaw-future-harness",
         version: "9.8.7",
-        nemoclaw: { harnessManifest: "manifest.yaml" },
+        nemoclaw: {
+          harnessManifest: "manifest.yaml",
+          minimumNemoClawVersion: "0.0.113",
+        },
       },
       null,
       2,
@@ -183,6 +186,7 @@ describe("bundled harness package artifacts", () => {
           id: "future-harness",
           displayName: "Future Harness",
           packageVersion: "9.8.7",
+          minimumNemoClawVersion: "0.0.113",
           manifestPath: "packages/nemoclaw-future-harness/manifest.yaml",
         },
       ]);
@@ -195,6 +199,7 @@ describe("bundled harness package artifacts", () => {
         id: "future-harness",
         displayName: "Future Harness",
         packageVersion: "9.8.7",
+        minimumNemoClawVersion: "0.0.113",
         manifest: "packages/nemoclaw-future-harness/manifest.yaml",
       });
       expect(validateHarnessPackageTree(packageRoot).contentDigest).toMatch(/^[a-f0-9]{64}$/u);
@@ -223,6 +228,7 @@ describe("bundled harness package artifacts", () => {
         manifest: parsed.envelope.manifest,
         manifestName: parsed.manifest.name,
         packageVersion: parsed.envelope.packageVersion,
+        minimumNemoClawVersion: parsed.envelope.minimumNemoClawVersion,
         dockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfilePath),
         baseDockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfileBasePath),
         legacyDockerfile: relativePackageAsset(
@@ -240,11 +246,20 @@ describe("bundled harness package artifacts", () => {
         const source = sources.find((candidate) => candidate.id === id)!;
         const packagePath = `packages/nemoclaw-${id}`;
         return {
-          keys: ["displayName", "id", "kind", "manifest", "packageVersion", "schemaVersion"],
+          keys: [
+            "displayName",
+            "id",
+            "kind",
+            "manifest",
+            "minimumNemoClawVersion",
+            "packageVersion",
+            "schemaVersion",
+          ],
           id,
           manifest: `${packagePath}/manifest.yaml`,
           manifestName: id,
           packageVersion: source.packageVersion,
+          minimumNemoClawVersion: source.minimumNemoClawVersion,
           dockerfile: `${packagePath}/Dockerfile`,
           baseDockerfile: `${packagePath}/Dockerfile.base`,
           legacyDockerfile: null,

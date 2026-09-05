@@ -64,6 +64,7 @@ function writeOpenClawPackage(
       id: "openclaw",
       displayName,
       packageVersion,
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     })}\n`,
   );
@@ -104,6 +105,7 @@ function installPiPackage() {
       id: "pi",
       displayName: "Pi",
       packageVersion: "0.1.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-pi/manifest.yaml",
     })}\n`,
   );

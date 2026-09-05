@@ -88,6 +88,7 @@ export interface HarnessPackageConformanceReport {
   readonly displayName: string;
   readonly packageName: string;
   readonly packageVersion: string;
+  readonly minimumNemoClawVersion: string;
   readonly manifestPath: string;
   readonly adapterArtifacts: readonly string[];
   readonly packedFiles: readonly string[];
@@ -113,7 +114,15 @@ export class HarnessPackageConformanceError extends Error {
 interface PackageMetadata {
   readonly name: string;
   readonly version: string;
-  readonly nemoclaw: { readonly harnessManifest: string };
+  readonly nemoclaw: {
+    readonly harnessManifest: string;
+    readonly minimumNemoClawVersion: string;
+  };
+}
+
+interface ParsedManifest {
+  readonly displayName: string;
+  readonly value: Readonly<Record<string, unknown>>;
 }
 
 interface NpmPackFile {
@@ -251,6 +260,10 @@ function isExactSemanticVersion(version: string): boolean {
   );
 }
 
+function isExactCoreVersion(version: string): boolean {
+  return /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.test(version);
+}
+
 function readPackageMetadata(
   packageRoot: string,
 ): PackageMetadata & { readonly harnessId: string } {
@@ -289,10 +302,23 @@ function readPackageMetadata(
       'nemoclaw.harnessManifest must be the package-root file "manifest.yaml"',
     );
   }
+  if (
+    typeof parsed.nemoclaw.minimumNemoClawVersion !== "string" ||
+    !isExactCoreVersion(parsed.nemoclaw.minimumNemoClawVersion)
+  ) {
+    throw diagnostic(
+      "metadata",
+      PACKAGE_JSON,
+      "nemoclaw.minimumNemoClawVersion must be one exact x.y.z version",
+    );
+  }
   return Object.freeze({
     name: parsed.name,
     version: parsed.version,
-    nemoclaw: Object.freeze({ harnessManifest: "manifest.yaml" }),
+    nemoclaw: Object.freeze({
+      harnessManifest: "manifest.yaml",
+      minimumNemoClawVersion: parsed.nemoclaw.minimumNemoClawVersion,
+    }),
     harnessId,
   });
 }
@@ -353,7 +379,7 @@ function assertBoundedManifestValue(value: unknown): void {
   visit(value, 0);
 }
 
-function readManifest(packageRoot: string, expectedHarnessId: string): string {
+function readManifest(packageRoot: string, expectedHarnessId: string): ParsedManifest {
   const source = readBoundedUtf8File(packageRoot, "manifest.yaml", MAX_MANIFEST_BYTES);
   const document = parseDocument(source, {
     prettyErrors: false,
@@ -383,7 +409,9 @@ function readManifest(packageRoot: string, expectedHarnessId: string): string {
       `name must exactly match package harness id ${JSON.stringify(expectedHarnessId)}`,
     );
   }
-  if (value.display_name === undefined) return expectedHarnessId;
+  if (value.display_name === undefined) {
+    return Object.freeze({ displayName: expectedHarnessId, value: Object.freeze(value) });
+  }
   if (
     typeof value.display_name !== "string" ||
     value.display_name.trim().length === 0 ||
@@ -393,7 +421,51 @@ function readManifest(packageRoot: string, expectedHarnessId: string): string {
   ) {
     throw diagnostic("manifest", "manifest.yaml", "display_name must be one bounded safe string");
   }
-  return value.display_name;
+  return Object.freeze({ displayName: value.display_name, value: Object.freeze(value) });
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requiredAdapterArtifacts(
+  manifest: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  const required = ["host/config-adapter.cts"];
+  if (isRecord(manifest.mcp) && manifest.mcp.support === "bridge") {
+    required.push("host/mcp-adapter.cts");
+  }
+  if (manifest.managed_image !== undefined) {
+    required.push("host/startup-adapter.cts");
+  }
+  if (
+    Array.isArray(manifest.state_files) &&
+    manifest.state_files.some(
+      (entry) =>
+        isRecord(entry) &&
+        isRecord(entry.restore) &&
+        entry.restore.merge === "package-config",
+    )
+  ) {
+    required.push("host/restore-adapter.cts");
+  }
+  return Object.freeze(required);
+}
+
+function assertRequiredAdapterArtifacts(
+  artifacts: readonly string[],
+  manifest: Readonly<Record<string, unknown>>,
+): void {
+  const available = new Set(artifacts);
+  for (const relativePath of requiredAdapterArtifacts(manifest)) {
+    if (!available.has(relativePath)) {
+      throw diagnostic(
+        "adapter-artifact",
+        relativePath,
+        "manifest capabilities require this compiled adapter artifact",
+      );
+    }
+  }
 }
 
 function safeRelativePath(value: unknown): string {
@@ -675,14 +747,16 @@ export function validateHarnessPackage(packageRootInput: string): HarnessPackage
   const packageRoot = resolvePackageRoot(packageRootInput);
   assertRequiredRootFiles(packageRoot);
   const metadata = readPackageMetadata(packageRoot);
-  const displayName = readManifest(packageRoot, metadata.harnessId);
+  const manifest = readManifest(packageRoot, metadata.harnessId);
   const adapterArtifacts = listAdapterArtifacts(packageRoot);
+  assertRequiredAdapterArtifacts(adapterArtifacts, manifest.value);
   const publishedFiles = inspectPackedFiles(packageRoot, metadata, adapterArtifacts);
   return Object.freeze({
     harnessId: metadata.harnessId,
-    displayName,
+    displayName: manifest.displayName,
     packageName: metadata.name,
     packageVersion: metadata.version,
+    minimumNemoClawVersion: metadata.nemoclaw.minimumNemoClawVersion,
     manifestPath: metadata.nemoclaw.harnessManifest,
     adapterArtifacts,
     packedFiles: Object.freeze(publishedFiles.map((file) => file.path)),

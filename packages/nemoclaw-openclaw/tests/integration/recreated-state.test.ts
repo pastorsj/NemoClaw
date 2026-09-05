@@ -47,6 +47,7 @@ function installOpenClawRestorePackage() {
       id: "openclaw",
       displayName: "OpenClaw",
       packageVersion: "0.1.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     })}\n`,
     { mode: 0o600 },

@@ -199,6 +199,7 @@ function installedHarnessPackage(identity: HarnessPackageIdentity) {
         id: identity.id,
         displayName: identity.id,
         packageVersion: identity.packageVersion,
+        minimumNemoClawVersion: "0.0.113",
         manifest: "manifest.yaml",
       },
       manifest: { name: identity.id },

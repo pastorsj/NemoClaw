@@ -52,6 +52,7 @@ function packageEnvelope(packageVersion: string): Record<string, unknown> {
     id: "openclaw",
     displayName: "OpenClaw",
     packageVersion,
+    minimumNemoClawVersion: "0.0.113",
     manifest: "packages/nemoclaw-openclaw/manifest.yaml",
   };
 }
@@ -238,6 +239,45 @@ describe("installHarnessPackage", () => {
     writeFixtureFile("packages/nemoclaw-openclaw/manifest.yaml", "name: hermes\n");
 
     expect(() => install()).toThrow("manifest name must match the package id");
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
+  it.each([
+    ["missing", undefined, "metadata fields do not match"],
+    ["malformed", "0.0", "minimumNemoClawVersion"],
+  ])(
+    "rejects a %s minimum NemoClaw version before creating package-store state",
+    (_label, minimumNemoClawVersion, expectedMessage) => {
+      const envelope = packageEnvelope("1.0.0");
+      if (minimumNemoClawVersion === undefined) {
+        delete envelope.minimumNemoClawVersion;
+      } else {
+        envelope.minimumNemoClawVersion = minimumNemoClawVersion;
+      }
+      writeFixtureFile("nemoclaw-package.json", `${JSON.stringify(envelope)}\n`);
+
+      expect(() => install()).toThrow(expectedMessage);
+      expect(fs.readdirSync(storeRoot)).toEqual([]);
+    },
+  );
+
+  it("rejects an incompatible package before creating package-store state", () => {
+    const envelope = packageEnvelope("1.0.0");
+    envelope.minimumNemoClawVersion = "0.0.114";
+    writeFixtureFile("nemoclaw-package.json", `${JSON.stringify(envelope)}\n`);
+
+    expect(() =>
+      installHarnessPackage(
+        { packageRoot: sourceRoot, sourceIdentity: FIRST_SOURCE_IDENTITY },
+        {
+          storeRoot,
+          getBuildIdentity: () => ({
+            nemoclawVersion: "0.0.113-99-gabcdef0",
+            sourceRevision: "a".repeat(40),
+          }),
+        },
+      ),
+    ).toThrow("requires NemoClaw 0.0.114 or newer");
     expect(fs.readdirSync(storeRoot)).toEqual([]);
   });
 

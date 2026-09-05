@@ -92,6 +92,7 @@ function writePackageFixture(parent: string, fixture: PackageFixture): string {
       id: fixture.id,
       displayName: fixture.displayName,
       packageVersion: fixture.packageVersion,
+      minimumNemoClawVersion: "0.0.113",
       manifest: manifestPath,
     })}\n`,
   );
