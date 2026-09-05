@@ -52,8 +52,10 @@ describe("DeepSeek Harness shell entry points", () => {
           encoding: "utf8",
           env: {
             PATH: process.env.PATH ?? "",
-            HTTP_PROXY: "http://proxy.fixture:1234",
-            HTTPS_PROXY: "http://proxy.fixture:1234",
+            HTTP_PROXY: "http://credential@untrusted.fixture:9999",
+            HTTPS_PROXY: "http://credential@untrusted.fixture:9999",
+            NEMOCLAW_PROXY_HOST: "proxy.fixture",
+            NEMOCLAW_PROXY_PORT: "1234",
             NO_PROXY: "inference.local",
             no_proxy: "inference.local",
           },
@@ -62,7 +64,10 @@ describe("DeepSeek Harness shell entry points", () => {
       expect(result.status, `${result.stdout}${result.stderr}`).toBe(0);
       expect(fs.statSync(runtimeEnvironment).mode & 0o777).toBe(0o444);
       expect(result.stdout).toContain("HTTP_PROXY=http://proxy.fixture:1234");
-      expect(result.stdout).toContain("NO_PROXY=localhost,127.0.0.1,::1");
+      expect(result.stdout).toContain("NO_PROXY=localhost,127.0.0.1,::1,proxy.fixture");
+      expect(fs.readFileSync(runtimeEnvironment, "utf8")).not.toMatch(
+        /credential|inference[.]local|NEMOCLAW_PROXY_/u,
+      );
     } finally {
       fs.rmSync(temporaryRoot, { force: true, recursive: true });
     }

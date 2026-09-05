@@ -12,11 +12,32 @@ export HAYSTACK_TELEMETRY_ENABLED=false
 export HAYSTACK_AUTO_TRACE_ENABLED=false
 export HAYSTACK_CONTENT_TRACING_ENABLED=false
 
-# OpenShell routes inference.local through its HTTP(S) L7 proxy. Remove the
-# sandbox-create bypass seed while retaining the proxy URLs that OpenShell owns.
-export NO_PROXY=localhost,127.0.0.1,::1
+is_valid_proxy_host() {
+  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+is_valid_proxy_port() {
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] || return 1
+  ((10#$1 >= 1 && 10#$1 <= 65535))
+}
+
+# Reconstruct the credential-free OpenShell proxy URL from the two typed,
+# validated startup values. Never persist an ambient proxy URL, which could
+# contain host credentials. inference.local must not appear in NO_PROXY.
+PROXY_HOST="${NEMOCLAW_PROXY_HOST:-}"
+PROXY_PORT="${NEMOCLAW_PROXY_PORT:-}"
+if ! is_valid_proxy_host "$PROXY_HOST" || ! is_valid_proxy_port "$PROXY_PORT"; then
+  printf '%s\n' '[SECURITY] Missing or invalid managed proxy route.' >&2
+  exit 1
+fi
+PROXY_URL="http://${PROXY_HOST}:${PROXY_PORT}"
+export HTTP_PROXY="$PROXY_URL"
+export HTTPS_PROXY="$PROXY_URL"
+export NO_PROXY="localhost,127.0.0.1,::1,${PROXY_HOST}"
+export http_proxy="$PROXY_URL"
+export https_proxy="$PROXY_URL"
 export no_proxy="$NO_PROXY"
-unset ALL_PROXY all_proxy OPENAI_PROXY
+unset ALL_PROXY all_proxy OPENAI_PROXY NEMOCLAW_PROXY_HOST NEMOCLAW_PROXY_PORT
 
 write_export_if_set() {
   local name="$1"
@@ -26,9 +47,8 @@ write_export_if_set() {
 }
 
 write_runtime_environment() {
-  # OpenShell starts PID 1 with the managed proxy environment, but later
-  # sandbox execs are independent processes. Persist only public routing and
-  # CA values so NemoClaw's generic exec wrapper can recreate that environment.
+  # Later sandbox execs are independent processes. Persist only public routing
+  # and CA values so NemoClaw's generic exec wrapper can recreate the route.
   local target=/tmp/nemoclaw-proxy-env.sh
   local staged
   staged="$(mktemp /tmp/nemoclaw-proxy-env.XXXXXX)"

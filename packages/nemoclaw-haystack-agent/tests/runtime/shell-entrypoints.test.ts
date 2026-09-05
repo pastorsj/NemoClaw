@@ -45,8 +45,10 @@ describe("Haystack Agent shell entry points", () => {
           encoding: "utf8",
           env: {
             PATH: process.env.PATH ?? "",
-            HTTP_PROXY: "http://proxy.fixture:1234",
-            HTTPS_PROXY: "http://proxy.fixture:1234",
+            HTTP_PROXY: "http://credential@untrusted.fixture:9999",
+            HTTPS_PROXY: "http://credential@untrusted.fixture:9999",
+            NEMOCLAW_PROXY_HOST: "proxy.fixture",
+            NEMOCLAW_PROXY_PORT: "1234",
             NO_PROXY: "inference.local",
             no_proxy: "inference.local",
             ALL_PROXY: "http://untrusted.fixture:9999",
@@ -65,11 +67,14 @@ describe("Haystack Agent shell entry points", () => {
       );
       expect(environment.HTTP_PROXY).toBe("http://proxy.fixture:1234");
       expect(environment.HTTPS_PROXY).toBe("http://proxy.fixture:1234");
-      expect(environment.NO_PROXY).toBe("localhost,127.0.0.1,::1");
-      expect(environment.no_proxy).toBe("localhost,127.0.0.1,::1");
+      expect(environment.NO_PROXY).toBe("localhost,127.0.0.1,::1,proxy.fixture");
+      expect(environment.no_proxy).toBe("localhost,127.0.0.1,::1,proxy.fixture");
       expect(environment).not.toHaveProperty("ALL_PROXY");
       expect(environment).not.toHaveProperty("all_proxy");
       expect(environment).not.toHaveProperty("OPENAI_PROXY");
+      expect(fs.readFileSync(runtimeEnvironment, "utf8")).not.toMatch(
+        /credential|inference[.]local|NEMOCLAW_PROXY_/u,
+      );
     } finally {
       fs.rmSync(temporaryRoot, { force: true, recursive: true });
     }
