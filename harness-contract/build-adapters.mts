@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const ADAPTER_FILE = /^[a-z][a-z0-9-]*-adapter\.cts$/u;
 const SPDX_HEADER =
@@ -16,6 +17,30 @@ const SPDX_HEADER =
 
 function fail(message: string): never {
   throw new Error(`Harness adapter build failed: ${message}`);
+}
+
+function containsRuntimeRequire(source: string): boolean {
+  const sourceFile = ts.createSourceFile(
+    "adapter.cjs",
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.JS,
+  );
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "require"
+    ) {
+      found = true;
+      return;
+    }
+    if (!found) ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
 }
 
 function compileAdapter(packageRoot: string, sourcePath: string): string {
@@ -62,7 +87,7 @@ function compileAdapter(packageRoot: string, sourcePath: string): string {
     const output = emitted.startsWith(strictPrefix)
       ? `${SPDX_HEADER}"use strict";\n${emitted.slice(strictPrefix.length)}`
       : emitted;
-    if (!output.includes("module.exports =") || /\brequire\s*\(/u.test(output)) {
+    if (!output.includes("module.exports =") || containsRuntimeRequire(output)) {
       fail(`${path.basename(sourcePath)} did not compile to one self-contained CommonJS module`);
     }
     return output;

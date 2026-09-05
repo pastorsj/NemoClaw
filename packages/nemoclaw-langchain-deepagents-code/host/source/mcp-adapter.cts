@@ -1,0 +1,959 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import type { HarnessMcpAdapterModule } from "@nvidia/nemoclaw-harness-contract";
+
+// Native command payloads stay opaque inside these existing helpers. The eight
+// host entrypoints below use the exact contract request and result types.
+const DEEPAGENTS_MCP_MAX_SERVERS = 64;
+const DEEPAGENTS_MCP_CONFIG_PATH = "/sandbox/.deepagents/.nemoclaw-mcp.json";
+const DEEPAGENTS_LEGACY_MCP_CONFIG_PATH = "/sandbox/.deepagents/.mcp.json";
+const DEEPAGENTS_MCP_CAPABILITY_MARKER = "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2";
+const DEEPAGENTS_MCP_CAPABILITY_COMMAND =
+  "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability";
+const DEEPAGENTS_UNSAFE_MCP_PROJECTION_PREFIX = "Unsafe managed Deep Agents MCP projection path";
+
+function shellQuote(value: any): any {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function getMutationCapability(sandboxName: any): any {
+  return {
+    command: DEEPAGENTS_MCP_CAPABILITY_COMMAND,
+    marker: DEEPAGENTS_MCP_CAPABILITY_MARKER,
+    failureMessage: `LangChain Deep Agents Code sandbox '${sandboxName}' does not contain managed MCP capability v2. Rebuild the sandbox before changing authenticated MCP state.`,
+  };
+}
+
+function pythonJsonLiteral(value: any): any {
+  return JSON.stringify(JSON.stringify(value));
+}
+
+function managedServerConfig(entry: any): any {
+  return {
+    type: "http",
+    url: entry.url,
+    ...(Object.keys(entry.headers).length > 0 ? { headers: entry.headers } : {}),
+  };
+}
+
+const DEEPAGENTS_STRICT_JSON_HELPERS = [
+  "def reject_duplicate_keys(pairs):",
+  "    result = {}",
+  "    for key, value in pairs:",
+  "        if key in result:",
+  "            raise ValueError(f'duplicate JSON key: {key}')",
+  "        result[key] = value",
+  "    return result",
+  "def reject_non_json_constant(value):",
+  "    raise ValueError(f'non-JSON numeric constant: {value}')",
+  "def strict_json_loads(raw):",
+  "    return json.loads(raw, object_pairs_hook=reject_duplicate_keys, parse_constant=reject_non_json_constant)",
+];
+
+const DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS = [
+  "MANAGED_MCP_MAX_BYTES = 262144",
+  "class UnsafeManagedProjectionError(ValueError):",
+  "    pass",
+  "def describe_managed_projection_type(metadata):",
+  "    if stat.S_ISLNK(metadata.st_mode):",
+  "        return 'symbolic link'",
+  "    if stat.S_ISFIFO(metadata.st_mode):",
+  "        return 'FIFO'",
+  "    return 'non-regular file'",
+  "def managed_fingerprint(metadata):",
+  "    return (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns, metadata.st_mode, metadata.st_nlink, metadata.st_uid)",
+  "def managed_path_identity(path):",
+  "    try:",
+  "        return managed_fingerprint(os.stat(path, follow_symlinks=False))",
+  "    except FileNotFoundError:",
+  "        return None",
+  "def assert_managed_source_stable(path, identity):",
+  "    current = managed_path_identity(path)",
+  "    if identity is None:",
+  "        if current is not None:",
+  "            raise ValueError('managed MCP projection appeared during mutation')",
+  "        return",
+  "    if current != identity:",
+  "        raise ValueError('managed MCP projection changed before mutation')",
+  "def validate_managed_descriptor_path(path, descriptor):",
+  "    opened = os.fstat(descriptor)",
+  "    linked = os.stat(path, follow_symlinks=False)",
+  "    for metadata in (opened, linked):",
+  "        if not stat.S_ISREG(metadata.st_mode):",
+  "            raise UnsafeManagedProjectionError(describe_managed_projection_type(metadata))",
+  "    safe = (opened.st_uid == os.getuid() and stat.S_IMODE(opened.st_mode) == 0o600 and opened.st_nlink == 1 and (opened.st_dev, opened.st_ino) == (linked.st_dev, linked.st_ino))",
+  "    if not safe:",
+  "        raise ValueError('managed MCP projection has unsafe ownership, mode, type, links, or path identity')",
+  "    return managed_fingerprint(opened)",
+  "def open_managed_projection(path, writable=False):",
+  "    access = os.O_RDWR if writable else os.O_RDONLY",
+  "    flags = access | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW",
+  "    try:",
+  "        descriptor = os.open(path, flags)",
+  "    except FileNotFoundError:",
+  "        assert_managed_source_stable(path, None)",
+  "        return b'', None, None",
+  "    except OSError:",
+  "        linked = os.stat(path, follow_symlinks=False)",
+  "        if not stat.S_ISREG(linked.st_mode):",
+  "            raise UnsafeManagedProjectionError(describe_managed_projection_type(linked)) from None",
+  "        raise",
+  "    try:",
+  "        before = os.fstat(descriptor)",
+  "        validate_managed_descriptor_path(path, descriptor)",
+  "        if before.st_size < 0 or before.st_size > MANAGED_MCP_MAX_BYTES:",
+  "            raise ValueError('managed MCP projection has invalid size')",
+  "        chunks = []",
+  "        remaining = before.st_size",
+  "        while remaining:",
+  "            chunk = os.read(descriptor, remaining)",
+  "            if not chunk:",
+  "                break",
+  "            chunks.append(chunk)",
+  "            remaining -= len(chunk)",
+  "        after = os.fstat(descriptor)",
+  "        linked_after = os.stat(path, follow_symlinks=False)",
+  "        stable = (managed_fingerprint(before) == managed_fingerprint(after) and managed_fingerprint(after) == managed_fingerprint(linked_after))",
+  "        if remaining or not stable:",
+  "            raise ValueError('managed MCP projection changed while reading')",
+  "        return b''.join(chunks), managed_fingerprint(after), descriptor",
+  "    except Exception:",
+  "        os.close(descriptor)",
+  "        raise",
+  "def decode_managed_projection(raw):",
+  "    return strict_json_loads(raw.decode('utf-8')) if raw else {}",
+  "def close_managed_projection_descriptor(descriptor):",
+  "    if descriptor is None:",
+  "        return",
+  "    try:",
+  "        os.close(descriptor)",
+  "    except OSError:",
+  "        pass",
+  "def load_managed_projection_for_update(path):",
+  "    raw, identity, descriptor = open_managed_projection(path, True)",
+  "    try:",
+  "        return decode_managed_projection(raw), identity, descriptor",
+  "    except Exception:",
+  "        close_managed_projection_descriptor(descriptor)",
+  "        raise",
+  "def read_managed_projection(path):",
+  "    raw, identity, descriptor = open_managed_projection(path)",
+  "    try:",
+  "        return decode_managed_projection(raw), identity",
+  "    finally:",
+  "        close_managed_projection_descriptor(descriptor)",
+];
+
+const DEEPAGENTS_MANAGED_PROJECTION_MUTATION_HELPERS = [
+  "def managed_projection_bytes(value):",
+  "    payload = (json.dumps(value, indent=2, sort_keys=True) + '\\n').encode('utf-8')",
+  "    if not payload or len(payload) > MANAGED_MCP_MAX_BYTES:",
+  "        raise ValueError('managed MCP projection has invalid rendered size')",
+  "    return payload",
+  "def rewrite_managed_projection(path, value, identity, descriptor):",
+  "    if identity is None or descriptor is None:",
+  "        raise ValueError('managed MCP projection descriptor is unavailable')",
+  "    assert_managed_source_stable(path, identity)",
+  "    payload = managed_projection_bytes(value)",
+  "    os.lseek(descriptor, 0, os.SEEK_SET)",
+  "    os.ftruncate(descriptor, 0)",
+  "    offset = 0",
+  "    while offset < len(payload):",
+  "        written = os.write(descriptor, payload[offset:])",
+  "        if written <= 0:",
+  "            raise OSError('managed MCP projection write made no progress')",
+  "        offset += written",
+  "    os.fsync(descriptor)",
+  "    os.lseek(descriptor, 0, os.SEEK_SET)",
+  "    persisted = os.read(descriptor, len(payload) + 1)",
+  "    if persisted != payload or os.fstat(descriptor).st_size != len(payload):",
+  "        raise ValueError('managed MCP projection verification failed')",
+  "    validate_managed_descriptor_path(path, descriptor)",
+  "def publish_absent_managed_projection(path, value):",
+  "    assert_managed_source_stable(path, None)",
+  "    payload = managed_projection_bytes(value)",
+  "    tmp_fd, tmp_name = tempfile.mkstemp(prefix='.nemoclaw-mcp.', dir=path.parent)",
+  "    try:",
+  "        os.fchmod(tmp_fd, 0o600)",
+  "        with os.fdopen(tmp_fd, 'wb') as tmp_file:",
+  "            tmp_file.write(payload)",
+  "            tmp_file.flush()",
+  "            os.fsync(tmp_file.fileno())",
+  "        try:",
+  "            os.link(tmp_name, path, follow_symlinks=False)",
+  "        except FileExistsError as exc:",
+  "            raise ValueError('managed MCP projection appeared during publication') from exc",
+  "        os.unlink(tmp_name)",
+  "    finally:",
+  "        try:",
+  "            os.unlink(tmp_name)",
+  "        except FileNotFoundError:",
+  "            pass",
+  "    persisted, _ = read_managed_projection(path)",
+  "    if persisted != value:",
+  "        raise ValueError('managed MCP projection verification failed')",
+  "def write_managed_projection(path, value, identity, descriptor):",
+  "    if identity is None:",
+  "        if descriptor is not None:",
+  "            raise ValueError('unexpected managed MCP projection descriptor')",
+  "        publish_absent_managed_projection(path, value)",
+  "    else:",
+  "        try:",
+  "            rewrite_managed_projection(path, value, identity, descriptor)",
+  "        finally:",
+  "            close_managed_projection_descriptor(descriptor)",
+];
+
+const DEEPAGENTS_MANAGED_PROJECTION_HELPERS = [
+  ...DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
+  ...DEEPAGENTS_MANAGED_PROJECTION_MUTATION_HELPERS,
+];
+
+const MANAGED_HTTP_SERVER_MATCH_HELPERS = [
+  "def managed_http_server_matches(actual, expected, allow_revisioned):",
+  "    if actual == expected:",
+  "        return True",
+  "    if not allow_revisioned or not isinstance(actual, dict) or not isinstance(expected, dict):",
+  "        return False",
+  "    if set(actual) != set(expected):",
+  "        return False",
+  "    for name, value in expected.items():",
+  "        if name != 'headers' and actual.get(name) != value:",
+  "            return False",
+  "    actual_headers = actual.get('headers')",
+  "    expected_headers = expected.get('headers')",
+  "    if not isinstance(actual_headers, dict) or not isinstance(expected_headers, dict):",
+  "        return False",
+  "    if set(actual_headers) != set(expected_headers):",
+  "        return False",
+  "    for name, value in expected_headers.items():",
+  "        actual_value = actual_headers.get(name)",
+  "        if actual_value == value:",
+  "            continue",
+  "        canonical_prefix = 'Bearer openshell:resolve:env:'",
+  "        env_name = value[len(canonical_prefix):] if name.lower() == 'authorization' and isinstance(value, str) and value.startswith(canonical_prefix) else ''",
+  "        revision_prefix = canonical_prefix + 'v'",
+  "        suffix = '_' + env_name",
+  "        if not env_name or not isinstance(actual_value, str) or not actual_value.startswith(revision_prefix) or not actual_value.endswith(suffix):",
+  "            return False",
+  "        revision = actual_value[len(revision_prefix):-len(suffix)]",
+  "        if not revision.isdigit() or not (1 <= len(revision) <= 20):",
+  "            return False",
+  "    return True",
+];
+
+const DEEPAGENTS_LEGACY_CONFIG_HELPERS = [
+  "LEGACY_MCP_MAX_BYTES = 262144",
+  "def legacy_fingerprint(metadata):",
+  "    return (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns, metadata.st_mode, metadata.st_nlink, metadata.st_uid)",
+  "def read_legacy_config(path):",
+  "    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW",
+  "    descriptor = os.open(path, flags)",
+  "    try:",
+  "        before = os.fstat(descriptor)",
+  "        linked = os.stat(path, follow_symlinks=False)",
+  "        safe = (stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid() and stat.S_IMODE(before.st_mode) == 0o600 and before.st_nlink == 1 and (before.st_dev, before.st_ino) == (linked.st_dev, linked.st_ino))",
+  "        if not safe:",
+  "            raise ValueError('legacy MCP config has unsafe ownership, mode, type, or links')",
+  "        if before.st_size <= 0 or before.st_size > LEGACY_MCP_MAX_BYTES:",
+  "            raise ValueError('legacy MCP config has invalid size')",
+  "        chunks = []",
+  "        remaining = before.st_size",
+  "        while remaining:",
+  "            chunk = os.read(descriptor, remaining)",
+  "            if not chunk:",
+  "                break",
+  "            chunks.append(chunk)",
+  "            remaining -= len(chunk)",
+  "        after = os.fstat(descriptor)",
+  "        linked_after = os.stat(path, follow_symlinks=False)",
+  "        stable = (legacy_fingerprint(before) == legacy_fingerprint(after) and legacy_fingerprint(after) == legacy_fingerprint(linked_after))",
+  "        if remaining or not stable:",
+  "            raise ValueError('legacy MCP config changed while reading')",
+  "    finally:",
+  "        os.close(descriptor)",
+  "    raw = b''.join(chunks).decode('utf-8')",
+  "    data = strict_json_loads(raw)",
+  "    return data, legacy_fingerprint(before)",
+  "def assert_legacy_source_stable(path, identity):",
+  "    if identity is None:",
+  "        if os.path.lexists(path):",
+  "            raise ValueError('legacy MCP config appeared during mutation')",
+  "        return",
+  "    current = os.stat(path, follow_symlinks=False)",
+  "    safe = (stat.S_ISREG(current.st_mode) and current.st_uid == os.getuid() and stat.S_IMODE(current.st_mode) == 0o600 and current.st_nlink == 1 and legacy_fingerprint(current) == identity)",
+  "    if not safe:",
+  "        raise ValueError('legacy MCP config changed before mutation')",
+];
+
+function buildStatusCommand(entry: any): any {
+  const payload = { server: entry.server, expected: managedServerConfig(entry) };
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, stat, sys",
+    "payload = json.loads(" + pythonJsonLiteral(payload) + ")",
+    "config_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
+    "try:",
+    "    data = read_managed_projection(config_path)[0]",
+    "except UnsafeManagedProjectionError as exc:",
+    "    print(" +
+      JSON.stringify(DEEPAGENTS_UNSAFE_MCP_PROJECTION_PREFIX + ": ") +
+      " + str(exc) + ' at ' + str(config_path), file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "except (OSError, UnicodeDecodeError, ValueError):",
+    "    print('Managed Deep Agents MCP projection is unsafe or invalid.', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "servers = data.get('mcpServers') if isinstance(data, dict) else None",
+    "present = isinstance(servers, dict) and payload['server'] in servers",
+    "server = servers.get(payload['server']) if present else None",
+    "ok = server == payload['expected']",
+    "print('registered' if ok else ('mismatch' if present else 'absent'))",
+    "PY",
+  ].join("\n");
+}
+
+function expectedServerMap(entries: any): any {
+  return Object.fromEntries(
+    entries
+      .map((entry: any) => [entry.server, managedServerConfig(entry)] as const)
+      .sort(([left]: readonly [string, any], [right]: readonly [string, any]) =>
+        left.localeCompare(right),
+      ),
+  );
+}
+
+function buildMcpRuntimeKindCommand(): any {
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import pathlib, sys",
+    "managed_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    "legacy_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_LEGACY_MCP_CONFIG_PATH) + ")",
+    'runtime_kind = "auto"  # NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR',
+    "if runtime_kind == 'auto':",
+    "    runtime_kind = 'unknown'",
+    "    try:",
+    "        from deepagents_code import _nemoclaw_managed as managed",
+    "        runtime_path = str(getattr(managed, '_MCP_CONFIG_FILE', ''))",
+    "        if runtime_path == str(managed_path):",
+    "            runtime_kind = 'v2'",
+    "        elif runtime_path == str(legacy_path):",
+    "            runtime_kind = 'legacy'",
+    "    except Exception:",
+    "        pass",
+    "if runtime_kind not in ('v2', 'legacy'):",
+    "    print('Could not identify the managed Deep Agents MCP runtime', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "print(runtime_kind)",
+    "PY",
+  ].join("\n");
+}
+
+function buildSnapshotRepairCommand(entries: any): any {
+  const expectedServers = expectedServerMap(entries);
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, secrets, stat, sys",
+    "expected = json.loads(" + pythonJsonLiteral({ mcpServers: expectedServers }) + ")",
+    "config_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_HELPERS,
+    "def open_projection_parent():",
+    "    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW",
+    "    parent_name = config_path.parent.name",
+    "    if not parent_name or parent_name in ('.', '..'):",
+    "        raise ValueError('managed MCP projection parent is unsafe')",
+    "    anchor = os.open(config_path.parent.parent, flags)",
+    "    try:",
+    "        try:",
+    "            os.mkdir(parent_name, 0o700, dir_fd=anchor)",
+    "        except FileExistsError:",
+    "            pass",
+    "        parent = os.open(parent_name, flags, dir_fd=anchor)",
+    "        opened = os.fstat(parent)",
+    "        linked = os.stat(parent_name, dir_fd=anchor, follow_symlinks=False)",
+    "        safe = stat.S_ISDIR(opened.st_mode) and opened.st_uid == os.getuid() and (opened.st_dev, opened.st_ino) == (linked.st_dev, linked.st_ino)",
+    "        if not safe:",
+    "            os.close(parent)",
+    "            raise ValueError('managed MCP projection parent is unsafe')",
+    "        return parent",
+    "    finally:",
+    "        os.close(anchor)",
+    "def reset_projection(value):",
+    "    payload = managed_projection_bytes(value)",
+    "    parent = open_projection_parent()",
+    "    staged_name = ''",
+    "    staged = None",
+    "    try:",
+    "        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW",
+    "        for _attempt in range(100):",
+    "            staged_name = '.nemoclaw-mcp-restore.' + secrets.token_hex(16)",
+    "            try:",
+    "                staged = os.open(staged_name, flags, 0o600, dir_fd=parent)",
+    "                break",
+    "            except FileExistsError:",
+    "                continue",
+    "        if staged is None:",
+    "            raise ValueError('managed MCP projection staging file could not be created')",
+    "        metadata = os.fstat(staged)",
+    "        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1:",
+    "            raise ValueError('managed MCP projection staging file is unsafe')",
+    "        offset = 0",
+    "        while offset < len(payload):",
+    "            written = os.write(staged, payload[offset:])",
+    "            if written <= 0:",
+    "                raise OSError('managed MCP projection write made no progress')",
+    "            offset += written",
+    "        os.fsync(staged)",
+    "        after = os.fstat(staged)",
+    "        linked = os.stat(staged_name, dir_fd=parent, follow_symlinks=False)",
+    "        stable = stat.S_ISREG(after.st_mode) and after.st_uid == os.getuid() and stat.S_IMODE(after.st_mode) == 0o600 and after.st_nlink == 1 and after.st_size == len(payload) and managed_fingerprint(after) == managed_fingerprint(linked)",
+    "        if not stable:",
+    "            raise ValueError('managed MCP projection staging file changed before publication')",
+    "        try:",
+    "            current = os.stat(config_path.name, dir_fd=parent, follow_symlinks=False)",
+    "        except FileNotFoundError:",
+    "            current = None",
+    "        if current is not None and stat.S_ISDIR(current.st_mode):",
+    "            raise ValueError('managed MCP projection path is a directory')",
+    "        os.replace(staged_name, config_path.name, src_dir_fd=parent, dst_dir_fd=parent)",
+    "        staged_name = ''",
+    "        os.fsync(parent)",
+    "    finally:",
+    "        if staged is not None:",
+    "            os.close(staged)",
+    "        if staged_name:",
+    "            try:",
+    "                os.unlink(staged_name, dir_fd=parent)",
+    "            except FileNotFoundError:",
+    "                pass",
+    "        os.close(parent)",
+    "    persisted, _ = read_managed_projection(config_path)",
+    "    if persisted != value:",
+    "        raise ValueError('managed MCP projection verification failed')",
+    "try:",
+    "    reset_projection(expected)",
+    "except (OSError, UnicodeDecodeError, ValueError) as exc:",
+    "    print(f'Managed Deep Agents MCP projection repair failed: {exc}', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "PY",
+  ].join("\n");
+}
+
+function buildMcpSnapshotRestorePlan(
+  request: Parameters<HarnessMcpAdapterModule["buildMcpSnapshotRestorePlan"]>[0],
+): ReturnType<HarnessMcpAdapterModule["buildMcpSnapshotRestorePlan"]> {
+  if (request.entries.length > DEEPAGENTS_MCP_MAX_SERVERS) {
+    throw new Error(
+      "Deep Agents managed MCP supports at most " +
+        String(DEEPAGENTS_MCP_MAX_SERVERS) +
+        " servers during snapshot restore.",
+    );
+  }
+  return {
+    kind: "conditional-repair",
+    applicability: {
+      command: buildMcpRuntimeKindCommand(),
+      timeoutSeconds: 15,
+      repairWhenOutput: "v2",
+      skipWhenOutput: "legacy",
+      failureMessage: "Could not identify the managed Deep Agents MCP runtime.",
+    },
+    capability: describeMcpMutationCapability({ sandboxName: request.sandboxName }),
+    execution: {
+      command: buildSnapshotRepairCommand(request.entries),
+      timeoutSeconds: 30,
+      success: { kind: "exit-zero" },
+      failureMessage: "Deep Agents Code managed MCP projection repair failed.",
+    },
+    verificationFailureMessage:
+      "Deep Agents Code managed MCP projection verification failed after snapshot repair",
+  };
+}
+
+function buildRollbackRegisterCommand(entry: any, expectedServers: any): any {
+  const payload = {
+    server: entry.server,
+    expected: managedServerConfig(entry),
+    expectedServers,
+  };
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, stat, sys, tempfile",
+    "payload = json.loads(" + pythonJsonLiteral(payload) + ")",
+    "managed_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    "legacy_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_LEGACY_MCP_CONFIG_PATH) + ")",
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_HELPERS,
+    ...DEEPAGENTS_LEGACY_CONFIG_HELPERS,
+    ...MANAGED_HTTP_SERVER_MATCH_HELPERS,
+    'runtime_kind = "auto"  # NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR',
+    "if runtime_kind == 'auto':",
+    "    runtime_kind = 'unknown'",
+    "    try:",
+    "        from deepagents_code import _nemoclaw_managed as managed",
+    "        runtime_path = str(getattr(managed, '_MCP_CONFIG_FILE', ''))",
+    "        if runtime_path == str(managed_path):",
+    "            runtime_kind = 'v2'",
+    "        elif runtime_path == str(legacy_path):",
+    "            runtime_kind = 'legacy'",
+    "    except Exception:",
+    "        pass",
+    "if runtime_kind not in ('v2', 'legacy'):",
+    "    print('Could not identify the managed Deep Agents MCP runtime; refusing rollback', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "is_v2 = runtime_kind == 'v2'",
+    "if is_v2 and len(payload['expectedServers']) > " + String(DEEPAGENTS_MCP_MAX_SERVERS) + ":",
+    "    print('Managed MCP v2 supports at most " +
+      String(DEEPAGENTS_MCP_MAX_SERVERS) +
+      " servers', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "config_path = managed_path if is_v2 else legacy_path",
+    "data = {}",
+    "managed_identity = None",
+    "managed_descriptor = None",
+    "legacy_identity = None",
+    "def fail_rollback(message):",
+    "    close_managed_projection_descriptor(managed_descriptor)",
+    "    print(message, file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "try:",
+    "    if is_v2:",
+    "        data, managed_identity, managed_descriptor = load_managed_projection_for_update(config_path)",
+    "    elif os.path.lexists(config_path):",
+    "        data, legacy_identity = read_legacy_config(config_path)",
+    "except (OSError, UnicodeDecodeError, ValueError) as exc:",
+    "    fail_rollback(f'Invalid managed MCP rollback state at {config_path}: {exc}')",
+    "if not isinstance(data, dict):",
+    "    fail_rollback(f'Invalid managed MCP rollback state at {config_path}: expected object')",
+    "if is_v2:",
+    "    if data and set(data) != {'mcpServers'}:",
+    "        fail_rollback(f'Invalid managed MCP v2 projection at {config_path}')",
+    "    servers = data.get('mcpServers', {})",
+    "    if not isinstance(servers, dict):",
+    "        fail_rollback(f'Invalid managed MCP v2 server map at {config_path}')",
+    "    if any(not managed_http_server_matches(current, payload['expectedServers'].get(name), True) for name, current in servers.items()):",
+    "        fail_rollback(f'Refusing to overwrite drifted managed MCP v2 projection at {config_path}')",
+    "    next_servers = {}",
+    "    for name, expected in payload['expectedServers'].items():",
+    "        if name != payload['server'] and name in servers:",
+    "            next_servers[name] = servers[name]",
+    "        else:",
+    "            next_servers[name] = expected",
+    "    data = {'mcpServers': next_servers}",
+    "else:",
+    "    servers = data.setdefault('mcpServers', {})",
+    "    if not isinstance(servers, dict):",
+    "        fail_rollback(f'Refusing to overwrite mixed legacy MCP state at {config_path}')",
+    "    current = servers.get(payload['server'])",
+    "    if payload['server'] in servers and current != payload['expected']:",
+    "        fail_rollback(f'Refusing to overwrite user-owned legacy MCP server at {config_path}')",
+    "    servers[payload['server']] = payload['expected']",
+    "config_path.parent.mkdir(parents=True, exist_ok=True)",
+    "if not is_v2:",
+    "    tmp_fd, tmp_name = tempfile.mkstemp(prefix='.nemoclaw-mcp.', dir=config_path.parent)",
+    "    try:",
+    "        os.fchmod(tmp_fd, 0o600)",
+    "        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp_file:",
+    "            json.dump(data, tmp_file, indent=2, sort_keys=True)",
+    "            tmp_file.write('\\n')",
+    "            tmp_file.flush()",
+    "            os.fsync(tmp_file.fileno())",
+    "        assert_legacy_source_stable(config_path, legacy_identity)",
+    "        if legacy_identity is None:",
+    "            os.link(tmp_name, config_path, follow_symlinks=False)",
+    "            os.unlink(tmp_name)",
+    "        else:",
+    "            os.replace(tmp_name, config_path)",
+    "    finally:",
+    "        try:",
+    "            os.unlink(tmp_name)",
+    "        except FileNotFoundError:",
+    "            pass",
+    "else:",
+    "    try:",
+    "        write_managed_projection(config_path, data, managed_identity, managed_descriptor)",
+    "    except (OSError, ValueError) as exc:",
+    "        fail_rollback(f'Could not publish managed MCP rollback state at {config_path}: {exc}')",
+    "try:",
+    "    persisted = read_managed_projection(config_path)[0] if is_v2 else read_legacy_config(config_path)[0]",
+    "except (OSError, UnicodeDecodeError, ValueError) as exc:",
+    "    fail_rollback(f'Could not verify managed MCP rollback state at {config_path}: {exc}')",
+    "if is_v2:",
+    "    persisted_servers = persisted.get('mcpServers') if isinstance(persisted, dict) else None",
+    "    restored = isinstance(persisted_servers, dict) and set(persisted_servers) == set(payload['expectedServers']) and all(managed_http_server_matches(persisted_servers.get(name), expected, True) for name, expected in payload['expectedServers'].items())",
+    "else:",
+    "    persisted_servers = persisted.get('mcpServers') if isinstance(persisted, dict) else None",
+    "    restored = isinstance(persisted_servers, dict) and persisted_servers.get(payload['server']) == payload['expected']",
+    "if not restored:",
+    "    fail_rollback(f'Managed MCP rollback verification failed at {config_path}')",
+    "print('NEMOCLAW_DEEPAGENTS_MCP_ROLLBACK_RESTORED=1')",
+    "print('NEMOCLAW_MCP_ROLLBACK_RESTORED=1')",
+    "PY",
+  ].join("\n");
+}
+
+function buildRegisterCommand(
+  entry: any,
+  replaceExisting: any = false,
+  managedEntries: any = [entry],
+  teardownRollback: any = false,
+): any {
+  const expectedServers = expectedServerMap(managedEntries);
+  const expectedServerCount = Object.keys(expectedServers).length;
+  if (!teardownRollback && expectedServerCount > DEEPAGENTS_MCP_MAX_SERVERS) {
+    throw new Error(
+      "Deep Agents managed MCP supports at most " +
+        String(DEEPAGENTS_MCP_MAX_SERVERS) +
+        " servers; refusing to render a " +
+        String(expectedServerCount) +
+        "-server mutation.",
+    );
+  }
+  if (teardownRollback) return buildRollbackRegisterCommand(entry, expectedServers);
+  const payload = {
+    server: entry.server,
+    expected: managedServerConfig(entry),
+    expectedServers,
+    replaceExisting,
+  };
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, stat, sys, tempfile",
+    "payload = json.loads(" + pythonJsonLiteral(payload) + ")",
+    "config_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_HELPERS,
+    ...MANAGED_HTTP_SERVER_MATCH_HELPERS,
+    "source_descriptor = None",
+    "def fail_registration(message):",
+    "    close_managed_projection_descriptor(source_descriptor)",
+    "    print(message, file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "try:",
+    "    data, source_identity, source_descriptor = load_managed_projection_for_update(config_path)",
+    "except (OSError, UnicodeDecodeError, ValueError) as exc:",
+    "    fail_registration(f'Invalid " + DEEPAGENTS_MCP_CONFIG_PATH + ": {exc}')",
+    "if not isinstance(data, dict):",
+    "    fail_registration('Invalid " + DEEPAGENTS_MCP_CONFIG_PATH + ": expected a JSON object')",
+    "if data and set(data) != {'mcpServers'}:",
+    "    fail_registration('Invalid " +
+      DEEPAGENTS_MCP_CONFIG_PATH +
+      ": only mcpServers is allowed')",
+    "servers = data.setdefault('mcpServers', {})",
+    "if not isinstance(servers, dict):",
+    "    fail_registration('Invalid " +
+      DEEPAGENTS_MCP_CONFIG_PATH +
+      ": mcpServers must be an object')",
+    "if payload['server'] in servers and not payload['replaceExisting']:",
+    "    fail_registration(f\"MCP server '{payload['server']}' already exists in " +
+      DEEPAGENTS_MCP_CONFIG_PATH +
+      ' and is not managed by NemoClaw.")',
+    "for name, current in servers.items():",
+    "    if name == payload['server'] and payload['replaceExisting']:",
+    "        continue",
+    "    if not managed_http_server_matches(current, payload['expectedServers'].get(name), True):",
+    '        fail_registration(f"Invalid ' +
+      DEEPAGENTS_MCP_CONFIG_PATH +
+      ": MCP server '{name}' is not exact registry-owned state\")",
+    "next_servers = {}",
+    "for name, expected in payload['expectedServers'].items():",
+    "    if name != payload['server'] and name in servers:",
+    "        next_servers[name] = servers[name]",
+    "    else:",
+    "        next_servers[name] = expected",
+    "data = {'mcpServers': next_servers}",
+    "config_path.parent.mkdir(parents=True, exist_ok=True)",
+    "try:",
+    "    write_managed_projection(config_path, data, source_identity, source_descriptor)",
+    "except (OSError, ValueError) as exc:",
+    "    fail_registration(f'Could not publish " + DEEPAGENTS_MCP_CONFIG_PATH + ": {exc}')",
+    "PY",
+  ].join("\n");
+}
+
+function buildRemoveCommand(entry: any, force: any = false, adaptiveTeardown: any = false): any {
+  const payload = { server: entry.server, expected: managedServerConfig(entry), force };
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, stat, sys, tempfile",
+    "payload = json.loads(" + pythonJsonLiteral(payload) + ")",
+    "managed_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    "legacy_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_LEGACY_MCP_CONFIG_PATH) + ")",
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_HELPERS,
+    ...DEEPAGENTS_LEGACY_CONFIG_HELPERS,
+    ...MANAGED_HTTP_SERVER_MATCH_HELPERS,
+    'runtime_kind = "' +
+      (adaptiveTeardown ? "auto" : "v2") +
+      '"  # NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR',
+    "if runtime_kind == 'auto':",
+    "    runtime_kind = 'unknown'",
+    "    try:",
+    "        from deepagents_code import _nemoclaw_managed as managed",
+    "        runtime_path = str(getattr(managed, '_MCP_CONFIG_FILE', ''))",
+    "        if runtime_path == str(managed_path):",
+    "            runtime_kind = 'v2'",
+    "        elif runtime_path == str(legacy_path):",
+    "            runtime_kind = 'legacy'",
+    "    except Exception:",
+    "        pass",
+    "if runtime_kind not in ('v2', 'legacy'):",
+    "    print('Could not identify the managed Deep Agents MCP runtime; refusing teardown', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "is_v2 = runtime_kind == 'v2'",
+    "config_path = managed_path if is_v2 else legacy_path",
+    "managed_identity = None",
+    "managed_descriptor = None",
+    "legacy_identity = None",
+    "def finish(outcome):",
+    "    close_managed_projection_descriptor(managed_descriptor)",
+    "    print('NEMOCLAW_DEEPAGENTS_MCP_REMOVAL=' + outcome)",
+    "    print('NEMOCLAW_MCP_REMOVAL_OUTCOME=' + outcome)",
+    "    raise SystemExit(0)",
+    "def fail_teardown(message):",
+    "    close_managed_projection_descriptor(managed_descriptor)",
+    "    print(message, file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "def repair_v2_projection(identity, descriptor):",
+    "    try:",
+    "        write_managed_projection(config_path, {'mcpServers': {}}, identity, descriptor)",
+    "    except (OSError, ValueError) as exc:",
+    "        fail_teardown(f'Refusing unsafe managed MCP v2 repair at {config_path}: {exc}')",
+    "def write_legacy_data(value):",
+    "    tmp_fd, tmp_name = tempfile.mkstemp(prefix='.nemoclaw-mcp.', dir=config_path.parent)",
+    "    try:",
+    "        os.fchmod(tmp_fd, 0o600)",
+    "        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as tmp_file:",
+    "            json.dump(value, tmp_file, indent=2, sort_keys=True)",
+    "            tmp_file.write('\\n')",
+    "            tmp_file.flush()",
+    "            os.fsync(tmp_file.fileno())",
+    "        assert_legacy_source_stable(config_path, legacy_identity)",
+    "        if legacy_identity is None:",
+    "            os.link(tmp_name, config_path, follow_symlinks=False)",
+    "            os.unlink(tmp_name)",
+    "        else:",
+    "            os.replace(tmp_name, config_path)",
+    "    finally:",
+    "        try:",
+    "            os.unlink(tmp_name)",
+    "        except FileNotFoundError:",
+    "            pass",
+    "if is_v2:",
+    "    try:",
+    "        raw, managed_identity, managed_descriptor = open_managed_projection(config_path, True)",
+    "    except (OSError, ValueError) as exc:",
+    "        fail_teardown(f'Invalid managed MCP v2 projection at {config_path}: {exc}')",
+    "    if managed_descriptor is None:",
+    "        finish('absent')",
+    "    try:",
+    "        data = decode_managed_projection(raw)",
+    "    except (UnicodeDecodeError, ValueError) as exc:",
+    "        if payload['force']:",
+    "            repair_v2_projection(managed_identity, managed_descriptor)",
+    "            finish('removed')",
+    "        fail_teardown(f'Invalid managed MCP v2 projection at {config_path}: {exc}')",
+    "else:",
+    "    if not os.path.lexists(config_path):",
+    "        finish('absent')",
+    "    try:",
+    "        data, legacy_identity = read_legacy_config(config_path)",
+    "    except (OSError, UnicodeDecodeError, ValueError):",
+    "        finish('unowned')",
+    "if not isinstance(data, dict):",
+    "    if is_v2 and payload['force']:",
+    "        repair_v2_projection(managed_identity, managed_descriptor)",
+    "        finish('removed')",
+    "    if is_v2:",
+    "        fail_teardown(f'Invalid managed MCP v2 projection at {config_path}: expected object')",
+    "    finish('unowned')",
+    "servers = data.get('mcpServers')",
+    "if not isinstance(servers, dict):",
+    "    if not is_v2 and 'mcpServers' not in data:",
+    "        finish('absent')",
+    "    if is_v2 and payload['force']:",
+    "        repair_v2_projection(managed_identity, managed_descriptor)",
+    "        finish('removed')",
+    "    if is_v2:",
+    "        fail_teardown(f'Invalid managed MCP v2 server map at {config_path}')",
+    "    finish('unowned')",
+    "present = payload['server'] in servers",
+    "current = servers.get(payload['server'])",
+    "if is_v2:",
+    "    if data and set(data) != {'mcpServers'}:",
+    "        if payload['force']:",
+    "            repair_v2_projection(managed_identity, managed_descriptor)",
+    "            finish('removed')",
+    "        fail_teardown(f'Invalid managed MCP v2 projection at {config_path}: only mcpServers is allowed')",
+    "    if present and not payload['force'] and not managed_http_server_matches(current, payload['expected'], True):",
+    "        fail_teardown(f\"Refusing to remove modified MCP server '{payload['server']}' from {config_path}. Use --force to remove it.\")",
+    "    if not present:",
+    "        finish('absent')",
+    "else:",
+    "    if not present:",
+    "        finish('absent')",
+    "    if not managed_http_server_matches(current, payload['expected'], True) and not payload['force']:",
+    "        finish('unowned')",
+    "servers.pop(payload['server'])",
+    "if is_v2:",
+    "    data = {'mcpServers': servers}",
+    "elif not servers:",
+    "    data.pop('mcpServers', None)",
+    "if data:",
+    "    try:",
+    "        if is_v2:",
+    "            write_managed_projection(config_path, data, managed_identity, managed_descriptor)",
+    "            persisted = read_managed_projection(config_path)[0]",
+    "        else:",
+    "            write_legacy_data(data)",
+    "            persisted = read_legacy_config(config_path)[0]",
+    "    except (OSError, UnicodeDecodeError, ValueError) as exc:",
+    "        fail_teardown(f'MCP teardown mutation failed at {config_path}: {exc}')",
+    "    if persisted != data:",
+    "        fail_teardown(f'MCP teardown verification failed at {config_path}')",
+    "else:",
+    "    assert_legacy_source_stable(config_path, legacy_identity)",
+    "    config_path.unlink()",
+    "    if os.path.lexists(config_path):",
+    "        fail_teardown(f'Managed MCP teardown verification failed at {config_path}')",
+    "finish('removed')",
+    "PY",
+  ].join("\n");
+}
+
+function parseRemovalOutcome(output: any): any {
+  const marker = output.match(/NEMOCLAW_DEEPAGENTS_MCP_REMOVAL=(removed|absent|unowned)/);
+  return marker?.[1] ?? "unowned";
+}
+
+function hasRollbackRestoredMarker(output: any): any {
+  return output.includes("NEMOCLAW_DEEPAGENTS_MCP_ROLLBACK_RESTORED=1");
+}
+
+function buildMcpRegistrationCommand(request: any): any {
+  return buildRegisterCommand(
+    request.entry,
+    request.replaceExisting,
+    request.managedEntries,
+    request.teardownRollback,
+  );
+}
+
+function buildMcpRegistrationPlan(
+  request: Parameters<HarnessMcpAdapterModule["buildMcpRegistrationPlan"]>[0],
+): ReturnType<HarnessMcpAdapterModule["buildMcpRegistrationPlan"]> {
+  const server = request.entry.server;
+  return {
+    execution: {
+      command: buildMcpRegistrationCommand(request),
+      timeoutSeconds: 15,
+      success: { kind: "exit-zero" },
+      failureMessage: `Deep Agents Code MCP config registration failed for '${server}'.`,
+    },
+    verification: request.teardownRollback
+      ? {
+          kind: "rollback-restored",
+          failureMessage: `Deep Agents Code MCP rollback verification failed for '${server}'.`,
+        }
+      : {
+          kind: "inspection",
+          failureMessage: `deepagents-config config verification failed after adding '${server}'`,
+        },
+    credentialConvergence: { kind: "none" },
+  };
+}
+
+function buildMcpRemovalCommand(request: any): any {
+  return buildRemoveCommand(request.entry, request.force, request.adaptiveTeardown);
+}
+
+function buildMcpRemovalPlan(
+  request: Parameters<HarnessMcpAdapterModule["buildMcpRemovalPlan"]>[0],
+): ReturnType<HarnessMcpAdapterModule["buildMcpRemovalPlan"]> {
+  return {
+    execution: {
+      command: buildMcpRemovalCommand(request),
+      timeoutSeconds: 15,
+      success: { kind: "exit-zero" },
+      failureMessage: `Deep Agents Code MCP config removal failed for '${request.entry.server}'.`,
+    },
+    outcome: { kind: "stdout-removal-outcome" },
+  };
+}
+
+function buildMcpInspectionCommand(
+  request: Parameters<HarnessMcpAdapterModule["buildMcpInspectionCommand"]>[0],
+): ReturnType<HarnessMcpAdapterModule["buildMcpInspectionCommand"]> {
+  return buildStatusCommand(request.entry);
+}
+
+function describeMcpMutationCapability(
+  request: Parameters<HarnessMcpAdapterModule["describeMcpMutationCapability"]>[0],
+): ReturnType<HarnessMcpAdapterModule["describeMcpMutationCapability"]> {
+  const capability = getMutationCapability(request.sandboxName);
+  return {
+    kind: "command",
+    command: capability.command,
+    success: { kind: "stdout-trimmed-equals", value: capability.marker },
+    timeoutSeconds: 30,
+    failureMessage: capability.failureMessage,
+  };
+}
+
+function describeMcpTeardownCapability(): ReturnType<
+  HarnessMcpAdapterModule["describeMcpTeardownCapability"]
+> {
+  return { kind: "not-required" };
+}
+
+function describeMcpRuntimeIntentVerification(): ReturnType<
+  HarnessMcpAdapterModule["describeMcpRuntimeIntentVerification"]
+> {
+  return { kind: "not-required" };
+}
+
+function buildMcpRuntimePlan(
+  request: Parameters<HarnessMcpAdapterModule["buildMcpRuntimePlan"]>[0],
+): ReturnType<HarnessMcpAdapterModule["buildMcpRuntimePlan"]> {
+  const runner =
+    "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
+  return {
+    command: ["/opt/venv/bin/python3", "-I", "-c", runner, ...request.command],
+    environmentVariablesToRemove: [],
+  };
+}
+
+const exportedAdapter = {
+  DEEPAGENTS_LEGACY_CONFIG_HELPERS,
+  DEEPAGENTS_LEGACY_MCP_CONFIG_PATH,
+  DEEPAGENTS_MANAGED_PROJECTION_HELPERS,
+  DEEPAGENTS_MANAGED_PROJECTION_MUTATION_HELPERS,
+  DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
+  DEEPAGENTS_MCP_CONFIG_PATH,
+  DEEPAGENTS_MCP_MAX_SERVERS,
+  DEEPAGENTS_STRICT_JSON_HELPERS,
+  MANAGED_HTTP_SERVER_MATCH_HELPERS,
+  buildMcpInspectionCommand,
+  buildMcpRegistrationCommand,
+  buildMcpRegistrationPlan,
+  buildMcpRemovalCommand,
+  buildMcpRemovalPlan,
+  buildMcpRuntimePlan,
+  buildMcpSnapshotRestorePlan,
+  buildRegisterCommand,
+  buildRemoveCommand,
+  buildRollbackRegisterCommand,
+  buildStatusCommand,
+  describeMcpMutationCapability,
+  describeMcpRuntimeIntentVerification,
+  describeMcpTeardownCapability,
+  getMutationCapability,
+  hasRollbackRestoredMarker,
+  managedServerConfig,
+  parseRemovalOutcome,
+};
+
+export = exportedAdapter satisfies HarnessMcpAdapterModule;
