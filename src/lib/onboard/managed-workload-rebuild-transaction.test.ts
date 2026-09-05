@@ -18,6 +18,7 @@ import {
   MANAGED_IMAGE_REPOSITORIES,
   MANAGED_IMAGE_SOURCE_REPOSITORY,
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+  qualifiedManagedImageDeclaration,
   type ManagedImageContractV1,
   type ShippedManagedImageAgent,
 } from "./managed-image/contract";
@@ -152,6 +153,7 @@ function handoff(
     schemaVersion: 1,
     providerId,
     agent,
+    managedImage: qualifiedManagedImageDeclaration(agent),
     previousReceipt: workloadReceipt(agent, "old", platform),
     previousContract,
     previousProfile,

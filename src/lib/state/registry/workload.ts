@@ -4,7 +4,6 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
-import { MANAGED_IMAGE_REPOSITORIES } from "../../onboard/managed-image/contract";
 import {
   decodeManagedStartupProfile,
   MANAGED_STARTUP_PROFILE_MAX_BYTES,
@@ -16,12 +15,8 @@ import type { SandboxWorkloadReceipt } from "./types";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const REVISION_PATTERN = /^[0-9a-f]{40}$/u;
 const COHORT_PATTERN = /^ghrun-[1-9][0-9]{0,19}-[1-9][0-9]{0,9}$/u;
-const MANAGED_REFERENCE_PATTERN = new RegExp(
-  `^(?:${Object.values(MANAGED_IMAGE_REPOSITORIES)
-    .map((repository) => repository.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
-    .join("|")})@sha256:[0-9a-f]{64}$`,
-  "u",
-);
+const MANAGED_REFERENCE_PATTERN =
+  /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+@sha256:[0-9a-f]{64}$/u;
 const MANAGED_PLATFORMS = new Set(["linux/amd64", "linux/arm64"]);
 const RELEASE_PATTERN = /^v[0-9]+(?:[.][0-9]+){1,3}(?:[-.][0-9A-Za-z][0-9A-Za-z.-]*)?$/u;
 const MAX_COHORT_BYTES = 128;
@@ -116,9 +111,6 @@ export function cloneSandboxWorkloadReceipt(
   try {
     profile = decodeManagedStartupProfile(value.encodedProfile);
   } catch {
-    return undefined;
-  }
-  if (!value.reference.startsWith(`${MANAGED_IMAGE_REPOSITORIES[profile.agent]}@sha256:`)) {
     return undefined;
   }
   const corporateCaBytes =

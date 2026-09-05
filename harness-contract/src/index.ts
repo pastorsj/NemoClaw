@@ -20,6 +20,27 @@ export type HarnessManifestRecord = { [key: string]: HarnessManifestValue };
 export type HarnessMcpSupport = "bridge" | "disabled";
 export type HarnessMcpAdapter = string;
 
+export type HarnessManagedImagePlatform = "linux/amd64" | "linux/arm64";
+
+export interface HarnessManagedImageRuntimeIdentity {
+  readonly uid: number;
+  readonly gid: number;
+  readonly workdir: "/sandbox";
+}
+
+/**
+ * Harness-native image requirements declared by a package. This declaration
+ * describes how to compose an already-qualified image; it does not authorize
+ * an image, publisher, digest, or release by itself.
+ */
+export interface HarnessManagedImageDeclaration {
+  readonly repository: string;
+  readonly architectures: readonly HarnessManagedImagePlatform[];
+  readonly runtime_identity: HarnessManagedImageRuntimeIdentity;
+  readonly startup_profile_contract_version: 1;
+  readonly capability_contract_version: 1;
+}
+
 export type HarnessMcpCapability =
   | {
       support: "bridge";
@@ -45,6 +66,7 @@ export type HarnessAgentManifest = HarnessManifestRecord & {
   readonly config?: HarnessManifestRecord;
   readonly inference?: HarnessManifestRecord;
   readonly mcp?: HarnessMcpCapability;
+  readonly managed_image?: HarnessManagedImageDeclaration;
 };
 
 export interface HarnessConfigTarget {

@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { cloneAndDeepFreeze } from "../../core/immutable";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import type { SandboxEntry, SandboxWorkloadReceipt } from "../../state/registry/types";
 import { cloneSandboxWorkloadReceipt } from "../../state/registry/workload";
 import type { ResolvedCorporateCa } from "../corporate-ca-types";
 import {
   isManagedImageAgent,
   MANAGED_IMAGE_CONTRACT_VERSION,
-  MANAGED_IMAGE_REPOSITORIES,
   MANAGED_IMAGE_SOURCE_REPOSITORY,
   type ManagedImageAgent,
   type ManagedImageContractV1,
+  parsePackageManagedImageContract,
   parseManagedImageContractV1,
+  qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
 import { validateManagedStartupCorporateCaTransport } from "../managed-startup/application";
 import {
@@ -43,8 +45,8 @@ export class ManagedWorkloadAuthorityError extends Error {
 function isManagedImageReference(value: unknown): value is string {
   return (
     typeof value === "string" &&
-    Object.values(MANAGED_IMAGE_REPOSITORIES).some((repository) =>
-      value.startsWith(`${repository}@sha256:`),
+    /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+@sha256:[0-9a-f]{64}$/u.test(
+      value,
     )
   );
 }
@@ -63,8 +65,15 @@ function exactAgent(value: string | null | undefined): ManagedImageAgent {
 function contractFromReceipt(
   receipt: ManagedWorkloadReceipt,
   agent: ManagedImageAgent,
+  definition?: Pick<AgentDefinition, "managedImage" | "name">,
 ): ManagedImageContractV1 {
-  const image = MANAGED_IMAGE_REPOSITORIES[agent];
+  if (definition && (definition.name !== agent || definition.managedImage === null)) {
+    throw new ManagedWorkloadAuthorityError(
+      "the receipt-pinned package does not declare this managed workload",
+    );
+  }
+  const declaration = definition?.managedImage;
+  const image = declaration?.repository ?? qualifiedManagedImageDeclaration(agent).repository;
   const referencePrefix = `${image}@`;
   if (!receipt.reference.startsWith(referencePrefix)) {
     throw new ManagedWorkloadAuthorityError(
@@ -78,25 +87,25 @@ function contractFromReceipt(
   }
   const digest = receipt.reference.slice(referencePrefix.length);
   try {
-    return parseManagedImageContractV1(
-      {
-        contractVersion: MANAGED_IMAGE_CONTRACT_VERSION,
-        agent,
-        platform: receipt.platform,
-        image,
-        digest,
-        reference: receipt.reference,
-        source: {
-          repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
-          revision: receipt.sourceRevision,
-          release: receipt.release,
-          cohort: receipt.sourceCohort,
-        },
-        startupProfileContractVersion: receipt.startupProfileContractVersion,
-        capabilityContractVersion: receipt.capabilityContractVersion,
-      },
+    const candidate = {
+      contractVersion: MANAGED_IMAGE_CONTRACT_VERSION,
       agent,
-    );
+      platform: receipt.platform,
+      image,
+      digest,
+      reference: receipt.reference,
+      source: {
+        repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+        revision: receipt.sourceRevision,
+        release: receipt.release,
+        cohort: receipt.sourceCohort,
+      },
+      startupProfileContractVersion: receipt.startupProfileContractVersion,
+      capabilityContractVersion: receipt.capabilityContractVersion,
+    };
+    return declaration
+      ? parsePackageManagedImageContract(candidate, agent, declaration)
+      : parseManagedImageContractV1(candidate, agent);
   } catch (error) {
     throw new ManagedWorkloadAuthorityError("the durable image contract failed validation", {
       cause: error,
@@ -136,6 +145,7 @@ function corporateCaFromReceipt(
  */
 export function readManagedWorkloadAuthority(
   entry: Pick<SandboxEntry, "agent" | "fromDockerfile" | "imageTag" | "workload">,
+  definition?: Pick<AgentDefinition, "managedImage" | "name">,
 ): ManagedWorkloadAuthority | null {
   const managedLooking =
     isManagedImageReference(entry.imageTag) || entry.workload?.kind === "managed-image";
@@ -159,7 +169,7 @@ export function readManagedWorkloadAuthority(
   }
 
   const agent = exactAgent(entry.agent);
-  const contract = contractFromReceipt(cloned, agent);
+  const contract = contractFromReceipt(cloned, agent, definition);
   let profile: ManagedStartupProfile;
   try {
     profile = decodeManagedStartupProfile(cloned.encodedProfile);

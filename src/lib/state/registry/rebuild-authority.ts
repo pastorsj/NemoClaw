@@ -6,8 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { cloneAndDeepFreeze } from "../../core/immutable";
 import {
   isManagedImageAgent,
-  MANAGED_IMAGE_REPOSITORIES,
-  type ManagedImageAgent,
+  qualifiedManagedImageDeclaration,
 } from "../../onboard/managed-image/contract";
 import { withLock } from "./lock";
 import { load, save } from "./persistence";
@@ -33,7 +32,14 @@ export interface SandboxRebuildAuthority {
    * rather than overwriting them from the caller's stale snapshot.
    */
   readonly entryRevisionSha256: string;
+  /** Package identity used to validate both the old and replacement receipts. */
+  readonly managedImage: SandboxRebuildManagedImageIdentity;
   readonly workload: ManagedWorkloadReceipt;
+}
+
+export interface SandboxRebuildManagedImageIdentity {
+  readonly agent: string;
+  readonly repository: string;
 }
 
 export type SandboxRebuildAuthoritySwapResult =
@@ -76,17 +82,28 @@ function requireReceiptAgent(
   agent: SandboxEntry["agent"],
   workload: ManagedWorkloadReceipt,
   label: string,
-): ManagedImageAgent {
+  expected?: SandboxRebuildManagedImageIdentity,
+): SandboxRebuildManagedImageIdentity {
+  let identity: SandboxRebuildManagedImageIdentity | null = expected ?? null;
+  if (identity === null && typeof agent === "string" && isManagedImageAgent(agent)) {
+    identity = { agent, repository: qualifiedManagedImageDeclaration(agent).repository };
+  }
   if (
+    !identity ||
     typeof agent !== "string" ||
-    !isManagedImageAgent(agent) ||
-    !workload.reference.startsWith(`${MANAGED_IMAGE_REPOSITORIES[agent]}@sha256:`)
+    agent !== identity.agent ||
+    !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(identity.agent) ||
+    !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[1-9][0-9]{0,4})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/u.test(
+      identity.repository,
+    ) ||
+    !workload.reference.startsWith(`${identity.repository}@sha256:`) ||
+    !/^[0-9a-f]{64}$/u.test(workload.reference.slice(`${identity.repository}@sha256:`.length))
   ) {
     throw new SandboxRebuildAuthorityError(
       `${label} agent does not match its managed workload receipt`,
     );
   }
-  return agent;
+  return cloneAndDeepFreeze(identity);
 }
 
 function cloneEntry(entry: SandboxEntry): SandboxEntry {
@@ -120,6 +137,7 @@ function sandboxEntryRevision(entry: SandboxEntry): string {
 export function captureSandboxRebuildAuthority(
   entry: SandboxEntry,
   providerId: string,
+  managedImage?: SandboxRebuildManagedImageIdentity,
 ): SandboxRebuildAuthority {
   if (!boundedIdentity(entry.name)) {
     throw new SandboxRebuildAuthorityError("sandbox name is missing or too large");
@@ -137,7 +155,12 @@ export function captureSandboxRebuildAuthority(
     throw new SandboxRebuildAuthorityError("live identity fingerprint is missing or invalid");
   }
   const workload = clonedManagedReceipt(entry.workload);
-  requireReceiptAgent(entry.agent, workload, "authoritative");
+  const managedImageIdentity = requireReceiptAgent(
+    entry.agent,
+    workload,
+    "authoritative",
+    managedImage,
+  );
   if (entry.imageTag !== workload.reference) {
     throw new SandboxRebuildAuthorityError(
       "image reference does not match the managed workload receipt",
@@ -151,6 +174,7 @@ export function captureSandboxRebuildAuthority(
     lifecycleGeneration: entry.lifecycleGeneration,
     liveIdentityFingerprint: entry.lifecycleLiveIdentityFingerprint,
     entryRevisionSha256: sandboxEntryRevision(entry),
+    managedImage: managedImageIdentity,
     workload,
   });
 }
@@ -188,7 +212,7 @@ export function sandboxRebuildAuthorityMatchesEntry(
   if (!entry) return false;
   let current: SandboxRebuildAuthority;
   try {
-    current = captureSandboxRebuildAuthority(entry, authority.providerId);
+    current = captureSandboxRebuildAuthority(entry, authority.providerId, authority.managedImage);
   } catch {
     return false;
   }
@@ -225,7 +249,7 @@ function validateReplacement(
     );
   }
   const workload = clonedManagedReceipt(replacement.workload);
-  requireReceiptAgent(replacement.agent, workload, "replacement");
+  requireReceiptAgent(replacement.agent, workload, "replacement", expected.managedImage);
   if (replacement.imageTag !== workload.reference) {
     throw new SandboxRebuildAuthorityError(
       "replacement image reference does not match its managed workload receipt",

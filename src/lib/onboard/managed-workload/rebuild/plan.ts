@@ -72,7 +72,10 @@ export function createManagedWorkloadRebuildPlan(input: {
   }
   let durableAuthority: NonNullable<ReturnType<typeof readManagedWorkloadAuthority>>;
   try {
-    const candidate = readManagedWorkloadAuthority(input.previousEntry);
+    const candidate = readManagedWorkloadAuthority(input.previousEntry, {
+      name: handoff.agent,
+      managedImage: handoff.managedImage,
+    });
     if (!candidate) {
       throw new Error("the durable row is not a managed workload");
     }
@@ -105,7 +108,10 @@ export function createManagedWorkloadRebuildPlan(input: {
       "the managed rebuild handoff contains cross-platform authority drift",
     );
   }
-  const previousAuthority = captureSandboxRebuildAuthority(input.previousEntry, providerId);
+  const previousAuthority = captureSandboxRebuildAuthority(input.previousEntry, providerId, {
+    agent: handoff.agent,
+    repository: handoff.managedImage.repository,
+  });
   const replacementReceipt = buildManagedWorkloadRebuildReceipt(handoff, input.provider);
   const transactionId = input.transactionId ?? randomUUID();
   if (!/^[0-9A-Za-z][0-9A-Za-z._:-]{0,255}$/u.test(transactionId)) {

@@ -28,6 +28,17 @@ expected_version: "0.20.6"
 # scheme keeps the staleness check off the shape heuristic when a manifest
 # could otherwise straddle both schemes (#6049).
 version_scheme: semver
+managed_image:
+  repository: ghcr.io/nvidia/nemoclaw/hermes-sandbox
+  architectures:
+    - linux/amd64
+    - linux/arm64
+  runtime_identity:
+    uid: 998
+    gid: 999
+    workdir: /sandbox
+  startup_profile_contract_version: 1
+  capability_contract_version: 1
 gateway_command: "hermes gateway run"
 # Interactive entry point a user types inside the sandbox. Hermes stays a
 # gateway agent (runtime.kind defaults to gateway); this only records the

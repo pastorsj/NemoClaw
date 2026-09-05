@@ -19,6 +19,7 @@ import {
   MANAGED_IMAGE_REPOSITORIES,
   MANAGED_IMAGE_SOURCE_REPOSITORY,
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+  qualifiedManagedImageDeclaration,
   type ManagedImageContractV1,
   type ManagedImagePlatform,
   type ShippedManagedImageAgent,
@@ -306,6 +307,7 @@ describe("managed workload rebuild preflight", () => {
     });
     expect(prepare).toHaveBeenCalledWith({
       agentName: agent,
+      managedImage: qualifiedManagedImageDeclaration(agent),
       legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
       runtime: runtime(),
       version: "0.0.100",
@@ -330,6 +332,7 @@ describe("managed workload rebuild preflight", () => {
 
     expect(prepare).toHaveBeenCalledExactlyOnceWith({
       agentName: "langchain-deepagents-code",
+      managedImage: qualifiedManagedImageDeclaration("langchain-deepagents-code"),
       legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
       runtime: runtime(),
       version: "0.0.100",
@@ -358,6 +361,7 @@ describe("managed workload rebuild preflight", () => {
 
       expect(prepare).toHaveBeenCalledExactlyOnceWith({
         agentName: "openclaw",
+        managedImage: qualifiedManagedImageDeclaration("openclaw"),
         legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
         runtime: runtime(),
         version: "0.0.100",
@@ -391,6 +395,7 @@ describe("managed workload rebuild preflight", () => {
     expect(handoff?.replacement.source.contract.source.revision).toBe("c".repeat(40));
     expect(prepare).toHaveBeenCalledExactlyOnceWith({
       agentName: "openclaw",
+      managedImage: qualifiedManagedImageDeclaration("openclaw"),
       legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
       runtime: runtime(),
       version: "0.0.100",
@@ -423,6 +428,7 @@ describe("managed workload rebuild preflight", () => {
       expect(handoff?.replacement.source.contract.source.revision).toBe("c".repeat(40));
       expect(prepare).toHaveBeenCalledExactlyOnceWith({
         agentName: "openclaw",
+        managedImage: qualifiedManagedImageDeclaration("openclaw"),
         legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
         runtime: runtime(),
         version: "0.0.100",
@@ -449,6 +455,7 @@ describe("managed workload rebuild preflight", () => {
 
     expect(prepare).toHaveBeenCalledExactlyOnceWith({
       agentName: "openclaw",
+      managedImage: qualifiedManagedImageDeclaration("openclaw"),
       legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
       runtime: runtime(),
       version: "0.0.100",
@@ -575,6 +582,54 @@ describe("managed workload rebuild preflight", () => {
     expect(result).toEqual(receipt("hermes", "new"));
     expect(result.shared).toBe(true);
     expect(Object.isFrozen(result)).toBe(true);
+  });
+
+  it("rebuilds from the receipt-pinned package repository instead of the core catalogue map", async () => {
+    const repository = "registry.example/team/openclaw-qualified";
+    const managedImage = {
+      repository,
+      architectures: ["linux/amd64"],
+      runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
+      startup_profile_contract_version: 1,
+      capability_contract_version: 1,
+    } as const;
+    const previousReceipt = {
+      ...receipt("openclaw", "old"),
+      reference: `${repository}@sha256:${"a".repeat(64)}`,
+    };
+    const row = {
+      ...entry("openclaw"),
+      imageTag: previousReceipt.reference,
+      workload: previousReceipt,
+    };
+    const next = managedContract("openclaw", "new");
+    const replacementContract = {
+      ...next,
+      image: repository,
+      reference: `${repository}@${next.digest}` as const,
+    };
+    managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource = vi.fn(async () => ({
+      source: {
+        kind: "managed-image" as const,
+        reference: replacementContract.reference,
+        contract: replacementContract,
+      },
+      release: replacementContract.source.release,
+      fallbackDiagnostic: null,
+    }));
+
+    const catalog = await prepareManagedWorkloadRebuildHandoff(row, {
+      runtime: runtime(),
+      provider: provider(),
+      agentDefinition: { name: "openclaw", managedImage },
+    });
+    const result = buildManagedWorkloadRebuildReceipt(
+      completeHandoff("openclaw", catalog),
+      provider(),
+    );
+
+    expect(result.reference).toBe(replacementContract.reference);
+    expect(result.reference).not.toContain(MANAGED_IMAGE_REPOSITORIES.openclaw);
   });
 
   it("rejects a cross-agent replacement contract and profile before receipt creation", async () => {

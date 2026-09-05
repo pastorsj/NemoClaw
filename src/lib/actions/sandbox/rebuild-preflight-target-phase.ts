@@ -247,6 +247,7 @@ export async function prepareRebuildTargetPreflights(args: {
     managedWorkloadRebuildCatalog = await prepareManagedWorkloadRebuildHandoff(sandboxEntry, {
       runtime,
       provider: runtimeProvider,
+      agentDefinition: agentAuthority.definition,
     });
     if (managedWorkloadRebuildCatalog) {
       prepareSandboxWorkloadSourceFromRebuildHandoff(

@@ -751,7 +751,7 @@ export function createOnboardCreatedSandboxCompletion(
           createIntent?.endpointSource ?? null,
         ),
         runtimeFields,
-        agent,
+        agent: effectiveAgent,
         agentVersionKnown: !fromDockerfile,
         portableLifecycle,
         toolDisclosure: sandboxRegistrationOptions.toolDisclosure,

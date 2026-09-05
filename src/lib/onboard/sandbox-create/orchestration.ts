@@ -54,7 +54,6 @@ import {
   createOnboardRecreateGatewayAuthorityRevalidator,
   type OwnedSandboxRecreateRuntime,
 } from "../onboard-recreate-journal";
-import { managedImageRuntimeIdentity } from "../managed-image/agents";
 import {
   managedStartupStateRoots,
   MANAGED_HERMES_STATE_ROOT,
@@ -1763,9 +1762,11 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           portableLifecycle: sandboxGpuCreateFlow.resolvePortableLifecycleMode(agent),
           hermesPortableLifecycle: agentCreateInput.hermesPortableLifecycle,
           agentName: requestedAgentName,
+          agentDefinition: effectiveAgent,
         }),
         tempManagedRuntimeCatalog,
         agentName: requestedAgentName,
+        agentDefinition: effectiveAgent,
         legacyDockerfilePath,
         customDockerfilePath:
           fromDockerfile ?? (preparedBuildContext ? preparedBuildContext.stagedDockerfile : null),
@@ -1813,14 +1814,23 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
     const prepareManagedStateVolumeLifecycle = (
       workload: Awaited<ReturnType<typeof ensurePreparedSandboxWorkload>>,
     ) => {
-      const managedStateRoots =
-        workload.source.kind === "managed-image"
-          ? managedStartupStateRoots({
-              agent: workload.source.contract.agent,
-              sandboxName,
-              agentIdentity: managedImageRuntimeIdentity(workload.source.contract.agent),
-            })
-          : [];
+      if (workload.source.kind !== "managed-image") {
+        return managedWorkloadOnboard.createManagedStateVolumeOnboardLifecycle({
+          roots: [],
+          runtimeProvider: managedWorkloadRuntime.runtimeProvider,
+        });
+      }
+      const agentIdentity = effectiveAgent.managedImage?.runtime_identity;
+      if (!agentIdentity || effectiveAgent.name !== workload.source.contract.agent) {
+        throw new Error(
+          "Managed workload state roots require the receipt-pinned package image declaration.",
+        );
+      }
+      const managedStateRoots = managedStartupStateRoots({
+        agent: workload.source.contract.agent,
+        sandboxName,
+        agentIdentity,
+      });
       return managedWorkloadOnboard.createManagedStateVolumeOnboardLifecycle({
         roots: managedStateRoots,
         runtimeProvider: managedWorkloadRuntime.runtimeProvider,

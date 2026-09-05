@@ -88,6 +88,20 @@ function replacement(): SandboxEntry {
   };
 }
 
+function packageEntry(digest: string, generation: string, fingerprint: string): SandboxEntry {
+  const repository = "registry.example/team/future-harness";
+  const workload = {
+    ...receipt(digest),
+    reference: `${repository}@sha256:${digest.repeat(64)}`,
+  };
+  return {
+    ...entry(generation, fingerprint),
+    agent: "future-harness",
+    imageTag: workload.reference,
+    workload,
+  };
+}
+
 describe("sandbox rebuild authority", () => {
   beforeEach(() => {
     registryPersistence.load.mockReset();
@@ -112,6 +126,22 @@ describe("sandbox rebuild authority", () => {
     expect(Object.isFrozen(authority)).toBe(true);
     expect(Object.isFrozen(authority.workload)).toBe(true);
     expect(Reflect.set(authority.workload, "reference", "mutated")).toBe(false);
+  });
+
+  it("keeps rebuild CAS generic for a receipt-pinned unknown package", () => {
+    const repository = "registry.example/team/future-harness";
+    const source = packageEntry("a", "generation-old", "fingerprint-old");
+    const next = packageEntry("b", "generation-new", "fingerprint-new");
+    const authority = captureSandboxRebuildAuthority(source, "docker", {
+      agent: "future-harness",
+      repository,
+    });
+
+    const swapped = swapSandboxRebuildAuthorityInRegistry(registry(source), authority, next);
+
+    expect(authority.managedImage).toEqual({ agent: "future-harness", repository });
+    expect(swapped.result.status).toBe("committed");
+    expect(swapped.registry.sandboxes.alpha).toEqual(next);
   });
 
   it.each([

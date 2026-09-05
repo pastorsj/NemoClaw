@@ -45,7 +45,7 @@ import {
   getHermesDashboardRegistryFields,
   type HermesDashboardOnboardState,
 } from "./hermes-dashboard";
-import { isManagedImageAgent, MANAGED_IMAGE_REPOSITORIES } from "./managed-image/contract";
+import { isManagedImageAgent, qualifiedManagedImageDeclaration } from "./managed-image/contract";
 import {
   CURRENT_RUNTIME_PROVIDER_BUNDLES,
   RuntimeProviderBundleRegistry,
@@ -388,9 +388,15 @@ export function buildCreatedSandboxRegistryEntry(
   const agentFields = getSandboxAgentRegistryFields(input.agent, input.agentVersionKnown);
   if (workload?.kind === "managed-image") {
     const requestedAgent = getRequestedSandboxAgentName(input.agent);
+    const definitionName = input.agent?.name ?? requestedAgent;
+    const managedImage =
+      input.agent?.managedImage === undefined && isManagedImageAgent(requestedAgent)
+        ? qualifiedManagedImageDeclaration(requestedAgent)
+        : input.agent?.managedImage;
     if (
-      !isManagedImageAgent(requestedAgent) ||
-      !workload.reference.startsWith(`${MANAGED_IMAGE_REPOSITORIES[requestedAgent]}@sha256:`)
+      !managedImage ||
+      definitionName !== requestedAgent ||
+      !workload.reference.startsWith(`${managedImage.repository}@sha256:`)
     ) {
       throw new RuntimeProviderSelectionError(
         "Sandbox agent identity does not match its managed workload receipt.",

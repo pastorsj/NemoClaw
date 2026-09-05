@@ -24,7 +24,11 @@ import {
 } from "../docker-gpu-route";
 import type { HermesDashboardOnboardState } from "../hermes-dashboard";
 import type { InitialSandboxPolicy } from "../initial-policy";
-import { isShippedManagedImageAgent, managedImageRuntimeIdentity } from "../managed-image/contract";
+import {
+  isManagedImageAgent,
+  isShippedManagedImageAgent,
+  qualifiedManagedImageDeclaration,
+} from "../managed-image/contract";
 import {
   type BuiltManagedStartupOnboardProfile,
   buildManagedStartupOnboardProfile,
@@ -155,6 +159,8 @@ export interface CreateManagedWorkloadOnboardRuntimeInput {
   readonly stockManagedRuntime: boolean;
   readonly tempManagedRuntimeCatalog: string | null;
   readonly agentName: string;
+  /** Receipt-pinned definition selected for this exact onboarding transaction. */
+  readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
   readonly legacyDockerfilePath: string;
   readonly customDockerfilePath: string | null;
   readonly rootDir: string;
@@ -169,6 +175,7 @@ export interface CreateManagedWorkloadOnboardRuntimeInput {
 
 export interface ManagedWorkloadOnboardRuntime {
   readonly runtimeProvider: RuntimeProviderBundle | null;
+  readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
   ensurePreparedWorkload(): Promise<PreparedSandboxWorkloadSource>;
   ensurePreparedProfile(
     workload: PreparedSandboxWorkloadSource,
@@ -179,10 +186,14 @@ export function shouldActivateStockManagedRuntime(input: {
   readonly portableLifecycle: boolean;
   readonly hermesPortableLifecycle: boolean;
   readonly agentName: string;
+  readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
 }): boolean {
   return (
     !input.portableLifecycle &&
     !input.hermesPortableLifecycle &&
+    (input.agentDefinition === undefined ||
+      (input.agentDefinition.name === input.agentName &&
+        input.agentDefinition.managedImage !== null)) &&
     isShippedManagedImageAgent(input.agentName)
   );
 }
@@ -249,6 +260,17 @@ export function createManagedWorkloadOnboardRuntime(
   input: CreateManagedWorkloadOnboardRuntimeInput,
   dependencies: ManagedWorkloadOnboardDependencies,
 ): ManagedWorkloadOnboardRuntime {
+  const agentDefinition =
+    input.agentDefinition ??
+    ({
+      name: input.agentName,
+      managedImage: isManagedImageAgent(input.agentName)
+        ? qualifiedManagedImageDeclaration(input.agentName)
+        : null,
+    } as const);
+  if (agentDefinition.name !== input.agentName) {
+    throw new Error("Managed workload package definition does not match the selected agent.");
+  }
   const discoveredRuntimeCapabilities = resolveSandboxWorkloadRuntimeCapabilities(
     input.computePlan,
   );
@@ -296,6 +318,7 @@ export function createManagedWorkloadOnboardRuntime(
         )
       : prepareSandboxWorkloadSource({
           agentName: input.agentName,
+          managedImage: agentDefinition.managedImage,
           legacyDockerfilePath: input.legacyDockerfilePath,
           customDockerfilePath: input.customDockerfilePath,
           runtime: runtimeCapabilities,
@@ -370,7 +393,12 @@ export function createManagedWorkloadOnboardRuntime(
     return preparedProfile;
   };
 
-  return { runtimeProvider, ensurePreparedWorkload, ensurePreparedProfile };
+  return {
+    runtimeProvider,
+    agentDefinition,
+    ensurePreparedWorkload,
+    ensurePreparedProfile,
+  };
 }
 
 export interface PrepareOnboardSandboxWorkloadLaunchInput {
@@ -636,7 +664,15 @@ export function resolveOnboardManagedBootstrapLaunch(input: {
       "Managed image onboarding is missing its identity-bound bootstrap launch contract.",
     );
   }
-  const agentIdentity = managedImageRuntimeIdentity(input.workload.source.contract.agent);
+  const agentDefinition = input.runtime.agentDefinition ?? {
+    name: input.workload.source.contract.agent,
+    managedImage: qualifiedManagedImageDeclaration(input.workload.source.contract.agent),
+  };
+  const managedImage = agentDefinition.managedImage;
+  if (managedImage === null || agentDefinition.name !== input.workload.source.contract.agent) {
+    throw new Error("Managed image launch is missing its receipt-pinned package declaration.");
+  }
+  const agentIdentity = managedImage.runtime_identity;
   return {
     bootstrapIdentity: input.bootstrapIdentity,
     stateRoot: input.stateRoot,

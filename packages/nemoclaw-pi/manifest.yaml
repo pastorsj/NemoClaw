@@ -14,10 +14,16 @@ version_command: "pi --version"
 expected_version: "0.84.1"
 version_scheme: semver
 managed_image:
+  repository: ghcr.io/nvidia/nemoclaw/pi-sandbox
   architectures:
     - linux/amd64
     - linux/arm64
+  runtime_identity:
+    uid: 999
+    gid: 999
+    workdir: /sandbox
   startup_profile_contract_version: 1
+  capability_contract_version: 1
 runtime:
   kind: terminal
   # Pi's login profile verifies nproc as well as nofile. Ubuntu /bin/sh cannot

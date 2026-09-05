@@ -193,6 +193,57 @@ describe("sandbox workload source resolution", () => {
     ).toThrow("failed closed validation");
   });
 
+  it("fails closed when qualification does not match the receipt-pinned package declaration", () => {
+    expect(() =>
+      resolveSandboxWorkloadSource({
+        agentName: "openclaw",
+        managedImage: {
+          repository: "registry.example/team/substituted-openclaw",
+          architectures: [MANAGED_IMAGE_PLATFORM],
+          runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+          startup_profile_contract_version: 1,
+          capability_contract_version: 1,
+        },
+        legacyDockerfilePath: "Dockerfile",
+        runtime: managedRuntime("podman"),
+        catalog: CATALOG,
+        policy: "require-managed",
+      }),
+    ).toThrow("failed closed validation");
+  });
+
+  it("composes a qualified repository from package data without changing the core map", () => {
+    const repository = "registry.example/team/openclaw-qualified";
+    const qualified = contractFor("openclaw");
+    const packageContract = {
+      ...qualified,
+      image: repository,
+      reference: `${repository}@${qualified.digest}`,
+    };
+
+    const source = resolveSandboxWorkloadSource({
+      agentName: "openclaw",
+      managedImage: {
+        repository,
+        architectures: [MANAGED_IMAGE_PLATFORM],
+        runtime_identity: { uid: 4321, gid: 4322, workdir: "/sandbox" },
+        startup_profile_contract_version: 1,
+        capability_contract_version: 1,
+      },
+      legacyDockerfilePath: "Dockerfile",
+      runtime: managedRuntime("podman"),
+      catalog: { openclaw: packageContract },
+      policy: "require-managed",
+    });
+
+    expect(source).toMatchObject({
+      kind: "managed-image",
+      reference: packageContract.reference,
+      contract: { image: repository },
+    });
+    expect(MANAGED_IMAGE_REPOSITORIES.openclaw).not.toBe(repository);
+  });
+
   it("fails closed when managed selection is required but the catalog has no exact contract (#7744)", () => {
     expect(() =>
       resolveSandboxWorkloadSource({

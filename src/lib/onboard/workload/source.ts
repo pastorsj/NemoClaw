@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+
 import {
   isCandidateManagedImageAgent,
   isManagedImageAgent,
@@ -11,7 +13,8 @@ import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
   type ManagedImagePlatform,
-  parseManagedImageContractV1,
+  parsePackageManagedImageContract,
+  qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
 
 export type ManagedImageSelectionPolicy = "prefer-managed" | "require-managed";
@@ -64,6 +67,8 @@ export interface ResolveSandboxWorkloadSourceOptions {
   readonly customDockerfilePath?: string | null;
   readonly runtime: SandboxWorkloadRuntimeCapabilities;
   readonly catalog: ManagedImageContractCatalog;
+  /** Receipt-pinned package declaration; catalogue authority is established by the caller. */
+  readonly managedImage?: HarnessManagedImageDeclaration | null;
   readonly policy?: ManagedImageSelectionPolicy;
   readonly candidateAgentsEnabled?: boolean;
 }
@@ -185,6 +190,17 @@ export function resolveSandboxWorkloadSource(
       "the selected agent is not a shipped managed agent",
     );
   }
+  const managedImage =
+    options.managedImage === undefined
+      ? qualifiedManagedImageDeclaration(agentName)
+      : (options.managedImage ?? null);
+  if (managedImage === null) {
+    return unavailableSource(
+      options,
+      "agent-not-managed",
+      "the selected package does not declare managed-image composition",
+    );
+  }
   if (!isShippedManagedImageAgent(agentName) && options.candidateAgentsEnabled !== true) {
     return unavailableSource(
       options,
@@ -215,7 +231,12 @@ export function resolveSandboxWorkloadSource(
   }
 
   try {
-    const contract = parseManagedImageContractV1(candidate, agentName, expectedPlatform);
+    const contract = parsePackageManagedImageContract(
+      candidate,
+      agentName,
+      managedImage,
+      expectedPlatform,
+    );
     return {
       kind: "managed-image",
       reference: contract.reference,

@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
 
 import { type OpenRegularFile, openRegularFileNoFollow } from "../../adapters/fs/regular-file";
 import { getBuildIdentity } from "../../core/version";
@@ -43,6 +44,8 @@ const SOURCE_REVISION_REF_PATTERN = /^[0-9A-Fa-f]{39,64}$/u;
 
 export interface PrepareSandboxWorkloadSourceInput {
   readonly agentName: string;
+  /** Exact declaration loaded from the selected package receipt. */
+  readonly managedImage?: HarnessManagedImageDeclaration | null;
   readonly legacyDockerfilePath: string;
   readonly customDockerfilePath?: string | null;
   readonly runtime: SandboxWorkloadRuntimeCapabilities;
@@ -251,6 +254,7 @@ function unavailableResult(
   }
   const source = resolveSandboxWorkloadSource({
     agentName: input.agentName,
+    managedImage: input.managedImage,
     legacyDockerfilePath: input.legacyDockerfilePath,
     customDockerfilePath: input.customDockerfilePath,
     runtime: input.runtime,
@@ -410,6 +414,7 @@ export async function prepareSandboxWorkloadSource(
   const candidateSelection = acceptedCandidateContract !== null;
   const cannotSelectManaged =
     input.customDockerfilePath != null ||
+    input.managedImage === null ||
     !isManagedImageAgent(input.agentName) ||
     (!isShippedManagedImageAgent(input.agentName) && !candidateSelection) ||
     managedImageRuntimeSupportError(input.runtime) !== null;
@@ -417,6 +422,7 @@ export async function prepareSandboxWorkloadSource(
     return {
       source: resolveSandboxWorkloadSource({
         agentName: input.agentName,
+        managedImage: input.managedImage,
         legacyDockerfilePath: input.legacyDockerfilePath,
         customDockerfilePath: input.customDockerfilePath,
         runtime: input.runtime,
@@ -519,6 +525,7 @@ export async function prepareSandboxWorkloadSource(
   return {
     source: resolveSandboxWorkloadSource({
       agentName: input.agentName,
+      managedImage: input.managedImage,
       legacyDockerfilePath: input.legacyDockerfilePath,
       customDockerfilePath: input.customDockerfilePath,
       runtime: input.runtime,

@@ -27,6 +27,17 @@ binary_path: /usr/local/bin/openclaw
 version_command: "openclaw --version"
 expected_version: "2026.7.1"
 version_scheme: calendar
+managed_image:
+  repository: ghcr.io/nvidia/nemoclaw/openclaw-sandbox
+  architectures:
+    - linux/amd64
+    - linux/arm64
+  runtime_identity:
+    uid: 998
+    gid: 998
+    workdir: /sandbox
+  startup_profile_contract_version: 1
+  capability_contract_version: 1
 gateway_command: "openclaw gateway run"
 # Interactive entry point a user types inside the sandbox. OpenClaw stays a
 # gateway agent (runtime.kind defaults to gateway); this only records the

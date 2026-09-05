@@ -69,6 +69,13 @@ describe("buildAgentDefinition", () => {
       packageRoot,
       manifestPath,
       agentDir: path.dirname(manifestPath),
+      managedImage: {
+        repository: "ghcr.io/nvidia/nemoclaw/openclaw-sandbox",
+        architectures: ["linux/amd64", "linux/arm64"],
+        runtime_identity: { uid: 998, gid: 998, workdir: "/sandbox" },
+        startup_profile_contract_version: 1,
+        capability_contract_version: 1,
+      },
     });
     expect(definition).toMatchObject({
       dockerfileBasePath: path.join(packageRoot, "Dockerfile.base"),

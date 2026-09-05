@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import {
   CANDIDATE_MANAGED_IMAGE_AGENTS,
   isCandidateManagedImageAgent,
+  isManagedImageAgent,
   isShippedManagedImageAgent,
   MANAGED_IMAGE_AGENTS,
   MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
@@ -16,6 +18,7 @@ import {
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
   type ManagedImageAgent,
   type ManagedImageContractV1,
+  parsePackageManagedImageContract,
   parseManagedImageContractV1,
   SHIPPED_MANAGED_IMAGE_AGENTS,
 } from "./managed-image/contract";
@@ -53,6 +56,65 @@ function contractFor(agent: ManagedImageAgent): ManagedImageContractV1 {
 }
 
 describe("managed image contract v1", () => {
+  it("composes a qualified synthetic package without adding its ID to core", () => {
+    const declaration: HarnessManagedImageDeclaration = {
+      repository: "registry.example/team/future-harness",
+      architectures: ["linux/amd64"],
+      runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+      startup_profile_contract_version: 1,
+      capability_contract_version: 1,
+    };
+    const digest = `sha256:${"9a".repeat(32)}` as const;
+    const contract = {
+      contractVersion: 1,
+      agent: "future-harness",
+      platform: "linux/amd64",
+      image: declaration.repository,
+      digest,
+      reference: `${declaration.repository}@${digest}`,
+      source: {
+        repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+        revision: SOURCE_REVISION,
+        release: SOURCE_RELEASE,
+        cohort: SOURCE_COHORT,
+      },
+      startupProfileContractVersion: 1,
+      capabilityContractVersion: 1,
+    };
+
+    const parsed = parsePackageManagedImageContract(contract, "future-harness", declaration);
+    const exactAgent: "future-harness" = parsed.agent;
+
+    expect(parsed).toEqual(contract);
+    expect(exactAgent).toBe("future-harness");
+    expect(isManagedImageAgent(parsed.agent)).toBe(false);
+  });
+
+  it("requires qualification evidence to match the package-owned repository and platform", () => {
+    const declaration: HarnessManagedImageDeclaration = {
+      repository: "registry.example/team/future-harness",
+      architectures: ["linux/arm64"],
+      runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+      startup_profile_contract_version: 1,
+      capability_contract_version: 1,
+    };
+    const base = contractFor("openclaw");
+
+    expect(() =>
+      parsePackageManagedImageContract(
+        { ...base, agent: "future-harness", image: declaration.repository },
+        "future-harness",
+        declaration,
+      ),
+    ).toThrow("not declared by package");
+    expect(() =>
+      parsePackageManagedImageContract({ ...base, agent: "future-harness" }, "future-harness", {
+        ...declaration,
+        architectures: ["linux/amd64"],
+      }),
+    ).toThrow("contract.image");
+  });
+
   it("advertises startup-profile contract v1 for every shipped agent (#7744)", () => {
     expect(MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION).toBe(1);
     expect(SHIPPED_MANAGED_IMAGE_AGENTS).toEqual([

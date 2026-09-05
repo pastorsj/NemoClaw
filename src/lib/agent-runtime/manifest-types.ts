@@ -5,6 +5,7 @@ import type {
   HarnessManifestRecord,
   HarnessManifestScalar,
   HarnessManifestValue,
+  HarnessManagedImageDeclaration,
   HarnessMcpAdapter,
   HarnessMcpCapability,
   HarnessMcpSupport,
@@ -19,6 +20,9 @@ export type {
   HarnessManifestRecord,
   HarnessManifestScalar,
   HarnessManifestValue,
+  HarnessManagedImageDeclaration,
+  HarnessManagedImagePlatform,
+  HarnessManagedImageRuntimeIdentity,
   HarnessMcpAdapter,
   HarnessMcpCapability,
   HarnessMcpSupport,
@@ -159,6 +163,7 @@ export interface AgentDefinition {
   config?: ManifestRecord;
   inference?: AgentInference;
   mcp?: AgentMcpCapability;
+  managed_image?: HarnessManagedImageDeclaration;
   state_files?: AgentStateFile[];
   user_managed_files?: string[];
   _legacy_paths?: StringMap;
@@ -179,6 +184,7 @@ export interface AgentDefinition {
   readonly configPaths: AgentConfigPaths;
   readonly inferenceProviderOptions: string[];
   readonly mcpCapability: AgentMcpCapability;
+  readonly managedImage: HarnessManagedImageDeclaration | null;
   readonly stateDirectories: AgentStateDirectory[];
   readonly stateDirs: string[];
   readonly stateDirPrefixes: string[];

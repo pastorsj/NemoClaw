@@ -34,6 +34,7 @@ import {
   readVersionScheme,
 } from "./manifest-readers";
 import { readAgentRuntime } from "./runtime/manifest";
+import { readManagedImageDeclaration } from "./managed-image";
 import {
   readStateDirectories,
   stateDirectoryPaths,
@@ -246,6 +247,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const config = readObject(raw, "config");
   const inference = readInference(raw);
   const mcp = readMcpCapability(raw);
+  const managedImage = readManagedImageDeclaration(raw);
   if (raw.runtime_auth_state_dirs !== undefined) {
     throw new Error(
       "Agent manifest field 'runtime_auth_state_dirs' was replaced by state_dirs entries with backup: false",
@@ -315,6 +317,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     config,
     inference,
     mcp,
+    managed_image: managedImage ?? undefined,
     state_files: stateFiles,
     user_managed_files: userManagedFiles,
     _legacy_paths: legacyPathConfig,
@@ -385,6 +388,10 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
 
     get mcpCapability(): AgentMcpCapability {
       return mcp;
+    },
+
+    get managedImage() {
+      return managedImage;
     },
 
     get stateDirectories(): AgentStateDirectory[] {

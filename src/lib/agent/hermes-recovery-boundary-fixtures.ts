@@ -33,6 +33,7 @@ export function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefini
       support: "disabled",
       reason: "test fixture",
     },
+    managedImage: null,
     stateDirectories: [],
     stateDirs: [],
     stateDirPrefixes: [],

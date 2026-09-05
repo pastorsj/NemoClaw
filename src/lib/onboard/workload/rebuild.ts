@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isDeepStrictEqual } from "node:util";
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import { readCandidateQualificationReceipt } from "../../agent/candidate";
 import { cloneAndDeepFreeze } from "../../core/immutable";
 import { getVersion } from "../../core/version";
@@ -12,9 +14,10 @@ import {
   isCandidateManagedImageAgent,
   MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
   MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+  qualifiedManagedImageDeclaration,
   type ManagedImageAgent,
   type ManagedImageContractV1,
-  parseManagedImageContractV1,
+  parsePackageManagedImageContract,
 } from "../managed-image/contract";
 import {
   type BuiltManagedStartupOnboardProfile,
@@ -62,6 +65,8 @@ export interface ManagedWorkloadRebuildCatalogHandoff {
   readonly schemaVersion: 1;
   readonly providerId: string;
   readonly agent: ManagedImageAgent;
+  /** Receipt-pinned package declaration retained across rebuild preparation. */
+  readonly managedImage: HarnessManagedImageDeclaration;
   /** Exact authority retained until a replacement has become Ready. */
   readonly previousReceipt: ManagedWorkloadReceipt;
   readonly previousContract: ManagedImageContractV1;
@@ -133,11 +138,23 @@ export async function prepareManagedWorkloadRebuildHandoff(
   options: {
     readonly runtime: SandboxWorkloadRuntimeCapabilities;
     readonly provider: RuntimeProviderBundle;
+    readonly agentDefinition?: Pick<AgentDefinition, "managedImage" | "name">;
     readonly version?: string;
   },
 ): Promise<ManagedWorkloadRebuildCatalogHandoff | null> {
-  const authority = readManagedWorkloadAuthority(entry);
+  const authority = readManagedWorkloadAuthority(entry, options.agentDefinition);
   if (!authority) return null;
+  const managedImage = options.agentDefinition
+    ? options.agentDefinition.managedImage
+    : qualifiedManagedImageDeclaration(authority.agent);
+  if (
+    managedImage === null ||
+    (options.agentDefinition !== undefined && options.agentDefinition.name !== authority.agent)
+  ) {
+    throw new ManagedWorkloadRebuildError(
+      "the receipt-pinned package does not declare the recorded managed image",
+    );
+  }
   requireProviderBoundAuthority(authority, options.runtime, options.provider);
 
   let replacement: PreparedSandboxWorkloadSource;
@@ -158,6 +175,7 @@ export async function prepareManagedWorkloadRebuildHandoff(
       replacement = {
         source: resolveSandboxWorkloadSource({
           agentName: authority.agent,
+          managedImage,
           legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
           runtime: options.runtime,
           catalog: { [authority.agent]: contract },
@@ -184,6 +202,7 @@ export async function prepareManagedWorkloadRebuildHandoff(
     try {
       replacement = await managedWorkloadRebuildDependencies.prepareSandboxWorkloadSource({
         agentName: authority.agent,
+        managedImage,
         legacyDockerfilePath: "managed-rebuild-must-not-stage-this-dockerfile",
         runtime: options.runtime,
         version: options.version ?? getVersion(),
@@ -214,6 +233,7 @@ export async function prepareManagedWorkloadRebuildHandoff(
     schemaVersion: 1 as const,
     providerId: options.provider.identity.id,
     agent: authority.agent,
+    managedImage,
     previousReceipt: authority.receipt,
     previousContract: authority.contract,
     previousProfile: authority.profile,
@@ -233,7 +253,10 @@ export function managedWorkloadRebuildHandoffMatchesEntry(
 ): boolean {
   if (!entry || provider.identity.id !== handoff.providerId) return false;
   try {
-    const current = readManagedWorkloadAuthority(entry);
+    const current = readManagedWorkloadAuthority(entry, {
+      name: handoff.agent,
+      managedImage: handoff.managedImage,
+    });
     return (
       current !== null &&
       current.agent === handoff.agent &&
@@ -381,6 +404,7 @@ export function prepareSandboxWorkloadSourceFromRebuildHandoff(
   try {
     source = resolveSandboxWorkloadSource({
       agentName: handoff.agent,
+      managedImage: handoff.managedImage,
       legacyDockerfilePath: "",
       runtime,
       catalog: { [handoff.agent]: handoff.replacement.source.contract },
@@ -434,9 +458,10 @@ export function buildManagedWorkloadRebuildReceipt(
   }
   let contract: ManagedImageContractV1;
   try {
-    contract = parseManagedImageContractV1(
+    contract = parsePackageManagedImageContract(
       handoff.replacement.source.contract,
       handoff.agent,
+      handoff.managedImage,
       handoff.previousContract.platform,
     );
   } catch (error) {
