@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
 
 import { validateFabricHarnessE2eContract } from "../../../tools/e2e/fabric-contract.mts";
 import {
@@ -35,6 +39,14 @@ const PACKAGE_CASES = [
     sandboxName: "e2e-haystack",
   },
 ] as const;
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    fs.rmSync(directory, { force: true, recursive: true });
+  }
+});
 
 describe("generic Fabric package E2E", () => {
   it.each(["openclaw", "hermes"] as const)(
@@ -110,6 +122,7 @@ describe("generic Fabric package E2E", () => {
 
     expect(options).toEqual({
       fixturePath: PACKAGE_CASES[1].fixture,
+      packageArtifact: undefined,
       sandboxName: "external-haystack",
     });
     expect(loadFabricPackageTarget(options.fixturePath, options)).toMatchObject({
@@ -117,6 +130,50 @@ describe("generic Fabric package E2E", () => {
       sandboxName: "external-haystack",
     });
   });
+
+  it("resolves an independently built package directory before entering the core checkout", () => {
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
+    temporaryDirectories.push(workingDirectory);
+    const artifactDirectory = path.join(workingDirectory, "dist", "nemoclaw-haystack-agent");
+    fs.mkdirSync(artifactDirectory, { recursive: true });
+    const fixturePath = path.resolve(PACKAGE_CASES[1].fixture);
+    const options = parseFabricPackageCliOptions([
+      "run",
+      "--contract",
+      fixturePath,
+      "--package-artifact",
+      "dist/nemoclaw-haystack-agent",
+    ]);
+
+    const target = loadFabricPackageTarget(options.fixturePath, {
+      ...options,
+      workingDirectory,
+    });
+
+    expect(target).toMatchObject({
+      contract: { packageId: "haystack-agent" },
+      packageArtifact: artifactDirectory,
+    });
+    expect(readFabricPackageE2eTarget(fabricPackageE2eEnvironment(target))).toEqual(target);
+  });
+
+  it.each(["missing", "file", "symlink"] as const)(
+    "rejects a %s local package artifact before starting the live journey",
+    (kind) => {
+      const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
+      temporaryDirectories.push(workingDirectory);
+      const artifactPath = path.join(workingDirectory, "package-artifact");
+      if (kind === "file") fs.writeFileSync(artifactPath, "not a directory\n", "utf8");
+      if (kind === "symlink") fs.symlinkSync(workingDirectory, artifactPath, "dir");
+
+      expect(() =>
+        loadFabricPackageTarget(path.resolve(PACKAGE_CASES[0].fixture), {
+          packageArtifact: artifactPath,
+          workingDirectory,
+        }),
+      ).toThrow(/Fabric package artifact/u);
+    },
+  );
 
   it.each([
     { arguments_: [] },

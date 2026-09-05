@@ -210,10 +210,13 @@ function selectInstalledIdentity(
     throw new Error("Harness inventory does not contain one healthy selected package");
   }
   const available = inventory.available.filter((row) => row.identity.id === selectedId);
+  if (available.length > 1) {
+    throw new Error("Harness inventory contains duplicate selected package availability");
+  }
   if (
-    available.length !== 1 ||
-    available[0]?.installationState !== "active" ||
-    !harnessPackageIdentitiesEqual(installed[0].identity, available[0].identity)
+    available.length === 1 &&
+    (available[0]?.installationState !== "active" ||
+      !harnessPackageIdentitiesEqual(installed[0].identity, available[0].identity))
   ) {
     throw new Error("Harness inventory does not confirm the selected package as active");
   }
@@ -250,9 +253,13 @@ export async function installHarnessPackage(
   host: HostCliClient,
   selectedId: HarnessPackageId,
   environment: NodeJS.ProcessEnv = process.env,
+  options: { readonly packageArtifact?: string } = {},
 ): Promise<HarnessPackageEvidence> {
   const id = requireHarnessId(selectedId);
-  const installResult = await host.nemoclaw(["harness", "install", id], {
+  const installArguments = options.packageArtifact
+    ? ["harness", "install", id, "--from", options.packageArtifact, "--yes-i-trust-local-package"]
+    : ["harness", "install", id];
+  const installResult = await host.nemoclaw(installArguments, {
     artifactName: `harness-install-${id}`,
     env: buildAvailabilityProbeEnv(environment),
     timeoutMs: INSTALL_TIMEOUT_MS,

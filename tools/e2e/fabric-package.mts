@@ -13,6 +13,7 @@ import {
   hasFabricPackageE2eTarget,
   readFabricPackageE2eTarget,
   validateFabricHarnessE2eContract,
+  validateFabricPackageArtifactPath,
   validateFabricPackageId,
   validateFabricPackageSandboxName,
 } from "./fabric-contract.mts";
@@ -80,14 +81,31 @@ export function defaultFabricPackageSandboxName(packageId: string): string {
 /** Load one reusable target from package-owned contract data and run-owned state. */
 export function loadFabricPackageTarget(
   fixturePath: string,
-  options: { readonly sandboxName?: string; readonly workingDirectory?: string } = {},
+  options: {
+    readonly packageArtifact?: string;
+    readonly sandboxName?: string;
+    readonly workingDirectory?: string;
+  } = {},
 ): FabricPackageE2eTarget {
-  const contract = readFabricHarnessE2eFixture(
-    fixturePath,
-    options.workingDirectory ?? process.cwd(),
-  );
+  const workingDirectory = options.workingDirectory ?? process.cwd();
+  const contract = readFabricHarnessE2eFixture(fixturePath, workingDirectory);
+  const packageArtifact = options.packageArtifact
+    ? validateFabricPackageArtifactPath(path.resolve(workingDirectory, options.packageArtifact))
+    : undefined;
+  if (packageArtifact) {
+    let metadata: fs.Stats;
+    try {
+      metadata = fs.lstatSync(packageArtifact);
+    } catch {
+      throw new Error("Fabric package artifact must be an existing directory");
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new Error("Fabric package artifact must be a directory without symbolic links");
+    }
+  }
   return Object.freeze({
     contract,
+    ...(packageArtifact ? { packageArtifact } : {}),
     sandboxName: validateFabricPackageSandboxName(
       options.sandboxName ?? defaultFabricPackageSandboxName(contract.packageId),
     ),
@@ -138,22 +156,26 @@ export function fabricPackageJourneyEnvironment(
 
 export interface FabricPackageCliOptions {
   readonly fixturePath: string;
+  readonly packageArtifact: string | undefined;
   readonly sandboxName: string | undefined;
 }
 
 export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPackageCliOptions {
   if (argv[0] !== "run") {
     throw new Error(
-      "Usage: fabric-package.mts run --contract <fixture.json> [--sandbox-name <name>]",
+      "Usage: fabric-package.mts run --contract <fixture.json> [--package-artifact <built-directory>] [--sandbox-name <name>]",
     );
   }
   const values = new Map<string, string>();
   for (let index = 1; index < argv.length; index += 2) {
     const option = argv[index];
     const value = argv[index + 1];
-    if ((option !== "--contract" && option !== "--sandbox-name") || !value) {
+    if (
+      (option !== "--contract" && option !== "--package-artifact" && option !== "--sandbox-name") ||
+      !value
+    ) {
       throw new Error(
-        "Usage: fabric-package.mts run --contract <fixture.json> [--sandbox-name <name>]",
+        "Usage: fabric-package.mts run --contract <fixture.json> [--package-artifact <built-directory>] [--sandbox-name <name>]",
       );
     }
     if (values.has(option)) throw new Error(`${option} must not be repeated`);
@@ -161,12 +183,17 @@ export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPac
   }
   const fixturePath = values.get("--contract");
   if (!fixturePath) throw new Error("Fabric package journey requires --contract");
-  return { fixturePath, sandboxName: values.get("--sandbox-name") };
+  return {
+    fixturePath,
+    packageArtifact: values.get("--package-artifact"),
+    sandboxName: values.get("--sandbox-name"),
+  };
 }
 
 /** Run the shared install-to-destroy journey from a package-owned fixture. */
 export async function runFabricPackageJourney(options: FabricPackageCliOptions): Promise<number> {
   const target = loadFabricPackageTarget(options.fixturePath, {
+    ...(options.packageArtifact ? { packageArtifact: options.packageArtifact } : {}),
     ...(options.sandboxName ? { sandboxName: options.sandboxName } : {}),
   });
   Object.assign(process.env, fabricPackageJourneyEnvironment(target));

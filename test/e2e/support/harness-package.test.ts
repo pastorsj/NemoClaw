@@ -45,6 +45,7 @@ function packageIdentity(
 function inventoryJson(
   selectedId: string,
   identities: HarnessPackageIdentity[] = [packageIdentity(selectedId)],
+  options: { readonly includeAvailable?: boolean } = {},
 ): string {
   return JSON.stringify({
     schemaVersion: 1,
@@ -54,11 +55,14 @@ function inventoryJson(
       health: "healthy",
       identity,
     })),
-    available: identities.map((identity) => ({
-      displayName: `Display ${identity.id}`,
-      identity,
-      installationState: "active",
-    })),
+    available:
+      options.includeAvailable === false
+        ? []
+        : identities.map((identity) => ({
+            displayName: `Display ${identity.id}`,
+            identity,
+            installationState: "active",
+          })),
   });
 }
 
@@ -204,7 +208,7 @@ describe("harness package E2E evidence", () => {
     const identity = packageIdentity("future-harness");
     const { host, runner } = createHost(
       shellResult(0, "Installed.\n"),
-      shellResult(0, inventoryJson("future-harness")),
+      shellResult(0, inventoryJson("future-harness", [identity], { includeAvailable: false })),
     );
 
     const evidence = await installHarnessPackage(host, "future-harness");
@@ -212,6 +216,31 @@ describe("harness package E2E evidence", () => {
     expect(evidence.identity).toEqual(identity);
     expect(runner.calls.map(({ args }) => args)).toEqual([
       ["harness", "install", "future-harness"],
+      ["harness", "list", "--json"],
+    ]);
+  });
+
+  it("installs a trusted local package artifact through the public command", async () => {
+    const identity = packageIdentity("future-harness");
+    const { host, runner } = createHost(
+      shellResult(0, "Installed.\n"),
+      shellResult(0, inventoryJson("future-harness", [identity], { includeAvailable: false })),
+    );
+
+    const evidence = await installHarnessPackage(host, "future-harness", process.env, {
+      packageArtifact: "/tmp/nemoclaw-future-harness",
+    });
+
+    expect(evidence.identity).toEqual(identity);
+    expect(runner.calls.map(({ args }) => args)).toEqual([
+      [
+        "harness",
+        "install",
+        "future-harness",
+        "--from",
+        "/tmp/nemoclaw-future-harness",
+        "--yes-i-trust-local-package",
+      ],
       ["harness", "list", "--json"],
     ]);
   });

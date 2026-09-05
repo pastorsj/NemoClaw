@@ -118,7 +118,9 @@ test.skipIf(!hasFabricPackageE2eTarget())(
     });
     assertExitZero(initialInventory, "list initial isolated harness inventory");
     requireEmptyHarnessInventory(initialInventory.stdout);
-    const installation = await installHarnessPackage(host, target.contract.packageId, env);
+    const installation = await installHarnessPackage(host, target.contract.packageId, env, {
+      ...(target.packageArtifact ? { packageArtifact: target.packageArtifact } : {}),
+    });
 
     progress.phase("onboard the package-owned sandbox");
     const onboard = await host.nemoclaw(
@@ -213,6 +215,7 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       id: target.contract.packageId,
       adapterId: target.contract.adapterId,
       installedIdentity: installation.identity,
+      packageSource: target.packageArtifact ? "trusted-local-artifact" : "bundled",
       lifecycle: ["onboard", "turn", "stop", "start", "turn", "destroy"],
       onboardReceipt,
       onboardTurn,

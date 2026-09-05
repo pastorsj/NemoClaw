@@ -29,6 +29,7 @@ const TARGET_ENVIRONMENT = {
   descriptorPathPrefix: "E2E_FABRIC_DESCRIPTOR_ROOT",
   descriptorRunnerModule: "E2E_FABRIC_RUNNER_MODULE",
   packageId: "E2E_FABRIC_PACKAGE_ID",
+  packageArtifact: "E2E_FABRIC_PACKAGE_ARTIFACT",
   processMarkers: "E2E_FABRIC_PROCESS_MARKERS",
   sandboxName: "NEMOCLAW_SANDBOX_NAME",
 } as const;
@@ -46,6 +47,7 @@ export interface FabricHarnessE2eContract {
 
 export interface FabricPackageE2eTarget {
   readonly contract: FabricHarnessE2eContract;
+  readonly packageArtifact?: string;
   readonly sandboxName: string;
 }
 
@@ -122,6 +124,14 @@ export function validateFabricPackageId(value: string): string {
   return value;
 }
 
+/** Validate a host path transported to the trusted-local package installer. */
+export function validateFabricPackageArtifactPath(value: string): string {
+  if (!isBoundedSafeText(value, 4096) || !path.isAbsolute(value) || path.resolve(value) !== value) {
+    throw new Error("Fabric package artifact must be a canonical absolute host path");
+  }
+  return value;
+}
+
 /** Validate the package-owned data used by the generic public Fabric proof. */
 export function validateFabricHarnessE2eContract(value: unknown): FabricHarnessE2eContract {
   if (!isPlainRecord(value)) throw new Error("Fabric package fixture must contain one object");
@@ -193,6 +203,13 @@ export function readFabricPackageE2eTarget(
   });
   return Object.freeze({
     contract,
+    ...(environment[TARGET_ENVIRONMENT.packageArtifact]?.trim()
+      ? {
+          packageArtifact: validateFabricPackageArtifactPath(
+            requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.packageArtifact),
+          ),
+        }
+      : {}),
     sandboxName: validateFabricPackageSandboxName(
       requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.sandboxName),
     ),
@@ -206,6 +223,13 @@ export function fabricPackageE2eEnvironment(
   const contract = validateFabricHarnessE2eContract(target.contract);
   return Object.freeze({
     [TARGET_ENVIRONMENT.packageId]: contract.packageId,
+    ...(target.packageArtifact
+      ? {
+          [TARGET_ENVIRONMENT.packageArtifact]: validateFabricPackageArtifactPath(
+            target.packageArtifact,
+          ),
+        }
+      : {}),
     [TARGET_ENVIRONMENT.adapterId]: contract.adapterId,
     [TARGET_ENVIRONMENT.artifactRoot]: contract.artifactRoot,
     [TARGET_ENVIRONMENT.configPath]: contract.configPath,
