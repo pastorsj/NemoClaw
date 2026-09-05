@@ -1,0 +1,13 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "packageId": "pi",
+  "adapterId": "nvidia.nemoclaw.pi",
+  "artifactRoot": "/sandbox/.pi/agent/fabric-artifacts",
+  "configPath": "/sandbox/.pi/agent/fabric.json",
+  "descriptorGlob": "/usr/local/share/nemoclaw/pi.fabric-adapter.json",
+  "descriptorPathPrefix": "/usr/local/share/nemoclaw",
+  "descriptorRunnerModule": "nemoclaw_pi_fabric.adapter",
+  "processMarkers": [
+    "nemoclaw_pi_fabric.process"
+  ]
+}
