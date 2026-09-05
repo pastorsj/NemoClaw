@@ -7,6 +7,12 @@ import * as agentRuntime from "../../agent/runtime";
 import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import { spawnExitCode } from "../../core/process-exit";
 import { resolveSandboxGatewayName } from "../../gateway-runtime-action";
+import {
+  captureSandboxCommandAgentAuthority,
+  requireCurrentSandboxCommandAgentAuthority,
+  type SandboxCommandAgentAuthority,
+  type SandboxCommandAgentDependencies,
+} from "../../sandbox/command-agent";
 import type { SandboxEntry } from "../../state/registry";
 import {
   completeReadinessQualifiedInteractiveSessionSetup,
@@ -61,6 +67,7 @@ interface LaunchSandboxDeps {
   withLaunchReadinessMutationGate?: typeof withLaunchReadinessMutationGate;
   now?: () => number;
   writeLaunchTiming?: (line: string) => void;
+  commandAgentDependencies?: SandboxCommandAgentDependencies;
 }
 
 type LaunchReadinessAction = "accepted" | "prepared";
@@ -106,6 +113,31 @@ type HermesPortableAcceptedLaunchAuthority = {
   readonly active: HermesPortableActiveLifecycleAuthority;
   readonly command: HermesPortableReadinessCommandAuthority;
 };
+
+function captureReceiptBackedLaunchAgentAuthority(
+  agent: AgentDefinition | null,
+  entry: SandboxEntry | null,
+  deps: LaunchSandboxDeps,
+): SandboxCommandAgentAuthority | null {
+  const hasPackage = entry?.harnessPackage != null;
+  const hasMigration = entry?.harnessPackageMigration != null;
+  if (!hasPackage && !hasMigration) return null;
+  if (!entry || !hasPackage) {
+    throw new Error("Harness package authority is incomplete before agent launch.");
+  }
+  const authority = captureSandboxCommandAgentAuthority(entry, deps.commandAgentDependencies);
+  const identity = authority.harnessPackage;
+  if (
+    !identity ||
+    !agent ||
+    entry.agent !== identity.id ||
+    authority.definition.name !== identity.id ||
+    !isDeepStrictEqual(agent, authority.definition)
+  ) {
+    throw new Error("Harness package authority does not match the launch-selected agent.");
+  }
+  return authority;
+}
 
 async function inspectLaunchReadinessForLaunch(
   sandboxName: string,
@@ -178,6 +210,7 @@ async function launchAgentWithPortableAuthority(
   command: readonly string[],
   deps: LaunchSandboxDeps,
   acceptedHermesAuthority: HermesPortableAcceptedLaunchAuthority | null,
+  packageAgentAuthority: SandboxCommandAgentAuthority | null,
   beforeOrdinaryLaunch?: () => void,
   beforeAgentExec?: () => void,
 ): Promise<void> {
@@ -222,6 +255,14 @@ async function launchAgentWithPortableAuthority(
   };
   const lockSandbox = deps.withSandboxMutationLock ?? withSandboxMutationLock;
   await lockSandbox(sandboxName, async () => {
+    const readSandbox = deps.getSandbox ?? getKnownSandboxTarget;
+    if (packageAgentAuthority) {
+      requireCurrentSandboxCommandAgentAuthority(
+        packageAgentAuthority,
+        readSandbox(sandboxName),
+        deps.commandAgentDependencies,
+      );
+    }
     const current = inspectPortableAgentReceiptDisposition(sandboxName);
     if ((current.kind === "hermes") !== hermesPortableSnapshot) {
       throw new Error("Hermes portable lifecycle authority changed before agent launch.");
@@ -234,7 +275,6 @@ async function launchAgentWithPortableAuthority(
     if (current.phase !== "active") {
       throw new Error("Hermes portable lifecycle authority changed before agent launch.");
     }
-    const readSandbox = deps.getSandbox ?? getKnownSandboxTarget;
     const registered = readSandbox(sandboxName);
     if (
       agent?.name !== "hermes" ||
@@ -374,7 +414,9 @@ export async function launchSandbox(
     break;
   }
   const { agent, sb, hermesPortable = false } = session;
-  const agentCommand = agentRuntime.getInteractiveAgentCommand(agent, sb?.agent);
+  const packageAgentAuthority = captureReceiptBackedLaunchAgentAuthority(agent, sb, deps);
+  const launchAgent = packageAgentAuthority?.definition ?? agent;
+  const agentCommand = agentRuntime.getInteractiveAgentCommand(launchAgent, sb?.agent);
   if (!agentCommand) {
     throw new Error(`Cannot resolve an interactive command for sandbox '${sandboxName}'.`);
   }
@@ -394,12 +436,13 @@ export async function launchSandbox(
   const command = ["bash", "-lc", agentCommand];
   await launchAgentWithPortableAuthority(
     sandboxName,
-    agent,
+    launchAgent,
     sb,
     hermesPortable,
     command,
     deps,
     acceptedHermesAuthority,
+    packageAgentAuthority,
     acceptedReadinessSetup,
     () => launchTiming.emit(readinessAction),
   );

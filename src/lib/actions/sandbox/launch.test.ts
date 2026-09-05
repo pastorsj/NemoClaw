@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDefinition } from "../../agent/defs";
 import * as agentDefinitions from "../../agent/defs";
 import { loadAgent } from "../../agent/defs";
+import type { SandboxCommandAgentDependencies } from "../../sandbox/command-agent";
 import type { SandboxEntry } from "../../state/registry";
 
 const mocks = vi.hoisted(() => ({
@@ -159,6 +160,29 @@ function sandboxEntry(agentName: string | null): SandboxEntry {
     model: null,
     gpuEnabled: false,
   } as SandboxEntry;
+}
+
+function packageBackedSandboxEntry(agentName: string, digestCharacter = "a"): SandboxEntry {
+  return {
+    ...sandboxEntry(agentName),
+    harnessPackage: {
+      kind: "agent-runtime",
+      id: agentName,
+      packageVersion: "1.0.0",
+      contentDigest: digestCharacter.repeat(64),
+    },
+  };
+}
+
+function commandAgentDependencies(
+  resolveDefinition: (entry: SandboxEntry) => AgentDefinition,
+): SandboxCommandAgentDependencies {
+  return {
+    loadAgent: vi.fn(() => {
+      throw new Error("receipt-backed launch must not consult the ambient catalogue");
+    }),
+    resolvePackageAgent: vi.fn((entry) => ({ definition: resolveDefinition(entry) })),
+  };
 }
 
 function activeHermesDisposition() {
@@ -477,6 +501,123 @@ describe("launchSandbox", () => {
     });
 
     expect(launchedCommand()).toEqual(["bash", "-lc", "/bin/bash"]);
+  });
+
+  it.each([
+    {
+      label: "gateway",
+      name: "future-gateway",
+      base: "hermes" as const,
+      kind: "gateway" as const,
+      interactiveCommand: "future-gateway tui",
+    },
+    {
+      label: "terminal",
+      name: "future-terminal",
+      base: "langchain-deepagents-code" as const,
+      kind: "terminal" as const,
+      interactiveCommand: "future-terminal",
+    },
+  ])(
+    "launches a receipt-backed future $label package from typed runtime metadata",
+    async (testCase) => {
+      const base = loadAgent(testCase.base);
+      const definition = {
+        ...base,
+        name: testCase.name,
+        runtime: {
+          ...base.runtime!,
+          kind: testCase.kind,
+          interactive_command: testCase.interactiveCommand,
+        },
+      };
+      const packageEntry = packageBackedSandboxEntry(testCase.name);
+      const packageDependencies = commandAgentDependencies(() => definition);
+      mocks.inspectLaunchReadiness.mockResolvedValue({
+        kind: "accepted",
+        category: "accepted",
+        agent: definition,
+        sb: packageEntry,
+      });
+
+      await launchSandbox("alpha", {
+        getSandbox: () => packageEntry,
+        commandAgentDependencies: packageDependencies,
+      });
+
+      expect(launchedCommand()).toEqual(["bash", "-lc", testCase.interactiveCommand]);
+      expect(packageDependencies.resolvePackageAgent).toHaveBeenCalledTimes(2);
+      expect(packageDependencies.loadAgent).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects receipt-backed package drift inside the launch lock", async () => {
+    const selectedEntry = packageBackedSandboxEntry("future-terminal", "a");
+    const replacementEntry = packageBackedSandboxEntry("future-terminal", "b");
+    const selectedDefinition = {
+      ...loadAgent("langchain-deepagents-code"),
+      name: "future-terminal",
+      runtime: {
+        kind: "terminal" as const,
+        interactive_command: "future-terminal",
+      },
+    };
+    const replacementDefinition = {
+      ...selectedDefinition,
+      packageRoot: "/replacement-package",
+    };
+    const packageDependencies = commandAgentDependencies((entry) =>
+      entry.harnessPackage?.contentDigest === selectedEntry.harnessPackage?.contentDigest
+        ? selectedDefinition
+        : replacementDefinition,
+    );
+    mocks.inspectLaunchReadiness.mockResolvedValue({
+      kind: "accepted",
+      category: "accepted",
+      agent: selectedDefinition,
+      sb: selectedEntry,
+    });
+
+    await expect(
+      launchSandbox("alpha", {
+        getSandbox: () => replacementEntry,
+        commandAgentDependencies: packageDependencies,
+      }),
+    ).rejects.toThrow("Sandbox command agent authority changed before mutation");
+
+    expect(mocks.execSandbox).not.toHaveBeenCalled();
+    expect(mocks.runSandboxExecChild).not.toHaveBeenCalled();
+  });
+
+  it("rejects a launch-selected definition that disagrees with its receipt", async () => {
+    const packageEntry = packageBackedSandboxEntry("future-terminal");
+    const installedDefinition = {
+      ...loadAgent("langchain-deepagents-code"),
+      name: "future-terminal",
+    };
+    const selectedDefinition = {
+      ...installedDefinition,
+      runtime: {
+        kind: "terminal" as const,
+        interactive_command: "different-terminal",
+      },
+    };
+    mocks.inspectLaunchReadiness.mockResolvedValue({
+      kind: "accepted",
+      category: "accepted",
+      agent: selectedDefinition,
+      sb: packageEntry,
+    });
+
+    await expect(
+      launchSandbox("alpha", {
+        getSandbox: () => packageEntry,
+        commandAgentDependencies: commandAgentDependencies(() => installedDefinition),
+      }),
+    ).rejects.toThrow("Harness package authority does not match the launch-selected agent");
+
+    expect(mocks.execSandbox).not.toHaveBeenCalled();
+    expect(mocks.runSandboxExecChild).not.toHaveBeenCalled();
   });
 
   it("rejects an untrusted registry agent before starting an in-sandbox command (#6006)", async () => {

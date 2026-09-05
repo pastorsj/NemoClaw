@@ -517,6 +517,34 @@ function projectAgent(agent: AgentDefinition): unknown {
   };
 }
 
+function resolveLaunchHarnessPackageAuthority(
+  entry: SandboxEntry,
+  agent: AgentDefinition,
+):
+  | { readonly status: "absent" }
+  | {
+      readonly status: "valid";
+      readonly harnessPackage: NonNullable<SandboxEntry["harnessPackage"]>;
+      readonly harnessPackageMigration: SandboxEntry["harnessPackageMigration"] | null;
+    } {
+  // The trusted-agent resolver validates the complete receipt and installed
+  // package. This local projection binds that resolved definition to the same
+  // registry identity without adding a second package-resolution path.
+  const harnessPackage = entry.harnessPackage;
+  if (!harnessPackage) {
+    if (entry.harnessPackageMigration) throw new ObservationError("config");
+    return { status: "absent" };
+  }
+  if (entry.agent !== harnessPackage.id || agent.name !== harnessPackage.id) {
+    throw new ObservationError("config");
+  }
+  return {
+    status: "valid",
+    harnessPackage,
+    harnessPackageMigration: entry.harnessPackageMigration ?? null,
+  };
+}
+
 export function buildLaunchReadinessRegistryProjection(
   entry: SandboxEntry,
   agent: AgentDefinition,
@@ -584,9 +612,10 @@ export function buildLaunchReadinessRegistryProjection(
   ) {
     throw new ObservationError("config");
   }
+  const packageAuthority = resolveLaunchHarnessPackageAuthority(entry, agent);
 
   return {
-    version: 2,
+    version: 3,
     name: entry.name,
     openshellDriver: driver,
     openshellVersion,
@@ -595,6 +624,9 @@ export function buildLaunchReadinessRegistryProjection(
     lifecycleGeneration,
     lifecycleLiveIdentityFingerprint: liveIdentityFingerprint,
     agent: agentName,
+    harnessPackage: packageAuthority.status === "valid" ? packageAuthority.harnessPackage : null,
+    harnessPackageMigration:
+      packageAuthority.status === "valid" ? packageAuthority.harnessPackageMigration : null,
     agentVersion: normalizedString(entry.agentVersion),
     nemoclawVersion: normalizedString(entry.nemoclawVersion),
     imageTag: normalizedString(entry.imageTag),
@@ -716,11 +748,19 @@ async function captureLaunchIdentity(
   if (!entry || entry.name !== sandboxName) throw new ObservationError("identity");
   const agentName = normalizedString(entry.agent) ?? "openclaw";
   const agent = resolveTrustedLaunchAgent(entry, deps, agentName);
+  const packageAuthority = resolveLaunchHarnessPackageAuthority(entry, agent);
+  // Receipt-backed packages opt into the supported pairing qualification
+  // through typed manifest metadata. Only no-receipt OpenClaw rows retain the
+  // historical package-name selection.
+  const requiresDevicePairing =
+    packageAuthority.status === "valid" ? agent.hasDevicePairing : agentName === "openclaw";
+  const ownsPortableReceipt =
+    packageAuthority.status === "valid" ? agent.hasDevicePairing : entry.agent === "openclaw";
   const portableReceipt = (
     deps.classifyPortableLifecycleReceipt ?? classifyPortableLifecycleReceipt
   )(sandboxName);
   let portableRuntimeAuthoritySha256: string | null = null;
-  if (entry.agent === "openclaw") {
+  if (ownsPortableReceipt) {
     if (portableReceipt.kind === "invalid-or-legacy") throw new ObservationError("config");
     if (portableReceipt.kind === "current") {
       if (entry.lifecycleGeneration !== portableReceipt.registryGeneration) {
@@ -845,20 +885,20 @@ async function captureLaunchIdentity(
   );
 
   let session: LaunchReadinessIdentity["session"] = null;
-  if (agentName === "openclaw") {
-    const openclawVersion = normalizedString(entry.agentVersion);
+  if (requiresDevicePairing) {
+    const pairedAgentVersion = normalizedString(entry.agentVersion);
     const stateDirectory = normalizedString(agent.config?.dir);
     // Pairing qualification requires a versioned trusted definition. The
     // receipt binds the sandbox's recorded version, including supported stale
     // versions that the normal launch warning permits.
-    if (!openclawVersion || !normalizedString(agent.expected_version) || !stateDirectory) {
+    if (!pairedAgentVersion || !normalizedString(agent.expected_version) || !stateDirectory) {
       throw new OpenClawPairingQualificationError();
     }
     try {
       session = (deps.observeOpenClawPairingQualification ?? observeOpenClawPairingQualification)(
         sandboxName,
         gatewayName,
-        openclawVersion,
+        pairedAgentVersion,
         stateDirectory,
       );
     } catch {

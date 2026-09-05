@@ -4,7 +4,7 @@
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { loadAgent } from "../../agent/defs";
+import { loadAgent, type AgentDefinition } from "../../agent/defs";
 import type {
   LaunchReadinessFence,
   LaunchReadinessIdentity,
@@ -64,6 +64,43 @@ function entry(agent = "openclaw"): SandboxEntry {
     compatibleEndpointReasoning: null,
     compatibleEndpointReasoningEffort: null,
     nimContainer: null,
+  };
+}
+
+function packageIdentity(
+  id: string,
+  digestCharacter = "a",
+): NonNullable<SandboxEntry["harnessPackage"]> {
+  return {
+    kind: "agent-runtime",
+    id,
+    packageVersion: "1.0.0",
+    contentDigest: digestCharacter.repeat(64),
+  };
+}
+
+function packageBackedEntry(agentName: string, digestCharacter = "a"): SandboxEntry {
+  return {
+    ...entry(agentName),
+    harnessPackage: packageIdentity(agentName, digestCharacter),
+  };
+}
+
+function syntheticAgent(
+  baseAgent: "openclaw" | "langchain-deepagents-code",
+  name: string,
+  runtimeKind: "gateway" | "terminal",
+  interactiveCommand: string,
+): AgentDefinition {
+  const base = loadAgent(baseAgent);
+  return {
+    ...base,
+    name,
+    runtime: {
+      ...base.runtime!,
+      kind: runtimeKind,
+      interactive_command: interactiveCommand,
+    },
   };
 }
 
@@ -853,6 +890,116 @@ describe("launch readiness validation", () => {
     expect(gatewayHealth).not.toHaveBeenCalled();
     expect(externalEvents).not.toContain("pairing-qualification");
     expect(publishedIdentity?.session).toBeNull();
+  });
+
+  it("uses typed receipt-backed capabilities for a future gateway package", async () => {
+    sandbox = packageBackedEntry("future-gateway");
+    const installedAgent = {
+      ...syntheticAgent("openclaw", "future-gateway", "gateway", "future-gateway tui"),
+      hasDevicePairing: true,
+    };
+    const currentDeps = deps();
+    const getRegisteredAgent = vi.fn(() => installedAgent);
+    const listAgents = vi.fn(() => {
+      throw new Error("receipt-backed readiness must not consult the ambient catalogue");
+    });
+    const gatewayHealth = vi.fn(async () => true);
+    const smoke = vi.fn(() => ({ ok: true }) as const);
+    currentDeps.getRegisteredAgent = getRegisteredAgent;
+    currentDeps.listAgents = listAgents;
+    currentDeps.gatewayHealth = gatewayHealth;
+    currentDeps.smoke = smoke;
+
+    await createAcceptedLease(currentDeps);
+    externalEvents = [];
+    expect(await inspectLaunchReadiness(SANDBOX, currentDeps)).toMatchObject({ kind: "accepted" });
+
+    expect(getRegisteredAgent).toHaveBeenCalledWith(sandbox);
+    expect(listAgents).not.toHaveBeenCalled();
+    expect(gatewayHealth).toHaveBeenCalledWith(SANDBOX, GATEWAY_NAME);
+    expect(smoke).not.toHaveBeenCalled();
+    expect(externalEvents).toContain("pairing-qualification");
+    expect(publishedIdentity?.session).toMatchObject({ kind: "openclaw-pairing" });
+  });
+
+  it("uses typed receipt-backed capabilities for a future terminal package", async () => {
+    sandbox = packageBackedEntry("future-terminal");
+    const installedAgent = {
+      ...syntheticAgent(
+        "langchain-deepagents-code",
+        "future-terminal",
+        "terminal",
+        "future-terminal",
+      ),
+      hasDevicePairing: false,
+    };
+    const currentDeps = deps();
+    const getRegisteredAgent = vi.fn(() => installedAgent);
+    const listAgents = vi.fn(() => {
+      throw new Error("receipt-backed readiness must not consult the ambient catalogue");
+    });
+    const gatewayHealth = vi.fn(async () => true);
+    const smoke = vi.fn(() => ({ ok: true }) as const);
+    currentDeps.getRegisteredAgent = getRegisteredAgent;
+    currentDeps.listAgents = listAgents;
+    currentDeps.gatewayHealth = gatewayHealth;
+    currentDeps.smoke = smoke;
+
+    await createAcceptedLease(currentDeps);
+    externalEvents = [];
+    expect(await inspectLaunchReadiness(SANDBOX, currentDeps)).toMatchObject({ kind: "accepted" });
+
+    expect(getRegisteredAgent).toHaveBeenCalledWith(sandbox);
+    expect(listAgents).not.toHaveBeenCalled();
+    expect(smoke).toHaveBeenCalledWith(
+      SANDBOX,
+      expect.objectContaining({ name: "future-terminal" }),
+      expect.any(Function),
+      GATEWAY_NAME,
+    );
+    expect(gatewayHealth).not.toHaveBeenCalled();
+    expect(externalEvents).not.toContain("pairing-qualification");
+    expect(publishedIdentity?.session).toBeNull();
+  });
+
+  it("invalidates receipt-backed readiness when package authority changes", async () => {
+    sandbox = packageBackedEntry("future-terminal");
+    const installedAgent = syntheticAgent(
+      "langchain-deepagents-code",
+      "future-terminal",
+      "terminal",
+      "future-terminal",
+    );
+    const currentDeps = deps();
+    currentDeps.getRegisteredAgent = () => installedAgent;
+    await createAcceptedLease(currentDeps);
+
+    sandbox = packageBackedEntry("future-terminal", "b");
+
+    await expect(inspectLaunchReadiness(SANDBOX, currentDeps)).resolves.toMatchObject({
+      kind: "fallback",
+      category: "config",
+    });
+  });
+
+  it("fails closed when a receipt-backed definition disagrees with its package id", async () => {
+    sandbox = packageBackedEntry("future-terminal");
+    const currentDeps = deps();
+    currentDeps.getRegisteredAgent = () =>
+      syntheticAgent(
+        "langchain-deepagents-code",
+        "different-terminal",
+        "terminal",
+        "different-terminal",
+      );
+    const publishLease = vi.fn();
+    currentDeps.publishLease = publishLease;
+
+    const decision = await inspectLaunchReadiness(SANDBOX, currentDeps);
+    await expect(
+      publishLaunchReadiness(publicationFromDecision(SANDBOX, decision), currentDeps),
+    ).resolves.toEqual({ kind: "validation-failed", category: "config" });
+    expect(publishLease).not.toHaveBeenCalled();
   });
 
   it("uses ordinary terminal smoke health for feature-gated NemoCUA (#9649)", async () => {
