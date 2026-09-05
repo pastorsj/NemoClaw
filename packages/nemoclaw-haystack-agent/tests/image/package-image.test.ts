@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import YAML from "yaml";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -49,5 +50,19 @@ describe("Haystack Agent POC image", () => {
       expect(packageText).not.toContain(excluded);
     }
     expect(packageText).not.toContain("managed-startup");
+  });
+
+  it("allows the shared NemoClaw curl probe through managed inference policy", () => {
+    const policy = YAML.parse(
+      fs.readFileSync(path.join(PACKAGE_ROOT, "policy-additions.yaml"), "utf8"),
+    ) as {
+      network_policies?: {
+        managed_inference?: { binaries?: Array<{ path?: string }> };
+      };
+    };
+
+    expect(policy.network_policies?.managed_inference?.binaries).toContainEqual({
+      path: "/usr/bin/curl",
+    });
   });
 });

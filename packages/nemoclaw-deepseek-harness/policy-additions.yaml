@@ -38,6 +38,8 @@ network_policies:
           - allow: { method: GET, path: "/v1/models" }
           - allow: { method: GET, path: "/v1/models/**" }
     binaries:
+      # NemoClaw status, doctor, and connect probe this route with this fixed path.
+      - { path: /usr/bin/curl }
       - { path: /opt/nemoclaw-fabric-venv/bin/python3* }
       - {
           path: /opt/nemoclaw-fabric-venv/lib/python3.13/site-packages/deepseek_harness_runtime/runtime/**,

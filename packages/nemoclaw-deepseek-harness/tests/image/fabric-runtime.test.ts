@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import YAML from "yaml";
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -50,5 +51,19 @@ describe("DeepSeek Harness image contract", () => {
     expect(processSource).toContain('profile="sdk-minimal"');
     expect(processSource).toContain("request_timeout_seconds=60");
     expect(processSource).toContain("PR_SET_CHILD_SUBREAPER");
+  });
+
+  it("allows the shared NemoClaw curl probe through managed inference policy", () => {
+    const policy = YAML.parse(
+      fs.readFileSync(path.join(PACKAGE_ROOT, "policy-additions.yaml"), "utf8"),
+    ) as {
+      network_policies?: {
+        managed_inference?: { binaries?: Array<{ path?: string }> };
+      };
+    };
+
+    expect(policy.network_policies?.managed_inference?.binaries).toContainEqual({
+      path: "/usr/bin/curl",
+    });
   });
 });
