@@ -25,6 +25,7 @@ export default defineConfig({
       "tests/config/**/*.test.ts",
       "tests/host/**/*.test.ts",
       "tests/image/**/*.test.ts",
+      "tests/package/**/*.test.ts",
       "tests/runtime/**/*.test.ts",
     ],
   },

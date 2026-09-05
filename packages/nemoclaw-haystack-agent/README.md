@@ -48,6 +48,9 @@ npm run test:fabric
 npm run test:fabric:composed
 ```
 
+`npm run test:package` validates the npm publish set and materializes a read-only install artifact
+through the public harness-contract builder.
+
 The successful inference edge still requires a real NemoClaw-managed route. The package-local live fixture in `tests/fixtures/live-contract.json` supplies the generic E2E runner fields without adding the package ID to a core switch.
 
 With hosted-inference environment variables already set, run the complete

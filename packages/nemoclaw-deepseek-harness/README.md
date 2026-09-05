@@ -45,6 +45,9 @@ npm test
 npm run typecheck
 ```
 
+`npm run test:package` validates the npm publish set and materializes a read-only install artifact
+through the public harness-contract builder.
+
 The composed test uses the sibling `packages/nemoclaw-fabric` checkout. Set
 `NEMOCLAW_FABRIC_RUNNER_PATH` when that generic runner lives elsewhere.
 

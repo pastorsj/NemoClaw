@@ -87,6 +87,6 @@ live test. It covers package installation, qualified-image onboarding, native an
 restart and rebuild recovery, and cleanup. Pi can adopt the ordinary package journey after it
 becomes selectable without candidate qualification.
 
-Pi does not yet have a package-owned archive test. The root
-`test/package-contract/bundled-harnesses.test.ts` test verifies its materialized package and packed
-root artifact. Add a package-owned archive test before Pi moves to an independent repository.
+`tests/package/materialization.test.ts` uses the public harness-contract builder to validate Pi's
+npm publish set and materialize its read-only install artifact. The test verifies the install
+envelope, Fabric descriptor, authoring-file exclusion, and executable startup entry point.
