@@ -648,6 +648,56 @@ describe("confirmRecoveredSandboxGatewayManaged scope", () => {
     expect(requestGatewaySupervisorAction).toHaveBeenCalledWith("hermes-box", "probe");
   });
 
+  it("accepts managed confirmation for any exact receipt-backed gateway package", () => {
+    requestGatewaySupervisorAction.mockClear();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "1.2.3",
+      contentDigest: "a".repeat(64),
+    };
+
+    expect(
+      confirmRecoveredSandboxGatewayManaged("future-box", {
+        getSandboxImpl: () => ({
+          ...openClawEntry,
+          name: "future-box",
+          agent: harnessPackage.id,
+          harnessPackage,
+        }),
+        getSessionAgentImpl: () =>
+          ({ name: harnessPackage.id, runtime: { kind: "gateway" } }) as never,
+        requestGatewaySupervisorActionImpl: requestGatewaySupervisorAction,
+      }),
+    ).toBe(true);
+    expect(requestGatewaySupervisorAction).toHaveBeenCalledWith("future-box", "probe");
+  });
+
+  it("does not probe a receipt-backed terminal package as a managed gateway", () => {
+    requestGatewaySupervisorAction.mockClear();
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-terminal",
+      packageVersion: "1.2.3",
+      contentDigest: "b".repeat(64),
+    };
+
+    expect(
+      confirmRecoveredSandboxGatewayManaged("future-box", {
+        getSandboxImpl: () => ({
+          ...openClawEntry,
+          name: "future-box",
+          agent: harnessPackage.id,
+          harnessPackage,
+        }),
+        getSessionAgentImpl: () =>
+          ({ name: harnessPackage.id, runtime: { kind: "terminal" } }) as never,
+        requestGatewaySupervisorActionImpl: requestGatewaySupervisorAction,
+      }),
+    ).toBeNull();
+    expect(requestGatewaySupervisorAction).not.toHaveBeenCalled();
+  });
+
   it("rejects a marker from a failed controller action", () => {
     expect(
       confirmRecoveredSandboxGatewayManaged("my-sandbox", {

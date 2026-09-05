@@ -438,7 +438,14 @@ function isSandboxGatewayRunning(
   // decision. Legacy custom gateway agents are the sole compatibility case:
   // their recovery contract is explicitly SSH-owned until manifests can
   // declare a trusted runtime user/supervisor.
-  if (!agent || agent.name === "openclaw" || agent.name === "hermes") return null;
+  let receiptBacked = false;
+  try {
+    receiptBacked = registry.getSandbox(sandboxName)?.harnessPackage != null;
+  } catch {
+    // Registry-backed package authority must remain on the trusted exec path.
+    // Legacy custom agents retain their existing SSH compatibility fallback.
+  }
+  if (receiptBacked || !agent || agent.name === "openclaw" || agent.name === "hermes") return null;
   return parseSandboxGatewayProbe(
     executeSandboxCommand(
       sandboxName,
@@ -723,13 +730,24 @@ export function confirmRecoveredSandboxGatewayManaged(
   const entry = getSandbox(sandboxName);
   if (!entry) return null;
   const persistedAgent = entry.agent ?? "openclaw";
-  if (persistedAgent !== "openclaw" && persistedAgent !== "hermes") return null;
+  const harnessPackage = entry.harnessPackage ?? null;
+  const receiptBacked = harnessPackage !== null;
+  if (!receiptBacked && persistedAgent !== "openclaw" && persistedAgent !== "hermes") return null;
 
   if (!usesManagedGatewayController(entry)) return null;
 
   const getSessionAgent = options.getSessionAgentImpl ?? agentRuntime.getSessionAgent;
   const agent = getSessionAgent(sandboxName);
-  if (persistedAgent === "hermes" && agent?.name !== "hermes") return null;
+  if (receiptBacked) {
+    if (
+      agent?.name !== harnessPackage.id ||
+      (entry.agent != null && entry.agent !== harnessPackage.id)
+    ) {
+      return null;
+    }
+  } else if (persistedAgent === "hermes" && agent?.name !== "hermes") {
+    return null;
+  }
   if (agent && !agentRuntime.hasGatewayRuntime(agent)) return null;
   const requestGatewaySupervisorAction =
     options.requestGatewaySupervisorActionImpl ?? executeGatewaySupervisorAction;
@@ -819,6 +837,8 @@ function recoverSandboxProcesses(
     return null;
   }
   const persistedSandbox = registry.getSandbox(sandboxName);
+  const harnessPackage = persistedSandbox?.harnessPackage ?? null;
+  const receiptBacked = harnessPackage !== null;
   // Providers that launch NemoClaw's managed in-sandbox controller recover the
   // gateway through that controller. Restarting their runtime first replaces
   // the still-healthy supervisor and changes gateway parentage.
@@ -926,6 +946,19 @@ function recoverSandboxProcesses(
     if (!quiet) printGatewayRestartFailure(sandboxName, failure.layer, failure.detail);
     return null;
   };
+  if (receiptBacked) {
+    if (!agent || agent.name !== harnessPackage.id) {
+      const detail = `${persistedAgent ?? "receipt-backed"} package agent definition could not be loaded exactly.`;
+      if (!quiet) printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
+      return null;
+    }
+    if (!agentRuntime.hasGatewayRuntime(agent)) {
+      const detail = `${agentRuntime.getAgentDisplayName(agent)} declares runtime.kind 'terminal'; gateway recovery requires runtime.kind 'gateway'.`;
+      if (!quiet) printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
+      return null;
+    }
+    return recoverManagedGateway();
+  }
   if (persistedAgent === "hermes") {
     if (!isHermesAgent(agent)) {
       const detail = "Hermes agent definition could not be loaded.";
@@ -1354,16 +1387,28 @@ function printHostManagedGatewayRecoveryHints(
     return;
   }
   let agentName = agent?.name ?? null;
-  if (!agentName) {
-    try {
-      agentName = registry.getSandbox(sandboxName)?.agent ?? null;
-    } catch {
-      // Preserve the legacy OpenClaw hint when registry lookup itself failed.
-    }
+  let receiptBacked = false;
+  try {
+    const sandbox = registry.getSandbox(sandboxName);
+    agentName ??= sandbox?.agent ?? null;
+    receiptBacked = sandbox?.harnessPackage != null;
+  } catch {
+    // Preserve the legacy OpenClaw hint when registry lookup itself failed.
   }
-  if (!agentName || agentName === "openclaw" || agentName === "hermes") {
+  if (
+    (receiptBacked && agent != null && agentRuntime.hasGatewayRuntime(agent)) ||
+    (!receiptBacked && (!agentName || agentName === "openclaw" || agentName === "hermes"))
+  ) {
     console.error("  Retry the managed restart from the host:");
     console.error(`    nemoclaw ${quotedSandboxName} gateway restart`);
+  } else if (receiptBacked && agent != null && !agentRuntime.hasGatewayRuntime(agent)) {
+    console.error(
+      `  ${agentRuntime.getAgentDisplayName(agent)} declares runtime.kind 'terminal' and has no gateway to restart.`,
+    );
+    console.error(`  Retry package-aware recovery with: nemoclaw ${quotedSandboxName} recover`);
+  } else if (receiptBacked) {
+    console.error("  The receipt-backed package definition could not be resolved exactly.");
+    console.error(`  Retry package-aware recovery with: nemoclaw ${quotedSandboxName} recover`);
   } else {
     console.error("  This custom agent does not support the managed gateway restart command.");
     console.error("  After addressing its gateway log, retry agent-aware recovery from the host:");

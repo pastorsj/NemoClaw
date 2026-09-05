@@ -114,6 +114,62 @@ describe("checkAndRecoverSandboxProcesses", () => {
     });
   });
 
+  it("routes a future receipt-backed gateway package through managed recovery and hints", () => {
+    const agentRuntime = requireSource("../../src/lib/agent/runtime.js");
+    const registry = requireSource("../../src/lib/state/registry.js");
+    const requestGatewaySupervisorAction = vi.fn(() => ({
+      status: 1,
+      stdout: "",
+      stderr: "GATEWAY_FAILED",
+    }));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "1.2.3",
+      contentDigest: "c".repeat(64),
+    };
+    const futureAgent = {
+      name: harnessPackage.id,
+      displayName: "Future Gateway",
+      runtime: { kind: "gateway" },
+      forwardPort: 19_000,
+      healthProbe: {
+        url: "http://127.0.0.1:19000/health",
+        port: 19_000,
+        timeout_seconds: 5,
+      },
+    };
+
+    vi.spyOn(agentRuntime, "getSessionAgent").mockReturnValue(futureAgent as never);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "future-box",
+      agent: harnessPackage.id,
+      harnessPackage,
+      openshellDriver: "docker",
+      dashboardPort: 19_000,
+    });
+
+    expect(
+      checkAndRecoverSandboxProcesses("future-box", {
+        quiet: false,
+        isSandboxGatewayRunningImpl: () => false,
+        requestGatewaySupervisorAction,
+      }),
+    ).toEqual({
+      checked: true,
+      wasRunning: false,
+      recovered: false,
+      forwardRecovered: false,
+    });
+    expect(requestGatewaySupervisorAction).toHaveBeenCalledWith("future-box", "recover");
+    const errorOutput = errorSpy.mock.calls.flat().join("\n");
+    expect(errorOutput).toContain("nemoclaw 'future-box' gateway restart");
+    expect(errorOutput).not.toContain("custom agent does not support");
+    expect(logSpy.mock.calls.flat().join("\n")).toContain("Future Gateway gateway is not running");
+  });
+
   it("waits for stopped Hermes recovery after managed OpenShell control succeeds", () => {
     const openshellRuntime = requireSource("../../src/lib/adapters/openshell/runtime.js");
     const agentRuntime = requireSource("../../src/lib/agent/runtime.js");

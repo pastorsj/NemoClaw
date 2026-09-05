@@ -4,6 +4,7 @@
 import { GATEWAY_RESTART_MARKERS as MARKERS } from "../../agent/gateway-restart-markers";
 import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/identity";
 import { G, R } from "../../cli/terminal-style";
 import { redactFullWithUrls } from "../../security/redact";
 import {
@@ -97,7 +98,12 @@ export type GatewayRestartResult =
       healthPassed: true;
     };
 
-type SandboxAgentLookup = (sandboxName: string) => { agent?: string | null } | null | undefined;
+type SandboxAgentRecord = {
+  agent?: string | null;
+  harnessPackage?: HarnessPackageIdentity | null;
+};
+
+type SandboxAgentLookup = (sandboxName: string) => SandboxAgentRecord | null | undefined;
 
 type SupervisorAction = (
   sandboxName: string,
@@ -385,10 +391,16 @@ export function printGatewayRestartFailure(
   }
 }
 
-function unsupportedGatewayRestartAgentDetail(agentName: string, reason: string): string {
+function unsupportedGatewayRestartAgentDetail(
+  agentName: string,
+  reason: string,
+  receiptBacked = false,
+): string {
   return [
     `Agent '${agentName}' does not support gateway restart.`,
-    `Gateway restart-supported agents: ${GATEWAY_RESTART_SUPPORTED_AGENTS.join(", ")}.`,
+    receiptBacked
+      ? "Receipt-backed packages support gateway restart when their manifest declares runtime.kind 'gateway'."
+      : `Gateway restart-supported agents: ${GATEWAY_RESTART_SUPPORTED_AGENTS.join(", ")}.`,
     reason,
   ].join("\n");
 }
@@ -417,9 +429,11 @@ export function restartSandboxGatewayWithDeps(
   },
 ): GatewayRestartResult {
   const agent = deps.getSessionAgent(sandboxName);
+  let sandbox: SandboxAgentRecord | null | undefined;
   let persistedAgent: string | null;
   try {
-    persistedAgent = sandboxAgentName(sandboxName, deps.getSandbox);
+    sandbox = deps.getSandbox(sandboxName);
+    persistedAgent = sandbox?.agent ?? null;
   } catch (error) {
     const reason =
       error instanceof Error && error.message.trim()
@@ -432,11 +446,13 @@ export function restartSandboxGatewayWithDeps(
   const agentName = agent?.name ?? persistedAgent ?? "openclaw";
   const dashboardPort = deps.resolveSandboxDashboardPort(sandboxName);
   const persistedAgentName = persistedAgent ?? "openclaw";
+  const receiptBacked = sandbox?.harnessPackage != null;
 
   if (agent && agent.name !== persistedAgentName) {
     const detail = unsupportedGatewayRestartAgentDetail(
       agent.name,
       `The supplied agent definition does not match the sandbox's persisted '${persistedAgentName}' agent.`,
+      receiptBacked,
     );
     printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
     return { ok: false, failureLayer: "unsupported agent", detail };
@@ -446,6 +462,7 @@ export function restartSandboxGatewayWithDeps(
     const detail = unsupportedGatewayRestartAgentDetail(
       persistedAgent,
       `${persistedAgent} agent definition could not be loaded.`,
+      receiptBacked,
     );
     printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
     return { ok: false, failureLayer: "unsupported agent", detail };
@@ -453,12 +470,25 @@ export function restartSandboxGatewayWithDeps(
   if (agent && !agentRuntime.hasGatewayRuntime(agent)) {
     const detail = unsupportedGatewayRestartAgentDetail(
       agent.name,
-      `${agentRuntime.getAgentDisplayName(agent)} has no gateway runtime.`,
+      receiptBacked
+        ? `${agentRuntime.getAgentDisplayName(agent)} declares runtime.kind 'terminal'; gateway restart requires runtime.kind 'gateway'.`
+        : `${agentRuntime.getAgentDisplayName(agent)} has no gateway runtime.`,
+      receiptBacked,
     );
     printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
     return { ok: false, failureLayer: "unsupported agent", detail };
   }
-  if (agentName === "hermes") {
+  if (receiptBacked) {
+    if (!agent || agent.name !== agentName) {
+      const detail = unsupportedGatewayRestartAgentDetail(
+        agentName,
+        "The package receipt's agent definition could not be resolved exactly.",
+        true,
+      );
+      printGatewayRestartFailure(sandboxName, "unsupported agent", detail);
+      return { ok: false, failureLayer: "unsupported agent", detail };
+    }
+  } else if (agentName === "hermes") {
     if (!agent || agent.name !== "hermes") {
       const detail = "Hermes agent definition could not be loaded.";
       printGatewayRestartFailure(sandboxName, "unsupported agent", detail);

@@ -670,6 +670,43 @@ describe("restartSandboxGateway — host-mediated gateway restart", () => {
     }
   });
 
+  it("uses a receipt-backed gateway runtime without dispatching on its package id", () => {
+    const restore = silenceConsole();
+    try {
+      const deps = baseDeps({
+        getSessionAgent: () => ({
+          name: "future-gateway",
+          displayName: "Future Gateway",
+          runtime: { kind: "gateway" },
+        }),
+        getSandbox: () => ({
+          name: "future-box",
+          agent: "future-gateway",
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-gateway",
+            packageVersion: "1.2.3",
+            contentDigest: "a".repeat(64),
+          },
+        }),
+      });
+
+      expect(restartSandboxGateway("future-box", { quiet: true, deps })).toEqual({
+        ok: true,
+        restarted: true,
+        healthPassed: true,
+        forwardRecovered: true,
+      });
+      expect(deps.requestGatewaySupervisorAction).toHaveBeenCalledWith(
+        "future-box",
+        "restart",
+        210000,
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("reports the primary forward failure ahead of failed auxiliary forwards", () => {
     const restore = silenceConsole();
     try {
@@ -722,6 +759,45 @@ describe("restartSandboxGateway — host-mediated gateway restart", () => {
         "Agent 'langchain-deepagents-code' does not support gateway restart.",
       );
       expect(errorOutput).toContain("Gateway restart-supported agents: openclaw, hermes.");
+      expect(deps.requestGatewaySupervisorAction).not.toHaveBeenCalled();
+    } finally {
+      restore();
+    }
+  });
+
+  it("explains receipt-backed terminal runtime incompatibility without a harness allowlist", () => {
+    const restore = silenceConsole();
+    try {
+      const deps = baseDeps({
+        getSessionAgent: () => ({
+          name: "future-terminal",
+          displayName: "Future Terminal",
+          runtime: { kind: "terminal" },
+        }),
+        getSandbox: () => ({
+          name: "future-box",
+          agent: "future-terminal",
+          harnessPackage: {
+            kind: "agent-runtime",
+            id: "future-terminal",
+            packageVersion: "2.0.0",
+            contentDigest: "b".repeat(64),
+          },
+        }),
+      });
+
+      const result = restartSandboxGateway("future-box", { quiet: true, deps });
+
+      expect(result).toMatchObject({ ok: false, failureLayer: "unsupported agent" });
+      expect(result.ok).toBe(false);
+      const detail = (result as Extract<typeof result, { ok: false }>).detail;
+      expect(detail).toContain(
+        "Receipt-backed packages support gateway restart when their manifest declares runtime.kind 'gateway'.",
+      );
+      expect(detail).toContain(
+        "Future Terminal declares runtime.kind 'terminal'; gateway restart requires runtime.kind 'gateway'.",
+      );
+      expect(detail).not.toContain("openclaw, hermes");
       expect(deps.requestGatewaySupervisorAction).not.toHaveBeenCalled();
     } finally {
       restore();
