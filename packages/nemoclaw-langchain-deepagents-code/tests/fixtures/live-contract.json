@@ -1,0 +1,10 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "packageId": "langchain-deepagents-code",
+  "adapterId": "nvidia.fabric.langchain.deepagents",
+  "artifactRoot": "/sandbox/.deepagents/fabric-artifacts",
+  "configPath": "/sandbox/.deepagents/fabric.json",
+  "descriptorGlob": "/opt/nemoclaw-fabric-venv/share/nemo-fabric/adapters/deepagents/deepagents.fabric-adapter.json",
+  "descriptorPathPrefix": "/opt/nemoclaw-fabric-venv/share/nemo-fabric",
+  "descriptorRunnerModule": "nemo_fabric_adapters.deepagents.adapter"
+}

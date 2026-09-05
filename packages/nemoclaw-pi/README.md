@@ -78,6 +78,15 @@ ambient checkout boundary. `npm test` runs the package and ambient composition l
 Fabric lane includes the direct Fabric cases. Use the `composed` in-tree overlay rehearsal in
 [`packages/README.md`](../README.md) with package ID `pi` to pin a supplied core commit.
 
+Pi intentionally does not provide the generic live-package fixture used by
+[`tools/e2e/fabric-package.mts`](../../tools/e2e/fabric-package.mts). That journey performs ordinary
+onboarding. Core exposes Pi only with a published qualification receipt and the matching
+managed-image catalog. The
+[`pi-agent-qualification` journey](../../test/e2e/live/pi-agent-qualification.test.ts) owns Pi's
+live test. It covers package installation, qualified-image onboarding, native and Fabric turns,
+restart and rebuild recovery, and cleanup. Pi can adopt the ordinary package journey after it
+becomes selectable without candidate qualification.
+
 Pi does not yet have a package-owned archive test. The root
 `test/package-contract/bundled-harnesses.test.ts` test verifies its materialized package and packed
 root artifact. Add a package-owned archive test before Pi moves to an independent repository.

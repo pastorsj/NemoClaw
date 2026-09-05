@@ -40,6 +40,28 @@ const PACKAGE_CASES = [
   },
 ] as const;
 
+const BUNDLED_PACKAGE_CASES = [
+  {
+    id: "openclaw",
+    adapterId: "nvidia.nemoclaw.openclaw",
+    fixture: "packages/nemoclaw-openclaw/tests/fixtures/live-contract.json",
+    runnerModule: "nemoclaw_openclaw_fabric.adapter",
+  },
+  {
+    id: "hermes",
+    adapterId: "nvidia.nemoclaw.hermes",
+    fixture: "packages/nemoclaw-hermes/tests/fixtures/live-contract.json",
+    runnerModule: "nemoclaw_hermes_fabric.adapter",
+  },
+  {
+    id: "langchain-deepagents-code",
+    adapterId: "nvidia.fabric.langchain.deepagents",
+    fixture: "packages/nemoclaw-langchain-deepagents-code/tests/fixtures/live-contract.json",
+    runnerModule: "nemo_fabric_adapters.deepagents.adapter",
+  },
+  ...PACKAGE_CASES,
+] as const;
+
 const temporaryDirectories: string[] = [];
 
 afterEach(() => {
@@ -49,30 +71,20 @@ afterEach(() => {
 });
 
 describe("generic Fabric package E2E", () => {
-  it.each(["openclaw", "hermes"] as const)(
-    "loads the conventional %s contract from its package",
-    (packageId) => {
-      const contract = readBundledFabricHarnessE2eFixture(packageId);
+  it.each(BUNDLED_PACKAGE_CASES)(
+    "loads the conventional $id contract from its package",
+    (fixture) => {
+      const contract = readBundledFabricHarnessE2eFixture(fixture.id);
 
-      expect(contract).toEqual(
-        readFabricHarnessE2eFixture(
-          `packages/nemoclaw-${packageId}/tests/fixtures/live-contract.json`,
-        ),
-      );
-      expect(contract.packageId).toBe(packageId);
+      expect(contract).toEqual(readFabricHarnessE2eFixture(fixture.fixture));
+      expect(contract).toMatchObject({
+        packageId: fixture.id,
+        adapterId: fixture.adapterId,
+        descriptorRunnerModule: fixture.runnerModule,
+      });
+      expect(Object.isFrozen(contract)).toBe(true);
     },
   );
-
-  it.each(PACKAGE_CASES)("reads the $id contract from its package fixture", (fixture) => {
-    const contract = readFabricHarnessE2eFixture(fixture.fixture);
-
-    expect(contract).toMatchObject({
-      packageId: fixture.id,
-      adapterId: fixture.adapterId,
-      descriptorRunnerModule: fixture.runnerModule,
-    });
-    expect(Object.isFrozen(contract)).toBe(true);
-  });
 
   it.each(PACKAGE_CASES)("builds the $id catalogue row from package-owned data", (fixture) => {
     const target = catalogueTarget(`${fixture.id}-fabric`);
