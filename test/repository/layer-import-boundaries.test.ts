@@ -114,6 +114,59 @@ describe("CLI layer import boundaries (#6245)", () => {
     ).toEqual([]);
   });
 
+  it("keeps generic harness contract modules free of discovered package IDs", () => {
+    const violations = scanFixture(
+      fixturePath("src/lib/agent-runtime/adapter", "package-id"),
+      'export const packageId = "pi";\n',
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        rule: "harness-contract-neutrality",
+        detail: "generic harness contract code must not encode package ID 'pi'",
+      }),
+    ]);
+  });
+
+  it("discovers future package IDs from their manifests", () => {
+    const packagesRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-packages-"));
+    const packageRoot = path.join(packagesRoot, "future-runtime");
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@example/future-runtime",
+        nemoclaw: { harnessManifest: "manifest.yaml" },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "manifest.yaml"), "name: future-harness\n");
+    try {
+      expect(
+        scanFixture(
+          fixturePath("src/lib/agent-runtime/package", "future-package-id"),
+          'export const packageId = "future-harness";\n',
+          packagesRoot,
+        ),
+      ).toEqual([
+        expect.objectContaining({
+          rule: "harness-contract-neutrality",
+          detail: "generic harness contract code must not encode package ID 'future-harness'",
+        }),
+      ]);
+    } finally {
+      fs.rmSync(packagesRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("allows package names in comments and explanatory text", () => {
+    expect(
+      scanFixture(
+        fixturePath("src/lib/agent-runtime/adapter", "package-id-prose"),
+        '// pi is an example only.\nexport const explanation = "pi-compatible example";\n',
+      ),
+    ).toEqual([]);
+  });
+
   it("collects TypeScript import-equals references (#6245)", () => {
     const violations = scanFixture(
       fixturePath("src/lib/domain", "import-equals"),

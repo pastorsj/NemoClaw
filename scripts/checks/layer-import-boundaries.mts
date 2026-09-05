@@ -5,6 +5,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { parse as parseYaml } from "yaml";
 
 type Violation = {
   file: string;
@@ -23,6 +24,7 @@ type ImportRef = {
 type AgentRuntimePackageDependency = {
   packageName: string;
   packageRoot: string;
+  packageId?: string;
 };
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -72,6 +74,13 @@ const MANAGED_STATE_ROOT_PROVIDER_MODULES = [
   "src/lib/onboard/managed-bootstrap/podman-runtime.ts",
 ] as const;
 const MANAGED_AGENT_IDS = new Set(["openclaw", "hermes", "langchain-deepagents-code", "pi"]);
+const HARNESS_AGNOSTIC_RUNTIME_PREFIXES = [
+  "src/lib/agent-runtime/adapter/",
+  "src/lib/agent-runtime/package/",
+] as const;
+// This module translates pre-contract registry records. Keep the exception visible until the
+// compatibility reader can be removed; new package authority must stay package-ID agnostic.
+const LEGACY_HARNESS_ID_MODULES = new Set(["src/lib/agent-runtime/package/identity.ts"]);
 
 function toRepoPath(absPath: string): string {
   return path.relative(REPO_ROOT, absPath).split(path.sep).join("/");
@@ -239,12 +248,56 @@ function readAgentRuntimePackageDependencies(
         `Agent runtime package metadata has no package name: ${toRepoPath(packageRoot)}`,
       );
     }
+    const manifestPath = path.resolve(packageRoot, metadata.nemoclaw.harnessManifest);
+    let packageId: string | undefined;
+    if (existsSync(manifestPath)) {
+      const manifest = parseYaml(readFileSync(manifestPath, "utf8")) as unknown;
+      if (
+        typeof manifest === "object" &&
+        manifest !== null &&
+        !Array.isArray(manifest) &&
+        typeof (manifest as { name?: unknown }).name === "string"
+      ) {
+        packageId = (manifest as { name: string }).name;
+      }
+    }
     packages.push({
       packageName: metadata.name,
       packageRoot: toRepoPath(realpathSync(packageRoot)),
+      ...(packageId ? { packageId } : {}),
     });
   }
   return packages.sort((left, right) => left.packageName.localeCompare(right.packageName));
+}
+
+function checkHarnessAgnosticRuntimeModule(
+  repoPath: string,
+  sourceFile: ts.SourceFile,
+  packageIds: ReadonlySet<string>,
+  violations: Violation[],
+): void {
+  if (
+    LEGACY_HARNESS_ID_MODULES.has(repoPath) ||
+    !HARNESS_AGNOSTIC_RUNTIME_PREFIXES.some((prefix) => repoPath.startsWith(prefix))
+  ) {
+    return;
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node) && packageIds.has(node.text)) {
+      const pos = position(sourceFile, node);
+      addViolation(
+        violations,
+        repoPath,
+        pos.line,
+        pos.column,
+        "harness-contract-neutrality",
+        `generic harness contract code must not encode package ID '${node.text}'`,
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
 }
 
 function importedAgentRuntimePackage(
@@ -595,6 +648,11 @@ export function findLayerImportBoundaryViolations(
 ): Violation[] {
   const violations: Violation[] = [];
   const agentRuntimePackages = readAgentRuntimePackageDependencies(packagesRoot);
+  const packageIds = new Set(
+    agentRuntimePackages
+      .map((dependency) => dependency.packageId)
+      .filter((packageId): packageId is string => packageId !== undefined),
+  );
   const usedLegacyAgentRuntimeImports = new Map<string, number>();
   for (const absPath of walk(root)) {
     const repoPath = toRepoPath(absPath);
@@ -614,6 +672,7 @@ export function findLayerImportBoundaryViolations(
       usedLegacyAgentRuntimeImports,
       violations,
     );
+    checkHarnessAgnosticRuntimeModule(repoPath, sourceFile, packageIds, violations);
     if (!domainFile && !actionFile && !adapterFile && !messagingManifestFile && !commandFile) {
       checkNoBinLibShimImport(absPath, repoPath, collectPreprocessedImportRefs(source), violations);
       continue;
