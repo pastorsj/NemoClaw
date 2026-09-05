@@ -81,3 +81,38 @@ describe("agent runtime headless environment", () => {
     ).toThrow("requires runtime.headless_command");
   });
 });
+
+describe("agent runtime prompt transport", () => {
+  it.each(["argv", "stdin"] as const)("reads the explicit %s transport", (promptTransport) => {
+    expect(
+      readAgentRuntime({
+        runtime: {
+          headless_command: "example-agent run",
+          prompt_transport: promptTransport,
+        },
+      }).prompt_transport,
+    ).toBe(promptTransport);
+  });
+
+  it("rejects an unknown transport", () => {
+    expect(() =>
+      readAgentRuntime({
+        runtime: {
+          headless_command: "example-agent run",
+          prompt_transport: "automatic",
+        },
+      }),
+    ).toThrow("runtime.prompt_transport' must be argv or stdin");
+  });
+
+  it("rejects prompt transport without a headless command", () => {
+    expect(() =>
+      readAgentRuntime({
+        runtime: {
+          interactive_command: "example-agent",
+          prompt_transport: "stdin",
+        },
+      }),
+    ).toThrow("runtime.prompt_transport' requires runtime.headless_command");
+  });
+});

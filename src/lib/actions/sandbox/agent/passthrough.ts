@@ -20,8 +20,8 @@
 //      agent flags verbatim. Terminal-runtime dispatch uses that manifest
 //      command only when it can be represented as simple whitespace-delimited
 //      argv tokens; shell quoting/escaping fails closed until manifests expose
-//      argv natively. For a Fabric headless command, NemoClaw recognizes only
-//      the shared prompt grammar and delivers that prompt over private stdin.
+//      argv natively. A package explicitly selects private standard-input
+//      prompt transport; core never infers transport from an executable name.
 //      Bare, help, and option-first calls use the manifest's native command, so
 //      core does not need to understand a package-specific option grammar.
 //    - Source-fix constraint: NemoClaw cannot prove agent type from anywhere
@@ -116,8 +116,6 @@
 //     argv arrays natively.
 //   - Drop Ollama pre-dispatch recovery when supported daemon restarts preserve
 //     loaded runners or NemoClaw manages and warms the daemon lifecycle.
-
-import path from "node:path";
 
 import { type AgentDefinition, isTerminalAgent } from "../../../agent/defs";
 import { CLI_NAME } from "../../../cli/branding";
@@ -361,18 +359,6 @@ function isPlainPromptInvocation(args: readonly string[]): boolean {
   return args.length > 0 && args.every((arg) => arg.trim().length > 0 && !arg.startsWith("-"));
 }
 
-function matchesExecutableName(command: string | undefined, executableName: string): boolean {
-  if (command === executableName) return true;
-  return Boolean(
-    command && path.posix.isAbsolute(command) && path.posix.basename(command) === executableName,
-  );
-}
-
-function isFabricRunCommand(command: readonly string[]): boolean {
-  if (matchesExecutableName(command[0], "nemoclaw-fabric-run")) return true;
-  return matchesExecutableName(command[0], "nemoclaw-fabric") && command[1] === "run";
-}
-
 function parseFabricPromptArguments(extraArgs: readonly string[]): FabricArgumentResult {
   const jsonCount = extraArgs.filter((argument) => argument === "--json").length;
   const jsonOutput = jsonCount === 1;
@@ -429,11 +415,12 @@ function buildManifestInvocation(
   agentName: string,
   headlessCommand: readonly string[],
   nativeCommand: ManifestCommandResult,
+  promptTransport: "argv" | "stdin" | undefined,
   headlessEnvironment: Readonly<Record<string, string>> | undefined,
   extraArgs: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
 ): AgentPassthroughInvocation {
-  if (!isFabricRunCommand(headlessCommand)) {
+  if (promptTransport !== "stdin") {
     return {
       command: [...headlessCommand, ...extraArgs],
       ...(headlessEnvironment ? { environment: headlessEnvironment } : {}),
@@ -535,6 +522,7 @@ function getPassthroughCommand(
     agentName,
     manifestCommand.argv,
     getNativePassthroughCommand(agent),
+    agent.runtime?.prompt_transport,
     agent.runtime?.headless_environment,
     extraArgs,
     proc,

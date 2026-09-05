@@ -7,6 +7,8 @@ export type AgentRuntimeKind = "gateway" | "terminal";
 
 export type AgentCommandShell = "/bin/sh" | "/bin/bash";
 
+export type AgentPromptTransport = "argv" | "stdin";
+
 export interface LoginShellSmokeBoundary {
   kind: "login-shell";
 }
@@ -23,6 +25,7 @@ export interface AgentRuntime {
   kind: AgentRuntimeKind;
   interactive_command?: string;
   headless_command?: string;
+  prompt_transport?: AgentPromptTransport;
   command_shell?: AgentCommandShell;
   startup_environment?: Readonly<Record<string, string>>;
   headless_environment?: Readonly<Record<string, string>>;
@@ -110,6 +113,15 @@ function readCommandShell(record: RuntimeRecord): AgentCommandShell | undefined 
   return value;
 }
 
+function readPromptTransport(record: RuntimeRecord): AgentPromptTransport | undefined {
+  const value = record.prompt_transport;
+  if (value === undefined) return undefined;
+  if (value !== "argv" && value !== "stdin") {
+    throw new Error("Agent manifest field 'runtime.prompt_transport' must be argv or stdin");
+  }
+  return value;
+}
+
 function readCanonicalAbsolutePath(value: unknown, field: string): string {
   if (typeof value !== "string" || !value.startsWith("/")) {
     throw new Error(`Agent manifest field '${field}' must be a canonical absolute path`);
@@ -155,6 +167,7 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
   const kind: AgentRuntimeKind = rawKind === "terminal" ? "terminal" : "gateway";
   const interactiveCommand = readString(runtime, "interactive_command")?.trim();
   const headlessCommand = readString(runtime, "headless_command")?.trim();
+  const promptTransport = readPromptTransport(runtime);
   const commandShell = readCommandShell(runtime);
   const startupEnvironment = readPublicEnvironment(runtime, "startup_environment");
   const headlessEnvironment = readPublicEnvironment(runtime, "headless_environment");
@@ -171,11 +184,17 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
       "Agent manifest field 'runtime.headless_environment' requires runtime.headless_command",
     );
   }
+  if (promptTransport && !headlessCommand) {
+    throw new Error(
+      "Agent manifest field 'runtime.prompt_transport' requires runtime.headless_command",
+    );
+  }
 
   return {
     kind,
     ...(interactiveCommand ? { interactive_command: interactiveCommand } : {}),
     ...(headlessCommand ? { headless_command: headlessCommand } : {}),
+    ...(promptTransport ? { prompt_transport: promptTransport } : {}),
     ...(commandShell ? { command_shell: commandShell } : {}),
     ...(startupEnvironment ? { startup_environment: startupEnvironment } : {}),
     ...(headlessEnvironment ? { headless_environment: headlessEnvironment } : {}),

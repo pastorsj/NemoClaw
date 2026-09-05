@@ -25,6 +25,7 @@ runtime:
   command_shell: /bin/bash
   interactive_command: "pi"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.pi/agent/fabric.json"
+  prompt_transport: stdin
   smoke_boundary:
     kind: login-shell
   smoke_commands:

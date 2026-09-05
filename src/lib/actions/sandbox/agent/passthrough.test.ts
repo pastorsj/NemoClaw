@@ -40,6 +40,7 @@ const loadAgentMock = vi.hoisted(() =>
         kind: string;
         interactive_command?: string;
         headless_command?: string;
+        prompt_transport?: "argv" | "stdin";
       };
     } => ({
       name,
@@ -49,6 +50,7 @@ const loadAgentMock = vi.hoisted(() =>
               kind: "terminal",
               interactive_command: "dcode",
               headless_command: "nemoclaw-fabric run",
+              prompt_transport: "stdin",
             }
           : undefined,
     }),
@@ -198,6 +200,7 @@ describe("runAgentPassthrough", () => {
           kind: "gateway",
           interactive_command: "hermes",
           headless_command: "nemoclaw-fabric run --config /sandbox/.hermes/fabric.json",
+          prompt_transport: "stdin",
           headless_environment: {
             HERMES_MANAGED_INFERENCE_ROUTE: "nemoclaw-managed-inference",
           },
@@ -384,6 +387,7 @@ describe("runAgentPassthrough", () => {
           kind: "gateway",
           interactive_command: "openclaw tui",
           headless_command: "nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json",
+          prompt_transport: "stdin",
         },
       } as ResolvedSandboxAgent["definition"],
       harnessPackage,
@@ -423,6 +427,7 @@ describe("runAgentPassthrough", () => {
           kind: "gateway",
           interactive_command: "openclaw tui",
           headless_command: "nemoclaw-fabric run --config /sandbox/.openclaw/fabric.json",
+          prompt_transport: "stdin",
         },
       } as ResolvedSandboxAgent["definition"],
       harnessPackage,
@@ -721,6 +726,7 @@ describe("runAgentPassthrough", () => {
             kind: runtimeKind,
             interactive_command: nativeCommand,
             headless_command: "nemoclaw-fabric run --config /sandbox/runtime/fabric.json",
+            prompt_transport: "stdin",
           },
         } as ResolvedSandboxAgent["definition"],
         harnessPackage: null,
@@ -824,6 +830,7 @@ describe("runAgentPassthrough", () => {
             kind: "terminal",
             interactive_command: "package-agent",
             headless_command: headlessCommand,
+            prompt_transport: "stdin",
           },
         } as ResolvedSandboxAgent["definition"],
         harnessPackage: null,
@@ -840,6 +847,67 @@ describe("runAgentPassthrough", () => {
       expect(invocation?.[2]).toEqual({ stdinInput: sentinel, tty: false });
     },
   );
+
+  it("uses declared stdin transport without recognizing the executable name", async () => {
+    const sentinel = "declared-private-prompt-8a2f";
+    const entry = { agent: "package-agent" };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "package-agent",
+      effectiveAgentId: "package-agent",
+      definition: {
+        name: "package-agent",
+        runtime: {
+          kind: "terminal",
+          interactive_command: "package-agent",
+          headless_command: "package-private-runner --request-mode single",
+          prompt_transport: "stdin",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+
+    await runAgentPassthrough("declared-stdin", { extraArgs: [sentinel] });
+
+    expect(execMock).toHaveBeenCalledWith(
+      "declared-stdin",
+      ["package-private-runner", "--request-mode", "single", "--stdin"],
+      { stdinInput: sentinel, tty: false },
+    );
+  });
+
+  it("does not infer stdin transport from a Fabric-shaped executable name", async () => {
+    const entry = { agent: "package-agent" };
+    getSandboxMock.mockReturnValueOnce(entry as never);
+    resolveLifecycleEligibleSandboxAgentMock.mockReturnValueOnce({
+      recordedAgent: "package-agent",
+      effectiveAgentId: "package-agent",
+      definition: {
+        name: "package-agent",
+        runtime: {
+          kind: "terminal",
+          interactive_command: "package-agent",
+          headless_command: "nemoclaw-fabric-run --config /sandbox/package/fabric.json",
+        },
+      } as ResolvedSandboxAgent["definition"],
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    });
+
+    await runAgentPassthrough("declared-argv", { extraArgs: ["public-prompt"] });
+
+    expect(execMock).toHaveBeenCalledWith(
+      "declared-argv",
+      [
+        "nemoclaw-fabric-run",
+        "--config",
+        "/sandbox/package/fabric.json",
+        "public-prompt",
+      ],
+      { tty: false },
+    );
+  });
 
   it.each([
     {
@@ -892,6 +960,7 @@ describe("runAgentPassthrough", () => {
           kind: "gateway",
           interactive_command: "hermes",
           headless_command: "nemoclaw-fabric run --config /sandbox/.hermes/fabric.json",
+          prompt_transport: "stdin",
         },
       } as ResolvedSandboxAgent["definition"],
       harnessPackage: null,

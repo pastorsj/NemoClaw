@@ -35,6 +35,7 @@ runtime:
   command_shell: /bin/sh
   interactive_command: "openclaw tui"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 15 --config /sandbox/.openclaw/fabric.json"
+  prompt_transport: stdin
   smoke_boundary:
     kind: login-shell
   smoke_commands:

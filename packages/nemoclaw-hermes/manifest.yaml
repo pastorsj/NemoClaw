@@ -36,6 +36,7 @@ runtime:
   command_shell: /bin/sh
   interactive_command: "hermes"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.hermes/fabric.json"
+  prompt_transport: stdin
   # These public constants must exist in the supervisor's initial environment.
   # The authenticated recovery helper validates that exact process boundary.
   startup_environment:

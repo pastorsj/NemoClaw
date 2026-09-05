@@ -23,6 +23,7 @@ describe("agent passthrough lifecycle exit", () => {
           kind: "gateway" as const,
           interactive_command: "hermes",
           headless_command: "nemoclaw-fabric run --config /sandbox/.hermes/fabric.json",
+          prompt_transport: "stdin" as const,
         },
       },
       harnessPackage,

@@ -57,6 +57,7 @@ runtime:
   command_shell: /bin/sh
   interactive_command: "dcode"
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.deepagents/fabric.json"
+  prompt_transport: stdin
   smoke_boundary:
     kind: managed-launcher
     launcher: /usr/local/lib/nemoclaw/dcode-managed-exec

@@ -83,6 +83,7 @@ function writeFutureAuthoringPackage(): void {
       "  kind: terminal",
       "  interactive_command: future-terminal",
       `  headless_command: nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ${FABRIC_CONFIG_PATH}`,
+      "  prompt_transport: stdin",
       "mcp:",
       "  support: disabled",
       "  reason: This package does not expose MCP.",
