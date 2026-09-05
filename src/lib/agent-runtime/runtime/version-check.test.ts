@@ -44,6 +44,27 @@ describe("checkTerminalAgentVersion (#6193)", () => {
     });
   });
 
+  it("reports current for a matching semantic prerelease", () => {
+    const agent = makeAgent({
+      name: "example-agent",
+      displayName: "Example Agent",
+      versionCommand: "EXAMPLE_HOME=/sandbox/.example /opt/example/bin/example-agent --version",
+      expectedVersion: "0.1.2-rc.1",
+    });
+    expect(
+      checkTerminalAgentVersion(
+        "example-sb",
+        agent,
+        vi.fn(() => "0.1.2-rc.1"),
+      ),
+    ).toEqual({
+      status: "current",
+      installedVersion: "0.1.2-rc.1",
+      expectedVersion: "0.1.2-rc.1",
+      schemeMismatch: false,
+    });
+  });
+
   it("uses the package-declared command shell for the version probe", () => {
     const runner = vi.fn(() => "example-agent 0.84.1");
 

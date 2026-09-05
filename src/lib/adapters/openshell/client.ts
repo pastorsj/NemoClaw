@@ -105,7 +105,43 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const SEMVER_PATTERN = /(?:^|[^0-9.])([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])/;
+const SEMVER_PATTERN =
+  /(?:^|[^0-9A-Za-z.]|[vV])([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?![0-9A-Za-z.+-])/;
+
+interface ComparableVersion {
+  readonly core: readonly [number, number, number];
+  readonly prerelease: readonly string[];
+}
+
+function parseComparableVersion(value: string): ComparableVersion | null {
+  const normalized = String(value).trim().replace(/^v/u, "") || "0.0.0";
+  const match = normalized.match(
+    /^([0-9]+)(?:\.([0-9]+))?(?:\.([0-9]+))?(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u,
+  );
+  if (!match) return null;
+  return {
+    core: [Number(match[1]), Number(match[2] ?? 0), Number(match[3] ?? 0)],
+    prerelease: match[4]?.split(".") ?? [],
+  };
+}
+
+function comparePrerelease(left: readonly string[], right: readonly string[]): number {
+  if (left.length === 0 || right.length === 0)
+    return left.length === right.length ? 0 : left.length ? -1 : 1;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left[index];
+    const rightPart = right[index];
+    if (leftPart === undefined || rightPart === undefined) return leftPart === undefined ? -1 : 1;
+    if (leftPart === rightPart) continue;
+    const leftNumeric = /^[0-9]+$/u.test(leftPart);
+    const rightNumeric = /^[0-9]+$/u.test(rightPart);
+    if (leftNumeric && rightNumeric) return Number(leftPart) > Number(rightPart) ? 1 : -1;
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart > rightPart ? 1 : -1;
+  }
+  return 0;
+}
 
 export function parseVersionFromText(value = "", versionCommand?: string): string | null {
   const text = String(value || "");
@@ -131,20 +167,16 @@ export function parseVersionFromText(value = "", versionCommand?: string): strin
 }
 
 export function versionGte(left = "0.0.0", right = "0.0.0"): boolean {
-  const lhs = String(left)
-    .split(".")
-    .map((part) => Number.parseInt(part, 10) || 0);
-  const rhs = String(right)
-    .split(".")
-    .map((part) => Number.parseInt(part, 10) || 0);
-  const length = Math.max(lhs.length, rhs.length);
-  for (let index = 0; index < length; index += 1) {
-    const a = lhs[index] || 0;
-    const b = rhs[index] || 0;
+  const lhs = parseComparableVersion(left);
+  const rhs = parseComparableVersion(right);
+  if (!lhs || !rhs) return false;
+  for (let index = 0; index < lhs.core.length; index += 1) {
+    const a = lhs.core[index];
+    const b = rhs.core[index];
     if (a > b) return true;
     if (a < b) return false;
   }
-  return true;
+  return comparePrerelease(lhs.prerelease, rhs.prerelease) >= 0;
 }
 
 function handleSpawnError(

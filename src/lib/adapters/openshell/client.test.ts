@@ -95,6 +95,12 @@ describe("openshell helpers", () => {
       parseVersionFromText("built on 2026.7.1, dcode 0.1.12, dcode 0.2.0", "dcode --version"),
     ).toBe("0.1.12");
     expect(parseVersionFromText("dcode 0.1.12", "/opt/venv/bin/dcode --version")).toBe("0.1.12");
+    expect(
+      parseVersionFromText(
+        "0.1.2-rc.1",
+        "DSH_HOME=/sandbox/.deepseek-harness /opt/venv/bin/dsh --version",
+      ),
+    ).toBe("0.1.2-rc.1");
     expect(parseVersionFromText("OpenClaw 2026.5.27.1", "openclaw --version")).toBeNull();
     expect(parseVersionFromText("no version here")).toBeNull();
   });
@@ -103,6 +109,10 @@ describe("openshell helpers", () => {
     expect(versionGte("0.0.9", "0.0.7")).toBe(true);
     expect(versionGte("0.0.7", "0.0.7")).toBe(true);
     expect(versionGte("0.0.6", "0.0.7")).toBe(false);
+    expect(versionGte("0.1.2-rc.1", "0.1.2-rc.1")).toBe(true);
+    expect(versionGte("0.1.2-rc.2", "0.1.2-rc.1")).toBe(true);
+    expect(versionGte("0.1.2-rc.1", "0.1.2")).toBe(false);
+    expect(versionGte("0.1.2", "0.1.2-rc.1")).toBe(true);
   });
 
   it("captures stdout and stderr like the legacy helper", () => {
