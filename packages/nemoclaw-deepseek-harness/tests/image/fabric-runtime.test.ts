@@ -25,7 +25,7 @@ describe("DeepSeek Harness image contract", () => {
     const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
     expect(dockerfile).toContain("/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run");
     expect(dockerfile).toContain("import nemoclaw_deepseek_fabric.adapter");
-    expect(dockerfile).not.toMatch(/^\s*DEEPSEEK_FABRIC_API_KEY=/mu);
+    expect(dockerfile).not.toMatch(/^\s*DEEPSEEK_MANAGED_INFERENCE_ROUTE=/mu);
     expect(manifest).toMatch(
       /version_command: "DSH_HOME=\/sandbox\/\.deepseek-harness \/opt\/nemoclaw-fabric-venv\/bin\/dsh --version"/u,
     );
@@ -33,6 +33,9 @@ describe("DeepSeek Harness image contract", () => {
       /- "DSH_HOME=\/sandbox\/\.deepseek-harness \/opt\/nemoclaw-fabric-venv\/bin\/dsh --version"/u,
     );
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/u);
+    expect(manifest).toMatch(
+      /startup_environment:\n    DEEPSEEK_MANAGED_INFERENCE_ROUTE: nemoclaw-managed-inference/u,
+    );
     expect(manifest).not.toMatch(/^managed_image:/mu);
     expect(manifest).toMatch(/mcp:\n  support: disabled/u);
   });

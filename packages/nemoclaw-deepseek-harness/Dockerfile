@@ -80,7 +80,7 @@ RUN umask 077 \
     && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/ \
     && /usr/local/lib/nemoclaw/generate-config \
     && test "$(stat -c %a /sandbox/.deepseek-harness/fabric.json)" = "600" \
-    && DEEPSEEK_FABRIC_API_KEY=nemoclaw-managed-inference /usr/local/bin/nemoclaw-fabric doctor \
+    && DEEPSEEK_MANAGED_INFERENCE_ROUTE=nemoclaw-managed-inference /usr/local/bin/nemoclaw-fabric doctor \
         --config /sandbox/.deepseek-harness/fabric.json --json >/tmp/nemoclaw-deepseek-doctor.json \
     && python3 -I -c 'import json; report=json.load(open("/tmp/nemoclaw-deepseek-doctor.json", encoding="utf-8")); assert report["status"] in {"pass", "warn"}' \
     && rm -f /tmp/nemoclaw-deepseek-doctor.json

@@ -25,7 +25,7 @@ from nemo_fabric_adapter_contract.models import (
 from nemo_fabric_adapters.common import lifecycle
 
 ADAPTER_ID = "nvidia.nemoclaw.deepseek-harness"
-API_KEY_ENV = "DEEPSEEK_FABRIC_API_KEY"
+MANAGED_ROUTE_ENV = "DEEPSEEK_MANAGED_INFERENCE_ROUTE"
 MANAGED_PROVIDER = "openshell"
 MANAGED_BASE_URL = "https://inference.local/v1"
 PROCESS_MODULE = "nemoclaw_deepseek_fabric.process"
@@ -62,8 +62,8 @@ def _selected_model(config: AgentConfig) -> AgentModelConfig:
     )
 
 
-def _managed_credential(model: AgentModelConfig) -> str:
-    """Validate the managed route and resolve its runtime-only credential."""
+def _managed_route_placeholder(model: AgentModelConfig) -> str:
+    """Validate the managed route and resolve its non-secret SDK placeholder."""
 
     if model.provider != MANAGED_PROVIDER:
         raise lifecycle.LifecycleError(
@@ -75,18 +75,18 @@ def _managed_credential(model: AgentModelConfig) -> str:
             "deepseek_base_url_unsupported",
             f"DeepSeek Harness requires the managed {MANAGED_BASE_URL} inference route",
         )
-    if model.api_key_env != API_KEY_ENV:
+    if model.api_key_env != MANAGED_ROUTE_ENV:
         raise lifecycle.LifecycleError(
             "deepseek_credential_unsupported",
-            f"DeepSeek Harness requires the managed {API_KEY_ENV} credential",
+            f"DeepSeek Harness requires the managed {MANAGED_ROUTE_ENV} route marker",
         )
-    credential = os.environ.get(API_KEY_ENV)
-    if not credential:
+    placeholder = os.environ.get(MANAGED_ROUTE_ENV)
+    if not placeholder:
         raise lifecycle.LifecycleError(
             "deepseek_credential_unavailable",
-            "DeepSeek Harness managed inference credential is unavailable",
+            "DeepSeek Harness managed inference route marker is unavailable",
         )
-    return credential
+    return placeholder
 
 
 async def _wait_for_process_exit(process: asyncio.subprocess.Process) -> None:
@@ -201,7 +201,7 @@ def _worker_environment() -> dict[str, str]:
 
     environment = dict(os.environ)
     for name in (
-        API_KEY_ENV,
+        MANAGED_ROUTE_ENV,
         "DEEPSEEK_API_KEY",
         "NVIDIA_API_KEY",
         "OPENAI_API_KEY",
@@ -254,7 +254,7 @@ class DeepSeekHarnessRuntime:
                 "DeepSeek Harness received an invalid Fabric start payload",
             )
         model = _selected_model(config)
-        _managed_credential(model)
+        _managed_route_placeholder(model)
         self._config = config
         self._base_dir = Path(base_dir)
         self._model = model
@@ -285,7 +285,7 @@ class DeepSeekHarnessRuntime:
             "prompt": prompt,
             "model": self._model.model,
             "base_url": self._model.base_url,
-            "api_key": _managed_credential(self._model),
+            "api_key": _managed_route_placeholder(self._model),
             "workspace": str(workspace),
             "dsh_home": _dsh_home(),
             "system_prompt": system.content if system else None,

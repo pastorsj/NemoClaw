@@ -36,7 +36,7 @@ from nemoclaw_deepseek_fabric.adapter import (
     DeepSeekHarnessRuntime,
 )
 
-CREDENTIAL_NAME = "DEEPSEEK_FABRIC_API_KEY"
+CREDENTIAL_NAME = "DEEPSEEK_MANAGED_INFERENCE_ROUTE"
 CREDENTIAL_VALUE = "nemoclaw-managed-inference"
 
 
@@ -61,7 +61,7 @@ class DeepSeekHarness:
                 "model": kwargs.get("model"),
                 "base_url": kwargs.get("base_url"),
                 "api_key_present": bool(kwargs.get("api_key")),
-                "inherited_fabric_key": "DEEPSEEK_FABRIC_API_KEY" in os.environ,
+                "inherited_route_marker": "DEEPSEEK_MANAGED_INFERENCE_ROUTE" in os.environ,
                 "inherited_provider_key": "DEEPSEEK_API_KEY" in os.environ,
                 "inherited_python_path": "PYTHONPATH" in os.environ,
                 "telemetry_mode": kwargs.get("env", {}).get("DSH_TELEMETRY_MODE"),
@@ -309,7 +309,7 @@ class DeepSeekRuntimeTests(DeepSeekFixtureMixin, unittest.IsolatedAsyncioTestCas
                 "model": "nvidia/nemotron-3-super-120b-a12b",
                 "base_url": "https://inference.local/v1",
                 "api_key_present": True,
-                "inherited_fabric_key": False,
+                "inherited_route_marker": False,
                 "inherited_provider_key": False,
                 "inherited_python_path": False,
                 "telemetry_mode": "DISABLED",
@@ -337,7 +337,7 @@ class DeepSeekRuntimeTests(DeepSeekFixtureMixin, unittest.IsolatedAsyncioTestCas
         environment.pop(CREDENTIAL_NAME)
         with (
             patch.dict(os.environ, environment, clear=True),
-            self.assertRaisesRegex(LifecycleError, "credential is unavailable"),
+            self.assertRaisesRegex(LifecycleError, "route marker is unavailable"),
         ):
             await self.start_runtime()
 

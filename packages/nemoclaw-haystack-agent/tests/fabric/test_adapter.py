@@ -35,7 +35,7 @@ from nemoclaw_haystack_fabric.adapter import (
     HaystackAgentRuntime,
 )
 
-CREDENTIAL_NAME = "HAYSTACK_FABRIC_API_KEY"
+CREDENTIAL_NAME = "HAYSTACK_MANAGED_INFERENCE_ROUTE"
 CREDENTIAL_VALUE = "nvapi-haystack-fixture-secret"
 
 
@@ -314,11 +314,11 @@ class HaystackAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         }
                     )
 
-    async def test_start_rejects_a_missing_credential_or_base_directory(self) -> None:
+    async def test_start_rejects_a_missing_route_marker_or_base_directory(self) -> None:
         runtime = HaystackAgentRuntime()
         with (
             patch.dict(os.environ, {}, clear=True),
-            self.assertRaisesRegex(LifecycleError, "credential is unavailable"),
+            self.assertRaisesRegex(LifecycleError, "route marker is unavailable"),
         ):
             await runtime.start(
                 {"base_dir": str(self.base_dir), "config": _agent_config()}
@@ -413,7 +413,7 @@ class GenericRunnerTests(unittest.TestCase):
             )
         return exit_code, stdout.getvalue(), stderr.getvalue()
 
-    def test_real_runner_validates_descriptor_and_stops_without_a_credential(
+    def test_real_runner_validates_descriptor_and_stops_without_a_route_marker(
         self,
     ) -> None:
         config = self.write_config()
@@ -434,7 +434,7 @@ class GenericRunnerTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(result["error"]["stage"], "run")
         self.assertEqual(result["error"]["code"], "fabric_error")
-        self.assertIn("credential is unavailable", result["error"]["message"])
+        self.assertIn("route marker is unavailable", result["error"]["message"])
         self.assertEqual(list((self.base_dir / "artifacts").rglob("*")), [])
 
 

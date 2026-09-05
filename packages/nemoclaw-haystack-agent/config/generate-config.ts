@@ -11,7 +11,7 @@ const SUPPORTED_INFERENCE_API = "openai-completions";
 const MANAGED_BASE_URL = "https://inference.local/v1";
 const FABRIC_ADAPTER_PATH = "/usr/local/share/nemoclaw/haystack-agent.fabric-adapter.json";
 const FABRIC_ARTIFACTS_PATH = "/sandbox/.haystack-agent/fabric-artifacts";
-const FABRIC_API_KEY_ENV = "HAYSTACK_FABRIC_API_KEY";
+const MANAGED_ROUTE_ENV = "HAYSTACK_MANAGED_INFERENCE_ROUTE";
 const DEFAULT_TEMPERATURE = 0;
 const DEFAULT_MAX_AGENT_STEPS = 8;
 const MAX_AGENT_STEPS = 32;
@@ -116,7 +116,7 @@ function buildFabricConfig(env: NodeJS.ProcessEnv): Readonly<Record<string, unkn
       default: {
         provider: "openshell",
         model,
-        api_key_env: FABRIC_API_KEY_ENV,
+        api_key_env: MANAGED_ROUTE_ENV,
         temperature: normalizeTemperature(env.NEMOCLAW_TEMPERATURE),
         base_url: baseUrl,
       },

@@ -36,7 +36,7 @@ from nemo_fabric_adapters.common import lifecycle
 ADAPTER_ID = "nvidia.nemoclaw.haystack-agent"
 MANAGED_PROVIDER = "openshell"
 MANAGED_BASE_URL = "https://inference.local/v1"
-MANAGED_CREDENTIAL_ENV = "HAYSTACK_FABRIC_API_KEY"
+MANAGED_ROUTE_ENV = "HAYSTACK_MANAGED_INFERENCE_ROUTE"
 DEFAULT_MAX_AGENT_STEPS = 8
 MAX_AGENT_STEPS = 32
 INFERENCE_TIMEOUT_SECONDS = 60.0
@@ -77,15 +77,15 @@ def _validate_model(model: AgentModelConfig) -> None:
             "haystack_base_url_unsupported",
             f"Haystack Agent requires the managed {MANAGED_BASE_URL} inference route",
         )
-    if model.api_key_env != MANAGED_CREDENTIAL_ENV:
+    if model.api_key_env != MANAGED_ROUTE_ENV:
         raise lifecycle.LifecycleError(
             "haystack_credential_unsupported",
             "Haystack Agent requires its package-owned credential environment name",
         )
-    if not os.environ.get(MANAGED_CREDENTIAL_ENV):
+    if not os.environ.get(MANAGED_ROUTE_ENV):
         raise lifecycle.LifecycleError(
             "haystack_credential_unavailable",
-            "Haystack Agent's managed inference credential is unavailable",
+            "Haystack Agent's managed inference route marker is unavailable",
         )
     if model.temperature is None or not 0 <= model.temperature <= 2:
         raise lifecycle.LifecycleError(
@@ -144,7 +144,7 @@ def build_chat_generator(model: AgentModelConfig) -> OpenAIChatGenerator:
     """Build Haystack's OpenAI-compatible generator from the typed model."""
 
     return OpenAIChatGenerator(
-        api_key=Secret.from_env_var(MANAGED_CREDENTIAL_ENV),
+        api_key=Secret.from_env_var(MANAGED_ROUTE_ENV),
         model=model.model,
         api_base_url=model.base_url,
         generation_kwargs={"temperature": model.temperature},

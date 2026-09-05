@@ -13,7 +13,7 @@
     "properties": {
       "provider": { "const": "openshell" },
       "model": { "type": "string", "minLength": 1 },
-      "api_key_env": { "const": "HAYSTACK_FABRIC_API_KEY" },
+      "api_key_env": { "const": "HAYSTACK_MANAGED_INFERENCE_ROUTE" },
       "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
       "base_url": { "const": "https://inference.local/v1" }
     },

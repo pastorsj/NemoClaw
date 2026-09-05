@@ -63,7 +63,7 @@ describe("Haystack Agent Fabric configuration", () => {
     expect(config.models.default).toEqual({
       provider: "openshell",
       model: "nvidia/nemotron-3-super-120b-a12b",
-      api_key_env: "HAYSTACK_FABRIC_API_KEY",
+      api_key_env: "HAYSTACK_MANAGED_INFERENCE_ROUTE",
       temperature: 0.25,
       base_url: "https://inference.local/v1",
     });

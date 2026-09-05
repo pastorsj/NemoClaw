@@ -17,6 +17,8 @@ version_scheme: semver
 runtime:
   kind: terminal
   command_shell: /bin/bash
+  startup_environment:
+    HAYSTACK_MANAGED_INFERENCE_ROUTE: nemoclaw-managed-inference
   headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.haystack-agent/fabric.json"
   smoke_boundary:
     kind: login-shell

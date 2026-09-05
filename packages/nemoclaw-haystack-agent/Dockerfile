@@ -65,7 +65,6 @@ RUN python3 -m venv --copies /tmp/fabric-build-venv \
         'export HAYSTACK_TELEMETRY_ENABLED=false' \
         'export HAYSTACK_AUTO_TRACE_ENABLED=false' \
         'export HAYSTACK_CONTENT_TRACING_ENABLED=false' \
-        'export HAYSTACK_FABRIC_API_KEY=nemoclaw-managed-inference' \
         'export NO_PROXY=localhost,127.0.0.1,::1' \
         'export no_proxy="$NO_PROXY"' \
         'unset ALL_PROXY all_proxy OPENAI_PROXY' \
@@ -101,7 +100,7 @@ RUN /usr/local/lib/nemoclaw-haystack/generate-config \
     && test "$(nemoclaw-haystack-version)" = 3.1.1 \
     && test "$(nemoclaw-fabric --version)" = "nemoclaw-fabric 0.1.2 (nemo-fabric 0.2.0)" \
     && nemoclaw-fabric-run --help >/dev/null \
-    && HAYSTACK_FABRIC_API_KEY=nemoclaw-managed-inference \
+    && HAYSTACK_MANAGED_INFERENCE_ROUTE=nemoclaw-managed-inference \
         nemoclaw-fabric doctor --config /sandbox/.haystack-agent/fabric.json >/dev/null
 
 USER root

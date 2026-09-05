@@ -15,7 +15,7 @@
     "properties": {
       "provider": { "const": "openshell" },
       "model": { "type": "string", "minLength": 1 },
-      "api_key_env": { "const": "DEEPSEEK_FABRIC_API_KEY" },
+      "api_key_env": { "const": "DEEPSEEK_MANAGED_INFERENCE_ROUTE" },
       "base_url": { "const": "https://inference.local/v1" }
     },
     "required": ["provider", "model", "api_key_env", "base_url"],

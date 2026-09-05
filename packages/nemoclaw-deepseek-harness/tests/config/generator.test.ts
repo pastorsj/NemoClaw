@@ -66,7 +66,7 @@ describe("DeepSeek Harness Fabric configuration", () => {
     expect(config.models.default).toEqual({
       provider: "openshell",
       model: "nvidia/nemotron-3-super-120b-a12b",
-      api_key_env: "DEEPSEEK_FABRIC_API_KEY",
+      api_key_env: "DEEPSEEK_MANAGED_INFERENCE_ROUTE",
       base_url: "https://inference.local/v1",
     });
     expect(config.runtime).toMatchObject({

@@ -13,7 +13,6 @@ export PATH="/usr/local/bin:/opt/nemoclaw-fabric-venv/bin:/usr/local/sbin:/usr/s
 export DSH_HOME=/sandbox/.deepseek-harness
 export DSH_TELEMETRY_MODE=DISABLED
 export DSH_TELEMETRY_DISABLED=1
-export DEEPSEEK_FABRIC_API_KEY=nemoclaw-managed-inference
 
 verify_state_root() {
   [ -d "$DSH_HOME" ] && [ ! -L "$DSH_HOME" ]

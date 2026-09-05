@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 ADAPTER_ID = "nvidia.nemoclaw.deepseek-harness"
 ADAPTER_PATH = "/usr/local/share/nemoclaw/deepseek.fabric-adapter.json"
-API_KEY_ENV = "DEEPSEEK_FABRIC_API_KEY"
+MANAGED_ROUTE_ENV = "DEEPSEEK_MANAGED_INFERENCE_ROUTE"
 ARTIFACTS_PATH = "/sandbox/.deepseek-harness/fabric-artifacts"
 BASE_URL = "https://inference.local/v1"
 INFERENCE_API = "openai-completions"
@@ -82,7 +82,7 @@ def build_fabric_config(environment: dict[str, str]) -> dict[str, object]:
             "default": {
                 "provider": "openshell",
                 "model": model,
-                "api_key_env": API_KEY_ENV,
+                "api_key_env": MANAGED_ROUTE_ENV,
                 "base_url": base_url,
             }
         },

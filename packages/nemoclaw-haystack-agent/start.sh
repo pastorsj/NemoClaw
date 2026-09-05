@@ -11,7 +11,6 @@ export PATH=/usr/local/bin:/opt/nemoclaw-fabric-venv/bin:/usr/bin:/bin
 export HAYSTACK_TELEMETRY_ENABLED=false
 export HAYSTACK_AUTO_TRACE_ENABLED=false
 export HAYSTACK_CONTENT_TRACING_ENABLED=false
-export HAYSTACK_FABRIC_API_KEY=nemoclaw-managed-inference
 
 # OpenShell routes inference.local through its HTTP(S) L7 proxy. Remove the
 # sandbox-create bypass seed while retaining the proxy URLs that OpenShell owns.
