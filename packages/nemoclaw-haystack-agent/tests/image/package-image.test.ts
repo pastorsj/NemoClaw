@@ -30,6 +30,7 @@ describe("Haystack Agent POC image", () => {
     expect(dockerfile).toContain("/sandbox/.nemoclaw/blueprints/0.1.0");
     expect(dockerfile).toContain("test -s /sandbox/.nemoclaw/blueprints/0.1.0/blueprint.yaml");
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/u);
+    expect(manifest).toMatch(/prompt_transport: stdin/u);
     expect(manifest).toMatch(
       /headless_environment:\n    HAYSTACK_MANAGED_INFERENCE_ROUTE: nemoclaw-managed-inference/u,
     );

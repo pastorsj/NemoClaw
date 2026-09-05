@@ -36,6 +36,7 @@ describe("DeepSeek Harness image contract", () => {
       /- "DSH_HOME=\/sandbox\/\.deepseek-harness \/opt\/nemoclaw-fabric-venv\/bin\/dsh --version"/u,
     );
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/u);
+    expect(manifest).toMatch(/prompt_transport: stdin/u);
     expect(manifest).toMatch(
       /headless_environment:\n    DEEPSEEK_MANAGED_INFERENCE_ROUTE: nemoclaw-managed-inference/u,
     );

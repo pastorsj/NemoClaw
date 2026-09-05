@@ -15,6 +15,7 @@ describe("Pi Fabric runtime entrypoint", () => {
     const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
 
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/);
+    expect(manifest).toMatch(/prompt_transport: stdin/);
     expect(dockerfile).toContain(`ln -s ${FABRIC_RUNNER_SOURCE} ${FABRIC_RUNNER_COMMAND}`);
     expect(dockerfile).toContain(
       `test "$(readlink ${FABRIC_RUNNER_COMMAND})" = "${FABRIC_RUNNER_SOURCE}"`,
