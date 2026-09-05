@@ -529,7 +529,7 @@ async function addMcpBridgeUnlocked(
       adapterEnvValues,
       {
         // An exact adapter entry is evidence of a post-commit process death.
-        // Replacing it is idempotent and, for Hermes, re-verifies runtime reload.
+        // Replacing it is idempotent and re-verifies the package-owned runtime reload.
         // The wait above already proved the same revision stable in consecutive
         // fresh execs, so repeating reconciliation here can outlive the caller's
         // bounded provider-synchronization contract.

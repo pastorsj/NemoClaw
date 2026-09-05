@@ -267,8 +267,8 @@ export async function prepareMcpBridgesForRebuild(
   try {
     for (const entry of entries) {
       // `/sandbox` may be a retained PVC. Scrub before delete so a replacement
-      // Hermes/agent cannot boot with a stale placeholder while its provider
-      // is intentionally detached during recreate.
+      // harness cannot boot with a stale placeholder while its provider is
+      // intentionally detached during recreate.
       scrubbedAdapters.push(
         scrubManagedMcpAdapterOrThrow(
           sandboxName,

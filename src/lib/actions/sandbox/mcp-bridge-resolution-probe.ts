@@ -95,11 +95,10 @@ export const MCP_PROBE_CONTROL_BEARER = "nemoclaw-mcp-probe-control-unresolvable
 const PROBE_CURL_MAX_TIME_SECONDS = 6;
 
 /**
- * Sourcing /tmp/nemoclaw-proxy-env.sh can export the OpenClaw gateway
- * credentials and break-glass toggles alongside the proxy variables the probe
- * actually needs. These are unset immediately after sourcing, before the
- * first child process, so neither the adapter runtime nor curl inherits them
- * (same sanitize set nemoclaw-start uses for un-managed openclaw children).
+ * Sourcing /tmp/nemoclaw-proxy-env.sh can export process-control variables
+ * alongside the proxy variables the probe actually needs. Core removes its
+ * universal security set immediately after sourcing; the receipt-backed
+ * package runtime plan contributes any adapter-specific variables.
  */
 export const PROBE_SANITIZED_ENV_VARS = MCP_RUNTIME_SANITIZED_ENV_VARS;
 
@@ -174,7 +173,7 @@ function curlCommand(url: string, authorization: string, httpMarker: string): st
     "-H",
     "content-type: application/json",
     "-H",
-    // mcporter itself synthesizes this accept header on every HTTP definition.
+    // Streamable HTTP MCP clients advertise both response media types.
     "accept: application/json, text/event-stream",
     "-H",
     `authorization: ${authorization}`,

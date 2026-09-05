@@ -311,9 +311,9 @@ async function removeMcpBridgeUnlocked(
     try {
       // For a legacy unsafe credential, the exact provider reference was
       // necessarily detached above before this first sandbox child. Otherwise
-      // this probe precedes every provider/policy/adapter side effect. Hermes
-      // retains its helper/lifecycle validation; Deep Agents intentionally
-      // skips only the marker that an older image cannot expose.
+      // this probe precedes every provider/policy/adapter side effect. The
+      // package-owned teardown capability retains any runtime-specific
+      // validation and can explicitly decline checks an older image cannot expose.
       assertAgentMcpTeardownRuntimeCapability(sandboxName, adapter, providerRuntimeSelection);
       const adapterRemoval = unregisterAgentAdapter(
         sandboxName,
