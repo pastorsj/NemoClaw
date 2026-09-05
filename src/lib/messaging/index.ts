@@ -11,5 +11,6 @@ export * from "./host-forward";
 export * from "./hydration";
 export * from "./manifest";
 export * from "./persistence";
+export * from "./profile-authority";
 export { MESSAGING_CREDENTIAL_PROVIDER_TYPE } from "./provider-profile";
 export * from "./utils";

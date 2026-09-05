@@ -428,28 +428,69 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function requiredAdapterArtifacts(
-  manifest: Readonly<Record<string, unknown>>,
-): readonly string[] {
-  const required = ["host/config-adapter.cts"];
+function requiredAdapterArtifacts(manifest: Readonly<Record<string, unknown>>): readonly string[] {
+  const required = ["host/config-adapter.cts", "host/messaging-adapter.cts"];
   if (isRecord(manifest.mcp) && manifest.mcp.support === "bridge") {
     required.push("host/mcp-adapter.cts");
   }
   if (manifest.managed_image !== undefined) {
     required.push("host/startup-adapter.cts");
   }
+  if (isRecord(manifest.sessions)) {
+    required.push("host/session-adapter.cts");
+  }
   if (
     Array.isArray(manifest.state_files) &&
     manifest.state_files.some(
       (entry) =>
-        isRecord(entry) &&
-        isRecord(entry.restore) &&
-        entry.restore.merge === "package-config",
+        isRecord(entry) && isRecord(entry.restore) && entry.restore.merge === "package-config",
     )
   ) {
     required.push("host/restore-adapter.cts");
   }
   return Object.freeze(required);
+}
+
+function assertMessagingDeclaration(manifest: Readonly<Record<string, unknown>>): void {
+  const messaging = manifest.messaging;
+  if (!isRecord(messaging)) {
+    throw diagnostic(
+      "manifest",
+      "manifest.yaml",
+      "messaging must explicitly declare channels or disabled support",
+    );
+  }
+  const keys = Object.keys(messaging).sort();
+  if (messaging.support === "disabled") {
+    if (keys.length !== 1 || keys[0] !== "support") {
+      throw diagnostic(
+        "manifest",
+        "manifest.yaml",
+        "disabled messaging support must not declare channel behavior",
+      );
+    }
+    return;
+  }
+  const channels = messaging.channels;
+  if (
+    messaging.support !== "channels" ||
+    keys.length !== 2 ||
+    keys[0] !== "channels" ||
+    keys[1] !== "support" ||
+    !Array.isArray(channels) ||
+    channels.length === 0 ||
+    channels.length > 32 ||
+    new Set(channels).size !== channels.length ||
+    channels.some(
+      (channel) => typeof channel !== "string" || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(channel),
+    )
+  ) {
+    throw diagnostic(
+      "manifest",
+      "manifest.yaml",
+      "messaging channels must be a unique bounded list of canonical identifiers",
+    );
+  }
 }
 
 function assertRequiredAdapterArtifacts(
@@ -748,6 +789,7 @@ export function validateHarnessPackage(packageRootInput: string): HarnessPackage
   assertRequiredRootFiles(packageRoot);
   const metadata = readPackageMetadata(packageRoot);
   const manifest = readManifest(packageRoot, metadata.harnessId);
+  assertMessagingDeclaration(manifest.value);
   const adapterArtifacts = listAdapterArtifacts(packageRoot);
   assertRequiredAdapterArtifacts(adapterArtifacts, manifest.value);
   const publishedFiles = inspectPackedFiles(packageRoot, metadata, adapterArtifacts);

@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 "use strict";
 function buildSessionListPlan(_request) {
-    return { kind: "unsupported", reason: "Pi does not expose session listing through NemoClaw yet." };
+    return {
+        kind: "unsupported",
+        reason: "Pi does not expose session listing through NemoClaw yet.",
+    };
 }
 function interpretSessionListOutput(_request) {
     return { kind: "refused", reason: "Session listing is not supported by this package." };

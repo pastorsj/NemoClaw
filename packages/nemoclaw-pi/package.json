@@ -29,6 +29,7 @@
     "fabric/requirements.lock",
     "fabric/src/**/*.py",
     "host/config-adapter.cts",
+    "host/messaging-adapter.cts",
     "host/session-adapter.cts",
     "host/startup-adapter.cts",
     "manifest.yaml",

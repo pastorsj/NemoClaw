@@ -28,6 +28,7 @@ const COMMON_PACKAGE_FILES = [
 const COMMON_WORKFLOW_DIRECTORIES = ["config", "runtime", "host", "compat", "plugin", "checks"];
 const RUNTIME_CONTRACTS = [
   "host/config-adapter.cts",
+  "host/messaging-adapter.cts",
   "host/base-qualification.cts",
   "host/managed-identity.cts",
   "host/mcp-adapter.cts",

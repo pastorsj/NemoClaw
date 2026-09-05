@@ -21,6 +21,10 @@ export type HarnessManifestRecord = { [key: string]: HarnessManifestValue };
 export type HarnessMcpSupport = "bridge" | "disabled";
 export type HarnessMcpAdapter = string;
 
+export type HarnessMessagingCapability =
+  | { readonly support: "channels"; readonly channels: readonly string[] }
+  | { readonly support: "disabled"; readonly channels?: never };
+
 export type HarnessManagedImagePlatform = "linux/amd64" | "linux/arm64";
 
 export interface HarnessManagedImageRuntimeIdentity {
@@ -67,6 +71,7 @@ export type HarnessAgentManifest = HarnessManifestRecord & {
   readonly config?: HarnessManifestRecord;
   readonly inference?: HarnessManifestRecord;
   readonly mcp?: HarnessMcpCapability;
+  readonly messaging: HarnessMessagingCapability;
   readonly sessions?: HarnessSessionCapability;
   readonly managed_image?: HarnessManagedImageDeclaration;
 };
@@ -348,6 +353,26 @@ export type HarnessSessionListOutput =
   | { readonly kind: "output"; readonly output: string }
   | { readonly kind: "refused"; readonly reason: string };
 
+export interface HarnessMessagingIntegrationRequest {
+  readonly packageId: string;
+}
+
+export interface HarnessMessagingSupportedIntegration {
+  readonly kind: "channels";
+  readonly packageId: string;
+  readonly channelIds: readonly string[];
+}
+
+export interface HarnessMessagingDisabledIntegration {
+  readonly kind: "disabled";
+  readonly packageId: string;
+  readonly reason: string;
+}
+
+export type HarnessMessagingIntegration =
+  | HarnessMessagingSupportedIntegration
+  | HarnessMessagingDisabledIntegration;
+
 export interface HarnessConfigAdapterModule {
   readonly describeInferenceConfig: (
     request: HarnessInferenceConfigRequest,
@@ -389,6 +414,12 @@ export interface HarnessSessionAdapterModule {
   readonly interpretSessionListOutput: (
     request: HarnessSessionListOutputRequest,
   ) => HarnessSessionListOutput;
+}
+
+export interface HarnessMessagingAdapterModule {
+  readonly describeMessagingIntegration: (
+    request: HarnessMessagingIntegrationRequest,
+  ) => HarnessMessagingIntegration;
 }
 
 export type HarnessStartupJsonScalar = string | number | boolean | null;

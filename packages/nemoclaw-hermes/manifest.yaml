@@ -182,6 +182,18 @@ sessions:
   operations:
     - list
 
+# ── Messaging integration ───────────────────────────────────────
+messaging:
+  support: channels
+  channels:
+    - discord
+    - googlechat
+    - slack
+    - teams
+    - telegram
+    - wechat
+    - whatsapp
+
 # ── Inference ───────────────────────────────────────────────────
 # Hermes supports custom OpenAI-compatible endpoints natively via
 # provider: "custom" + base_url in config.yaml. This is how we

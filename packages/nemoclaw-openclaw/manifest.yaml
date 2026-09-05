@@ -153,6 +153,18 @@ sessions:
   operations:
     - list
 
+# ── Messaging integration ───────────────────────────────────────
+messaging:
+  support: channels
+  channels:
+    - discord
+    - googlechat
+    - slack
+    - teams
+    - telegram
+    - wechat
+    - whatsapp
+
 # ── Phone-home hosts ───────────────────────────────────────────
 phone_home_hosts:
   - openclaw.ai

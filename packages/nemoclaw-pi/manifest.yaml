@@ -101,6 +101,8 @@ mcp:
   support: disabled
 sessions:
   operations: []
+messaging:
+  support: disabled
 package_registry:
   hosts:
     - registry.npmjs.org

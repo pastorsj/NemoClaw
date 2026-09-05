@@ -66,6 +66,8 @@ function createPackageFixture(options: FixtureOptions = {}): string {
         "  prompt_transport: stdin",
         "mcp:",
         "  support: disabled",
+        "messaging:",
+        "  support: disabled",
         "",
       ].join("\n"),
   );
@@ -74,6 +76,11 @@ function createPackageFixture(options: FixtureOptions = {}): string {
   writeFile(
     packageRoot,
     "host/config-adapter.cts",
+    '"use strict";\nmodule.exports = Object.freeze({});\n',
+  );
+  writeFile(
+    packageRoot,
+    "host/messaging-adapter.cts",
     '"use strict";\nmodule.exports = Object.freeze({});\n',
   );
   return packageRoot;
@@ -146,9 +153,13 @@ test("accepts a synthetic harness package and reports its published runtime file
     assert.equal(report.packageName, "@example/nemoclaw-future-terminal");
     assert.equal(report.packageVersion, "3.2.1-beta.2+build.7");
     assert.equal(report.minimumNemoClawVersion, "0.0.113");
-    assert.deepEqual(report.adapterArtifacts, ["host/config-adapter.cts"]);
+    assert.deepEqual(report.adapterArtifacts, [
+      "host/config-adapter.cts",
+      "host/messaging-adapter.cts",
+    ]);
     assert.ok(report.packedFiles.includes("manifest.yaml"));
     assert.ok(report.packedFiles.includes("host/config-adapter.cts"));
+    assert.ok(report.packedFiles.includes("host/messaging-adapter.cts"));
     assert.equal(fs.existsSync(path.join(packageRoot, "ran")), false);
   } finally {
     removeFixture(packageRoot);
@@ -340,17 +351,25 @@ test("requires compiled adapters for the capabilities declared by the manifest",
   const cases = [
     {
       name: "the universal configuration boundary",
-      manifest: "name: future-terminal\nmcp:\n  support: disabled\n",
+      manifest:
+        "name: future-terminal\nmcp:\n  support: disabled\nmessaging:\n  support: disabled\n",
       artifact: "host/config-adapter.cts",
     },
     {
+      name: "the universal messaging boundary",
+      manifest:
+        "name: future-terminal\nmcp:\n  support: disabled\nmessaging:\n  support: disabled\n",
+      artifact: "host/messaging-adapter.cts",
+    },
+    {
       name: "MCP bridge support",
-      manifest: "name: future-terminal\nmcp:\n  support: bridge\n",
+      manifest: "name: future-terminal\nmcp:\n  support: bridge\nmessaging:\n  support: disabled\n",
       artifact: "host/mcp-adapter.cts",
     },
     {
       name: "managed image startup",
-      manifest: "name: future-terminal\nmanaged_image: {}\nmcp:\n  support: disabled\n",
+      manifest:
+        "name: future-terminal\nmanaged_image: {}\nmcp:\n  support: disabled\nmessaging:\n  support: disabled\n",
       artifact: "host/startup-adapter.cts",
     },
     {
@@ -363,6 +382,8 @@ test("requires compiled adapters for the capabilities declared by the manifest",
         "      merge: package-config",
         "mcp:",
         "  support: disabled",
+        "messaging:",
+        "  support: disabled",
         "",
       ].join("\n"),
       artifact: "host/restore-adapter.cts",
@@ -373,14 +394,14 @@ test("requires compiled adapters for the capabilities declared by the manifest",
     await t.test(fixture.name, () => {
       const packageRoot = createPackageFixture({ manifest: fixture.manifest });
       try {
-        fs.rmSync(path.join(packageRoot, "host/config-adapter.cts"));
         if (fixture.artifact !== "host/config-adapter.cts") {
           writeFile(
             packageRoot,
-            "host/config-adapter.cts",
+            fixture.artifact,
             '"use strict";\nmodule.exports = Object.freeze({});\n',
           );
         }
+        fs.rmSync(path.join(packageRoot, fixture.artifact));
         expectDiagnostic(packageRoot, "adapter-artifact", fixture.artifact);
       } finally {
         removeFixture(packageRoot);

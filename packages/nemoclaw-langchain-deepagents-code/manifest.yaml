@@ -167,6 +167,9 @@ mcp:
 sessions:
   operations: []
 
+messaging:
+  support: disabled
+
 package_registry:
   hosts:
     - pypi.org
