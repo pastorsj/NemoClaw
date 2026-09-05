@@ -25,6 +25,15 @@ const disabledHermesDashboardState = { config: null, enabled: false };
 const IMAGE_ID = `sha256:${"a".repeat(64)}`;
 const temporaryBuildContexts: string[] = [];
 
+function packageOwnedAgent(name: string, layout: "artifact" | "source" = "source") {
+  const packageRoot = `/var/lib/nemoclaw/harnesses/objects/${"a".repeat(64)}`;
+  const manifestPath =
+    layout === "source"
+      ? `${packageRoot}/manifest.yaml`
+      : `${packageRoot}/packages/nemoclaw-${name}/manifest.yaml`;
+  return { name, packageRoot, manifestPath } as ReturnType<typeof loadAgent>;
+}
+
 function createTrustedBuildContext(): string {
   const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), SANDBOX_BUILD_CONTEXT_PREFIX));
   temporaryBuildContexts.push(buildCtx);
@@ -39,6 +48,66 @@ afterEach(() => {
 });
 
 describe("buildSandboxRuntimeEnvArgs", () => {
+  it.each(["source", "artifact"] as const)(
+    "supplies the default managed proxy route to a package-owned %s startup command",
+    (layout) => {
+      const envArgs = buildSandboxRuntimeEnvArgs({
+        agent: packageOwnedAgent("future-terminal", layout),
+        chatUiUrl: "",
+        manageDashboard: false,
+        getDashboardForwardPort: () => "0",
+        hermesDashboardState: disabledHermesDashboardState,
+        extraPlaceholderKeys: [],
+        env: {},
+      }).envArgs;
+
+      expect(envArgs).toEqual(
+        expect.arrayContaining(["NEMOCLAW_PROXY_HOST=10.200.0.1", "NEMOCLAW_PROXY_PORT=3128"]),
+      );
+    },
+  );
+
+  it("uses one validated managed proxy route override for an unknown package", () => {
+    const envArgs = buildSandboxRuntimeEnvArgs({
+      agent: packageOwnedAgent("future-terminal"),
+      chatUiUrl: "",
+      manageDashboard: false,
+      getDashboardForwardPort: () => "0",
+      hermesDashboardState: disabledHermesDashboardState,
+      extraPlaceholderKeys: [],
+      env: {
+        NEMOCLAW_PROXY_HOST: " host.containers.internal ",
+        NEMOCLAW_PROXY_PORT: " 43128 ",
+      },
+    }).envArgs;
+
+    expect(envArgs).toEqual(
+      expect.arrayContaining([
+        "NEMOCLAW_PROXY_HOST=host.containers.internal",
+        "NEMOCLAW_PROXY_PORT=43128",
+      ]),
+    );
+    expect(envArgs).not.toContain("NEMOCLAW_PROXY_HOST=10.200.0.1");
+    expect(envArgs).not.toContain("NEMOCLAW_PROXY_PORT=3128");
+  });
+
+  it.each([
+    ["invalid host", { NEMOCLAW_PROXY_HOST: "bad:ipv6::host" }],
+    ["invalid port", { NEMOCLAW_PROXY_PORT: "70000" }],
+  ] as const)("fails closed for an %s in a package-owned proxy route", (_caseName, env) => {
+    const envArgs = buildSandboxRuntimeEnvArgs({
+      agent: packageOwnedAgent("future-terminal"),
+      chatUiUrl: "",
+      manageDashboard: false,
+      getDashboardForwardPort: () => "0",
+      hermesDashboardState: disabledHermesDashboardState,
+      extraPlaceholderKeys: [],
+      env,
+    }).envArgs;
+
+    expect(envArgs.some((entry) => entry.startsWith("NEMOCLAW_PROXY_"))).toBe(false);
+  });
+
   it("omits credential-bearing env when omitCredentialEnv is set", () => {
     const base = {
       agent: { name: "openclaw", configPaths: { dir: "/sandbox/.openclaw" } } as any,
@@ -479,6 +548,8 @@ describe("prepareSandboxCreateLaunch", () => {
       "NEMOCLAW_HERMES_DASHBOARD_PORT=18790",
       "NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT=8643",
       "NEMOCLAW_HERMES_DASHBOARD_TUI=1",
+      "NEMOCLAW_PROXY_HOST=10.200.0.1",
+      "NEMOCLAW_PROXY_PORT=3128",
     ]);
   });
 

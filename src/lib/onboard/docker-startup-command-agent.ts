@@ -18,14 +18,10 @@ export const DCODE_DOCKER_ULIMITS: readonly DockerUlimit[] = [
 ];
 
 /** Recognize a definition produced from an authored or installed package manifest. */
-function isPackageOwnedAgentDefinition(
+export function isPackageOwnedAgentDefinition(
   agent: AgentDefinition | null | undefined,
 ): agent is AgentDefinition {
-  if (
-    !agent ||
-    typeof agent.manifestPath !== "string" ||
-    typeof agent.packageRoot !== "string"
-  ) {
+  if (!agent || typeof agent.manifestPath !== "string" || typeof agent.packageRoot !== "string") {
     return false;
   }
   const manifestPath = path.relative(agent.packageRoot, agent.manifestPath);

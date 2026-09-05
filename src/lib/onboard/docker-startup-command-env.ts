@@ -4,15 +4,13 @@
 import { getRegisteredAgent } from "../agent/runtime";
 import type { AgentDefinition } from "../agent-runtime/manifest-types";
 import { formatEnvAssignment } from "../core/url-utils";
-import { isValidProxyHost, isValidProxyPort } from "./dockerfile-patch";
+import { isPackageOwnedAgentDefinition } from "./docker-startup-command-agent";
 import { appendExtraPlaceholderKeysEnvArg } from "./extra-placeholder-keys";
 import { HERMES_API_PORT_ENV, resolveOnboardHermesApiPort } from "./hermes-api-port";
-import {
-  appendHermesDashboardEnvArgs,
-  type HermesDashboardOnboardState,
-} from "./hermes-dashboard";
+import { appendHermesDashboardEnvArgs, type HermesDashboardOnboardState } from "./hermes-dashboard";
 import { appendHostProxyEnvArgs } from "./host-proxy-env";
 import { appendOpenClawRuntimeEnvArgs } from "./openclaw-runtime-env";
+import { isValidProxyHost, isValidProxyPort, resolveManagedProxyRoute } from "./proxy-route";
 
 const STARTUP_COMMAND_TOKEN = /^[A-Za-z0-9_./:=,@%+\-\[\]]+$/u;
 const OPENCLAW_AUTO_PAIR_RUNTIME_ENV_KEYS = [
@@ -78,12 +76,34 @@ function appendOpenClawMcpToolsListTimeoutRuntimeEnvArg(
   envArgs.push(formatEnvAssignment(OPENCLAW_MCP_TOOLS_LIST_TIMEOUT_ENV, String(timeoutMs)));
 }
 
-function appendAgentStartupEnvironment(
-  envArgs: string[],
-  agent: AgentDefinition | null,
-): void {
+function appendAgentStartupEnvironment(envArgs: string[], agent: AgentDefinition | null): void {
   for (const [name, value] of Object.entries(agent?.runtime?.startup_environment ?? {})) {
     envArgs.push(formatEnvAssignment(name, value));
+  }
+}
+
+function appendManagedProxyRoute(
+  envArgs: string[],
+  agent: AgentDefinition | null,
+  env: NodeJS.ProcessEnv,
+): void {
+  if (isPackageOwnedAgentDefinition(agent)) {
+    const route = resolveManagedProxyRoute(env);
+    if (!route) return;
+    envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_HOST", route.host));
+    envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_PORT", String(route.port)));
+    return;
+  }
+
+  // Preserve the legacy explicit-only behavior for definitions that do not
+  // come from an installed or authored package.
+  const sandboxProxyHost = env.NEMOCLAW_PROXY_HOST;
+  if (sandboxProxyHost && isValidProxyHost(sandboxProxyHost)) {
+    envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_HOST", sandboxProxyHost));
+  }
+  const sandboxProxyPort = env.NEMOCLAW_PROXY_PORT;
+  if (sandboxProxyPort && isValidProxyPort(sandboxProxyPort)) {
+    envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_PORT", sandboxProxyPort));
   }
 }
 
@@ -139,14 +159,7 @@ export function buildSandboxRuntimeEnvArgs(input: SandboxRuntimeEnvArgsInput): {
       agent?.name === "langchain-deepagents-code" || input.omitCredentialEnv === true,
   });
 
-  const sandboxProxyHost = env.NEMOCLAW_PROXY_HOST;
-  if (sandboxProxyHost && isValidProxyHost(sandboxProxyHost)) {
-    envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_HOST", sandboxProxyHost));
-  }
-  const sandboxProxyPort = env.NEMOCLAW_PROXY_PORT;
-  if (sandboxProxyPort && isValidProxyPort(sandboxProxyPort)) {
-    envArgs.push(formatEnvAssignment("NEMOCLAW_PROXY_PORT", sandboxProxyPort));
-  }
+  appendManagedProxyRoute(envArgs, agent, env);
   if (input.sandboxName) {
     envArgs.push(formatEnvAssignment("NEMOCLAW_SANDBOX_NAME", input.sandboxName));
   }

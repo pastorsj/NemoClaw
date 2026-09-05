@@ -48,13 +48,14 @@ import {
   validateToolDisclosureDockerfileContract,
 } from "./dockerfile-tool-disclosure-contract";
 import { normalizeReasoningEffort, REASONING_EFFORT_ENV } from "./reasoning-mode";
+import { isValidProxyHost, isValidProxyPort } from "./proxy-route";
 
 export { assertToolDisclosureDockerfileContract } from "./dockerfile-tool-disclosure-contract";
+export { isValidProxyHost, isValidProxyPort } from "./proxy-route";
 
 const SANDBOX_BASE_IMAGE = "ghcr.io/nvidia/nemoclaw/sandbox-base";
 const NODE_RUNTIME_REFRESH_INSTRUCTION =
   "COPY --from=builder /usr/local/bin/node /usr/local/bin/node";
-const PROXY_HOST_RE = /^[A-Za-z0-9._-]+$/;
 const POSITIVE_INT_RE = /^[1-9][0-9]*$/;
 
 type LooseObject = Record<string, unknown>;
@@ -246,16 +247,6 @@ export function patchDcodeAutoApprovalDockerArg(
     );
   }
   return dockerfile.replace(instruction, `ARG ${DCODE_AUTO_APPROVAL_BUILD_ARG}=${mode}`);
-}
-
-export function isValidProxyHost(value: string): boolean {
-  return PROXY_HOST_RE.test(value);
-}
-
-export function isValidProxyPort(value: string): boolean {
-  if (!/^[0-9]{1,5}$/.test(value)) return false;
-  const port = Number(value);
-  return port >= 1 && port <= 65535;
 }
 
 export type PatchedDockerfileMetadata = { dashboardRemoteBindPrepared: boolean };

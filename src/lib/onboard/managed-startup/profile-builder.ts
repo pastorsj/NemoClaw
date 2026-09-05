@@ -15,6 +15,7 @@ import {
 } from "../corporate-ca-policy";
 import type { ResolvedCorporateCa } from "../corporate-ca-types";
 import { normalizeCertificateBlocks } from "../corporate-ca-validation";
+import { DEFAULT_MANAGED_PROXY_ROUTE } from "../proxy-route";
 import {
   encodeManagedStartupProfile,
   MANAGED_STARTUP_PROFILE_AFFORDANCE_INVENTORY,
@@ -34,8 +35,6 @@ import {
   validateManagedStartupProfile,
 } from "./profile";
 
-const DEFAULT_MANAGED_PROXY_HOST = "10.200.0.1";
-const DEFAULT_MANAGED_PROXY_PORT = 3128;
 const DEFAULT_CONTEXT_WINDOW = 131_072;
 const DEFAULT_OPENCLAW_MAX_TOKENS = 4096;
 const DEFAULT_OPENCLAW_AGENT_TIMEOUT_SECONDS = 600;
@@ -874,11 +873,12 @@ function buildCandidate(input: ManagedStartupProfileBuilderInput): {
   const inference = input.inference;
   const hostProxy = resolveHostProxy(input.agent, input.environment);
   const managedHost =
-    presentEnvironmentValue(input.environment, "NEMOCLAW_PROXY_HOST") ?? DEFAULT_MANAGED_PROXY_HOST;
+    presentEnvironmentValue(input.environment, "NEMOCLAW_PROXY_HOST") ??
+    DEFAULT_MANAGED_PROXY_ROUTE.host;
   const managedPort = parsePort(
     input.environment,
     "NEMOCLAW_PROXY_PORT",
-    DEFAULT_MANAGED_PROXY_PORT,
+    DEFAULT_MANAGED_PROXY_ROUTE.port,
   );
   const messagingPlan = normalizeMessagingPlan(input.agent, input.messagingPlan);
   const corporateCa = resolveCorporateCaMaterial(input.corporateCa);
