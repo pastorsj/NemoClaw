@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools == 82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemoclaw-haystack-fabric"
+version = "0.1.0"
+description = "NemoClaw's local NeMo Fabric adapter for a headless Haystack Agent"
+requires-python = ">=3.13,<3.14"
+license = "Apache-2.0"
+dependencies = [
+  "haystack-ai == 3.1.1",
+  "nemo-fabric-adapter-contract == 0.2.0",
+  "nemo-fabric-adapters-common == 0.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

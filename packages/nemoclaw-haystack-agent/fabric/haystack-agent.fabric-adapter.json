@@ -1,0 +1,44 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "contract_version": "fabric.adapter/v1alpha2",
+  "adapter_id": "nvidia.nemoclaw.haystack-agent",
+  "adapter_kind": "python",
+  "runner": {
+    "module": "nemoclaw_haystack_fabric.adapter"
+  },
+  "requirements": {},
+  "model_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "provider": { "const": "openshell" },
+      "model": { "type": "string", "minLength": 1 },
+      "api_key_env": { "const": "HAYSTACK_FABRIC_API_KEY" },
+      "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+      "base_url": { "const": "https://inference.local/v1" }
+    },
+    "required": ["provider", "model", "api_key_env", "temperature", "base_url"],
+    "additionalProperties": false
+  },
+  "settings_schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "config": {
+    "accepts": [
+      "models",
+      "models.base_url",
+      "models.temperature",
+      "instructions.system",
+      "runtime.max_turns"
+    ]
+  },
+  "capabilities": {
+    "streaming": false,
+    "cancellation": false,
+    "updates": false,
+    "service": false
+  }
+}

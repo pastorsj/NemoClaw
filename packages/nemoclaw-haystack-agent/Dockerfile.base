@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Local-only Haystack Agent POC base image.
+# hadolint global ignore=DL3066
+
+FROM node:22-trixie-slim@sha256:db8a96a63e5264607ada2d206758876ebbed6a12be2ada7517793cbfb0c2a29c
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    HAYSTACK_TELEMETRY_ENABLED=false \
+    HAYSTACK_AUTO_TRACE_ENABLED=false \
+    HAYSTACK_CONTENT_TRACING_ENABLED=false \
+    PATH="/opt/nemoclaw-fabric-venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# This POC keeps its operating-system surface small. The Python dependency
+# graph below is hash locked separately from these exact Debian package pins.
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates=20250419 \
+        openssh-sftp-server=1:10.0p1-7+deb13u4 \
+        procps=2:4.0.4-9 \
+        python3=3.13.5-1 \
+        python3-pip=25.1.1+dfsg-1 \
+        python3-venv=3.13.5-1 \
+        util-linux=2.41-5 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 999 sandbox \
+    && useradd --uid 999 --gid sandbox --home-dir /sandbox --shell /bin/bash sandbox \
+    && install -d -o sandbox -g sandbox -m 0700 /sandbox
+
+COPY packages/nemoclaw-haystack-agent/fabric/requirements.lock /tmp/haystack-requirements.lock
+
+RUN python3 -m venv --copies /opt/nemoclaw-fabric-venv \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 install --no-cache-dir --require-hashes \
+        -r /tmp/haystack-requirements.lock \
+    && /opt/nemoclaw-fabric-venv/bin/pip3 check \
+    && /opt/nemoclaw-fabric-venv/bin/python3 -I -c \
+        'from importlib.metadata import version; expected = {"haystack-ai": "3.1.1", "nemo-fabric": "0.2.0", "nemo-fabric-adapter-contract": "0.2.0", "nemo-fabric-adapters-common": "0.2.0"}; actual = {name: version(name) for name in expected}; assert actual == expected, actual; from haystack.components.agents import Agent; from haystack.components.generators.chat import OpenAIChatGenerator' \
+    && rm -f /tmp/haystack-requirements.lock \
+    && find /opt/nemoclaw-fabric-venv -type d -name __pycache__ -prune -exec rm -rf '{}' + \
+    && chown -R root:root /opt/nemoclaw-fabric-venv \
+    && chmod -R go-w /opt/nemoclaw-fabric-venv
+
+WORKDIR /sandbox
+USER sandbox

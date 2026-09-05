@@ -1,0 +1,46 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
+  "name": "@nvidia/nemoclaw-haystack-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental local Haystack Agent runtime package for NemoClaw",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "test:fabric": "bash tests/fabric/run-tests.sh",
+    "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
+    "test:package": "vitest run --config vitest.config.ts",
+    "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm run test:fabric:composed",
+    "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree",
+    "test:watch": "vitest watch --config vitest.config.ts",
+    "test": "npm run test:package && npm run test:nemoclaw",
+    "typecheck": "tsc -p tsconfig.test.json"
+  },
+  "files": [
+    "Dockerfile",
+    "Dockerfile.base",
+    "README.md",
+    "config/",
+    "fabric/haystack-agent.fabric-adapter.json",
+    "fabric/pyproject.toml",
+    "fabric/requirements.in",
+    "fabric/requirements.lock",
+    "fabric/src/**/*.py",
+    "host/config-adapter.cts",
+    "manifest.yaml",
+    "policy-additions.yaml",
+    "runtime/",
+    "start.sh"
+  ],
+  "nemoclaw": {
+    "harnessManifest": "manifest.yaml"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

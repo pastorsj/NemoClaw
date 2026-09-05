@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Local-only POC package. Haystack is a framework; this package constructs the
+# concrete headless Agent that NemoClaw invokes through NeMo Fabric.
+name: haystack-agent
+display_name: "Haystack Agent (experimental)"
+description: "Local headless agent POC built directly on the Haystack Agent API"
+version_constraint: ">=3.1.1"
+language: python
+license: Apache-2.0
+homepage: "https://haystack.deepset.ai"
+install_method: pip
+binary_path: /usr/local/bin/nemoclaw-haystack-version
+version_command: "nemoclaw-haystack-version"
+expected_version: "3.1.1"
+version_scheme: semver
+runtime:
+  kind: terminal
+  command_shell: /bin/bash
+  headless_command: "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.haystack-agent/fabric.json"
+  smoke_boundary:
+    kind: login-shell
+  smoke_commands:
+    - "nemoclaw-haystack-version"
+    - "nemoclaw-fabric --version"
+    - "/usr/local/bin/nemoclaw-fabric-run --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK"
+    - "test -s /sandbox/.haystack-agent/fabric.json && echo NEMOCLAW_HAYSTACK_FABRIC_OK"
+    - 'test "$(stat -c %a /sandbox/.haystack-agent/fabric.json)" = 600 && echo NEMOCLAW_HAYSTACK_FABRIC_MODE_OK'
+config:
+  dir: /sandbox/.haystack-agent
+  config_file: fabric.json
+  mutable_access: private
+  format: json
+state_dirs:
+  - path: fabric-artifacts
+    backup: false
+device_pairing: false
+inference:
+  provider_type: openai_compatible
+  default_model: nvidia/nemotron-3-super-120b-a12b
+  base_url_config_key: "models.default.base_url"
+  model_config_key: "models.default.model"
+  proxy_support: implicit
+mcp:
+  support: disabled
+package_registry:
+  hosts:
+    - pypi.org
+    - files.pythonhosted.org
+  binary: /opt/nemoclaw-fabric-venv/bin/pip3

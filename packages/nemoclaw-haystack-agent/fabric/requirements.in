@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Exact direct dependencies for the local Haystack Agent and generic Fabric runner.
+haystack-ai==3.1.1
+nemo-fabric==0.2.0
+nemo-fabric-adapter-contract==0.2.0
+nemo-fabric-adapters-common==0.2.0

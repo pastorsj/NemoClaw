@@ -1,0 +1,11 @@
+{
+  "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. SPDX-License-Identifier: Apache-2.0",
+  "packageId": "haystack-agent",
+  "adapterId": "nvidia.nemoclaw.haystack-agent",
+  "artifactRoot": "/sandbox/.haystack-agent/fabric-artifacts",
+  "configPath": "/sandbox/.haystack-agent/fabric.json",
+  "descriptorGlob": "/usr/local/share/nemoclaw/haystack-agent.fabric-adapter.json",
+  "descriptorPathPrefix": "/usr/local/share/nemoclaw",
+  "descriptorRunnerModule": "nemoclaw_haystack_fabric.adapter",
+  "processMarkers": ["nemoclaw_haystack_fabric"]
+}
