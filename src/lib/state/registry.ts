@@ -442,6 +442,12 @@ export function registerSandbox(
       throw new Error("Cannot register a sandbox with invalid serving profile provenance");
     }
     const normalizedPolicyEntry = normalizeSandboxPolicyAttribution(entry);
+    const workload = cloneSandboxWorkloadReceipt(entry.workload, {
+      harnessPackage: normalizedPolicyEntry.harnessPackage ?? null,
+    });
+    if (entry.workload !== undefined && workload === undefined) {
+      throw new Error("Cannot register a sandbox with an invalid workload receipt");
+    }
     assertPendingCreateIdentityMatchesRegistration(
       recordedEntry,
       normalizedPolicyEntry,
@@ -535,7 +541,7 @@ export function registerSandbox(
           ? entry.webSearchProvider
           : null,
       agent: entry.agent === "openclaw" ? null : entry.agent || null,
-      ...normalizeSandboxHarnessPackageAuthority(entry),
+      ...normalizeSandboxHarnessPackageAuthority(normalizedPolicyEntry),
       agentVersion: entry.agentVersion || null,
       openclawImagePluginInstalls: Array.isArray(entry.openclawImagePluginInstalls)
         ? entry.openclawImagePluginInstalls.map((install) => ({
@@ -550,7 +556,7 @@ export function registerSandbox(
           ? entry.hermesAuthMethod
           : null,
       imageTag: entry.imageTag || null,
-      workload: cloneSandboxWorkloadReceipt(entry.workload),
+      workload,
       ...(hostLocalInferenceReceipt !== undefined ? { hostLocalInferenceReceipt } : {}),
       ...(hostLocalInferenceProvenance ? { hostLocalInferenceProvenance } : {}),
       lifecycleGeneration: entry.lifecycleGeneration,

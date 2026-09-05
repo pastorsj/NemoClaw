@@ -5,7 +5,12 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
 import {
-  decodeManagedStartupProfile,
+  harnessPackageIdentitiesEqual,
+  type HarnessPackageIdentity,
+} from "../../agent-runtime/package/identity";
+import {
+  decodeManagedStartupDurableProfile,
+  isManagedStartupPackageProfile,
   MANAGED_STARTUP_PROFILE_MAX_BYTES,
   MANAGED_STARTUP_PROFILE_MAX_ENCODED_BYTES,
 } from "../../onboard/managed-startup/profile";
@@ -24,6 +29,26 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const STANDARD_BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 const MAX_CORPORATE_CA_BYTES = 128 * 1024;
 const MAX_CORPORATE_CA_ENCODED_BYTES = Math.ceil(MAX_CORPORATE_CA_BYTES / 3) * 4;
+
+export interface SandboxWorkloadReceiptAuthority {
+  /** Explicit null distinguishes a package-absent registry row from standalone receipt decoding. */
+  readonly harnessPackage: HarnessPackageIdentity | null;
+}
+
+function packageProfileMatchesAuthority(
+  profile: ReturnType<typeof decodeManagedStartupDurableProfile>,
+  authority: SandboxWorkloadReceiptAuthority | undefined,
+): boolean {
+  if (authority === undefined || !isManagedStartupPackageProfile(profile)) return true;
+  if (authority.harnessPackage === null || profile.agent !== authority.harnessPackage.id) {
+    return false;
+  }
+  try {
+    return harnessPackageIdentitiesEqual(profile.harnessPackage, authority.harnessPackage);
+  } catch {
+    return false;
+  }
+}
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim() !== "";
@@ -66,6 +91,7 @@ function decodeCanonicalStandardBase64(value: unknown): Buffer | null {
 
 export function cloneSandboxWorkloadReceipt(
   value: SandboxWorkloadReceipt | undefined,
+  authority?: SandboxWorkloadReceiptAuthority,
 ): SandboxWorkloadReceipt | undefined {
   if (!value || value.schemaVersion !== 1) return undefined;
   if (value.kind === "native-artifact") {
@@ -107,12 +133,13 @@ export function cloneSandboxWorkloadReceipt(
   ) {
     return undefined;
   }
-  let profile: ReturnType<typeof decodeManagedStartupProfile>;
+  let profile: ReturnType<typeof decodeManagedStartupDurableProfile>;
   try {
-    profile = decodeManagedStartupProfile(value.encodedProfile);
+    profile = decodeManagedStartupDurableProfile(value.encodedProfile);
   } catch {
     return undefined;
   }
+  if (!packageProfileMatchesAuthority(profile, authority)) return undefined;
   const corporateCaBytes =
     value.corporateCaB64 === undefined ? null : decodeCanonicalStandardBase64(value.corporateCaB64);
   if (value.corporateCaB64 !== undefined && corporateCaBytes === null) {

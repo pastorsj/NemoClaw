@@ -30,9 +30,12 @@ import { cloneSandboxWorkloadReceipt } from "./workload";
 
 function cloneSandboxWorkloadReceiptOrThrow(
   value: SandboxEntry["workload"],
+  harnessPackage: SandboxEntry["harnessPackage"],
   operation: "load" | "save",
 ): SandboxEntry["workload"] {
-  const workload = cloneSandboxWorkloadReceipt(value);
+  const workload = cloneSandboxWorkloadReceipt(value, {
+    harnessPackage: harnessPackage ?? null,
+  });
   if (value !== undefined && workload === undefined) {
     throw new Error(`Cannot ${operation} a sandbox entry with an invalid workload receipt`);
   }
@@ -173,7 +176,12 @@ function serializeRegistryForDisk(data: SandboxRegistry): SandboxRegistry {
 
 function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
   const messaging = cloneSandboxMessagingState(entry.messaging);
-  const workload = cloneSandboxWorkloadReceiptOrThrow(entry.workload, "load");
+  const policyEntry = normalizeSandboxPolicyAttribution(entry);
+  const workload = cloneSandboxWorkloadReceiptOrThrow(
+    policyEntry.workload,
+    policyEntry.harnessPackage,
+    "load",
+  );
   const hostLocalInferenceReceipt = cloneHostLocalInferenceReceiptOrThrow(
     entry.hostLocalInferenceReceipt,
     "load",
@@ -188,7 +196,6 @@ function normalizeSandboxEntryForRuntime(entry: SandboxEntry): SandboxEntry {
     "load",
   );
   const mcp = normalizeSandboxMcpState(entry.mcp);
-  const policyEntry = normalizeSandboxPolicyAttribution(entry);
   const {
     cuaRuntimeReadiness: _legacyCuaRuntimeReadiness,
     messaging: _messaging,
@@ -231,7 +238,12 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     providerCredentialHashes?: unknown;
   };
   const messaging = serializeSandboxMessagingStateForDisk(durable.messaging);
-  const workload = cloneSandboxWorkloadReceiptOrThrow(durable.workload, "save");
+  const policyEntry = normalizeSandboxPolicyAttribution(durable);
+  const workload = cloneSandboxWorkloadReceiptOrThrow(
+    policyEntry.workload,
+    policyEntry.harnessPackage,
+    "save",
+  );
   const hostLocalInferenceReceipt = cloneHostLocalInferenceReceiptOrThrow(
     durable.hostLocalInferenceReceipt,
     "save",
@@ -246,7 +258,6 @@ function serializeSandboxEntryForDisk(entry: SandboxEntry): SandboxEntry {
     "save",
   );
   const mcp = serializeSandboxMcpStateForDisk(durable.mcp);
-  const policyEntry = normalizeSandboxPolicyAttribution(durable);
   const {
     cuaRuntimeReadiness: _legacyCuaRuntimeReadiness,
     messaging: _messaging,
