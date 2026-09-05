@@ -392,6 +392,27 @@ export function assertAuthenticatedBridgeEntry(entry: McpBridgeEntry): void {
 }
 
 /**
+ * Return whether a read-only adapter command can safely start for persisted credentials.
+ *
+ * Current credential names are safe by definition. An old revision-scoped OpenShell name is
+ * also safe because OpenShell skips it instead of attaching its value to a fresh sandbox child.
+ * Every other rejected legacy name may control the child process itself and remains fail-closed.
+ */
+export function canSafelyInspectPersistedMcpCredential(entry: McpBridgeEntry): boolean {
+  try {
+    assertPersistedAuthenticatedBridgeEntry(entry);
+    validateMcpCredentialEnvName(entry.env[0]);
+    return true;
+  } catch {
+    return (
+      Array.isArray(entry.env) &&
+      entry.env.length === 1 &&
+      OPENSHELL_REVISIONED_CREDENTIAL_NAME_RE.test(entry.env[0] ?? "")
+    );
+  }
+}
+
+/**
  * Read values only for local display redaction while cleaning legacy state.
  * Never pass this map to a subprocess environment or provider mutation.
  */

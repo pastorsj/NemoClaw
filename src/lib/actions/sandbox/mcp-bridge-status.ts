@@ -42,6 +42,7 @@ import {
 } from "./mcp-bridge-url-validation";
 import {
   assertAuthenticatedBridgeEntry,
+  canSafelyInspectPersistedMcpCredential,
   normalizeMcpServerUrl,
   resolvePersistedCredentialEnvForRedaction,
   validateMcpServerName,
@@ -103,7 +104,9 @@ function getAdapterRegistration(
         detail: `Adapter inspection was skipped because ${credentialObservationDetail}.`,
       }
     : undefined;
-  if (credentialInspectionFailure) return credentialInspectionFailure;
+  if (credentialInspectionFailure && !canSafelyInspectPersistedMcpCredential(entry)) {
+    return credentialInspectionFailure;
+  }
   if (runtimeIntentInspection) {
     return runtimeIntentInspection.ok
       ? { registered: true }
@@ -122,20 +125,24 @@ function getAdapterRegistration(
   const result = executeSandboxCommand(sandboxName, installedCommand, { runtimeSelection });
   if (!result)
     return credentialInspectionFailure ?? { registered: null, detail: "sandbox unreachable" };
-  if (credentialInspectionFailure) return credentialInspectionFailure;
   if (result.status === 0) {
+    if (credentialInspectionFailure) return credentialInspectionFailure;
     const output = result.stdout.trim();
     if (output === "registered") return { registered: true };
     return { registered: false, detail: output || "not found" };
   }
   const envValues = resolvePersistedCredentialEnvForRedaction(entry.env);
+  const failureDetail = redactBridgeSecretsForDisplay(
+    result.stderr || result.stdout || "not found",
+    entry,
+    envValues,
+  );
+  if (result.status === 2) {
+    throw new McpBridgeError(failureDetail, 2);
+  }
   return {
     registered: false,
-    detail: redactBridgeSecretsForDisplay(
-      result.stderr || result.stdout || "not found",
-      entry,
-      envValues,
-    ),
+    detail: failureDetail,
   };
 }
 
@@ -268,28 +275,30 @@ export async function statusMcpBridge(
     )
     .find((detail) => detail !== undefined);
 
-  const runtimeIntentInspection =
+  const packageRuntimeIntentInspection =
     agent.mcpCapability.support === "bridge" &&
     agent.mcpCapability.adapter &&
     (entries.length > 0 || (sandbox.mcp?.managedServerNames?.length ?? 0) > 0) &&
     runtimeIntentEntries.every(
       ([, entry]) => !entry || storedCredentialWarning(entry) === undefined,
     )
-      ? runtimeIntentCredentialObservationDetail
-        ? {
-            ok: false as const,
-            state: "error" as const,
-            detail: runtimeIntentCredentialObservationDetail,
-          }
-        : inspectAgentMcpRuntimeIntent(sandboxName, agent.mcpCapability.adapter, {
-            entries: runtimeIntentEntries.flatMap(([, entry]) => (entry ? [entry] : [])),
-            ...(sandbox.mcp?.managedServerNames
-              ? { managedServerNames: sandbox.mcp.managedServerNames }
-              : {}),
-            credentialRevisions,
-            runtimeSelection: providerRuntimeSelection,
-          })
+      ? inspectAgentMcpRuntimeIntent(sandboxName, agent.mcpCapability.adapter, {
+          entries: runtimeIntentEntries.flatMap(([, entry]) => (entry ? [entry] : [])),
+          ...(sandbox.mcp?.managedServerNames
+            ? { managedServerNames: sandbox.mcp.managedServerNames }
+            : {}),
+          credentialRevisions,
+          runtimeSelection: providerRuntimeSelection,
+        })
       : undefined;
+  const runtimeIntentInspection =
+    packageRuntimeIntentInspection && runtimeIntentCredentialObservationDetail
+      ? {
+          ok: false as const,
+          state: "error" as const,
+          detail: runtimeIntentCredentialObservationDetail,
+        }
+      : packageRuntimeIntentInspection;
   if (entries.length === 0 && runtimeIntentInspection && !runtimeIntentInspection.ok) {
     throw new McpBridgeError(
       `Agent MCP runtime does not match the persisted managed intent for sandbox '${sandboxName}': ${runtimeIntentInspection.detail}.`,

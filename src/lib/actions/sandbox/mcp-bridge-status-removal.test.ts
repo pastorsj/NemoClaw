@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe("cross-agent MCP removal", testTimeoutOptions(15_000), () => {
-  it("removes a persisted bridge without requiring the current agent to support MCP", () => {
+  it("refuses persisted removal without reconciled package authority before mutation", () => {
     const home = createTempHome("nemoclaw-mcp-remove-");
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
@@ -73,13 +73,14 @@ registry.registerSandbox({
 });
 const bridge = require("./src/lib/actions/sandbox/mcp-bridge.js");
 bridge.removeMcpBridge("legacy-sandbox", "github").then(
-  () => {
-    process.stdout.write(JSON.stringify(registry.getSandbox("legacy-sandbox")));
-    process.exit(0);
-  },
+  () => process.exit(1),
   (error) => {
-    console.error(error);
-    process.exit(1);
+    process.stdout.write(JSON.stringify({
+      message: error.message,
+      reasonCode: error.reasonCode,
+      sandbox: registry.getSandbox("legacy-sandbox"),
+    }));
+    process.exit(0);
   },
 );
 `;
@@ -91,16 +92,19 @@ bridge.removeMcpBridge("legacy-sandbox", "github").then(
 
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     const jsonStart = result.stdout.indexOf("{");
-    const sandbox = JSON.parse(result.stdout.slice(jsonStart)) as {
-      mcp?: { bridges?: Record<string, unknown>; managedServerNames?: string[] };
+    const payload = JSON.parse(result.stdout.slice(jsonStart)) as {
+      message: string;
+      reasonCode: string;
+      sandbox: { mcp?: { bridges?: Record<string, unknown> } };
     };
-    expect(sandbox.mcp).toEqual({
-      bridges: {},
-      managedServerNames: ["github"],
+    expect(payload).toMatchObject({
+      message: expect.stringContaining("requires reconciled harness package authority"),
+      reasonCode: "package-authority-required",
     });
+    expect(payload.sandbox.mcp?.bridges).toHaveProperty("github");
   });
 
-  it("preserves the registry entry when force cleanup leaves residual policy state", () => {
+  it("refuses force cleanup without using legacy adapter or policy fallbacks", () => {
     const home = createTempHome("nemoclaw-mcp-residual-");
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
@@ -150,6 +154,7 @@ bridge.removeMcpBridge("legacy-sandbox", "github", { force: true }).then(
   (error) => {
     process.stdout.write(JSON.stringify({
       message: error.message,
+      reasonCode: error.reasonCode,
       sandbox: registry.getSandbox("legacy-sandbox"),
     }));
     process.exit(0);
@@ -166,9 +171,11 @@ bridge.removeMcpBridge("legacy-sandbox", "github", { force: true }).then(
     const jsonStart = result.stdout.indexOf("{");
     const payload = JSON.parse(result.stdout.slice(jsonStart)) as {
       message: string;
+      reasonCode: string;
       sandbox: { mcp?: { bridges?: Record<string, unknown> } };
     };
-    expect(payload.message).toContain("registry entry was preserved");
+    expect(payload.message).toContain("requires reconciled harness package authority");
+    expect(payload.reasonCode).toBe("package-authority-required");
     expect(payload.sandbox.mcp?.bridges).toHaveProperty("github");
   });
 });

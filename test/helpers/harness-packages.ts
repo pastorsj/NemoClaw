@@ -6,7 +6,12 @@ import path from "node:path";
 
 import { installHarnessPackage } from "../../src/lib/agent-runtime/package/install";
 import type { BundledHarnessPackageSourceIdentity } from "../../src/lib/agent-runtime/package/receipt";
-import type { InstalledHarnessPackage } from "../../src/lib/agent-runtime/package/store";
+import {
+  resolvePinnedHarnessPackage,
+  type InstalledHarnessPackage,
+} from "../../src/lib/agent-runtime/package/store";
+
+const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../..");
 
 const HARNESS_PACKAGE_FIXTURES = Object.freeze([
   {
@@ -56,6 +61,13 @@ interface HarnessPackageFixtureDeclaration {
 }
 
 export type HarnessPackageFixtureId = (typeof HARNESS_PACKAGE_FIXTURES)[number]["id"];
+export type McpHarnessPackageFixtureId = Exclude<HarnessPackageFixtureId, "pi">;
+
+interface McpHarnessPackageStoreTemplate {
+  readonly root: string;
+  readonly storeRoot: string;
+  readonly identities: ReadonlyMap<McpHarnessPackageFixtureId, InstalledHarnessPackage["identity"]>;
+}
 
 export interface HarnessPackageFixtureOptions {
   readonly fixtureParent?: string;
@@ -100,6 +112,7 @@ const SOURCE_IDENTITY: BundledHarnessPackageSourceIdentity = Object.freeze({
     sourceRevision: "d".repeat(40),
   }),
 });
+let mcpHarnessPackageStoreTemplate: McpHarnessPackageStoreTemplate | undefined;
 
 function privateDirectory(directory: string): void {
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -164,6 +177,7 @@ function writePackageArtifact(input: {
       id: input.declaration.id,
       displayName: input.declaration.displayName,
       packageVersion: input.packageVersion,
+      minimumNemoClawVersion: "0.0.113",
       manifest: input.declaration.manifestPath,
     })}\n`,
   );
@@ -375,6 +389,90 @@ export function installHomeHarnessPackageFixture(
   return fixture.install(id);
 }
 
+function installMcpHarnessPackageFixture(
+  sourceParent: string,
+  storeRoot: string,
+  id: McpHarnessPackageFixtureId,
+): InstalledHarnessPackage {
+  const declaration = HARNESS_PACKAGE_FIXTURES.find((candidate) => candidate.id === id);
+  if (!declaration) throw new Error(`Unknown MCP harness fixture package '${id}'`);
+
+  const sourceRoot = path.join(sourceParent, id);
+  const packageDirectory = `packages/nemoclaw-${id}`;
+  const repositoryPackageRoot = path.join(REPOSITORY_ROOT, packageDirectory);
+  privateDirectory(path.join(sourceRoot, packageDirectory, "host"));
+  writePrivateFile(
+    sourceRoot,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id,
+      displayName: declaration.displayName,
+      packageVersion: declaration.packageVersion,
+      minimumNemoClawVersion: "0.0.113",
+      manifest: `${packageDirectory}/manifest.yaml`,
+    })}\n`,
+  );
+  for (const relativePath of ["manifest.yaml", "host/mcp-adapter.cts"] as const) {
+    writePrivateFile(
+      sourceRoot,
+      `${packageDirectory}/${relativePath}`,
+      fs.readFileSync(path.join(repositoryPackageRoot, relativePath), "utf8"),
+    );
+  }
+
+  return installHarnessPackage(
+    { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+    { storeRoot },
+  );
+}
+
+function getMcpHarnessPackageStoreTemplate(): McpHarnessPackageStoreTemplate {
+  if (mcpHarnessPackageStoreTemplate) return mcpHarnessPackageStoreTemplate;
+  privateDirectory(FIXTURE_PARENT);
+  const root = fs.mkdtempSync(path.join(FIXTURE_PARENT, "mcp-store-"));
+  fs.chmodSync(root, 0o700);
+  const storeRoot = path.join(root, "store");
+  const sourceParent = path.join(root, "sources");
+  const identities = new Map<McpHarnessPackageFixtureId, InstalledHarnessPackage["identity"]>();
+  for (const id of ["openclaw", "hermes", "langchain-deepagents-code"] as const) {
+    identities.set(id, installMcpHarnessPackageFixture(sourceParent, storeRoot, id).identity);
+  }
+  mcpHarnessPackageStoreTemplate = Object.freeze({ root, storeRoot, identities });
+  return mcpHarnessPackageStoreTemplate;
+}
+
+function restorePrivateFixtureModes(root: string): void {
+  fs.chmodSync(root, 0o700);
+  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+    const target = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      restorePrivateFixtureModes(target);
+    } else {
+      fs.chmodSync(target, 0o600);
+    }
+  }
+}
+
+/** Install a package's real manifest and MCP adapter under an isolated test HOME. */
+export function installHomeMcpHarnessPackageFixture(
+  home: string,
+  id: McpHarnessPackageFixtureId,
+): InstalledHarnessPackage {
+  const canonicalHome = fs.realpathSync(home);
+  const template = getMcpHarnessPackageStoreTemplate();
+  const storeRoot = path.join(canonicalHome, ".nemoclaw", "harnesses");
+  if (!fs.existsSync(storeRoot)) {
+    privateDirectory(path.dirname(storeRoot));
+    fs.cpSync(template.storeRoot, storeRoot, { recursive: true, preserveTimestamps: true });
+    restorePrivateFixtureModes(storeRoot);
+  }
+  const identity = template.identities.get(id);
+  if (!identity) throw new Error(`Unknown MCP harness fixture package '${id}'`);
+  return resolvePinnedHarnessPackage(identity, { storeRoot });
+}
+
 /** Install the real OpenClaw restore manifest and adapter under an isolated HOME. */
 export function installHomeOpenClawRestorePackageFixture(home: string): InstalledHarnessPackage {
   const canonicalHome = fs.realpathSync(home);
@@ -404,6 +502,7 @@ export function installHomeOpenClawRestorePackageFixture(home: string): Installe
       id: "openclaw",
       displayName: "OpenClaw",
       packageVersion: "0.1.1",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-openclaw/manifest.yaml",
     })}\n`,
   );

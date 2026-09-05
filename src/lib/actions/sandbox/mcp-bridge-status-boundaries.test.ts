@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
@@ -17,7 +18,7 @@ const sourceNodeOptions = [process.env.NODE_OPTIONS, `--require=${sourceRequireH
 const tempHomes = new Set<string>();
 
 function createTempHome(prefix: string): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tempHomes.add(home);
   return home;
 }
@@ -30,6 +31,7 @@ afterEach(() => {
 describe("cross-agent MCP status boundaries", testTimeoutOptions(45_000), () => {
   it("pins provider reads to the recorded runtime (#10514)", () => {
     const home = createTempHome("nemoclaw-mcp-status-provider-target-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "openclaw").identity;
     const script = String.raw`
 process.env.HOME = ${JSON.stringify(home)};
 process.env.OPENSHELL_GATEWAY = "ambient-gateway";
@@ -72,6 +74,7 @@ processRecovery.executeSandboxCommand = () => ({ status: 0, stdout: "registered"
 registry.registerSandbox({
   name: "alpha",
   agent: "openclaw",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   gatewayName: "nemoclaw-9090",
   gatewayPort: 9090,
   mcp: { bridges: { github: {
@@ -125,6 +128,7 @@ require("./src/lib/actions/sandbox/mcp-bridge-status.js").statusMcpBridge("alpha
 
   it("reports unsupported persisted boundaries without starting an unsafe sandbox child", () => {
     const home = createTempHome("nemoclaw-mcp-status-risk-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "openclaw").identity;
     const script = String.raw`
 process.env.HOME = ${JSON.stringify(home)};
 process.env.LD_PRELOAD = "/tmp/legacy-attached-loader.so";
@@ -163,6 +167,7 @@ processRecovery.executeSandboxCommand = () => {
 registry.registerSandbox({
   name: "alpha",
   agent: "openclaw",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   gatewayName: "nemoclaw-9090",
   gatewayPort: 9090,
   mcp: { bridges: { fake: {
@@ -228,6 +233,7 @@ const bridge = require("./src/lib/actions/sandbox/mcp-bridge.js");
 
   it("reports Hermes bridge support in status JSON without requiring servers", () => {
     const home = createTempHome("nemoclaw-mcp-status-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "hermes").identity;
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
@@ -239,6 +245,7 @@ const bridge = require("./src/lib/actions/sandbox/mcp-bridge.js");
 registry.registerSandbox({
   name: "hermes-sandbox",
   agent: "hermes",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   gatewayName: "nemoclaw-9090",
   gatewayPort: 9090,
 });

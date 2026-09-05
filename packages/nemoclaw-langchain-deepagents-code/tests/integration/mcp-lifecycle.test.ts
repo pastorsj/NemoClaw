@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { mockManagedEndpointlessProviderProfile } from "../helpers/provider-mocks.ts";
 
 const mocks = vi.hoisted(() => ({
@@ -54,7 +55,9 @@ const ORIGINAL_HOME = process.env.HOME;
 const ORIGINAL_GATEWAY_MANAGEMENT = process.env.NEMOCLAW_GATEWAY_MANAGEMENT;
 const ORIGINAL_OPENSHELL_BIN = process.env.NEMOCLAW_OPENSHELL_BIN;
 const ORIGINAL_OPENSHELL_GATEWAY = process.env.OPENSHELL_GATEWAY;
-const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-deepagents-mcp-legacy-"));
+const TMP_HOME = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-deepagents-mcp-legacy-")),
+);
 const GATEWAY_MANAGEMENT = path.join(TMP_HOME, "gateway-management.json");
 
 fs.writeFileSync(
@@ -65,6 +68,11 @@ fs.writeFileSync(
 process.env.HOME = TMP_HOME;
 process.env.NEMOCLAW_GATEWAY_MANAGEMENT = GATEWAY_MANAGEMENT;
 process.env.NEMOCLAW_OPENSHELL_BIN = MATCHING_OPENSHELL;
+
+let harnessPackage = installHomeMcpHarnessPackageFixture(
+  TMP_HOME,
+  "langchain-deepagents-code",
+).identity;
 
 const registry = await import("../../../../src/lib/state/registry");
 const bridge = await import("../../../../src/lib/actions/sandbox/mcp-bridge");
@@ -119,6 +127,10 @@ afterEach(() => {
 
 beforeEach(() => {
   fs.rmSync(path.dirname(registry.REGISTRY_FILE), { recursive: true, force: true });
+  harnessPackage = installHomeMcpHarnessPackageFixture(
+    TMP_HOME,
+    "langchain-deepagents-code",
+  ).identity;
   process.env.NEMOCLAW_GATEWAY_MANAGEMENT = GATEWAY_MANAGEMENT;
   restoreEnvironmentVariable("OPENSHELL_GATEWAY", ORIGINAL_OPENSHELL_GATEWAY);
 
@@ -218,12 +230,12 @@ beforeEach(() => {
       switch (true) {
         case command === "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability":
           return { status: 2, stdout: "", stderr: "unknown option" };
-        case command.includes("servers.pop(payload['server'])"): {
+        case command.includes("NEMOCLAW_MCP_REMOVAL_OUTCOME"): {
           const outcome = adapterRemovalOutcome || (adapterRegistered ? "removed" : "absent");
           adapterRegistered = outcome === "unowned" ? adapterRegistered : false;
           return {
             status: 0,
-            stdout: `NEMOCLAW_DEEPAGENTS_MCP_REMOVAL=${outcome}\n`,
+            stdout: `NEMOCLAW_MCP_REMOVAL_OUTCOME=${outcome}\n`,
             stderr: "",
           };
         }
@@ -231,7 +243,7 @@ beforeEach(() => {
           adapterRegistered = true;
           return {
             status: 0,
-            stdout: "NEMOCLAW_DEEPAGENTS_MCP_ROLLBACK_RESTORED=1\n",
+            stdout: "NEMOCLAW_MCP_ROLLBACK_RESTORED=1\n",
             stderr: "",
           };
         case command.includes(
@@ -276,6 +288,7 @@ beforeEach(() => {
   registry.registerSandbox({
     name: "alpha",
     agent: "langchain-deepagents-code",
+    harnessPackage,
     gatewayName: "nemoclaw",
     mcp: { bridges: { github: entry } },
   });

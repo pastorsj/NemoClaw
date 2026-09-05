@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { isTrustedPrivateEndpointCapability } from "../../security/trusted-private-endpoint";
 import { addMcpBridge, normalizeMcpServerUrl } from "./mcp-bridge";
 import {
@@ -152,7 +153,10 @@ describe("MCP URL target validation", () => {
       timeout: 40_000,
     },
     () => {
-      const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-private-mcp-add-success-"));
+      const home = fs.realpathSync(
+        fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-private-mcp-add-success-")),
+      );
+      const harnessPackage = installHomeMcpHarnessPackageFixture(home, "openclaw").identity;
       const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
       const script = `
 process.env.HOME = ${JSON.stringify(home)};
@@ -211,6 +215,7 @@ replace(processRecovery, "executeSandboxExecCommand", () => ({
 registry.registerSandbox({
   name: "alpha",
   agent: "openclaw",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   gatewayName: "nemoclaw-9090",
   gatewayPort: 9090,
 });

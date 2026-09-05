@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 import { testTimeoutOptions } from "../../../../test/helpers/timeouts";
 
 const sourceRequireHook = path.resolve("test/helpers/onboard-script-mocks.cjs");
@@ -17,7 +18,7 @@ const sourceNodeOptions = [process.env.NODE_OPTIONS, `--require=${sourceRequireH
 const tempHomes = new Set<string>();
 
 function createTempHome(prefix: string): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tempHomes.add(home);
   return home;
 }
@@ -31,15 +32,17 @@ afterEach(() => {
 // graph, which the recorded timing hints put at ~5.5s — over the 5s default.
 // Use the same budget as the sibling `mcp-bridge-status-removal` suite so a
 // loaded shard cannot fail these on timing alone.
-describe("cross-agent MCP status state", testTimeoutOptions(15_000), () => {
+describe("cross-agent MCP status state", testTimeoutOptions(60_000), () => {
   it("rejects duplicate static credential keys across bridges in one sandbox", () => {
     const home = createTempHome("nemoclaw-mcp-env-key-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "openclaw").identity;
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
 registry.registerSandbox({
   name: "openclaw-sandbox",
   agent: "openclaw",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   mcp: { bridges: { first: {
     server: "first",
     url: "https://8.8.8.8/mcp",
@@ -131,6 +134,7 @@ process.stdout.write(JSON.stringify(markers.map((_, index) => registry.getSandbo
 
   it("reconciles Hermes removal tombstones when no active bridges remain", () => {
     const home = createTempHome("nemoclaw-hermes-mcp-tombstone-status-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "hermes").identity;
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
@@ -149,6 +153,7 @@ providerCommands.runOpenshellProviderCommand = (args) => {
 registry.registerSandbox({
   name: "hermes-sandbox",
   agent: "hermes",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   mcp: { bridges: {}, managedServerNames: ["retired"] },
 });
 const status = require("./src/lib/actions/sandbox/mcp-bridge-status.js");
@@ -162,7 +167,7 @@ const status = require("./src/lib/actions/sandbox/mcp-bridge-status.js");
     refusal = error instanceof Error ? error.message : String(error);
   }
   process.stdout.write(JSON.stringify({ matched, payloads, refusal }));
-})().catch((error) => {
+})().then(() => process.exit(0)).catch((error) => {
   console.error(error);
   process.exit(1);
 });
@@ -185,16 +190,21 @@ const status = require("./src/lib/actions/sandbox/mcp-bridge-status.js");
       { present: {}, absent: ["retired"] },
     ]);
     expect(payload.refusal).toContain("does not match the persisted managed intent");
-    expect(payload.refusal).toContain("managed Hermes MCP entry is still present");
+    expect(payload.refusal).toContain("Hermes MCP runtime does not match");
   });
 
   it("validates requested server names and does not read inherited bridge keys", () => {
     const home = createTempHome("nemoclaw-mcp-status-key-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "openclaw").identity;
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
 const status = require("./src/lib/actions/sandbox/mcp-bridge-status.js");
-registry.registerSandbox({ name: "openclaw-sandbox", agent: "openclaw" });
+registry.registerSandbox({
+  name: "openclaw-sandbox",
+  agent: "openclaw",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
+});
 (async () => {
   let invalid;
   try {
@@ -234,20 +244,14 @@ registry.registerSandbox({ name: "openclaw-sandbox", agent: "openclaw" });
     });
   });
 
-  it("uses the loaded OpenClaw configuration directory for status inspection", () => {
+  it("uses the package-owned OpenClaw configuration directory for status inspection", () => {
     const home = createTempHome("nemoclaw-mcp-status-custom-root-");
+    const harnessPackage = installHomeMcpHarnessPackageFixture(home, "openclaw").identity;
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
-const agentDefs = require("./src/lib/agent/defs.js");
 const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
-agentDefs.loadAgent = () => ({
-  name: "openclaw",
-  displayName: "OpenClaw",
-  configPaths: { dir: "/sandbox/.custom-openclaw" },
-  mcpCapability: { support: "bridge", adapter: "mcporter" },
-});
 gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
   recovered: true,
   attempted: false,
@@ -262,6 +266,7 @@ processRecovery.executeSandboxCommand = (_sandboxName, command) => {
 registry.registerSandbox({
   name: "custom-root-status",
   agent: "openclaw",
+  harnessPackage: ${JSON.stringify(harnessPackage)},
   mcp: { bridges: { github: {
     server: "github",
     agent: "openclaw",
@@ -293,37 +298,16 @@ status.statusMcpBridge("custom-root-status", "github").then(
       capturedCommand: string;
     };
     expect(payload.bridges[0]?.adapter.registered).toBe(true);
-    expect(payload.capturedCommand).toContain(
-      '\\"root\\":\\"/sandbox/.custom-openclaw/workspace\\"',
-    );
-    expect(payload.capturedCommand).not.toContain('\\"root\\":\\"/sandbox/.openclaw/workspace\\"');
+    expect(payload.capturedCommand).toContain('\\"root\\":\\"/sandbox/.openclaw/workspace\\"');
   });
 
-  it("reports each bridge from its persisted adapter or agent capability", () => {
+  it("refuses persisted adapters without reconciled package authority", () => {
     const home = createTempHome("nemoclaw-mcp-status-agent-");
     const script = `
 process.env.HOME = ${JSON.stringify(home)};
 const registry = require("./src/lib/state/registry.js");
-const agentDefs = require("./src/lib/agent/defs.js");
 const gatewayRuntime = require("./src/lib/gateway-runtime-action.js");
 const processRecovery = require("./src/lib/actions/sandbox/process-recovery.js");
-agentDefs.loadAgent = (name) => {
-  if (name === "current-disabled") {
-    return {
-      name,
-      displayName: "Current Disabled",
-      mcpCapability: { support: "disabled", reason: "current agent is disabled" },
-    };
-  }
-  if (name === "persisted-enabled") {
-    return {
-      name,
-      displayName: "Persisted Enabled",
-      mcpCapability: { support: "bridge", adapter: "deepagents-config" },
-    };
-  }
-  throw new Error("Unexpected agent lookup: " + name);
-};
 gatewayRuntime.recoverNamedGatewayRuntime = async () => ({
   recovered: true,
   attempted: false,
@@ -356,10 +340,10 @@ registry.registerSandbox({
 });
 const status = require("./src/lib/actions/sandbox/mcp-bridge-status.js");
 status.statusMcpBridge("persisted-status").then(
-  (bridges) => process.stdout.write(JSON.stringify(bridges)),
+  () => process.exit(1),
   (error) => {
-    console.error(error);
-    process.exit(1);
+    process.stdout.write(JSON.stringify({ message: error.message, reasonCode: error.reasonCode }));
+    process.exit(0);
   },
 );
 `;
@@ -370,25 +354,10 @@ status.statusMcpBridge("persisted-status").then(
     });
 
     expect(result.status).toBe(0);
-    const bridges = JSON.parse(result.stdout) as Array<{
-      server: string;
-      agent: string;
-      support: { supported: boolean; mode: string; adapter?: string; reason?: string };
-      adapter: { registered: boolean | null };
-    }>;
-    expect(bridges).toHaveLength(2);
-    expect(bridges[0]).toMatchObject({
-      server: "direct",
-      agent: "persisted-unknown",
-      support: { supported: true, mode: "bridge", adapter: "mcporter" },
-      adapter: { registered: true },
-    });
-    expect(bridges[0]?.support.reason).toBeUndefined();
-    expect(bridges[1]).toMatchObject({
-      server: "legacy",
-      agent: "persisted-enabled",
-      support: { supported: true, mode: "bridge", adapter: "deepagents-config" },
-      adapter: { registered: true },
+    const refusal = JSON.parse(result.stdout) as { message: string; reasonCode: string };
+    expect(refusal).toEqual({
+      message: expect.stringContaining("requires reconciled harness package authority"),
+      reasonCode: "package-authority-required",
     });
   });
 });

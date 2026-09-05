@@ -1,7 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { installHomeMcpHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
 
 const mocks = vi.hoisted(() => ({
   executeGatewaySupervisorAction: vi.fn(),
@@ -21,9 +27,26 @@ vi.mock("../../../../src/lib/state/registry", async (importOriginal) => ({
 
 import { assertAgentMcpMutationRuntimeCapability } from "../../../../src/lib/actions/sandbox/mcp-bridge-adapters";
 
+const ORIGINAL_HOME = process.env.HOME;
+const TMP_HOME = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-capability-")),
+);
+process.env.HOME = TMP_HOME;
+const harnessPackage = installHomeMcpHarnessPackageFixture(
+  TMP_HOME,
+  "langchain-deepagents-code",
+).identity;
+
+afterAll(() => {
+  if (ORIGINAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = ORIGINAL_HOME;
+  fs.rmSync(TMP_HOME, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   mocks.getSandbox.mockReset().mockReturnValue({
     agent: "langchain-deepagents-code",
+    harnessPackage,
     gatewayName: "nemoclaw-8091",
     name: "deepagents-box",
   });
