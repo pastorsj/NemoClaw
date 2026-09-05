@@ -4,6 +4,7 @@
 import { isDeepStrictEqual } from "node:util";
 
 import { dockerCapture } from "../../adapters/docker";
+import { isTerminalAgent } from "../../agent-runtime/runtime/manifest";
 import { shouldManageDashboardForAgent } from "../../onboard/dashboard-runtime";
 import { resolveSandboxAgent, type ResolvedSandboxAgent } from "../../onboard/sandbox-agent";
 import {
@@ -44,6 +45,7 @@ const LEGACY_OPENSHELL_KEEPALIVE = "sleep infinity";
 const DOCKER_INSPECT_TIMEOUT_MS = 15000;
 const STATE_BACKUP_MAX_RETRIES = 5;
 const STATE_BACKUP_RETRY_SECONDS = 2;
+const LEGACY_SUPERVISOR_RELAUNCH_AGENTS = new Set(["openclaw", "hermes"]);
 
 export type ManagedSupervisorRelaunch = {
   containerId: string;
@@ -138,6 +140,30 @@ function hasLegacyKeepaliveStartup(inspect: DockerContainerInspect): boolean {
   return values.length === 1 && values[0] === LEGACY_OPENSHELL_KEEPALIVE;
 }
 
+/**
+ * Decide whether the selected package owns a long-running supervisor.
+ *
+ * Receipt-backed sandboxes use the exact definition resolved from their
+ * installed package. The package identifier, effective identifier, and
+ * definition must agree before runtime metadata can authorize recovery.
+ * Rows without a receipt retain only the historical OpenClaw and Hermes
+ * compatibility behavior; an ambient definition cannot add another legacy
+ * recovery target.
+ */
+function supportsManagedSupervisorRelaunch(selectedAgent: ResolvedSandboxAgent): boolean {
+  const harnessPackage = selectedAgent.harnessPackage;
+  if (harnessPackage === null) {
+    return LEGACY_SUPERVISOR_RELAUNCH_AGENTS.has(selectedAgent.effectiveAgentId);
+  }
+  if (
+    harnessPackage.id !== selectedAgent.effectiveAgentId ||
+    selectedAgent.definition.name !== selectedAgent.effectiveAgentId
+  ) {
+    throw new Error("selected supervisor definition does not match its harness package receipt");
+  }
+  return !isTerminalAgent(selectedAgent.definition);
+}
+
 function reconstructSupervisorLaunchCommand(
   sandboxName: string,
   entry: NonNullable<ReturnType<typeof registry.getSandbox>>,
@@ -146,7 +172,7 @@ function reconstructSupervisorLaunchCommand(
   deps: ManagedSupervisorRelaunchDeps,
 ): string[] | null {
   const agent = selectedAgent.definition;
-  if (!["openclaw", "hermes"].includes(selectedAgent.effectiveAgentId)) return null;
+  if (!supportsManagedSupervisorRelaunch(selectedAgent)) return null;
 
   const manageDashboard = shouldManageDashboardForAgent(agent);
   const resolveDashboardPort = deps.resolveDashboardPort ?? resolveSandboxDashboardPort;

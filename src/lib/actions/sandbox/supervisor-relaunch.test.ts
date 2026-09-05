@@ -117,6 +117,141 @@ describe("relaunchManagedSupervisorSession", () => {
     expect(deps.recreate).not.toHaveBeenCalled();
   });
 
+  it("uses a receipt-backed future gateway definition for supervisor recovery", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "4.5.6",
+      contentDigest: "c".repeat(64),
+    };
+    const deps = baseDeps({
+      getSandbox: vi.fn(() => ({
+        name: "alpha",
+        agent: "future-gateway",
+        harnessPackage,
+        dashboardPort: 20400,
+        openshellDriver: "docker",
+      })),
+      resolveSandboxAgent: vi.fn(() => ({
+        recordedAgent: "future-gateway",
+        effectiveAgentId: "future-gateway",
+        definition: {
+          name: "future-gateway",
+          displayName: "Future Gateway",
+          forwardPort: 20400,
+          packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+          runtime: {
+            kind: "gateway",
+            startup_environment: { FUTURE_GATEWAY_MODE: "managed" },
+          },
+        },
+        harnessPackage,
+        harnessPackageMigration: null,
+      })) as never,
+      resolveDashboardPort: vi.fn(() => 20400),
+    });
+
+    const relaunch = relaunchManagedSupervisorSession("alpha", { quiet: true, deps });
+
+    expect(relaunch).not.toBeNull();
+    expect(deps.recreate).toHaveBeenCalledOnce();
+    const command = vi.mocked(deps.recreate).mock.calls[0]?.[0].openshellSandboxCommand ?? [];
+    expect(command).toContain("FUTURE_GATEWAY_MODE=managed");
+    expect(command).toContain("NEMOCLAW_DASHBOARD_PORT=20400");
+    expect(command.at(-1)).toBe("nemoclaw-start");
+  });
+
+  it("does not recreate a receipt-backed future terminal runtime", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-terminal",
+      packageVersion: "4.5.6",
+      contentDigest: "d".repeat(64),
+    };
+    const deps = baseDeps({
+      getSandbox: vi.fn(() => ({
+        name: "alpha",
+        agent: "future-terminal",
+        harnessPackage,
+        openshellDriver: "docker",
+      })),
+      resolveSandboxAgent: vi.fn(() => ({
+        recordedAgent: "future-terminal",
+        effectiveAgentId: "future-terminal",
+        definition: {
+          name: "future-terminal",
+          packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+          runtime: { kind: "terminal", interactive_command: "future-terminal" },
+        },
+        harnessPackage,
+        harnessPackageMigration: null,
+      })) as never,
+    });
+
+    expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).toBeNull();
+    expect(deps.resolveDashboardPort).not.toHaveBeenCalled();
+    expect(deps.resolveContainer).not.toHaveBeenCalled();
+    expect(deps.recreate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a receipt-backed definition names another harness", () => {
+    const harnessPackage = {
+      kind: "agent-runtime" as const,
+      id: "future-gateway",
+      packageVersion: "4.5.6",
+      contentDigest: "e".repeat(64),
+    };
+    const deps = baseDeps({
+      getSandbox: vi.fn(() => ({
+        name: "alpha",
+        agent: "future-gateway",
+        harnessPackage,
+        openshellDriver: "docker",
+      })),
+      resolveSandboxAgent: vi.fn(() => ({
+        recordedAgent: "future-gateway",
+        effectiveAgentId: "future-gateway",
+        definition: {
+          name: "different-gateway",
+          packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+          runtime: { kind: "gateway" },
+        },
+        harnessPackage,
+        harnessPackageMigration: null,
+      })) as never,
+    });
+
+    expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).toBeNull();
+    expect(deps.resolveDashboardPort).not.toHaveBeenCalled();
+    expect(deps.resolveContainer).not.toHaveBeenCalled();
+    expect(deps.recreate).not.toHaveBeenCalled();
+  });
+
+  it("does not let an unreceipted future definition expand legacy recovery", () => {
+    const deps = baseDeps({
+      getSandbox: vi.fn(() => ({
+        name: "alpha",
+        agent: "future-gateway",
+        openshellDriver: "docker",
+      })),
+      resolveSandboxAgent: vi.fn(() => ({
+        recordedAgent: "future-gateway",
+        effectiveAgentId: "future-gateway",
+        definition: {
+          name: "future-gateway",
+          packageRoot: "/repository/agents/future-gateway",
+          runtime: { kind: "gateway" },
+        },
+        harnessPackage: null,
+        harnessPackageMigration: null,
+      })) as never,
+    });
+
+    expect(relaunchManagedSupervisorSession("alpha", { quiet: true, deps })).toBeNull();
+    expect(deps.resolveContainer).not.toHaveBeenCalled();
+    expect(deps.recreate).not.toHaveBeenCalled();
+  });
+
   it("refuses a container that no longer has the legacy keepalive startup", () => {
     const deps = baseDeps({
       inspectContainer: vi.fn(() => ({
