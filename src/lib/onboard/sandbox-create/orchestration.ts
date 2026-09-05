@@ -1820,16 +1820,16 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
           runtimeProvider: managedWorkloadRuntime.runtimeProvider,
         });
       }
-      const agentIdentity = effectiveAgent.managedImage?.runtime_identity;
-      if (!agentIdentity || effectiveAgent.name !== workload.source.contract.agent) {
+      const managedImage = effectiveAgent.managedImage;
+      if (!managedImage || effectiveAgent.name !== workload.source.contract.agent) {
         throw new Error(
           "Managed workload state roots require the receipt-pinned package image declaration.",
         );
       }
       const managedStateRoots = managedStartupStateRoots({
-        agent: workload.source.contract.agent,
+        packageId: workload.source.contract.agent,
         sandboxName,
-        agentIdentity,
+        managedImage,
       });
       return managedWorkloadOnboard.createManagedStateVolumeOnboardLifecycle({
         roots: managedStateRoots,

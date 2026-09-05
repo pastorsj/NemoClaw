@@ -672,7 +672,6 @@ export function resolveOnboardManagedBootstrapLaunch(input: {
   if (managedImage === null || agentDefinition.name !== input.workload.source.contract.agent) {
     throw new Error("Managed image launch is missing its receipt-pinned package declaration.");
   }
-  const agentIdentity = managedImage.runtime_identity;
   return {
     bootstrapIdentity: input.bootstrapIdentity,
     stateRoot: input.stateRoot,
@@ -683,15 +682,14 @@ export function resolveOnboardManagedBootstrapLaunch(input: {
       repository: input.workload.source.contract.image,
       manifestDigest: input.workload.source.contract.digest,
     },
-    agentIdentity,
+    agentIdentity: managedImage.runtime_identity,
     workspaceRoot: managedStartupWorkspaceRoot({
-      agent: input.workload.source.contract.agent,
-      agentIdentity,
+      managedImage,
     }),
     managedStateRoots: managedStartupStateRoots({
-      agent: input.workload.source.contract.agent,
+      packageId: input.workload.source.contract.agent,
       sandboxName: input.sandboxName,
-      agentIdentity,
+      managedImage,
     }),
     intendedWorkloadArgv: input.intendedWorkloadArgv,
     expectedSupervisorArgv: OPENSHELL_SANDBOX_SUPERVISOR_ARGV,

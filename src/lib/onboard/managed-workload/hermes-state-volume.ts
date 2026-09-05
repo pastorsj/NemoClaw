@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isManagedImageAgent, managedImageRuntimeIdentity } from "../managed-image/agents";
+import { isManagedImageAgent } from "../managed-image/agents";
+import { qualifiedManagedImageDeclaration } from "../managed-image/contract";
 import {
   managedHermesStateVolumeLabels,
   managedHermesStateVolumeName,
@@ -21,11 +22,7 @@ import {
   type ManagedStateVolumeMount,
 } from "./managed-state-volumes";
 
-export {
-  managedHermesStateVolumeLabels,
-  managedHermesStateVolumeName,
-  MANAGED_HERMES_STATE_ROOT,
-};
+export { managedHermesStateVolumeLabels, managedHermesStateVolumeName, MANAGED_HERMES_STATE_ROOT };
 
 export type ManagedHermesStateVolumeContext = {
   readonly agentName: string | null | undefined;
@@ -63,9 +60,9 @@ export type ManagedHermesStateVolumeScope = {
 
 function hermesStateRoots(sandboxName: string) {
   return managedStartupStateRoots({
-    agent: "hermes",
+    packageId: "hermes",
     sandboxName,
-    agentIdentity: managedImageRuntimeIdentity("hermes"),
+    managedImage: qualifiedManagedImageDeclaration("hermes"),
   });
 }
 
@@ -78,9 +75,9 @@ function managedAgentStateRoots(context: ManagedHermesStateVolumeContext) {
     return [];
   }
   return managedStartupStateRoots({
-    agent: context.agentName,
+    packageId: context.agentName,
     sandboxName: context.sandboxName,
-    agentIdentity: managedImageRuntimeIdentity(context.agentName),
+    managedImage: qualifiedManagedImageDeclaration(context.agentName),
   });
 }
 

@@ -37,6 +37,12 @@ managed_image:
     uid: 998
     gid: 999
     workdir: /sandbox
+  workspace:
+    owner: runtime
+    mode: "0755"
+  state_root:
+    mount_target: /sandbox/.hermes
+    mode: "3770"
   startup_profile_contract_version: 1
   capability_contract_version: 1
 gateway_command: "hermes gateway run"

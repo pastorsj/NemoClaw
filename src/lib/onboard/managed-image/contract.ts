@@ -58,14 +58,34 @@ export const MANAGED_IMAGE_REPOSITORIES = {
   pi: "ghcr.io/nvidia/nemoclaw/pi-sandbox",
 } as const satisfies Record<ManagedImageAgent, string>;
 
+const MANAGED_IMAGE_WORKSPACES = {
+  openclaw: { owner: "runtime", mode: "0755" },
+  hermes: { owner: "runtime", mode: "0755" },
+  "langchain-deepagents-code": { owner: "root", mode: "1775" },
+  pi: { owner: "runtime", mode: "0755" },
+} as const satisfies Record<
+  ManagedImageAgent,
+  NonNullable<HarnessManagedImageDeclaration["workspace"]>
+>;
+
+const MANAGED_IMAGE_STATE_ROOTS = {
+  openclaw: { mount_target: "/sandbox/.openclaw", mode: "2770" },
+  hermes: { mount_target: "/sandbox/.hermes", mode: "3770" },
+  "langchain-deepagents-code": null,
+  pi: null,
+} as const satisfies Record<ManagedImageAgent, HarnessManagedImageDeclaration["state_root"] | null>;
+
 /** Product-qualified compatibility declaration used by publication tooling and legacy callers. */
 export function qualifiedManagedImageDeclaration(
   agent: ManagedImageAgent,
 ): HarnessManagedImageDeclaration {
+  const stateRoot = MANAGED_IMAGE_STATE_ROOTS[agent];
   return Object.freeze({
     repository: MANAGED_IMAGE_REPOSITORIES[agent],
     architectures: MANAGED_IMAGE_PLATFORMS,
     runtime_identity: MANAGED_IMAGE_RUNTIME_IDENTITIES[agent],
+    workspace: MANAGED_IMAGE_WORKSPACES[agent],
+    ...(stateRoot ? { state_root: stateRoot } : {}),
     startup_profile_contract_version: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
     capability_contract_version: MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
   });

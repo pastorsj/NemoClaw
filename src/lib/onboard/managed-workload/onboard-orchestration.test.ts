@@ -9,6 +9,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import type { AgentDefinition } from "../../agent/defs";
 import { createHermesStateVolumeDockerHarness } from "../__test-helpers__/hermes-state-volume";
+import { qualifiedManagedImageDeclaration } from "../managed-image/contract";
 import {
   managedStartupStateRoots,
   managedStartupWorkspaceRoot,
@@ -18,14 +19,12 @@ describe("managed workspace-root declarations", () => {
   it("preserves the DCode sticky root-owned login-profile boundary generically", () => {
     expect(
       managedStartupWorkspaceRoot({
-        agent: "langchain-deepagents-code",
-        agentIdentity: { uid: 999, gid: 999 },
+        managedImage: qualifiedManagedImageDeclaration("langchain-deepagents-code"),
       }),
     ).toEqual({ uid: 0, gid: 999, mode: 0o1775 });
     expect(
       managedStartupWorkspaceRoot({
-        agent: "openclaw",
-        agentIdentity: { uid: 998, gid: 998 },
+        managedImage: qualifiedManagedImageDeclaration("openclaw"),
       }),
     ).toEqual({ uid: 998, gid: 998, mode: 0o755 });
   });
@@ -365,9 +364,12 @@ describe("managed workload onboard orchestration", () => {
     const lifecycle = createManagedStateVolumeOnboardLifecycle(
       {
         roots: managedStartupStateRoots({
-          agent: "hermes",
+          packageId: "hermes",
           sandboxName: "alpha",
-          agentIdentity: { uid: 1000, gid: 1000 },
+          managedImage: {
+            ...qualifiedManagedImageDeclaration("hermes"),
+            runtime_identity: { uid: 1000, gid: 1000, workdir: "/sandbox" },
+          },
         }),
         runtimeProvider: {
           identity: { id: "docker" },

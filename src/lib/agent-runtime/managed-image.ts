@@ -7,6 +7,8 @@ import type {
   HarnessManagedImageDeclaration,
   HarnessManagedImagePlatform,
   HarnessManagedImageRuntimeIdentity,
+  HarnessManagedImageStateRoot,
+  HarnessManagedImageWorkspace,
 } from "@nvidia/nemoclaw-harness-contract";
 
 import type { ManifestRecord } from "./manifest-types";
@@ -17,9 +19,13 @@ const MANAGED_IMAGE_FIELDS = new Set([
   "capability_contract_version",
   "repository",
   "runtime_identity",
+  "state_root",
   "startup_profile_contract_version",
+  "workspace",
 ]);
 const RUNTIME_IDENTITY_FIELDS = new Set(["gid", "uid", "workdir"]);
+const WORKSPACE_FIELDS = new Set(["mode", "owner"]);
+const STATE_ROOT_FIELDS = new Set(["mode", "mount_target"]);
 const MANAGED_IMAGE_PLATFORMS = new Set<HarnessManagedImagePlatform>([
   "linux/amd64",
   "linux/arm64",
@@ -38,6 +44,22 @@ function requireExactFields(
   if (unexpected !== undefined || Object.keys(value).length !== expected.size) {
     throw new Error(
       `Agent manifest field '${field}' must contain exactly: ${[...expected].join(", ")}`,
+    );
+  }
+}
+
+function requireKnownFields(
+  value: ManifestRecord,
+  allowed: ReadonlySet<string>,
+  required: ReadonlySet<string>,
+  field: string,
+): void {
+  const keys = Object.keys(value);
+  const unexpected = keys.find((key) => !allowed.has(key));
+  const missing = [...required].find((key) => !Object.hasOwn(value, key));
+  if (unexpected !== undefined || missing !== undefined) {
+    throw new Error(
+      `Agent manifest field '${field}' must contain ${[...required].join(", ")} and only: ${[...allowed].join(", ")}`,
     );
   }
 }
@@ -93,6 +115,50 @@ function readRuntimeIdentity(value: ManifestRecord): HarnessManagedImageRuntimeI
   });
 }
 
+function readWorkspace(value: unknown): HarnessManagedImageWorkspace | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Agent manifest field 'managed_image.workspace' must be an object");
+  }
+  const workspace = value as ManifestRecord;
+  requireExactFields(workspace, WORKSPACE_FIELDS, "managed_image.workspace");
+  if (workspace.owner !== "runtime" && workspace.owner !== "root") {
+    throw new Error("Agent manifest field 'managed_image.workspace.owner' must be runtime or root");
+  }
+  if (workspace.mode !== "0755" && workspace.mode !== "1775") {
+    throw new Error("Agent manifest field 'managed_image.workspace.mode' must be 0755 or 1775");
+  }
+  return Object.freeze({ owner: workspace.owner, mode: workspace.mode });
+}
+
+function readStateRoot(value: unknown): HarnessManagedImageStateRoot | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Agent manifest field 'managed_image.state_root' must be an object");
+  }
+  const stateRoot = value as ManifestRecord;
+  requireExactFields(stateRoot, STATE_ROOT_FIELDS, "managed_image.state_root");
+  const mountTarget = stateRoot.mount_target;
+  if (
+    typeof mountTarget !== "string" ||
+    !/^\/sandbox\/[^/]+$/u.test(mountTarget) ||
+    path.posix.normalize(mountTarget) !== mountTarget
+  ) {
+    throw new Error(
+      "Agent manifest field 'managed_image.state_root.mount_target' must be one directory directly below /sandbox",
+    );
+  }
+  if (stateRoot.mode !== "0770" && stateRoot.mode !== "2770" && stateRoot.mode !== "3770") {
+    throw new Error(
+      "Agent manifest field 'managed_image.state_root.mode' must be 0770, 2770, or 3770",
+    );
+  }
+  return Object.freeze({
+    mount_target: mountTarget as `/sandbox/${string}`,
+    mode: stateRoot.mode,
+  });
+}
+
 function readContractVersion(value: unknown, field: string): 1 {
   if (value !== 1) {
     throw new Error(`Agent manifest field '${field}' must be 1`);
@@ -107,7 +173,18 @@ export function readManagedImageDeclaration(
   if (manifest.managed_image === undefined) return null;
   const value = readObject(manifest, "managed_image");
   if (!value) throw new Error("Agent manifest field 'managed_image' must be an object");
-  requireExactFields(value, MANAGED_IMAGE_FIELDS, "managed_image");
+  requireKnownFields(
+    value,
+    MANAGED_IMAGE_FIELDS,
+    new Set([
+      "architectures",
+      "capability_contract_version",
+      "repository",
+      "runtime_identity",
+      "startup_profile_contract_version",
+    ]),
+    "managed_image",
+  );
 
   const repository = value.repository;
   if (
@@ -124,10 +201,14 @@ export function readManagedImageDeclaration(
     throw new Error("Agent manifest field 'managed_image.runtime_identity' must be an object");
   }
 
+  const workspace = readWorkspace(value.workspace);
+  const stateRoot = readStateRoot(value.state_root);
   return Object.freeze({
     repository,
     architectures: readArchitectures(value.architectures),
     runtime_identity: readRuntimeIdentity(runtimeIdentity),
+    ...(workspace ? { workspace } : {}),
+    ...(stateRoot ? { state_root: stateRoot } : {}),
     startup_profile_contract_version: readContractVersion(
       value.startup_profile_contract_version,
       "managed_image.startup_profile_contract_version",

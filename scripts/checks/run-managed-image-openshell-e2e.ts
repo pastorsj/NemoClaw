@@ -29,9 +29,11 @@ import { createDockerManagedBootstrapAdapter } from "../../src/lib/onboard/manag
 import { createDockerManagedBootstrapSurface } from "../../src/lib/onboard/managed-bootstrap/docker-runtime.ts";
 import {
   managedImageRuntimeIdentity,
+  qualifiedManagedImageDeclaration,
   SHIPPED_MANAGED_IMAGE_AGENTS,
   type ShippedManagedImageAgent,
 } from "../../src/lib/onboard/managed-image/contract.ts";
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { encodeManagedStartupProfile } from "../../src/lib/onboard/managed-startup/profile.ts";
 import { createManagedStartupRootApplyRequest } from "../../src/lib/onboard/managed-startup/root-apply.ts";
 import type {
@@ -207,14 +209,15 @@ const MANAGED_IMAGE_E2E_ENVIRONMENT_KEYS = [
 type OnboardModule = {
   managedWorkloadOnboard: {
     managedStartupStateRoots(input: {
-      readonly agent: ShippedManagedImageAgent;
+      readonly packageId: string;
       readonly sandboxName: string;
-      readonly agentIdentity: { readonly uid: number; readonly gid: number };
+      readonly managedImage: HarnessManagedImageDeclaration;
     }): readonly ProtectedManagedStateRoot[];
-    managedStartupWorkspaceRoot(input: {
-      readonly agent: ShippedManagedImageAgent;
-      readonly agentIdentity: { readonly uid: number; readonly gid: number };
-    }): { readonly uid: number; readonly gid: number; readonly mode: 0o755 | 0o1775 };
+    managedStartupWorkspaceRoot(input: { readonly managedImage: HarnessManagedImageDeclaration }): {
+      readonly uid: number;
+      readonly gid: number;
+      readonly mode: 0o755 | 0o1775;
+    };
     prepareManagedStateVolumes(
       input: { readonly roots: readonly ProtectedManagedStateRoot[] },
       deps: { readonly runtimeProvider: RuntimeProviderBundle },
@@ -1058,10 +1061,11 @@ async function run<T extends ManagedImageOpenShellE2eLocalInferenceEvidence = ne
     };
     runtimeProvider = selectedRuntimeProvider;
     const agentIdentity = managedImageRuntimeIdentity(input.agent);
+    const managedImage = qualifiedManagedImageDeclaration(input.agent);
     managedStateRoots = onboard.managedWorkloadOnboard.managedStartupStateRoots({
-      agent: input.agent,
+      packageId: input.agent,
       sandboxName: input.sandbox,
-      agentIdentity,
+      managedImage,
     });
     managedStateVolumeScope = onboard.managedWorkloadOnboard.prepareManagedStateVolumes(
       { roots: managedStateRoots },
@@ -1174,8 +1178,7 @@ async function run<T extends ManagedImageOpenShellE2eLocalInferenceEvidence = ne
             image,
             agentIdentity,
             workspaceRoot: onboard.managedWorkloadOnboard.managedStartupWorkspaceRoot({
-              agent: input.agent,
-              agentIdentity,
+              managedImage,
             }),
             managedStateRoots,
             intendedWorkloadArgv: launch.intendedSandboxStartupCommand,

@@ -36,6 +36,12 @@ managed_image:
     uid: 998
     gid: 998
     workdir: /sandbox
+  workspace:
+    owner: runtime
+    mode: "0755"
+  state_root:
+    mount_target: /sandbox/.openclaw
+    mode: "2770"
   startup_profile_contract_version: 1
   capability_contract_version: 1
 gateway_command: "openclaw gateway run"

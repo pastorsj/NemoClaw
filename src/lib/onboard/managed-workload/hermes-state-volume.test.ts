@@ -15,7 +15,7 @@ import {
   MANAGED_OPENCLAW_STATE_ROOT,
   managedStartupStateRoots,
 } from "../managed-startup/state-roots";
-import { managedImageRuntimeIdentity } from "../managed-image/agents";
+import { qualifiedManagedImageDeclaration } from "../managed-image/contract";
 import { prepareManagedStateVolumes } from "./managed-state-volumes";
 import {
   managedHermesStateVolumeName,
@@ -215,9 +215,9 @@ describe("managed Hermes state volume", () => {
   it("projects and retires the declared OpenClaw state root through the generic volume path", () => {
     const docker = dockerHarness();
     const roots = managedStartupStateRoots({
-      agent: "openclaw",
+      packageId: "openclaw",
       sandboxName: "alpha",
-      agentIdentity: managedImageRuntimeIdentity("openclaw"),
+      managedImage: qualifiedManagedImageDeclaration("openclaw"),
     });
     const scope = prepareManagedStateVolumes(
       { roots },

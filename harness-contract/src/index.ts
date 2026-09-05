@@ -33,6 +33,18 @@ export interface HarnessManagedImageRuntimeIdentity {
   readonly workdir: "/sandbox";
 }
 
+export interface HarnessManagedImageWorkspace {
+  /** Select either the sandbox runtime UID or root for the shared workspace directory. */
+  readonly owner: "runtime" | "root";
+  readonly mode: "0755" | "1775";
+}
+
+export interface HarnessManagedImageStateRoot {
+  /** One package-owned state volume mounted directly below /sandbox. */
+  readonly mount_target: `/sandbox/${string}`;
+  readonly mode: "0770" | "2770" | "3770";
+}
+
 /**
  * Harness-native image requirements declared by a package. This declaration
  * describes how to compose an already-qualified image; it does not authorize
@@ -42,6 +54,10 @@ export interface HarnessManagedImageDeclaration {
   readonly repository: string;
   readonly architectures: readonly HarnessManagedImagePlatform[];
   readonly runtime_identity: HarnessManagedImageRuntimeIdentity;
+  /** Defaults to runtime ownership and mode 0755 when omitted. */
+  readonly workspace?: HarnessManagedImageWorkspace;
+  /** Omit when the harness keeps its state in the shared workspace filesystem. */
+  readonly state_root?: HarnessManagedImageStateRoot;
   readonly startup_profile_contract_version: 1;
   readonly capability_contract_version: 1;
 }
