@@ -706,7 +706,7 @@ export async function runPublicFabricTurn(
     [
       "/bin/bash",
       "-lc",
-      'set -eu; . /tmp/nemoclaw-proxy-env.sh; exec /usr/local/bin/nemoclaw-fabric doctor --config "$1" --json',
+      'set -eu; if [ -r /tmp/nemoclaw-proxy-env.sh ]; then . /tmp/nemoclaw-proxy-env.sh; fi; exec /usr/local/bin/nemoclaw-fabric doctor --config "$1" --json',
       "nemoclaw-fabric-doctor",
       contract.configPath,
     ],
