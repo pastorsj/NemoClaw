@@ -7,6 +7,7 @@ import * as agentRuntime from "../../agent/runtime";
 import type { AgentDefinition } from "../../agent-runtime/manifest-types";
 import { spawnExitCode } from "../../core/process-exit";
 import { resolveSandboxGatewayName } from "../../gateway-runtime-action";
+import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent";
 import {
   captureSandboxCommandAgentAuthority,
   requireCurrentSandboxCommandAgentAuthority,
@@ -130,7 +131,7 @@ function captureReceiptBackedLaunchAgentAuthority(
   if (
     !identity ||
     !agent ||
-    entry.agent !== identity.id ||
+    normalizeSandboxAgentName(entry.agent) !== identity.id ||
     authority.definition.name !== identity.id ||
     !isDeepStrictEqual(agent, authority.definition)
   ) {

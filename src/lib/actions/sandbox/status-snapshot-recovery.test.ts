@@ -229,6 +229,7 @@ describe("collectSandboxStatusSnapshot Docker recovery", () => {
       agentName: "future-gateway",
       agentRuntime: "unknown",
       agentLoadError: expect.stringContaining("does not match the sandbox package receipt"),
+      packageAuthorityInvalid: true,
     });
   });
 

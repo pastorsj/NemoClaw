@@ -39,6 +39,7 @@ export default class SandboxStatusCommand extends NemoClawCommand {
           : report.gatewayState !== "present" ||
             report.rpcIssue ||
             report.failureLayer ||
+            report.packageAuthorityInvalid ||
             isInferenceHealthFailing(report.inferenceHealth) ||
             report.terminalRuntimeHealth?.kind === "degraded")
       ) {

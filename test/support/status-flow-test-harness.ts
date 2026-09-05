@@ -8,6 +8,7 @@ import { type MockInstance, vi } from "vitest";
 import type { SandboxGatewayState } from "../../src/lib/actions/sandbox/gateway-state";
 import type { SandboxStatusPreflightResult } from "../../src/lib/actions/sandbox/status-preflight";
 import type {
+  SandboxStatusAgentInfo,
   SandboxStatusRouteDrift,
   ServingProcessHealth,
 } from "../../src/lib/actions/sandbox/status-snapshot";
@@ -76,6 +77,7 @@ export type StatusFlowHarnessOptions = {
   routeDrift?: SandboxStatusRouteDrift | null;
   inferenceHealth?: ProviderHealthStatus | null;
   servingProcessHealth?: ServingProcessHealth | null;
+  statusAgent?: SandboxStatusAgentInfo;
   portableDisposition?:
     | PortableAgentReceiptDisposition
     | Error
@@ -237,6 +239,7 @@ export function createStatusFlowHarness(options: StatusFlowHarnessOptions = {}):
             ? null
             : { checked: false }
           : options.servingProcessHealth,
+      ...(options.statusAgent ? { statusAgent: options.statusAgent } : {}),
       ...(options.postRecoveryPreflight
         ? { postRecoveryPreflight: options.postRecoveryPreflight }
         : {}),

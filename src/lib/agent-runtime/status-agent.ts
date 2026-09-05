@@ -16,6 +16,7 @@ export interface SandboxStatusAgentInfo {
   agentDisplayName: string;
   agentRuntime: "gateway" | "terminal" | "unknown";
   agentLoadError?: string;
+  packageAuthorityInvalid?: true;
   agentDefinition: AgentDefinition | null;
 }
 
@@ -79,6 +80,7 @@ export function resolveSandboxStatusAgent(
   let agentDisplayName = agentName === "openclaw" ? "OpenClaw" : agentName;
   let agentRuntime: SandboxStatusAgentInfo["agentRuntime"] = "gateway";
   let agentLoadError: string | undefined;
+  let packageAuthorityInvalid = false;
   let agentDefinition: AgentDefinition | null = null;
   try {
     const agent = receiptBacked
@@ -100,6 +102,7 @@ export function resolveSandboxStatusAgent(
     if (receiptBacked || agentName !== "openclaw") {
       agentRuntime = "unknown";
       agentLoadError = safeAgentLoadError(error);
+      packageAuthorityInvalid = receiptBacked;
     }
   }
   return {
@@ -107,6 +110,7 @@ export function resolveSandboxStatusAgent(
     agentDisplayName,
     agentRuntime,
     ...(agentLoadError ? { agentLoadError } : {}),
+    ...(packageAuthorityInvalid ? { packageAuthorityInvalid: true as const } : {}),
     agentDefinition,
   };
 }

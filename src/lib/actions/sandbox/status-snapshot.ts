@@ -158,6 +158,7 @@ export interface SandboxStatusReport {
   agentRuntime: "gateway" | "terminal" | "unknown";
   dcodeAutoApprovalMode: DcodeAutoApprovalMode | null;
   agentLoadError?: string;
+  packageAuthorityInvalid?: true;
   model: string;
   provider: string;
   servingProfileProvenance: ServingProfileProvenance | null;
@@ -784,6 +785,7 @@ async function buildSandboxStatusReport(
     agentRuntime: agent.agentRuntime,
     dcodeAutoApprovalMode: resolveSandboxStatusDcodeAutoApprovalMode(sb),
     ...(agent.agentLoadError ? { agentLoadError: agent.agentLoadError } : {}),
+    ...(agent.packageAuthorityInvalid ? { packageAuthorityInvalid: true as const } : {}),
     // Keep schema v1's established live-first fields for existing consumers.
     // The explicit route fields separate durable sandbox intent from the one
     // gateway-global route without changing those legacy meanings.

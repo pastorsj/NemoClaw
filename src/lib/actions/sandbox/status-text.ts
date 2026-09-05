@@ -206,7 +206,8 @@ function printAgentHarness(context: SandboxStatusTextContext): number | null {
   if (statusAgent.agentLoadError) {
     console.log(`    Agent load error: ${statusAgent.agentLoadError}`);
   }
-  return printTerminalHarness(context);
+  const terminalExitCode = printTerminalHarness(context);
+  return statusAgent.packageAuthorityInvalid ? 1 : terminalExitCode;
 }
 
 function printActiveSessions(sandboxName: string): void {

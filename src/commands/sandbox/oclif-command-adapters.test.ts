@@ -35,6 +35,15 @@ const mocks = vi.hoisted(() => {
     restartSandboxGateway: vi.fn().mockReturnValue({ ok: true }),
     recoverSandboxWithHermesCronRestore: vi.fn().mockResolvedValue(undefined),
     runSandboxDoctor: vi.fn().mockResolvedValue(undefined),
+    getSandboxStatusReport: vi.fn().mockResolvedValue({
+      found: true,
+      gatewayState: "present",
+      rpcIssue: null,
+      failureLayer: null,
+      inferenceHealth: null,
+      terminalRuntimeHealth: null,
+    }),
+    isInferenceHealthFailing: vi.fn(() => false),
     showSandboxLogs: vi.fn(),
     showSandboxStatus: vi.fn().mockResolvedValue(undefined),
     addSandboxHostAlias: vi.fn(),
@@ -65,6 +74,8 @@ vi.mock("../../lib/actions/sandbox/process-recovery", () => ({
 }));
 
 vi.mock("../../lib/actions/sandbox/status", () => ({
+  getSandboxStatusReport: mocks.getSandboxStatusReport,
+  isInferenceHealthFailing: mocks.isInferenceHealthFailing,
   showSandboxStatus: mocks.showSandboxStatus,
 }));
 
@@ -263,6 +274,23 @@ describe("sandbox oclif command adapters", () => {
       lines: "25",
       since: "5m",
     });
+  });
+
+  it("returns a failing JSON status for invalid package authority", async () => {
+    mocks.getSandboxStatusReport.mockResolvedValueOnce({
+      found: true,
+      gatewayState: "present",
+      rpcIssue: null,
+      failureLayer: null,
+      packageAuthorityInvalid: true,
+      inferenceHealth: null,
+      terminalRuntimeHealth: null,
+    });
+
+    await SandboxStatusCommand.run(["alpha", "--json"], rootDir);
+
+    expect(process.exitCode).toBe(1);
+    expect(mocks.getSandboxStatusReport).toHaveBeenCalledWith("alpha");
   });
 
   it("rejects real schema-5 logs and dashboard-token routes before their actions (#9203)", async () => {

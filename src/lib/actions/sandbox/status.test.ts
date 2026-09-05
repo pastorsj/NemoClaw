@@ -66,9 +66,33 @@ describe("sandbox status package definition", () => {
         agentDefinition: fixture.selectedAgent.definition,
       });
       expect(statusAgent.agentLoadError).toBeUndefined();
+      expect(statusAgent.packageAuthorityInvalid).toBeUndefined();
       expect(resolveSandboxAgentImpl).toHaveBeenCalledWith(fixture.entry);
     },
   );
+
+  it("resolves package-backed OpenClaw when its recorded agent is null", () => {
+    const fixture = futurePackageStatusFixture("gateway");
+    const harnessPackage = { ...fixture.entry.harnessPackage!, id: "openclaw" };
+    const entry = { ...fixture.entry, agent: null, harnessPackage };
+    const selectedAgent = {
+      ...fixture.selectedAgent,
+      recordedAgent: null,
+      effectiveAgentId: "openclaw",
+      definition: { ...fixture.selectedAgent.definition, name: "openclaw" },
+      harnessPackage,
+    };
+
+    const statusAgent = resolveSandboxStatusAgent(entry, {
+      resolveSandboxAgentImpl: vi.fn(() => selectedAgent) as never,
+    });
+
+    expect(statusAgent).toMatchObject({
+      agentName: "openclaw",
+      agentRuntime: "gateway",
+    });
+    expect(statusAgent.packageAuthorityInvalid).toBeUndefined();
+  });
 
   it("reports unknown instead of using an ambient definition when receipt authority disagrees", () => {
     const fixture = futurePackageStatusFixture("gateway");
@@ -85,7 +109,23 @@ describe("sandbox status package definition", () => {
     expect(statusAgent.agentRuntime).toBe("unknown");
     expect(statusAgent.agentDefinition).toBeNull();
     expect(statusAgent.agentLoadError).toContain("does not match the sandbox package receipt");
+    expect(statusAgent.packageAuthorityInvalid).toBe(true);
     expect(loadAgentImpl).not.toHaveBeenCalled();
+  });
+
+  it("keeps a missing legacy definition nonfatal", () => {
+    const statusAgent = resolveSandboxStatusAgent("legacy-missing", {
+      loadAgentImpl: vi.fn(() => {
+        throw new Error("legacy definition unavailable");
+      }),
+    });
+
+    expect(statusAgent).toMatchObject({
+      agentName: "legacy-missing",
+      agentRuntime: "unknown",
+      agentLoadError: "legacy definition unavailable",
+    });
+    expect(statusAgent.packageAuthorityInvalid).toBeUndefined();
   });
 });
 

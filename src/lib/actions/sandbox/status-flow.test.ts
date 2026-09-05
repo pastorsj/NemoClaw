@@ -123,6 +123,26 @@ describe("showSandboxStatus flow", () => {
     expect(harness.withMcpLifecycleLockSpy).toHaveBeenCalledWith("alpha", expect.any(Function));
   });
 
+  it("returns a failing status when receipt-backed package authority is invalid", async () => {
+    const harness = createStatusFlowHarness({
+      statusAgent: {
+        agentName: "openclaw",
+        agentDisplayName: "OpenClaw",
+        agentRuntime: "unknown",
+        agentLoadError: "Harness package store integrity validation failed",
+        packageAuthorityInvalid: true,
+        agentDefinition: null,
+      },
+    });
+
+    await expect(harness.showSandboxStatus("alpha")).resolves.toBeUndefined();
+
+    expect(process.exitCode).toBe(1);
+    expect(harness.logSpy.mock.calls.flat().join("\n")).toContain(
+      "Agent load error: Harness package store integrity validation failed",
+    );
+  });
+
   it("classifies publication while waiting for the status lifecycle fence (#9203)", async () => {
     let disposition: { readonly kind: "absent" } | ReturnType<typeof hermesPortableDisposition> = {
       kind: "absent",

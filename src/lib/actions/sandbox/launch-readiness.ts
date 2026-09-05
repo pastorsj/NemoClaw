@@ -20,6 +20,7 @@ import { withGatewayRouteMutationLock } from "../../inference/gateway-route-muta
 import { normalizeInferenceSelection } from "../../inference/selection";
 import { parseServingProfileProvenance } from "../../inference/serving/profile-provenance";
 import { resolveGatewayName } from "../../onboard/gateway-binding";
+import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent";
 import {
   classifyPortableLifecycleReceipt,
   portableLifecycleReceiptMatchesGeneration,
@@ -535,7 +536,10 @@ function resolveLaunchHarnessPackageAuthority(
     if (entry.harnessPackageMigration) throw new ObservationError("config");
     return { status: "absent" };
   }
-  if (entry.agent !== harnessPackage.id || agent.name !== harnessPackage.id) {
+  if (
+    normalizeSandboxAgentName(entry.agent) !== harnessPackage.id ||
+    agent.name !== harnessPackage.id
+  ) {
     throw new ObservationError("config");
   }
   return {
@@ -748,19 +752,19 @@ async function captureLaunchIdentity(
   if (!entry || entry.name !== sandboxName) throw new ObservationError("identity");
   const agentName = normalizedString(entry.agent) ?? "openclaw";
   const agent = resolveTrustedLaunchAgent(entry, deps, agentName);
-  const packageAuthority = resolveLaunchHarnessPackageAuthority(entry, agent);
-  // Receipt-backed packages opt into the supported pairing qualification
-  // through typed manifest metadata. Only no-receipt OpenClaw rows retain the
-  // historical package-name selection.
-  const requiresDevicePairing =
-    packageAuthority.status === "valid" ? agent.hasDevicePairing : agentName === "openclaw";
-  const ownsPortableReceipt =
-    packageAuthority.status === "valid" ? agent.hasDevicePairing : entry.agent === "openclaw";
+  resolveLaunchHarnessPackageAuthority(entry, agent);
+  // Pairing qualification and the Portable receipt are still OpenClaw-owned
+  // compatibility protocols. A generic `device_pairing` flag cannot safely
+  // opt another harness into OpenClaw's state-file format. Keep this selection
+  // explicit until the package contract supplies a typed pairing operation.
+  const requiresOpenClawPairing =
+    agentName === "openclaw" && agent.name === "openclaw" && agent.hasDevicePairing;
+  const ownsPortableOpenClawReceipt = entry.agent === "openclaw" && agent.name === "openclaw";
   const portableReceipt = (
     deps.classifyPortableLifecycleReceipt ?? classifyPortableLifecycleReceipt
   )(sandboxName);
   let portableRuntimeAuthoritySha256: string | null = null;
-  if (ownsPortableReceipt) {
+  if (ownsPortableOpenClawReceipt) {
     if (portableReceipt.kind === "invalid-or-legacy") throw new ObservationError("config");
     if (portableReceipt.kind === "current") {
       if (entry.lifecycleGeneration !== portableReceipt.registryGeneration) {
@@ -885,7 +889,7 @@ async function captureLaunchIdentity(
   );
 
   let session: LaunchReadinessIdentity["session"] = null;
-  if (requiresDevicePairing) {
+  if (requiresOpenClawPairing) {
     const pairedAgentVersion = normalizedString(entry.agentVersion);
     const stateDirectory = normalizedString(agent.config?.dir);
     // Pairing qualification requires a versioned trusted definition. The

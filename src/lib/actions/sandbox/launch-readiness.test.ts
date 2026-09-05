@@ -43,7 +43,7 @@ network_policies:
 
 const POLICY_B = POLICY_A.replace("example.com", "api.example.com");
 
-function entry(agent = "openclaw"): SandboxEntry {
+function entry(agent: string | null = "openclaw"): SandboxEntry {
   return {
     name: SANDBOX,
     openshellDriver: "docker",
@@ -892,7 +892,7 @@ describe("launch readiness validation", () => {
     expect(publishedIdentity?.session).toBeNull();
   });
 
-  it("uses typed receipt-backed capabilities for a future gateway package", async () => {
+  it("does not route a future pairing package through OpenClaw compatibility protocols", async () => {
     sandbox = packageBackedEntry("future-gateway");
     const installedAgent = {
       ...syntheticAgent("openclaw", "future-gateway", "gateway", "future-gateway tui"),
@@ -918,6 +918,23 @@ describe("launch readiness validation", () => {
     expect(listAgents).not.toHaveBeenCalled();
     expect(gatewayHealth).toHaveBeenCalledWith(SANDBOX, GATEWAY_NAME);
     expect(smoke).not.toHaveBeenCalled();
+    expect(externalEvents).not.toContain("pairing-qualification");
+    expect(publishedIdentity?.session).toBeNull();
+  });
+
+  it("qualifies canonical package-backed OpenClaw rows whose recorded agent is null", async () => {
+    sandbox = {
+      ...entry(null),
+      harnessPackage: packageIdentity("openclaw"),
+    };
+    const installedAgent = loadAgent("openclaw");
+    const currentDeps = deps();
+    currentDeps.getRegisteredAgent = vi.fn(() => installedAgent);
+
+    await createAcceptedLease(currentDeps);
+    externalEvents = [];
+    expect(await inspectLaunchReadiness(SANDBOX, currentDeps)).toMatchObject({ kind: "accepted" });
+
     expect(externalEvents).toContain("pairing-qualification");
     expect(publishedIdentity?.session).toMatchObject({ kind: "openclaw-pairing" });
   });

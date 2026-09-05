@@ -551,6 +551,30 @@ describe("launchSandbox", () => {
     },
   );
 
+  it("launches canonical package-backed OpenClaw when its recorded agent is null", async () => {
+    const definition = loadAgent("openclaw");
+    const packageEntry = {
+      ...packageBackedSandboxEntry("openclaw"),
+      agent: null,
+    };
+    const packageDependencies = commandAgentDependencies(() => definition);
+    mocks.inspectLaunchReadiness.mockResolvedValue({
+      kind: "accepted",
+      category: "accepted",
+      agent: definition,
+      sb: packageEntry,
+    });
+
+    await launchSandbox("alpha", {
+      getSandbox: () => packageEntry,
+      commandAgentDependencies: packageDependencies,
+    });
+
+    expect(launchedCommand()).toEqual(["bash", "-lc", "openclaw tui"]);
+    expect(packageDependencies.resolvePackageAgent).toHaveBeenCalledTimes(2);
+    expect(packageDependencies.loadAgent).not.toHaveBeenCalled();
+  });
+
   it("rejects receipt-backed package drift inside the launch lock", async () => {
     const selectedEntry = packageBackedSandboxEntry("future-terminal", "a");
     const replacementEntry = packageBackedSandboxEntry("future-terminal", "b");
