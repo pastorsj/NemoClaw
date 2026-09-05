@@ -87,6 +87,10 @@ nemoclaw harness install example \
 `nemoclaw-build-adapters` compiles self-contained CommonJS artifacts. Imports are unavailable when
 NemoClaw evaluates an adapter.
 
+The package prepare step compiles these commands to JavaScript for the npm archive. The TypeScript
+command sources remain in this repository for review, but npm does not publish them or depend on
+Node.js executing TypeScript from `node_modules`.
+
 `nemoclaw-validate-package` checks identity, required files, adapter freshness, file types, modes,
 credential-shaped paths, and the npm publish set. It runs `npm pack` with lifecycle scripts
 disabled. Every package publishes `host/config-adapter.cts`. A package also publishes
@@ -95,6 +99,11 @@ disabled. Every package publishes `host/config-adapter.cts`. A package also publ
 
 `nemoclaw-build-package` copies the validated publish set into a new read-only directory. It does
 not replace an existing output.
+
+The contract's own test suite also exercises this workflow from outside the NemoClaw checkout. It
+packs the contract, installs that tarball into a temporary harness repository without workspace
+links or network access, compiles typed adapters, validates the npm publish set, and verifies that
+the resulting runtime artifact contains no source, tests, lockfile, or development dependencies.
 
 ## Typed operations
 

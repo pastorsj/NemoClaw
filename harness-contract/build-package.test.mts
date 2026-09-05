@@ -279,8 +279,8 @@ test("rejects a linked runtime file without creating the output", () => {
   }
 });
 
-test("the contract archive contains executable builder binaries but no contract tests", () => {
-  const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts", "."], {
+test("the prepared contract archive contains executable builder binaries but no contract tests", () => {
+  const result = spawnSync("npm", ["pack", "--dry-run", "--json", "--silent", "."], {
     cwd: CONTRACT_ROOT,
     encoding: "utf8",
   });
@@ -290,12 +290,16 @@ test("the contract archive contains executable builder binaries but no contract 
   }>;
   const files = packed[0]?.files ?? [];
   const modes = new Map(files.map((file) => [file.path, file.mode]));
-  assert.equal(modes.get("build-adapters.mts"), 0o755);
-  assert.equal(modes.get("validate-package.mts"), 0o755);
-  assert.equal(modes.get("build-package.mts"), 0o755);
+  assert.equal(modes.get("dist/build-adapters.mjs"), 0o755);
+  assert.equal(modes.get("dist/validate-package.mjs"), 0o755);
+  assert.equal(modes.get("dist/build-package.mjs"), 0o755);
   assert.equal(modes.has("README.md"), true);
   assert.equal(
-    files.some((file) => String(file.path).endsWith(".test.mts")),
+    files.some((file) => String(file.path).endsWith(".mts")),
+    false,
+  );
+  assert.equal(
+    files.some((file) => String(file.path).includes(".test.")),
     false,
   );
 });

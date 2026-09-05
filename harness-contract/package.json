@@ -6,34 +6,35 @@
   "license": "Apache-2.0",
   "type": "commonjs",
   "scripts": {
+    "build:tools": "node --experimental-strip-types --no-warnings build-tools.mts",
+    "check:tools": "node --experimental-strip-types --no-warnings build-tools.mts --check",
     "check-package": "node --experimental-strip-types --no-warnings validate-package.mts",
     "build-package": "node --experimental-strip-types --no-warnings build-package.mts",
-    "test": "tsc -p tsconfig.json && node --test --experimental-strip-types --no-warnings build-adapters.test.mts validate-package.test.mts build-package.test.mts"
+    "prepare": "npm run build:tools",
+    "test": "tsc -p tsconfig.json && npm run build:tools && npm run check:tools && node --test --experimental-strip-types --no-warnings build-adapters.test.mts validate-package.test.mts build-package.test.mts external-package.test.mts"
   },
   "exports": {
     ".": {
       "types": "./src/index.ts"
     },
     "./build-adapters": {
-      "import": "./build-adapters.mts"
+      "import": "./dist/build-adapters.mjs"
     },
     "./validate-package": {
-      "import": "./validate-package.mts"
+      "import": "./dist/validate-package.mjs"
     },
     "./build-package": {
-      "import": "./build-package.mts"
+      "import": "./dist/build-package.mjs"
     }
   },
   "bin": {
-    "nemoclaw-build-adapters": "./build-adapters.mts",
-    "nemoclaw-validate-package": "./validate-package.mts",
-    "nemoclaw-build-package": "./build-package.mts"
+    "nemoclaw-build-adapters": "./dist/build-adapters.mjs",
+    "nemoclaw-validate-package": "./dist/validate-package.mjs",
+    "nemoclaw-build-package": "./dist/build-package.mjs"
   },
   "files": [
-    "src/index.ts",
-    "build-adapters.mts",
-    "validate-package.mts",
-    "build-package.mts"
+    "src/**/*.ts",
+    "dist/*.mjs"
   ],
   "dependencies": {
     "yaml": "2.8.3"
