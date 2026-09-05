@@ -6,13 +6,10 @@
 //     name onboard accepts) was rejected as unsupported; only the OpenShell
 //     name `compatible-anthropic-endpoint` was accepted. The two commands
 //     used different vocabularies for the same provider.
-//   Facet 3 — `inference set` on a Deep Agents (dcode /
-//     langchain-deepagents-code) sandbox refused with a blunt message and no
-//     next step. dcode bakes its model at image-build time, so the fix is an
-//     actionable error pointing at re-onboard.
+//   Facet 3 — receipt-backed packages own whether their configuration is
+//     mutable; `inference set` refuses an immutable package before mutation.
 
 import { describe, expect, it, vi } from "vitest";
-import { shellQuote } from "../core/shell-quote";
 // onboard's provider config is the source of truth the local alias map must
 // stay in sync with. Imported here (test only — not into the inference-set hot
 // path) to drive the parity check below. providers.ts is a CJS module.
@@ -187,11 +184,24 @@ describe("runInferenceSet accepts the installer provider name — facet 1 (#6321
   });
 });
 
-describe("runInferenceSet dcode refusal message — facet 3 (#6321)", () => {
-  it("points Deep Agents users at re-onboard instead of a dead-end refusal", async () => {
+describe("runInferenceSet package-owned mutability — facet 3 (#6321)", () => {
+  const configTarget = (agentName: string) => ({
+    agentName,
+    configPath: `/sandbox/.${agentName}/config.json`,
+    configDir: `/sandbox/.${agentName}`,
+    format: "json",
+    configFile: "config.json",
+    sensitiveFiles: [] as string[],
+  });
+
+  it("uses the receipt-backed package's immutable reason before any mutation", async () => {
+    const reason =
+      "This configuration is materialized by the sandbox image. Re-onboard to change it.";
     const deps = createDeps({
       config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
       entry: { name: "dcode-sb", agent: "langchain-deepagents-code" },
+      target: configTarget("langchain-deepagents-code"),
+      configUpdateSupport: { kind: "immutable", reason },
     });
 
     await expect(
@@ -199,69 +209,47 @@ describe("runInferenceSet dcode refusal message — facet 3 (#6321)", () => {
         { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "dcode-sb" },
         deps,
       ),
-    ).rejects.toThrow(/re-onboard with the new selection/);
+    ).rejects.toThrow(reason);
 
-    // The message keeps the original "supports OpenClaw and Hermes" statement
-    // for compatibility with anything matching on it, and adds the dcode hint.
-    await expect(
-      runInferenceSet(
-        { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "dcode-sb" },
-        deps,
-      ),
-    ).rejects.toThrow(/supports OpenClaw and Hermes sandboxes/);
+    expect(deps.calls.inspectInstalledInferenceConfigSupport).toHaveBeenCalledOnce();
+    expectNoInferenceMutation(deps.calls);
   });
 
-  it("does NOT add the dcode hint for other unsupported agents", async () => {
+  it("keeps an explicit compatibility refusal for a legacy sandbox without a receipt", async () => {
     const deps = createDeps({
       config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
       entry: { name: "spark-sb", agent: "spark" },
+      target: configTarget("spark"),
     });
     await expect(
       runInferenceSet(
         { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "spark-sb" },
         deps,
       ),
-    ).rejects.toThrow(/supports OpenClaw and Hermes sandboxes; 'spark-sb' uses 'spark'\.$/);
-  });
-
-  it("shell-quotes the sandbox name in the dcode re-onboard hint (#6321)", async () => {
-    // The hint embeds the sandbox name inside a copy-pasteable `onboard` command.
-    // validateName currently restricts names to a metacharacter-free shape, so
-    // shellQuote is defense-in-depth: it must still wrap the name so the command
-    // stays safe if a name ever reaches this path unvalidated or the name policy
-    // loosens. Lock in that the wrapper is applied (single-quoted form present),
-    // not raw interpolation.
-    const name = "dcode-sb";
-    const deps = createDeps({
-      config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
-      entry: { name, agent: "langchain-deepagents-code" },
-    });
-    const attempt = runInferenceSet(
-      { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: name },
-      deps,
+    ).rejects.toThrow(
+      /legacy runtime for 'spark' does not provide a supported runtime inference mapping/u,
     );
 
-    // shellQuote always single-quotes, so the hint carries the quoted form.
-    // `toThrow(string)` does a substring match on the error message.
-    expect(shellQuote(name)).toBe("'dcode-sb'");
-    await expect(attempt).rejects.toThrow(`--name ${shellQuote(name)} --fresh`);
-    // The bare, unquoted name must not sit directly after --name.
-    await expect(attempt).rejects.not.toThrow(`--name ${name} --fresh`);
+    expectNoInferenceMutation(deps.calls);
   });
 
-  // PRA-2: validateName blocks metacharacter names before the recovery hint, so
-  // shellQuote is defense-in-depth.
-  it.each(["a b", "a'b", "a;b", "a$(id)", "a`id`"])(
-    "keeps the metacharacter input %j inside one shell argument",
-    (meta) => {
-      const quoted = shellQuote(meta);
-      expect(quoted.startsWith("'")).toBe(true);
-      expect(quoted.endsWith("'")).toBe(true);
-      // After removing the only legal break-out escape ('\''), no bare single
-      // quote remains — nothing can terminate the quoted argument early.
-      expect(quoted.slice(1, -1).replaceAll("'\\''", "")).not.toContain("'");
-    },
-  );
+  it("fails closed when an unknown package is mutable but lacks an inference mapping", async () => {
+    const deps = createDeps({
+      config: { agents: { defaults: { model: { primary: "inference/nvidia/model-a" } } } },
+      entry: { name: "future-sb", agent: "future-harness" },
+      target: configTarget("future-harness"),
+      configUpdateSupport: { kind: "mutable" },
+    });
+
+    await expect(
+      runInferenceSet(
+        { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "future-sb" },
+        deps,
+      ),
+    ).rejects.toThrow(/package adapter for 'future-harness'.*supported runtime inference mapping/u);
+
+    expectNoInferenceMutation(deps.calls);
+  });
 });
 
 // Hosts the stand-in guard treats as internal-resolving. Parsed exactly from

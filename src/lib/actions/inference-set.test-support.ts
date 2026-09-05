@@ -161,6 +161,7 @@ export function createDeps(options: {
   defaultSandbox?: string | null;
   requestedAgent?: string | null;
   target?: AgentConfigTarget;
+  configUpdateSupport?: ReturnType<InferenceSetDeps["inspectInstalledInferenceConfigSupport"]>;
   session?: Session | null;
   openshellStatus?: number;
   captureOpenshell?: InferenceSetDeps["captureOpenshell"];
@@ -186,6 +187,7 @@ export function createDeps(options: {
     seedHermesDashboardConfig: ReturnType<typeof vi.fn>;
     updateSandbox: ReturnType<typeof vi.fn>;
     readSandboxConfig: ReturnType<typeof vi.fn>;
+    inspectInstalledInferenceConfigSupport: ReturnType<typeof vi.fn>;
     updateSession: ReturnType<typeof vi.fn>;
     appendAuditEntry: ReturnType<typeof vi.fn>;
     log: ReturnType<typeof vi.fn>;
@@ -223,6 +225,10 @@ export function createDeps(options: {
     seedHermesDashboardConfig: vi.fn(() => options.seedHermesDashboardConfigResult ?? "converged"),
     updateSandbox: vi.fn(options.updateSandbox ?? (() => true)),
     readSandboxConfig: vi.fn(() => options.config),
+    inspectInstalledInferenceConfigSupport: vi.fn(
+      (): ReturnType<InferenceSetDeps["inspectInstalledInferenceConfigSupport"]> =>
+        options.configUpdateSupport ?? { kind: "legacy" },
+    ),
     updateSession: vi.fn((mutator: (value: Session) => Session | void) => {
       const current = session ?? baseSession();
       session = mutator(current) ?? current;
@@ -285,6 +291,7 @@ export function createDeps(options: {
     updateSession: calls.updateSession,
     resolveAgentConfig: () => options.target ?? OPENCLAW_TARGET,
     readSandboxConfig: calls.readSandboxConfig,
+    inspectInstalledInferenceConfigSupport: calls.inspectInstalledInferenceConfigSupport,
     writeSandboxConfig: calls.writeSandboxConfig,
     recomputeSandboxConfigHash: calls.recomputeSandboxConfigHash,
     seedHermesDashboardConfig: calls.seedHermesDashboardConfig,

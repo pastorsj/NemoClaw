@@ -20,6 +20,14 @@ function requireTarget(target: HarnessConfigTarget): void {
 }
 
 const configAdapter: HarnessConfigAdapterModule = {
+  describeInferenceConfig(request) {
+    requireTarget(request.target);
+    return {
+      kind: "immutable",
+      reason: "The sandbox image generates the Pi model catalog. Re-onboard to change it.",
+    };
+  },
+
   prepareConfigUpdate(request) {
     requireTarget(request.target);
     return {

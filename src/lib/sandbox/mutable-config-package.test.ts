@@ -57,6 +57,7 @@ function createPackageHarness(
   describeMutableConfig: HarnessConfigAdapterHostModule["describeMutableConfig"],
 ) {
   const adapter: HarnessConfigAdapterHostModule = {
+    describeInferenceConfig: vi.fn(() => ({ kind: "mutable" as const })),
     prepareConfigUpdate: vi.fn(),
     classifyConfigUrl: vi.fn(),
     describeMutableConfig: vi.fn(describeMutableConfig),

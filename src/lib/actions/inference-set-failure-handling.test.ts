@@ -80,6 +80,14 @@ describe("runInferenceSet failure handling", () => {
     const deps = createDeps({
       config: {},
       entry: { name: "spark", agent: "spark" },
+      target: {
+        agentName: "spark",
+        configPath: "/sandbox/.spark/config.json",
+        configDir: "/sandbox/.spark",
+        format: "json",
+        configFile: "config.json",
+        sensitiveFiles: [],
+      },
     });
 
     await expect(
@@ -87,7 +95,7 @@ describe("runInferenceSet failure handling", () => {
         { provider: "nvidia-prod", model: "nvidia/model-a", sandboxName: "spark" },
         deps,
       ),
-    ).rejects.toThrow(/supports OpenClaw and Hermes/);
+    ).rejects.toThrow(/legacy runtime for 'spark'.*supported runtime inference mapping/u);
 
     expect(deps.calls.captureOpenshell).not.toHaveBeenCalled();
     expect(deps.calls.writeSandboxConfig).not.toHaveBeenCalled();

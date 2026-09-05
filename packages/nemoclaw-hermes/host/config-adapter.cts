@@ -89,6 +89,10 @@ finally:
     os.close(directory_fd)
 `;
 const configAdapter = {
+    describeInferenceConfig(request) {
+        requireTarget(request.target);
+        return { kind: "mutable" };
+    },
     prepareConfigUpdate(request) {
         requireTarget(request.target);
         return {

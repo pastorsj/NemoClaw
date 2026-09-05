@@ -23,6 +23,10 @@ export interface InstalledConfigAdapterSelection {
   readonly adapter: HarnessConfigAdapterHostModule;
 }
 
+export type InstalledInferenceConfigSupport =
+  | { readonly kind: "legacy" }
+  | ReturnType<HarnessConfigAdapterHostModule["describeInferenceConfig"]>;
+
 /** Resolve package configuration behavior only from the sandbox's exact receipt. */
 export function loadInstalledConfigAdapter(
   sandboxName: string,
@@ -39,4 +43,14 @@ export function loadInstalledConfigAdapter(
     identity,
     adapter: loadHarnessConfigAdapterHostModule(identity),
   });
+}
+
+/** Ask the exact installed package whether runtime inference configuration is mutable. */
+export function inspectInstalledInferenceConfigSupport(
+  sandboxName: string,
+  target: AgentConfigTarget,
+): InstalledInferenceConfigSupport {
+  const selection = loadInstalledConfigAdapter(sandboxName, target);
+  if (!selection) return { kind: "legacy" };
+  return selection.adapter.describeInferenceConfig({ target: toHarnessConfigTarget(target) });
 }

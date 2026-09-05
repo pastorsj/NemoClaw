@@ -21,6 +21,7 @@ const CONFIG_PACKAGES = [
     id: "openclaw",
     target: { directory: "/sandbox/.openclaw", file: "openclaw.json", format: "json" },
     serializedConfig: "{}\n",
+    inferenceKind: "mutable",
     updateKind: "transaction",
     mutableKind: "stat",
   },
@@ -28,6 +29,7 @@ const CONFIG_PACKAGES = [
     id: "hermes",
     target: { directory: "/sandbox/.hermes", file: "config.yaml", format: "yaml" },
     serializedConfig: "model: {}\n",
+    inferenceKind: "mutable",
     updateKind: "transaction",
     mutableKind: "probe",
   },
@@ -35,6 +37,7 @@ const CONFIG_PACKAGES = [
     id: "langchain-deepagents-code",
     target: { directory: "/sandbox/.deepagents", file: "config.toml", format: "toml" },
     serializedConfig: "",
+    inferenceKind: "immutable",
     updateKind: "immutable",
     mutableKind: "not-required",
   },
@@ -42,6 +45,23 @@ const CONFIG_PACKAGES = [
     id: "pi",
     target: { directory: "/sandbox/.pi/agent", file: "models.json", format: "json" },
     serializedConfig: "{}\n",
+    inferenceKind: "immutable",
+    updateKind: "immutable",
+    mutableKind: "not-required",
+  },
+  {
+    id: "deepseek-harness",
+    target: { directory: "/sandbox/.deepseek-harness", file: "fabric.json", format: "json" },
+    serializedConfig: "{}\n",
+    inferenceKind: "immutable",
+    updateKind: "immutable",
+    mutableKind: "not-required",
+  },
+  {
+    id: "haystack-agent",
+    target: { directory: "/sandbox/.haystack-agent", file: "fabric.json", format: "json" },
+    serializedConfig: "{}\n",
+    inferenceKind: "immutable",
     updateKind: "immutable",
     mutableKind: "not-required",
   },
@@ -156,7 +176,7 @@ describe("compiled harness adapter boundary", () => {
 
   it.each(CONFIG_PACKAGES)(
     "loads $id configuration through the same compiled contract",
-    ({ id, target, serializedConfig, updateKind, mutableKind }) => {
+    ({ id, target, serializedConfig, inferenceKind, updateKind, mutableKind }) => {
       const fixtureRoot = fs.mkdtempSync(path.join(TEST_PARENT, "fixture-"));
       fs.chmodSync(fixtureRoot, 0o700);
       const storeRoot = path.join(fixtureRoot, "store");
@@ -171,6 +191,7 @@ describe("compiled harness adapter boundary", () => {
           storeRoot,
         });
         const configTarget = { ...target, sensitiveFiles: [] };
+        const inference = adapter.describeInference({ target: configTarget });
         const update = adapter.prepareUpdate({
           config: {},
           serializedConfig,
@@ -188,6 +209,7 @@ describe("compiled harness adapter boundary", () => {
           sandboxGid: null,
         });
 
+        expect(inference.kind).toBe(inferenceKind);
         expect(update.kind).toBe(updateKind);
         expect(urlPolicy).toMatchObject({
           allowPrivateUrls: expect.any(Boolean),
@@ -195,6 +217,7 @@ describe("compiled harness adapter boundary", () => {
         });
         expect(mutable.kind).toBe(mutableKind);
         expect(Object.isFrozen(update)).toBe(true);
+        expect(Object.isFrozen(inference)).toBe(true);
         expect(Object.isFrozen(mutable)).toBe(true);
       } finally {
         fs.rmSync(fixtureRoot, { recursive: true, force: true });

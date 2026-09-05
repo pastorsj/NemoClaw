@@ -6,6 +6,8 @@ import {
   HARNESS_CONFIG_RESTORE_CONTRACT,
   type HarnessConfigRestoreRequest,
   type HarnessConfigRestoreResult,
+  type HarnessInferenceConfigRequest,
+  type HarnessInferenceConfigSupport,
   type HarnessConfigUpdatePlan,
   type HarnessConfigUpdateRequest,
   type HarnessConfigUrlPolicy,
@@ -40,6 +42,7 @@ export type {
 } from "./adapter/config";
 
 export interface HarnessConfigAdapterHostModule {
+  describeInferenceConfig(request: HarnessInferenceConfigRequest): HarnessInferenceConfigSupport;
   prepareConfigUpdate(request: HarnessConfigUpdateRequest): HarnessConfigUpdatePlan;
   classifyConfigUrl(request: HarnessConfigUrlRequest): HarnessConfigUrlPolicy;
   describeMutableConfig(request: HarnessMutableConfigRequest): HarnessMutableConfigPlan;
@@ -97,6 +100,9 @@ export function loadHarnessConfigAdapterHostModule(
     configModuleFailure(error);
   }
   return Object.freeze({
+    describeInferenceConfig(request: HarnessInferenceConfigRequest): HarnessInferenceConfigSupport {
+      return callConfigAdapter(() => adapter.describeInference(request));
+    },
     prepareConfigUpdate(request: HarnessConfigUpdateRequest): HarnessConfigUpdatePlan {
       return callConfigAdapter(() => adapter.prepareUpdate(request));
     },

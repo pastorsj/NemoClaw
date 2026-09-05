@@ -19,7 +19,10 @@ vi.mock("./agent-config", async (importOriginal) => ({
 }));
 
 import { HarnessConfigModuleError } from "../agent-runtime/config-module";
-import { loadInstalledConfigAdapter } from "./package-config";
+import {
+  inspectInstalledInferenceConfigSupport,
+  loadInstalledConfigAdapter,
+} from "./package-config";
 
 const IDENTITY = Object.freeze({
   kind: "agent-runtime" as const,
@@ -36,6 +39,7 @@ const TARGET = Object.freeze({
   sensitiveFiles: [] as string[],
 });
 const ADAPTER = Object.freeze({
+  describeInferenceConfig: vi.fn(),
   prepareConfigUpdate: vi.fn(),
   classifyConfigUrl: vi.fn(),
   describeMutableConfig: vi.fn(),
@@ -44,6 +48,7 @@ const ADAPTER = Object.freeze({
 beforeEach(() => {
   mocks.getSandbox.mockReset();
   mocks.loadConfigAdapter.mockReset().mockReturnValue(ADAPTER);
+  ADAPTER.describeInferenceConfig.mockReset();
 });
 
 describe("installed configuration adapter selection", () => {
@@ -62,6 +67,34 @@ describe("installed configuration adapter selection", () => {
 
     expect(loadInstalledConfigAdapter("legacy", TARGET)).toBeNull();
     expect(mocks.loadConfigAdapter).not.toHaveBeenCalled();
+  });
+
+  it("gets inference mutability from the exact receipt-backed adapter", () => {
+    mocks.getSandbox.mockReturnValue({ harnessPackage: IDENTITY });
+    ADAPTER.describeInferenceConfig.mockReturnValue({
+      kind: "immutable",
+      reason: "Re-onboard to change this image-owned configuration.",
+    });
+
+    expect(inspectInstalledInferenceConfigSupport("future", TARGET)).toEqual({
+      kind: "immutable",
+      reason: "Re-onboard to change this image-owned configuration.",
+    });
+    expect(ADAPTER.describeInferenceConfig).toHaveBeenCalledExactlyOnceWith({
+      target: {
+        directory: TARGET.configDir,
+        file: TARGET.configFile,
+        format: TARGET.format,
+        sensitiveFiles: TARGET.sensitiveFiles,
+      },
+    });
+  });
+
+  it("labels no-receipt inference mutability as legacy compatibility", () => {
+    mocks.getSandbox.mockReturnValue({ harnessPackage: null });
+
+    expect(inspectInstalledInferenceConfigSupport("legacy", TARGET)).toEqual({ kind: "legacy" });
+    expect(ADAPTER.describeInferenceConfig).not.toHaveBeenCalled();
   });
 
   it("rejects a package receipt for a different agent runtime", () => {

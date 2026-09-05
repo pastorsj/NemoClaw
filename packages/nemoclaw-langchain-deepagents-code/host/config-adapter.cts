@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 "use strict";
 const configAdapter = {
+    describeInferenceConfig() {
+        return {
+            kind: "immutable",
+            reason: "This configuration is materialized by the sandbox image. Re-onboard to change it.",
+        };
+    },
     prepareConfigUpdate() {
         return {
             kind: "immutable",

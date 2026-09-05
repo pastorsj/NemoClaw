@@ -99,6 +99,10 @@ function mutableConfigRepair(request) {
     };
 }
 const configAdapter = {
+    describeInferenceConfig(request) {
+        requireTarget(request.target);
+        return { kind: "mutable" };
+    },
     prepareConfigUpdate(request) {
         requireTarget(request.target);
         return {

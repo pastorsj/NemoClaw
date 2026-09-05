@@ -4,7 +4,6 @@
 import type { CaptureOpenshellOptions, CaptureOpenshellResult } from "../adapters/openshell/client";
 import { captureOpenshell, getOpenshellBinary } from "../adapters/openshell/runtime";
 import { CLI_NAME } from "../cli/branding";
-import { shellQuote } from "../core/shell-quote";
 import { applyHermesManagedRoute } from "../hermes-managed-route";
 import { isBedrockRuntimeEndpoint } from "../inference/bedrock-runtime";
 import {
@@ -47,6 +46,10 @@ import {
   seedHermesDashboardConfig,
   writeSandboxConfig,
 } from "../sandbox/config";
+import {
+  inspectInstalledInferenceConfigSupport,
+  type InstalledInferenceConfigSupport,
+} from "../sandbox/package-config";
 import type { ConfigObject, ConfigValue } from "../security/credential-filter";
 import { isConfigObject, isConfigValue } from "../security/credential-filter";
 import { withSandboxMutationLock } from "../state/mcp-lifecycle-lock";
@@ -146,6 +149,10 @@ export interface InferenceSetDeps extends InferenceGatewayRestartDeps {
     mutator: (session: onboardSession.Session) => onboardSession.Session | void,
   ) => onboardSession.Session;
   resolveAgentConfig: (sandboxName: string) => AgentConfigTarget;
+  inspectInstalledInferenceConfigSupport: (
+    sandboxName: string,
+    target: AgentConfigTarget,
+  ) => InstalledInferenceConfigSupport;
   readSandboxConfig: (sandboxName: string, target: AgentConfigTarget) => ConfigObject;
   writeSandboxConfig: (
     sandboxName: string,
@@ -261,6 +268,7 @@ function defaultDeps(): InferenceSetDeps {
     loadSession: onboardSession.loadSession,
     updateSession: onboardSession.updateSession,
     resolveAgentConfig,
+    inspectInstalledInferenceConfigSupport,
     readSandboxConfig,
     writeSandboxConfig,
     recomputeSandboxConfigHash,
@@ -817,20 +825,25 @@ async function runInferenceSetWithoutHostLock(
 
   const { sandboxName, entry, agentName } = resolveTargetSandbox(options.sandboxName, deps);
   const priorHttpsPinRouteId = parseHttpsPinRouteId(entry.endpointUrl);
-  if (agentName !== "openclaw" && agentName !== "hermes") {
-    // #6321: Deep Agents Code (langchain-deepagents-code) bakes its model into
-    // the sandbox image at build time (packages/nemoclaw-langchain-deepagents-code/Dockerfile
-    // ARG NEMOCLAW_MODEL → ~/.deepagents/config.toml), so — unlike OpenClaw and
-    // Hermes — it has no runtime inference-set config-mutation path. The blunt
-    // "supports OpenClaw and Hermes" message left dcode users with no next step;
-    // point them at the only way to change a Deep Agents model: re-onboard with
-    // a new selection.
-    const dcodeHint =
-      agentName === "langchain-deepagents-code"
-        ? ` Deep Agents Code bakes its model into the sandbox image at build time, so it has no runtime inference-set path. To change the model, re-onboard with the new selection: \`${CLI_NAME} onboard --agent dcode --name ${shellQuote(sandboxName)} --fresh\` (set NEMOCLAW_PROVIDER / NEMOCLAW_MODEL for the target model).`
-        : "";
+  const target = deps.resolveAgentConfig(sandboxName);
+  const targetAgent = normalizeSandboxAgent(target.agentName);
+  if (targetAgent !== agentName) {
     throw new InferenceSetError(
-      `nemoclaw inference set supports OpenClaw and Hermes sandboxes; '${sandboxName}' uses '${agentName}'.${dcodeHint}`,
+      `Sandbox '${sandboxName}' is registered as '${agentName}' but resolved config for '${target.agentName}'.`,
+      2,
+    );
+  }
+  const configUpdateSupport = deps.inspectInstalledInferenceConfigSupport(sandboxName, target);
+  if (configUpdateSupport.kind === "immutable") {
+    throw new InferenceSetError(
+      `Inference configuration is not mutable for '${agentName}': ${configUpdateSupport.reason}`,
+      2,
+    );
+  }
+  if (agentName !== "openclaw" && agentName !== "hermes") {
+    const authority = configUpdateSupport.kind === "legacy" ? "legacy runtime" : "package adapter";
+    throw new InferenceSetError(
+      `The ${authority} for '${agentName}' does not provide a supported runtime inference mapping.`,
       2,
     );
   }
@@ -905,14 +918,6 @@ async function runInferenceSetWithoutHostLock(
     );
   }
 
-  const target = deps.resolveAgentConfig(sandboxName);
-  const targetAgent = normalizeSandboxAgent(target.agentName);
-  if (targetAgent !== agentName) {
-    throw new InferenceSetError(
-      `Sandbox '${sandboxName}' is registered as '${agentName}' but resolved config for '${target.agentName}'.`,
-      2,
-    );
-  }
   // Explicit custom routes may start an HTTPS-pin adapter during finalization,
   // so reject an unsupported API family before that first possible mutation.
   if (preparedRoute.preliminaryExplicitMetadata) {

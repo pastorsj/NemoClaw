@@ -152,6 +152,10 @@ describe("published LangChain Deep Agents Code package", () => {
 
   it("loads package-owned runtime modules from a normal node_modules installation", () => {
     const configAdapter = loadInstalledModule<{
+      describeInferenceConfig(request: Record<string, unknown>): {
+        kind: string;
+        reason?: string;
+      };
       prepareConfigUpdate(request: Record<string, unknown>): { kind: string; reason?: string };
     }>("host/config-adapter.cts");
     const identity = loadInstalledModule<{
@@ -199,6 +203,10 @@ describe("published LangChain Deep Agents Code package", () => {
       getMutationCapability(sandboxName: string): { command: string; marker: string };
     }>("host/mcp-adapter.cts");
 
+    expect(configAdapter.describeInferenceConfig({})).toMatchObject({
+      kind: "immutable",
+      reason: expect.stringContaining("Re-onboard"),
+    });
     expect(configAdapter.prepareConfigUpdate({})).toMatchObject({
       kind: "immutable",
       reason: expect.stringContaining("Re-onboard"),

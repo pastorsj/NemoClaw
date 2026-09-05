@@ -4,6 +4,13 @@
 import type { HarnessConfigAdapterModule } from "@nvidia/nemoclaw-harness-contract";
 
 const configAdapter: HarnessConfigAdapterModule = {
+  describeInferenceConfig() {
+    return {
+      kind: "immutable",
+      reason: "This configuration is materialized by the sandbox image. Re-onboard to change it.",
+    };
+  },
+
   prepareConfigUpdate() {
     return {
       kind: "immutable",

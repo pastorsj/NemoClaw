@@ -107,6 +107,14 @@ export interface HarnessConfigUpdateRequest {
   readonly target: HarnessConfigTarget;
 }
 
+export interface HarnessInferenceConfigRequest {
+  readonly target: HarnessConfigTarget;
+}
+
+export type HarnessInferenceConfigSupport =
+  | { readonly kind: "mutable" }
+  | { readonly kind: "immutable"; readonly reason: string };
+
 export type HarnessConfigUpdatePlan =
   | { readonly kind: "immutable"; readonly reason: string }
   | {
@@ -307,6 +315,9 @@ export type HarnessMcpSnapshotRestorePlan =
     };
 
 export interface HarnessConfigAdapterModule {
+  readonly describeInferenceConfig: (
+    request: HarnessInferenceConfigRequest,
+  ) => HarnessInferenceConfigSupport;
   readonly prepareConfigUpdate: (request: HarnessConfigUpdateRequest) => HarnessConfigUpdatePlan;
   readonly classifyConfigUrl: (request: HarnessConfigUrlRequest) => HarnessConfigUrlPolicy;
   readonly describeMutableConfig: (

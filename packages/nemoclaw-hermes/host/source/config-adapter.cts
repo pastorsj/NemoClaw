@@ -100,6 +100,11 @@ finally:
 `;
 
 const configAdapter: HarnessConfigAdapterModule = {
+  describeInferenceConfig(request) {
+    requireTarget(request.target);
+    return { kind: "mutable" };
+  },
+
   prepareConfigUpdate(request) {
     requireTarget(request.target);
     return {

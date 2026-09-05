@@ -9,6 +9,8 @@ import type {
   HarnessConfigTransactionCommand,
   HarnessConfigUpdatePlan,
   HarnessConfigUpdateRequest,
+  HarnessInferenceConfigRequest,
+  HarnessInferenceConfigSupport,
   HarnessConfigUrlPolicy,
   HarnessConfigUrlRequest,
   HarnessExitZeroCommand,
@@ -32,6 +34,8 @@ export type {
   HarnessConfigTransactionCommand,
   HarnessConfigUpdatePlan,
   HarnessConfigUpdateRequest,
+  HarnessInferenceConfigRequest,
+  HarnessInferenceConfigSupport,
   HarnessConfigUrlPolicy,
   HarnessConfigUrlRequest,
   HarnessExitZeroCommand,
@@ -157,6 +161,33 @@ const updateRequestSchema: AnySchemaObject = Object.freeze({
     expectedConfigSha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
     target: configTargetSchema,
   },
+});
+
+const inferenceRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["target"],
+  properties: { target: configTargetSchema },
+});
+
+const inferenceSupportSchema: AnySchemaObject = Object.freeze({
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { const: "mutable" } },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "reason"],
+      properties: {
+        kind: { const: "immutable" },
+        reason: { type: "string", minLength: 1, maxLength: 8192 },
+      },
+    },
+  ],
 });
 
 const updateResultSchema: AnySchemaObject = Object.freeze({
@@ -367,6 +398,15 @@ export const HARNESS_CONFIG_ADAPTER_CONTRACT = defineHarnessAdapterContract({
   requestMaxBytes: CONFIG_ADAPTER_VALUE_MAX_BYTES,
   resultMaxBytes: CONFIG_ADAPTER_VALUE_MAX_BYTES,
   operations: {
+    describeInference: defineHarnessAdapterOperation<
+      HarnessInferenceConfigRequest,
+      HarnessInferenceConfigSupport
+    >({
+      exportName: "describeInferenceConfig",
+      requestSchema: inferenceRequestSchema,
+      resultSchema: inferenceSupportSchema,
+      resultDescription: "inference configuration support",
+    }),
     prepareUpdate: defineHarnessAdapterOperation<
       HarnessConfigUpdateRequest,
       HarnessConfigUpdatePlan

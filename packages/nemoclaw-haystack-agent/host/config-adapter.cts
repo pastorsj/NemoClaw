@@ -11,6 +11,13 @@ function requireConfigTarget(target) {
     }
 }
 const configAdapter = {
+    describeInferenceConfig(request) {
+        requireConfigTarget(request.target);
+        return {
+            kind: "immutable",
+            reason: "The sandbox image generates the Haystack Agent config. Re-onboard to change it.",
+        };
+    },
     prepareConfigUpdate(request) {
         requireConfigTarget(request.target);
         return {
