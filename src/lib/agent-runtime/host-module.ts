@@ -13,6 +13,8 @@ import {
   type HarnessMcpRemovalPlan,
   type HarnessMcpRuntimeIntentRequest,
   type HarnessMcpRuntimeRequest,
+  type HarnessMcpSnapshotRestorePlan,
+  type HarnessMcpSnapshotRestoreRequest,
 } from "./adapter/mcp";
 import { readMcpCapability } from "./manifest-readers";
 import type { HarnessPackageStoreOptions } from "./package/store";
@@ -35,6 +37,9 @@ export type {
   HarnessMcpRemovalPlan,
   HarnessMcpRuntimeIntentRequest,
   HarnessMcpRuntimeRequest,
+  HarnessMcpSnapshotApplicability,
+  HarnessMcpSnapshotRestorePlan,
+  HarnessMcpSnapshotRestoreRequest,
 } from "./adapter/mcp";
 
 export interface HarnessMcpAdapterHostModule {
@@ -47,6 +52,9 @@ export interface HarnessMcpAdapterHostModule {
     request: HarnessMcpRuntimeIntentRequest,
   ): HarnessMcpCapabilityProbe;
   buildMcpRuntimeCommand(request: HarnessMcpRuntimeRequest): readonly string[];
+  buildMcpSnapshotRestorePlan(
+    request: HarnessMcpSnapshotRestoreRequest,
+  ): HarnessMcpSnapshotRestorePlan;
 }
 
 export interface LoadHarnessMcpAdapterHostModuleOptions extends HarnessPackageStoreOptions {
@@ -135,6 +143,11 @@ export function loadHarnessMcpAdapterHostModule(
     },
     buildMcpRuntimeCommand(request: HarnessMcpRuntimeRequest): readonly string[] {
       return callMcpAdapter(() => adapter.runtime(request));
+    },
+    buildMcpSnapshotRestorePlan(
+      request: HarnessMcpSnapshotRestoreRequest,
+    ): HarnessMcpSnapshotRestorePlan {
+      return callMcpAdapter(() => adapter.snapshotRestore(request));
     },
   });
 }

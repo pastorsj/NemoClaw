@@ -293,7 +293,38 @@ export const updateSandboxMock = vi.fn();
 export const updateSandboxIfCurrentMock = vi.fn();
 export const finalizePendingSandboxRegistrationMock = vi.fn();
 export const restoreSandboxStateMock = vi.fn();
-export const restoreDeepAgentsManagedMcpProjectionMock = vi.fn();
+function preparedMcpSnapshotRestore(sandbox: SandboxRecord) {
+  if (sandbox.agent !== "langchain-deepagents-code") return null;
+  return {
+    sandboxName: sandbox.name,
+    agentName: "langchain-deepagents-code",
+    adapter: "deepagents-config",
+    entries: Object.values(sandbox.mcp?.bridges ?? {}).filter(
+      (entry) =>
+        entry.agent === "langchain-deepagents-code" && entry.adapter === "deepagents-config",
+    ),
+    plan: {
+      kind: "conditional-repair",
+      applicability: {
+        command: "runtime-kind",
+        timeoutSeconds: 15,
+        repairWhenOutput: "v2",
+        skipWhenOutput: "legacy",
+        failureMessage: "runtime kind unavailable",
+      },
+      capability: { kind: "not-required" },
+      execution: {
+        command: "repair",
+        timeoutSeconds: 30,
+        success: { kind: "exit-zero" },
+        failureMessage: "repair failed",
+      },
+      verificationFailureMessage: "verification failed",
+    },
+  };
+}
+export const prepareInstalledMcpSnapshotRestoreMock = vi.fn(preparedMcpSnapshotRestore);
+export const applyInstalledMcpSnapshotRestoreMock = vi.fn();
 export const getMcpProviderInspectionRuntimeSelectionMock = vi.fn(() => ({
   gatewayName: "nemoclaw-8091",
   workspace: "default",
@@ -591,9 +622,9 @@ vi.mock("./restore-gateway-pairing", () => ({
   waitForRestoredSandboxGatewaySupervisor: waitForRestoredSandboxGatewaySupervisorMock,
 }));
 
-vi.mock("./mcp-bridge-adapter-deepagents-registration", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./mcp-bridge-adapter-deepagents-registration")>()),
-  restoreDeepAgentsManagedMcpProjection: restoreDeepAgentsManagedMcpProjectionMock,
+vi.mock("./mcp-bridge/package-snapshot", () => ({
+  prepareInstalledMcpSnapshotRestore: prepareInstalledMcpSnapshotRestoreMock,
+  applyInstalledMcpSnapshotRestore: applyInstalledMcpSnapshotRestoreMock,
 }));
 
 vi.mock("./mcp-bridge-provider-inspection", async (importOriginal) => ({
@@ -729,7 +760,8 @@ export function resetSnapshotRestoreMocks(): void {
       };
     },
   );
-  restoreDeepAgentsManagedMcpProjectionMock.mockReset();
+  prepareInstalledMcpSnapshotRestoreMock.mockReset().mockImplementation(preparedMcpSnapshotRestore);
+  applyInstalledMcpSnapshotRestoreMock.mockReset();
   getMcpProviderInspectionRuntimeSelectionMock.mockClear();
   streamSandboxCreateMock.mockImplementation(async () => ({
     status: 0,

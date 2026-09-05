@@ -96,6 +96,9 @@ module.exports = {
   buildMcpRuntimeCommand(request) {
     return ["future-runtime", ...request.command];
   },
+  buildMcpSnapshotRestorePlan() {
+    return { kind: "not-required" };
+  },
 };
 `;
 
@@ -123,6 +126,7 @@ function writeFuturePackage(moduleSource: string = VALID_MODULE): void {
       id: "future-harness",
       displayName: "Future Harness",
       packageVersion: "1.0.0",
+      minimumNemoClawVersion: "0.0.113",
       manifest: "packages/nemoclaw-future-harness/manifest.yaml",
     })}\n`,
   );
@@ -272,6 +276,9 @@ describe("installed harness host module", () => {
       "node",
       "probe.mjs",
     ]);
+    expect(module.buildMcpSnapshotRestorePlan({ sandboxName: "sandbox", entries: [] })).toEqual({
+      kind: "not-required",
+    });
   });
 
   it("rejects an installed package without the fixed MCP adapter file", () => {
@@ -333,6 +340,7 @@ module.exports = {
   describeMcpTeardownCapability() { return { kind: "not-required" }; },
   describeMcpRuntimeIntentVerification() { return { kind: "not-required" }; },
   buildMcpRuntimeCommand() { return "runtime"; },
+  buildMcpSnapshotRestorePlan() { return { kind: "not-required" }; },
 };
 `);
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });
@@ -406,6 +414,7 @@ module.exports = {
   describeMcpTeardownCapability() { return { kind: "not-required" }; },
   describeMcpRuntimeIntentVerification() { return { kind: "not-required" }; },
   buildMcpRuntimeCommand() { return "runtime"; },
+  buildMcpSnapshotRestorePlan() { return { kind: "not-required" }; },
 };
 `);
     const module = loadHarnessMcpAdapterHostModule(installed.identity, { storeRoot });

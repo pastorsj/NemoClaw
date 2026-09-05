@@ -12,6 +12,8 @@ import type {
   HarnessMcpRemovalRequest,
   HarnessMcpRuntimeIntentRequest,
   HarnessMcpRuntimeRequest,
+  HarnessMcpSnapshotRestorePlan,
+  HarnessMcpSnapshotRestoreRequest,
 } from "@nvidia/nemoclaw-harness-contract";
 
 import { defineHarnessAdapterContract, defineHarnessAdapterOperation } from "./contract";
@@ -37,6 +39,9 @@ export type {
   HarnessMcpRemovalRequest,
   HarnessMcpRuntimeIntentRequest,
   HarnessMcpRuntimeRequest,
+  HarnessMcpSnapshotApplicability,
+  HarnessMcpSnapshotRestorePlan,
+  HarnessMcpSnapshotRestoreRequest,
 } from "@nvidia/nemoclaw-harness-contract";
 
 const stringValueSchema = Object.freeze({ type: "string", maxLength: 65_536 });
@@ -151,6 +156,25 @@ const mcpRuntimeIntentRequestSchema: AnySchemaObject = Object.freeze({
       maxItems: 512,
       uniqueItems: true,
       items: { type: "string", minLength: 1, maxLength: 256 },
+    },
+  },
+});
+
+const mcpSnapshotRestoreRequestSchema: AnySchemaObject = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["sandboxName", "entries"],
+  properties: {
+    sandboxName: {
+      type: "string",
+      minLength: 1,
+      maxLength: 256,
+      pattern: "^[^\\u0000\\r\\n]+$",
+    },
+    entries: {
+      type: "array",
+      maxItems: 512,
+      items: mcpEntrySchema,
     },
   },
 });
@@ -379,6 +403,61 @@ const mcpCapabilityProbeSchema: AnySchemaObject = Object.freeze({
   ],
 });
 
+const mcpSnapshotRestorePlanSchema: AnySchemaObject = Object.freeze({
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { const: "not-required" } },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "applicability", "capability", "execution", "verificationFailureMessage"],
+      properties: {
+        kind: { const: "conditional-repair" },
+        applicability: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "command",
+            "timeoutSeconds",
+            "repairWhenOutput",
+            "skipWhenOutput",
+            "failureMessage",
+          ],
+          properties: {
+            command: mcpCommandSchema,
+            timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
+            repairWhenOutput: { type: "string", minLength: 1, maxLength: 65_536 },
+            skipWhenOutput: { type: "string", minLength: 1, maxLength: 65_536 },
+            failureMessage: failureMessageSchema,
+          },
+        },
+        capability: mcpCapabilityProbeSchema,
+        execution: {
+          type: "object",
+          additionalProperties: false,
+          required: ["command", "timeoutSeconds", "success", "failureMessage"],
+          properties: {
+            command: mcpCommandSchema,
+            timeoutSeconds: { type: "integer", minimum: 1, maximum: 3600 },
+            success: {
+              type: "object",
+              additionalProperties: false,
+              required: ["kind"],
+              properties: { kind: { const: "exit-zero" } },
+            },
+            failureMessage: failureMessageSchema,
+          },
+        },
+        verificationFailureMessage: failureMessageSchema,
+      },
+    },
+  ],
+});
+
 const mcpCapabilitySchema: AnySchemaObject = Object.freeze({
   type: "object",
   required: ["mcp"],
@@ -456,6 +535,15 @@ export const HARNESS_MCP_ADAPTER_CONTRACT = defineHarnessAdapterContract({
       requestSchema: mcpRuntimeRequestSchema,
       resultSchema: mcpArgumentVectorSchema,
       resultDescription: "runtime argument vector",
+    }),
+    snapshotRestore: defineHarnessAdapterOperation<
+      HarnessMcpSnapshotRestoreRequest,
+      HarnessMcpSnapshotRestorePlan
+    >({
+      exportName: "buildMcpSnapshotRestorePlan",
+      requestSchema: mcpSnapshotRestoreRequestSchema,
+      resultSchema: mcpSnapshotRestorePlanSchema,
+      resultDescription: "snapshot restore plan",
     }),
   },
 });

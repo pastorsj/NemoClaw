@@ -242,6 +242,10 @@ function buildMcpRuntimeCommand(request) {
   return ["nemoclaw-start", "node", "-e", runner, "--", ...request.command];
 }
 
+function buildMcpSnapshotRestorePlan() {
+  return { kind: "not-required" };
+}
+
 module.exports = {
   DEFAULT_OPENCLAW_CONFIG_DIR,
   MCPORTER_VERSION,
@@ -253,6 +257,7 @@ module.exports = {
   buildMcpRemovalCommand,
   buildMcpRemovalPlan,
   buildMcpRuntimeCommand,
+  buildMcpSnapshotRestorePlan,
   buildRegisterCommand,
   buildRemoveCommand,
   describeMcpMutationCapability,

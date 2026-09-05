@@ -281,6 +281,31 @@ export interface HarnessMcpRuntimeIntentRequest {
   readonly managedServerNames: readonly string[];
 }
 
+export interface HarnessMcpSnapshotRestoreRequest {
+  readonly sandboxName: string;
+  readonly entries: readonly HarnessMcpAdapterEntry[];
+}
+
+export interface HarnessMcpSnapshotApplicability {
+  readonly command: HarnessMcpAdapterCommand;
+  readonly timeoutSeconds: number;
+  readonly repairWhenOutput: string;
+  readonly skipWhenOutput: string;
+  readonly failureMessage: string;
+}
+
+export type HarnessMcpSnapshotRestorePlan =
+  | { readonly kind: "not-required" }
+  | {
+      readonly kind: "conditional-repair";
+      readonly applicability: HarnessMcpSnapshotApplicability;
+      readonly capability: HarnessMcpCapabilityProbe;
+      readonly execution: HarnessMcpExecutionPlan & {
+        readonly success: { readonly kind: "exit-zero" };
+      };
+      readonly verificationFailureMessage: string;
+    };
+
 export interface HarnessConfigAdapterModule {
   readonly prepareConfigUpdate: (request: HarnessConfigUpdateRequest) => HarnessConfigUpdatePlan;
   readonly classifyConfigUrl: (request: HarnessConfigUrlRequest) => HarnessConfigUrlPolicy;
@@ -309,6 +334,9 @@ export interface HarnessMcpAdapterModule {
     request: HarnessMcpRuntimeIntentRequest,
   ) => HarnessMcpCapabilityProbe;
   readonly buildMcpRuntimeCommand: (request: HarnessMcpRuntimeRequest) => readonly string[];
+  readonly buildMcpSnapshotRestorePlan: (
+    request: HarnessMcpSnapshotRestoreRequest,
+  ) => HarnessMcpSnapshotRestorePlan;
 }
 
 export type HarnessStartupJsonScalar = string | number | boolean | null;

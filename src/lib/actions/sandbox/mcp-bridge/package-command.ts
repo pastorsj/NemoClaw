@@ -8,6 +8,7 @@ import {
   type HarnessMcpCapabilityProbe,
   type HarnessMcpRegistrationPlan,
   type HarnessMcpRemovalPlan,
+  type HarnessMcpSnapshotRestorePlan,
 } from "../../../agent-runtime/host-module";
 import type { McpAttachedCredentialRevision } from "../mcp-bridge-provider-readiness";
 import { getSandboxHarnessPackage } from "../mcp-bridge-state";
@@ -210,6 +211,26 @@ export function buildInstalledMcpRuntimeCommand(
   } catch (error) {
     throw new McpBridgeError(
       `Installed MCP adapter '${adapter}' could not build its runtime command: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+export function buildInstalledMcpSnapshotRestorePlan(
+  sandboxName: string,
+  adapter: AgentMcpAdapter,
+  agentName: string,
+  entries: readonly InstalledMcpEntry[],
+): HarnessMcpSnapshotRestorePlan | null {
+  const installed = installedMcpAdapter(sandboxName, adapter, agentName);
+  if (!installed) return null;
+  try {
+    return installed.buildMcpSnapshotRestorePlan({
+      sandboxName,
+      entries: entries.map((entry) => packageEntry(entry)),
+    });
+  } catch (error) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' could not build its snapshot restore plan: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

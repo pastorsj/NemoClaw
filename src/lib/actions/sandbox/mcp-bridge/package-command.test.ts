@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   describeTeardown: vi.fn(),
   describeIntent: vi.fn(),
   buildRuntime: vi.fn(),
+  buildSnapshotRestore: vi.fn(),
 }));
 
 vi.mock("../mcp-bridge-state", () => ({
@@ -28,6 +29,7 @@ import {
   buildInstalledMcpRegistrationPlan,
   buildInstalledMcpRemovalPlan,
   buildInstalledMcpRuntimeCommand,
+  buildInstalledMcpSnapshotRestorePlan,
   describeInstalledMcpMutationCapability,
   describeInstalledMcpRuntimeIntentVerification,
   describeInstalledMcpTeardownCapability,
@@ -84,6 +86,7 @@ beforeEach(() => {
   mocks.describeTeardown.mockReset().mockReturnValue({ kind: "not-required" });
   mocks.describeIntent.mockReset().mockReturnValue({ kind: "not-required" });
   mocks.buildRuntime.mockReset().mockReturnValue(["future-runtime"]);
+  mocks.buildSnapshotRestore.mockReset().mockReturnValue({ kind: "not-required" });
   mocks.loadHostModule.mockReturnValue({
     buildMcpRegistrationPlan: mocks.buildRegistration,
     buildMcpRemovalPlan: mocks.buildRemoval,
@@ -92,6 +95,7 @@ beforeEach(() => {
     describeMcpTeardownCapability: mocks.describeTeardown,
     describeMcpRuntimeIntentVerification: mocks.describeIntent,
     buildMcpRuntimeCommand: mocks.buildRuntime,
+    buildMcpSnapshotRestorePlan: mocks.buildSnapshotRestore,
   });
 });
 
@@ -204,6 +208,9 @@ describe("installed MCP package command boundary", () => {
     expect(
       buildInstalledMcpRuntimeCommand("alpha", "future-config", ENTRY.agent, ["node", "probe.mjs"]),
     ).toEqual(["future-runtime"]);
+    expect(
+      buildInstalledMcpSnapshotRestorePlan("alpha", "future-config", ENTRY.agent, [ENTRY]),
+    ).toEqual({ kind: "not-required" });
     expect(mocks.describeMutation).toHaveBeenCalledWith({ sandboxName: "alpha" });
     expect(mocks.describeTeardown).toHaveBeenCalledWith({ sandboxName: "alpha" });
     expect(mocks.describeIntent).toHaveBeenCalledWith({
@@ -217,6 +224,16 @@ describe("installed MCP package command boundary", () => {
       managedServerNames: ["docs", "search"],
     });
     expect(mocks.buildRuntime).toHaveBeenCalledWith({ command: ["node", "probe.mjs"] });
+    expect(mocks.buildSnapshotRestore).toHaveBeenCalledWith({
+      sandboxName: "alpha",
+      entries: [
+        {
+          server: "docs",
+          url: "https://example.test/mcp",
+          headers: { Authorization: "Bearer openshell:resolve:env:FUTURE_TOKEN" },
+        },
+      ],
+    });
   });
 
   it("fails closed when the registry package belongs to a different agent", () => {

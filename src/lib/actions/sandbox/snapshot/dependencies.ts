@@ -23,8 +23,12 @@ export type {
 } from "../../../onboard/workload/clone";
 export { backupSandboxStateWithManagedAuthority } from "./backup-authority";
 export { createSnapshotCloneLifecycle, fingerprintSandboxLiveIdentity } from "./clone-lifecycle";
-export { restoreDeepAgentsManagedMcpProjection } from "../mcp-bridge-adapter-deepagents-registration";
 export { getMcpProviderInspectionRuntimeSelection } from "../mcp-bridge-provider-inspection";
+export {
+  applyInstalledMcpSnapshotRestore,
+  prepareInstalledMcpSnapshotRestore,
+  type PreparedInstalledMcpSnapshotRestore,
+} from "../mcp-bridge/package-snapshot";
 export type {
   ManagedCloneProviderBinding,
   ManagedCloneProviderCleanupResult,

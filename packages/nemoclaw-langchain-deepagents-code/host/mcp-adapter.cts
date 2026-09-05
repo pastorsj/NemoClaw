@@ -7,6 +7,7 @@ const DEEPAGENTS_LEGACY_MCP_CONFIG_PATH = "/sandbox/.deepagents/.mcp.json";
 const DEEPAGENTS_MCP_CAPABILITY_MARKER = "NEMOCLAW_DEEPAGENTS_MCP_CAPABILITY=2";
 const DEEPAGENTS_MCP_CAPABILITY_COMMAND =
   "/usr/local/bin/deepagents-code --nemoclaw-mcp-capability";
+const DEEPAGENTS_UNSAFE_MCP_PROJECTION_PREFIX = "Unsafe managed Deep Agents MCP projection path";
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
@@ -48,6 +49,14 @@ const DEEPAGENTS_STRICT_JSON_HELPERS = [
 
 const DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS = [
   "MANAGED_MCP_MAX_BYTES = 262144",
+  "class UnsafeManagedProjectionError(ValueError):",
+  "    pass",
+  "def describe_managed_projection_type(metadata):",
+  "    if stat.S_ISLNK(metadata.st_mode):",
+  "        return 'symbolic link'",
+  "    if stat.S_ISFIFO(metadata.st_mode):",
+  "        return 'FIFO'",
+  "    return 'non-regular file'",
   "def managed_fingerprint(metadata):",
   "    return (metadata.st_dev, metadata.st_ino, metadata.st_size, metadata.st_mtime_ns, metadata.st_ctime_ns, metadata.st_mode, metadata.st_nlink, metadata.st_uid)",
   "def managed_path_identity(path):",
@@ -66,7 +75,10 @@ const DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS = [
   "def validate_managed_descriptor_path(path, descriptor):",
   "    opened = os.fstat(descriptor)",
   "    linked = os.stat(path, follow_symlinks=False)",
-  "    safe = (stat.S_ISREG(opened.st_mode) and opened.st_uid == os.getuid() and stat.S_IMODE(opened.st_mode) == 0o600 and opened.st_nlink == 1 and (opened.st_dev, opened.st_ino) == (linked.st_dev, linked.st_ino))",
+  "    for metadata in (opened, linked):",
+  "        if not stat.S_ISREG(metadata.st_mode):",
+  "            raise UnsafeManagedProjectionError(describe_managed_projection_type(metadata))",
+  "    safe = (opened.st_uid == os.getuid() and stat.S_IMODE(opened.st_mode) == 0o600 and opened.st_nlink == 1 and (opened.st_dev, opened.st_ino) == (linked.st_dev, linked.st_ino))",
   "    if not safe:",
   "        raise ValueError('managed MCP projection has unsafe ownership, mode, type, links, or path identity')",
   "    return managed_fingerprint(opened)",
@@ -78,6 +90,11 @@ const DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS = [
   "    except FileNotFoundError:",
   "        assert_managed_source_stable(path, None)",
   "        return b'', None, None",
+  "    except OSError:",
+  "        linked = os.stat(path, follow_symlinks=False)",
+  "        if not stat.S_ISREG(linked.st_mode):",
+  "            raise UnsafeManagedProjectionError(describe_managed_projection_type(linked)) from None",
+  "        raise",
   "    try:",
   "        before = os.fstat(descriptor)",
   "        validate_managed_descriptor_path(path, descriptor)",
@@ -277,6 +294,11 @@ function buildStatusCommand(entry) {
     ...DEEPAGENTS_MANAGED_PROJECTION_READ_HELPERS,
     "try:",
     "    data = read_managed_projection(config_path)[0]",
+    "except UnsafeManagedProjectionError as exc:",
+    "    print(" +
+      JSON.stringify(DEEPAGENTS_UNSAFE_MCP_PROJECTION_PREFIX + ": ") +
+      " + str(exc) + ' at ' + str(config_path), file=sys.stderr)",
+    "    raise SystemExit(2)",
     "except (OSError, UnicodeDecodeError, ValueError):",
     "    print('Managed Deep Agents MCP projection is unsafe or invalid.', file=sys.stderr)",
     "    raise SystemExit(2)",
@@ -295,6 +317,152 @@ function expectedServerMap(entries) {
       .map((entry) => [entry.server, managedServerConfig(entry)])
       .sort(([left], [right]) => left.localeCompare(right)),
   );
+}
+
+function buildMcpRuntimeKindCommand() {
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import pathlib, sys",
+    "managed_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    "legacy_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_LEGACY_MCP_CONFIG_PATH) + ")",
+    'runtime_kind = "auto"  # NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR',
+    "if runtime_kind == 'auto':",
+    "    runtime_kind = 'unknown'",
+    "    try:",
+    "        from deepagents_code import _nemoclaw_managed as managed",
+    "        runtime_path = str(getattr(managed, '_MCP_CONFIG_FILE', ''))",
+    "        if runtime_path == str(managed_path):",
+    "            runtime_kind = 'v2'",
+    "        elif runtime_path == str(legacy_path):",
+    "            runtime_kind = 'legacy'",
+    "    except Exception:",
+    "        pass",
+    "if runtime_kind not in ('v2', 'legacy'):",
+    "    print('Could not identify the managed Deep Agents MCP runtime', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "print(runtime_kind)",
+    "PY",
+  ].join("\n");
+}
+
+function buildSnapshotRepairCommand(entries) {
+  const expectedServers = expectedServerMap(entries);
+  return [
+    "/opt/venv/bin/python3 -I - <<'PY'",
+    "import json, os, pathlib, secrets, stat, sys",
+    "expected = json.loads(" + pythonJsonLiteral({ mcpServers: expectedServers }) + ")",
+    "config_path = pathlib.Path(" + JSON.stringify(DEEPAGENTS_MCP_CONFIG_PATH) + ")",
+    ...DEEPAGENTS_STRICT_JSON_HELPERS,
+    ...DEEPAGENTS_MANAGED_PROJECTION_HELPERS,
+    "def open_projection_parent():",
+    "    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW",
+    "    parent_name = config_path.parent.name",
+    "    if not parent_name or parent_name in ('.', '..'):",
+    "        raise ValueError('managed MCP projection parent is unsafe')",
+    "    anchor = os.open(config_path.parent.parent, flags)",
+    "    try:",
+    "        try:",
+    "            os.mkdir(parent_name, 0o700, dir_fd=anchor)",
+    "        except FileExistsError:",
+    "            pass",
+    "        parent = os.open(parent_name, flags, dir_fd=anchor)",
+    "        opened = os.fstat(parent)",
+    "        linked = os.stat(parent_name, dir_fd=anchor, follow_symlinks=False)",
+    "        safe = stat.S_ISDIR(opened.st_mode) and opened.st_uid == os.getuid() and (opened.st_dev, opened.st_ino) == (linked.st_dev, linked.st_ino)",
+    "        if not safe:",
+    "            os.close(parent)",
+    "            raise ValueError('managed MCP projection parent is unsafe')",
+    "        return parent",
+    "    finally:",
+    "        os.close(anchor)",
+    "def reset_projection(value):",
+    "    payload = managed_projection_bytes(value)",
+    "    parent = open_projection_parent()",
+    "    staged_name = ''",
+    "    staged = None",
+    "    try:",
+    "        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW",
+    "        for _attempt in range(100):",
+    "            staged_name = '.nemoclaw-mcp-restore.' + secrets.token_hex(16)",
+    "            try:",
+    "                staged = os.open(staged_name, flags, 0o600, dir_fd=parent)",
+    "                break",
+    "            except FileExistsError:",
+    "                continue",
+    "        if staged is None:",
+    "            raise ValueError('managed MCP projection staging file could not be created')",
+    "        metadata = os.fstat(staged)",
+    "        if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) != 0o600 or metadata.st_nlink != 1:",
+    "            raise ValueError('managed MCP projection staging file is unsafe')",
+    "        offset = 0",
+    "        while offset < len(payload):",
+    "            written = os.write(staged, payload[offset:])",
+    "            if written <= 0:",
+    "                raise OSError('managed MCP projection write made no progress')",
+    "            offset += written",
+    "        os.fsync(staged)",
+    "        after = os.fstat(staged)",
+    "        linked = os.stat(staged_name, dir_fd=parent, follow_symlinks=False)",
+    "        stable = stat.S_ISREG(after.st_mode) and after.st_uid == os.getuid() and stat.S_IMODE(after.st_mode) == 0o600 and after.st_nlink == 1 and after.st_size == len(payload) and managed_fingerprint(after) == managed_fingerprint(linked)",
+    "        if not stable:",
+    "            raise ValueError('managed MCP projection staging file changed before publication')",
+    "        try:",
+    "            current = os.stat(config_path.name, dir_fd=parent, follow_symlinks=False)",
+    "        except FileNotFoundError:",
+    "            current = None",
+    "        if current is not None and stat.S_ISDIR(current.st_mode):",
+    "            raise ValueError('managed MCP projection path is a directory')",
+    "        os.replace(staged_name, config_path.name, src_dir_fd=parent, dst_dir_fd=parent)",
+    "        staged_name = ''",
+    "        os.fsync(parent)",
+    "    finally:",
+    "        if staged is not None:",
+    "            os.close(staged)",
+    "        if staged_name:",
+    "            try:",
+    "                os.unlink(staged_name, dir_fd=parent)",
+    "            except FileNotFoundError:",
+    "                pass",
+    "        os.close(parent)",
+    "    persisted, _ = read_managed_projection(config_path)",
+    "    if persisted != value:",
+    "        raise ValueError('managed MCP projection verification failed')",
+    "try:",
+    "    reset_projection(expected)",
+    "except (OSError, UnicodeDecodeError, ValueError) as exc:",
+    "    print(f'Managed Deep Agents MCP projection repair failed: {exc}', file=sys.stderr)",
+    "    raise SystemExit(2)",
+    "PY",
+  ].join("\n");
+}
+
+function buildMcpSnapshotRestorePlan(request) {
+  if (request.entries.length > DEEPAGENTS_MCP_MAX_SERVERS) {
+    throw new Error(
+      "Deep Agents managed MCP supports at most " +
+        String(DEEPAGENTS_MCP_MAX_SERVERS) +
+        " servers during snapshot restore.",
+    );
+  }
+  return {
+    kind: "conditional-repair",
+    applicability: {
+      command: buildMcpRuntimeKindCommand(),
+      timeoutSeconds: 15,
+      repairWhenOutput: "v2",
+      skipWhenOutput: "legacy",
+      failureMessage: "Could not identify the managed Deep Agents MCP runtime.",
+    },
+    capability: describeMcpMutationCapability({ sandboxName: request.sandboxName }),
+    execution: {
+      command: buildSnapshotRepairCommand(request.entries),
+      timeoutSeconds: 30,
+      success: { kind: "exit-zero" },
+      failureMessage: "Deep Agents Code managed MCP projection repair failed.",
+    },
+    verificationFailureMessage:
+      "Deep Agents Code managed MCP projection verification failed after snapshot repair",
+  };
 }
 
 function buildRollbackRegisterCommand(entry, expectedServers) {
@@ -749,6 +917,7 @@ module.exports = {
   buildMcpRemovalCommand,
   buildMcpRemovalPlan,
   buildMcpRuntimeCommand,
+  buildMcpSnapshotRestorePlan,
   buildRegisterCommand,
   buildRemoveCommand,
   buildRollbackRegisterCommand,

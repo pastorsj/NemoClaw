@@ -175,6 +175,10 @@ function buildMcpRuntimeCommand(request) {
   return ["/opt/hermes/.venv/bin/python", "-I", "-c", runner, ...request.command];
 }
 
+function buildMcpSnapshotRestorePlan() {
+  return { kind: "not-required" };
+}
+
 module.exports = {
   HERMES_MCP_TRANSACTION_HELPER,
   buildInspectCommand,
@@ -185,6 +189,7 @@ module.exports = {
   buildMcpRemovalCommand,
   buildMcpRemovalPlan,
   buildMcpRuntimeCommand,
+  buildMcpSnapshotRestorePlan,
   buildProbeCommand,
   buildRegisterCommand,
   buildRemoveCommand,

@@ -20,6 +20,18 @@ const mcpAdapter = loadPackageHostModule<{
     url: string;
     headers: Record<string, string>;
   }): string;
+  buildMcpSnapshotRestorePlan(request: {
+    sandboxName: string;
+    entries: Array<{ server: string; url: string; headers: Record<string, string> }>;
+  }): {
+    kind: "conditional-repair";
+    applicability: {
+      command: string;
+      repairWhenOutput: string;
+      skipWhenOutput: string;
+    };
+    execution: { command: string };
+  };
 }>("mcp-adapter.cts");
 
 function runPackageStatusCommand(configPath: string) {
@@ -29,6 +41,20 @@ function runPackageStatusCommand(configPath: string) {
       url: "https://example.test/mcp",
       headers: {},
     })
+    .replace("/opt/venv/bin/python3", "python3")
+    .replace(JSON.stringify(managedProjectionPath), JSON.stringify(configPath));
+  return spawnSync("/bin/sh", ["-c", command], {
+    encoding: "utf-8",
+    timeout: 5000,
+  });
+}
+
+function runPackageSnapshotRepair(
+  configPath: string,
+  entries: Array<{ server: string; url: string; headers: Record<string, string> }> = [],
+) {
+  const plan = mcpAdapter.buildMcpSnapshotRestorePlan({ sandboxName: "sandbox", entries });
+  const command = plan.execution.command
     .replace("/opt/venv/bin/python3", "python3")
     .replace(JSON.stringify(managedProjectionPath), JSON.stringify(configPath));
   return spawnSync("/bin/sh", ["-c", command], {
@@ -53,6 +79,83 @@ function runManagedHelper(source: string) {
 }
 
 describe("Deep Agents managed MCP runtime hardening", () => {
+  it("declares the finite managed and legacy snapshot restore paths", () => {
+    const plan = mcpAdapter.buildMcpSnapshotRestorePlan({
+      sandboxName: "sandbox",
+      entries: [],
+    });
+
+    expect(plan).toMatchObject({
+      kind: "conditional-repair",
+      applicability: {
+        repairWhenOutput: "v2",
+        skipWhenOutput: "legacy",
+      },
+      execution: { command: expect.stringContaining("reset_projection(expected)") },
+    });
+    expect(plan.applicability.command).toContain("NEMOCLAW_DEEPAGENTS_RUNTIME_TEST_ANCHOR");
+  });
+
+  it.each(["symlink", "FIFO"] as const)(
+    "atomically replaces an unsafe %s during package-owned snapshot repair",
+    (fixture) => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-restore-"));
+      const configPath = path.join(tempDir, "managed.json");
+      const targetPath = path.join(tempDir, "target.json");
+      try {
+        fs.writeFileSync(targetPath, '{"outside":true}\n', { mode: 0o600 });
+        if (fixture === "symlink") {
+          fs.symlinkSync(targetPath, configPath);
+        } else {
+          const fifo = spawnSync("mkfifo", [configPath], { encoding: "utf-8" });
+          expect(fifo.status, fifo.stderr).toBe(0);
+        }
+
+        const result = runPackageSnapshotRepair(configPath, [
+          {
+            server: "docs",
+            url: "https://example.test/mcp",
+            headers: { Authorization: "Bearer openshell:resolve:env:DOCS_TOKEN" },
+          },
+        ]);
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(JSON.parse(fs.readFileSync(configPath, "utf-8"))).toEqual({
+          mcpServers: {
+            docs: {
+              type: "http",
+              url: "https://example.test/mcp",
+              headers: { Authorization: "Bearer openshell:resolve:env:DOCS_TOKEN" },
+            },
+          },
+        });
+        expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+        expect(fs.readFileSync(targetPath, "utf-8")).toBe('{"outside":true}\n');
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("refuses to replace a directory during package-owned snapshot repair", () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-restore-"));
+    const configPath = path.join(tempDir, "managed.json");
+    try {
+      fs.mkdirSync(configPath);
+      fs.writeFileSync(path.join(configPath, "keep.json"), '{"owned":false}\n');
+
+      const result = runPackageSnapshotRepair(configPath);
+
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain("managed MCP projection path is a directory");
+      expect(fs.readFileSync(path.join(configPath, "keep.json"), "utf-8")).toBe(
+        '{"owned":false}\n',
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("reports only a genuinely absent package projection as absent", () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-dcode-status-"));
     try {
@@ -90,10 +193,16 @@ describe("Deep Agents managed MCP runtime hardening", () => {
 
         expect(result.status).toBe(2);
         expect(result.stdout).toBe("");
-        expect(result.stderr.trim()).toBe(
-          "Managed Deep Agents MCP projection is unsafe or invalid.",
-        );
-        expect(result.stderr).not.toContain(configPath);
+        if (fixture === "symlink") {
+          expect(result.stderr.trim()).toBe(
+            `Unsafe managed Deep Agents MCP projection path: symbolic link at ${configPath}`,
+          );
+        } else {
+          expect(result.stderr.trim()).toBe(
+            "Managed Deep Agents MCP projection is unsafe or invalid.",
+          );
+          expect(result.stderr).not.toContain(configPath);
+        }
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
