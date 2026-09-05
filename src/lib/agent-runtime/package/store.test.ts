@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { copyVerifiedPackageTree } from "./copy";
 import {
+  activateHarnessPackage,
   getHarnessPackageStoreRoot,
   HarnessPackageStoreIntegrityError,
   HarnessPackageVersionConflictError,
@@ -491,6 +492,87 @@ describe("harness package store", () => {
     expect(fs.existsSync(objectPath(first))).toBe(true);
     expect(fs.existsSync(receiptPath(first))).toBe(true);
     expect(openedDirectories).not.toContain(path.dirname(receiptPath(first)));
+  });
+
+  it("activates immutable receipts backward and forward without changing package history", () => {
+    const first = publish();
+    const firstReceipt = fs.readFileSync(receiptPath(first));
+    writePackage("1.1.0", "second payload\n");
+    const second = publish();
+    const secondReceipt = fs.readFileSync(receiptPath(second));
+
+    expect(
+      activateHarnessPackage("openclaw", first.identity.contentDigest, { storeRoot }).identity,
+    ).toEqual(first.identity);
+    expect(requiredActive().identity).toEqual(first.identity);
+    expect(
+      activateHarnessPackage("openclaw", second.identity.contentDigest, { storeRoot }).identity,
+    ).toEqual(second.identity);
+    expect(requiredActive().identity).toEqual(second.identity);
+    expect(fs.readFileSync(receiptPath(first))).toEqual(firstReceipt);
+    expect(fs.readFileSync(receiptPath(second))).toEqual(secondReceipt);
+  });
+
+  it("leaves the active pointer unchanged when activation is interrupted", () => {
+    const first = publish();
+    writePackage("1.1.0", "second payload\n");
+    const second = publish();
+
+    expect(() =>
+      activateHarnessPackage("openclaw", first.identity.contentDigest, {
+        storeRoot,
+        dependencies: {
+          onPointerMutationCheckpoint: () => {
+            throw new Error("injected activation interruption");
+          },
+        },
+      }),
+    ).toThrow(HarnessPackageStoreIntegrityError);
+    expect(requiredActive().identity).toEqual(second.identity);
+  });
+
+  it("rejects a missing activation receipt without changing the active pointer", () => {
+    const active = publish();
+
+    expect(() => activateHarnessPackage("openclaw", "f".repeat(64), { storeRoot })).toThrow(
+      HarnessPackageStoreIntegrityError,
+    );
+    expect(requiredActive().identity).toEqual(active.identity);
+  });
+
+  it("does not overwrite an active pointer that changes before activation publication", () => {
+    const first = publish();
+    writePackage("1.1.0", "second payload\n");
+    const second = publish();
+    const secondPointer = fs.readFileSync(activePointerPath());
+    writePackage("1.2.0", "third payload\n");
+    publish();
+
+    expect(() =>
+      activateHarnessPackage("openclaw", first.identity.contentDigest, {
+        storeRoot,
+        dependencies: {
+          onPointerMutationCheckpoint: () => {
+            fs.writeFileSync(activePointerPath(), secondPointer, { mode: 0o600 });
+          },
+        },
+      }),
+    ).toThrow(HarnessPackageStoreIntegrityError);
+    expect(requiredActive().identity).toEqual(second.identity);
+  });
+
+  it("rejects a damaged activation object without changing the active pointer", () => {
+    const first = publish();
+    writePackage("1.1.0", "current payload\n");
+    const current = publish();
+    fs.writeFileSync(path.join(objectPath(first), "runtime/payload.txt"), "tampered\n", {
+      mode: 0o600,
+    });
+
+    expect(() =>
+      activateHarnessPackage("openclaw", first.identity.contentDigest, { storeRoot }),
+    ).toThrow(HarnessPackageStoreIntegrityError);
+    expect(requiredActive().identity).toEqual(current.identity);
   });
 
   it("rejects an active read when its pointer advances during pinned validation", () => {

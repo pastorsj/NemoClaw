@@ -33,6 +33,22 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
       flags: "[id] [--from <directory> --yes-i-trust-local-package]",
     },
   ],
+  "harness:activate": [
+    {
+      group: "Getting Started",
+      order: 1.62,
+      description: "Activate an installed harness package revision",
+      flags: "<id> --digest <sha256> [--json]",
+    },
+  ],
+  "harness:remove": [
+    {
+      group: "Getting Started",
+      order: 1.64,
+      description: "Remove a harness package when it has no retained owners",
+      flags: "<id> [--yes|-y] [--json]",
+    },
+  ],
   "harness:validate": [
     {
       group: "Getting Started",

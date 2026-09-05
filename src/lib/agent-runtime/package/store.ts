@@ -71,8 +71,20 @@ export interface HarnessPackageStoreDependencies {
   readonly onPublicationCheckpoint?: (checkpoint: HarnessPackagePublicationCheckpoint) => void;
 }
 
+export type HarnessPackagePointerMutationCheckpoint = "before-active-pointer-replacement";
+
+export interface HarnessPackagePointerMutationDependencies {
+  readonly onPointerMutationCheckpoint?: (
+    checkpoint: HarnessPackagePointerMutationCheckpoint,
+  ) => void;
+}
+
 export interface HarnessPackageStoreOptions {
   readonly storeRoot?: string;
+}
+
+export interface HarnessPackagePointerMutationOptions extends HarnessPackageStoreOptions {
+  readonly dependencies?: HarnessPackagePointerMutationDependencies;
 }
 
 export interface PublishHarnessPackageInput extends HarnessPackageStoreOptions {
@@ -262,7 +274,11 @@ function resolveActiveWithAuthority(
   paths: HarnessPackageStorePaths,
   pointerAuthority: HarnessPackageStoreAuthority,
   pinnedAuthority: HarnessPackageStoreAuthority,
-): { readonly installed: InstalledHarnessPackage; readonly pointer: HarnessPackageActivePointer } {
+): {
+  readonly installed: InstalledHarnessPackage;
+  readonly pointer: HarnessPackageActivePointer;
+  readonly pointerRecord: VerifiedStoreFile<HarnessPackageActivePointer>;
+} {
   const pointerRecord = readPointerRecord(paths, id, pointerAuthority);
   const pointer = pointerRecord.value;
   if (pointer.id !== id) {
@@ -283,6 +299,7 @@ function resolveActiveWithAuthority(
   return {
     installed,
     pointer,
+    pointerRecord,
   };
 }
 
@@ -438,12 +455,12 @@ function optionalObject(
 function validateCurrentPointer(
   paths: HarnessPackageStorePaths,
   authority: HarnessPackageStoreAuthority,
-): HarnessPackageActivePointer | null {
+): ReturnType<typeof resolveActiveWithAuthority> | null {
   const activePath = pointerPath(paths, path.basename(paths.lock, ".lock"));
   if (storePathIsMissing(activePath)) return null;
   const id = path.basename(activePath, ".json");
   const pinnedAuthority = capturePinnedAuthority(paths);
-  return resolveActiveWithAuthority(id, paths, authority, pinnedAuthority).pointer;
+  return resolveActiveWithAuthority(id, paths, authority, pinnedAuthority);
 }
 
 function publishObject(
@@ -530,17 +547,23 @@ function publishReceipt(
 }
 
 function replacePointer(
-  input: PublishHarnessPackageInput,
+  desiredIdentity: HarnessPackageIdentity,
   paths: HarnessPackageStorePaths,
   authority: HarnessPackageStoreAuthority,
-  current: HarnessPackageActivePointer | null,
+  current: ReturnType<typeof resolveActiveWithAuthority> | null,
+  beforeReplacement: (() => void) | undefined,
 ): void {
   const desired: HarnessPackageActivePointer = {
     schemaVersion: 1,
-    id: input.expectedIdentity.id,
-    contentDigest: input.expectedIdentity.contentDigest,
+    id: desiredIdentity.id,
+    contentDigest: desiredIdentity.contentDigest,
   };
-  if (current?.id === desired.id && current.contentDigest === desired.contentDigest) return;
+  if (
+    current?.pointer.id === desired.id &&
+    current.pointer.contentDigest === desired.contentDigest
+  ) {
+    return;
+  }
   let stagedFile: StagedStoreFile | null = null;
   try {
     stagedFile = writeStagedStoreFile(
@@ -549,7 +572,14 @@ function replacePointer(
       serializeHarnessPackageActivePointer(desired),
       authority,
     );
-    input.dependencies?.onPublicationCheckpoint?.("before-active-pointer-replacement");
+    beforeReplacement?.();
+    if (current) {
+      assertCanonicalStoreFileUnchanged(current.pointerRecord, authority);
+    } else if (!storePathIsMissing(pointerPath(paths, desired.id))) {
+      throw new HarnessPackageStoreIntegrityError(
+        "Harness package active pointer appeared before replacement",
+      );
+    }
     publishStagedStoreFile(stagedFile, pointerPath(paths, desired.id), authority);
     stagedFile = null;
     const published = readPointer(paths, desired.id, authority);
@@ -587,7 +617,9 @@ function publishUnderLock(
   } finally {
     copied?.removeStagingRoot();
   }
-  replacePointer(input, paths, authority, current);
+  replacePointer(input.expectedIdentity, paths, authority, current, () =>
+    input.dependencies?.onPublicationCheckpoint?.("before-active-pointer-replacement"),
+  );
   const pointerAuthority = captureHarnessPackageStore(paths, [paths.active]);
   const installed = resolveActiveWithAuthority(
     input.expectedIdentity.id,
@@ -626,6 +658,68 @@ export function publishHarnessPackage(
     const lock = acquireProcessBoundLockAt(paths.lock);
     try {
       return publishUnderLock(input, paths, authority);
+    } finally {
+      releaseProcessBoundLock(lock);
+    }
+  } catch (error) {
+    return integrityFailure(error);
+  }
+}
+
+function captureMutableStoreAuthority(
+  paths: HarnessPackageStorePaths,
+): HarnessPackageStoreAuthority {
+  return captureHarnessPackageStore(paths, [
+    paths.staging,
+    paths.objects,
+    paths.objectShard,
+    paths.receipts,
+    paths.harnessReceipts,
+    paths.receiptShard,
+    paths.active,
+    paths.locks,
+  ]);
+}
+
+/** Select an existing immutable package receipt as the active package. */
+export function activateHarnessPackage(
+  idValue: unknown,
+  digestValue: unknown,
+  options: HarnessPackagePointerMutationOptions = {},
+): InstalledHarnessPackage {
+  try {
+    const id = parseHarnessPackageId(idValue);
+    const digest = parseHarnessPackageContentDigest(digestValue);
+    const paths = harnessPackageStorePaths(selectedStoreRoot(options), id);
+    if (storePathIsMissing(paths.root)) {
+      throw new HarnessPackageStoreIntegrityError("Harness package store is unavailable");
+    }
+    const authority = captureMutableStoreAuthority(paths);
+    const lock = acquireProcessBoundLockAt(paths.lock);
+    try {
+      const receipt = readReceipt(paths, digest, authority);
+      if (receipt.identity.id !== id || receipt.identity.contentDigest !== digest) {
+        throw new HarnessPackageStoreIntegrityError(
+          "Harness package receipt does not match the requested activation",
+        );
+      }
+      const selected = resolvePinnedWithAuthority(receipt.identity, paths, authority);
+      const current = validateCurrentPointer(paths, authority);
+      replacePointer(selected.identity, paths, authority, current, () =>
+        options.dependencies?.onPointerMutationCheckpoint?.("before-active-pointer-replacement"),
+      );
+      const activated = resolveActiveWithAuthority(
+        id,
+        paths,
+        captureHarnessPackageStore(paths, [paths.active]),
+        capturePinnedAuthority(paths),
+      ).installed;
+      if (!sameIdentity(activated.identity, selected.identity)) {
+        throw new HarnessPackageStoreIntegrityError(
+          "Harness package activation selected a different package",
+        );
+      }
+      return activated;
     } finally {
       releaseProcessBoundLock(lock);
     }

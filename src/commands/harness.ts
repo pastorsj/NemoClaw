@@ -7,17 +7,19 @@ export default class HarnessCommand extends NemoClawCommand {
   static id = "harness";
   static strict = true;
   static summary = "Manage and validate agent runtime packages";
-  static description = "List, install, or validate agent runtime packages.";
-  static usage = ["harness <install|list|validate>"];
+  static description = "Install, inspect, activate, remove, or validate agent runtime packages.";
+  static usage = ["harness <activate|install|list|remove|validate>"];
   static examples = [
     "<%= config.bin %> harness list",
     "<%= config.bin %> harness install openclaw",
+    "<%= config.bin %> harness activate openclaw --digest <sha256>",
+    "<%= config.bin %> harness remove openclaw --yes",
     "<%= config.bin %> harness validate ./dist/nemoclaw-example",
   ];
   static flags = {};
 
   public async run(): Promise<void> {
     await this.parse(HarnessCommand);
-    this.log(`Usage: ${this.config.bin} harness <install|list|validate>`);
+    this.log(`Usage: ${this.config.bin} harness <activate|install|list|remove|validate>`);
   }
 }

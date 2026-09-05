@@ -130,13 +130,16 @@ describe("command-registry", () => {
       expect(COMMANDS.filter((command) => command.commandId === "harness")).toEqual([]);
     });
 
-    it.each(["harness:list", "harness:install", "harness:validate"])(
-      "%s publishes one public display row",
-      (commandId) => {
-        expect(COMMANDS.filter((command) => command.commandId === commandId)).toHaveLength(1);
-        expect(PUBLIC_DISPLAY_ENTRIES[commandId]).toHaveLength(1);
-      },
-    );
+    it.each([
+      "harness:activate",
+      "harness:list",
+      "harness:install",
+      "harness:remove",
+      "harness:validate",
+    ])("%s publishes one public display row", (commandId) => {
+      expect(COMMANDS.filter((command) => command.commandId === commandId)).toHaveLength(1);
+      expect(PUBLIC_DISPLAY_ENTRIES[commandId]).toHaveLength(1);
+    });
 
     it("does not discover the removed deploy command (#10572)", () => {
       expect(getRegisteredOclifCommandsMetadata()).not.toHaveProperty("deploy");

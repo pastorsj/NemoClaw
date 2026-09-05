@@ -52,7 +52,7 @@ describe("harness inventory oclif commands", () => {
 
   it("publishes the focused harness topic actions", () => {
     expect(HarnessCommand.summary).toBe("Manage and validate agent runtime packages");
-    expect(HarnessCommand.usage).toEqual(["harness <install|list|validate>"]);
+    expect(HarnessCommand.usage).toEqual(["harness <activate|install|list|remove|validate>"]);
   });
 
   it("prints the empty installed state and reviewed available package", async () => {
