@@ -31,6 +31,7 @@ export default defineConfig({
       "tests/host/adapter-build.test.ts",
       "tests/host/config-url.test.ts",
       "tests/host/mcp-adapter.test.ts",
+      "tests/host/session-adapter.test.ts",
       "tests/host/startup-adapter.test.ts",
       "tests/image/fabric-runtime.test.ts",
       "tests/runtime/seal-config.test.ts",

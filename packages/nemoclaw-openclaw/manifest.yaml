@@ -148,6 +148,11 @@ mcp:
     - /usr/local/bin/node
     - /usr/bin/node
 
+# ── Conversation session operations ─────────────────────────────
+sessions:
+  operations:
+    - list
+
 # ── Phone-home hosts ───────────────────────────────────────────
 phone_home_hosts:
   - openclaw.ai

@@ -31,6 +31,7 @@ const RUNTIME_CONTRACTS = [
   "host/base-qualification.cts",
   "host/managed-identity.cts",
   "host/mcp-adapter.cts",
+  "host/session-adapter.cts",
   "host/startup-adapter.cts",
 ] as const;
 

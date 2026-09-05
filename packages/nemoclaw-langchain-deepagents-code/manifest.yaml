@@ -164,6 +164,9 @@ mcp:
     - /usr/local/bin/dcode
     - /opt/venv/bin/python3*
 
+sessions:
+  operations: []
+
 package_registry:
   hosts:
     - pypi.org

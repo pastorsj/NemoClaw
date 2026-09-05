@@ -67,6 +67,7 @@ export type HarnessAgentManifest = HarnessManifestRecord & {
   readonly config?: HarnessManifestRecord;
   readonly inference?: HarnessManifestRecord;
   readonly mcp?: HarnessMcpCapability;
+  readonly sessions?: HarnessSessionCapability;
   readonly managed_image?: HarnessManagedImageDeclaration;
 };
 
@@ -319,6 +320,34 @@ export type HarnessMcpSnapshotRestorePlan =
       readonly verificationFailureMessage: string;
     };
 
+export type HarnessSessionOperation = "list";
+
+export interface HarnessSessionCapability {
+  readonly operations: readonly HarnessSessionOperation[];
+}
+
+export interface HarnessSessionListPlanRequest {
+  /** Arguments after the public session-list command. */
+  readonly arguments: readonly string[];
+  /** Preserve the legacy parent-command shorthand when the native CLI supports it. */
+  readonly useListSubcommand: boolean;
+}
+
+export type HarnessSessionListPlan =
+  | { readonly kind: "unsupported"; readonly reason: string }
+  | { readonly kind: "stream"; readonly command: readonly string[] }
+  | { readonly kind: "capture"; readonly command: readonly string[] };
+
+export interface HarnessSessionListOutputRequest {
+  readonly output: string;
+  readonly jsonOutput: boolean;
+  readonly hiddenSessionIdPrefix: string;
+}
+
+export type HarnessSessionListOutput =
+  | { readonly kind: "output"; readonly output: string }
+  | { readonly kind: "refused"; readonly reason: string };
+
 export interface HarnessConfigAdapterModule {
   readonly describeInferenceConfig: (
     request: HarnessInferenceConfigRequest,
@@ -353,6 +382,13 @@ export interface HarnessMcpAdapterModule {
   readonly buildMcpSnapshotRestorePlan: (
     request: HarnessMcpSnapshotRestoreRequest,
   ) => HarnessMcpSnapshotRestorePlan;
+}
+
+export interface HarnessSessionAdapterModule {
+  readonly buildSessionListPlan: (request: HarnessSessionListPlanRequest) => HarnessSessionListPlan;
+  readonly interpretSessionListOutput: (
+    request: HarnessSessionListOutputRequest,
+  ) => HarnessSessionListOutput;
 }
 
 export type HarnessStartupJsonScalar = string | number | boolean | null;

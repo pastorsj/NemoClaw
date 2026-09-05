@@ -46,6 +46,8 @@ inference:
   proxy_support: implicit
 mcp:
   support: disabled
+sessions:
+  operations: []
 package_registry:
   hosts:
     - pypi.org

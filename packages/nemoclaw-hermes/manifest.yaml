@@ -177,6 +177,11 @@ device_pairing: false
 web_auth_method: bearer_token
 web_auth_env: API_SERVER_KEY
 
+# ── Conversation session operations ─────────────────────────────
+sessions:
+  operations:
+    - list
+
 # ── Inference ───────────────────────────────────────────────────
 # Hermes supports custom OpenAI-compatible endpoints natively via
 # provider: "custom" + base_url in config.yaml. This is how we

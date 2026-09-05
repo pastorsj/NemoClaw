@@ -14,7 +14,7 @@ export default class SandboxSessionsCommand extends NemoClawCommand {
   static strict = false;
   static summary = "List conversation sessions in a sandbox";
   static description =
-    "Pass through to the sandbox agent's session-listing command (`openclaw sessions` for OpenClaw sandboxes, `hermes sessions list` for Hermes sandboxes). On OpenClaw sandboxes the in-sandbox CLI lists stored sessions for the configured default agent, and internal NemoClaw onboard warm-up sessions are hidden from default user-facing output; OpenClaw-specific flags are forwarded verbatim. Hermes sandboxes pass through their native output unchanged.";
+    "List conversation sessions through the installed harness package. Additional arguments are forwarded to the package's native session command.";
   static usage = ["<name> [sessions-flags...]"];
   static examples = [
     "<%= config.bin %> sandbox sessions alpha",

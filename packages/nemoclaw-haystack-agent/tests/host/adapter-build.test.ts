@@ -36,6 +36,7 @@ describe("Haystack Agent host adapter build", () => {
   it("publishes the runtime artifact without its authoring source", () => {
     const paths = packedPaths();
     expect(paths).toContain("host/config-adapter.cts");
+    expect(paths).toContain("host/session-adapter.cts");
     expect(paths.some((candidate) => candidate.startsWith("host/source/"))).toBe(false);
   });
 });
