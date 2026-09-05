@@ -15,6 +15,9 @@ describe("Haystack Agent POC image", () => {
     const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
     const lock = fs.readFileSync(path.join(PACKAGE_ROOT, "fabric", "requirements.lock"), "utf8");
     expect(base).toContain('haystack-ai": "3.1.1');
+    expect(base).toContain("iproute2=6.15.0-1");
+    expect(base).toContain("iptables=1.8.11-2");
+    expect(base).toContain("nftables=1.1.3-1");
     expect(lock).toMatch(/^haystack-ai==3\.1\.1 /mu);
     expect(lock).toMatch(/^nemo-fabric==0\.2\.0 /mu);
     expect(dockerfile).toContain("/usr/local/share/nemoclaw/haystack-agent.fabric-adapter.json");
