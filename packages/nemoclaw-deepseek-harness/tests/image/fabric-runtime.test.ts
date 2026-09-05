@@ -25,6 +25,8 @@ describe("DeepSeek Harness image contract", () => {
     const manifest = fs.readFileSync(path.join(PACKAGE_ROOT, "manifest.yaml"), "utf8");
     expect(dockerfile).toContain("/opt/nemoclaw-fabric-venv/bin/nemoclaw-fabric-run");
     expect(dockerfile).toContain("import nemoclaw_deepseek_fabric.adapter");
+    expect(dockerfile).toContain("rm -rf /sandbox/.cache");
+    expect(dockerfile).toContain("install -d -o sandbox -g sandbox -m 0700 /sandbox/.cache");
     expect(dockerfile).not.toMatch(/^\s*DEEPSEEK_MANAGED_INFERENCE_ROUTE=/mu);
     expect(manifest).toMatch(
       /version_command: "DSH_HOME=\/sandbox\/\.deepseek-harness \/opt\/nemoclaw-fabric-venv\/bin\/dsh --version"/u,

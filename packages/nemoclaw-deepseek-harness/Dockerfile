@@ -91,6 +91,8 @@ RUN umask 077 \
 USER root
 RUN chown root:sandbox /sandbox \
     && chmod 1775 /sandbox \
+    && rm -rf /sandbox/.cache \
+    && install -d -o sandbox -g sandbox -m 0700 /sandbox/.cache \
     && chown root:root /sandbox/.nemoclaw \
     && chmod 1755 /sandbox/.nemoclaw \
     && chown -R root:root /sandbox/.nemoclaw/blueprints \
