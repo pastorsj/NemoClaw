@@ -8,8 +8,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as agentDefs from "../agent/defs";
+import { readInstalledHarnessPackage } from "../agent-runtime/package/store";
 import { ROOT } from "../runner";
 import * as registry from "../state/registry";
+import { createHarnessPackageFixture } from "../../../test/helpers/harness-packages";
 import {
   resolveAgentBaselinePolicy,
   resolveAgentDefinitionBaselinePolicy,
@@ -44,6 +46,7 @@ function useAgentPolicy(content: string): void {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -117,6 +120,53 @@ network_policies:
 });
 
 describe("agent definition baseline policy resolution", () => {
+  it("uses a synthetic sandbox receipt after its active package advances", () => {
+    const fixtureParent = path.join(
+      process.cwd(),
+      "node_modules/.cache/nemoclaw-pinned-policy-tests",
+    );
+    fs.mkdirSync(fixtureParent, { recursive: true, mode: 0o700 });
+    const home = fs.mkdtempSync(path.join(fixtureParent, "home-"));
+    tempDirs.push(home);
+    const storeRoot = path.join(home, ".nemoclaw", "harnesses");
+    const reviewedPolicy = fs.readFileSync(
+      path.join(ROOT, "packages/nemoclaw-hermes/policy-additions.yaml"),
+      "utf8",
+    );
+    const pinnedContent = `${reviewedPolicy}\n# pinned synthetic package\n`;
+    const ambientContent = `${reviewedPolicy}\n# ambient replacement package\n`;
+    const selectedFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(home, "selected"),
+      storeRoot,
+      agentPolicyAdditionsContent: pinnedContent,
+    });
+    const selected = selectedFixture.installLocal({
+      id: "synthetic-harness",
+      packageVersion: "1.0.0",
+    });
+    const ambientFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(home, "ambient"),
+      storeRoot,
+      agentPolicyAdditionsContent: ambientContent,
+    });
+    const ambient = ambientFixture.installLocal({
+      id: "synthetic-harness",
+      packageVersion: "2.0.0",
+    });
+    vi.stubEnv("HOME", home);
+    vi.spyOn(registry, "getSandbox").mockReturnValue({
+      name: "alpha",
+      agent: "synthetic-harness",
+      harnessPackage: selected.identity,
+    } as never);
+
+    expect(readInstalledHarnessPackage("synthetic-harness")?.identity).toEqual(ambient.identity);
+    expect(resolveSandboxBaselinePolicy("alpha")).toMatchObject({
+      agent: "synthetic-harness",
+      content: pinnedContent,
+    });
+  });
+
   it("uses a pinned OpenClaw package policy instead of the repository definition", () => {
     const reviewedPolicy = fs.readFileSync(
       path.join(ROOT, "nemoclaw-blueprint", "policies", "openclaw-sandbox.yaml"),

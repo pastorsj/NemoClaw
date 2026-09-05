@@ -29,12 +29,14 @@ import {
   getMessagingManifestAvailabilityContext,
   isMessagingChannelSupportedByAgent,
   isMessagingHookConflictError,
+  listMessagingChannelsForProfile,
   markPlanChannelPendingRemoval,
   MessagingHostStateApplier,
   MessagingSetupApplier,
   MessagingWorkflowPlanner,
   MESSAGING_CREDENTIAL_PROVIDER_TYPE,
   runMessagingHook,
+  resolveSandboxMessagingProfileAuthority,
   type MessagingOpenShellRunner,
   type SandboxMessagingChannelPlan,
   type SandboxMessagingPlan,
@@ -54,6 +56,7 @@ import {
   collectMessagingBridgeTokenDefs,
   staticMessagingProviderTypeForChannel,
 } from "../../onboard/messaging-bridge-provider";
+import { normalizeSandboxAgentName } from "../../onboard/sandbox-agent";
 import {
   getMessagingChannelConfigFromPlan,
   getStoredMessagingChannelConfig,
@@ -71,6 +74,11 @@ import {
 import { formatPolicyListPresetRow } from "../../policy/policy-list-display";
 import type { PolicyObject } from "../../policy/preset-parsing";
 import { redactFullWithUrls, shellQuote } from "../../runner";
+import {
+  captureSandboxCommandAgentAuthority,
+  requireCurrentSandboxCommandAgentAuthority,
+  type SandboxCommandAgentAuthority,
+} from "../../sandbox/command-agent";
 import {
   type ChannelDef,
   channelUsesInSandboxQrPairing,
@@ -615,9 +623,7 @@ export function listSandboxPolicies(sandboxName: string) {
 // ── Messaging channels ───────────────────────────────────────────
 
 function resolveAgentForSandbox(sandboxName: string): AgentDefinition {
-  const entry = registry.getSandbox(sandboxName);
-  const agentName = entry?.agent || "openclaw";
-  return loadAgent(agentName);
+  return resolveMessagingProfileForSandbox(sandboxName).agent;
 }
 
 function knownManifestChannelNames(): string[] {
@@ -634,13 +640,46 @@ function availableManifestChannelsForAgent(agent: AgentDefinition): ChannelManif
   );
 }
 
-function channelSupportedByAgent(manifest: ChannelManifest, agent: AgentDefinition): boolean {
-  return isMessagingChannelSupportedByAgent(manifest, agent);
+type SandboxMessagingProfile = Readonly<{
+  agent: AgentDefinition;
+  availableChannels: readonly ChannelManifest[];
+  receiptAuthority?: SandboxCommandAgentAuthority;
+}>;
+
+/** Resolve package messaging from the sandbox receipt, with legacy rows kept explicit. */
+function resolveMessagingProfileForSandbox(sandboxName: string): SandboxMessagingProfile {
+  const entry = registry.getSandbox(sandboxName);
+  if (!entry?.harnessPackage) {
+    const agent = loadAgent(normalizeSandboxAgentName(entry?.agent));
+    return Object.freeze({
+      agent,
+      availableChannels: availableManifestChannelsForAgent(agent),
+    });
+  }
+
+  const profileAuthority = resolveSandboxMessagingProfileAuthority(entry);
+  return Object.freeze({
+    agent: profileAuthority.agent,
+    availableChannels: listMessagingChannelsForProfile(profileAuthority, messagingManifestRegistry),
+    receiptAuthority: captureSandboxCommandAgentAuthority(entry),
+  });
+}
+
+/** Re-read the registry and package object before a receipt-backed channel mutation. */
+function requireCurrentMessagingProfileAuthority(
+  sandboxName: string,
+  expected: SandboxCommandAgentAuthority | undefined,
+): void {
+  if (!expected) return;
+  const current = registry.getSandbox(sandboxName);
+  requireCurrentSandboxCommandAgentAuthority(expected, current);
+  if (!current) return;
+  const profileAuthority = resolveSandboxMessagingProfileAuthority(current);
+  listMessagingChannelsForProfile(profileAuthority, messagingManifestRegistry);
 }
 
 export function listSandboxChannels(sandboxName: string) {
-  const agent = resolveAgentForSandbox(sandboxName);
-  const availableChannels = availableManifestChannelsForAgent(agent);
+  const { availableChannels } = resolveMessagingProfileForSandbox(sandboxName);
   console.log("");
   console.log(`  Known messaging channels for sandbox '${sandboxName}':`);
   if (availableChannels.length === 0) {
@@ -843,6 +882,7 @@ async function applyChannelAddToGatewayAndRegistry(
   applyPolicyAfterAttachment?: () => boolean,
   upsertMessagingProviders = policyChannelDependencies.upsertMessagingProviders,
   cleanupCredentialFreePolicy?: () => void,
+  expectedAgentAuthority?: SandboxCommandAgentAuthority,
 ): Promise<boolean | null> {
   const sandboxAgent = registry.getSandbox(sandboxName)?.agent;
   const staticProviderType = staticMessagingProviderTypeForChannel(channelName, sandboxAgent);
@@ -896,6 +936,7 @@ async function applyChannelAddToGatewayAndRegistry(
     cleanupCredentialFreePolicy?.();
     process.exit(1);
   }
+  requireCurrentMessagingProfileAuthority(sandboxName, expectedAgentAuthority);
   policyChannelDependencies.revalidateChannelProviderPolicy(sandboxName, gatewayName);
   try {
     // bestEffort: failures throw (instead of process.exit inside the helper)
@@ -905,7 +946,7 @@ async function applyChannelAddToGatewayAndRegistry(
       requireExactBindings: true,
     });
     for (const providerName of providerNames) {
-      revalidateMessagingProviderAttachmentTarget(sandboxName, gatewayName);
+      revalidateMessagingProviderAttachmentTarget(sandboxName, gatewayName, expectedAgentAuthority);
       const attached = runOpenshell(
         ["sandbox", "provider", "attach", "-g", gatewayName, sandboxName, providerName],
         { ignoreError: true, stdio: ["ignore", "pipe", "pipe"] },
@@ -915,7 +956,7 @@ async function applyChannelAddToGatewayAndRegistry(
           `OpenShell did not attach messaging provider '${providerName}' to sandbox '${sandboxName}'.`,
         );
       }
-      revalidateMessagingProviderAttachmentTarget(sandboxName, gatewayName);
+      revalidateMessagingProviderAttachmentTarget(sandboxName, gatewayName, expectedAgentAuthority);
     }
     if (applyPolicyAfterAttachment && !applyPolicyAfterAttachment()) {
       return null;
@@ -993,6 +1034,7 @@ async function applyChannelAddToGatewayAndRegistry(
 export function revalidateMessagingProviderAttachmentTarget(
   sandboxName: string,
   gatewayName: string,
+  expectedAgentAuthority?: SandboxCommandAgentAuthority,
 ): void {
   const expected = registry.getSandbox(sandboxName);
   const lifecycleGeneration = expected?.lifecycleGeneration;
@@ -1007,11 +1049,23 @@ export function revalidateMessagingProviderAttachmentTarget(
       `Sandbox '${sandboxName}' has incomplete lifecycle identity for messaging provider attachment.`,
     );
   }
+  const capturedAgentAuthority = expected.harnessPackage
+    ? captureSandboxCommandAgentAuthority(expected)
+    : undefined;
+  if (expectedAgentAuthority) {
+    requireCurrentSandboxCommandAgentAuthority(expectedAgentAuthority, expected);
+  }
   const liveFingerprint = policyChannelDependencies.inspectMessagingProviderAttachmentTarget(
     sandboxName,
     gatewayName,
   );
   const confirmed = registry.getSandbox(sandboxName);
+  if (capturedAgentAuthority) {
+    requireCurrentSandboxCommandAgentAuthority(capturedAgentAuthority, confirmed);
+  }
+  if (expectedAgentAuthority) {
+    requireCurrentSandboxCommandAgentAuthority(expectedAgentAuthority, confirmed);
+  }
   if (
     liveFingerprint !== expectedFingerprint ||
     confirmed?.lifecycleGeneration !== lifecycleGeneration ||
@@ -1214,6 +1268,7 @@ async function planSandboxChannelAdd(
   sandboxName: string,
   channelId: string,
   agent: AgentDefinition,
+  availableChannels: readonly ChannelManifest[],
   dependencies: AddSandboxChannelDependencies,
 ): Promise<SandboxMessagingPlan> {
   const planner = new MessagingWorkflowPlanner(
@@ -1228,7 +1283,6 @@ async function planSandboxChannelAdd(
     }),
     createBuiltInRenderTemplateResolver(),
   );
-  const availableChannels = availableManifestChannelsForAgent(agent);
   const supportedChannelIds = availableChannels.map((manifest) => manifest.id);
 
   hydrateAddChannelEnvFromStoredState(sandboxName);
@@ -1259,7 +1313,8 @@ export async function persistManifestChannelDisabledPlan(
 ): Promise<SandboxMessagingPlan | null> {
   const entry = registry.getSandbox(sandboxName);
   if (!entry?.messaging?.plan) return null;
-  const agent = resolveAgentForSandbox(sandboxName);
+  const profile = resolveMessagingProfileForSandbox(sandboxName);
+  const { agent, availableChannels } = profile;
   const agentId = tryGetMessagingAgentId(agent, messagingManifestRegistry.list());
   if (agentId === null) return null;
   const planner = new MessagingWorkflowPlanner(
@@ -1272,12 +1327,13 @@ export async function persistManifestChannelDisabledPlan(
     agent: agentId,
     channelId,
     sandboxEntry: entry,
-    supportedChannelIds: availableManifestChannelsForAgent(agent).map((manifest) => manifest.id),
+    supportedChannelIds: availableChannels.map((manifest) => manifest.id),
   };
   const plan = disabled
     ? await planner.buildChannelStopPlanFromSandboxEntry(context)
     : await planner.buildChannelStartPlanFromSandboxEntry(context);
   if (!plan) return null;
+  requireCurrentMessagingProfileAuthority(sandboxName, profile.receiptAuthority);
   return MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan) ? plan : null;
 }
 
@@ -1287,10 +1343,12 @@ export async function persistManifestChannelRemovePlan(
 ): Promise<boolean> {
   const entry = registry.getSandbox(sandboxName);
   if (!entry) return false;
-  const agent = resolveAgentForSandbox(sandboxName);
+  const profile = resolveMessagingProfileForSandbox(sandboxName);
+  const { agent, availableChannels } = profile;
   const agentId = tryGetMessagingAgentId(agent, messagingManifestRegistry.list());
   if (agentId === null) {
     if (entry.messaging?.plan) {
+      requireCurrentMessagingProfileAuthority(sandboxName, profile.receiptAuthority);
       return registry.updateSandbox(sandboxName, { messaging: undefined });
     }
     return true;
@@ -1305,9 +1363,10 @@ export async function persistManifestChannelRemovePlan(
     agent: agentId,
     channelId,
     sandboxEntry: entry,
-    supportedChannelIds: availableManifestChannelsForAgent(agent).map((manifest) => manifest.id),
+    supportedChannelIds: availableChannels.map((manifest) => manifest.id),
   });
   if (!plan) return !entry.messaging?.plan;
+  requireCurrentMessagingProfileAuthority(sandboxName, profile.receiptAuthority);
   return MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan);
 }
 
@@ -1453,8 +1512,9 @@ async function addSandboxChannelUnlocked(
   }
   const canonical = manifest.id;
 
-  const agent = resolveAgentForSandbox(sandboxName);
-  if (!channelSupportedByAgent(manifest, agent)) {
+  const messagingProfile = resolveMessagingProfileForSandbox(sandboxName);
+  const { agent, availableChannels } = messagingProfile;
+  if (!availableChannels.some((candidate) => candidate.id === canonical)) {
     console.error("  This channel does not support the configured agent.");
     process.exit(1);
   }
@@ -1472,7 +1532,13 @@ async function addSandboxChannelUnlocked(
     return;
   }
 
-  const plan = await planSandboxChannelAdd(sandboxName, canonical, agent, dependencies);
+  const plan = await planSandboxChannelAdd(
+    sandboxName,
+    canonical,
+    agent,
+    availableChannels,
+    dependencies,
+  );
   const messagingConfig = getMessagingChannelConfigFromPlan(plan);
   const disclosedPresetState =
     canonical === "wechat"
@@ -1488,6 +1554,7 @@ async function addSandboxChannelUnlocked(
     return; // user aborted; nothing registered or widened
   }
   assertAddChannelPlanActive(sandboxName, manifest, plan);
+  requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
 
   // QR-paired channels that own their session inside the sandbox have no
   // host-side credential to acquire; register the bridge now and let the
@@ -1507,7 +1574,10 @@ async function addSandboxChannelUnlocked(
       {},
       undefined,
       dependencies.upsertMessagingProviders,
+      undefined,
+      messagingProfile.receiptAuthority,
     );
+    requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
     if (!MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan)) {
       console.error(`  ${YW}⚠${R} Could not persist messaging plan for '${sandboxName}'.`);
       removeChannelPresetIfPresent(sandboxName, canonical);
@@ -1578,6 +1648,7 @@ async function addSandboxChannelUnlocked(
       }),
     dependencies.upsertMessagingProviders,
     cleanupCredentialFreePolicy,
+    messagingProfile.receiptAuthority,
   );
   if (registeredBridge === null) {
     await rollbackChannelAdd(sandboxName, channelDef, canonical, {
@@ -1592,6 +1663,7 @@ async function addSandboxChannelUnlocked(
   }
   persistChannelTokens(acquired);
 
+  requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
   if (!MessagingHostStateApplier.applyPlanToRegistry(sandboxName, plan)) {
     console.error(`  ${YW}⚠${R} Could not persist messaging plan for '${sandboxName}'.`);
     await rollbackChannelAdd(sandboxName, channelDef, canonical, {
@@ -1942,6 +2014,7 @@ async function removeSandboxChannelUnlocked(
     process.exit(1);
   }
   const canonical = rawChannelArg.trim().toLowerCase();
+  const messagingProfile = resolveMessagingProfileForSandbox(sandboxName);
 
   if (dryRun) {
     console.log(`  --dry-run: would remove channel '${canonical}' for '${sandboxName}'.`);
@@ -1957,7 +2030,9 @@ async function removeSandboxChannelUnlocked(
     registry.getConfiguredMessagingChannelsFromEntry(registryEntry).includes(canonical) ||
     policies.getAppliedPresets(sandboxName).includes(canonical);
   const recoverPhysicalWechatResidue =
-    canonical === "wechat" && resolveAgentForSandbox(sandboxName).name === "openclaw";
+    canonical === "wechat" && messagingProfile.agent.name === "openclaw";
+
+  requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
 
   // The public Google Chat endpoint must stop before credentials, providers,
   // policy, or durable plan state change. Otherwise a partial teardown leaves
@@ -2043,6 +2118,7 @@ async function removeSandboxChannelUnlocked(
     );
     process.exit(1);
   }
+  requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
   const teardown = await applyChannelRemoveToGatewayAndRegistry(sandboxName, canonical, tokenKeys, {
     bestEffort: true,
   });
@@ -2108,8 +2184,8 @@ async function sandboxChannelsSetEnabled(
   }
 
   const canonical = manifest.id;
-  const agent = resolveAgentForSandbox(sandboxName);
-  const availableChannels = availableManifestChannelsForAgent(agent);
+  const messagingProfile = resolveMessagingProfileForSandbox(sandboxName);
+  const { availableChannels } = messagingProfile;
   if (!availableChannels.some((candidate) => candidate.id === canonical)) {
     console.error("  This channel does not support the configured agent.");
     process.exit(1);
@@ -2137,6 +2213,7 @@ async function sandboxChannelsSetEnabled(
     return;
   }
 
+  requireCurrentMessagingProfileAuthority(sandboxName, messagingProfile.receiptAuthority);
   const plan = await persistManifestChannelDisabledPlan(sandboxName, canonical, disabled);
   if (!plan) {
     console.error(`  Could not persist messaging plan for '${sandboxName}'.`);

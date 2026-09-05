@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import fs from "node:fs";
+import path from "node:path";
 import YAML from "yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +11,7 @@ import type {
   SetOpenShellSandboxPolicyRequest,
 } from "../adapters/openshell/sandbox-policy";
 import { digestBaselineEntry } from "./baseline-exclusion";
+import { createHarnessPackageFixture } from "../../../test/helpers/harness-packages";
 
 const mocks = vi.hoisted(() => ({
   getSandbox: vi.fn(),
@@ -115,11 +117,7 @@ describe("live OpenShell policy mutations", () => {
     } as const;
 
     expect(
-      captureRecordedSandboxBasePolicy(
-        sandboxName,
-        "capture a lifecycle policy",
-        runtimeSelection,
-      ),
+      captureRecordedSandboxBasePolicy(sandboxName, "capture a lifecycle policy", runtimeSelection),
     ).toBe(livePolicy);
     expect(mocks.inspectSandboxPolicy).toHaveBeenCalledWith({
       target: { kind: "named", gatewayName: "nemoclaw" },
@@ -222,6 +220,59 @@ describe("live OpenShell policy mutations", () => {
     expect(mocks.setSandboxPolicy).not.toHaveBeenCalled();
     expect(mocks.readSandboxPolicy).toHaveBeenCalledTimes(2);
     expect(YAML.parse(livePolicy).network_policies).toHaveProperty("concurrent_host_edit");
+  });
+
+  it("stops before policy mutation when a synthetic sandbox receipt changes", () => {
+    const fixtureParent = path.join(
+      process.cwd(),
+      "node_modules/.cache/nemoclaw-policy-authority-tests",
+    );
+    fs.mkdirSync(fixtureParent, { recursive: true, mode: 0o700 });
+    const home = fs.mkdtempSync(path.join(fixtureParent, "home-"));
+    const storeRoot = path.join(home, ".nemoclaw", "harnesses");
+    const selectedFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(home, "selected"),
+      storeRoot,
+    });
+    const replacementFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(home, "replacement"),
+      storeRoot,
+    });
+    const selected = selectedFixture.installLocal({
+      id: "synthetic-harness",
+      packageVersion: "1.0.0",
+    });
+    const replacement = replacementFixture.installLocal({
+      id: "synthetic-harness",
+      packageVersion: "2.0.0",
+    });
+    const selectedEntry = {
+      name: sandboxName,
+      agent: "synthetic-harness",
+      gatewayName: "nemoclaw",
+      harnessPackage: selected.identity,
+    };
+    const replacementEntry = {
+      ...selectedEntry,
+      harnessPackage: replacement.identity,
+    };
+    let registryReads = 0;
+    mocks.getSandbox.mockImplementation(() => {
+      registryReads += 1;
+      return registryReads === 1 ? selectedEntry : replacementEntry;
+    });
+    vi.stubEnv("HOME", home);
+
+    try {
+      expect(applyPresetContent(sandboxName, "weather", preset, { nonFatal: true })).toBe(false);
+      expect(mocks.setSandboxPolicy).not.toHaveBeenCalled();
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining("harness package authority changed"),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("preserves a host edit made after the final reread but before policy set", () => {

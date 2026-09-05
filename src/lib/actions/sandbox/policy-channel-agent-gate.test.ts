@@ -7,14 +7,24 @@
 // Without this gate, a destructive sandbox rebuild can run and fail late at
 // Dockerfile patching.
 //
+import fs from "node:fs";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import * as runtime from "../../adapters/openshell/runtime";
 import * as defs from "../../agent/defs";
+import { readInstalledHarnessPackage } from "../../agent-runtime/package/store";
 import * as store from "../../credentials/store";
 import * as policy from "../../policy";
 import * as registry from "../../state/registry";
-import { addSandboxChannel, startSandboxChannel, stopSandboxChannel } from "./policy-channel";
+import { createHarnessPackageFixture } from "../../../../test/helpers/harness-packages";
+import {
+  addSandboxChannel,
+  listSandboxChannels,
+  startSandboxChannel,
+  stopSandboxChannel,
+} from "./policy-channel";
 import { policyChannelDependencies } from "./policy-channel-dependencies";
 
 function agentFixture(name: string): defs.AgentDefinition {
@@ -45,6 +55,26 @@ let saveCredentialMock: MockInstance;
 let getCredentialMock: MockInstance;
 let promptMock: MockInstance;
 let rebuildMock: MockInstance;
+const tempDirs: string[] = [];
+
+function declareFixtureMessaging(packageRoot: string, channelId: string): void {
+  const manifestPath = path.join(packageRoot, "packages/nemoclaw-hermes/manifest.yaml");
+  fs.appendFileSync(
+    manifestPath,
+    `messaging:\n  support: channels\n  channels:\n    - ${channelId}\n`,
+  );
+  const adapterPath = path.join(packageRoot, "packages/nemoclaw-hermes/host/messaging-adapter.cts");
+  fs.mkdirSync(path.dirname(adapterPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(
+    adapterPath,
+    `module.exports = {
+  describeMessagingIntegration(request) {
+    return { kind: "channels", packageId: request.packageId, channelIds: [${JSON.stringify(channelId)}] };
+  },
+};\n`,
+    { mode: 0o600 },
+  );
+}
 
 function exitCodeFromError(err: unknown): number | null {
   const message = err instanceof Error ? err.message : String(err);
@@ -80,6 +110,64 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+  for (const directory of tempDirs.splice(0)) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+describe("receipt-backed messaging profile", () => {
+  it("does not let an ambient package activation replace a sandbox channel profile", () => {
+    const fixtureParent = path.join(
+      process.cwd(),
+      "node_modules/.cache/nemoclaw-policy-channel-authority-tests",
+    );
+    fs.mkdirSync(fixtureParent, { recursive: true, mode: 0o700 });
+    const home = fs.mkdtempSync(path.join(fixtureParent, "home-"));
+    tempDirs.push(home);
+    const storeRoot = path.join(home, ".nemoclaw", "harnesses");
+
+    const selectedFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(home, "selected"),
+      storeRoot,
+    });
+    const selectedRoot = selectedFixture.packageRoots.get("hermes");
+    if (!selectedRoot) throw new Error("Hermes fixture is unavailable");
+    declareFixtureMessaging(selectedRoot, "discord");
+    const selected = selectedFixture.install("hermes");
+
+    const ambientFixture = createHarnessPackageFixture({
+      fixtureParent: path.join(home, "ambient"),
+      storeRoot,
+    });
+    const ambientRoot = ambientFixture.packageRoots.get("hermes");
+    if (!ambientRoot) throw new Error("Hermes fixture is unavailable");
+    declareFixtureMessaging(ambientRoot, "telegram");
+    const ambientDeclarationPath = path.join(ambientRoot, "nemoclaw-package.json");
+    const ambientDeclaration = JSON.parse(
+      fs.readFileSync(ambientDeclarationPath, "utf8"),
+    ) as Record<string, unknown>;
+    fs.writeFileSync(
+      ambientDeclarationPath,
+      `${JSON.stringify({ ...ambientDeclaration, packageVersion: "0.2.0" })}\n`,
+      { mode: 0o600 },
+    );
+    const ambient = ambientFixture.install("hermes");
+
+    vi.stubEnv("HOME", home);
+    getSandboxMock.mockReturnValue({
+      name: "da-test",
+      agent: "hermes",
+      harnessPackage: selected.identity,
+    });
+
+    expect(readInstalledHarnessPackage("hermes")?.identity).toEqual(ambient.identity);
+    listSandboxChannels("da-test");
+
+    const output = logSpy.mock.calls.flat().map(String).join("\n");
+    expect(output).toContain("discord");
+    expect(output).not.toContain("telegram");
+  });
 });
 
 describe("addSandboxChannel agent gate", () => {
@@ -154,38 +242,41 @@ describe("channel lifecycle agent gate", () => {
   it.each([
     ["start", ["googlechat"], () => startSandboxChannel("da-test", { channel: "googlechat" })],
     ["stop", [], () => stopSandboxChannel("da-test", { channel: "googlechat" })],
-  ])("rejects a stale channel during %s before reading channel state or mutating the sandbox", async (_verb, disabledChannels, run) => {
-    // googlechat now supports openclaw + hermes, so exercise the unsupported-pair
-    // lifecycle gate with a non-messaging custom agent (supported by no channel).
-    getSandboxMock.mockReturnValue({ name: "da-test", agent: "custom-agent" });
-    vi.spyOn(defs, "loadAgent").mockReturnValue(agentFixture("custom-agent"));
-    const configuredChannelsMock = vi
-      .spyOn(registry, "getConfiguredMessagingChannelsFromEntry")
-      .mockReturnValue(["googlechat"]);
-    const disabledChannelsMock = vi
-      .spyOn(registry, "getDisabledChannels")
-      .mockReturnValue(disabledChannels);
+  ])(
+    "rejects a stale channel during %s before reading channel state or mutating the sandbox",
+    async (_verb, disabledChannels, run) => {
+      // googlechat now supports openclaw + hermes, so exercise the unsupported-pair
+      // lifecycle gate with a non-messaging custom agent (supported by no channel).
+      getSandboxMock.mockReturnValue({ name: "da-test", agent: "custom-agent" });
+      vi.spyOn(defs, "loadAgent").mockReturnValue(agentFixture("custom-agent"));
+      const configuredChannelsMock = vi
+        .spyOn(registry, "getConfiguredMessagingChannelsFromEntry")
+        .mockReturnValue(["googlechat"]);
+      const disabledChannelsMock = vi
+        .spyOn(registry, "getDisabledChannels")
+        .mockReturnValue(disabledChannels);
 
-    let caught: unknown;
-    try {
-      await run();
-    } catch (err) {
-      caught = err;
-    }
+      let caught: unknown;
+      try {
+        await run();
+      } catch (err) {
+        caught = err;
+      }
 
-    expect(exitCodeFromError(caught)).toBe(1);
-    const errorText = (errSpy.mock.calls as unknown[][])
-      .map((call) => call.map(String).join(" "))
-      .join("\n");
-    expect(errorText).toContain("This channel does not support the configured agent.");
-    expect(errorText).not.toContain("custom-agent");
+      expect(exitCodeFromError(caught)).toBe(1);
+      const errorText = (errSpy.mock.calls as unknown[][])
+        .map((call) => call.map(String).join(" "))
+        .join("\n");
+      expect(errorText).toContain("This channel does not support the configured agent.");
+      expect(errorText).not.toContain("custom-agent");
 
-    expect(configuredChannelsMock).not.toHaveBeenCalled();
-    expect(disabledChannelsMock).not.toHaveBeenCalled();
-    expect(loadPresetForSandboxMock).not.toHaveBeenCalled();
-    expect(applyPresetMock).not.toHaveBeenCalled();
-    expect(updateSandboxMock).not.toHaveBeenCalled();
-    expect(rebuildMock).not.toHaveBeenCalled();
-    expect(runOpenshellMock).not.toHaveBeenCalled();
-  });
+      expect(configuredChannelsMock).not.toHaveBeenCalled();
+      expect(disabledChannelsMock).not.toHaveBeenCalled();
+      expect(loadPresetForSandboxMock).not.toHaveBeenCalled();
+      expect(applyPresetMock).not.toHaveBeenCalled();
+      expect(updateSandboxMock).not.toHaveBeenCalled();
+      expect(rebuildMock).not.toHaveBeenCalled();
+      expect(runOpenshellMock).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { AgentDefinition } from "../agent/defs";
 import type { SandboxEntry } from "../state/registry";
-import { resolveSandboxCommandAgent } from "./command-agent";
+import {
+  captureSandboxCommandAgentAuthority,
+  requireCurrentSandboxCommandAgentAuthority,
+  resolveSandboxCommandAgent,
+} from "./command-agent";
 
 describe("resolveSandboxCommandAgent", () => {
   it("uses the exact receipt for an unknown package without consulting the legacy catalogue", () => {
@@ -41,5 +45,49 @@ describe("resolveSandboxCommandAgent", () => {
     ).toBe(definition);
     expect(loadAgent).toHaveBeenCalledWith("openclaw");
     expect(resolvePackageAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed package receipt before a sandbox mutation", () => {
+    const selectedDefinition = {
+      name: "synthetic-harness",
+      packageRoot: "/objects/selected",
+    } as AgentDefinition;
+    const replacementDefinition = {
+      name: "synthetic-harness",
+      packageRoot: "/objects/replacement",
+    } as AgentDefinition;
+    const selectedEntry = {
+      name: "alpha",
+      agent: "synthetic-harness",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "synthetic-harness",
+        packageVersion: "1.0.0",
+        contentDigest: "a".repeat(64),
+      },
+    } as SandboxEntry;
+    const replacementEntry = {
+      ...selectedEntry,
+      harnessPackage: {
+        ...selectedEntry.harnessPackage!,
+        packageVersion: "2.0.0",
+        contentDigest: "b".repeat(64),
+      },
+    } as SandboxEntry;
+    const dependencies = {
+      loadAgent: vi.fn(),
+      resolvePackageAgent: vi.fn((entry: SandboxEntry) => ({
+        definition:
+          entry.harnessPackage?.contentDigest === selectedEntry.harnessPackage?.contentDigest
+            ? selectedDefinition
+            : replacementDefinition,
+      })),
+    };
+    const authority = captureSandboxCommandAgentAuthority(selectedEntry, dependencies);
+
+    expect(() =>
+      requireCurrentSandboxCommandAgentAuthority(authority, replacementEntry, dependencies),
+    ).toThrow("Sandbox command agent authority changed before mutation");
+    expect(dependencies.loadAgent).not.toHaveBeenCalled();
   });
 });

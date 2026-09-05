@@ -52,13 +52,42 @@ describe("selectOnboardAgent interactive agent selection", () => {
     assert.match(menu, /Hermes/);
   });
 
-  it("defaults to the OpenClaw path when the user accepts the default", async () => {
+  it("retains the selected OpenClaw definition when the user accepts the default", async () => {
     const { select } = makeSelectOnboardAgent("");
 
     const agent = await select({ canPrompt: true });
 
-    // The OpenClaw default path is represented by a null agent downstream.
-    assert.equal(agent, null);
+    assert.equal(agent?.name, "openclaw");
+  });
+
+  it("does not reload an interactive choice after the active definition changes", async () => {
+    let activeDefinition = { name: "synthetic-harness", displayName: "Selected" } as never;
+    const selectedDefinition = activeDefinition;
+    const loadAgent = vi.fn(() => activeDefinition);
+    const select = createSelectOnboardAgent({
+      resolveAgent: vi.fn(),
+      loadAgent,
+      getAgentChoices: () => [
+        { name: "synthetic-harness", displayName: "Synthetic", description: "Selected package" },
+        { name: "other-harness", displayName: "Other", description: "Other package" },
+      ],
+      isNonInteractive: () => false,
+      note: vi.fn(),
+      log: vi.fn(),
+      prompt: vi.fn(async () => {
+        activeDefinition = {
+          name: "synthetic-harness",
+          displayName: "Ambient replacement",
+        } as never;
+        return "1";
+      }),
+      selectFromNumberedMenu: (_reply, _defaultIndex, choices) => choices[0]!,
+    });
+
+    const selected = await select({ canPrompt: true });
+
+    assert.equal(selected, selectedDefinition);
+    assert.equal(loadAgent.mock.calls.length, 2);
   });
 
   it("skips the picker when an explicit --agent flag is provided", async () => {

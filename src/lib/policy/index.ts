@@ -39,6 +39,11 @@ import { resolveSandboxGatewayName } from "../onboard/gateway-binding";
 import { assertNoOpenShellGatewayEndpointOverride } from "../openshell-gateway-endpoint-guard";
 import { OPENSHELL_SANDBOX_HOST_BRIDGE } from "../private-networks";
 import { ROOT } from "../runner";
+import {
+  captureSandboxCommandAgentAuthority,
+  requireCurrentSandboxCommandAgentAuthority,
+  type SandboxCommandAgentAuthority,
+} from "../sandbox/command-agent";
 import { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } from "../sandbox-name-contract";
 import { redact } from "../security/redact";
 import * as registry from "../state/registry";
@@ -123,6 +128,13 @@ type SandboxPresetLoadOptions = {
   agentDefinition?: AgentDefinition;
   messagingConfig?: MessagingPolicyConfig | null;
 };
+
+function captureSandboxReceiptAgentAuthority(
+  sandboxName: string,
+): SandboxCommandAgentAuthority | undefined {
+  const sandbox = registry.getSandbox(sandboxName);
+  return sandbox?.harnessPackage ? captureSandboxCommandAgentAuthority(sandbox) : undefined;
+}
 
 type SetupPolicyPresetSupportOptions = {
   webSearchSupported?: boolean | null;
@@ -373,15 +385,17 @@ function loadAgentPresetContent(
   } catch {
     return null;
   }
-  if (!sandboxAgent) return null;
-  if (pinnedAgentDefinition && pinnedAgentDefinition.name !== sandboxAgent) {
+  const expectedAgent =
+    sandboxAgent ?? (pinnedAgentDefinition?.name === "openclaw" ? "openclaw" : null);
+  if (!expectedAgent) return null;
+  if (pinnedAgentDefinition && pinnedAgentDefinition.name !== expectedAgent) {
     throw new Error(
-      `Pinned agent definition '${pinnedAgentDefinition.name}' does not match sandbox '${sandboxName}' agent '${sandboxAgent}'`,
+      `Pinned agent definition '${pinnedAgentDefinition.name}' does not match sandbox '${sandboxName}' agent '${expectedAgent}'`,
     );
   }
 
   try {
-    const agent = pinnedAgentDefinition ?? loadAgent(sandboxAgent);
+    const agent = pinnedAgentDefinition ?? loadAgent(expectedAgent);
     if (!agent?.policyAdditionsPath || !fs.existsSync(agent.policyAdditionsPath)) return null;
 
     const agentPolicies = parseNetworkPolicies(fs.readFileSync(agent.policyAdditionsPath, "utf-8"));
@@ -414,11 +428,12 @@ function loadPresetForSandbox(
   presetName: string,
   options: SandboxPresetLoadOptions = {},
 ): string | null {
+  let sandbox: ReturnType<typeof registry.getSandbox> = null;
   let sandboxAgent: string | null = null;
   let configuredMessagingChannels: string[] = [];
   let messagingConfig = options.messagingConfig;
   try {
-    const sandbox = registry.getSandbox(sandboxName);
+    sandbox = registry.getSandbox(sandboxName);
     sandboxAgent = sandbox?.agent ?? null;
     configuredMessagingChannels = getCredentialBoundMessagingChannelsFromEntry(sandbox);
     if (messagingConfig === undefined) {
@@ -428,6 +443,18 @@ function loadPresetForSandbox(
     sandboxAgent = null;
     configuredMessagingChannels = [];
   }
+  const receiptAuthority = sandbox?.harnessPackage
+    ? captureSandboxCommandAgentAuthority(sandbox)
+    : undefined;
+  if (
+    receiptAuthority &&
+    options.agentDefinition &&
+    !isDeepStrictEqual(receiptAuthority.definition, options.agentDefinition)
+  ) {
+    throw new Error(`Pinned agent definition does not match sandbox '${sandboxName}' receipt`);
+  }
+  const agentDefinition = receiptAuthority?.definition ?? options.agentDefinition;
+  if (agentDefinition) sandboxAgent = agentDefinition.name;
 
   const channelId = messagingChannelIdForPreset(presetName);
   if (options.includeMessagingCredentialBindings && channelId) {
@@ -453,12 +480,8 @@ function loadPresetForSandbox(
   const builtinPresetContent = loadCentralPreset(presetName, { reportMissing: false });
   if (!builtinPresetContent) return liveCustomPresetContent(sandboxName, presetName);
   const resolvedPresetContent =
-    loadAgentPresetContent(
-      sandboxName,
-      presetName,
-      builtinPresetContent,
-      options.agentDefinition,
-    ) || builtinPresetContent;
+    loadAgentPresetContent(sandboxName, presetName, builtinPresetContent, agentDefinition) ||
+    builtinPresetContent;
   return presetName === "outlook" &&
     sandboxAgent !== "hermes" &&
     configuredMessagingChannels.includes("teams")
@@ -659,6 +682,7 @@ export interface PolicyMutationContext {
   readonly inspection: OpenShellPolicyInspection;
   readonly basePolicyDocument: string;
   readonly runtimeSelection?: OpenShellRuntimeSelection;
+  readonly agentAuthority?: SandboxCommandAgentAuthority;
 }
 
 function requirePolicyObservation<T>(result: OpenShellSandboxResult<T>): T {
@@ -723,6 +747,16 @@ function inspectLivePolicyBoundary(
       `Refusing to ${operation}: sandbox '${sandboxName}' policy state is unavailable.`,
     );
   }
+  let agentAuthority: SandboxCommandAgentAuthority | undefined;
+  if (sandbox.harnessPackage) {
+    try {
+      agentAuthority = captureSandboxCommandAgentAuthority(sandbox);
+    } catch {
+      throw new PolicyObservationError(
+        `Refusing to ${operation}: the recorded harness package could not be revalidated.`,
+      );
+    }
+  }
   let recordedGatewayName: string | null;
   try {
     recordedGatewayName = resolveSandboxGatewayName(sandbox);
@@ -764,6 +798,7 @@ function inspectLivePolicyBoundary(
     gatewayName,
     inspection,
     basePolicyDocument,
+    ...(agentAuthority ? { agentAuthority } : {}),
     ...(runtimeSelection ? { runtimeSelection } : {}),
   };
 }
@@ -804,6 +839,26 @@ function preparePolicyMutationContext(
   return inspectLivePolicyBoundary(sandboxName, operation, requestedGatewayName, runtimeSelection);
 }
 
+function requirePolicyAgentAuthorityCurrent(
+  sandboxName: string,
+  operation: string,
+  expected: SandboxCommandAgentAuthority | undefined,
+): void {
+  let current: ReturnType<typeof registry.getSandbox>;
+  try {
+    current = registry.getSandbox(sandboxName);
+    if (expected) {
+      requireCurrentSandboxCommandAgentAuthority(expected, current);
+    } else if (current?.harnessPackage) {
+      throw new Error("a package receipt appeared during a legacy operation");
+    }
+  } catch {
+    throw new PolicyObservationError(
+      `Refusing to ${operation}: sandbox '${sandboxName}' harness package authority changed.`,
+    );
+  }
+}
+
 /** Re-read live state immediately before a policy mutation. */
 export function recheckPolicyMutationContext(
   sandboxName: string,
@@ -816,7 +871,9 @@ export function recheckPolicyMutationContext(
     previous.gatewayName,
     previous.runtimeSelection,
   );
+  requirePolicyAgentAuthorityCurrent(sandboxName, operation, previous.agentAuthority);
   if (
+    Boolean(current.agentAuthority) !== Boolean(previous.agentAuthority) ||
     !isDeepStrictEqual(current.inspection.effectivePolicy, previous.inspection.effectivePolicy) ||
     !policyDocumentsMatch(current.basePolicyDocument, previous.basePolicyDocument)
   ) {
@@ -1096,6 +1153,13 @@ export function setPolicyDocument(
 
     const originalDocument = context.basePolicyDocument;
     const originalVersion = context.inspection.policyIdentity.activeVersion;
+    try {
+      requirePolicyAgentAuthorityCurrent(sandboxName, operation, context.agentAuthority);
+    } catch (error) {
+      console.error(`  ${policyObservationError(error)}`);
+      if (options.nonFatal) return false;
+      process.exit(1);
+    }
     const { outcome, status } = submitComposedPolicy(
       sandboxName,
       requestedDocument,
@@ -1596,9 +1660,11 @@ function resolveSandboxOpenClawNpmBaseline(sandboxName: string): string | null {
   // Legacy and unregistered rows historically use OpenClaw preset content.
   // Activation still requires an exact reviewed npm_registry entry in the
   // live policy, so this fallback cannot inject or broaden a missing key.
-  const agent = sandbox?.agent || "openclaw";
+  const agent = sandbox?.harnessPackage
+    ? captureSandboxCommandAgentAuthority(sandbox).definition.name
+    : sandbox?.agent || "openclaw";
   if (agent !== "openclaw") return null;
-  const baseline = resolveAgentBaselinePolicy(agent);
+  const baseline = resolveSandboxBaselinePolicy(sandboxName);
   if (!baseline) {
     throw new Error(
       `Cannot reconcile OpenClaw npm policy compatibility for '${sandboxName}': the reviewed baseline is unavailable.`,
@@ -1835,6 +1901,8 @@ function removePreset(
     return false;
   }
 
+  const agentAuthority = captureSandboxReceiptAgentAuthority(sandboxName);
+
   const operation = `remove policy preset '${presetName}'`;
   const context = inspectLivePolicyForMutation(
     sandboxName,
@@ -1843,6 +1911,16 @@ function removePreset(
     options.runtimeSelection,
   );
   if (!context) return false;
+  if (agentAuthority) {
+    try {
+      requirePolicyAgentAuthorityCurrent(sandboxName, operation, agentAuthority);
+      if (!context.agentAuthority || !isDeepStrictEqual(context.agentAuthority, agentAuthority)) {
+        throw new Error("the captured package authority changed");
+      }
+    } catch (error) {
+      return reportPolicyObservationFailure(error);
+    }
+  }
 
   const currentPolicy = currentPolicyFromMutationContext(context);
   if (!currentPolicy) {
@@ -1852,7 +1930,11 @@ function removePreset(
   const customPresetContent = liveCustomPresetContentFromPolicy(currentPolicy, presetName);
   const isCustom = customPresetContent !== null;
   const presetContent =
-    options.presetContent ?? customPresetContent ?? loadPresetForSandbox(sandboxName, presetName);
+    options.presetContent ??
+    customPresetContent ??
+    loadPresetForSandbox(sandboxName, presetName, {
+      agentDefinition: agentAuthority?.definition,
+    });
   if (!presetContent) {
     console.error(`  Cannot load preset: ${presetName}`);
     return false;
@@ -1954,8 +2036,7 @@ function readCurrentSandboxPolicy(
     return (
       parseCurrentPolicyOrEmpty(
         readLivePolicyDocument(sandboxName, selectedGateway, "base", undefined, runtimeSelection),
-      ) ||
-      null
+      ) || null
     );
   } catch {
     return null;
@@ -2002,7 +2083,13 @@ function resolveAgentBaselinePolicy(
 function resolveSandboxBaselinePolicy(
   sandboxName: string,
 ): { agent: string; policyPath: string; content: string } | null {
-  return resolveAgentBaselinePolicy(registry.getSandbox(sandboxName)?.agent);
+  const sandbox = registry.getSandbox(sandboxName);
+  if (sandbox?.harnessPackage) {
+    return resolveAgentDefinitionBaselinePolicy(
+      captureSandboxCommandAgentAuthority(sandbox).definition,
+    );
+  }
+  return resolveAgentBaselinePolicy(sandbox?.agent);
 }
 
 /** The current baseline entry for a key, or null when the baseline omits it. */
@@ -2258,6 +2345,7 @@ function applyPresetContent(
     disclosedPresetState?: PresetPolicyState | null;
     includeMessagingCredentialBindings?: boolean;
     runtimeSelection?: OpenShellRuntimeSelection;
+    agentAuthority?: SandboxCommandAgentAuthority;
   } = {},
 ): boolean {
   // Guard against truncated sandbox names — WSL can truncate hyphenated
@@ -2346,6 +2434,17 @@ function applyPresetContent(
       options.runtimeSelection?.gatewayName,
       options.runtimeSelection,
     );
+    if (options.agentAuthority) {
+      requirePolicyAgentAuthorityCurrent(sandboxName, operation, options.agentAuthority);
+      if (
+        !context.agentAuthority ||
+        !isDeepStrictEqual(context.agentAuthority, options.agentAuthority)
+      ) {
+        throw new PolicyObservationError(
+          `Refusing to ${operation}: sandbox '${sandboxName}' harness package authority changed.`,
+        );
+      }
+    }
   } catch (error) {
     return reportPolicyObservationFailure(error);
   }
@@ -2480,16 +2579,20 @@ function applyPreset(
   options: ApplyPresetOptions = {},
 ): boolean {
   const { agentDefinition, ...contentOptions } = options;
+  const agentAuthority = captureSandboxReceiptAgentAuthority(sandboxName);
   const presetContent = loadPresetForSandbox(sandboxName, presetName, {
     includeMessagingCredentialBindings: options.includeMessagingCredentialBindings === true,
-    agentDefinition,
+    agentDefinition: agentAuthority?.definition ?? agentDefinition,
     messagingConfig: options.messagingConfig as MessagingPolicyConfig | null | undefined,
   });
   if (!presetContent) {
     console.error(`  Cannot load preset: ${presetName}`);
     return false;
   }
-  return applyPresetContent(sandboxName, presetName, presetContent, contentOptions);
+  return applyPresetContent(sandboxName, presetName, presetContent, {
+    ...contentOptions,
+    ...(agentAuthority ? { agentAuthority } : {}),
+  });
 }
 
 /**
@@ -2508,6 +2611,7 @@ function applyPresets(sandboxName: string, presetNames: string[]): boolean {
 
   const uniquePresetNames = [...new Set(presetNames)].filter(Boolean);
   if (uniquePresetNames.length === 0) return true;
+  const agentAuthority = captureSandboxReceiptAgentAuthority(sandboxName);
 
   const preparedPresets: Array<{
     content: string;
@@ -2516,7 +2620,9 @@ function applyPresets(sandboxName: string, presetNames: string[]): boolean {
   }> = [];
 
   for (const presetName of uniquePresetNames) {
-    const presetContent = loadPresetForSandbox(sandboxName, presetName);
+    const presetContent = loadPresetForSandbox(sandboxName, presetName, {
+      agentDefinition: agentAuthority?.definition,
+    });
     if (!presetContent) {
       console.error(`  Cannot load preset: ${presetName}`);
       return false;
@@ -2543,6 +2649,14 @@ function applyPresets(sandboxName: string, presetNames: string[]): boolean {
   let context: PolicyMutationContext;
   try {
     context = preparePolicyMutationContext(sandboxName, operation);
+    if (agentAuthority) {
+      requirePolicyAgentAuthorityCurrent(sandboxName, operation, agentAuthority);
+      if (!context.agentAuthority || !isDeepStrictEqual(context.agentAuthority, agentAuthority)) {
+        throw new PolicyObservationError(
+          `Refusing to ${operation}: sandbox '${sandboxName}' harness package authority changed.`,
+        );
+      }
+    }
   } catch (error) {
     return reportPolicyObservationFailure(error);
   }
@@ -2836,7 +2950,15 @@ function getGatewayPresets(sandboxName: string, timeoutMs?: number): string[] | 
   } catch {
     return null;
   }
-  const sandboxAgent = sandbox.agent ?? null;
+  let agentAuthority: SandboxCommandAgentAuthority | undefined;
+  try {
+    agentAuthority = sandbox.harnessPackage
+      ? captureSandboxCommandAgentAuthority(sandbox)
+      : undefined;
+  } catch {
+    return null;
+  }
+  const sandboxAgent = agentAuthority?.definition.name ?? sandbox.agent ?? null;
   const builtins = inspectGatewayPresetNames({
     readPolicy: () => {
       try {
@@ -2850,7 +2972,9 @@ function getGatewayPresets(sandboxName: string, timeoutMs?: number): string[] | 
     sources: () => [
       ...listPresets({ agent: sandboxAgent }).map((preset) => ({
         name: preset.name,
-        content: loadPresetForSandbox(sandboxName, preset.name),
+        content: loadPresetForSandbox(sandboxName, preset.name, {
+          agentDefinition: agentAuthority?.definition,
+        }),
       })),
     ],
   });
@@ -2870,11 +2994,7 @@ function getPresetContentGatewayState(
 ): "match" | "absent" | "drift" | null {
   return inspectPresetContentGatewayState({
     readPolicy: () =>
-      readCurrentSandboxPolicy(
-        sandboxName,
-        runtimeSelection?.gatewayName,
-        runtimeSelection,
-      ) ?? "",
+      readCurrentSandboxPolicy(sandboxName, runtimeSelection?.gatewayName, runtimeSelection) ?? "",
     parseCurrentPolicy: parseCurrentPolicyOrEmpty,
     extractPresetEntries,
     presetContent,

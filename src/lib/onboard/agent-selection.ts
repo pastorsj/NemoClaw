@@ -85,9 +85,15 @@ export function createSelectOnboardAgent(deps: SelectOnboardAgentDeps) {
     if (!explicitlySelected && !resume && canPrompt && !deps.isNonInteractive()) {
       const choices = deps.getAgentChoices();
       if (choices.length > 1) {
+        // Bind each displayed choice to the definition observed before the
+        // prompt. Do not reload the ambient package pointer after selection.
+        const definitions = new Map(
+          choices.map((choice) => [choice.name, deps.loadAgent(choice.name)] as const),
+        );
         const selected = await promptForAgentChoice(deps, choices);
-        // The default OpenClaw path is represented by a null agent downstream.
-        return selected.name === "openclaw" ? null : deps.loadAgent(selected.name);
+        const definition = definitions.get(selected.name);
+        if (!definition) throw new Error(`Selected agent '${selected.name}' is unavailable`);
+        return definition;
       }
     }
 
