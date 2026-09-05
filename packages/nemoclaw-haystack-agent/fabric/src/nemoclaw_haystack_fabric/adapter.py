@@ -19,7 +19,7 @@ os.environ["HAYSTACK_CONTENT_TRACING_ENABLED"] = "false"
 
 from haystack.components.agents import Agent
 from haystack.components.generators.chat import OpenAIChatGenerator
-from haystack.dataclasses import ChatMessage
+from haystack.dataclasses import ChatMessage, ChatRole
 from haystack.utils import Secret
 from nemo_fabric_adapter_contract.models import (
     AgentConfig,
@@ -153,22 +153,22 @@ def build_chat_generator(model: AgentModelConfig) -> OpenAIChatGenerator:
     )
 
 
-def build_haystack_agent(
-    config: AgentConfig, model: AgentModelConfig, max_steps: int
-) -> Agent:
+def build_haystack_agent(model: AgentModelConfig, max_steps: int) -> Agent:
     """Construct the package's concrete, tool-free Haystack Agent."""
 
-    system_prompt = (
-        config.instructions.system.content
-        if config.instructions and config.instructions.system
-        else None
-    )
     return Agent(
         chat_generator=build_chat_generator(model),
         tools=None,
-        system_prompt=system_prompt,
         max_agent_steps=max_steps,
     )
+
+
+def _literal_system_message(config: AgentConfig) -> ChatMessage | None:
+    """Keep Fabric instructions as data instead of a Haystack Jinja template."""
+
+    if config.instructions is None or config.instructions.system is None:
+        return None
+    return ChatMessage.from_system(config.instructions.system.content)
 
 
 def _nonnegative_int(value: Any) -> int | None:
@@ -204,11 +204,26 @@ def _normalized_usage(value: Any) -> AgentUsage | None:
     )
 
 
+def _successful_assistant_text(result: Any) -> str | None:
+    """Return text only from Haystack's successful assistant completion."""
+
+    if not isinstance(result, Mapping) or result.get("exit_reason") != "text":
+        return None
+    last_message = result.get("last_message")
+    if not isinstance(last_message, ChatMessage) or not last_message.is_from(
+        ChatRole.ASSISTANT
+    ):
+        return None
+    response = last_message.text
+    return response.strip() if response and response.strip() else None
+
+
 class HaystackAgentRuntime:
     """Own one direct Haystack Agent for a Fabric lifecycle."""
 
     def __init__(self) -> None:
         self._agent: Agent | None = None
+        self._system_message: ChatMessage | None = None
         self._active_invocation: asyncio.Task[Any] | None = None
 
     async def start(self, payload: dict[str, Any]) -> None:
@@ -235,7 +250,8 @@ class HaystackAgentRuntime:
         _validate_model(model)
         max_steps = _validate_supported_config(config)
         try:
-            self._agent = build_haystack_agent(config, model, max_steps)
+            agent = build_haystack_agent(model, max_steps)
+            system_message = _literal_system_message(config)
         except lifecycle.LifecycleError:
             raise
         except Exception as error:
@@ -243,6 +259,8 @@ class HaystackAgentRuntime:
                 "haystack_runtime_unavailable",
                 "Haystack Agent could not initialize its runtime",
             ) from error
+        self._agent = agent
+        self._system_message = system_message
 
     async def invoke(
         self, request: AgentRunRequest, _context: RuntimeContext
@@ -271,9 +289,10 @@ class HaystackAgentRuntime:
             raise RuntimeError("Haystack Agent invocation requires an asyncio task")
         self._active_invocation = active_task
         try:
-            result = await agent.run_async(
-                messages=[ChatMessage.from_user(request.input)]
-            )
+            messages = [ChatMessage.from_user(request.input)]
+            if self._system_message is not None:
+                messages.insert(0, self._system_message)
+            result = await agent.run_async(messages=messages)
         except asyncio.CancelledError:
             raise
         # Haystack components can raise provider- and plugin-specific exception
@@ -288,18 +307,16 @@ class HaystackAgentRuntime:
             if self._active_invocation is active_task:
                 self._active_invocation = None
 
-        if result.get("exit_reason") == "max_agent_steps":
+        if (
+            isinstance(result, Mapping)
+            and result.get("exit_reason") == "max_agent_steps"
+        ):
             return _failed(
                 "haystack_step_limit_reached",
                 "Haystack Agent reached its configured step limit",
             )
-        last_message = result.get("last_message")
-        response = (
-            last_message.text.strip()
-            if isinstance(last_message, ChatMessage) and last_message.text
-            else ""
-        )
-        if not response:
+        response = _successful_assistant_text(result)
+        if response is None:
             return _failed(
                 "haystack_no_assistant_response",
                 "Haystack Agent completed without a final text response",
@@ -332,6 +349,7 @@ class HaystackAgentRuntime:
         agent = self._agent
         self._active_invocation = None
         self._agent = None
+        self._system_message = None
         if agent is not None:
             await agent.close_async()
 

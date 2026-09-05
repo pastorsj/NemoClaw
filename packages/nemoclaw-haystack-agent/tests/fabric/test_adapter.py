@@ -81,11 +81,11 @@ def _request(value: object = "Reply with PONG") -> AgentRunRequest:
 
 
 class _ResultAgent:
-    def __init__(self, result: dict[str, object]) -> None:
+    def __init__(self, result: object) -> None:
         self.result = result
         self.closed = False
 
-    async def run_async(self, **_kwargs: object) -> dict[str, object]:
+    async def run_async(self, **_kwargs: object) -> object:
         return self.result
 
     async def close_async(self) -> None:
@@ -187,6 +187,33 @@ class HaystackAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(second.status, AgentRunStatus.SUCCEEDED)
         self.assertNotIn(CREDENTIAL_VALUE, json.dumps(first.to_mapping()))
 
+    async def test_system_instruction_is_passed_as_literal_message(self) -> None:
+        instruction = (
+            'Keep "{{ tenant_id }}" and "{% if enabled %}literal{% endif %}" unchanged.'
+        )
+        received_messages: list[list[ChatMessage]] = []
+
+        def respond(messages: list[ChatMessage]) -> ChatMessage:
+            received_messages.append(messages)
+            return ChatMessage.from_assistant("PONG")
+
+        config = _agent_config(
+            instructions={"system": {"content": instruction, "mode": "replace"}}
+        )
+        runtime = await self.start_runtime(
+            config=config,
+            generator=MockChatGenerator(response_fn=respond),
+        )
+
+        result = await runtime.invoke(_request(), _runtime_context(self.base_dir))
+
+        self.assertIs(result.status, AgentRunStatus.SUCCEEDED)
+        self.assertEqual(len(received_messages), 1)
+        self.assertEqual(received_messages[0][0], ChatMessage.from_system(instruction))
+        self.assertEqual(
+            received_messages[0][1], ChatMessage.from_user("Reply with PONG")
+        )
+
     async def test_direct_agent_rejects_empty_and_structured_input(self) -> None:
         runtime = await self.start_runtime()
         for value in ("  ", {"prompt": "hello"}):
@@ -207,13 +234,39 @@ class HaystackAgentRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error.code, "haystack_inference_failed")
         self.assertNotIn(CREDENTIAL_VALUE, json.dumps(result.to_mapping()))
 
+    async def test_retained_user_message_is_not_returned_as_a_response(self) -> None:
+        runtime = await self.start_runtime()
+        retained_input = "retained user input"
+        runtime._agent = _ResultAgent(  # type: ignore[assignment]
+            {
+                "last_message": ChatMessage.from_user(retained_input),
+                "exit_reason": "text",
+            }
+        )
+
+        result = await runtime.invoke(
+            _request(retained_input), _runtime_context(self.base_dir)
+        )
+
+        self.assertIs(result.status, AgentRunStatus.FAILED)
+        self.assertEqual(result.error.code, "haystack_no_assistant_response")
+        self.assertNotIn(retained_input, json.dumps(result.to_mapping()))
+
     async def test_malformed_and_step_limit_outputs_fail_closed(self) -> None:
         runtime = await self.start_runtime()
         for result, code in (
+            ([], "haystack_no_assistant_response"),
             (
                 {
                     "last_message": ChatMessage.from_assistant(None),
                     "exit_reason": "text",
+                },
+                "haystack_no_assistant_response",
+            ),
+            (
+                {
+                    "last_message": ChatMessage.from_assistant("unconfirmed"),
+                    "exit_reason": None,
                 },
                 "haystack_no_assistant_response",
             ),
