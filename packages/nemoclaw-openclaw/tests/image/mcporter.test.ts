@@ -10,16 +10,11 @@ import { describe, expect, it } from "vitest";
 import { type DependencyNode, findDependency } from "../helpers/dependency-graph.ts";
 
 const repoRoot = path.resolve(import.meta.dirname, "../../../..");
-const runtimeDirectory = path.join(
-  repoRoot,
-  "packages",
-  "nemoclaw-openclaw",
-  "runtime",
-  "mcporter",
-);
+const openClawPackageRoot = path.join(repoRoot, "packages", "nemoclaw-openclaw");
+const runtimeDirectory = path.join(openClawPackageRoot, "runtime", "mcporter");
 const dockerfiles = ["Dockerfile.base", "Dockerfile"].map((name) => ({
   name,
-  contents: fs.readFileSync(path.join(repoRoot, "packages", "nemoclaw-openclaw", name), "utf8"),
+  contents: fs.readFileSync(path.join(openClawPackageRoot, name), "utf8"),
 }));
 const expectedVersion = "0.7.3";
 const expectedIntegrity =
@@ -265,7 +260,7 @@ describe("mcporter image supply-chain controls", () => {
   });
 
   it("copies the cached base-image audit report only after receipt verification succeeds", () => {
-    const contents = fs.readFileSync(path.join(repoRoot, "Dockerfile.base"), "utf8");
+    const contents = fs.readFileSync(path.join(openClawPackageRoot, "Dockerfile.base"), "utf8");
     const flattenedContents = contents.replace(/\\\s*\n/g, " ").replace(/\s+/g, " ");
 
     expect(flattenedContents).toContain(
