@@ -1,8 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isDeepStrictEqual } from "node:util";
+
 import type { OpenShellSandboxObserver } from "../../adapters/openshell/sandbox-observer";
 import { cliName } from "../../onboard/branding";
+import {
+  normalizeSandboxAgentName,
+  resolveSandboxAgent,
+  type ResolvedSandboxAgent,
+} from "../../onboard/sandbox-agent";
 import {
   CURRENT_RUNTIME_PROVIDER_BUNDLES,
   type RuntimeProviderBundleRegistry,
@@ -79,6 +86,7 @@ export interface SandboxStartDeps {
   waitForManagedGatewaySupervisor?: (sandboxName: string) => boolean;
   verifyGateway?: (sandboxName: string) => Promise<void>;
   probeInferenceInvocation?: typeof probeSandboxInferenceInvocation;
+  resolveSandboxAgent?: typeof resolveSandboxAgent;
   withLifecycleLock?: typeof withSandboxLifecycleLock;
   log?: (message: string) => void;
 }
@@ -124,6 +132,70 @@ function startupRecoveryError(sandboxName: string, detail: unknown): Error {
   );
 }
 
+function hasHarnessPackageAuthority(sandbox: SandboxEntry): boolean {
+  return sandbox.harnessPackage != null || sandbox.harnessPackageMigration != null;
+}
+
+function resolvedAgentMatchesSandbox(
+  sandbox: SandboxEntry,
+  selectedAgent: ResolvedSandboxAgent,
+): boolean {
+  const recordedAgent = sandbox.agent ?? null;
+  const effectiveAgentId = normalizeSandboxAgentName(recordedAgent);
+  return (
+    selectedAgent.recordedAgent === recordedAgent &&
+    selectedAgent.effectiveAgentId === effectiveAgentId &&
+    selectedAgent.definition.name === effectiveAgentId &&
+    isDeepStrictEqual(selectedAgent.harnessPackage, sandbox.harnessPackage ?? null) &&
+    isDeepStrictEqual(
+      selectedAgent.harnessPackageMigration,
+      sandbox.harnessPackageMigration ?? null,
+    )
+  );
+}
+
+/** Resolve only receipt-backed package metadata; legacy start behavior stays unchanged. */
+function resolveStartAgentAuthority(
+  sandbox: SandboxEntry,
+  deps: SandboxStartDeps,
+): ResolvedSandboxAgent | null {
+  if (!hasHarnessPackageAuthority(sandbox)) return null;
+  const selectedAgent = (deps.resolveSandboxAgent ?? resolveSandboxAgent)(sandbox);
+  if (!resolvedAgentMatchesSandbox(sandbox, selectedAgent)) {
+    throw new Error("the selected agent definition does not match the sandbox package receipt");
+  }
+  return selectedAgent;
+}
+
+function requireCurrentStartAgentAuthority(
+  sandboxName: string,
+  expectedSandbox: SandboxEntry,
+  expectedAgent: ResolvedSandboxAgent | null,
+  deps: SandboxStartDeps,
+): ResolvedSandboxAgent | null {
+  if (expectedAgent === null) return null;
+  const currentSandbox = (deps.getSandbox ?? registry.getSandbox)(sandboxName);
+  if (
+    !currentSandbox ||
+    (currentSandbox.agent ?? null) !== (expectedSandbox.agent ?? null) ||
+    !isDeepStrictEqual(
+      currentSandbox.harnessPackage ?? null,
+      expectedSandbox.harnessPackage ?? null,
+    ) ||
+    !isDeepStrictEqual(
+      currentSandbox.harnessPackageMigration ?? null,
+      expectedSandbox.harnessPackageMigration ?? null,
+    )
+  ) {
+    throw new Error("the sandbox package authority changed while the sandbox was starting");
+  }
+  const currentAgent = resolveStartAgentAuthority(currentSandbox, deps);
+  if (currentAgent === null || !isDeepStrictEqual(currentAgent, expectedAgent)) {
+    throw new Error("the sandbox package definition changed while the sandbox was starting");
+  }
+  return currentAgent;
+}
+
 /**
  * A started gateway that answers the /v1/models probe can still reject an
  * inference request, so start sends one inference request with the recorded
@@ -134,6 +206,7 @@ function startupRecoveryError(sandboxName: string, detail: unknown): Error {
 function checkStartedSandboxInference(
   sandboxName: string,
   sandbox: SandboxEntry,
+  selectedAgent: ResolvedSandboxAgent | null,
   deps: SandboxStartDeps,
   log: (message: string) => void,
 ): SandboxInferenceInvocationResult | null {
@@ -141,12 +214,17 @@ function checkStartedSandboxInference(
   const provider = (sandbox.provider ?? "").trim();
   if (!model || !provider) return null;
   const gatewayName = getPersistedSandboxTargetGatewayName(sandbox);
+  const agentName = selectedAgent?.definition.name;
   log("  Checking that the sandbox serves an agent request…");
   return (deps.probeInferenceInvocation ?? probeSandboxInferenceInvocation)(
     {
       sandboxName,
       gatewayName,
-      ...(sandbox.agent === "langchain-deepagents-code" ? { agentName: sandbox.agent } : {}),
+      ...(agentName
+        ? { agentName }
+        : sandbox.agent === "langchain-deepagents-code"
+          ? { agentName: sandbox.agent }
+          : {}),
       provider,
       model,
       preferredInferenceApi: sandbox.preferredInferenceApi ?? null,
@@ -184,6 +262,18 @@ async function startSandboxWithinLifecycleFence(
   );
   if (!resolved.ok) return resolved.result;
 
+  let selectedAgent: ResolvedSandboxAgent | null;
+  try {
+    selectedAgent = resolveStartAgentAuthority(resolved.sandbox, deps);
+  } catch {
+    return {
+      exitCode: 1,
+      message:
+        `  Sandbox '${sandboxName}' has invalid harness package authority. ` +
+        "Reinstall or repair the recorded package before starting it.",
+    };
+  }
+
   const input = {
     environment: deps.environment ?? process.env,
     log,
@@ -200,6 +290,12 @@ async function startSandboxWithinLifecycleFence(
 
   const readiness: { inference: SandboxInferenceInvocationResult | null } = { inference: null };
   await resolved.lifecycle.verifyStarted(input, async (name) => {
+    let currentAgent: ResolvedSandboxAgent | null;
+    try {
+      currentAgent = requireCurrentStartAgentAuthority(name, resolved.sandbox, selectedAgent, deps);
+    } catch (error) {
+      throw startupRecoveryError(name, error);
+    }
     log("  Restoring sandbox startup state…");
     const restoreStartupState =
       deps.restoreStartupState ??
@@ -239,7 +335,13 @@ async function startSandboxWithinLifecycleFence(
     if (failure) throw startupRecoveryError(name, failure);
     log("  Checking gateway health and host forwards…");
     await (deps.verifyGateway ?? verifyGateway)(name);
-    readiness.inference = checkStartedSandboxInference(name, resolved.sandbox, deps, log);
+    readiness.inference = checkStartedSandboxInference(
+      name,
+      resolved.sandbox,
+      currentAgent,
+      deps,
+      log,
+    );
   });
   if (readiness.inference && !readiness.inference.ok) {
     log(`  The sandbox started but inference is not usable: ${readiness.inference.detail}.`);

@@ -4,8 +4,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ProviderHealthProbeOptions } from "../../inference/health";
+import type { SandboxEntry } from "../../state/registry";
 import {
   classifySandboxContainerFailureForStatus,
   classifySandboxStatusPreflightFailure,
@@ -17,6 +18,76 @@ import {
   sandboxGpuProofStatusSuffix,
   sandboxGpuProofUnverified,
 } from "./status";
+import { resolveSandboxStatusAgent } from "./status-snapshot";
+
+function futurePackageStatusFixture(runtimeKind: "gateway" | "terminal") {
+  const agentName = `future-${runtimeKind}`;
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: agentName,
+    packageVersion: "4.5.6",
+    contentDigest: (runtimeKind === "gateway" ? "c" : "d").repeat(64),
+  };
+  const entry = {
+    name: agentName,
+    agent: agentName,
+    harnessPackage,
+  } satisfies SandboxEntry;
+  const selectedAgent = {
+    recordedAgent: agentName,
+    effectiveAgentId: agentName,
+    definition: {
+      name: agentName,
+      displayName: `Future ${runtimeKind}`,
+      packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+      runtime: { kind: runtimeKind },
+    },
+    harnessPackage,
+    harnessPackageMigration: null,
+  };
+  return { agentName, entry, selectedAgent };
+}
+
+describe("sandbox status package definition", () => {
+  it.each(["gateway", "terminal"] as const)(
+    "describes a receipt-backed future %s from its exact definition",
+    (runtimeKind) => {
+      const fixture = futurePackageStatusFixture(runtimeKind);
+      const resolveSandboxAgentImpl = vi.fn(() => fixture.selectedAgent);
+
+      const statusAgent = resolveSandboxStatusAgent(fixture.entry, {
+        resolveSandboxAgentImpl: resolveSandboxAgentImpl as never,
+      });
+
+      expect(statusAgent).toMatchObject({
+        agentName: fixture.agentName,
+        agentDisplayName: `Future ${runtimeKind}`,
+        agentRuntime: runtimeKind,
+        agentDefinition: fixture.selectedAgent.definition,
+      });
+      expect(statusAgent.agentLoadError).toBeUndefined();
+      expect(resolveSandboxAgentImpl).toHaveBeenCalledWith(fixture.entry);
+    },
+  );
+
+  it("reports unknown instead of using an ambient definition when receipt authority disagrees", () => {
+    const fixture = futurePackageStatusFixture("gateway");
+    const loadAgentImpl = vi.fn();
+
+    const statusAgent = resolveSandboxStatusAgent(fixture.entry, {
+      loadAgentImpl: loadAgentImpl as never,
+      resolveSandboxAgentImpl: vi.fn(() => ({
+        ...fixture.selectedAgent,
+        definition: { ...fixture.selectedAgent.definition, name: "different-gateway" },
+      })) as never,
+    });
+
+    expect(statusAgent.agentRuntime).toBe("unknown");
+    expect(statusAgent.agentDefinition).toBeNull();
+    expect(statusAgent.agentLoadError).toContain("does not match the sandbox package receipt");
+    expect(loadAgentImpl).not.toHaveBeenCalled();
+  });
+});
 
 describe("sandbox status DCode auto-approval (#6478)", () => {
   it("defaults legacy DCode entries to disabled", () => {

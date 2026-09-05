@@ -8,10 +8,14 @@ import {
   type OpenShellStateRpcIssue,
 } from "../../adapters/openshell/gateway-drift";
 import { captureOpenshellForStatus, isCommandTimeout } from "../../adapters/openshell/runtime";
-import { type AgentDefinition, getAgentRuntimeKind, loadAgent } from "../../agent/defs";
-import { retryUntilAsync } from "../../core/retry";
-
+import {
+  hasHarnessPackageAuthority,
+  resolveSandboxStatusAgent,
+  type SandboxStatusAgentDeps,
+  type SandboxStatusAgentInfo,
+} from "../../agent-runtime/status-agent";
 import { withStdoutRedirectedToStderr } from "../../cli/stdout-guard";
+import { retryUntilAsync } from "../../core/retry";
 import {
   buildGatewayInferenceGetArgs,
   type GatewayInference,
@@ -204,6 +208,8 @@ export interface SandboxStatusRouteDrift {
 
 export interface SandboxStatusSnapshot {
   sb: registry.SandboxEntry | null;
+  /** Exact package definition used for every observation in this snapshot. */
+  statusAgent?: SandboxStatusAgentInfo;
   lookup: SandboxGatewayState;
   rpcIssue: OpenShellStateRpcIssue | null;
   currentModel: string;
@@ -218,44 +224,11 @@ export interface SandboxStatusSnapshot {
   postRecoveryPreflight?: SandboxStatusPreflightResult;
 }
 
-export interface SandboxStatusAgentInfo {
-  agentName: string;
-  agentDisplayName: string;
-  agentRuntime: "gateway" | "terminal" | "unknown";
-  agentLoadError?: string;
-  agentDefinition: AgentDefinition | null;
-}
-
 export function resolveSandboxStatusDcodeAutoApprovalMode(
   sandbox: registry.SandboxEntry | null,
 ): DcodeAutoApprovalMode | null {
   if (sandbox?.agent !== "langchain-deepagents-code") return null;
   return normalizeDcodeAutoApprovalMode(sandbox.dcodeAutoApprovalMode);
-}
-
-export function resolveSandboxStatusAgent(agentName = "openclaw"): SandboxStatusAgentInfo {
-  let agentDisplayName = agentName === "openclaw" ? "OpenClaw" : agentName;
-  let agentRuntime: SandboxStatusAgentInfo["agentRuntime"] = "gateway";
-  let agentLoadError: string | undefined;
-  let agentDefinition: AgentDefinition | null = null;
-  try {
-    const agent = loadAgent(agentName);
-    agentDisplayName = agent.displayName;
-    agentRuntime = getAgentRuntimeKind(agent);
-    agentDefinition = agentName === "openclaw" ? null : agent;
-  } catch (err) {
-    if (agentName !== "openclaw") {
-      agentRuntime = "unknown";
-      agentLoadError = err instanceof Error ? err.message : String(err);
-    }
-  }
-  return {
-    agentName,
-    agentDisplayName,
-    agentRuntime,
-    ...(agentLoadError ? { agentLoadError } : {}),
-    agentDefinition,
-  };
 }
 
 type ReconcileSandboxGatewayState = (sandboxName: string) => Promise<SandboxGatewayState>;
@@ -294,11 +267,17 @@ interface CollectSandboxStatusSnapshotDeps {
   reportInferenceProbeError?: (message: string) => void;
   reportInferenceProbeRetry?: (message: string) => void;
   probeTerminalRuntimeHealth?: ProbeTerminalRuntimeHealth;
+  resolveSandboxAgentImpl?: SandboxStatusAgentDeps["resolveSandboxAgentImpl"];
   recoverSandboxProcesses?: RecoverSandboxProcesses;
   reconcile?: ReconcileSandboxGatewayState;
   getSandboxStatusPreflightImpl?: typeof getSandboxStatusPreflight;
   getGatewayPresets?: typeof getGatewayPresets;
 }
+
+export {
+  resolveSandboxStatusAgent,
+  type SandboxStatusAgentInfo,
+} from "../../agent-runtime/status-agent";
 
 function sanitizedStatusDetail(error: unknown): string {
   const raw = error instanceof Error && error.message ? error.message : String(error);
@@ -440,6 +419,22 @@ export async function collectSandboxStatusSnapshot(
       return entry && registry.isPublishedSandboxRegistration(entry) ? entry : null;
     });
   const sb = getSandbox(sandboxName);
+  const statusAgent = resolveSandboxStatusAgent(
+    sb,
+    opts.deps?.resolveSandboxAgentImpl
+      ? { resolveSandboxAgentImpl: opts.deps.resolveSandboxAgentImpl }
+      : {},
+  );
+  const receiptBackedAgent = hasHarnessPackageAuthority(sb);
+  const receiptBackedAgentInvalid = receiptBackedAgent && statusAgent.agentRuntime === "unknown";
+  const observedAgentName = receiptBackedAgent
+    ? (statusAgent.agentDefinition?.name ?? null)
+    : (sb?.agent ?? null);
+  const inferenceProbeAgentName = receiptBackedAgent
+    ? observedAgentName
+    : sb?.agent === "langchain-deepagents-code"
+      ? sb.agent
+      : null;
   let lookup: SandboxGatewayState;
   try {
     lookup = await reconcile(sandboxName);
@@ -451,23 +446,26 @@ export async function collectSandboxStatusSnapshot(
     };
   }
   const dockerRecovered = lookup.recoveredSandbox === true;
-  const managedOpenClawDeliveryMustBeProven =
+  const managedAgentDeliveryMustBeProven =
     lookup.state === "present" &&
     sb !== null &&
     usesManagedProviderGateway(sb) &&
-    (sb.agent ?? "openclaw") === "openclaw" &&
+    statusAgent.agentRuntime === "gateway" &&
+    (receiptBackedAgent || (sb.agent ?? "openclaw") === "openclaw") &&
     lookup.phase === "Ready" &&
     !opts.preflight?.failure;
   let recoveredManagedGateway = false;
   if (
     lookup.state === "present" &&
-    (lookup.recoveredSandbox || managedOpenClawDeliveryMustBeProven)
+    !receiptBackedAgentInvalid &&
+    (lookup.recoveredSandbox || managedAgentDeliveryMustBeProven)
   ) {
     let failure: SandboxProcessRecoveryFailure | null;
     try {
       // The managed gateway service can restart a Docker sandbox before status
       // runs. OpenShell then reports Ready without a recoveredSandbox marker,
-      // while the OpenClaw gateway and host forward can still be absent.
+      // while the package-declared gateway and host forward can still be
+      // absent.
       const recovery = (opts.deps?.recoverSandboxProcesses ?? loadRecoverSandboxProcesses())(
         sandboxName,
         {
@@ -502,8 +500,9 @@ export async function collectSandboxStatusSnapshot(
         )
       : undefined;
   const suppressInferenceProbe =
-    (postRecoveryPreflight ?? opts.preflight)?.suppressInferenceProbe ??
-    opts.suppressInferenceProbe === true;
+    ((postRecoveryPreflight ?? opts.preflight)?.suppressInferenceProbe ??
+      opts.suppressInferenceProbe === true) ||
+    receiptBackedAgentInvalid;
   let liveResult: Awaited<ReturnType<typeof captureOpenshellForStatus>> | null = null;
   let gatewayName: string | null = null;
   if (lookup.state === "present") {
@@ -522,6 +521,7 @@ export async function collectSandboxStatusSnapshot(
   if (rpcIssue) {
     return {
       sb,
+      statusAgent,
       lookup,
       rpcIssue,
       currentModel: (sb && sb.model) || "unknown",
@@ -635,7 +635,7 @@ export async function collectSandboxStatusSnapshot(
                   {
                     sandboxName,
                     gatewayName: gatewayName ?? undefined,
-                    ...(sb?.agent === "langchain-deepagents-code" ? { agentName: sb.agent } : {}),
+                    ...(inferenceProbeAgentName ? { agentName: inferenceProbeAgentName } : {}),
                     provider: invocationProvider,
                     model: invocationModel,
                     preferredInferenceApi: invocationRoute.preferredInferenceApi,
@@ -684,11 +684,10 @@ export async function collectSandboxStatusSnapshot(
       invocation = null;
     }
     inferenceHealth = buildSandboxInferenceRouteHealth(gatewayChain, providerHealth, invocation, {
-      agentName: sb?.agent ?? null,
+      agentName: observedAgentName,
       provider: invocationRoute.provider ?? null,
     });
   }
-  const statusAgent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
   const terminalRuntimeHealth =
     lookup.state === "present" && statusAgent.agentRuntime === "terminal"
       ? (opts.deps?.probeTerminalRuntimeHealth ?? probeTerminalRuntimeCgroupOom)(sandboxName)
@@ -702,6 +701,7 @@ export async function collectSandboxStatusSnapshot(
       : null;
   return {
     sb,
+    statusAgent,
     lookup,
     rpcIssue,
     currentModel,
@@ -769,7 +769,12 @@ async function buildSandboxStatusReport(
   const sandboxGpuEnabled = sb ? (sb.sandboxGpuEnabled ?? sb.gpuEnabled === true) : false;
   const hostMounts = normalizeSandboxStatusHostMounts(sb?.hostMounts);
   const livePolicies = sb ? (deps.getGatewayPresets ?? getGatewayPresets)(sandboxName) : [];
-  const agent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
+  const agent =
+    snapshot.statusAgent ??
+    resolveSandboxStatusAgent(
+      sb,
+      deps.resolveSandboxAgentImpl ? { resolveSandboxAgentImpl: deps.resolveSandboxAgentImpl } : {},
+    );
   return {
     schemaVersion: 1,
     name: sandboxName,

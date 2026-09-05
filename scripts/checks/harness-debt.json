@@ -50,7 +50,7 @@
     ["src/lib/actions/sandbox/process-recovery.ts","checkAndRecoverSandboxProcessesWithoutHostLock","equality","openclaw",1],
     ["src/lib/actions/sandbox/start.ts","checkStartedSandboxInference","equality","langchain-deepagents-code",1],
     ["src/lib/actions/sandbox/status-snapshot.ts","resolveSandboxStatusDcodeAutoApprovalMode","equality","langchain-deepagents-code",1],
-    ["src/lib/actions/sandbox/status-snapshot.ts","resolveSandboxStatusAgent","equality","openclaw",3],
+    ["src/lib/agent-runtime/status-agent.ts","resolveSandboxStatusAgent","equality","openclaw",3],
     ["src/lib/actions/sandbox/status-snapshot.ts","collectSandboxStatusSnapshot","equality","openclaw",1],
     ["src/lib/actions/sandbox/status-snapshot.ts","collectSandboxStatusSnapshot","equality","langchain-deepagents-code",1],
     ["src/lib/actions/sandbox/status.ts","inspectHermesPortableStatus","equality","hermes",1],

@@ -78,6 +78,34 @@ function snapshotDeps(recoveryResult: unknown) {
   };
 }
 
+function futurePackageStatusEntry(runtimeKind: "gateway" | "terminal") {
+  const agentName = `future-${runtimeKind}`;
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: agentName,
+    packageVersion: "4.5.6",
+    contentDigest: (runtimeKind === "gateway" ? "c" : "d").repeat(64),
+  };
+  const entry: SandboxEntry = {
+    ...sandbox,
+    agent: agentName,
+    harnessPackage,
+  };
+  const selectedAgent = {
+    recordedAgent: agentName,
+    effectiveAgentId: agentName,
+    definition: {
+      name: agentName,
+      displayName: `Future ${runtimeKind}`,
+      packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+      runtime: { kind: runtimeKind },
+    },
+    harnessPackage,
+    harnessPackageMigration: null,
+  };
+  return { entry, selectedAgent };
+}
+
 describe("collectSandboxStatusSnapshot Docker recovery", () => {
   it("recovers the delivery chain when OpenShell already reports the restarted container (#7824)", async () => {
     const deps = {
@@ -99,6 +127,109 @@ describe("collectSandboxStatusSnapshot Docker recovery", () => {
 
     expect(deps.recoverSandboxProcesses).toHaveBeenCalledWith("alpha", { quiet: true });
     expect(snapshot.lookup.state).toBe("present");
+  });
+
+  it("proves markerless delivery for a receipt-backed future gateway", async () => {
+    const fixture = futurePackageStatusEntry("gateway");
+    const deps = {
+      ...snapshotDeps({
+        checked: true,
+        wasRunning: true,
+        recovered: false,
+        forwardRecovered: true,
+      }),
+      getSandbox: () => fixture.entry,
+      reconcile: () =>
+        Promise.resolve({
+          state: "present" as const,
+          phase: "Ready",
+          output: "Phase: Ready",
+        }),
+      resolveSandboxAgentImpl: vi.fn(() => fixture.selectedAgent) as never,
+    };
+
+    const snapshot = await collectSandboxStatusSnapshot("alpha", {
+      suppressInferenceProbe: true,
+      deps,
+    });
+
+    expect(deps.recoverSandboxProcesses).toHaveBeenCalledWith("alpha", { quiet: true });
+    expect(snapshot.statusAgent).toMatchObject({
+      agentName: "future-gateway",
+      agentRuntime: "gateway",
+    });
+    expect(snapshot.servingProcessHealth).toEqual({ checked: false });
+    expect(snapshot.terminalRuntimeHealth).toBeNull();
+  });
+
+  it("keeps a receipt-backed future terminal out of markerless gateway recovery", async () => {
+    const fixture = futurePackageStatusEntry("terminal");
+    const probeTerminalRuntimeHealth = vi.fn(() => ({
+      kind: "ok" as const,
+      oomKillCount: 0 as const,
+    }));
+    const deps = {
+      ...snapshotDeps({
+        checked: true,
+        wasRunning: false,
+        recovered: false,
+        forwardRecovered: false,
+      }),
+      getSandbox: () => fixture.entry,
+      reconcile: () =>
+        Promise.resolve({
+          state: "present" as const,
+          phase: "Ready",
+          output: "Phase: Ready",
+        }),
+      probeTerminalRuntimeHealth,
+      resolveSandboxAgentImpl: vi.fn(() => fixture.selectedAgent) as never,
+    };
+
+    const snapshot = await collectSandboxStatusSnapshot("alpha", {
+      suppressInferenceProbe: true,
+      deps,
+    });
+
+    expect(deps.recoverSandboxProcesses).not.toHaveBeenCalled();
+    expect(probeTerminalRuntimeHealth).toHaveBeenCalledWith("alpha");
+    expect(snapshot.terminalRuntimeHealth).toEqual({ kind: "ok", oomKillCount: 0 });
+    expect(snapshot.servingProcessHealth).toBeNull();
+    expect(snapshot.statusAgent).toMatchObject({
+      agentName: "future-terminal",
+      agentRuntime: "terminal",
+    });
+  });
+
+  it("does not recover or probe when receipt-backed status authority disagrees", async () => {
+    const fixture = futurePackageStatusEntry("gateway");
+    const deps = {
+      ...snapshotDeps({
+        checked: true,
+        wasRunning: false,
+        recovered: false,
+        forwardRecovered: false,
+      }),
+      getSandbox: () => fixture.entry,
+      resolveSandboxAgentImpl: vi.fn(() => ({
+        ...fixture.selectedAgent,
+        definition: { ...fixture.selectedAgent.definition, name: "different-gateway" },
+      })) as never,
+    };
+
+    const snapshot = await collectSandboxStatusSnapshot("alpha", { deps });
+
+    expect(deps.recoverSandboxProcesses).not.toHaveBeenCalled();
+    expect(deps.probeProviderHealthImpl).not.toHaveBeenCalled();
+    expect(deps.probeSandboxInferenceGatewayHealthImpl).not.toHaveBeenCalled();
+    expect(snapshot.inferenceHealth).toBeNull();
+    expect(snapshot.terminalRuntimeHealth).toBeNull();
+    expect(snapshot.servingProcessHealth).toBeNull();
+    expect(snapshot.statusAgent).toMatchObject({
+      agentName: "future-gateway",
+      agentRuntime: "unknown",
+      agentLoadError: expect.stringContaining("does not match the sandbox package receipt"),
+    });
   });
 
   it("fails closed when the visible restarted container cannot recover OpenClaw (#7824)", async () => {

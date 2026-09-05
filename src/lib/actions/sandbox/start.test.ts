@@ -22,6 +22,36 @@ function sandbox(values: Partial<SandboxEntry> = {}): SandboxEntry {
   return { name: "my-sandbox", ...values };
 }
 
+function futurePackageStartFixture(runtimeKind: "gateway" | "terminal") {
+  const agentName = `future-${runtimeKind}`;
+  const harnessPackage = {
+    kind: "agent-runtime" as const,
+    id: agentName,
+    packageVersion: "4.5.6",
+    contentDigest: (runtimeKind === "gateway" ? "c" : "d").repeat(64),
+  };
+  const entry = sandbox({
+    agent: agentName,
+    gatewayName: "nemoclaw-19080",
+    harnessPackage,
+    model: "nvidia/nemotron",
+    provider: "nvidia",
+  });
+  const selectedAgent = {
+    recordedAgent: agentName,
+    effectiveAgentId: agentName,
+    definition: {
+      name: agentName,
+      displayName: `Future ${runtimeKind}`,
+      packageRoot: `/state/harnesses/objects/${harnessPackage.contentDigest}`,
+      runtime: { kind: runtimeKind },
+    },
+    harnessPackage,
+    harnessPackageMigration: null,
+  };
+  return { agentName, entry, selectedAgent };
+}
+
 const SUCCESSFUL_RECOVERY = {
   checked: true,
   wasRunning: true,
@@ -718,6 +748,76 @@ describe("startSandbox", () => {
     expect(probeInferenceInvocation.mock.invocationCallOrder[0]).toBeGreaterThan(
       h.verifyGateway.mock.invocationCallOrder[0],
     );
+  });
+
+  it.each(["gateway", "terminal"] as const)(
+    "uses the exact receipt-backed future %s definition for its start observation",
+    async (runtimeKind) => {
+      const fixture = futurePackageStartFixture(runtimeKind);
+      const probeInferenceInvocation = vi.fn(() => ({ ok: true }) as const);
+      const resolveSandboxAgent = vi.fn(() => fixture.selectedAgent);
+      const h = harness({
+        probeInferenceInvocation,
+        resolveSandboxAgent: resolveSandboxAgent as never,
+      });
+      h.getSandbox.mockReturnValue(fixture.entry);
+
+      await expect(startSandbox("my-sandbox", h.deps)).resolves.toEqual({ exitCode: 0 });
+
+      expect(resolveSandboxAgent).toHaveBeenCalledTimes(2);
+      expect(probeInferenceInvocation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentName: fixture.agentName,
+          gatewayName: "nemoclaw-19080",
+          sandboxName: "my-sandbox",
+        }),
+        {},
+        30_000,
+      );
+    },
+  );
+
+  it("refuses a receipt-backed start whose definition names another harness", async () => {
+    const fixture = futurePackageStartFixture("gateway");
+    const h = harness({
+      resolveSandboxAgent: vi.fn(() => ({
+        ...fixture.selectedAgent,
+        definition: { ...fixture.selectedAgent.definition, name: "different-gateway" },
+      })) as never,
+    });
+    h.getSandbox.mockReturnValue(fixture.entry);
+
+    const result = await startSandbox("my-sandbox", h.deps);
+
+    expect(result).toMatchObject({ exitCode: 1 });
+    expect(result.message).toContain("invalid harness package authority");
+    expect(h.recoverDockerDriverSandbox).not.toHaveBeenCalled();
+    expect(h.restoreStartupState).not.toHaveBeenCalled();
+  });
+
+  it("stops start observation when the package definition drifts after launch", async () => {
+    const fixture = futurePackageStartFixture("gateway");
+    const resolveSandboxAgent = vi
+      .fn()
+      .mockReturnValueOnce(fixture.selectedAgent)
+      .mockReturnValueOnce({
+        ...fixture.selectedAgent,
+        definition: { ...fixture.selectedAgent.definition, displayName: "Changed gateway" },
+      });
+    const probeInferenceInvocation = vi.fn(() => ({ ok: true }) as const);
+    const h = harness({
+      probeInferenceInvocation,
+      resolveSandboxAgent: resolveSandboxAgent as never,
+    });
+    h.getSandbox.mockReturnValue(fixture.entry);
+
+    await expect(startSandbox("my-sandbox", h.deps)).rejects.toThrow(
+      "package definition changed while the sandbox was starting",
+    );
+
+    expect(resolveSandboxAgent).toHaveBeenCalledTimes(2);
+    expect(h.restoreStartupState).not.toHaveBeenCalled();
+    expect(probeInferenceInvocation).not.toHaveBeenCalled();
   });
 
   it("pins a Hermes start probe to its recorded OpenShell gateway (#10302)", async () => {

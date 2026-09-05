@@ -201,7 +201,7 @@ async function showLegacySandboxStatus(sandboxName: string): Promise<void> {
     snapshot.postRecoveryPreflight ?? preflight,
     phase,
   );
-  const statusAgent = resolveSandboxStatusAgent(sb?.agent || "openclaw");
+  const statusAgent = snapshot.statusAgent ?? resolveSandboxStatusAgent(sb);
   printSandboxStatusPreflightHeader(effectivePreflight);
   if (effectivePreflight.exitCode !== 0) {
     process.exitCode = effectivePreflight.exitCode;
