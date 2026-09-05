@@ -10,6 +10,7 @@ filesystem_policy:
     - /opt/nemoclaw-fabric-venv
     - /lib
     - /proc
+    - /dev/urandom
     - /etc
     - /var/log
     - /var/lib/dpkg

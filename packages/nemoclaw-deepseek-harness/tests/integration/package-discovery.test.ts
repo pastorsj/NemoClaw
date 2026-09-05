@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createRequire } from "node:module";
+import fs from "node:fs";
 import path from "node:path";
 
 import { describe, expect, it } from "vitest";
+import YAML from "yaml";
 
 import { listBundledAgentRuntimeSources } from "../../../../scripts/build-harnesses.mts";
+import { prepareInitialSandboxCreatePolicy } from "../../../../src/lib/onboard/initial-policy.ts";
 import type { PublicFabricHarnessContract } from "../../../../test/e2e/live/public-fabric-turn.ts";
 import deepSeekFabricE2eContract from "../fixtures/live-contract.json";
 
@@ -46,5 +49,22 @@ describe("DeepSeek Harness package discovery", () => {
       adapterId: "nvidia.nemoclaw.deepseek-harness",
       descriptorRunnerModule: "nemoclaw_deepseek_fabric.adapter",
     });
+  });
+
+  it("keeps operating-system entropy readable after core prepares the strict policy", () => {
+    const prepared = prepareInitialSandboxCreatePolicy(
+      path.join(PACKAGE_ROOT, "policy-additions.yaml"),
+      [],
+      { agentName: "deepseek-harness" },
+    );
+    try {
+      const policy = YAML.parse(fs.readFileSync(prepared.policyPath, "utf8")) as {
+        filesystem_policy?: { read_only?: string[]; read_write?: string[] };
+      };
+      expect(policy.filesystem_policy?.read_only).toContain("/dev/urandom");
+      expect(policy.filesystem_policy?.read_write).not.toContain("/dev/urandom");
+    } finally {
+      prepared.cleanup?.();
+    }
   });
 });
