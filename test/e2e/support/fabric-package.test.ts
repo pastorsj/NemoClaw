@@ -124,6 +124,7 @@ describe("generic Fabric package E2E", () => {
       fixturePath: PACKAGE_CASES[1].fixture,
       packageArtifact: undefined,
       sandboxName: "external-haystack",
+      upgradePackageArtifact: undefined,
     });
     expect(loadFabricPackageTarget(options.fixturePath, options)).toMatchObject({
       contract: { packageId: "haystack-agent" },
@@ -157,7 +158,62 @@ describe("generic Fabric package E2E", () => {
     expect(readFabricPackageE2eTarget(fabricPackageE2eEnvironment(target))).toEqual(target);
   });
 
-  it.each(["missing", "file", "symlink"] as const)(
+  it("round-trips an explicit upgrade artifact without a package registry entry", () => {
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
+    temporaryDirectories.push(workingDirectory);
+    const packageArtifact = path.join(workingDirectory, "initial-package");
+    const upgradePackageArtifact = path.join(workingDirectory, "upgrade-package");
+    fs.mkdirSync(packageArtifact);
+    fs.mkdirSync(upgradePackageArtifact);
+    const options = parseFabricPackageCliOptions([
+      "run",
+      "--contract",
+      path.resolve(PACKAGE_CASES[0].fixture),
+      "--package-artifact",
+      packageArtifact,
+      "--upgrade-package-artifact",
+      upgradePackageArtifact,
+    ]);
+
+    const target = loadFabricPackageTarget(options.fixturePath, options);
+
+    expect(target).toMatchObject({ packageArtifact, upgradePackageArtifact });
+    expect(readFabricPackageE2eTarget(fabricPackageE2eEnvironment(target))).toEqual(target);
+  });
+
+  it("rejects one directory as both lifecycle revisions before starting the journey", () => {
+    const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
+    temporaryDirectories.push(workingDirectory);
+    const packageArtifact = path.join(workingDirectory, "package");
+    fs.mkdirSync(packageArtifact);
+
+    expect(() =>
+      loadFabricPackageTarget(path.resolve(PACKAGE_CASES[0].fixture), {
+        packageArtifact,
+        upgradePackageArtifact: packageArtifact,
+      }),
+    ).toThrow(/different directories/u);
+  });
+
+  it.each(["package", "upgrade"] as const)(
+    "rejects a missing %s artifact before starting the live journey",
+    (field) => {
+      const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));
+      temporaryDirectories.push(workingDirectory);
+      const artifactPath = path.join(workingDirectory, "package-artifact");
+
+      expect(() =>
+        loadFabricPackageTarget(path.resolve(PACKAGE_CASES[0].fixture), {
+          ...(field === "package"
+            ? { packageArtifact: artifactPath }
+            : { upgradePackageArtifact: artifactPath }),
+          workingDirectory,
+        }),
+      ).toThrow(/Fabric package artifact/u);
+    },
+  );
+
+  it.each(["file", "symlink"] as const)(
     "rejects a %s local package artifact before starting the live journey",
     (kind) => {
       const workingDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-package-"));

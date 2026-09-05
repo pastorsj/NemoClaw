@@ -21,6 +21,8 @@ export type PublicFabricLifecyclePhase =
   | "after-gateway-restart"
   | "after-inference-switch"
   | "after-onboard"
+  | "after-package-deactivation"
+  | "after-package-upgrade"
   | "after-rebuild"
   | "after-sandbox-restart"
   | "after-shields-down"

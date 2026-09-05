@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import path from "node:path";
 
 import { assertExitZero, outputContainsSandbox, resultText } from "../fixtures/clients/command.ts";
@@ -13,6 +14,12 @@ import {
   parseHarnessPackageIdentity,
   type HarnessPackageIdentity,
 } from "../fixtures/harness-package.ts";
+import {
+  prepareHarnessPackageUpgrade,
+  requireHarnessPackageActivation,
+  requireHarnessPackageDeactivation,
+  requireHarnessPackageUpgrade,
+} from "../fixtures/harness-lifecycle.ts";
 import { requireHostedInferenceConfig } from "../fixtures/hosted-inference.ts";
 import { readRegistrySandboxEntry } from "../fixtures/phases/index.ts";
 import {
@@ -28,7 +35,9 @@ const FABRIC_PACKAGE_PHASES = [
   "install and inspect the receipt-backed harness package",
   "onboard the package-owned sandbox",
   "run the public Fabric agent turn",
-  "restart the sandbox and repeat the Fabric turn",
+  "upgrade the active package while the sandbox stays pinned",
+  "roll back the active package receipt",
+  "deactivate the package and restart the pinned sandbox",
   "destroy the sandbox and verify absence",
   "record Fabric package journey evidence",
 ] as const;
@@ -94,7 +103,9 @@ test.skipIf(!hasFabricPackageE2eTarget())(
         "the public CLI installs and lists one exact receipt-backed harness package",
         "the installed package onboards from its package-owned Dockerfile",
         "the public agent command dispatches through the package-owned Fabric adapter",
-        "the package receipt and Fabric turn survive a sandbox stop and start",
+        "an active package upgrade does not change the existing sandbox receipt",
+        "the public CLI rolls back and deactivates the active package receipt",
+        "the pinned sandbox survives package deactivation and a stop-start cycle",
         "destroy removes the sandbox from NemoClaw and OpenShell inventory",
       ],
       adapterId: target.contract.adapterId,
@@ -116,11 +127,32 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       env,
       timeoutMs: COMMAND_TIMEOUT_MS,
     });
-    assertExitZero(initialInventory, "list initial isolated harness inventory");
     requireEmptyHarnessInventory(initialInventory.stdout);
     const installation = await installHarnessPackage(host, target.contract.packageId, env, {
       ...(target.packageArtifact ? { packageArtifact: target.packageArtifact } : {}),
     });
+    let preparedUpgrade: ReturnType<typeof prepareHarnessPackageUpgrade> | undefined;
+    let upgradePackageArtifact = target.upgradePackageArtifact;
+    if (upgradePackageArtifact === undefined) {
+      const installedPackageObject = path.join(
+        runtime.home,
+        ".nemoclaw",
+        "harnesses",
+        "objects",
+        "sha256",
+        installation.identity.contentDigest,
+      );
+      const prepared = prepareHarnessPackageUpgrade(
+        installedPackageObject,
+        path.join(runtime.home, "fabric-package-upgrade"),
+        target.contract.packageId,
+      );
+      preparedUpgrade = prepared;
+      upgradePackageArtifact = prepared.packageRoot;
+      cleanup.trackDisposable("remove derived Fabric package upgrade", () =>
+        fs.rmSync(prepared.packageRoot, { force: true, recursive: true }),
+      );
+    }
 
     progress.phase("onboard the package-owned sandbox");
     const onboard = await host.nemoclaw(
@@ -154,7 +186,76 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       sandboxName: target.sandboxName,
     });
 
-    progress.phase("restart the sandbox and repeat the Fabric turn");
+    progress.phase("upgrade the active package while the sandbox stays pinned");
+    const upgradeInstallation = await installHarnessPackage(host, target.contract.packageId, env, {
+      packageArtifact: upgradePackageArtifact,
+    });
+    requireHarnessPackageUpgrade(
+      installation.identity,
+      upgradeInstallation.identity,
+      preparedUpgrade?.packageVersion,
+    );
+    const upgradePinnedReceipt = requireRecordedPackageIdentity(
+      target.sandboxName,
+      installation.identity,
+      registryPath,
+    );
+    const upgradedTurn = await runPublicFabricTurn({
+      artifacts,
+      contract: target.contract,
+      env,
+      host,
+      lifecyclePhase: "after-package-upgrade",
+      redactionValues,
+      sandbox,
+      sandboxName: target.sandboxName,
+    });
+
+    progress.phase("roll back the active package receipt");
+    const rollback = await host.nemoclaw(
+      [
+        "harness",
+        "activate",
+        target.contract.packageId,
+        "--digest",
+        installation.identity.contentDigest,
+        "--json",
+      ],
+      {
+        artifactName: `fabric-${target.contract.packageId}-rollback-package`,
+        env,
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      },
+    );
+    const rollbackIdentity = requireHarnessPackageActivation(rollback, installation.identity);
+    const rollbackPinnedReceipt = requireRecordedPackageIdentity(
+      target.sandboxName,
+      installation.identity,
+      registryPath,
+    );
+
+    progress.phase("deactivate the package and restart the pinned sandbox");
+    const removal = await host.nemoclaw(
+      ["harness", "remove", target.contract.packageId, "--yes", "--json"],
+      {
+        artifactName: `fabric-${target.contract.packageId}-deactivate-package`,
+        env,
+        timeoutMs: COMMAND_TIMEOUT_MS,
+      },
+    );
+    const deactivatedIdentity = requireHarnessPackageDeactivation(removal, installation.identity);
+    const inactiveInventory = await host.nemoclaw(["harness", "list", "--json"], {
+      artifactName: `fabric-${target.contract.packageId}-inactive-harness-list`,
+      env,
+      timeoutMs: COMMAND_TIMEOUT_MS,
+    });
+    assertExitZero(inactiveInventory, "list inactive harness inventory");
+    requireEmptyHarnessInventory(inactiveInventory.stdout);
+    const deactivatedPinnedReceipt = requireRecordedPackageIdentity(
+      target.sandboxName,
+      installation.identity,
+      registryPath,
+    );
     const stop = await host.nemoclaw([target.sandboxName, "stop"], {
       artifactName: `fabric-${target.contract.packageId}-stop`,
       env,
@@ -181,7 +282,7 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       contract: target.contract,
       env,
       host,
-      lifecyclePhase: "after-sandbox-restart",
+      lifecyclePhase: "after-package-deactivation",
       redactionValues,
       sandbox,
       sandboxName: target.sandboxName,
@@ -216,9 +317,30 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       adapterId: target.contract.adapterId,
       installedIdentity: installation.identity,
       packageSource: target.packageArtifact ? "trusted-local-artifact" : "bundled",
-      lifecycle: ["onboard", "turn", "stop", "start", "turn", "destroy"],
+      upgradeIdentity: upgradeInstallation.identity,
+      upgradePackageSource: target.upgradePackageArtifact
+        ? "trusted-local-artifact"
+        : "derived-test-artifact",
+      lifecycle: [
+        "onboard",
+        "turn",
+        "upgrade",
+        "turn",
+        "rollback",
+        "deactivate",
+        "stop",
+        "start",
+        "turn",
+        "destroy",
+      ],
       onboardReceipt,
       onboardTurn,
+      upgradePinnedReceipt,
+      upgradedTurn,
+      rollbackIdentity,
+      rollbackPinnedReceipt,
+      deactivatedIdentity,
+      deactivatedPinnedReceipt,
       restartedReceipt,
       restartedTurn,
       sandboxAbsent: true,

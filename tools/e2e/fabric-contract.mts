@@ -30,6 +30,7 @@ const TARGET_ENVIRONMENT = {
   descriptorRunnerModule: "E2E_FABRIC_RUNNER_MODULE",
   packageId: "E2E_FABRIC_PACKAGE_ID",
   packageArtifact: "E2E_FABRIC_PACKAGE_ARTIFACT",
+  upgradePackageArtifact: "E2E_FABRIC_UPGRADE_PACKAGE_ARTIFACT",
   processMarkers: "E2E_FABRIC_PROCESS_MARKERS",
   sandboxName: "NEMOCLAW_SANDBOX_NAME",
 } as const;
@@ -48,6 +49,7 @@ export interface FabricHarnessE2eContract {
 export interface FabricPackageE2eTarget {
   readonly contract: FabricHarnessE2eContract;
   readonly packageArtifact?: string;
+  readonly upgradePackageArtifact?: string;
   readonly sandboxName: string;
 }
 
@@ -210,6 +212,13 @@ export function readFabricPackageE2eTarget(
           ),
         }
       : {}),
+    ...(environment[TARGET_ENVIRONMENT.upgradePackageArtifact]?.trim()
+      ? {
+          upgradePackageArtifact: validateFabricPackageArtifactPath(
+            requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.upgradePackageArtifact),
+          ),
+        }
+      : {}),
     sandboxName: validateFabricPackageSandboxName(
       requiredEnvironmentValue(environment, TARGET_ENVIRONMENT.sandboxName),
     ),
@@ -227,6 +236,13 @@ export function fabricPackageE2eEnvironment(
       ? {
           [TARGET_ENVIRONMENT.packageArtifact]: validateFabricPackageArtifactPath(
             target.packageArtifact,
+          ),
+        }
+      : {}),
+    ...(target.upgradePackageArtifact
+      ? {
+          [TARGET_ENVIRONMENT.upgradePackageArtifact]: validateFabricPackageArtifactPath(
+            target.upgradePackageArtifact,
           ),
         }
       : {}),

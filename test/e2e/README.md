@@ -8,6 +8,24 @@ Direct E2E coverage runs through Vitest.
 Interactive TUI targets require `expect`. The unified workflow installs it
 before those targets run; local runners must provide it themselves.
 
+## External Fabric package lifecycle
+
+An external harness repository can run the generic package journey with its package-owned contract
+and built artifact:
+
+```bash
+npx tsx tools/e2e/fabric-package.mts run \
+  --contract /path/to/live-contract.json \
+  --package-artifact /path/to/nemoclaw-example
+```
+
+The journey installs and onboards the artifact once. It derives a test-only package revision from
+the validated immutable object, installs that revision, verifies the existing sandbox receipt,
+rolls back, deactivates the package, and restarts the same pinned sandbox. The public package
+installer validates both artifact trees.
+Pass `--upgrade-package-artifact /path/to/nemoclaw-example-next` to test two release artifacts instead
+of the derived revision.
+
 - `.github/workflows/e2e.yaml` compares the commits before and after each push to `main`.
   It selects targets and jobs that own changed files, then publishes the `Relevant E2E` check.
   It also supports trusted manual dispatches for the latest PR commit.

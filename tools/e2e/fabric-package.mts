@@ -84,28 +84,35 @@ export function loadFabricPackageTarget(
   options: {
     readonly packageArtifact?: string;
     readonly sandboxName?: string;
+    readonly upgradePackageArtifact?: string;
     readonly workingDirectory?: string;
   } = {},
 ): FabricPackageE2eTarget {
   const workingDirectory = options.workingDirectory ?? process.cwd();
   const contract = readFabricHarnessE2eFixture(fixturePath, workingDirectory);
-  const packageArtifact = options.packageArtifact
-    ? validateFabricPackageArtifactPath(path.resolve(workingDirectory, options.packageArtifact))
-    : undefined;
-  if (packageArtifact) {
+  const resolveArtifact = (candidate: string | undefined): string | undefined => {
+    if (!candidate) return undefined;
+    const artifact = validateFabricPackageArtifactPath(path.resolve(workingDirectory, candidate));
     let metadata: fs.Stats;
     try {
-      metadata = fs.lstatSync(packageArtifact);
+      metadata = fs.lstatSync(artifact);
     } catch {
       throw new Error("Fabric package artifact must be an existing directory");
     }
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
       throw new Error("Fabric package artifact must be a directory without symbolic links");
     }
+    return artifact;
+  };
+  const packageArtifact = resolveArtifact(options.packageArtifact);
+  const upgradePackageArtifact = resolveArtifact(options.upgradePackageArtifact);
+  if (packageArtifact && upgradePackageArtifact && packageArtifact === upgradePackageArtifact) {
+    throw new Error("Fabric package lifecycle artifacts must use different directories");
   }
   return Object.freeze({
     contract,
     ...(packageArtifact ? { packageArtifact } : {}),
+    ...(upgradePackageArtifact ? { upgradePackageArtifact } : {}),
     sandboxName: validateFabricPackageSandboxName(
       options.sandboxName ?? defaultFabricPackageSandboxName(contract.packageId),
     ),
@@ -158,25 +165,28 @@ export interface FabricPackageCliOptions {
   readonly fixturePath: string;
   readonly packageArtifact: string | undefined;
   readonly sandboxName: string | undefined;
+  readonly upgradePackageArtifact: string | undefined;
 }
+
+const FABRIC_PACKAGE_USAGE =
+  "Usage: fabric-package.mts run --contract <fixture.json> [--package-artifact <built-directory>] [--upgrade-package-artifact <built-directory>] [--sandbox-name <name>]";
 
 export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPackageCliOptions {
   if (argv[0] !== "run") {
-    throw new Error(
-      "Usage: fabric-package.mts run --contract <fixture.json> [--package-artifact <built-directory>] [--sandbox-name <name>]",
-    );
+    throw new Error(FABRIC_PACKAGE_USAGE);
   }
   const values = new Map<string, string>();
   for (let index = 1; index < argv.length; index += 2) {
     const option = argv[index];
     const value = argv[index + 1];
     if (
-      (option !== "--contract" && option !== "--package-artifact" && option !== "--sandbox-name") ||
+      (option !== "--contract" &&
+        option !== "--package-artifact" &&
+        option !== "--upgrade-package-artifact" &&
+        option !== "--sandbox-name") ||
       !value
     ) {
-      throw new Error(
-        "Usage: fabric-package.mts run --contract <fixture.json> [--package-artifact <built-directory>] [--sandbox-name <name>]",
-      );
+      throw new Error(FABRIC_PACKAGE_USAGE);
     }
     if (values.has(option)) throw new Error(`${option} must not be repeated`);
     values.set(option, value);
@@ -187,6 +197,7 @@ export function parseFabricPackageCliOptions(argv: readonly string[]): FabricPac
     fixturePath,
     packageArtifact: values.get("--package-artifact"),
     sandboxName: values.get("--sandbox-name"),
+    upgradePackageArtifact: values.get("--upgrade-package-artifact"),
   };
 }
 
@@ -195,6 +206,9 @@ export async function runFabricPackageJourney(options: FabricPackageCliOptions):
   const target = loadFabricPackageTarget(options.fixturePath, {
     ...(options.packageArtifact ? { packageArtifact: options.packageArtifact } : {}),
     ...(options.sandboxName ? { sandboxName: options.sandboxName } : {}),
+    ...(options.upgradePackageArtifact
+      ? { upgradePackageArtifact: options.upgradePackageArtifact }
+      : {}),
   });
   Object.assign(process.env, fabricPackageJourneyEnvironment(target));
   process.env.NEMOCLAW_CLI_BIN ??= path.join(FABRIC_PACKAGE_REPOSITORY_ROOT, "bin/nemoclaw.js");
