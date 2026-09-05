@@ -7,14 +7,16 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "build:adapters": "nemoclaw-build-adapters .",
+    "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
     "test:fabric": "bash tests/fabric/run-tests.sh",
     "test:fabric:composed": "bash tests/fabric/run-tests.sh composed",
-    "test:package": "vitest run --config vitest.config.ts",
+    "test:package": "npm run check:adapters && vitest run --config vitest.config.ts",
     "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts && npm run test:fabric:composed",
     "test:spec": "vitest run --config vitest.config.ts --reporter=tree && vitest run --config vitest.nemoclaw.ts --reporter=tree",
     "test:watch": "vitest watch --config vitest.config.ts",
     "test": "npm run test:package && npm run test:nemoclaw",
-    "typecheck": "tsc -p tsconfig.test.json"
+    "typecheck": "tsc -p tsconfig.test.json && tsc -p tsconfig.adapters.json"
   },
   "files": [
     "Dockerfile",
@@ -39,6 +41,7 @@
     "node": ">=22.19.0"
   },
   "devDependencies": {
+    "@nvidia/nemoclaw-harness-contract": "^0.1.0",
     "@types/node": "^25.5.2",
     "typescript": "6.0.3",
     "vitest": "^4.1.9"
