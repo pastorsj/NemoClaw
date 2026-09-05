@@ -167,6 +167,80 @@ describe("CLI layer import boundaries (#6245)", () => {
     ).toEqual([]);
   });
 
+  it("blocks exact harness decisions after package authority is resolved", () => {
+    const fixture = fixturePath("src/lib", "receipt-harness-branch");
+    const authority = path
+      .relative(
+        path.dirname(fixture),
+        path.join(REPO_ROOT, "src/lib/onboard/package/package-authority"),
+      )
+      .split(path.sep)
+      .join("/");
+    const specifier = authority.startsWith(".") ? authority : `./${authority}`;
+    const violations = scanFixture(
+      fixture,
+      `import { resolvePackageBackedSandboxAgent } from ${JSON.stringify(specifier)};\n` +
+        `export function decide(entry: Parameters<typeof resolvePackageBackedSandboxAgent>[0]) {\n` +
+        `  const resolved = resolvePackageBackedSandboxAgent(entry);\n` +
+        `  return resolved.definition.name === "pi";\n` +
+        `}\n`,
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({
+        rule: "receipt-backed-harness-neutrality",
+        detail: expect.stringContaining("package ID 'pi'"),
+      }),
+    ]);
+  });
+
+  it("blocks inline harness membership decisions after package authority is resolved", () => {
+    const fixture = fixturePath("src/lib", "receipt-harness-membership");
+    const authority = path
+      .relative(path.dirname(fixture), path.join(REPO_ROOT, "src/lib/sandbox/command-agent"))
+      .split(path.sep)
+      .join("/");
+    const specifier = authority.startsWith(".") ? authority : `./${authority}`;
+    const violations = scanFixture(
+      fixture,
+      `import { resolveSandboxCommandAgent } from ${JSON.stringify(specifier)};\n` +
+        `export function decide(entry: Parameters<typeof resolveSandboxCommandAgent>[0]) {\n` +
+        `  return ["openclaw", "hermes"].includes(resolveSandboxCommandAgent(entry).name);\n` +
+        `}\n`,
+    );
+
+    expect(violations).toEqual([
+      expect.objectContaining({ rule: "receipt-backed-harness-neutrality" }),
+      expect.objectContaining({ rule: "receipt-backed-harness-neutrality" }),
+    ]);
+  });
+
+  it("allows package IDs in catalogue code that does not consume package authority", () => {
+    expect(
+      scanFixture(
+        fixturePath("src/lib", "catalogue-harness-ids"),
+        'export const qualifiedHarnesses = new Set(["openclaw", "pi"]);\n',
+      ),
+    ).toEqual([]);
+  });
+
+  it("allows package IDs in non-decision diagnostics beside package authority", () => {
+    const fixture = fixturePath("src/lib", "receipt-harness-diagnostic");
+    const authority = path
+      .relative(path.dirname(fixture), path.join(REPO_ROOT, "src/lib/sandbox/command-agent"))
+      .split(path.sep)
+      .join("/");
+    const specifier = authority.startsWith(".") ? authority : `./${authority}`;
+    expect(
+      scanFixture(
+        fixture,
+        `import { resolveSandboxCommandAgent } from ${JSON.stringify(specifier)};\n` +
+          'export const migrationNote = "openclaw is a legacy example";\n' +
+          "export { resolveSandboxCommandAgent };\n",
+      ),
+    ).toEqual([]);
+  });
+
   it("collects TypeScript import-equals references (#6245)", () => {
     const violations = scanFixture(
       fixturePath("src/lib/domain", "import-equals"),

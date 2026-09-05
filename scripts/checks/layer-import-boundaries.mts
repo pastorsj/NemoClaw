@@ -81,6 +81,23 @@ const HARNESS_AGNOSTIC_RUNTIME_PREFIXES = [
 // This module translates pre-contract registry records. Keep the exception visible until the
 // compatibility reader can be removed; new package authority must stay package-ID agnostic.
 const LEGACY_HARNESS_ID_MODULES = new Set(["src/lib/agent-runtime/package/identity.ts"]);
+const PACKAGE_AUTHORITY_MODULES = new Set([
+  "src/lib/onboard/package/package-authority.ts",
+  "src/lib/sandbox/command-agent.ts",
+]);
+// These modules explicitly decode records written before package receipts existed. Keep the
+// compatibility ownership narrow; catalogue, qualification, and display modules do not need an
+// exception because the receipt-backed rule only applies to package-authority consumers.
+const RECEIPT_HARNESS_ID_COMPATIBILITY_MODULES = new Set([
+  // Existing passthrough translation retains native OpenClaw argv compatibility until its package
+  // adapter migration; this is the named legacy decoder, not a general actions-layer exception.
+  "src/lib/actions/sandbox/agent/passthrough.ts",
+  "src/lib/agent-runtime/package/identity.ts",
+  "src/lib/onboard/package/package-authority.ts",
+  // Sandbox creation owns product qualification and migration from pre-receipt onboarding rows.
+  "src/lib/onboard/sandbox-create/orchestration.ts",
+  "src/lib/state/harness-migration.ts",
+]);
 
 function toRepoPath(absPath: string): string {
   return path.relative(REPO_ROOT, absPath).split(path.sep).join("/");
@@ -294,6 +311,65 @@ function checkHarnessAgnosticRuntimeModule(
         "harness-contract-neutrality",
         `generic harness contract code must not encode package ID '${node.text}'`,
       );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+}
+
+function checkReceiptBackedHarnessBranch(
+  absPath: string,
+  repoPath: string,
+  sourceFile: ts.SourceFile,
+  imports: readonly ImportRef[],
+  packageIds: ReadonlySet<string>,
+  violations: Violation[],
+): void {
+  if (RECEIPT_HARNESS_ID_COMPATIBILITY_MODULES.has(repoPath)) return;
+  const consumesPackageAuthority = imports.some((ref) => {
+    const target = resolveInternalImport(absPath, ref.specifier);
+    return target !== null && PACKAGE_AUTHORITY_MODULES.has(target);
+  });
+  if (!consumesPackageAuthority) return;
+
+  const isEqualityOperator = (kind: ts.SyntaxKind): boolean =>
+    kind === ts.SyntaxKind.EqualsEqualsToken ||
+    kind === ts.SyntaxKind.ExclamationEqualsToken ||
+    kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+    kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+  const isExactPackageId = (node: ts.Node): node is ts.StringLiteralLike =>
+    ts.isStringLiteralLike(node) && packageIds.has(node.text);
+  const report = (node: ts.StringLiteralLike): void => {
+    const pos = position(sourceFile, node);
+    addViolation(
+      violations,
+      repoPath,
+      pos.line,
+      pos.column,
+      "receipt-backed-harness-neutrality",
+      `receipt-backed production code must use package metadata instead of branching on package ID '${node.text}'`,
+    );
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isBinaryExpression(node) &&
+      isEqualityOperator(node.operatorToken.kind) &&
+      (isExactPackageId(node.left) || isExactPackageId(node.right))
+    ) {
+      if (isExactPackageId(node.left)) report(node.left);
+      if (isExactPackageId(node.right)) report(node.right);
+    } else if (ts.isCaseClause(node) && isExactPackageId(node.expression)) {
+      report(node.expression);
+    } else if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === "includes" &&
+      ts.isArrayLiteralExpression(node.expression.expression)
+    ) {
+      for (const element of node.expression.expression.elements) {
+        if (isExactPackageId(element)) report(element);
+      }
     }
     ts.forEachChild(node, visit);
   };
@@ -673,6 +749,7 @@ export function findLayerImportBoundaryViolations(
       violations,
     );
     checkHarnessAgnosticRuntimeModule(repoPath, sourceFile, packageIds, violations);
+    checkReceiptBackedHarnessBranch(absPath, repoPath, sourceFile, imports, packageIds, violations);
     if (!domainFile && !actionFile && !adapterFile && !messagingManifestFile && !commandFile) {
       checkNoBinLibShimImport(absPath, repoPath, collectPreprocessedImportRefs(source), violations);
       continue;
