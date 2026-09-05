@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -57,12 +56,8 @@ import {
 import {
   applyManagedStartupImageProfile,
   applyManagedStartupRootRequest,
-  buildHermesManagedConfigHash,
   buildManagedStartupImageActionPlan,
-  buildOpenClawManagedConfigHash,
-  installHermesManagedPolicy,
   MANAGED_STARTUP_PROFILE_ENV,
-  normalizeHermesManagedConfigDescriptor,
   type ManagedStartupImageActionPlanInput,
   main as mainManagedStartupImageRuntime,
 } from "./managed-startup/image-runtime";
@@ -97,12 +92,31 @@ function actionInput(
             runAs: "sandbox" as const,
           },
         ];
+  const sealActions =
+    agent === "openclaw"
+      ? [
+          {
+            kind: "seal-config" as const,
+            runAs: "sandbox" as const,
+            committedReplay: "skip" as const,
+          },
+        ]
+      : agent === "hermes"
+        ? [
+            {
+              kind: "seal-config" as const,
+              runAs: "root" as const,
+              committedReplay: "run" as const,
+            },
+          ]
+        : [];
   return {
     agent,
     actions: [
       ...messagingActions.slice(0, 1),
       { kind: "generate-config", runAs: "sandbox" },
       ...messagingActions.slice(1),
+      ...sealActions,
     ],
   };
 }
@@ -117,6 +131,7 @@ describe("buildManagedStartupImageActionPlan", () => {
         { action: "messaging-runtime-setup", runAs: "root" },
         { action: "generate-agent-config", runAs: "sandbox" },
         { action: "messaging-post-agent-install", runAs: "sandbox" },
+        { action: "seal-config", runAs: agent === "openclaw" ? "sandbox" : "root" },
       ]);
       expect(plan[0]?.argv).toContain("runtime-setup");
       expect(plan[0]?.argv).toContain("apply");
@@ -124,6 +139,7 @@ describe("buildManagedStartupImageActionPlan", () => {
       expect(plan[2]?.argv).toContain("post-agent-install");
       expect(plan[2]?.argv).toContain("apply");
       expect(plan[2]?.argv).toContain("--managed-startup-runtime");
+      expect(plan[3]?.argv).toEqual(["/usr/local/lib/nemoclaw/seal-config"]);
       expect(
         plan.some((command) =>
           command.argv.some((argument) => /^(?:npm|npx|pip|pip3|uv)$/u.test(argument)),
@@ -203,6 +219,27 @@ describe("buildManagedStartupImageActionPlan", () => {
         actions: [...actionInput("openclaw").actions.slice(1), actionInput("openclaw").actions[0]],
       },
       /not in the required construction order/,
+    ],
+    [
+      "out-of-order config seal",
+      {
+        ...actionInput("openclaw"),
+        actions: [
+          actionInput("openclaw").actions.at(-1),
+          ...actionInput("openclaw").actions.slice(0, -1),
+        ],
+      },
+      /not in the required construction order/,
+    ],
+    [
+      "ambiguous config seal replay",
+      {
+        ...actionInput("hermes"),
+        actions: actionInput("hermes").actions.map((action) =>
+          action.kind === "seal-config" ? { ...action, committedReplay: "sometimes" } : action,
+        ),
+      },
+      /config sealing replay behavior is invalid/,
     ],
     [
       "root config generation",
@@ -285,79 +322,12 @@ describe("buildManagedStartupImageActionPlan", () => {
 });
 
 describe("managed startup image runtime", () => {
-  const policyTemporaryDirectories: string[] = [];
-
-  function temporaryPolicyDirectory(): string {
-    const directory = fs.mkdtempSync(path.join(process.env.TMPDIR!, "nemoclaw-managed-policy-"));
-    policyTemporaryDirectories.push(directory);
-    return directory;
-  }
-
   beforeEach(() => {
     childProcessMock.spawnSync.mockReset().mockReturnValue({ error: undefined, status: 0 });
     coordinatorMock.coordinateManagedStartupApplication.mockReset();
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    for (const directory of policyTemporaryDirectories.splice(0)) {
-      fs.rmSync(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("builds the Hermes integrity seal from every generated configuration input", () => {
-    const config = Buffer.from("model: test\n");
-    const env = Buffer.from("HERMES_HOME=/sandbox/.hermes\n");
-    const fabric = Buffer.from('{"endpoint":"https://example.test"}\n');
-    const mcpDigest = "d".repeat(64);
-
-    expect(buildHermesManagedConfigHash(config, env, fabric, mcpDigest)).toBe(
-      [
-        `${createHash("sha256").update(config).digest("hex")}  /sandbox/.hermes/config.yaml`,
-        `${createHash("sha256").update(env).digest("hex")}  /sandbox/.hermes/.env`,
-        `${createHash("sha256").update(fabric).digest("hex")}  /sandbox/.hermes/fabric.json`,
-        `# nemoclaw-hermes-mcp-state-v1 intended=${mcpDigest} applied=${mcpDigest}`,
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("builds the OpenClaw integrity seal from its runtime and Fabric configuration", () => {
-    const config = Buffer.from('{"agents":{}}\n');
-    const fabric = Buffer.from('{"endpoint":"https://example.test"}\n');
-
-    expect(buildOpenClawManagedConfigHash(config, fabric)).toBe(
-      `${createHash("sha256").update(config).digest("hex")}  openclaw.json\n` +
-        `${createHash("sha256").update(fabric).digest("hex")}  fabric.json\n`,
-    );
-  });
-
-  it("keeps Hermes Fabric credentials private while normalizing other generated config", () => {
-    const directory = temporaryPolicyDirectory();
-    const config = path.join(directory, "config.yaml");
-    const fabric = path.join(directory, "fabric.json");
-    fs.writeFileSync(config, "model: test\n", { mode: 0o600 });
-    fs.writeFileSync(fabric, "{}\n", { mode: 0o600 });
-
-    const realFstatSync = fs.fstatSync.bind(fs);
-    const realLstatSync = fs.lstatSync.bind(fs);
-    const sandboxOwned = (stat: fs.BigIntStats): fs.BigIntStats =>
-      new Proxy(stat, {
-        get(inner, property) {
-          const value =
-            property === "uid" || property === "gid" ? 1000n : Reflect.get(inner, property);
-          return typeof value === "function" ? value.bind(inner) : value;
-        },
-      });
-    vi.spyOn(fs, "fstatSync").mockImplementation(((descriptor: number) =>
-      sandboxOwned(realFstatSync(descriptor, { bigint: true }))) as typeof fs.fstatSync);
-    vi.spyOn(fs, "lstatSync").mockImplementation(((target: fs.PathLike) =>
-      sandboxOwned(realLstatSync(target, { bigint: true }))) as typeof fs.lstatSync);
-
-    normalizeHermesManagedConfigDescriptor(config, { uid: 1000, gid: 1000 });
-    normalizeHermesManagedConfigDescriptor(fabric, { uid: 1000, gid: 1000 }, 0o600);
-
-    expect(fs.statSync(config).mode & 0o777).toBe(0o640);
-    expect(fs.statSync(fabric).mode & 0o777).toBe(0o600);
   });
 
   it("verifies copied transaction status only through a read-only receipt mount", async () => {
@@ -392,70 +362,6 @@ describe("managed startup image runtime", () => {
       { readOnlyReceipt: true },
     );
     expect(write).toHaveBeenCalledWith("pending\n");
-  });
-
-  function mockRootOwnedPolicyInstallPaths(
-    source: string,
-    shareDirectory: string,
-    target: string,
-    beforeSourceCleanup?: () => void,
-  ): void {
-    const realLstatSync = fs.lstatSync.bind(fs);
-    const rootOwned = (stat: fs.Stats): fs.Stats =>
-      new Proxy(stat, {
-        get(inner, property) {
-          const value = property === "uid" || property === "gid" ? 0 : Reflect.get(inner, property);
-          return typeof value === "function" ? value.bind(inner) : value;
-        },
-      });
-    vi.spyOn(fs, "lstatSync").mockImplementation(((
-      file: fs.PathLike,
-      options?: { bigint?: boolean },
-    ) => {
-      const sourceCleanupHook =
-        file.toString() === source && options?.bigint === true ? beforeSourceCleanup : undefined;
-      sourceCleanupHook?.();
-      const stat = options?.bigint ? realLstatSync(file, { bigint: true }) : realLstatSync(file);
-      const rootPath = file.toString() === shareDirectory || file.toString() === target;
-      return rootPath && options?.bigint !== true ? rootOwned(stat as fs.Stats) : stat;
-    }) as typeof fs.lstatSync);
-    vi.spyOn(fs, "fchownSync").mockImplementation(() => undefined);
-  }
-
-  it("promotes generated Hermes policy to one root-owned, read-only runtime artifact", () => {
-    const directory = temporaryPolicyDirectory();
-    const shareDirectory = path.join(directory, "share");
-    const source = path.join(directory, "managed-policy.json");
-    const target = path.join(shareDirectory, "hermes-managed-policy.json");
-    const policy = '{"schema_version":1}\n';
-    fs.mkdirSync(shareDirectory);
-    fs.writeFileSync(source, policy, { mode: 0o600 });
-    mockRootOwnedPolicyInstallPaths(source, shareDirectory, target);
-
-    installHermesManagedPolicy(source, target);
-
-    expect(fs.existsSync(source)).toBe(false);
-    expect(fs.readFileSync(target, "utf8")).toBe(policy);
-    expect(fs.statSync(target).mode & 0o777).toBe(0o444);
-  });
-
-  it("preserves generated Hermes policy when it changes before source cleanup", () => {
-    const directory = temporaryPolicyDirectory();
-    const shareDirectory = path.join(directory, "share");
-    const source = path.join(directory, "managed-policy.json");
-    const target = path.join(shareDirectory, "hermes-managed-policy.json");
-    const policy = '{"schema_version":1}\n';
-    fs.mkdirSync(shareDirectory);
-    fs.writeFileSync(source, policy, { mode: 0o600 });
-    mockRootOwnedPolicyInstallPaths(source, shareDirectory, target, () => {
-      fs.appendFileSync(source, "changed\n");
-    });
-
-    expect(() => installHermesManagedPolicy(source, target)).toThrow(
-      /changed before source cleanup/u,
-    );
-    expect(fs.readFileSync(source, "utf8")).toBe(`${policy}changed\n`);
-    expect(fs.readFileSync(target, "utf8")).toBe(policy);
   });
 
   it("verifies a host-copied transaction only through the explicit read-only receipt mode", async () => {

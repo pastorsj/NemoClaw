@@ -17,7 +17,6 @@ import {
   applyManagedStartupCommandEnvironmentPlan,
   buildManagedStartupImageActionPlan,
   MANAGED_STARTUP_COMPLETION_SCHEMA_VERSION,
-  normalizeHermesManagedConfigDescriptor,
   readStableRegularFile,
   serializeManagedStartupCompletionMarker,
   serializeManagedStartupRuntimeEnvironment,
@@ -176,7 +175,12 @@ describe("managed startup image runtime handoff and descriptor integrity", () =>
       expect(plan.map(({ action }) => action)).toEqual(
         agent === "langchain-deepagents-code" || agent === "pi"
           ? ["generate-agent-config"]
-          : ["messaging-runtime-setup", "generate-agent-config", "messaging-post-agent-install"],
+          : [
+              "messaging-runtime-setup",
+              "generate-agent-config",
+              "messaging-post-agent-install",
+              "seal-config",
+            ],
       );
       expect(plan.some((command) => command.argv.includes("agent-install"))).toBe(false);
     },
@@ -601,89 +605,5 @@ describe("managed startup image runtime handoff and descriptor integrity", () =>
       .mockImplementation(realReadSync as typeof fs.readSync);
 
     expect(() => readStableRegularFile(target, 1024)).toThrow(/changed while it was read/u);
-  });
-
-  it("normalizes mutable sandbox-owned Hermes config descriptors to mode 0640", () => {
-    const directory = temporaryDirectory();
-    const target = path.join(directory, "config.yaml");
-    fs.writeFileSync(target, "model: managed\n", { mode: 0o600 });
-    mockDescriptorOwnership(501n, 20n);
-
-    normalizeHermesManagedConfigDescriptor(target, {
-      uid: 501,
-      gid: 20,
-    });
-
-    expect(fs.readFileSync(target, "utf8")).toBe("model: managed\n");
-    expect(fs.statSync(target).mode & 0o777).toBe(0o640);
-  });
-
-  it("rejects a root-owned read-only Hermes descriptor", () => {
-    const directory = temporaryDirectory();
-    const target = path.join(directory, ".env");
-    fs.writeFileSync(target, "OPENAI_API_KEY=managed\n", { mode: 0o444 });
-    mockDescriptorOwnership(0n, 0n);
-    expect(() =>
-      normalizeHermesManagedConfigDescriptor(target, {
-        uid: 501,
-        gid: 20,
-      }),
-    ).toThrow(/unexpected Hermes managed config descriptor/u);
-    expect(fs.readFileSync(target, "utf8")).toBe("OPENAI_API_KEY=managed\n");
-  });
-
-  it.each([0o440, 0o644, 0o660])("fails closed on unexpected mutable Hermes mode %s", (mode) => {
-    const directory = temporaryDirectory();
-    const target = path.join(directory, "config.yaml");
-    fs.writeFileSync(target, "model: managed\n", { mode });
-    fs.chmodSync(target, mode);
-    mockDescriptorOwnership(501n, 20n);
-
-    expect(() =>
-      normalizeHermesManagedConfigDescriptor(target, {
-        uid: 501,
-        gid: 20,
-      }),
-    ).toThrow(/unexpected Hermes managed config descriptor/u);
-    expect(fs.statSync(target).mode & 0o777).toBe(mode);
-  });
-
-  it("fails closed on an unexpected Hermes descriptor owner", () => {
-    const directory = temporaryDirectory();
-    const target = path.join(directory, "config.yaml");
-    fs.writeFileSync(target, "model: managed\n", { mode: 0o600 });
-    mockDescriptorOwnership(502n, 21n);
-
-    expect(() =>
-      normalizeHermesManagedConfigDescriptor(target, {
-        uid: 501,
-        gid: 20,
-      }),
-    ).toThrow(/unexpected Hermes managed config descriptor/u);
-    expect(fs.statSync(target).mode & 0o777).toBe(0o600);
-  });
-
-  it("detects a path replacement while normalizing through the trusted descriptor", () => {
-    const directory = temporaryDirectory();
-    const target = path.join(directory, "config.yaml");
-    const displaced = path.join(directory, "displaced.yaml");
-    const replacement = path.join(directory, "replacement.yaml");
-    fs.writeFileSync(target, "model: managed\n", { mode: 0o600 });
-    fs.writeFileSync(replacement, "model: replaced\n", { mode: 0o640 });
-    mockDescriptorOwnership(501n, 20n);
-    const realFchmodSync = fs.fchmodSync.bind(fs);
-    vi.spyOn(fs, "fchmodSync").mockImplementation((descriptor, mode) => {
-      realFchmodSync(descriptor, mode);
-      fs.renameSync(target, displaced);
-      fs.renameSync(replacement, target);
-    });
-
-    expect(() =>
-      normalizeHermesManagedConfigDescriptor(target, {
-        uid: 501,
-        gid: 20,
-      }),
-    ).toThrow(/changed during normalization/u);
-    expect(fs.readFileSync(target, "utf8")).toBe("model: replaced\n");
   });
 });

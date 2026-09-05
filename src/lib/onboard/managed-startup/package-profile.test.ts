@@ -75,7 +75,6 @@ module.exports = {
         expectedSha256: request.corporateCa.bundleSha256,
       }],
       actions: [{ kind: "generate-config", runAs: "sandbox" }],
-      integrity: { kind: "none" },
     };
   },
 };

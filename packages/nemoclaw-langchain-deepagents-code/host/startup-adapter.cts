@@ -107,7 +107,6 @@ function buildStartupPlan(request) {
             rootFile("NEMOCLAW_REASONING_EFFORT", "/usr/local/share/nemoclaw/dcode-reasoning-effort", reasoningEffort),
         ],
         actions: [{ kind: "generate-config", runAs: "sandbox" }],
-        integrity: { kind: "none" },
     };
 }
 const startupAdapter = { buildStartupPlan };

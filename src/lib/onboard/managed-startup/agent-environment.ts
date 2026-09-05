@@ -9,7 +9,6 @@ import type {
   HarnessStartupAction,
   HarnessStartupAdapterRequest,
   HarnessStartupApplicationRuntimePlan,
-  HarnessStartupIntegrityPlan,
   HarnessStartupMaterial,
 } from "@nvidia/nemoclaw-harness-contract";
 
@@ -56,7 +55,6 @@ export interface ManagedStartupAgentEnvironment {
   readonly applicationRuntime: ManagedStartupApplicationRuntimePlan;
   readonly materials: readonly ManagedStartupAgentMaterial[];
   readonly actions: readonly ManagedStartupAgentAction[];
-  readonly integrity: HarnessStartupIntegrityPlan;
 }
 
 export interface HarnessStartupAdapterSource {
@@ -225,6 +223,20 @@ function startupAction(value: unknown): ManagedStartupAgentAction {
     if (value.runAs !== "sandbox") fail("generate-config must run as sandbox");
     return Object.freeze({ kind: "generate-config", runAs: "sandbox" });
   }
+  if (value.kind === "seal-config") {
+    exactKeys(value, ["kind", "runAs", "committedReplay"], "seal-config action");
+    if (value.runAs !== "root" && value.runAs !== "sandbox") {
+      fail("seal-config identity is invalid");
+    }
+    if (value.committedReplay !== "run" && value.committedReplay !== "skip") {
+      fail("seal-config committed replay behavior is invalid");
+    }
+    return Object.freeze({
+      kind: "seal-config",
+      runAs: value.runAs,
+      committedReplay: value.committedReplay,
+    });
+  }
   if (value.kind !== "apply-messaging") fail("startup action kind is unsupported");
   exactKeys(value, ["kind", "mode", "phase", "runAs"], "apply-messaging action");
   if (value.mode !== "apply" && value.mode !== "clear") fail("messaging mode is invalid");
@@ -248,7 +260,7 @@ function startupAction(value: unknown): ManagedStartupAgentAction {
 }
 
 function startupActions(value: unknown): readonly ManagedStartupAgentAction[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 3) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 4) {
     fail("actions must contain one bounded startup workflow");
   }
   const actions = value.map(startupAction);
@@ -257,7 +269,14 @@ function startupActions(value: unknown): readonly ManagedStartupAgentAction[] {
   );
   const supportedOrders = [
     ["generate-config"],
+    ["generate-config", "seal-config"],
     ["apply-messaging:runtime-setup", "generate-config", "apply-messaging:post-agent-install"],
+    [
+      "apply-messaging:runtime-setup",
+      "generate-config",
+      "apply-messaging:post-agent-install",
+      "seal-config",
+    ],
   ];
   if (!supportedOrders.some((order) => JSON.stringify(kinds) === JSON.stringify(order))) {
     fail("actions are not in a supported transaction order");
@@ -271,19 +290,6 @@ function startupActions(value: unknown): readonly ManagedStartupAgentAction[] {
     fail("messaging actions disagree about desired state");
   }
   return Object.freeze(actions);
-}
-
-function integrityPlan(value: unknown): HarnessStartupIntegrityPlan {
-  if (!isRecord(value)) fail("integrity must be an object");
-  exactKeys(value, ["kind"], "integrity");
-  if (
-    value.kind !== "none" &&
-    value.kind !== "validated-json-config" &&
-    value.kind !== "managed-config-set"
-  ) {
-    fail("integrity workflow is unsupported");
-  }
-  return Object.freeze({ kind: value.kind });
 }
 
 export function validateHarnessStartupPlan(
@@ -301,7 +307,6 @@ export function validateHarnessStartupPlan(
       "applicationRuntime",
       "materials",
       "actions",
-      "integrity",
     ],
     "startup adapter result",
   );
@@ -330,7 +335,6 @@ export function validateHarnessStartupPlan(
     applicationRuntime: applicationRuntime(value.applicationRuntime),
     materials: Object.freeze(materials),
     actions: startupActions(value.actions),
-    integrity: integrityPlan(value.integrity),
   });
 }
 

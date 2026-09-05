@@ -516,6 +516,12 @@ export type HarnessStartupMaterial =
 
 export type HarnessStartupAction =
   | { readonly kind: "generate-config"; readonly runAs: "sandbox" }
+  /** Core executes the package-owned sealer at its one fixed image path. */
+  | {
+      readonly kind: "seal-config";
+      readonly runAs: "root" | "sandbox";
+      readonly committedReplay: "run" | "skip";
+    }
   | {
       readonly kind: "apply-messaging";
       readonly mode: "apply" | "clear";
@@ -529,12 +535,6 @@ export type HarnessStartupAction =
       readonly runAs: "sandbox";
     };
 
-/** Finite built-in integrity workflows; adapters cannot return a command. */
-export type HarnessStartupIntegrityPlan =
-  | { readonly kind: "none" }
-  | { readonly kind: "validated-json-config" }
-  | { readonly kind: "managed-config-set" };
-
 export interface HarnessStartupPlan {
   readonly schemaVersion: 1;
   readonly packageId: string;
@@ -543,7 +543,6 @@ export interface HarnessStartupPlan {
   readonly applicationRuntime: HarnessStartupApplicationRuntimePlan;
   readonly materials: readonly HarnessStartupMaterial[];
   readonly actions: readonly HarnessStartupAction[];
-  readonly integrity: HarnessStartupIntegrityPlan;
 }
 
 export interface HarnessStartupAdapterModule<

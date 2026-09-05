@@ -81,6 +81,5 @@ describe("LangChain Deep Agents Code startup adapter", () => {
       ]),
     );
     expect(plan.actions).toEqual([{ kind: "generate-config", runAs: "sandbox" }]);
-    expect(plan.integrity).toEqual({ kind: "none" });
   });
 });

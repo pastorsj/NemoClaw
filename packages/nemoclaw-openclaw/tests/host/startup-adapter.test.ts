@@ -109,8 +109,13 @@ describe("OpenClaw startup adapter", () => {
       "apply-messaging",
       "generate-config",
       "apply-messaging",
+      "seal-config",
     ]);
-    expect(plan.integrity).toEqual({ kind: "validated-json-config" });
+    expect(plan.actions.at(-1)).toEqual({
+      kind: "seal-config",
+      runAs: "sandbox",
+      committedReplay: "skip",
+    });
   });
 
   it("rejects another package and invalid public runtime controls", () => {

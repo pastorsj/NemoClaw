@@ -120,8 +120,8 @@ function buildStartupPlan(request) {
                 phase: "post-agent-install",
                 runAs: "sandbox",
             },
+            { kind: "seal-config", runAs: "root", committedReplay: "run" },
         ],
-        integrity: { kind: "managed-config-set" },
     };
 }
 const startupAdapter = { buildStartupPlan };

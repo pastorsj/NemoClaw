@@ -87,6 +87,10 @@ export function mockRootReplayFilesystem(
   ]);
   const fixtureFiles = new Map([
     [
+      "/usr/local/lib/nemoclaw/seal-config",
+      { contents: "managed startup test sealer", mode: 0o555 },
+    ],
+    [
       "/usr/sbin/update-ca-certificates",
       { contents: "managed startup test executable", mode: 0o555 },
     ],

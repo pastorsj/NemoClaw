@@ -33,6 +33,7 @@ export default defineConfig({
       "tests/host/mcp-adapter.test.ts",
       "tests/host/startup-adapter.test.ts",
       "tests/image/fabric-runtime.test.ts",
+      "tests/runtime/seal-config.test.ts",
     ],
   },
 });

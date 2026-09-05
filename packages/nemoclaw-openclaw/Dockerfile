@@ -613,6 +613,7 @@ COPY packages/nemoclaw-openclaw/runtime/preloads/*.js /usr/local/lib/nemoclaw/pr
 COPY --from=runtime-preload-builder /opt/nemoclaw-root/dist/lib/messaging/channels/ /usr/local/lib/nemoclaw/preloads-compiled-channels/
 COPY packages/nemoclaw-openclaw/runtime/codex-acp.sh /usr/local/bin/nemoclaw-codex-acp
 COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
+COPY --chmod=0555 packages/nemoclaw-openclaw/runtime/seal-config.cts /usr/local/lib/nemoclaw/seal-config
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/generate-config.mts /packages/nemoclaw-openclaw/config/generate-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/agent-config.mts /packages/nemoclaw-openclaw/config/agent-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/model-setup.mts /packages/nemoclaw-openclaw/config/model-setup.mts
@@ -2475,6 +2476,8 @@ RUN check_metadata() { \
     && check_metadata /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh 'root:root:444' \
     && test ! -L /usr/local/lib/nemoclaw/generate-config \
     && check_metadata /usr/local/lib/nemoclaw/generate-config 'root:root:555' \
+    && test ! -L /usr/local/lib/nemoclaw/seal-config \
+    && check_metadata /usr/local/lib/nemoclaw/seal-config 'root:root:555' \
     && check_metadata /usr/local/bin/nemoclaw-gateway-control 'root:root:700' \
     && check_metadata /usr/local/lib/nemoclaw/openclaw-startup 'root:root:755' \
     && for startup_module in \

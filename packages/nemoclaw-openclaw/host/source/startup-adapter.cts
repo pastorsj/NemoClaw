@@ -174,8 +174,8 @@ function buildStartupPlan(request: HarnessStartupRequest): HarnessStartupPlan {
         phase: "post-agent-install",
         runAs: "sandbox",
       },
+      { kind: "seal-config", runAs: "sandbox", committedReplay: "skip" },
     ],
-    integrity: { kind: "validated-json-config" },
   };
 }
 

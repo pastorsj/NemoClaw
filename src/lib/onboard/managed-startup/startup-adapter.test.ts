@@ -71,7 +71,6 @@ function futurePlan(): Record<string, unknown> {
       },
     ],
     actions: [{ kind: "generate-config", runAs: "sandbox" }],
-    integrity: { kind: "none" },
   };
 }
 

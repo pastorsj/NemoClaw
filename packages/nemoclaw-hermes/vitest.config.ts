@@ -32,6 +32,7 @@ export default defineConfig({
       "tests/host/startup-adapter.test.ts",
       "tests/image/fabric-lifecycle.test.ts",
       "tests/image/fabric-runtime.test.ts",
+      "tests/runtime/startup-seal.test.ts",
     ],
   },
 });

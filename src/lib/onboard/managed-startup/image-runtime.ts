@@ -61,18 +61,12 @@ const MANAGED_STARTUP_TLS_ENV_NAMES = new Set([
   "SSL_CERT_FILE",
 ]);
 const MESSAGING_RUNTIME_PLAN_FILE = "/usr/local/share/nemoclaw/messaging-runtime-plan.json";
+const SEAL_CONFIG_EXECUTABLE = "/usr/local/lib/nemoclaw/seal-config";
+const SEAL_CONFIG_REPLAY_ENV = "NEMOCLAW_MANAGED_STARTUP_REPLAY";
 const ROOT_STATE_PARENT = "/var/lib/nemoclaw";
 const ROOT_RUNTIME_DIRECTORY = "/run/nemoclaw";
 const ROOT_OWNED_DIRECTORY_MODE = 0o755;
 const MAX_TRUST_BUNDLE_BYTES = 4 * 1024 * 1024;
-const HERMES_MANAGED_CONFIG_FILES = [
-  { path: "/sandbox/.hermes/config.yaml", mutableMode: 0o640 },
-  { path: "/sandbox/.hermes/.env", mutableMode: 0o640 },
-  { path: "/sandbox/.hermes/fabric.json", mutableMode: 0o600 },
-] as const;
-const HERMES_GENERATED_MANAGED_POLICY_FILE = "/sandbox/.hermes/managed-policy.json";
-const HERMES_INSTALLED_MANAGED_POLICY_FILE = "/usr/local/share/nemoclaw/hermes-managed-policy.json";
-const MAX_HERMES_MANAGED_POLICY_BYTES = 4 * 1024 * 1024;
 const FIXED_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 const SHA256_RE = /^[a-f0-9]{64}$/u;
 export const MANAGED_STARTUP_COMPLETION_SCHEMA_VERSION = 1;
@@ -84,6 +78,12 @@ export type ManagedStartupImageIdentity = "root" | "sandbox";
 export interface ManagedStartupGenerateConfigConstructionAction {
   readonly kind: "generate-config";
   readonly runAs: "sandbox";
+}
+
+export interface ManagedStartupSealConfigConstructionAction {
+  readonly kind: "seal-config";
+  readonly runAs: "root" | "sandbox";
+  readonly committedReplay: "run" | "skip";
 }
 
 interface ManagedStartupApplyMessagingConstructionActionBase {
@@ -107,6 +107,7 @@ export type ManagedStartupApplyMessagingConstructionAction =
 
 export type ManagedStartupImageConstructionAction =
   | ManagedStartupGenerateConfigConstructionAction
+  | ManagedStartupSealConfigConstructionAction
   | ManagedStartupApplyMessagingConstructionAction;
 
 /**
@@ -121,6 +122,7 @@ export interface ManagedStartupImageActionPlanInput {
 export interface ManagedStartupImageActionCommand {
   readonly action:
     | "generate-agent-config"
+    | "seal-config"
     | "messaging-runtime-setup"
     | "messaging-post-agent-install";
   readonly runAs: ManagedStartupImageIdentity;
@@ -539,6 +541,7 @@ export function buildManagedStartupImageActionPlan(
   const inputAgent = exactActionPlanAgent(input.agent);
   const commands: ManagedStartupImageActionCommand[] = [];
   let generateActions = 0;
+  let sealActions = 0;
   let runtimeMessagingActions = 0;
   let postMessagingActions = 0;
 
@@ -553,6 +556,21 @@ export function buildManagedStartupImageActionPlan(
           action: "generate-agent-config",
           runAs: action.runAs,
           argv: generatorCommand(),
+        });
+        break;
+      }
+      case "seal-config": {
+        if (action.runAs !== "root" && action.runAs !== "sandbox") {
+          failActionPlan("config sealing identity is invalid");
+        }
+        if (action.committedReplay !== "run" && action.committedReplay !== "skip") {
+          failActionPlan("config sealing replay behavior is invalid");
+        }
+        sealActions += 1;
+        commands.push({
+          action: "seal-config",
+          runAs: action.runAs,
+          argv: [SEAL_CONFIG_EXECUTABLE],
         });
         break;
       }
@@ -593,6 +611,9 @@ export function buildManagedStartupImageActionPlan(
   if (generateActions !== 1) {
     failActionPlan("exactly one agent config construction action is required");
   }
+  if (sealActions > 1) {
+    failActionPlan("at most one config sealing action is supported");
+  }
   const supportsMessaging = runtimeMessagingActions > 0 || postMessagingActions > 0;
   const expectedMessagingActions = supportsMessaging ? 1 : 0;
   if (
@@ -603,9 +624,12 @@ export function buildManagedStartupImageActionPlan(
       `${inputAgent} requires ${String(expectedMessagingActions)} action for each messaging phase`,
     );
   }
-  const expectedOrder = supportsMessaging
-    ? ["messaging-runtime-setup", "generate-agent-config", "messaging-post-agent-install"]
-    : ["generate-agent-config"];
+  const expectedOrder = [
+    ...(supportsMessaging
+      ? ["messaging-runtime-setup", "generate-agent-config", "messaging-post-agent-install"]
+      : ["generate-agent-config"]),
+    ...(sealActions === 1 ? ["seal-config"] : []),
+  ];
   if (commands.some((command, index) => command.action !== expectedOrder[index])) {
     failActionPlan(`${inputAgent} image actions are not in the required construction order`);
   }
@@ -655,58 +679,9 @@ function verifyMessagingRuntimeTarget(mode: "apply" | "clear"): void {
   }
 }
 
-function runInternalSandboxAction(
-  action: "write-openclaw-hash" | "write-hermes-compat-hash",
-  configurationEnvironment: Readonly<Record<string, string>>,
-  applicationRuntime: ManagedStartupApplicationRuntimePlan,
-  extraEnvironment: Readonly<Record<string, string>> = {},
-): void {
-  execute(
-    ["/usr/local/bin/node", MANAGED_STARTUP_RUNTIME_EXECUTABLE, `--internal-${action}`],
-    "sandbox",
-    { ...configurationEnvironment, ...extraEnvironment },
-    applicationRuntime,
-  );
-}
-
-function sealOpenClawConfiguration(
-  configurationEnvironment: Readonly<Record<string, string>>,
-  applicationRuntime: ManagedStartupApplicationRuntimePlan,
-): void {
-  const validation = execute(
-    ["/usr/local/bin/openclaw", "config", "validate", "--json"],
-    "sandbox",
-    {
-      ...configurationEnvironment,
-      OPENCLAW_CONFIG_PATH: "/sandbox/.openclaw/openclaw.json",
-    },
-    applicationRuntime,
-    true,
-  );
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(validation.stdout);
-  } catch {
-    fail("OpenClaw config validation did not emit JSON");
-  }
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    (parsed as Record<string, unknown>).valid !== true
-  ) {
-    fail("OpenClaw rejected the generated managed startup config");
-  }
-  runInternalSandboxAction("write-openclaw-hash", configurationEnvironment, applicationRuntime);
-}
-
 export interface StableRegularFile {
   readonly bytes: Buffer;
   readonly stat: fs.BigIntStats;
-}
-
-interface NumericIdentity {
-  readonly uid: number;
-  readonly gid: number;
 }
 
 function sameStableFileMetadata(left: fs.BigIntStats, right: fs.BigIntStats): boolean {
@@ -772,175 +747,6 @@ export function readStableRegularFileSnapshot(target: string, maxBytes: number):
 
 export function readStableRegularFile(target: string, maxBytes: number): Buffer {
   return readStableRegularFileSnapshot(target, maxBytes).bytes;
-}
-
-/** Promote the generator output to the one root-owned policy artifact used at runtime. */
-export function installHermesManagedPolicy(
-  source = HERMES_GENERATED_MANAGED_POLICY_FILE,
-  target = HERMES_INSTALLED_MANAGED_POLICY_FILE,
-): void {
-  const generated = readStableRegularFileSnapshot(source, MAX_HERMES_MANAGED_POLICY_BYTES);
-  atomicWriteRootFile(target, generated.bytes, 0o444);
-  const current = fs.lstatSync(source, { bigint: true });
-  if (!sameStableFileMetadata(generated.stat, current)) {
-    fail(`Hermes managed policy changed before source cleanup: ${source}`);
-  }
-  fs.unlinkSync(source);
-}
-
-/**
- * Restore the mutable Hermes image contract after its sandbox-side generator
- * atomically replaces a generated configuration input. config.yaml and .env
- * become group-readable (0640); the Fabric route configuration stays private
- * at 0600 even though it stores only credential references.
- * The mode transition is performed through the already-authenticated
- * descriptor, never by path.
- */
-export function normalizeHermesManagedConfigDescriptor(
-  target: string,
-  sandboxIdentity: NumericIdentity,
-  mutableMode: 0o600 | 0o640 = 0o640,
-): void {
-  if (
-    !Number.isSafeInteger(sandboxIdentity.uid) ||
-    sandboxIdentity.uid <= 0 ||
-    !Number.isSafeInteger(sandboxIdentity.gid) ||
-    sandboxIdentity.gid <= 0
-  ) {
-    fail("invalid sandbox identity for Hermes descriptor normalization");
-  }
-  if (mutableMode !== 0o600 && mutableMode !== 0o640) {
-    fail("invalid mutable mode for Hermes descriptor normalization");
-  }
-  if (typeof fs.constants.O_NOFOLLOW !== "number") {
-    fail("O_NOFOLLOW is unavailable for Hermes descriptor normalization");
-  }
-  const nonblock = typeof fs.constants.O_NONBLOCK === "number" ? fs.constants.O_NONBLOCK : 0;
-  let descriptor: number;
-  try {
-    descriptor = fs.openSync(target, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | nonblock);
-  } catch {
-    fail(`refusing unsafe Hermes managed config descriptor ${target}`);
-  }
-
-  try {
-    const before = fs.fstatSync(descriptor, { bigint: true });
-    const beforeMode = Number(before.mode & 0o777n);
-    const mutable =
-      before.uid === BigInt(sandboxIdentity.uid) &&
-      before.gid === BigInt(sandboxIdentity.gid) &&
-      (beforeMode === 0o600 || beforeMode === mutableMode);
-    if (!before.isFile() || before.nlink !== 1n || !mutable) {
-      fail(`refusing unexpected Hermes managed config descriptor ${target}`);
-    }
-
-    const expectedMode = mutableMode;
-    if (beforeMode !== expectedMode) {
-      try {
-        fs.fchmodSync(descriptor, expectedMode);
-      } catch {
-        fail(`could not normalize Hermes managed config descriptor ${target}`);
-      }
-    }
-
-    const after = fs.fstatSync(descriptor, { bigint: true });
-    let pathAfter: fs.BigIntStats;
-    try {
-      pathAfter = fs.lstatSync(target, { bigint: true });
-    } catch {
-      fail(`Hermes managed config descriptor disappeared during normalization: ${target}`);
-    }
-    const expectedUid = BigInt(sandboxIdentity.uid);
-    const expectedGid = BigInt(sandboxIdentity.gid);
-    if (
-      !after.isFile() ||
-      after.nlink !== 1n ||
-      after.dev !== before.dev ||
-      after.ino !== before.ino ||
-      after.uid !== expectedUid ||
-      after.gid !== expectedGid ||
-      Number(after.mode & 0o777n) !== expectedMode ||
-      after.size !== before.size ||
-      after.mtimeNs !== before.mtimeNs ||
-      pathAfter.isSymbolicLink() ||
-      !pathAfter.isFile() ||
-      !sameStableFileMetadata(after, pathAfter)
-    ) {
-      fail(`Hermes managed config descriptor changed during normalization: ${target}`);
-    }
-  } finally {
-    try {
-      fs.closeSync(descriptor);
-    } catch {
-      fail(`could not close Hermes managed config descriptor ${target}`);
-    }
-  }
-}
-
-function normalizeHermesManagedConfiguration(): void {
-  const identity = readSandboxIdentity();
-  const sandboxIdentity = {
-    uid: Number(identity.uid),
-    gid: Number(identity.gid),
-  };
-  for (const file of HERMES_MANAGED_CONFIG_FILES) {
-    normalizeHermesManagedConfigDescriptor(file.path, sandboxIdentity, file.mutableMode);
-  }
-}
-
-export function buildHermesManagedConfigHash(
-  config: Buffer,
-  env: Buffer,
-  fabric: Buffer,
-  mcpDigest: string,
-): string {
-  if (!SHA256_RE.test(mcpDigest)) {
-    fail("Hermes MCP digest helper returned an invalid digest");
-  }
-  return [
-    `${createHash("sha256").update(config).digest("hex")}  /sandbox/.hermes/config.yaml`,
-    `${createHash("sha256").update(env).digest("hex")}  /sandbox/.hermes/.env`,
-    `${createHash("sha256").update(fabric).digest("hex")}  /sandbox/.hermes/fabric.json`,
-    `# nemoclaw-hermes-mcp-state-v1 intended=${mcpDigest} applied=${mcpDigest}`,
-    "",
-  ].join("\n");
-}
-
-function sealHermesConfiguration(
-  configurationEnvironment: Readonly<Record<string, string>>,
-  applicationRuntime: ManagedStartupApplicationRuntimePlan,
-): void {
-  const configPath = "/sandbox/.hermes/config.yaml";
-  const envPath = "/sandbox/.hermes/.env";
-  const fabricPath = "/sandbox/.hermes/fabric.json";
-  const config = readStableRegularFile(configPath, 4 * 1024 * 1024);
-  const env = readStableRegularFile(envPath, 512 * 1024);
-  const fabric = readStableRegularFile(fabricPath, 4 * 1024 * 1024);
-  const digest = execute(
-    [
-      "/opt/hermes/.venv/bin/python3",
-      "-I",
-      "/usr/local/lib/nemoclaw/build-hermes-mcp-digest.py",
-      "--guard",
-      "/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py",
-      "--config",
-      configPath,
-    ],
-    "root",
-    configurationEnvironment,
-    applicationRuntime,
-    true,
-  ).stdout.trim();
-  const hashText = buildHermesManagedConfigHash(config, env, fabric, digest);
-  atomicWriteRootFile("/etc/nemoclaw/hermes.config-hash", hashText, 0o444);
-  runInternalSandboxAction(
-    "write-hermes-compat-hash",
-    configurationEnvironment,
-    applicationRuntime,
-    {
-      NEMOCLAW_MANAGED_HERMES_HASH_B64: Buffer.from(hashText, "utf8").toString("base64"),
-    },
-  );
 }
 
 function installRootOwnedMaterials(materials: readonly ManagedStartupAgentMaterial[]): void {
@@ -1371,10 +1177,15 @@ function applyAdapter(
       }
       continue;
     }
+    if (action.kind === "seal-config" && !trustedExecutable(SEAL_CONFIG_EXECUTABLE)) {
+      fail(`a trusted ${SEAL_CONFIG_EXECUTABLE} executable is required`);
+    }
     execute(
       command.argv,
       command.runAs,
-      mapped.configurationEnvironment,
+      action.kind === "seal-config"
+        ? { ...mapped.configurationEnvironment, [SEAL_CONFIG_REPLAY_ENV]: "0" }
+        : mapped.configurationEnvironment,
       mapped.applicationRuntime,
     );
   }
@@ -1382,25 +1193,33 @@ function applyAdapter(
     fail("image action plan contains an unmatched command");
   }
 
-  switch (mapped.integrity.kind) {
-    case "validated-json-config":
-      sealOpenClawConfiguration(mapped.configurationEnvironment, mapped.applicationRuntime);
-      break;
-    case "managed-config-set":
-      installHermesManagedPolicy();
-      sealHermesConfiguration(mapped.configurationEnvironment, mapped.applicationRuntime);
-      // Normalize before the coordinator commits a newly applied profile so
-      // the durable transaction never records generator-created 0600 files as
-      // a completed mutable image contract.
-      normalizeHermesManagedConfiguration();
-      break;
-    case "none":
-      break;
-  }
   installRootOwnedMaterials(mapped.materials);
   installCorporateCa(context.corporateCaPath);
   installCorporateCaSystemAnchors(context.corporateCaPath);
   mergeCorporateCa(context.corporateCaPath);
+}
+
+function replayPackageSeal(mapped: ManagedStartupAgentEnvironment): void {
+  const actionIndex = mapped.actions.findIndex(({ kind }) => kind === "seal-config");
+  if (actionIndex < 0) return;
+  const action = mapped.actions[actionIndex];
+  if (action?.kind !== "seal-config" || action.committedReplay === "skip") return;
+  const command = buildManagedStartupImageActionPlan({
+    agent: mapped.agent,
+    actions: mapped.actions,
+  })[actionIndex];
+  if (!command || command.action !== "seal-config") {
+    fail("config sealing action does not match the finite command plan");
+  }
+  if (!trustedExecutable(SEAL_CONFIG_EXECUTABLE)) {
+    fail(`a trusted ${SEAL_CONFIG_EXECUTABLE} executable is required`);
+  }
+  execute(
+    command.argv,
+    command.runAs,
+    { ...mapped.configurationEnvironment, [SEAL_CONFIG_REPLAY_ENV]: "1" },
+    mapped.applicationRuntime,
+  );
 }
 
 function startupAdapter(mapped: ManagedStartupAgentEnvironment): ManagedStartupAgentAdapter {
@@ -1448,10 +1267,7 @@ export async function applyManagedStartupImageProfile(
   if (mapped.agent !== result.application.profile.agent) {
     fail(`mapped ${mapped.agent} environment for ${result.application.profile.agent}`);
   }
-  if (mapped.integrity.kind === "managed-config-set" && !result.adapterApplied) {
-    // Committed startup replays still repair generator-created 0600 files.
-    normalizeHermesManagedConfiguration();
-  }
+  if (!result.adapterApplied) replayPackageSeal(mapped);
   let corporateCaMerged: boolean;
   if (result.adapterApplied) {
     corporateCaMerged = result.application.corporateCaPath !== null;
@@ -1585,79 +1401,6 @@ function readBoundedRootApplyStdin(): string {
   return text;
 }
 
-function writeSandboxFileAtomically(target: string, contents: string, mode: number): void {
-  const parent = path.dirname(target);
-  const parentStat = fs.lstatSync(parent);
-  if (
-    parentStat.isSymbolicLink() ||
-    !parentStat.isDirectory() ||
-    parentStat.uid !== process.geteuid?.() ||
-    parentStat.gid !== process.getegid?.()
-  ) {
-    fail(`refusing unsafe sandbox-owned directory ${parent}`);
-  }
-  const temporary = path.join(
-    parent,
-    `.${path.basename(target)}.${randomBytes(12).toString("hex")}`,
-  );
-  let descriptor: number | undefined;
-  try {
-    descriptor = fs.openSync(
-      temporary,
-      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | fs.constants.O_NOFOLLOW,
-      0o600,
-    );
-    fs.writeFileSync(descriptor, contents);
-    fs.fchmodSync(descriptor, mode);
-    fs.fsyncSync(descriptor);
-    fs.closeSync(descriptor);
-    descriptor = undefined;
-    fs.renameSync(temporary, target);
-  } catch (error) {
-    if (descriptor !== undefined) fs.closeSync(descriptor);
-    try {
-      fs.unlinkSync(temporary);
-    } catch {
-      // Preserve the primary write failure.
-    }
-    fail(`could not write sandbox-owned file ${target}: ${(error as Error).message}`);
-  }
-}
-
-export function buildOpenClawManagedConfigHash(config: Buffer, fabric: Buffer): string {
-  return (
-    `${createHash("sha256").update(config).digest("hex")}  openclaw.json\n` +
-    `${createHash("sha256").update(fabric).digest("hex")}  fabric.json\n`
-  );
-}
-
-function internalWriteOpenClawHash(): void {
-  if (process.geteuid?.() === 0) fail("sandbox hash writer must not run as root");
-  const configPath = "/sandbox/.openclaw/openclaw.json";
-  const fabricPath = "/sandbox/.openclaw/fabric.json";
-  const config = readStableRegularFile(configPath, 16 * 1024 * 1024);
-  const fabric = readStableRegularFile(fabricPath, 4 * 1024 * 1024);
-  const text = buildOpenClawManagedConfigHash(config, fabric);
-  writeSandboxFileAtomically("/sandbox/.openclaw/.config-hash", text, 0o660);
-}
-
-function internalWriteHermesCompatHash(): void {
-  if (process.geteuid?.() === 0) fail("sandbox hash writer must not run as root");
-  const encoded = process.env.NEMOCLAW_MANAGED_HERMES_HASH_B64 ?? "";
-  if (
-    encoded.length === 0 ||
-    encoded.length > 4096 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(encoded)
-  ) {
-    fail("Hermes compatibility hash transport is invalid");
-  }
-  const decoded = Buffer.from(encoded, "base64");
-  if (decoded.toString("base64") !== encoded) {
-    fail("Hermes compatibility hash transport is non-canonical");
-  }
-  writeSandboxFileAtomically("/sandbox/.hermes/.config-hash", decoded.toString("utf8"), 0o640);
-}
-
 function readCliAgent(argv: readonly string[], expectedLength = 2): string {
   const index = argv.indexOf("--agent");
   if (index < 0 || index + 1 >= argv.length || argv.length !== expectedLength) {
@@ -1685,14 +1428,6 @@ function readCliBootstrapIdentity(argv: readonly string[]): string {
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<void> {
-  if (argv.length === 1 && argv[0] === "--internal-write-openclaw-hash") {
-    internalWriteOpenClawHash();
-    return;
-  }
-  if (argv.length === 1 && argv[0] === "--internal-write-hermes-compat-hash") {
-    internalWriteHermesCompatHash();
-    return;
-  }
   if (argv.length === 3 && argv[0] === "--apply-root-stdin") {
     const expectedAgent = exactAgent(readCliAgent(argv, 3));
     const request = parseManagedStartupRootApplyRequest(readBoundedRootApplyStdin());

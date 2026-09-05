@@ -154,7 +154,6 @@ function buildStartupPlan(request: HarnessStartupRequest): HarnessStartupPlan {
       ),
     ],
     actions: [{ kind: "generate-config", runAs: "sandbox" }],
-    integrity: { kind: "none" },
   };
 }
 

@@ -93,7 +93,6 @@ function buildStartupPlan(request) {
             rootFile("NEMOCLAW_PROXY_PORT", "/usr/local/share/nemoclaw/pi-proxy-port", String(settings.proxy.managedPort)),
         ],
         actions: [{ kind: "generate-config", runAs: "sandbox" }],
-        integrity: { kind: "none" },
     };
 }
 const startupAdapter = { buildStartupPlan };

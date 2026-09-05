@@ -21,6 +21,7 @@
     "packages/nemoclaw-hermes/compat/sqlite-store.py",
     "packages/nemoclaw-hermes/config/",
     "packages/nemoclaw-hermes/host/managed-route.cts",
+    "packages/nemoclaw-hermes/host/startup-adapter.cts",
     "packages/nemoclaw-hermes/host/tool-matrix.json",
     "packages/nemoclaw-hermes/model-specific-setup/",
     "packages/nemoclaw-hermes/plugin/",
@@ -41,6 +42,7 @@
     "packages/nemoclaw-hermes/runtime/mcp-transaction.py",
     "packages/nemoclaw-hermes/runtime/runtime-integrity.sh",
     "packages/nemoclaw-hermes/runtime/service-control.sh",
+    "packages/nemoclaw-hermes/runtime/startup-seal.py",
     "packages/nemoclaw-hermes/runtime/tirith-marker.py",
     "packages/nemoclaw-hermes/start.sh",
     "packages/nemoclaw-openclaw/compat/npm-remediation.mts",
@@ -395,6 +397,10 @@
       "mode": "100644"
     },
     {
+      "path": "packages/nemoclaw-hermes/host/startup-adapter.cts",
+      "mode": "100644"
+    },
+    {
       "path": "packages/nemoclaw-hermes/host/tool-matrix.json",
       "mode": "100644"
     },
@@ -513,6 +519,10 @@
     {
       "path": "packages/nemoclaw-hermes/runtime/service-control.sh",
       "mode": "100644"
+    },
+    {
+      "path": "packages/nemoclaw-hermes/runtime/startup-seal.py",
+      "mode": "100755"
     },
     {
       "path": "packages/nemoclaw-hermes/runtime/tirith-marker.py",

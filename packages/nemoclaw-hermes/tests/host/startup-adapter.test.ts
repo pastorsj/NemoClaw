@@ -89,8 +89,13 @@ describe("Hermes startup adapter", () => {
       "apply-messaging",
       "generate-config",
       "apply-messaging",
+      "seal-config",
     ]);
-    expect(plan.integrity).toEqual({ kind: "managed-config-set" });
+    expect(plan.actions.at(-1)).toEqual({
+      kind: "seal-config",
+      runAs: "root",
+      committedReplay: "run",
+    });
   });
 
   it("fails closed when a forwarded dashboard has no browser URL", () => {

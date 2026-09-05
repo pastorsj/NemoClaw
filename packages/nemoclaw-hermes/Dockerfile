@@ -127,7 +127,7 @@ COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hol
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
-COPY --chmod=0444 packages/nemoclaw-hermes/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
+COPY packages/nemoclaw-hermes/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
 COPY packages/nemoclaw-hermes/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py
@@ -138,6 +138,7 @@ COPY packages/nemoclaw-hermes/runtime/managed_policy.py /usr/local/lib/nemoclaw/
 COPY packages/nemoclaw-hermes/compat/langfuse-credentials.mts /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts
 COPY packages/nemoclaw-hermes/runtime/dashboard-config.py /usr/local/lib/nemoclaw/seed-hermes-dashboard-config.py
 COPY packages/nemoclaw-hermes/runtime/config-guard.py /usr/local/lib/nemoclaw/hermes-runtime-config-guard.py
+COPY packages/nemoclaw-hermes/runtime/startup-seal.py /usr/local/lib/nemoclaw/seal-config
 COPY packages/nemoclaw-hermes/runtime/tirith-marker.py /usr/local/lib/nemoclaw/finalize-tirith-marker.py
 COPY packages/nemoclaw-hermes/runtime/mcp-digest.py /usr/local/lib/nemoclaw/build-hermes-mcp-digest.py
 COPY packages/nemoclaw-hermes/runtime/mcp-transaction.py /usr/local/lib/nemoclaw/hermes-mcp-config-transaction.py
@@ -553,11 +554,21 @@ RUN managed_runtime_assertion_failed() { \
     && { chown root:root /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
     && { chmod 0444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null || managed_runtime_assertion_failed mode-0444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
     && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs 2>/dev/null)" = '0:0:444' || managed_runtime_assertion_failed metadata-0:0:444 /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs; } \
+    && { test -f /usr/local/lib/nemoclaw/startup-adapter.cjs || managed_runtime_assertion_failed regular-file /usr/local/lib/nemoclaw/startup-adapter.cjs; } \
+    && { test ! -L /usr/local/lib/nemoclaw/startup-adapter.cjs || managed_runtime_assertion_failed non-symlink /usr/local/lib/nemoclaw/startup-adapter.cjs; } \
+    && { chown root:root /usr/local/lib/nemoclaw/startup-adapter.cjs 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/startup-adapter.cjs; } \
+    && { chmod 0444 /usr/local/lib/nemoclaw/startup-adapter.cjs 2>/dev/null || managed_runtime_assertion_failed mode-0444 /usr/local/lib/nemoclaw/startup-adapter.cjs; } \
+    && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/startup-adapter.cjs 2>/dev/null)" = '0:0:444' || managed_runtime_assertion_failed metadata-0:0:444 /usr/local/lib/nemoclaw/startup-adapter.cjs; } \
     && { test -f /usr/local/lib/nemoclaw/generate-config || managed_runtime_assertion_failed regular-file /usr/local/lib/nemoclaw/generate-config; } \
     && { test ! -L /usr/local/lib/nemoclaw/generate-config || managed_runtime_assertion_failed non-symlink /usr/local/lib/nemoclaw/generate-config; } \
     && { chown root:root /usr/local/lib/nemoclaw/generate-config 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/generate-config; } \
     && { chmod 0555 /usr/local/lib/nemoclaw/generate-config 2>/dev/null || managed_runtime_assertion_failed mode-0555 /usr/local/lib/nemoclaw/generate-config; } \
     && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/generate-config 2>/dev/null)" = '0:0:555' || managed_runtime_assertion_failed metadata-0:0:555 /usr/local/lib/nemoclaw/generate-config; } \
+    && { test -f /usr/local/lib/nemoclaw/seal-config || managed_runtime_assertion_failed regular-file /usr/local/lib/nemoclaw/seal-config; } \
+    && { test ! -L /usr/local/lib/nemoclaw/seal-config || managed_runtime_assertion_failed non-symlink /usr/local/lib/nemoclaw/seal-config; } \
+    && { chown root:root /usr/local/lib/nemoclaw/seal-config 2>/dev/null || managed_runtime_assertion_failed owner-root-root /usr/local/lib/nemoclaw/seal-config; } \
+    && { chmod 0555 /usr/local/lib/nemoclaw/seal-config 2>/dev/null || managed_runtime_assertion_failed mode-0555 /usr/local/lib/nemoclaw/seal-config; } \
+    && { test "$(stat -c '%u:%g:%a' /usr/local/lib/nemoclaw/seal-config 2>/dev/null)" = '0:0:555' || managed_runtime_assertion_failed metadata-0:0:555 /usr/local/lib/nemoclaw/seal-config; } \
     && test -f /usr/local/bin/nemoclaw-managed-bootstrap \
     && test ! -L /usr/local/bin/nemoclaw-managed-bootstrap \
     && test "$(stat -c '%u:%g:%a' /usr/local/bin/nemoclaw-managed-bootstrap)" = '0:0:755' \
@@ -592,6 +603,7 @@ RUN rm -rf /usr/local/lib/nemoclaw/preloads \
     && chmod 444 /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts \
     && chmod 444 /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
     && /opt/hermes/.venv/bin/python3 -I -c 'import runpy, yaml; assert yaml.safe_load("ready: true")["ready"] is True; runpy.run_path("/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py", run_name="nemoclaw_runtime_config_guard_probe")' \
+    && NEMOCLAW_MANAGED_STARTUP_REPLAY=invalid /usr/local/lib/nemoclaw/seal-config 2>&1 | grep -Fq 'NEMOCLAW_MANAGED_STARTUP_REPLAY must be 0 or 1' \
     && chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && mkdir -p /etc/profile.d \
     && printf '%s\n' \
@@ -1710,8 +1722,11 @@ RUN check_metadata() { \
     && check_metadata /scripts/lib/patch-bundled-npm-ip-address.mts 'root:root 444' \
     && check_metadata /scripts/patch-bundled-npm-tar.mts 'root:root 444' \
     && check_metadata /opt/nemoclaw-hermes-config/config/generate-config.ts 'root:root 444' \
+    && check_metadata /usr/local/lib/nemoclaw/startup-adapter.cjs 'root:root 444' \
     && test ! -L /usr/local/lib/nemoclaw/generate-config \
     && check_metadata /usr/local/lib/nemoclaw/generate-config 'root:root 555' \
+    && test ! -L /usr/local/lib/nemoclaw/seal-config \
+    && check_metadata /usr/local/lib/nemoclaw/seal-config 'root:root 555' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-startup 'root:root 555' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-startup/config-setup.sh 'root:root 444' \
     && check_metadata /usr/local/lib/nemoclaw/hermes-startup/service-control.sh 'root:root 444' \
