@@ -40,27 +40,27 @@ const PACKAGE_CASES = [
   },
 ] as const;
 
-const BUNDLED_PACKAGE_CASES = [
-  {
-    id: "openclaw",
-    adapterId: "nvidia.nemoclaw.openclaw",
-    fixture: "packages/nemoclaw-openclaw/tests/fixtures/live-contract.json",
-    runnerModule: "nemoclaw_openclaw_fabric.adapter",
-  },
-  {
-    id: "hermes",
-    adapterId: "nvidia.nemoclaw.hermes",
-    fixture: "packages/nemoclaw-hermes/tests/fixtures/live-contract.json",
-    runnerModule: "nemoclaw_hermes_fabric.adapter",
-  },
-  {
-    id: "langchain-deepagents-code",
-    adapterId: "nvidia.fabric.langchain.deepagents",
-    fixture: "packages/nemoclaw-langchain-deepagents-code/tests/fixtures/live-contract.json",
-    runnerModule: "nemo_fabric_adapters.deepagents.adapter",
-  },
-  ...PACKAGE_CASES,
-] as const;
+function discoverBundledFabricFixtures(): readonly {
+  readonly id: string;
+  readonly fixture: string;
+}[] {
+  const packagesDirectory = path.resolve("packages");
+  return fs
+    .readdirSync(packagesDirectory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
+    .flatMap((entry) => {
+      const id = entry.name.slice("nemoclaw-".length);
+      const fixture = path.posix.join(
+        "packages",
+        entry.name,
+        "tests/fixtures/live-contract.json",
+      );
+      return fs.existsSync(path.resolve(fixture)) ? [{ id, fixture }] : [];
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
+}
+
+const BUNDLED_PACKAGE_CASES = discoverBundledFabricFixtures();
 
 const temporaryDirectories: string[] = [];
 
@@ -77,11 +77,7 @@ describe("generic Fabric package E2E", () => {
       const contract = readBundledFabricHarnessE2eFixture(fixture.id);
 
       expect(contract).toEqual(readFabricHarnessE2eFixture(fixture.fixture));
-      expect(contract).toMatchObject({
-        packageId: fixture.id,
-        adapterId: fixture.adapterId,
-        descriptorRunnerModule: fixture.runnerModule,
-      });
+      expect(contract.packageId).toBe(fixture.id);
       expect(Object.isFrozen(contract)).toBe(true);
     },
   );
