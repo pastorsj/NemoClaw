@@ -9,10 +9,10 @@ import {
   type HarnessMcpRegistrationPlan,
   type HarnessMcpRemovalPlan,
 } from "../../../agent-runtime/host-module";
-import { entryHeaders } from "../mcp-bridge-adapter-status";
 import type { McpAttachedCredentialRevision } from "../mcp-bridge-provider-readiness";
 import { getSandboxHarnessPackage } from "../mcp-bridge-state";
 import { McpBridgeError } from "./error";
+import { entryHeaders } from "./package-headers";
 
 interface InstalledMcpEntry {
   readonly server: string;

@@ -116,7 +116,6 @@ async function assertRestartCredentialsAvailable(
 
 export async function restartMcpBridge(sandboxName: string, server?: string): Promise<void> {
   return withMcpLifecycleLock(sandboxName, () => {
-    assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:restart");
     return restartMcpBridgeUnlocked(sandboxName, server);
   });
 }
@@ -124,6 +123,7 @@ export async function restartMcpBridge(sandboxName: string, server?: string): Pr
 async function restartMcpBridgeUnlocked(sandboxName: string, server?: string): Promise<void> {
   validateSandboxName(sandboxName);
   const sandbox = getSandboxOrThrow(sandboxName);
+  assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:restart");
   assertMcpDestroyNotPending(sandbox);
   const agent = getSandboxAgent(sandbox);
   const adapter = getBridgeAdapter(agent);

@@ -126,7 +126,6 @@ export async function removeMcpBridge(
   options: { force?: boolean; allowResidual?: boolean } = {},
 ): Promise<void> {
   return withMcpLifecycleLock(sandboxName, async () => {
-    assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:remove");
     // #6376: capture the recoverable prepared-destroy phase BEFORE the removal.
     const before = getSandboxOrThrow(sandboxName).mcp;
     const recoverPreparedDestroy =
@@ -157,6 +156,7 @@ async function removeMcpBridgeUnlocked(
   validateSandboxName(sandboxName);
   validateMcpServerName(server);
   const sandbox = getSandboxOrThrow(sandboxName);
+  assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:remove");
   // #6376: `--force` on `mcp remove` is the documented non-destructive recovery
   // for a stuck MCP destroy transaction. It is PHASE-AWARE: only the prepared
   // (phase-one) marker — in-sandbox scrub + provider detach done, deletion not

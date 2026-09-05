@@ -544,7 +544,7 @@ describe("deterministic PR risk plan", () => {
       "packages/nemoclaw-hermes/Dockerfile",
       "packages/nemoclaw-langchain-deepagents-code/Dockerfile",
       "scripts/checks/run-managed-image-direct-e2e.ts",
-      "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.ts",
+      "src/lib/actions/sandbox/mcp-bridge-adapters.ts",
       "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
       "src/lib/onboard/managed-startup/image-runtime.ts",
     ];
@@ -574,7 +574,7 @@ describe("deterministic PR risk plan", () => {
     "packages/nemoclaw-openclaw/plugin/src/index.ts",
     "nemoclaw-blueprint/blueprint.yaml",
     "scripts/checks/build-protected-managed-images.sh",
-    "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.ts",
+    "src/lib/actions/sandbox/mcp-bridge-adapters.ts",
     "src/lib/actions/sandbox/openshell-child-visible-credentials.v0.0.106.json",
     "src/lib/core/json-types.ts",
     "src/lib/core/ports.ts",

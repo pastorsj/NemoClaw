@@ -40,6 +40,17 @@ export function getSandboxHarnessPackage(sandboxName: string): HarnessPackageIde
   return registry.getSandbox(sandboxName)?.harnessPackage ?? null;
 }
 
+/** Require the exact package receipt that owns every harness-specific MCP operation. */
+export function requireSandboxHarnessPackage(sandboxName: string): HarnessPackageIdentity {
+  const sandbox = getSandboxOrThrow(sandboxName);
+  if (sandbox.harnessPackage) return sandbox.harnessPackage;
+  throw new McpBridgeError(
+    `Managed MCP requires reconciled harness package authority for sandbox '${sandboxName}'. Re-run the NemoClaw installer to install and reconcile this sandbox's harness package, then retry.`,
+    1,
+    "package-authority-required",
+  );
+}
+
 function getSandboxAgentName(sandbox: SandboxEntry): string {
   return sandbox.agent || "openclaw";
 }

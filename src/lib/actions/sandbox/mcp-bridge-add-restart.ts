@@ -147,10 +147,7 @@ export async function addMcpBridge(
   sandboxName: string,
   options: McpBridgeAddOptions,
 ): Promise<ReturnType<typeof getMcpProviderInspectionRuntimeSelection>> {
-  return withMcpLifecycleLock(sandboxName, () => {
-    assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:add");
-    return addMcpBridgeUnlocked(sandboxName, options);
-  });
+  return withMcpLifecycleLock(sandboxName, () => addMcpBridgeUnlocked(sandboxName, options));
 }
 
 async function addMcpBridgeUnlocked(
@@ -194,6 +191,7 @@ async function addMcpBridgeUnlocked(
   }
   const matchingTrustedPrivateHosts = allTrustedPrivateHosts.filter((host) => host === urlHost);
   const sandbox = getSandboxOrThrow(sandboxName);
+  assertMcpCommandRuntimeAvailable(sandboxName, "sandbox:mcp:add");
   assertMcpDestroyNotPending(sandbox);
   const agent = getSandboxAgent(sandbox);
   const adapter = getBridgeAdapter(agent);

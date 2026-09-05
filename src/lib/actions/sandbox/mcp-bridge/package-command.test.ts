@@ -96,7 +96,7 @@ beforeEach(() => {
 });
 
 describe("installed MCP package command boundary", () => {
-  it("keeps legacy sandboxes on their existing adapter path", () => {
+  it("returns no package plan when central orchestration has not established authority", () => {
     mocks.getSandbox.mockReturnValue(null);
 
     expect(buildInstalledMcpRegistrationPlan("alpha", "future-config", ENTRY)).toBeNull();

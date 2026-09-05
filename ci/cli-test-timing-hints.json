@@ -26,7 +26,6 @@
     "src/lib/actions/sandbox/auto-pair-approval.test.ts": 10074,
     "src/lib/actions/sandbox/destroy-flow.test.ts": 25594,
     "src/lib/actions/sandbox/doctor-flow.test.ts": 24265,
-    "src/lib/actions/sandbox/mcp-bridge-adapter-openclaw.test.ts": 8470,
     "src/lib/actions/sandbox/mcp-bridge-input-targets.test.ts": 5667,
     "src/lib/actions/sandbox/mcp-bridge-status-removal.test.ts": 7973,
     "src/lib/actions/sandbox/mcp-bridge-status-resolution.test.ts": 34602,

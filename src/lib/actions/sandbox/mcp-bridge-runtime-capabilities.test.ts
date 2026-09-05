@@ -3,18 +3,15 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { McpBridgeError } from "./mcp-bridge-contracts";
+
 const mocks = vi.hoisted(() => ({
-  getSandboxHarnessPackage: vi.fn(),
-  assertPortableUnavailable: vi.fn(),
+  requireSandboxHarnessPackage: vi.fn(),
 }));
 
 vi.mock("./mcp-bridge-state", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./mcp-bridge-state")>()),
-  getSandboxHarnessPackage: mocks.getSandboxHarnessPackage,
-}));
-
-vi.mock("../../onboard/experimental/portable-agent-lifecycle", () => ({
-  assertHermesPortableCommandUnavailable: mocks.assertPortableUnavailable,
+  requireSandboxHarnessPackage: mocks.requireSandboxHarnessPackage,
 }));
 
 import { assertMcpCommandRuntimeAvailable } from "./mcp-bridge-runtime-capabilities";
@@ -22,8 +19,8 @@ import { assertMcpCommandRuntimeAvailable } from "./mcp-bridge-runtime-capabilit
 beforeEach(() => vi.clearAllMocks());
 
 describe("MCP command runtime authority", () => {
-  it("does not apply a Hermes-specific command guard to a receipt-backed package", () => {
-    mocks.getSandboxHarnessPackage.mockReturnValue({
+  it("accepts a receipt-backed package without selecting a harness-specific guard", () => {
+    mocks.requireSandboxHarnessPackage.mockReturnValue({
       kind: "agent-runtime",
       id: "future-harness",
       packageVersion: "1.0.0",
@@ -32,14 +29,20 @@ describe("MCP command runtime authority", () => {
 
     assertMcpCommandRuntimeAvailable("alpha", "sandbox:mcp:add");
 
-    expect(mocks.assertPortableUnavailable).not.toHaveBeenCalled();
+    expect(mocks.requireSandboxHarnessPackage).toHaveBeenCalledWith("alpha");
   });
 
-  it("retains the legacy guard when the sandbox has no package receipt", () => {
-    mocks.getSandboxHarnessPackage.mockReturnValue(null);
+  it("propagates the typed package-authority refusal", () => {
+    mocks.requireSandboxHarnessPackage.mockImplementation(() => {
+      throw new McpBridgeError(
+        "Managed MCP requires reconciled harness package authority. Re-run the NemoClaw installer.",
+        1,
+        "package-authority-required",
+      );
+    });
 
-    assertMcpCommandRuntimeAvailable("alpha", "sandbox:mcp:add");
-
-    expect(mocks.assertPortableUnavailable).toHaveBeenCalledWith("alpha", "sandbox:mcp:add");
+    expect(() => assertMcpCommandRuntimeAvailable("alpha", "sandbox:mcp:add")).toThrowError(
+      expect.objectContaining({ reasonCode: "package-authority-required" }),
+    );
   });
 });

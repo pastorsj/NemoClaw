@@ -34,21 +34,7 @@ import { getSandboxAgent, getSandboxOrThrow } from "./mcp-bridge-state";
 import { buildJsonSummary, statusMcpBridge } from "./mcp-bridge-status";
 import { parseMcpAddArgs } from "./mcp-bridge-validation";
 
-export {
-  buildDeepAgentsMcpRegisterCommand,
-  buildDeepAgentsMcpRemoveCommand,
-  buildDeepAgentsMcpStatusCommand,
-  buildHermesMcpExecArgs,
-  buildHermesMcpProbeCommand,
-  buildHermesMcpRegisterCommand,
-  buildOpenClawMcporterInspectCommand,
-  buildOpenClawMcporterRegisterCommand,
-  buildOpenClawMcporterRemoveCommand,
-  DEEPAGENTS_MCP_CONFIG_PATH,
-  MCPORTER_VERSION,
-  mcporterHeadersMatchExpected,
-  parseAdapterRegistrationInspection,
-} from "./mcp-bridge-adapters";
+export { parseAdapterRegistrationInspection } from "./mcp-bridge-adapter-inspection";
 export type {
   McpBridgeAddOptions,
   McpBridgeStatus,

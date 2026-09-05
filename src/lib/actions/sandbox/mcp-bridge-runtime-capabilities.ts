@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentMcpAdapter } from "../../agent/defs";
-import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import {
   assertAgentMcpMutationRuntimeCapability,
@@ -10,12 +9,15 @@ import {
 } from "./mcp-bridge-adapters";
 import { isAgentMcpAdapter } from "./mcp-bridge-contracts";
 import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
-import { getBridgeAdapter, getSandboxAgent, getSandboxHarnessPackage } from "./mcp-bridge-state";
+import {
+  getBridgeAdapter,
+  getSandboxAgent,
+  requireSandboxHarnessPackage,
+} from "./mcp-bridge-state";
 
-/** Retain the Hermes portable refusal only for sandboxes without package authority. */
-export function assertMcpCommandRuntimeAvailable(sandboxName: string, commandId: string): void {
-  if (getSandboxHarnessPackage(sandboxName)) return;
-  assertHermesPortableCommandUnavailable(sandboxName, commandId);
+/** Fail before an MCP action can mutate state without an exact package owner. */
+export function assertMcpCommandRuntimeAvailable(sandboxName: string, _commandId: string): void {
+  requireSandboxHarnessPackage(sandboxName);
 }
 
 function adaptersForEntries(
@@ -41,10 +43,7 @@ export function assertMcpAdapterMutationRuntimeCapabilities(
 }
 
 /**
- * Prove host-visible config mutability without requiring a capability marker
- * from the image being torn down. Deep Agents entries created by an older
- * NemoClaw release remain safe to scrub because their exact persisted adapter
- * definition is still ownership-checked by unregisterAgentAdapter.
+ * Prove host-visible config mutability through the package-owned teardown probe.
  */
 export function assertMcpAdapterTeardownRuntimeCapabilities(
   sandboxName: string,

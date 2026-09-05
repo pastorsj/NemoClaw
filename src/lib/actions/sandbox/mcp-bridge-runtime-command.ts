@@ -3,6 +3,8 @@
 
 import type { AgentMcpAdapter } from "../../agent/defs";
 import { shellQuote } from "../../core/shell-quote";
+import { McpBridgeError } from "./mcp-bridge-contracts";
+import { requireSandboxHarnessPackage } from "./mcp-bridge-state";
 import { buildInstalledMcpRuntimeCommand } from "./mcp-bridge/package-command";
 
 export interface McpRuntimePackageContext {
@@ -48,10 +50,6 @@ export const MCP_RUNTIME_SANITIZED_ENV_VARS = [
   "SSLKEYLOGFILE",
 ] as const;
 
-function unsupportedAdapter(adapter: string): never {
-  throw new Error(`Unsupported MCP adapter: ${String(adapter)}`);
-}
-
 /**
  * OpenShell binds generated MCP policies to the configured adapter executable
  * and its process ancestry. Keep that runtime as the parent of a shared child
@@ -62,33 +60,24 @@ export function wrapMcpRuntimeCommand(
   command: readonly string[],
   packageContext?: McpRuntimePackageContext,
 ): string {
-  if (packageContext) {
-    const installedCommand = buildInstalledMcpRuntimeCommand(
-      packageContext.sandboxName,
-      adapter,
-      packageContext.agentName,
-      command,
+  if (!packageContext) {
+    throw new McpBridgeError(
+      "Managed MCP runtime commands require reconciled harness package authority. Re-run the NemoClaw installer to install and reconcile the sandbox's harness package, then retry.",
+      1,
+      "package-authority-required",
     );
-    if (installedCommand !== null) return installedCommand.map(shellQuote).join(" ");
   }
-  const quotedCommand = command.map(shellQuote).join(" ");
-  switch (adapter) {
-    case "mcporter": {
-      const runner =
-        'const { spawnSync } = require("node:child_process"); const result = spawnSync(process.argv[1], process.argv.slice(2), { stdio: "inherit" }); process.exit(result.status ?? 1);';
-      return `nemoclaw-start node -e ${shellQuote(runner)} ${quotedCommand}`;
-    }
-    case "hermes-config": {
-      const runner =
-        "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
-      return `/opt/hermes/.venv/bin/python -I -c ${shellQuote(runner)} ${quotedCommand}`;
-    }
-    case "deepagents-config": {
-      const runner =
-        "import subprocess, sys; raise SystemExit(subprocess.run(sys.argv[1:], check=False).returncode)";
-      return `/opt/venv/bin/python3 -I -c ${shellQuote(runner)} ${quotedCommand}`;
-    }
-    default:
-      return unsupportedAdapter(adapter);
+  requireSandboxHarnessPackage(packageContext.sandboxName);
+  const installedCommand = buildInstalledMcpRuntimeCommand(
+    packageContext.sandboxName,
+    adapter,
+    packageContext.agentName,
+    command,
+  );
+  if (installedCommand === null) {
+    throw new McpBridgeError(
+      `Installed MCP adapter '${adapter}' for sandbox '${packageContext.sandboxName}' is unavailable.`,
+    );
   }
+  return installedCommand.map(shellQuote).join(" ");
 }

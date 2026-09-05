@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import * as portableAgentLifecycle from "../../onboard/experimental/portable-agent-lifecycle";
+import * as registry from "../../state/registry";
 
 import {
   addMcpBridge,
@@ -15,34 +15,26 @@ import {
 } from "./mcp-bridge";
 
 describe("MCP input runtime boundaries", () => {
-  it("rejects schema-5 MCP mutations inside their lifecycle fences (#9203)", async ({
-    onTestFinished,
-  }) => {
-    const guard = vi
-      .spyOn(portableAgentLifecycle, "assertHermesPortableCommandUnavailable")
-      .mockImplementation(() => {
-        throw new Error("schema-5 rejected");
-      });
-    onTestFinished(() => guard.mockRestore());
+  it("rejects every mutation before side effects without package authority", async () => {
+    const sandboxName = "unreconciled";
+    registry.registerSandbox({ name: sandboxName, agent: "openclaw" });
 
-    await expect(
-      addMcpBridge("missing-sandbox", {
-        server: "github",
-        url: "https://mcp.example.test/mcp",
-        env: [{ name: "TOKEN" }],
-      }),
-    ).rejects.toThrow("schema-5 rejected");
-    await expect(removeMcpBridge("missing-sandbox", "github")).rejects.toThrow(
-      "schema-5 rejected",
-    );
-    await expect(restartMcpBridge("missing-sandbox", "github")).rejects.toThrow(
-      "schema-5 rejected",
-    );
-    expect(guard.mock.calls.map((call) => call[1])).toEqual([
-      "sandbox:mcp:add",
-      "sandbox:mcp:remove",
-      "sandbox:mcp:restart",
-    ]);
+    const actions = [
+      () =>
+        addMcpBridge(sandboxName, {
+          server: "github",
+          url: "https://mcp.example.test/mcp",
+          env: [{ name: "TOKEN" }],
+        }),
+      () => removeMcpBridge(sandboxName, "github"),
+      () => restartMcpBridge(sandboxName, "github"),
+    ];
+
+    for (const action of actions) {
+      await expect(action()).rejects.toMatchObject({
+        reasonCode: "package-authority-required",
+      });
+    }
   });
 
   it("rejects unauthenticated direct add callers before sandbox or network side effects", async () => {

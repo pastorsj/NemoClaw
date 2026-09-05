@@ -3,27 +3,19 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { McpBridgeError } from "./mcp-bridge-contracts";
+
 const mocks = vi.hoisted(() => ({
-  loadAgent: vi.fn(),
   ensureGateway: vi.fn(),
   inspectRuntimeIntent: vi.fn(),
   buildInstalledInspection: vi.fn(),
   executeSandboxCommand: vi.fn(),
-  legacyOpenClawInspection: vi.fn(),
-  legacyHermesInspection: vi.fn(),
-  legacyDeepAgentsInspection: vi.fn(),
   getSandbox: vi.fn(),
+  requirePackage: vi.fn(),
 }));
 
-vi.mock("../../agent/defs", () => ({ loadAgent: mocks.loadAgent }));
-
 vi.mock("./mcp-bridge-adapters", () => ({
-  buildDeepAgentsMcpStatusCommand: mocks.legacyDeepAgentsInspection,
-  buildHermesMcpStatusCommand: mocks.legacyHermesInspection,
-  buildOpenClawMcporterInspectCommand: mocks.legacyOpenClawInspection,
-  DEFAULT_OPENCLAW_CONFIG_DIR: "/sandbox/.openclaw",
   inspectAgentMcpRuntimeIntent: mocks.inspectRuntimeIntent,
-  openClawMcporterRoot: (directory: string) => directory,
 }));
 
 vi.mock("./mcp-bridge-policy", () => ({
@@ -32,6 +24,10 @@ vi.mock("./mcp-bridge-policy", () => ({
 }));
 
 vi.mock("./mcp-bridge-provider", () => ({
+  getMcpProviderInspectionRuntimeSelection: () => ({
+    gatewayName: "nemoclaw-8091",
+    workspace: "default",
+  }),
   inspectMcpProvider: () => ({ exists: true }),
   observeMcpCredentialRevision: () => "v7",
   providerAttached: () => true,
@@ -51,6 +47,7 @@ vi.mock("./mcp-bridge-state", () => ({
   getAgentConfigDir: () => "/sandbox/.future",
   getSandboxAgent: (sandbox: { definition: unknown }) => sandbox.definition,
   getSandboxOrThrow: mocks.getSandbox,
+  requireSandboxHarnessPackage: mocks.requirePackage,
 }));
 
 vi.mock("./mcp-bridge-tool-discovery", () => ({ discoverMcpTools: vi.fn() }));
@@ -113,6 +110,7 @@ const SYNTHETIC_SANDBOX = Object.freeze({
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSandbox.mockReturnValue(SYNTHETIC_SANDBOX);
+  mocks.requirePackage.mockReturnValue(PACKAGE_IDENTITY);
   mocks.inspectRuntimeIntent.mockReturnValue(undefined);
   mocks.buildInstalledInspection.mockReturnValue("future-inspect");
   mocks.executeSandboxCommand.mockReturnValue({ status: 0, stdout: "registered\n", stderr: "" });
@@ -133,16 +131,15 @@ describe("receipt-backed MCP status", () => {
       entries: [ENTRY],
       managedServerNames: ["docs"],
       credentialRevisions: new Map([["docs", "v7"]]),
+      runtimeSelection: { gatewayName: "nemoclaw-8091", workspace: "default" },
     });
     expect(mocks.buildInstalledInspection).toHaveBeenCalledWith("alpha", "future-config", ENTRY, {
       credentialRevision: "v7",
       configDirectory: "/sandbox/.future",
     });
-    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", "future-inspect");
-    expect(mocks.legacyOpenClawInspection).not.toHaveBeenCalled();
-    expect(mocks.legacyHermesInspection).not.toHaveBeenCalled();
-    expect(mocks.legacyDeepAgentsInspection).not.toHaveBeenCalled();
-    expect(mocks.loadAgent).not.toHaveBeenCalled();
+    expect(mocks.executeSandboxCommand).toHaveBeenCalledWith("alpha", "future-inspect", {
+      runtimeSelection: { gatewayName: "nemoclaw-8091", workspace: "default" },
+    });
   });
 
   it("verifies complete package intent while presenting one selected server", async () => {
@@ -165,7 +162,24 @@ describe("receipt-backed MCP status", () => {
         ["docs", "v7"],
         ["search", "v7"],
       ]),
+      runtimeSelection: { gatewayName: "nemoclaw-8091", workspace: "default" },
     });
     expect(mocks.buildInstalledInspection).toHaveBeenCalledOnce();
+  });
+
+  it("refuses status before sandbox inspection without reconciled package authority", async () => {
+    mocks.requirePackage.mockImplementation(() => {
+      throw new McpBridgeError(
+        "Managed MCP requires reconciled harness package authority. Re-run the NemoClaw installer.",
+        1,
+        "package-authority-required",
+      );
+    });
+
+    await expect(statusMcpBridge("alpha", "docs")).rejects.toMatchObject({
+      reasonCode: "package-authority-required",
+    });
+    expect(mocks.ensureGateway).not.toHaveBeenCalled();
+    expect(mocks.executeSandboxCommand).not.toHaveBeenCalled();
   });
 });

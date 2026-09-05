@@ -7,13 +7,18 @@ import type { AgentMcpAdapter } from "../../../agent/defs";
 import type { McpBridgeEntry } from "../../../state/registry";
 
 const mocks = vi.hoisted(() => ({
+  assertCapability: vi.fn(),
+  buildInspection: vi.fn(),
+  describeIntent: vi.fn(),
+  describeMutation: vi.fn(),
+  describeTeardown: vi.fn(),
   getConfigDirectory: vi.fn(),
   getPackage: vi.fn(),
   getSandbox: vi.fn(),
+  inspectRegistration: vi.fn(),
   registerInstalled: vi.fn(),
-  registerLegacy: vi.fn(),
+  requirePackage: vi.fn(),
   unregisterInstalled: vi.fn(),
-  unregisterLegacy: vi.fn(),
 }));
 
 vi.mock("../mcp-bridge-state", async (importOriginal) => ({
@@ -21,6 +26,24 @@ vi.mock("../mcp-bridge-state", async (importOriginal) => ({
   getAgentConfigDir: mocks.getConfigDirectory,
   getSandboxHarnessPackage: mocks.getPackage,
   getSandboxOrThrow: mocks.getSandbox,
+  requireSandboxHarnessPackage: mocks.requirePackage,
+}));
+
+vi.mock("../mcp-bridge-adapter-inspection", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../mcp-bridge-adapter-inspection")>()),
+  inspectAdapterRegistrationCommand: mocks.inspectRegistration,
+}));
+
+vi.mock("./package-command", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./package-command")>()),
+  buildInstalledMcpInspectionCommand: mocks.buildInspection,
+  describeInstalledMcpMutationCapability: mocks.describeMutation,
+  describeInstalledMcpRuntimeIntentVerification: mocks.describeIntent,
+  describeInstalledMcpTeardownCapability: mocks.describeTeardown,
+}));
+
+vi.mock("./package-probe", () => ({
+  assertInstalledMcpCapability: mocks.assertCapability,
 }));
 
 vi.mock("./package-mutation", () => ({
@@ -28,12 +51,15 @@ vi.mock("./package-mutation", () => ({
   unregisterInstalledMcpAdapter: mocks.unregisterInstalled,
 }));
 
-vi.mock("./legacy-mutation", () => ({
-  registerLegacyMcpAdapter: mocks.registerLegacy,
-  unregisterLegacyMcpAdapter: mocks.unregisterLegacy,
-}));
-
-import { registerAgentAdapter, unregisterAgentAdapter } from "../mcp-bridge-adapters";
+import {
+  assertAgentMcpMutationRuntimeCapability,
+  assertAgentMcpTeardownRuntimeCapability,
+  inspectAgentAdapterRegistration,
+  inspectAgentMcpRuntimeIntent,
+  registerAgentAdapter,
+  unregisterAgentAdapter,
+} from "../mcp-bridge-adapters";
+import { McpBridgeError } from "../mcp-bridge-contracts";
 
 const PACKAGE_IDENTITY = Object.freeze({
   kind: "agent-runtime" as const,
@@ -57,13 +83,18 @@ function entry(agent: string, adapter: AgentMcpAdapter): McpBridgeEntry {
 }
 
 beforeEach(() => {
+  mocks.assertCapability.mockReset();
+  mocks.buildInspection.mockReset().mockReturnValue("package-inspect");
+  mocks.describeIntent.mockReset().mockReturnValue({ kind: "not-required" });
+  mocks.describeMutation.mockReset().mockReturnValue({ kind: "not-required" });
+  mocks.describeTeardown.mockReset().mockReturnValue({ kind: "not-required" });
   mocks.getConfigDirectory.mockReset().mockReturnValue("/sandbox/.package-agent");
   mocks.getPackage.mockReset().mockReturnValue(PACKAGE_IDENTITY);
   mocks.getSandbox.mockReset().mockReturnValue({ name: "alpha" });
+  mocks.inspectRegistration.mockReset().mockReturnValue({ state: "registered" });
   mocks.registerInstalled.mockReset();
-  mocks.registerLegacy.mockReset();
+  mocks.requirePackage.mockReset().mockReturnValue(PACKAGE_IDENTITY);
   mocks.unregisterInstalled.mockReset().mockReturnValue("removed");
-  mocks.unregisterLegacy.mockReset().mockReturnValue("removed");
 });
 
 describe("MCP package mutation dispatch", () => {
@@ -72,8 +103,30 @@ describe("MCP package mutation dispatch", () => {
     ["hermes", "hermes-config"],
     ["langchain-deepagents-code", "deepagents-config"],
     ["future-harness", "future-config"],
-  ] as const)("registers package agent %s through the generic %s plan", (agent, adapter) => {
+  ] as const)("uses one package path for agent %s and adapter %s", (agent, adapter) => {
     const packageEntry = entry(agent, adapter);
+    const packageIdentity = { ...PACKAGE_IDENTITY, id: agent };
+    mocks.getPackage.mockReturnValue(packageIdentity);
+    mocks.requirePackage.mockReturnValue(packageIdentity);
+    mocks.getSandbox.mockReturnValue({
+      name: "alpha",
+      agent,
+      harnessPackage: packageIdentity,
+      mcp: { bridges: { docs: packageEntry }, managedServerNames: ["docs"] },
+    });
+
+    expect(
+      inspectAgentAdapterRegistration("alpha", adapter, packageEntry, runtimeSelection),
+    ).toEqual({ state: "registered" });
+    assertAgentMcpMutationRuntimeCapability("alpha", adapter, runtimeSelection);
+    assertAgentMcpTeardownRuntimeCapability("alpha", adapter, runtimeSelection);
+    expect(
+      inspectAgentMcpRuntimeIntent("alpha", adapter, {
+        entries: [packageEntry],
+        managedServerNames: ["docs"],
+        runtimeSelection,
+      }),
+    ).toBeUndefined();
 
     registerAgentAdapter(
       "alpha",
@@ -83,7 +136,26 @@ describe("MCP package mutation dispatch", () => {
       { FUTURE_TOKEN: "host-only-secret" },
       { replaceExisting: true, credentialRevision: "v12" },
     );
+    expect(
+      unregisterAgentAdapter("alpha", adapter, packageEntry, runtimeSelection, {
+        force: true,
+        bestEffort: true,
+      }),
+    ).toBe("removed");
 
+    expect(mocks.buildInspection).toHaveBeenCalledWith("alpha", adapter, packageEntry, {
+      configDirectory: "/sandbox/.package-agent",
+    });
+    expect(mocks.describeMutation).toHaveBeenCalledWith("alpha", adapter, agent);
+    expect(mocks.describeTeardown).toHaveBeenCalledWith("alpha", adapter, agent);
+    expect(mocks.describeIntent).toHaveBeenCalledWith(
+      "alpha",
+      adapter,
+      agent,
+      [packageEntry],
+      ["docs"],
+      undefined,
+    );
     expect(mocks.registerInstalled).toHaveBeenCalledWith(
       "alpha",
       adapter,
@@ -96,24 +168,6 @@ describe("MCP package mutation dispatch", () => {
         configDirectory: "/sandbox/.package-agent",
       },
     );
-    expect(mocks.registerLegacy).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["openclaw", "mcporter"],
-    ["hermes", "hermes-config"],
-    ["langchain-deepagents-code", "deepagents-config"],
-    ["future-harness", "future-config"],
-  ] as const)("removes package agent %s through the generic %s plan", (agent, adapter) => {
-    const packageEntry = entry(agent, adapter);
-
-    expect(
-      unregisterAgentAdapter("alpha", adapter, packageEntry, runtimeSelection, {
-        force: true,
-        bestEffort: true,
-      }),
-    ).toBe("removed");
-
     expect(mocks.unregisterInstalled).toHaveBeenCalledWith(
       "alpha",
       adapter,
@@ -125,20 +179,33 @@ describe("MCP package mutation dispatch", () => {
         configDirectory: "/sandbox/.package-agent",
       },
     );
-    expect(mocks.unregisterLegacy).not.toHaveBeenCalled();
   });
 
-  it("uses the isolated native fallback when the registry has no package authority", () => {
+  it("fails with typed guidance before either mutation without package authority", () => {
     mocks.getPackage.mockReturnValue(null);
+    mocks.requirePackage.mockImplementation(() => {
+      throw new McpBridgeError(
+        "Managed MCP requires reconciled harness package authority. Re-run the NemoClaw installer.",
+        1,
+        "package-authority-required",
+      );
+    });
     const legacyEntry = entry("openclaw", "mcporter");
 
-    registerAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection);
-    expect(unregisterAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection)).toBe(
-      "removed",
-    );
+    for (const action of [
+      () => registerAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection),
+      () => unregisterAgentAdapter("alpha", "mcporter", legacyEntry, runtimeSelection),
+    ]) {
+      try {
+        action();
+        throw new Error("expected package authority refusal");
+      } catch (error) {
+        expect(error).toBeInstanceOf(McpBridgeError);
+        expect((error as McpBridgeError).reasonCode).toBe("package-authority-required");
+        expect((error as Error).message).toMatch(/Re-run the NemoClaw installer/u);
+      }
+    }
 
-    expect(mocks.registerLegacy).toHaveBeenCalledOnce();
-    expect(mocks.unregisterLegacy).toHaveBeenCalledOnce();
     expect(mocks.registerInstalled).not.toHaveBeenCalled();
     expect(mocks.unregisterInstalled).not.toHaveBeenCalled();
   });

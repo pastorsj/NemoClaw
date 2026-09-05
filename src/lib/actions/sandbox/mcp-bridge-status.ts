@@ -1,18 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type AgentDefinition, type AgentMcpAdapter, loadAgent } from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 import {
   type AgentMcpRuntimeIntentInspection,
-  buildDeepAgentsMcpStatusCommand,
-  buildHermesMcpStatusCommand,
-  buildOpenClawMcporterInspectCommand,
-  DEFAULT_OPENCLAW_CONFIG_DIR,
   inspectAgentMcpRuntimeIntent,
-  openClawMcporterRoot,
 } from "./mcp-bridge-adapters";
-import { parseUnsafeDeepAgentsMcpProjectionResult } from "./mcp-bridge-adapter-status";
 import { isAgentMcpAdapter, McpBridgeError, type McpBridgeStatus } from "./mcp-bridge-contracts";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import { getPolicyPresence, getRegisteredGeneratedPolicy } from "./mcp-bridge-policy";
@@ -39,6 +33,7 @@ import {
   getAgentConfigDir,
   getSandboxAgent,
   getSandboxOrThrow,
+  requireSandboxHarnessPackage,
 } from "./mcp-bridge-state";
 import { discoverMcpTools } from "./mcp-bridge-tool-discovery";
 import {
@@ -95,7 +90,6 @@ function getAdapterRegistration(
   sandbox: SandboxEntry,
   adapter: AgentMcpAdapter | undefined,
   entry: McpBridgeEntry | undefined,
-  packageBacked: boolean,
   runtimeSelection: McpProviderInspectionRuntimeSelection,
   runtimeIntentInspection?: AgentMcpRuntimeIntentInspection,
   credentialRevision?: McpAttachedCredentialRevision,
@@ -109,50 +103,25 @@ function getAdapterRegistration(
         detail: `Adapter inspection was skipped because ${credentialObservationDetail}.`,
       }
     : undefined;
-  if (credentialInspectionFailure && (packageBacked || adapter !== "deepagents-config"))
-    return credentialInspectionFailure;
+  if (credentialInspectionFailure) return credentialInspectionFailure;
   if (runtimeIntentInspection) {
     return runtimeIntentInspection.ok
       ? { registered: true }
       : { registered: false, detail: runtimeIntentInspection.detail };
   }
-  const configDirectory = getAgentConfigDir(entry.agent, DEFAULT_OPENCLAW_CONFIG_DIR, sandbox);
+  const configDirectory = getAgentConfigDir(entry.agent, undefined, sandbox);
   const installedCommand = buildInstalledMcpInspectionCommand(sandboxName, adapter, entry, {
     credentialRevision,
     configDirectory,
   });
-  if (packageBacked && installedCommand === null) {
+  if (installedCommand === null) {
     throw new McpBridgeError(
       `Installed MCP adapter '${adapter}' for sandbox '${sandboxName}' is unavailable.`,
     );
   }
-  const command =
-    installedCommand ??
-    (adapter === "mcporter"
-      ? buildOpenClawMcporterInspectCommand(
-          entry,
-          false,
-          openClawMcporterRoot(configDirectory),
-          credentialRevision,
-        )
-      : adapter === "hermes-config"
-        ? buildHermesMcpStatusCommand(entry, credentialRevision)
-        : buildDeepAgentsMcpStatusCommand(entry, credentialRevision));
-  const result = executeSandboxCommand(sandboxName, command, { runtimeSelection });
+  const result = executeSandboxCommand(sandboxName, installedCommand, { runtimeSelection });
   if (!result)
     return credentialInspectionFailure ?? { registered: null, detail: "sandbox unreachable" };
-  const unsafeProjection =
-    !packageBacked && adapter === "deepagents-config"
-      ? parseUnsafeDeepAgentsMcpProjectionResult(result)
-      : null;
-  if (unsafeProjection) {
-    const redactedPath = redactBridgeSecretsForDisplay(
-      unsafeProjection.path,
-      entry,
-      resolvePersistedCredentialEnvForRedaction(entry.env),
-    ).trim();
-    throw new McpBridgeError(`${unsafeProjection.messagePrefix}${redactedPath}`, 2);
-  }
   if (credentialInspectionFailure) return credentialInspectionFailure;
   if (result.status === 0) {
     const output = result.stdout.trim();
@@ -219,6 +188,7 @@ export async function statusMcpBridge(
   validateSandboxName(sandboxName);
   if (server !== undefined) validateMcpServerName(server);
   const sandbox = getSandboxOrThrow(sandboxName);
+  requireSandboxHarnessPackage(sandboxName);
   const agent = getSandboxAgent(sandbox);
   const bridges = bridgeState(sandbox);
   const selectedEntry =
@@ -260,9 +230,7 @@ export async function statusMcpBridge(
       },
     ];
   }
-  const hasManagedRuntimeIntent =
-    (!!sandbox.harnessPackage || agent.name === "hermes") &&
-    (sandbox.mcp?.managedServerNames?.length ?? 0) > 0;
+  const hasManagedRuntimeIntent = (sandbox.mcp?.managedServerNames?.length ?? 0) > 0;
   if (entries.length === 0 && !hasManagedRuntimeIntent) return [];
   const providerRuntimeSelection =
     options.runtimeSelection ?? getMcpProviderInspectionRuntimeSelection(sandbox);
@@ -273,9 +241,7 @@ export async function statusMcpBridge(
   // A filtered status response still verifies the package's complete persisted intent. Passing
   // one selected entry with every managed name would tell package adapters that all unselected
   // entries are expected to be absent.
-  const runtimeIntentEntries: Array<[string, McpBridgeEntry | undefined]> = sandbox.harnessPackage
-    ? Object.entries(bridges)
-    : entries;
+  const runtimeIntentEntries: Array<[string, McpBridgeEntry | undefined]> = Object.entries(bridges);
 
   const credentialObservations = new Map<string, McpCredentialRevisionObservation | null>();
   for (const [name, entry] of runtimeIntentEntries) {
@@ -305,7 +271,6 @@ export async function statusMcpBridge(
   const runtimeIntentInspection =
     agent.mcpCapability.support === "bridge" &&
     agent.mcpCapability.adapter &&
-    (!!sandbox.harnessPackage || agent.mcpCapability.adapter === "hermes-config") &&
     (entries.length > 0 || (sandbox.mcp?.managedServerNames?.length ?? 0) > 0) &&
     runtimeIntentEntries.every(
       ([, entry]) => !entry || storedCredentialWarning(entry) === undefined,
@@ -326,9 +291,8 @@ export async function statusMcpBridge(
           })
       : undefined;
   if (entries.length === 0 && runtimeIntentInspection && !runtimeIntentInspection.ok) {
-    const runtimeLabel = sandbox.harnessPackage ? "Agent" : "Hermes";
     throw new McpBridgeError(
-      `${runtimeLabel} MCP runtime does not match the persisted managed intent for sandbox '${sandboxName}': ${runtimeIntentInspection.detail}.`,
+      `Agent MCP runtime does not match the persisted managed intent for sandbox '${sandboxName}': ${runtimeIntentInspection.detail}.`,
     );
   }
 
@@ -348,9 +312,7 @@ export async function statusMcpBridge(
   );
 
   return entries.map(([name, entry]) => {
-    const support = entry
-      ? getPersistedBridgeSupport(entry, agent, !!sandbox.harnessPackage)
-      : getSupportSummary(agent);
+    const support = entry ? getPersistedBridgeSupport(entry, agent) : getSupportSummary(agent);
     const registeredPolicy = getRegisteredGeneratedPolicy(sandboxName, entry);
     const policyPresence = getPolicyPresence(sandboxName, entry, providerRuntimeSelection);
     const hasCredentialBinding =
@@ -410,7 +372,6 @@ export async function statusMcpBridge(
       sandbox,
       support.adapter,
       entry,
-      !!sandbox.harnessPackage,
       providerRuntimeSelection,
       runtimeIntentInspection,
       credentialRevision,
@@ -515,8 +476,14 @@ export async function statusMcpBridge(
 function getPersistedBridgeSupport(
   entry: McpBridgeEntry,
   sandboxAgent: AgentDefinition,
-  packageBacked: boolean,
 ): McpBridgeStatus["support"] {
+  if (entry.agent !== sandboxAgent.name) {
+    return {
+      supported: false,
+      mode: "disabled",
+      reason: `Persisted agent '${entry.agent}' does not match sandbox agent '${sandboxAgent.name}'.`,
+    };
+  }
   if (isAgentMcpAdapter(entry.adapter)) {
     return {
       supported: true,
@@ -524,23 +491,7 @@ function getPersistedBridgeSupport(
       adapter: entry.adapter,
     };
   }
-  if (entry.agent === sandboxAgent.name) return getSupportSummary(sandboxAgent);
-  if (packageBacked) {
-    return {
-      supported: false,
-      mode: "disabled",
-      reason: `Persisted agent '${entry.agent}' does not match sandbox agent '${sandboxAgent.name}'.`,
-    };
-  }
-  try {
-    return getSupportSummary(loadAgent(entry.agent));
-  } catch {
-    return {
-      supported: false,
-      mode: "disabled",
-      reason: `Persisted agent '${entry.agent}' is unavailable.`,
-    };
-  }
+  return getSupportSummary(sandboxAgent);
 }
 
 function getSupportSummary(agent: AgentDefinition): McpBridgeStatus["support"] {

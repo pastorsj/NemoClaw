@@ -7,8 +7,14 @@ import type { AgentDefinition } from "../../agent/defs";
 import type { SandboxEntry } from "../../state/registry";
 
 const mocks = vi.hoisted(() => ({
+  getRegistrySandbox: vi.fn(),
   loadAgent: vi.fn(),
   resolveSandboxAgent: vi.fn(),
+}));
+
+vi.mock("../../state/registry", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../state/registry")>()),
+  getSandbox: mocks.getRegistrySandbox,
 }));
 
 vi.mock("../../agent/defs", async (importOriginal) => ({
@@ -21,7 +27,12 @@ vi.mock("../../onboard/sandbox-agent", async (importOriginal) => ({
   resolveSandboxAgent: mocks.resolveSandboxAgent,
 }));
 
-import { getAgentConfigDir, getBridgeAdapter, getSandboxAgent } from "./mcp-bridge-state";
+import {
+  getAgentConfigDir,
+  getBridgeAdapter,
+  getSandboxAgent,
+  requireSandboxHarnessPackage,
+} from "./mcp-bridge-state";
 
 function agentDefinition(
   displayName: string,
@@ -50,11 +61,31 @@ const sandboxWithReceiptA = Object.freeze({
 }) as SandboxEntry;
 
 beforeEach(() => {
+  mocks.getRegistrySandbox.mockReset();
   mocks.loadAgent.mockReset();
   mocks.resolveSandboxAgent.mockReset();
 });
 
 describe("MCP sandbox agent authority", () => {
+  it("returns exact package authority and rejects unreconciled state with a typed repair", () => {
+    mocks.getRegistrySandbox.mockReturnValue(sandboxWithReceiptA);
+    expect(requireSandboxHarnessPackage("alpha")).toBe(receiptA);
+
+    mocks.getRegistrySandbox.mockReturnValue({ name: "alpha", agent: "future-agent" });
+    try {
+      requireSandboxHarnessPackage("alpha");
+      throw new Error("expected package authority refusal");
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "McpBridgeError",
+        reasonCode: "package-authority-required",
+      });
+      expect((error as Error).message).toMatch(
+        /Re-run the NemoClaw installer to install and reconcile/u,
+      );
+    }
+  });
+
   it("keeps receipt A authoritative after the active package advances to B", () => {
     const receiptDefinitionA = agentDefinition(
       "Receipt A",

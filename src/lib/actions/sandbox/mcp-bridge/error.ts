@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export type McpBridgeErrorReasonCode = "rejected" | "unresolved";
+export type McpBridgeErrorReasonCode = "package-authority-required" | "rejected" | "unresolved";
 
 export class McpBridgeError extends Error {
   constructor(

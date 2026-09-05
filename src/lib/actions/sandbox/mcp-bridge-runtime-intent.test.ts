@@ -6,9 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getSandboxOrThrow: vi.fn(),
   getSandboxHarnessPackage: vi.fn(),
+  requireSandboxHarnessPackage: vi.fn(),
   describeIntent: vi.fn(),
   assertCapability: vi.fn(),
-  assertHermesIntent: vi.fn(),
 }));
 
 vi.mock("./mcp-bridge-state", async (importOriginal) => ({
@@ -17,6 +17,7 @@ vi.mock("./mcp-bridge-state", async (importOriginal) => ({
     sandbox.mcp?.bridges ?? {},
   getSandboxOrThrow: mocks.getSandboxOrThrow,
   getSandboxHarnessPackage: mocks.getSandboxHarnessPackage,
+  requireSandboxHarnessPackage: mocks.requireSandboxHarnessPackage,
 }));
 
 vi.mock("./mcp-bridge/package-command", async (importOriginal) => ({
@@ -29,11 +30,8 @@ vi.mock("./mcp-bridge/package-probe", async (importOriginal) => ({
   assertInstalledMcpCapability: mocks.assertCapability,
 }));
 
-vi.mock("./mcp-bridge-hermes-reconciliation", () => ({
-  assertHermesMcpRuntimeIntent: mocks.assertHermesIntent,
-}));
-
 import { assertAgentMcpRuntimeIntent } from "./mcp-bridge-adapters";
+import { McpBridgeError } from "./mcp-bridge-contracts";
 
 const PACKAGE_IDENTITY = Object.freeze({
   kind: "agent-runtime" as const,
@@ -63,6 +61,7 @@ beforeEach(() => {
     mcp: { bridges: { docs: ENTRY }, managedServerNames: ["docs"] },
   });
   mocks.getSandboxHarnessPackage.mockReturnValue(PACKAGE_IDENTITY);
+  mocks.requireSandboxHarnessPackage.mockReturnValue(PACKAGE_IDENTITY);
   mocks.describeIntent.mockReturnValue({
     kind: "command",
     command: ["future-verify"],
@@ -99,7 +98,6 @@ describe("package MCP runtime intent authority", () => {
       },
       runtimeSelection,
     );
-    expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
 
   it("fails closed when a receipt-backed adapter cannot describe verification", () => {
@@ -111,7 +109,6 @@ describe("package MCP runtime intent authority", () => {
       assertAgentMcpRuntimeIntent("alpha", "future-config", { runtimeSelection }),
     ).toThrow(/invalid package result/u);
     expect(mocks.assertCapability).not.toHaveBeenCalled();
-    expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
 
   it("fails closed when receipt-backed runtime verification does not pass", () => {
@@ -122,7 +119,6 @@ describe("package MCP runtime intent authority", () => {
     expect(() =>
       assertAgentMcpRuntimeIntent("alpha", "future-config", { runtimeSelection }),
     ).toThrow(/future intent mismatch/u);
-    expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
 
   it("refuses a bridge entry that does not match the installed package", () => {
@@ -137,10 +133,9 @@ describe("package MCP runtime intent authority", () => {
       assertAgentMcpRuntimeIntent("alpha", "future-config", { runtimeSelection }),
     ).toThrow(/does not match the installed package runtime intent/u);
     expect(mocks.describeIntent).not.toHaveBeenCalled();
-    expect(mocks.assertHermesIntent).not.toHaveBeenCalled();
   });
 
-  it("retains core Hermes reconciliation only for a no-receipt legacy sandbox", () => {
+  it("rejects a no-receipt Hermes sandbox instead of selecting a native fallback", () => {
     const hermesEntry = { ...ENTRY, agent: "hermes", adapter: "hermes-config" };
     mocks.getSandboxOrThrow.mockReturnValue({
       name: "alpha",
@@ -148,13 +143,17 @@ describe("package MCP runtime intent authority", () => {
       mcp: { bridges: { docs: hermesEntry }, managedServerNames: ["docs", "removed"] },
     });
     mocks.getSandboxHarnessPackage.mockReturnValue(null);
-
-    assertAgentMcpRuntimeIntent("alpha", "hermes-config");
-
-    expect(mocks.assertHermesIntent).toHaveBeenCalledWith("alpha", {
-      entries: [hermesEntry],
-      managedServerNames: ["docs", "removed"],
+    mocks.requireSandboxHarnessPackage.mockImplementation(() => {
+      throw new McpBridgeError(
+        "Managed MCP requires reconciled harness package authority. Re-run the NemoClaw installer.",
+        1,
+        "package-authority-required",
+      );
     });
+
+    expect(() => assertAgentMcpRuntimeIntent("alpha", "hermes-config")).toThrowError(
+      expect.objectContaining({ reasonCode: "package-authority-required" }),
+    );
     expect(mocks.describeIntent).not.toHaveBeenCalled();
   });
 });

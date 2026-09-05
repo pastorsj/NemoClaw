@@ -12,6 +12,9 @@ import {
   DEEPAGENTS_STRICT_JSON_HELPERS,
   DEEPAGENTS_UNSAFE_MCP_PROJECTION_TYPES,
 } from "./mcp-bridge-adapter-deepagents-projection";
+import { authorizationValue, entryHeaders } from "./mcp-bridge/package-headers";
+
+export { authorizationValue, entryHeaders } from "./mcp-bridge/package-headers";
 
 // NemoClaw owns this dedicated projection. Deep Agents Code's user/project
 // `.mcp.json` discovery is disabled in the managed image so user-authored MCP
@@ -63,8 +66,6 @@ export function openClawMcporterRoot(configDir = DEFAULT_OPENCLAW_CONFIG_DIR): s
   return `${configDir.replace(/\/+$/, "")}/workspace`;
 }
 export const OPENCLAW_MCPORTER_ROOT = openClawMcporterRoot();
-const DEFAULT_AUTH_HEADER = "Authorization";
-const DEFAULT_AUTH_SCHEME = "Bearer";
 
 export interface UnsafeDeepAgentsMcpProjectionResult {
   messagePrefix: string;
@@ -88,32 +89,6 @@ export function parseUnsafeDeepAgentsMcpProjectionResult(result: {
       : null;
   }
   return null;
-}
-
-function authPlaceholder(
-  entry: { readonly env: readonly string[] },
-  credentialRevision?: McpAttachedCredentialRevision,
-): string | null {
-  const envName = entry.env[0];
-  if (!envName) return null;
-  const revision = credentialRevision ? `${credentialRevision}_` : "";
-  return `openshell:resolve:env:${revision}${envName}`;
-}
-
-export function authorizationValue(
-  entry: { readonly env: readonly string[] },
-  credentialRevision?: McpAttachedCredentialRevision,
-): string | null {
-  const placeholder = authPlaceholder(entry, credentialRevision);
-  return placeholder ? `${DEFAULT_AUTH_SCHEME} ${placeholder}` : null;
-}
-
-export function entryHeaders(
-  entry: { readonly env: readonly string[] },
-  credentialRevision?: McpAttachedCredentialRevision,
-): Record<string, string> {
-  const authorization = authorizationValue(entry, credentialRevision);
-  return authorization ? { [DEFAULT_AUTH_HEADER]: authorization } : {};
 }
 
 export function pythonJsonLiteral(value: unknown): string {

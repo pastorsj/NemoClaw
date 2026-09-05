@@ -6,8 +6,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpBridgeEntry } from "../../state/registry";
 
 const mocks = vi.hoisted(() => ({
+  buildRuntimeCommand: vi.fn(),
   executeSandboxCommand: vi.fn(),
   observeMcpCredentialRevision: vi.fn(),
+  requirePackage: vi.fn(),
+}));
+
+vi.mock("./mcp-bridge/package-command", () => ({
+  buildInstalledMcpRuntimeCommand: mocks.buildRuntimeCommand,
+}));
+
+vi.mock("./mcp-bridge-state", () => ({
+  requireSandboxHarnessPackage: mocks.requirePackage,
 }));
 
 vi.mock("./process-recovery", () => ({
@@ -78,6 +88,18 @@ function probeStdout(
 }
 
 beforeEach(() => {
+  mocks.requirePackage.mockReset().mockReturnValue({
+    kind: "agent-runtime",
+    id: "openclaw",
+    packageVersion: "1.0.0",
+    contentDigest: "a".repeat(64),
+  });
+  mocks.buildRuntimeCommand
+    .mockReset()
+    .mockImplementation((_sandbox, _adapter, _agent, command: readonly string[]) => [
+      "package-runtime",
+      ...command,
+    ]);
   mocks.executeSandboxCommand.mockReset();
   mocks.observeMcpCredentialRevision.mockReset();
   mocks.observeMcpCredentialRevision.mockReturnValue("v11");
