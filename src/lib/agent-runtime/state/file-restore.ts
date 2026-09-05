@@ -89,7 +89,7 @@ function assertKnownFields(
   }
 }
 
-const STATE_FILE_MERGE_STRATEGIES = ["key-allowlist", "package-config", "openclaw-config"] as const;
+const STATE_FILE_MERGE_STRATEGIES = ["key-allowlist", "package-config"] as const;
 const STATE_FILE_USER_KEY_TYPES: readonly StateFileUserKeyType[] = [
   "boolean",
   "string",
@@ -259,7 +259,7 @@ export function readStateFileRestore(
     );
   }
 
-  if (merge === "openclaw-config" || merge === "package-config") {
+  if (merge === "package-config") {
     for (const disallowed of ["user_keys", "require_fresh_tables", "require_fresh_headers"]) {
       if (value[disallowed] !== undefined) {
         throw new Error(

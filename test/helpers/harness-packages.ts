@@ -374,3 +374,41 @@ export function installHomeHarnessPackageFixture(
   }
   return fixture.install(id);
 }
+
+/** Install the real OpenClaw restore manifest and adapter under an isolated HOME. */
+export function installHomeOpenClawRestorePackageFixture(home: string): InstalledHarnessPackage {
+  const canonicalHome = fs.realpathSync(home);
+  const sourceRoot = path.join(canonicalHome, "openclaw-restore-package");
+  const packageRoot = path.join(sourceRoot, "packages", "nemoclaw-openclaw");
+  const repositoryPackageRoot = path.join(
+    import.meta.dirname,
+    "../..",
+    "packages",
+    "nemoclaw-openclaw",
+  );
+  privateDirectory(path.join(packageRoot, "host"));
+  fs.copyFileSync(
+    path.join(repositoryPackageRoot, "manifest.yaml"),
+    path.join(packageRoot, "manifest.yaml"),
+  );
+  fs.copyFileSync(
+    path.join(repositoryPackageRoot, "host", "restore-adapter.cts"),
+    path.join(packageRoot, "host", "restore-adapter.cts"),
+  );
+  writePrivateFile(
+    sourceRoot,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "openclaw",
+      displayName: "OpenClaw",
+      packageVersion: "0.1.1",
+      manifest: "packages/nemoclaw-openclaw/manifest.yaml",
+    })}\n`,
+  );
+  return installHarnessPackage(
+    { packageRoot: sourceRoot, sourceIdentity: SOURCE_IDENTITY },
+    { storeRoot: path.join(canonicalHome, ".nemoclaw", "harnesses") },
+  );
+}

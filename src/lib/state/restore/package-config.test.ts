@@ -68,9 +68,6 @@ function restoreWithContext(
     OWNERSHIP,
     false,
     log,
-    undefined,
-    undefined,
-    undefined,
     context,
   );
   return { log, restored };

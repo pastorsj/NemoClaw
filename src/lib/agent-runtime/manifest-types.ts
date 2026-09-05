@@ -41,7 +41,7 @@ export type AgentStateDirectory = AgentStateDirectoryPath | AgentStateDirectoryP
 
 export type AgentStateFileStrategy = "copy" | "sqlite_backup";
 
-export type StateFileRestoreMerge = "key-allowlist" | "package-config" | "openclaw-config";
+export type StateFileRestoreMerge = "key-allowlist" | "package-config";
 
 export type StateFileUserKeyType = "boolean" | "string" | "integer" | "number" | "enum";
 
@@ -66,13 +66,6 @@ export interface StateFileKeyAllowlistRestoreOwnership {
   requireFreshHeaders?: readonly StateFileFreshHeader[];
 }
 
-export interface StateFileOpenClawRestoreOwnership {
-  merge: "openclaw-config";
-  userKeys?: never;
-  requireFreshTables?: never;
-  requireFreshHeaders?: never;
-}
-
 export interface StateFilePackageConfigRestoreOwnership {
   merge: "package-config";
   userKeys?: never;
@@ -82,8 +75,7 @@ export interface StateFilePackageConfigRestoreOwnership {
 
 export type StateFileRestoreOwnership =
   | StateFileKeyAllowlistRestoreOwnership
-  | StateFilePackageConfigRestoreOwnership
-  | StateFileOpenClawRestoreOwnership;
+  | StateFilePackageConfigRestoreOwnership;
 
 export interface AgentStateFile {
   path: string;

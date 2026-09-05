@@ -11,8 +11,6 @@ import type {
 } from "../agent-runtime/config-module.js";
 import { redactFull, shellQuote } from "../runner.js";
 import { listManagedChannelNames } from "./restore/managed-channels.js";
-import { buildOpenClawConfigRestoreInputFromSandbox } from "./openclaw-config-restore-input.js";
-import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
 import { buildKeyAllowlistMergeRestoreCommand } from "./state-file-key-merge.js";
 
 export interface StateFileRestoreSpec {
@@ -69,6 +67,7 @@ function readCurrentPackageConfig(
   dir: string,
   specPath: string,
   log: (message: string) => void,
+  env?: NodeJS.ProcessEnv,
 ):
   | { readonly kind: "read"; readonly content: Buffer }
   | { readonly kind: "missing" }
@@ -81,6 +80,7 @@ function readCurrentPackageConfig(
     'cat -- "$src"',
   ].join("; ");
   const result = spawnSync("ssh", [...sshArgs, command], {
+    ...(env ? { env } : {}),
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 120000,
     maxBuffer: 256 * 1024 * 1024,
@@ -104,8 +104,9 @@ function buildPackageConfigRestoreInput(
   backupContents: Buffer,
   context: PackageConfigRestoreContext,
   log: (message: string) => void,
+  env?: NodeJS.ProcessEnv,
 ): PackageConfigRestoreInput | null {
-  const current = readCurrentPackageConfig(sshArgs, dir, specPath, log);
+  const current = readCurrentPackageConfig(sshArgs, dir, specPath, log, env);
   if (current.kind === "failed") return null;
   let result: ReturnType<HarnessConfigRestoreHostModule["mergeConfigState"]>;
   try {
@@ -287,9 +288,6 @@ export function restoreStateFile(
   ownership: StateFileRestoreOwnership | undefined,
   allowCustomImageWholeStateFileRestore: boolean,
   log: (message: string) => void,
-  freshImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
-  previousImagePluginInstalls?: readonly OpenClawImagePluginInstall[],
-  configHashFiles?: readonly string[],
   packageConfigRestore?: PackageConfigRestoreContext,
   env?: NodeJS.ProcessEnv,
 ): boolean {
@@ -309,6 +307,7 @@ export function restoreStateFile(
       backupContents,
       packageConfigRestore,
       log,
+      env,
     );
     if (!prepared) return false;
     command = buildStateFileRestoreCommand(
@@ -318,24 +317,6 @@ export function restoreStateFile(
       prepared.write.kind === "config-anchors" ? prepared.write.hashFiles : [spec.path],
     );
     input = prepared.input;
-  } else if (ownership?.merge === "openclaw-config") {
-    command = buildStateFileRestoreCommand(dir, spec, true, configHashFiles ?? [spec.path]);
-    const result = buildOpenClawConfigRestoreInputFromSandbox({
-      backupContents,
-      dir,
-      env,
-      freshImagePluginInstalls,
-      log,
-      previousImagePluginInstalls,
-      specPath: spec.path,
-      sshArgs,
-    });
-    if (result.ok) {
-      input = result.input;
-    } else {
-      log(`FAILED: ${result.error}`);
-      input = null;
-    }
   } else if (ownership?.merge === "key-allowlist") {
     command = allowCustomImageWholeStateFileRestore
       ? buildStateFileRestoreCommand(dir, spec, false)

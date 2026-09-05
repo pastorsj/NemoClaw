@@ -15,22 +15,29 @@ import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   createSnapshotBackupAuthorityFixture,
-  createSnapshotHarnessPackageFixture,
   createSnapshotRestoreAuthorityFixture,
 } from "../helpers/snapshot-authority";
 
-// sandbox-state computes its backup root from HOME at module load time.
-// vi.stubEnv records and restores the prior value (including unset) on teardown.
-const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-auth-home-"));
-vi.stubEnv("HOME", TMP_HOME);
+// sandbox-state computes its backup root from HOME at module load time. Assign
+// HOME directly because Vitest restores stubbed variables before each test.
+const ORIGINAL_HOME = process.env.HOME;
+const TMP_HOME = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-runtime-auth-home-")),
+);
+process.env.HOME = TMP_HOME;
 
 const REPO_ROOT = path.join(import.meta.dirname, "../..");
+const { installHomeOpenClawRestorePackageFixture } = await import(
+  pathToFileURL(path.join(REPO_ROOT, "test", "helpers", "harness-packages.ts")).href
+);
 const sandboxState = (await import(
   pathToFileURL(path.join(REPO_ROOT, "src", "lib", "state", "sandbox.ts")).href
 )) as typeof import("../../src/lib/state/sandbox.js");
+const OPENCLAW_PACKAGE = installHomeOpenClawRestorePackageFixture(TMP_HOME).identity;
 
 afterAll(() => {
-  vi.unstubAllEnvs();
+  if (ORIGINAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = ORIGINAL_HOME;
   fs.rmSync(TMP_HOME, { recursive: true, force: true });
 });
 
@@ -166,7 +173,7 @@ function writeOpenClawRegistry(sandboxName: string): void {
           provider: "p",
           gpuEnabled: false,
           agent: null,
-          harnessPackage: createSnapshotHarnessPackageFixture("openclaw"),
+          harnessPackage: OPENCLAW_PACKAGE,
         },
       },
     }),
@@ -209,10 +216,10 @@ describe("runtime auth state across snapshot backup/restore (#6852)", () => {
       vi.stubEnv("PATH", `${binDir}:${process.env.PATH || ""}`);
 
       // ── Backup: runtime auth dirs are not captured at all ──────────
-      const backup = sandboxState.backupSandboxState(
-        "alpha",
-        createSnapshotBackupAuthorityFixture("openclaw"),
-      );
+      const backup = sandboxState.backupSandboxState("alpha", {
+        ...createSnapshotBackupAuthorityFixture("openclaw"),
+        harnessPackage: OPENCLAW_PACKAGE,
+      });
       expect(backup.success).toBe(true);
       expect(backup.backedUpDirs).toContain("agents");
       expect(backup.backedUpDirs).not.toContain("identity");

@@ -2527,7 +2527,7 @@ function restoreSandboxStateFromTrustedTree(
           `Package configuration restore adapter could not be loaded: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-    } else if (targetAgent.name !== "openclaw") {
+    } else {
       return failRestoreContract(
         "Package configuration restore requires the target harness package receipt",
       );
@@ -2805,26 +2805,15 @@ function restoreSandboxStateFromTrustedTree(
       if (!targetStateFile) throw new Error(`Validated target state file missing: ${spec.path}`);
       const backupContents = stagedStateFiles.get(spec.path);
       if (!backupContents) throw new Error(`Staged state file missing: ${spec.path}`);
-      const restoreOwnership =
-        targetStateFile.restore?.merge === "package-config" &&
-        !packageConfigRestoreAdapter &&
-        targetAgent.name === "openclaw"
-          ? ({ merge: "openclaw-config" } as const)
-          : targetStateFile.restore;
       if (
         restoreStateFile(
           sshArgs(configFile, sandboxName),
           dir,
           spec,
           backupContents,
-          restoreOwnership,
+          targetStateFile.restore,
           options.allowCustomImageWholeStateFileRestore === true,
           _log,
-          configFreshOpenClawImagePluginInstalls,
-          previousOpenClawImagePluginInstalls,
-          restoreOwnership?.merge === "openclaw-config"
-            ? [targetAgent.configPaths.configFile, "fabric.json"]
-            : [targetAgent.configPaths.configFile],
           packageConfigRestoreAdapter
             ? {
                 agentName: targetAgent.name,

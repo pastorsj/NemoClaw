@@ -24,9 +24,12 @@ import { stateDirectoryDiscoverySshSource } from "../helpers/snapshot-state-disc
 // restored in afterAll so sibling tests running in the same worker don't
 // inherit a deleted temp directory.
 const ORIGINAL_HOME = process.env.HOME;
-const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snap-naming-"));
+const TMP_HOME = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-snap-naming-")));
 process.env.HOME = TMP_HOME;
 const REPO_ROOT = path.join(import.meta.dirname, "../..");
+const { installHomeOpenClawRestorePackageFixture } = await import(
+  pathToFileURL(path.join(REPO_ROOT, "test", "helpers", "harness-packages.ts")).href
+);
 type BackupScalar = string | number | boolean | null | undefined;
 type BackupValue = BackupScalar | BackupManifestOverrides | BackupValue[];
 type SandboxStateModule = typeof import("../../src/lib/state/sandbox.js");
@@ -49,6 +52,7 @@ if (!isSandboxStateModule(loadedSandboxState)) {
 const sandboxState = loadedSandboxState;
 const { parseRestoreArgs } = sandboxState;
 const BACKUPS_ROOT = path.join(TMP_HOME, ".nemoclaw", "rebuild-backups");
+const OPENCLAW_PACKAGE = installHomeOpenClawRestorePackageFixture(TMP_HOME).identity;
 const registeredAgentIds = new Map<string, string>();
 type BackupManifestOverrides = { [key: string]: BackupValue };
 function writeBackup(
@@ -158,6 +162,7 @@ function writeAgentRegistry(
 }
 
 function testHarnessPackage(agentId: string) {
+  if (agentId === "openclaw") return OPENCLAW_PACKAGE;
   return {
     kind: "agent-runtime" as const,
     id: agentId,

@@ -8,15 +8,63 @@ import { pathToFileURL } from "node:url";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 
 const ORIGINAL_HOME = process.env.HOME;
-const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-restore-"));
+const TMP_HOME = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-restore-")),
+);
 process.env.HOME = TMP_HOME;
 
 const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../..");
+const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
 const BACKUPS_ROOT = path.join(TMP_HOME, ".nemoclaw", "rebuild-backups");
 
 type SandboxStateModule = typeof import("../../../../src/lib/state/sandbox.js");
 type CurrentOpenClawReadMode = "file" | "missing" | "invalid-json";
 
+const { installHarnessPackage } = (await import(
+  pathToFileURL(path.join(REPOSITORY_ROOT, "src", "lib", "agent-runtime", "package", "install.ts"))
+    .href
+)) as typeof import("../../../../src/lib/agent-runtime/package/install.js");
+
+function installOpenClawRestorePackage() {
+  const sourceRoot = path.join(TMP_HOME, "openclaw-restore-package");
+  const packageRoot = path.join(sourceRoot, "packages", "nemoclaw-openclaw");
+  fs.mkdirSync(path.join(packageRoot, "host"), { recursive: true, mode: 0o700 });
+  fs.copyFileSync(
+    path.join(PACKAGE_ROOT, "manifest.yaml"),
+    path.join(packageRoot, "manifest.yaml"),
+  );
+  fs.copyFileSync(
+    path.join(PACKAGE_ROOT, "host", "restore-adapter.cts"),
+    path.join(packageRoot, "host", "restore-adapter.cts"),
+  );
+  fs.writeFileSync(
+    path.join(sourceRoot, "nemoclaw-package.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "openclaw",
+      displayName: "OpenClaw",
+      packageVersion: "0.1.0",
+      manifest: "packages/nemoclaw-openclaw/manifest.yaml",
+    })}\n`,
+    { mode: 0o600 },
+  );
+  return installHarnessPackage(
+    {
+      packageRoot: sourceRoot,
+      sourceIdentity: {
+        kind: "bundled",
+        nemoclawBuildIdentity: {
+          nemoclawVersion: "0.0.113",
+          sourceRevision: "c".repeat(40),
+        },
+      },
+    },
+    { storeRoot: path.join(TMP_HOME, ".nemoclaw", "harnesses") },
+  ).identity;
+}
+
+const OPENCLAW_PACKAGE_IDENTITY = installOpenClawRestorePackage();
 const sandboxState = (await import(
   pathToFileURL(path.join(REPOSITORY_ROOT, "src", "lib", "state", "sandbox.ts")).href
 )) as SandboxStateModule;
@@ -51,6 +99,7 @@ function writeOpenClawRegistry(sandboxName: string): void {
           provider: "p",
           gpuEnabled: false,
           agent: null,
+          harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
         },
       },
     }),

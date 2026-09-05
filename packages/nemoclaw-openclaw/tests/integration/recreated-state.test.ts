@@ -4,12 +4,75 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
-import { restoreEnvBulk } from "../../../test/helpers/env-test-helpers.js";
-import type { OpenClawImagePluginInstall } from "./openclaw-plugin-restore.js";
-import { restoreRecreatedSandboxState } from "./sandbox.js";
+import { restoreEnvBulk } from "../../../../test/helpers/env-test-helpers.js";
+import type { OpenClawImagePluginInstall } from "../../../../src/lib/state/openclaw-plugin-restore.js";
+
+const ORIGINAL_HOME = process.env.HOME;
+const TMP_HOME = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-openclaw-recreated-home-")),
+);
+process.env.HOME = TMP_HOME;
+
+const REPOSITORY_ROOT = path.resolve(import.meta.dirname, "../../../..");
+const PACKAGE_ROOT = path.resolve(import.meta.dirname, "../..");
+const { installHarnessPackage } = (await import(
+  pathToFileURL(path.join(REPOSITORY_ROOT, "src", "lib", "agent-runtime", "package", "install.ts"))
+    .href
+)) as typeof import("../../../../src/lib/agent-runtime/package/install.js");
+const { restoreRecreatedSandboxState } = (await import(
+  pathToFileURL(path.join(REPOSITORY_ROOT, "src", "lib", "state", "sandbox.ts")).href
+)) as typeof import("../../../../src/lib/state/sandbox.js");
+
+function installOpenClawRestorePackage() {
+  const sourceRoot = path.join(TMP_HOME, "openclaw-recreated-package");
+  const packageRoot = path.join(sourceRoot, "packages", "nemoclaw-openclaw");
+  fs.mkdirSync(path.join(packageRoot, "host"), { recursive: true, mode: 0o700 });
+  fs.copyFileSync(
+    path.join(PACKAGE_ROOT, "manifest.yaml"),
+    path.join(packageRoot, "manifest.yaml"),
+  );
+  fs.copyFileSync(
+    path.join(PACKAGE_ROOT, "host", "restore-adapter.cts"),
+    path.join(packageRoot, "host", "restore-adapter.cts"),
+  );
+  fs.writeFileSync(
+    path.join(sourceRoot, "nemoclaw-package.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: "openclaw",
+      displayName: "OpenClaw",
+      packageVersion: "0.1.0",
+      manifest: "packages/nemoclaw-openclaw/manifest.yaml",
+    })}\n`,
+    { mode: 0o600 },
+  );
+  return installHarnessPackage(
+    {
+      packageRoot: sourceRoot,
+      sourceIdentity: {
+        kind: "bundled",
+        nemoclawBuildIdentity: {
+          nemoclawVersion: "0.0.113",
+          sourceRevision: "c".repeat(40),
+        },
+      },
+    },
+    { storeRoot: path.join(TMP_HOME, ".nemoclaw", "harnesses") },
+  ).identity;
+}
+
+const OPENCLAW_PACKAGE_IDENTITY = installOpenClawRestorePackage();
+
+afterAll(() => {
+  if (ORIGINAL_HOME === undefined) delete process.env.HOME;
+  else process.env.HOME = ORIGINAL_HOME;
+  fs.rmSync(TMP_HOME, { recursive: true, force: true });
+});
 
 const OPENCLAW_DIR = "/sandbox/.openclaw";
 
@@ -20,6 +83,26 @@ function imageInstall(id: string, extensionDir: string): OpenClawImagePluginInst
 
 function writeExecutable(filePath: string, source: string): void {
   fs.writeFileSync(filePath, source, { mode: 0o755 });
+}
+
+function writeOpenClawRegistry(sandboxName: string): void {
+  fs.mkdirSync(path.join(TMP_HOME, ".nemoclaw"), { recursive: true });
+  fs.writeFileSync(
+    path.join(TMP_HOME, ".nemoclaw", "sandboxes.json"),
+    JSON.stringify({
+      defaultSandbox: sandboxName,
+      sandboxes: {
+        [sandboxName]: {
+          name: sandboxName,
+          model: "m",
+          provider: "p",
+          gpuEnabled: false,
+          agent: null,
+          harnessPackage: OPENCLAW_PACKAGE_IDENTITY,
+        },
+      },
+    }),
+  );
 }
 
 function extensionDir(install: OpenClawImagePluginInstall): string | null {
@@ -181,6 +264,7 @@ process.exit(1);
 
     process.env.NEMOCLAW_OPENSHELL_BIN = openshell;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    writeOpenClawRegistry("alpha");
     const restore = restoreRecreatedSandboxState("alpha", backupPath, {
       targetAgentType: "openclaw",
       ...(options.discoverFreshPluginInstalls

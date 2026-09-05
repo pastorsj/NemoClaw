@@ -59,6 +59,8 @@ export const openclawPackageTestMoves = createTestMoveRecords({
 });
 
 export const openclawNemoclawTestMoves = createTestMoveRecords({
+  "src/lib/state/sandbox-recreated-openclaw-restore.test.ts":
+    "tests/integration/recreated-state.test.ts",
   "test/agents/agents-manifest-policy-conformance.test.ts": "tests/config/agent-policy.test.ts",
   "test/onboarding/blueprint-runtime-identity-lifecycle.test.ts":
     "tests/integration/runtime-identity.test.ts",
@@ -246,6 +248,10 @@ export const openclawPackageSplitTests = openclawPackageTestSplits.map(
 // Package-owned assertions split from larger root suites. This lane supplies
 // the exact NemoClaw checkout that their fixtures and production paths read.
 export const openclawNemoclawTestSplits: readonly PackageTestMove[] = [
+  {
+    source: "src/lib/state/openclaw-config-restore-input.test.ts",
+    destination: "tests/integration/config-restore.test.ts",
+  },
   {
     source: "test/generation/generate-openclaw-config.test.ts",
     destination: "tests/config/generator-validation.test.ts",

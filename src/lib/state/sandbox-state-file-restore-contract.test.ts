@@ -177,6 +177,44 @@ describe("state-file restore target contract", () => {
     expect(validateBeforeMutation).toHaveBeenCalledOnce();
   });
 
+  it("refuses package configuration restore without the target package receipt", () => {
+    const packageDefinition = Object.freeze({
+      ...loadAgent("langchain-deepagents-code"),
+      name: "future-harness",
+      displayName: "Future Harness",
+      packageRoot: "/installed/future-harness",
+      configPaths: {
+        dir: "/sandbox/.future-harness",
+        configFile: "config.json",
+        envFile: null,
+        format: "json",
+      },
+      stateFiles: [
+        {
+          path: "config.json",
+          strategy: "copy" as const,
+          restore: { merge: "package-config" as const },
+        },
+      ],
+    }) satisfies AgentDefinition;
+    const backupPath = writeBackup({
+      agentType: packageDefinition.name,
+      dir: packageDefinition.configPaths.dir,
+      stateFiles: [{ path: "config.json", strategy: "copy" }],
+    });
+
+    const result = restoreRecreatedSandboxState("alpha", backupPath, {
+      targetAgentType: packageDefinition.name,
+      agentDefinition: packageDefinition,
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      failedFiles: ["config.json"],
+      error: "Package configuration restore requires the target harness package receipt",
+    });
+  });
+
   it("restores staged state-file bytes when the backup path changes after the mutation fence", () => {
     const packageDefinition = Object.freeze({
       ...loadAgent("langchain-deepagents-code"),
