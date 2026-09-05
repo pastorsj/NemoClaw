@@ -334,6 +334,7 @@ export function createManagedWorkloadOnboardRuntime(
       : prepareSandboxWorkloadSource({
           agentName: input.agentName,
           managedImage: agentDefinition.managedImage,
+          harnessPackage: input.harnessPackage,
           legacyDockerfilePath: input.legacyDockerfilePath,
           customDockerfilePath: input.customDockerfilePath,
           runtime: runtimeCapabilities,
@@ -695,12 +696,20 @@ export function resolveOnboardManagedBootstrapLaunch(input: {
       "Managed image onboarding is missing its identity-bound bootstrap launch contract.",
     );
   }
-  const agentDefinition = input.runtime.agentDefinition ?? {
-    name: input.workload.source.contract.agent,
-    managedImage: qualifiedManagedImageDeclaration(input.workload.source.contract.agent),
-  };
+  const contractAgent = input.workload.source.contract.agent;
+  const agentDefinition =
+    input.runtime.agentDefinition ??
+    (isManagedImageAgent(contractAgent)
+      ? {
+          name: contractAgent,
+          managedImage: qualifiedManagedImageDeclaration(contractAgent),
+        }
+      : null);
+  if (!agentDefinition) {
+    throw new Error("Managed image launch is missing its receipt-pinned package definition.");
+  }
   const managedImage = agentDefinition.managedImage;
-  if (managedImage === null || agentDefinition.name !== input.workload.source.contract.agent) {
+  if (managedImage === null || agentDefinition.name !== contractAgent) {
     throw new Error("Managed image launch is missing its receipt-pinned package declaration.");
   }
   return {

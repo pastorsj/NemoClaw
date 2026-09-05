@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
   MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
   MANAGED_IMAGE_CONTRACT_VERSION,
@@ -13,6 +15,7 @@ import {
   type ManagedImageContractV1,
   CANDIDATE_MANAGED_IMAGE_AGENTS,
   type ManagedImageAgent,
+  type PackageManagedImageContract,
   SHIPPED_MANAGED_IMAGE_AGENTS,
   type ShippedManagedImageAgent,
 } from "./managed-image/contract";
@@ -57,6 +60,44 @@ const CATALOG: ManagedImageContractCatalog = Object.fromEntries(
   SHIPPED_MANAGED_IMAGE_AGENTS.map((agent) => [agent, contractFor(agent)]),
 );
 
+const FUTURE_HARNESS_PACKAGE = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "8e".repeat(32),
+} as const satisfies HarnessPackageIdentity;
+
+const FUTURE_MANAGED_IMAGE = {
+  repository: "registry.example/team/future-harness",
+  architectures: [MANAGED_IMAGE_PLATFORM],
+  runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+  startup_profile_contract_version: 1,
+  capability_contract_version: 1,
+} as const satisfies HarnessManagedImageDeclaration;
+
+function futureHarnessContract(
+  harnessPackage: HarnessPackageIdentity = FUTURE_HARNESS_PACKAGE,
+): PackageManagedImageContract<"future-harness"> {
+  const digest = `sha256:${"8f".repeat(32)}` as const;
+  return {
+    harnessPackage,
+    contractVersion: MANAGED_IMAGE_CONTRACT_VERSION,
+    agent: "future-harness",
+    platform: MANAGED_IMAGE_PLATFORM,
+    image: FUTURE_MANAGED_IMAGE.repository,
+    digest,
+    reference: `${FUTURE_MANAGED_IMAGE.repository}@${digest}`,
+    source: {
+      repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+      revision: SOURCE_REVISION,
+      release: SOURCE_RELEASE,
+      cohort: SOURCE_COHORT,
+    },
+    startupProfileContractVersion: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+    capabilityContractVersion: MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
+  };
+}
+
 function managedRuntime(driverName: string): SandboxWorkloadRuntimeCapabilities {
   return {
     driverName,
@@ -72,22 +113,23 @@ function managedRuntime(driverName: string): SandboxWorkloadRuntimeCapabilities 
 }
 
 describe("sandbox workload source resolution", () => {
-  it.each(
-    SHIPPED_MANAGED_IMAGE_AGENTS,
-  )("selects the published managed image for stock %s on a capable runtime (#7744)", (agent) => {
-    const source = resolveSandboxWorkloadSource({
-      agentName: agent,
-      legacyDockerfilePath: `agents/${agent}/Dockerfile`,
-      runtime: managedRuntime("podman"),
-      catalog: CATALOG,
-    });
+  it.each(SHIPPED_MANAGED_IMAGE_AGENTS)(
+    "selects the published managed image for stock %s on a capable runtime (#7744)",
+    (agent) => {
+      const source = resolveSandboxWorkloadSource({
+        agentName: agent,
+        legacyDockerfilePath: `agents/${agent}/Dockerfile`,
+        runtime: managedRuntime("podman"),
+        catalog: CATALOG,
+      });
 
-    expect(source).toEqual({
-      kind: "managed-image",
-      reference: contractFor(agent).reference,
-      contract: contractFor(agent),
-    });
-  });
+      expect(source).toEqual({
+        kind: "managed-image",
+        reference: contractFor(agent).reference,
+        contract: contractFor(agent),
+      });
+    },
+  );
 
   it("uses the same contract with an MXC-shaped capable driver (#7744)", () => {
     const source = resolveSandboxWorkloadSource({
@@ -174,6 +216,57 @@ describe("sandbox workload source resolution", () => {
         catalog: CATALOG,
       }),
     ).toThrow("selected agent is not a shipped managed agent");
+  });
+
+  it("selects a receipt-qualified managed image for a synthetic package", () => {
+    const contract = futureHarnessContract();
+
+    const source = resolveSandboxWorkloadSource({
+      agentName: FUTURE_HARNESS_PACKAGE.id,
+      harnessPackage: FUTURE_HARNESS_PACKAGE,
+      managedImage: FUTURE_MANAGED_IMAGE,
+      legacyDockerfilePath: "/workspace/future-harness/Dockerfile",
+      runtime: managedRuntime("podman"),
+      catalog: { [FUTURE_HARNESS_PACKAGE.id]: contract },
+      policy: "require-managed",
+    });
+
+    expect(source).toEqual({
+      kind: "managed-image",
+      reference: contract.reference,
+      contract,
+    });
+  });
+
+  it("does not admit synthetic package qualification without its exact receipt", () => {
+    const contract = futureHarnessContract();
+
+    expect(() =>
+      resolveSandboxWorkloadSource({
+        agentName: FUTURE_HARNESS_PACKAGE.id,
+        managedImage: FUTURE_MANAGED_IMAGE,
+        legacyDockerfilePath: "/workspace/future-harness/Dockerfile",
+        runtime: managedRuntime("podman"),
+        catalog: { [FUTURE_HARNESS_PACKAGE.id]: contract },
+        policy: "require-managed",
+      }),
+    ).toThrow("selected agent is not a shipped managed agent");
+  });
+
+  it("does not admit synthetic package qualification after receipt drift", () => {
+    const contract = futureHarnessContract();
+
+    expect(() =>
+      resolveSandboxWorkloadSource({
+        agentName: FUTURE_HARNESS_PACKAGE.id,
+        harnessPackage: { ...FUTURE_HARNESS_PACKAGE, packageVersion: "1.2.4" },
+        managedImage: FUTURE_MANAGED_IMAGE,
+        legacyDockerfilePath: "/workspace/future-harness/Dockerfile",
+        runtime: managedRuntime("podman"),
+        catalog: { [FUTURE_HARNESS_PACKAGE.id]: contract },
+        policy: "require-managed",
+      }),
+    ).toThrow("failed closed validation");
   });
 
   it("fails closed when a supplied stock-agent contract does not match (#7744)", () => {
@@ -297,38 +390,40 @@ describe("sandbox workload source resolution", () => {
     ).toThrow("failed closed validation");
   });
 
-  it.each(
-    CANDIDATE_MANAGED_IMAGE_AGENTS,
-  )("refuses candidate %s while candidate selection is disabled (#7927)", (agent) => {
-    expect(() =>
-      resolveSandboxWorkloadSource({
+  it.each(CANDIDATE_MANAGED_IMAGE_AGENTS)(
+    "refuses candidate %s while candidate selection is disabled (#7927)",
+    (agent) => {
+      expect(() =>
+        resolveSandboxWorkloadSource({
+          agentName: agent,
+          legacyDockerfilePath: `agents/${agent}/Dockerfile`,
+          runtime: managedRuntime("docker"),
+          catalog: { ...CATALOG, [agent]: contractFor(agent) },
+        }),
+      ).toThrow(
+        `Managed image workload is required for '${agent}', but the selected agent is a release candidate and candidate selection is disabled.`,
+      );
+    },
+  );
+
+  it.each(CANDIDATE_MANAGED_IMAGE_AGENTS)(
+    "selects the exact candidate digest for %s behind the gate (#7927)",
+    (agent) => {
+      const source = resolveSandboxWorkloadSource({
         agentName: agent,
         legacyDockerfilePath: `agents/${agent}/Dockerfile`,
         runtime: managedRuntime("docker"),
         catalog: { ...CATALOG, [agent]: contractFor(agent) },
-      }),
-    ).toThrow(
-      `Managed image workload is required for '${agent}', but the selected agent is a release candidate and candidate selection is disabled.`,
-    );
-  });
+        candidateAgentsEnabled: true,
+      });
 
-  it.each(
-    CANDIDATE_MANAGED_IMAGE_AGENTS,
-  )("selects the exact candidate digest for %s behind the gate (#7927)", (agent) => {
-    const source = resolveSandboxWorkloadSource({
-      agentName: agent,
-      legacyDockerfilePath: `agents/${agent}/Dockerfile`,
-      runtime: managedRuntime("docker"),
-      catalog: { ...CATALOG, [agent]: contractFor(agent) },
-      candidateAgentsEnabled: true,
-    });
-
-    expect(source).toEqual({
-      kind: "managed-image",
-      reference: contractFor(agent).reference,
-      contract: contractFor(agent),
-    });
-  });
+      expect(source).toEqual({
+        kind: "managed-image",
+        reference: contractFor(agent).reference,
+        contract: contractFor(agent),
+      });
+    },
+  );
 
   it("never builds a host Dockerfile for a gated candidate on a buildless runtime (#7927)", () => {
     expect(() =>

@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
+import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
 import { createInMemoryRuntimeProviderBundle } from "../../../test/helpers/runtime-provider-bundle";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
   ManagedImageCatalogError,
   ManagedImageCatalogUnavailableError,
@@ -21,6 +23,7 @@ import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
   type ManagedImageAgent,
+  type PackageManagedImageContract,
   SHIPPED_MANAGED_IMAGE_AGENTS,
 } from "./managed-image/contract";
 import { createRuntimeProviderBundleRegistry } from "./runtime-provider/registry";
@@ -63,6 +66,44 @@ function contract(agent: ManagedImageAgent, index: number): ManagedImageContract
 const CATALOG: ManagedImageContractCatalog = Object.fromEntries(
   SHIPPED_MANAGED_IMAGE_AGENTS.map((agent, index) => [agent, contract(agent, index)]),
 );
+
+const FUTURE_HARNESS_PACKAGE = {
+  kind: "agent-runtime",
+  id: "future-harness",
+  packageVersion: "1.2.3",
+  contentDigest: "8e".repeat(32),
+} as const satisfies HarnessPackageIdentity;
+
+const FUTURE_MANAGED_IMAGE = {
+  repository: "registry.example/team/future-harness",
+  architectures: [MANAGED_IMAGE_PLATFORM],
+  runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+  startup_profile_contract_version: 1,
+  capability_contract_version: 1,
+} as const satisfies HarnessManagedImageDeclaration;
+
+function futureHarnessContract(
+  harnessPackage: HarnessPackageIdentity = FUTURE_HARNESS_PACKAGE,
+): PackageManagedImageContract<"future-harness"> {
+  const digest = `sha256:${"8f".repeat(32)}` as const;
+  return {
+    harnessPackage,
+    contractVersion: MANAGED_IMAGE_CONTRACT_VERSION,
+    agent: "future-harness",
+    platform: MANAGED_IMAGE_PLATFORM,
+    image: FUTURE_MANAGED_IMAGE.repository,
+    digest,
+    reference: `${FUTURE_MANAGED_IMAGE.repository}@${digest}`,
+    source: {
+      repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+      revision: REVISION,
+      release: RELEASE,
+      cohort: COHORT,
+    },
+    startupProfileContractVersion: MANAGED_IMAGE_STARTUP_PROFILE_CONTRACT_VERSION,
+    capabilityContractVersion: MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION,
+  };
+}
 
 function runtime(driverName = "docker"): SandboxWorkloadRuntimeCapabilities {
   return {
@@ -282,7 +323,9 @@ describe("sandbox workload preparation", () => {
       expect(
         readLiveE2eManagedImageCatalogContracts({ path: catalogPath, revision: REVISION }),
       ).toEqual(
-        new Map(SHIPPED_MANAGED_IMAGE_AGENTS.map((agent, index) => [agent, contract(agent, index)])),
+        new Map(
+          SHIPPED_MANAGED_IMAGE_AGENTS.map((agent, index) => [agent, contract(agent, index)]),
+        ),
       );
       expect(() =>
         readLiveE2eManagedImageCatalogContracts({ path: symlinkPath, revision: REVISION }),
@@ -314,6 +357,55 @@ describe("sandbox workload preparation", () => {
       });
     },
   );
+
+  it("prepares one receipt-qualified managed image for a synthetic package", async () => {
+    const contract = futureHarnessContract();
+
+    await expect(
+      prepareSandboxWorkloadSource({
+        ...input(FUTURE_HARNESS_PACKAGE.id),
+        harnessPackage: FUTURE_HARNESS_PACKAGE,
+        managedImage: FUTURE_MANAGED_IMAGE,
+        catalog: { [FUTURE_HARNESS_PACKAGE.id]: contract },
+        expectedCatalogRevision: REVISION,
+      }),
+    ).resolves.toEqual({
+      source: {
+        kind: "managed-image",
+        reference: contract.reference,
+        contract,
+      },
+      release: RELEASE,
+      fallbackDiagnostic: null,
+    });
+  });
+
+  it("fails synthetic package preparation without its exact receipt", async () => {
+    const contract = futureHarnessContract();
+
+    await expect(
+      prepareSandboxWorkloadSource({
+        ...input(FUTURE_HARNESS_PACKAGE.id),
+        managedImage: FUTURE_MANAGED_IMAGE,
+        catalog: { [FUTURE_HARNESS_PACKAGE.id]: contract },
+      }),
+    ).rejects.toThrow("selected agent is not a shipped managed agent");
+  });
+
+  it("fails synthetic package preparation after receipt drift", async () => {
+    const contract = futureHarnessContract();
+
+    await expect(
+      prepareSandboxWorkloadSource({
+        ...input(FUTURE_HARNESS_PACKAGE.id),
+        harnessPackage: { ...FUTURE_HARNESS_PACKAGE, contentDigest: "9f".repeat(32) },
+        managedImage: FUTURE_MANAGED_IMAGE,
+        catalog: { [FUTURE_HARNESS_PACKAGE.id]: contract },
+      }),
+    ).rejects.toThrow(
+      "managed image catalog contract for 'future-harness' failed closed validation",
+    );
+  });
 
   it("passes an immutable qualification revision to catalog resolution (#9385)", async () => {
     const resolveCatalog = vi.fn(async () => CATALOG);

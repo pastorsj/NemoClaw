@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
 
 import { type OpenRegularFile, openRegularFileNoFollow } from "../../adapters/fs/regular-file";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import { getBuildIdentity } from "../../core/version";
 import {
   ManagedImageCatalogUnavailableError,
@@ -46,6 +47,8 @@ export interface PrepareSandboxWorkloadSourceInput {
   readonly agentName: string;
   /** Exact declaration loaded from the selected package receipt. */
   readonly managedImage?: HarnessManagedImageDeclaration | null;
+  /** Exact installed package authority required for package-owned qualification. */
+  readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly legacyDockerfilePath: string;
   readonly customDockerfilePath?: string | null;
   readonly runtime: SandboxWorkloadRuntimeCapabilities;
@@ -255,6 +258,7 @@ function unavailableResult(
   const source = resolveSandboxWorkloadSource({
     agentName: input.agentName,
     managedImage: input.managedImage,
+    harnessPackage: input.harnessPackage,
     legacyDockerfilePath: input.legacyDockerfilePath,
     customDockerfilePath: input.customDockerfilePath,
     runtime: input.runtime,
@@ -292,11 +296,7 @@ function requireCompleteManagedImageCatalog(
       );
     }
     try {
-      const contract = parseManagedImageContractV1(
-        candidate,
-        agent,
-        cohortPlatform ?? undefined,
-      );
+      const contract = parseManagedImageContractV1(candidate, agent, cohortPlatform ?? undefined);
       cohortPlatform ??= contract.platform;
       if (
         expectedRevision === null &&
@@ -408,6 +408,9 @@ export async function prepareSandboxWorkloadSource(
   dependencies: PrepareSandboxWorkloadSourceDependencies = {},
 ): Promise<PreparedSandboxWorkloadSource> {
   const policy = input.policy ?? input.runtime.managedImageSelectionPolicy;
+  const stockManagedAgent = isManagedImageAgent(input.agentName);
+  const receiptBackedPackageSelection =
+    !stockManagedAgent && input.harnessPackage != null && input.managedImage != null;
   const acceptedCandidateContract = isCandidateManagedImageAgent(input.agentName)
     ? (input.acceptedCandidateContract ?? null)
     : null;
@@ -415,14 +418,15 @@ export async function prepareSandboxWorkloadSource(
   const cannotSelectManaged =
     input.customDockerfilePath != null ||
     input.managedImage === null ||
-    !isManagedImageAgent(input.agentName) ||
-    (!isShippedManagedImageAgent(input.agentName) && !candidateSelection) ||
+    (!stockManagedAgent && !receiptBackedPackageSelection) ||
+    (stockManagedAgent && !isShippedManagedImageAgent(input.agentName) && !candidateSelection) ||
     managedImageRuntimeSupportError(input.runtime) !== null;
   if (cannotSelectManaged) {
     return {
       source: resolveSandboxWorkloadSource({
         agentName: input.agentName,
         managedImage: input.managedImage,
+        harnessPackage: input.harnessPackage,
         legacyDockerfilePath: input.legacyDockerfilePath,
         customDockerfilePath: input.customDockerfilePath,
         runtime: input.runtime,
@@ -512,7 +516,7 @@ export async function prepareSandboxWorkloadSource(
       platform,
       acceptedCandidateContract,
     );
-  } else {
+  } else if (!receiptBackedPackageSelection) {
     const catalogIdentity = requireCompleteManagedImageCatalog(
       catalog,
       release,
@@ -522,10 +526,50 @@ export async function prepareSandboxWorkloadSource(
     release = catalogIdentity.release;
   }
 
+  if (receiptBackedPackageSelection) {
+    let source: SandboxWorkloadSource;
+    try {
+      source = resolveSandboxWorkloadSource({
+        agentName: input.agentName,
+        managedImage: input.managedImage,
+        harnessPackage: input.harnessPackage,
+        legacyDockerfilePath: input.legacyDockerfilePath,
+        customDockerfilePath: input.customDockerfilePath,
+        runtime: input.runtime,
+        catalog,
+        policy,
+      });
+    } catch (error) {
+      throw new SandboxWorkloadPreparationError(
+        `managed image catalog contract for '${input.agentName}' failed closed validation`,
+        { cause: error },
+      );
+    }
+    if (source.kind !== "managed-image") {
+      throw new SandboxWorkloadPreparationError(
+        `managed image catalog contract for '${input.agentName}' did not resolve to an immutable image`,
+      );
+    }
+    if (
+      trustedCatalogRevision !== null &&
+      source.contract.source.revision !== trustedCatalogRevision
+    ) {
+      throw new SandboxWorkloadPreparationError(
+        "managed image catalog source revision does not match the trusted catalog revision",
+      );
+    }
+    return {
+      source,
+      release: source.contract.source.release,
+      fallbackDiagnostic: null,
+    };
+  }
+
   return {
     source: resolveSandboxWorkloadSource({
       agentName: input.agentName,
       managedImage: input.managedImage,
+      harnessPackage: input.harnessPackage,
       legacyDockerfilePath: input.legacyDockerfilePath,
       customDockerfilePath: input.customDockerfilePath,
       runtime: input.runtime,

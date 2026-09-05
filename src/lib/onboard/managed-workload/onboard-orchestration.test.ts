@@ -8,6 +8,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import type { AgentDefinition } from "../../agent/defs";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 import { createHermesStateVolumeDockerHarness } from "../__test-helpers__/hermes-state-volume";
 import { qualifiedManagedImageDeclaration } from "../managed-image/contract";
 import {
@@ -92,6 +93,7 @@ function createFreshOnboardingRuntime(
     readonly tempManagedRuntime?: boolean;
     readonly tempManagedRuntimeCatalog?: string | null;
     readonly unavailableCatalog?: boolean;
+    readonly harnessPackage?: HarnessPackageIdentity;
   } = {},
 ) {
   const prepared = {
@@ -115,6 +117,7 @@ function createFreshOnboardingRuntime(
       stockManagedRuntime: options.stockManagedRuntime ?? false,
       tempManagedRuntimeCatalog: options.tempManagedRuntimeCatalog ?? null,
       agentName: "openclaw",
+      harnessPackage: options.harnessPackage ?? null,
       legacyDockerfilePath: "packages/nemoclaw-openclaw/Dockerfile",
       customDockerfilePath: null,
       rootDir: releaseRoot,
@@ -322,6 +325,24 @@ describe("managed workload onboard orchestration", () => {
     await expect(runtime.ensurePreparedWorkload()).resolves.toMatchObject({
       source: { kind: "legacy-dockerfile" },
     });
+  });
+
+  it("passes the exact selected package receipt to managed-image preparation", async () => {
+    const harnessPackage = {
+      kind: "agent-runtime",
+      id: "openclaw",
+      packageVersion: "1.2.3",
+      contentDigest: "8e".repeat(32),
+    } as const satisfies HarnessPackageIdentity;
+    const { prepared, runtime } = createFreshOnboardingRuntime(
+      {},
+      { stockManagedRuntime: true, harnessPackage },
+    );
+
+    await expect(runtime.ensurePreparedWorkload()).resolves.toBe(prepared);
+    expect(prepareSandboxWorkloadSource).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ harnessPackage }),
+    );
   });
 
   it("rejects an unavailable catalog for explicit temporary managed-image onboarding", async () => {

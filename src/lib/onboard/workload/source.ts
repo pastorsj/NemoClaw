@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 import {
   isCandidateManagedImageAgent,
@@ -13,6 +14,8 @@ import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
   type ManagedImagePlatform,
+  type PackageManagedImageContract,
+  parsePackageManagedImageContract,
   parseStockManagedImageContract,
   qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
@@ -56,7 +59,7 @@ export interface LegacyDockerfileWorkloadSource {
 export interface ManagedImageWorkloadSource {
   readonly kind: "managed-image";
   readonly reference: ManagedImageContractV1["reference"];
-  readonly contract: ManagedImageContractV1;
+  readonly contract: ManagedImageContractV1 | PackageManagedImageContract;
 }
 
 export type SandboxWorkloadSource = LegacyDockerfileWorkloadSource | ManagedImageWorkloadSource;
@@ -69,6 +72,8 @@ export interface ResolveSandboxWorkloadSourceOptions {
   readonly catalog: ManagedImageContractCatalog;
   /** Receipt-pinned package declaration; catalogue authority is established by the caller. */
   readonly managedImage?: HarnessManagedImageDeclaration | null;
+  /** Exact installed package authority required for package-owned qualification. */
+  readonly harnessPackage?: HarnessPackageIdentity | null;
   readonly policy?: ManagedImageSelectionPolicy;
   readonly candidateAgentsEnabled?: boolean;
 }
@@ -183,7 +188,10 @@ export function resolveSandboxWorkloadSource(
   }
 
   const agentName = options.agentName;
-  if (!isManagedImageAgent(agentName)) {
+  const stockManagedAgent = isManagedImageAgent(agentName);
+  const receiptBackedPackage =
+    !stockManagedAgent && options.harnessPackage != null && options.managedImage != null;
+  if (!stockManagedAgent && !receiptBackedPackage) {
     return unavailableSource(
       options,
       "agent-not-managed",
@@ -191,7 +199,7 @@ export function resolveSandboxWorkloadSource(
     );
   }
   const managedImage =
-    options.managedImage === undefined
+    stockManagedAgent && options.managedImage === undefined
       ? qualifiedManagedImageDeclaration(agentName)
       : (options.managedImage ?? null);
   if (managedImage === null) {
@@ -201,7 +209,11 @@ export function resolveSandboxWorkloadSource(
       "the selected package does not declare managed-image composition",
     );
   }
-  if (!isShippedManagedImageAgent(agentName) && options.candidateAgentsEnabled !== true) {
+  if (
+    stockManagedAgent &&
+    !isShippedManagedImageAgent(agentName) &&
+    options.candidateAgentsEnabled !== true
+  ) {
     return unavailableSource(
       options,
       "agent-not-managed",
@@ -231,12 +243,14 @@ export function resolveSandboxWorkloadSource(
   }
 
   try {
-    const contract = parseStockManagedImageContract(
-      candidate,
-      agentName,
-      managedImage,
-      expectedPlatform,
-    );
+    const contract = stockManagedAgent
+      ? parseStockManagedImageContract(candidate, agentName, managedImage, expectedPlatform)
+      : parsePackageManagedImageContract(
+          candidate,
+          options.harnessPackage!,
+          managedImage,
+          expectedPlatform,
+        );
     return {
       kind: "managed-image",
       reference: contract.reference,
