@@ -3,7 +3,16 @@
 
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -85,6 +94,7 @@ function configProbe(
   overrides: Record<string, unknown> = {},
 ): ShellProbeResult {
   const contract = typeof selected === "string" ? CONTRACTS[selected] : selected;
+  const stateScanRequired = typeof selected !== "string";
   return shellResult({
     stdout: `${JSON.stringify({
       adapterId: contract.adapterId,
@@ -108,6 +118,12 @@ function configProbe(
       expectedAdapterId: contract.adapterId,
       expectedRunnerModule: contract.descriptorRunnerModule,
       schemaVersion: "fabric.agent/v1alpha1",
+      stateBytesScanned: stateScanRequired ? 128 : null,
+      stateCredentialFree: stateScanRequired ? true : null,
+      stateEntryCount: stateScanRequired ? 4 : null,
+      stateScanComplete: stateScanRequired ? true : null,
+      stateScanRequired,
+      stateTreeBounded: stateScanRequired ? true : null,
       ...overrides,
     })}\n`,
   });
@@ -209,6 +225,11 @@ describe("public Fabric live turn", () => {
         responseSha256: createHash("sha256").update(PUBLIC_FABRIC_TURN_RESPONSE).digest("hex"),
         runnerIdentity: PUBLIC_FABRIC_RUNNER_IDENTITY,
         sandboxName: `fabric-${agent}`,
+        stateBytesScanned: null,
+        stateCredentialFree: null,
+        stateEntryCount: null,
+        stateScanRequired: false,
+        stateTreeBounded: null,
       });
 
       expect(harness.nemoclaw).toHaveBeenCalledExactlyOnceWith(
@@ -264,6 +285,7 @@ describe("public Fabric live turn", () => {
           sha256: createHash("sha256").update("fixture-credential").digest("hex"),
         },
       ]);
+      expect(configCommand[11]).toBe("not-required");
 
       expect(harness.sandboxExec.mock.calls[2]![1]).toEqual([
         "/bin/bash",
@@ -322,6 +344,8 @@ describe("public Fabric live turn", () => {
     });
 
     const processCommand = harness.sandboxExec.mock.calls[4]![1];
+    const configCommand = harness.sandboxExec.mock.calls[3]![1];
+    expect(configCommand[11]).toBe("required");
     expect(JSON.parse(processCommand[4]!)).toEqual(
       expect.arrayContaining([
         FUTURE_CONTRACT.adapterId,
@@ -332,7 +356,12 @@ describe("public Fabric live turn", () => {
     );
     expect(harness.writeJson).toHaveBeenCalledWith(
       "fabric-future-harness-after-onboard-proof.json",
-      expect.objectContaining({ agent: "future-harness" }),
+      expect.objectContaining({
+        agent: "future-harness",
+        stateCredentialFree: true,
+        stateScanRequired: true,
+        stateTreeBounded: true,
+      }),
     );
   });
 
@@ -437,7 +466,7 @@ describe("public Fabric live turn", () => {
     });
   });
 
-  it("executes the private config probe without publishing config bytes or credential digests", async () => {
+  it("executes the bounded private state probe without publishing credential evidence", async () => {
     const harness = fixture({ sandboxResults: successfulSandboxResults("openclaw") });
     await runTurn("openclaw", harness);
     const configCommand = harness.sandboxExec.mock.calls[3]![1];
@@ -451,9 +480,13 @@ describe("public Fabric live turn", () => {
       const descriptorRoot = join(root, "descriptor");
       const configPath = join(stateRoot, "fabric.json");
       const descriptorPath = join(descriptorRoot, "adapter.json");
+      const sessionRoot = join(stateRoot, "sessions");
+      const sessionPath = join(sessionRoot, "turn.json");
       mkdirSync(artifactRoot, { recursive: true });
       mkdirSync(descriptorRoot, { recursive: true });
+      mkdirSync(sessionRoot, { recursive: true });
       writeFileSync(join(artifactRoot, "turn.json"), "{}\n");
+      writeFileSync(sessionPath, '{"status":"clean"}\n');
       writeFileSync(
         descriptorPath,
         `${JSON.stringify({
@@ -462,40 +495,44 @@ describe("public Fabric live turn", () => {
           runner: { module: CONTRACTS.openclaw.descriptorRunnerModule },
         })}\n`,
       );
-      writeFileSync(
-        configPath,
-        `${JSON.stringify({
-          schema_version: "fabric.agent/v1alpha1",
-          harness: { adapter_id: CONTRACTS.openclaw.adapterId },
-          runtime: { artifacts: artifactRoot },
-          environment: { artifacts: artifactRoot },
-        })}\n`,
-      );
+      const cleanConfig = `${JSON.stringify({
+        schema_version: "fabric.agent/v1alpha1",
+        harness: { adapter_id: CONTRACTS.openclaw.adapterId },
+        runtime: { artifacts: artifactRoot },
+        environment: { artifacts: artifactRoot },
+      })}\n`;
+      writeFileSync(configPath, cleanConfig);
       chmodSync(configPath, 0o600);
 
       const secret = "fixture-probe-secret";
+      const fingerprintDigest = createHash("sha256").update(secret).digest("hex");
       const fingerprints = JSON.stringify([
         {
           length: Buffer.byteLength(secret),
-          sha256: createHash("sha256").update(secret).digest("hex"),
+          sha256: fingerprintDigest,
         },
       ]);
-      const probe = spawnSync(
-        "python3",
-        [
-          "-I",
-          "-c",
-          configScript,
-          configPath,
-          artifactRoot,
-          CONTRACTS.openclaw.adapterId,
-          descriptorPath,
-          descriptorRoot,
-          CONTRACTS.openclaw.descriptorRunnerModule,
-          fingerprints,
-        ],
-        { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
-      );
+      const probeArguments = [
+        "-I",
+        "-c",
+        configScript,
+        configPath,
+        artifactRoot,
+        CONTRACTS.openclaw.adapterId,
+        descriptorPath,
+        descriptorRoot,
+        CONTRACTS.openclaw.descriptorRunnerModule,
+        fingerprints,
+        "required",
+      ];
+      const runConfigProbe = () =>
+        spawnSync("python3", probeArguments, {
+          encoding: "utf8",
+          killSignal: "SIGKILL",
+          timeout: 30_000,
+        });
+
+      const probe = runConfigProbe();
       expect(probe.status, probe.stderr).toBe(0);
       expect(JSON.parse(probe.stdout)).toMatchObject({
         artifactEntryCount: 1,
@@ -507,8 +544,28 @@ describe("public Fabric live turn", () => {
         descriptorPathBounded: true,
         descriptorRegularFile: true,
         descriptorRunnerModule: CONTRACTS.openclaw.descriptorRunnerModule,
+        stateCredentialFree: true,
+        stateScanComplete: true,
+        stateTreeBounded: true,
       });
+      expect(JSON.parse(probe.stdout).stateBytesScanned).toBeGreaterThan(0);
+      expect(JSON.parse(probe.stdout).stateEntryCount).toBeGreaterThan(0);
+      expect(probe.stdout).not.toContain(secret);
+      expect(probe.stdout).not.toContain(fingerprintDigest);
 
+      writeFileSync(sessionPath, `{"credential":"${secret}"}\n`);
+      const nativeCredentialProbe = runConfigProbe();
+      expect(nativeCredentialProbe.status, nativeCredentialProbe.stderr).toBe(0);
+      expect(JSON.parse(nativeCredentialProbe.stdout)).toMatchObject({
+        configCredentialFree: true,
+        stateCredentialFree: false,
+        stateScanComplete: true,
+        stateTreeBounded: true,
+      });
+      expect(nativeCredentialProbe.stdout).not.toContain(secret);
+      expect(nativeCredentialProbe.stdout).not.toContain(fingerprintDigest);
+
+      writeFileSync(sessionPath, '{"status":"clean"}\n');
       writeFileSync(
         configPath,
         `${JSON.stringify({
@@ -520,24 +577,58 @@ describe("public Fabric live turn", () => {
         })}\n`,
       );
       chmodSync(configPath, 0o600);
-      const credentialProbe = spawnSync(
-        "python3",
-        [
-          "-I",
-          "-c",
-          configScript,
-          configPath,
-          artifactRoot,
-          CONTRACTS.openclaw.adapterId,
-          descriptorPath,
-          descriptorRoot,
-          CONTRACTS.openclaw.descriptorRunnerModule,
-          fingerprints,
-        ],
-        { encoding: "utf8", killSignal: "SIGKILL", timeout: 30_000 },
-      );
+      const credentialProbe = runConfigProbe();
       expect(credentialProbe.status, credentialProbe.stderr).toBe(0);
       expect(JSON.parse(credentialProbe.stdout).configCredentialFree).toBe(false);
+      expect(credentialProbe.stdout).not.toContain(secret);
+      expect(credentialProbe.stdout).not.toContain(fingerprintDigest);
+
+      writeFileSync(configPath, cleanConfig);
+      chmodSync(configPath, 0o600);
+      const unsafeTarget = join(root, "outside-state.txt");
+      const unsafeLink = join(stateRoot, "outside-state-link");
+      writeFileSync(unsafeTarget, secret);
+      symlinkSync(unsafeTarget, unsafeLink);
+      const unsafeTreeProbe = runConfigProbe();
+      expect(unsafeTreeProbe.status, unsafeTreeProbe.stderr).toBe(0);
+      expect(JSON.parse(unsafeTreeProbe.stdout)).toMatchObject({
+        stateCredentialFree: true,
+        stateScanComplete: true,
+        stateTreeBounded: false,
+      });
+      expect(unsafeTreeProbe.stdout).not.toContain("outside-state-link");
+      expect(unsafeTreeProbe.stdout).not.toContain(secret);
+      expect(unsafeTreeProbe.stdout).not.toContain(fingerprintDigest);
+      rmSync(unsafeLink);
+
+      const oversizedPath = join(stateRoot, "oversized-state.bin");
+      writeFileSync(oversizedPath, "");
+      truncateSync(oversizedPath, 64 * 1024 * 1024 + 1);
+      const oversizedProbe = runConfigProbe();
+      expect(oversizedProbe.status, oversizedProbe.stderr).toBe(0);
+      expect(JSON.parse(oversizedProbe.stdout)).toMatchObject({
+        stateCredentialFree: true,
+        stateScanComplete: false,
+        stateTreeBounded: true,
+      });
+      expect(JSON.parse(oversizedProbe.stdout).stateBytesScanned).toBeLessThanOrEqual(
+        64 * 1024 * 1024,
+      );
+      rmSync(oversizedPath);
+
+      const manyEntriesRoot = join(stateRoot, "many-entries");
+      mkdirSync(manyEntriesRoot);
+      for (let index = 0; index < 4097; index += 1) {
+        writeFileSync(join(manyEntriesRoot, `entry-${index}`), "");
+      }
+      const excessiveEntriesProbe = runConfigProbe();
+      expect(excessiveEntriesProbe.status, excessiveEntriesProbe.stderr).toBe(0);
+      expect(JSON.parse(excessiveEntriesProbe.stdout)).toMatchObject({
+        stateCredentialFree: true,
+        stateEntryCount: 4097,
+        stateScanComplete: false,
+        stateTreeBounded: true,
+      });
 
       const syntax = spawnSync(
         "python3",
@@ -651,7 +742,7 @@ describe("public Fabric live turn", () => {
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { configCredentialFree: false }),
       ],
-      message: "config or artifact-root integrity",
+      message: "config, state, or artifact integrity",
     },
     {
       label: "a mismatched adapter descriptor",
@@ -661,7 +752,7 @@ describe("public Fabric live turn", () => {
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { descriptorRunnerModule: "unreviewed.adapter" }),
       ],
-      message: "config or artifact-root integrity",
+      message: "config, state, or artifact integrity",
     },
     {
       label: "an artifact tree outside its package root",
@@ -671,7 +762,7 @@ describe("public Fabric live turn", () => {
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { artifactTreeBounded: false }),
       ],
-      message: "config or artifact-root integrity",
+      message: "config, state, or artifact integrity",
     },
     {
       label: "a missing artifact root",
@@ -681,7 +772,7 @@ describe("public Fabric live turn", () => {
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { artifactRootExists: false }),
       ],
-      message: "config or artifact-root integrity",
+      message: "config, state, or artifact integrity",
     },
     {
       label: "an unhealthy doctor result",
@@ -700,7 +791,7 @@ describe("public Fabric live turn", () => {
         shellResult({ stdout: '{"checks":[],"status":"pass"}\n' }),
         configProbe("hermes", { artifactEntryCount: 1 }),
       ],
-      message: "config or artifact-root integrity",
+      message: "config, state, or artifact integrity",
     },
     {
       label: "a lingering adapter process",
@@ -722,6 +813,30 @@ describe("public Fabric live turn", () => {
     const harness = fixture({ sandboxResults: results });
 
     await expect(runTurn("hermes", harness)).rejects.toThrow(message);
+    expect(harness.writeJson).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["credential content", { stateCredentialFree: false }],
+    ["an incomplete scan", { stateScanComplete: false }],
+    ["an unbounded tree", { stateTreeBounded: false }],
+  ])("rejects package-native state with %s", async (_label, stateOverride) => {
+    const results = successfulContractResults(FUTURE_CONTRACT);
+    results[3] = configProbe(FUTURE_CONTRACT, stateOverride);
+    const harness = fixture({ sandboxResults: results });
+
+    await expect(
+      runPublicFabricTurn({
+        artifacts: harness.artifacts,
+        contract: FUTURE_CONTRACT,
+        env: { PATH: "/test/bin" },
+        host: harness.host,
+        lifecyclePhase: "after-onboard",
+        redactionValues: ["fixture-credential"],
+        sandbox: harness.sandbox,
+        sandboxName: "fabric-future-harness",
+      }),
+    ).rejects.toThrow("config, state, or artifact integrity");
     expect(harness.writeJson).not.toHaveBeenCalled();
   });
 });

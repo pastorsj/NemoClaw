@@ -53,6 +53,9 @@ const PUBLIC_FABRIC_AGENT_CONTRACTS: Record<PublicFabricAgent, PublicFabricHarne
   },
 };
 
+const FABRIC_STATE_ENTRY_LIMIT = 4096;
+const FABRIC_STATE_BYTE_LIMIT = 64 * 1024 * 1024;
+
 const CONFIG_PROBE_SCRIPT = String.raw`
 import grp
 import glob
@@ -63,6 +66,10 @@ import pwd
 import stat
 import sys
 
+STATE_ENTRY_LIMIT = ${FABRIC_STATE_ENTRY_LIMIT}
+STATE_BYTE_LIMIT = ${FABRIC_STATE_BYTE_LIMIT}
+STATE_READ_SIZE = 64 * 1024
+
 (
     config_path,
     expected_artifact_root,
@@ -71,8 +78,12 @@ import sys
     descriptor_path_prefix,
     expected_runner_module,
     fingerprint_json,
+    state_scan_mode,
 ) = sys.argv[1:]
 fingerprints = json.loads(fingerprint_json)
+if state_scan_mode not in ("required", "not-required"):
+    raise ValueError("invalid private state scan mode")
+state_scan_required = state_scan_mode == "required"
 config_stat = os.lstat(config_path)
 config_bytes = open(config_path, "rb").read()
 config = json.loads(config_bytes.decode("utf-8"))
@@ -109,6 +120,11 @@ artifact_exists = os.path.lexists(expected_artifact_root)
 artifact_tree_bounded = True
 artifact_entry_count = 0
 artifact_scan_complete = True
+state_tree_bounded = True if state_scan_required else None
+state_entry_count = 0 if state_scan_required else None
+state_bytes_scanned = 0 if state_scan_required else None
+state_scan_complete = True if state_scan_required else None
+state_credential_free = True if state_scan_required else None
 
 if os.path.realpath(expected_artifact_root) != expected_artifact_root:
     artifact_tree_bounded = False
@@ -137,6 +153,129 @@ if artifact_exists:
             if not artifact_scan_complete:
                 break
 
+if state_scan_required:
+    state_exists = os.path.lexists(state_root)
+    if not state_exists or resolved_state_root != state_root:
+        state_tree_bounded = False
+    else:
+        try:
+            state_stat = os.lstat(state_root)
+            if stat.S_ISLNK(state_stat.st_mode) or not stat.S_ISDIR(state_stat.st_mode):
+                state_tree_bounded = False
+        except OSError:
+            state_tree_bounded = False
+            state_scan_complete = False
+
+no_follow_flag = getattr(os, "O_NOFOLLOW", None)
+if state_scan_required and no_follow_flag is None:
+    state_tree_bounded = False
+    state_scan_complete = False
+
+stop_state_scan = (
+    not state_scan_required
+    or not state_tree_bounded
+    or not state_scan_complete
+)
+if not stop_state_scan:
+    walk_errors = []
+    try:
+        for root, directories, files in os.walk(
+            state_root,
+            followlinks=False,
+            onerror=lambda _error: walk_errors.append(True),
+        ):
+            retained_directories = []
+            for name in directories:
+                state_entry_count += 1
+                if state_entry_count > STATE_ENTRY_LIMIT:
+                    state_scan_complete = False
+                    stop_state_scan = True
+                    break
+                candidate = os.path.join(root, name)
+                try:
+                    candidate_stat = os.lstat(candidate)
+                    safe_directory = (
+                        stat.S_ISDIR(candidate_stat.st_mode)
+                        and not stat.S_ISLNK(candidate_stat.st_mode)
+                        and is_beneath(os.path.realpath(candidate), resolved_state_root)
+                    )
+                except OSError:
+                    safe_directory = False
+                    state_scan_complete = False
+                if safe_directory:
+                    retained_directories.append(name)
+                else:
+                    state_tree_bounded = False
+            directories[:] = retained_directories
+            if stop_state_scan:
+                break
+
+            for name in files:
+                state_entry_count += 1
+                if state_entry_count > STATE_ENTRY_LIMIT:
+                    state_scan_complete = False
+                    stop_state_scan = True
+                    break
+                candidate = os.path.join(root, name)
+                file_descriptor = None
+                try:
+                    candidate_stat = os.lstat(candidate)
+                    if (
+                        stat.S_ISLNK(candidate_stat.st_mode)
+                        or not stat.S_ISREG(candidate_stat.st_mode)
+                        or not is_beneath(os.path.realpath(candidate), resolved_state_root)
+                    ):
+                        state_tree_bounded = False
+                        continue
+                    file_descriptor = os.open(
+                        candidate,
+                        os.O_RDONLY | no_follow_flag | getattr(os, "O_CLOEXEC", 0),
+                    )
+                    opened_stat = os.fstat(file_descriptor)
+                    if (
+                        not stat.S_ISREG(opened_stat.st_mode)
+                        or opened_stat.st_dev != candidate_stat.st_dev
+                        or opened_stat.st_ino != candidate_stat.st_ino
+                    ):
+                        state_tree_bounded = False
+                        continue
+                    remaining = STATE_BYTE_LIMIT - state_bytes_scanned
+                    if opened_stat.st_size > remaining:
+                        state_scan_complete = False
+                        stop_state_scan = True
+                        break
+                    chunks = []
+                    while True:
+                        chunk = os.read(file_descriptor, min(STATE_READ_SIZE, remaining + 1))
+                        if not chunk:
+                            break
+                        if len(chunk) > remaining:
+                            state_bytes_scanned = STATE_BYTE_LIMIT
+                            state_scan_complete = False
+                            stop_state_scan = True
+                            break
+                        chunks.append(chunk)
+                        state_bytes_scanned += len(chunk)
+                        remaining -= len(chunk)
+                    if stop_state_scan:
+                        break
+                    payload = b"".join(chunks)
+                    if any(has_fingerprint(payload, item) for item in fingerprints):
+                        state_credential_free = False
+                except OSError:
+                    state_scan_complete = False
+                    stop_state_scan = True
+                    break
+                finally:
+                    if file_descriptor is not None:
+                        os.close(file_descriptor)
+            if stop_state_scan:
+                break
+        if walk_errors:
+            state_scan_complete = False
+    except OSError:
+        state_scan_complete = False
+
 owner_user = pwd.getpwuid(config_stat.st_uid).pw_name
 owner_group = grp.getgrgid(config_stat.st_gid).gr_name
 print(json.dumps({
@@ -161,6 +300,12 @@ print(json.dumps({
     "expectedAdapterId": expected_adapter_id,
     "expectedRunnerModule": expected_runner_module,
     "schemaVersion": config.get("schema_version"),
+    "stateBytesScanned": state_bytes_scanned,
+    "stateCredentialFree": state_credential_free,
+    "stateEntryCount": state_entry_count,
+    "stateScanRequired": state_scan_required,
+    "stateScanComplete": state_scan_complete,
+    "stateTreeBounded": state_tree_bounded,
 }, sort_keys=True))
 `;
 
@@ -244,6 +389,12 @@ interface FabricConfigProbe {
   readonly expectedAdapterId: string;
   readonly expectedRunnerModule: string;
   readonly schemaVersion: string;
+  readonly stateBytesScanned: number | null;
+  readonly stateCredentialFree: boolean | null;
+  readonly stateEntryCount: number | null;
+  readonly stateScanComplete: boolean | null;
+  readonly stateScanRequired: boolean;
+  readonly stateTreeBounded: boolean | null;
 }
 
 interface FabricProcessProbe {
@@ -272,6 +423,11 @@ export interface PublicFabricTurnProof {
   readonly responseSha256: string;
   readonly runnerIdentity: typeof PUBLIC_FABRIC_RUNNER_IDENTITY;
   readonly sandboxName: string;
+  readonly stateBytesScanned: number | null;
+  readonly stateCredentialFree: boolean | null;
+  readonly stateEntryCount: number | null;
+  readonly stateScanRequired: boolean;
+  readonly stateTreeBounded: boolean | null;
 }
 
 interface PublicFabricTurnBaseOptions {
@@ -404,10 +560,28 @@ function credentialFingerprints(redactionValues: readonly string[]): Array<{
 function requireConfigProbe(
   value: Record<string, unknown>,
   contract: PublicFabricHarnessContract,
+  stateScanRequired: boolean,
 ): FabricConfigProbe {
   const securePosture =
     (value.configOwner === "sandbox:sandbox" && value.configMode === "0600") ||
     (value.configOwner === "root:root" && value.configMode === "0444");
+  const stateProbeValid = stateScanRequired
+    ? typeof value.stateBytesScanned === "number" &&
+      Number.isSafeInteger(value.stateBytesScanned) &&
+      value.stateBytesScanned >= 0 &&
+      value.stateBytesScanned <= FABRIC_STATE_BYTE_LIMIT &&
+      typeof value.stateEntryCount === "number" &&
+      Number.isSafeInteger(value.stateEntryCount) &&
+      value.stateEntryCount >= 0 &&
+      value.stateEntryCount <= FABRIC_STATE_ENTRY_LIMIT &&
+      value.stateCredentialFree === true &&
+      value.stateScanComplete === true &&
+      value.stateTreeBounded === true
+    : value.stateBytesScanned === null &&
+      value.stateCredentialFree === null &&
+      value.stateEntryCount === null &&
+      value.stateScanComplete === null &&
+      value.stateTreeBounded === null;
   if (
     value.adapterId !== contract.adapterId ||
     value.expectedAdapterId !== contract.adapterId ||
@@ -428,9 +602,11 @@ function requireConfigProbe(
     value.artifactTreeBounded !== true ||
     value.artifactRootExists !== true ||
     value.artifactEntryCount !== 0 ||
+    value.stateScanRequired !== stateScanRequired ||
+    !stateProbeValid ||
     !securePosture
   ) {
-    throw new Error("public Fabric config or artifact-root integrity check failed");
+    throw new Error("public Fabric config, state, or artifact integrity check failed");
   }
   return value as unknown as FabricConfigProbe;
 }
@@ -471,6 +647,10 @@ export async function runPublicFabricTurn(
     sandboxName,
     timeoutMs = 3 * 60_000,
   } = options;
+  // A package-contract journey starts from one fresh, finite private state root.
+  // Established agent journeys can own larger compatibility trees; their package
+  // suites retain responsibility for scanning those deliberately broader roots.
+  const stateScanRequired = options.contract !== undefined;
   const { agent, contract } = resolveFabricHarnessContract(options);
   const processMarkers = fabricProcessMarkers(contract);
   const baselineResult = await sandbox.exec(
@@ -559,6 +739,7 @@ export async function runPublicFabricTurn(
       contract.descriptorPathPrefix,
       contract.descriptorRunnerModule,
       JSON.stringify(fingerprints),
+      stateScanRequired ? "required" : "not-required",
     ],
     {
       artifactName: `fabric-${agent}-${lifecyclePhase}-config-integrity`,
@@ -571,6 +752,7 @@ export async function runPublicFabricTurn(
   const configProbe = requireConfigProbe(
     parseProbeRecord(configResult, `public ${agent} Fabric config probe`),
     contract,
+    stateScanRequired,
   );
 
   const processResult = await sandbox.exec(
@@ -615,6 +797,11 @@ export async function runPublicFabricTurn(
     responseSha256: createHash("sha256").update(PUBLIC_FABRIC_TURN_RESPONSE).digest("hex"),
     runnerIdentity: PUBLIC_FABRIC_RUNNER_IDENTITY,
     sandboxName,
+    stateBytesScanned: configProbe.stateBytesScanned,
+    stateCredentialFree: configProbe.stateCredentialFree,
+    stateEntryCount: configProbe.stateEntryCount,
+    stateScanRequired: configProbe.stateScanRequired,
+    stateTreeBounded: configProbe.stateTreeBounded,
   };
   await artifacts.writeJson(`fabric-${agent}-${lifecyclePhase}-proof.json`, proof);
   return proof;
