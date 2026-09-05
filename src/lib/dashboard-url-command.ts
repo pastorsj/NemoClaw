@@ -3,8 +3,8 @@
 
 /**
  * `nemoclaw <name> dashboard-url` -- print the browser-facing dashboard URL.
- * OpenClaw sandboxes still receive an authenticated token fragment, while
- * session-auth agent dashboards can return the plain URL.
+ * URL-token dashboards receive an authenticated fragment, while session-auth
+ * or unauthenticated package dashboards return the plain URL.
  */
 
 import { DASHBOARD_PORT } from "./core/ports";
@@ -13,11 +13,19 @@ import type { SandboxEntry } from "./state/registry";
 
 type DashboardAuth = "url_token" | "session" | "none";
 
+export interface SandboxDashboardPresentation {
+  readonly dashboardPort?: number | null;
+  readonly dashboard: { readonly auth: DashboardAuth; readonly label: string };
+  readonly runtime: { readonly kind: "terminal" | "gateway"; readonly displayName: string };
+}
+
 export interface DashboardUrlCommandDeps {
-  /** Pull gateway.auth.token from the sandbox config (host-side helper). */
+  /** Fetch the package-declared dashboard token, or the legacy gateway token. */
   fetchToken: (sandboxName: string) => string | null;
   /** Read sandbox metadata such as agent name and recorded dashboard port. */
   getSandbox?: (sandboxName: string) => Pick<SandboxEntry, "agent" | "dashboardPort"> | null;
+  /** Exact package-owned dashboard/runtime metadata for a receipt-backed sandbox. */
+  getSandboxPresentation?: (sandboxName: string) => SandboxDashboardPresentation | null;
   /** Resolve the browser-facing dashboard base URL for this host, when known. */
   getAccessUrl?: (port: number) => string | null;
   /** Resolve a registered agent's dashboard auth contract. */
@@ -141,6 +149,18 @@ export function runDashboardUrlCommand(
     for (const line of hint) log(line);
   };
 
+  let presentation: SandboxDashboardPresentation | null = null;
+  if (deps.getSandboxPresentation) {
+    try {
+      presentation = deps.getSandboxPresentation(sandboxName);
+    } catch {
+      dashboardUrlFail(`  Could not resolve dashboard metadata for sandbox '${sandboxName}'.`);
+    }
+    if (!presentation) {
+      dashboardUrlFail(`  Could not resolve dashboard metadata for sandbox '${sandboxName}'.`);
+    }
+  }
+
   let sandbox: Pick<SandboxEntry, "agent" | "dashboardPort"> | null = null;
   if (deps.getSandbox) {
     try {
@@ -155,21 +175,26 @@ export function runDashboardUrlCommand(
   // Terminal-runtime sandboxes (e.g. Deep Agents Code) have no dashboard by
   // design. Say so plainly instead of failing later with a token error that
   // wrongly implies the sandbox is down or misconfigured (#5727).
-  const terminal = resolveTerminalRuntime(agent, deps);
+  const terminal =
+    presentation?.runtime.kind === "terminal"
+      ? { displayName: presentation.runtime.displayName }
+      : presentation
+        ? null
+        : resolveTerminalRuntime(agent, deps);
   if (terminal) {
     dashboardUrlFail(
       `  Sandbox '${sandboxName}' uses a terminal runtime (${terminal.displayName}) and does not have a dashboard.`,
     );
   }
 
-  const dashboardAuth = resolveAgentDashboardAuth(agent, deps);
+  const dashboardAuth = presentation?.dashboard.auth ?? resolveAgentDashboardAuth(agent, deps);
   if (agent && agent !== "openclaw" && !dashboardAuth) {
     dashboardUrlFail(
       `  Could not resolve dashboard metadata for agent '${agent}' in sandbox '${sandboxName}'.`,
     );
   }
   if (dashboardAuth === "session" || dashboardAuth === "none") {
-    const port = resolveDashboardPort(sandbox);
+    const port = resolveDashboardPort(presentation ?? sandbox);
     const accessUrl = deps.getAccessUrl?.(port) ?? null;
     const url = buildPlainDashboardUrl(port, accessUrl ?? undefined);
     if (options.quiet) {
@@ -196,7 +221,7 @@ export function runDashboardUrlCommand(
     ]);
   }
 
-  const port = resolveDashboardPort(sandbox);
+  const port = resolveDashboardPort(presentation ?? sandbox);
   const accessUrl = deps.getAccessUrl?.(port) ?? null;
   const url = buildDashboardUrl(token, port, accessUrl ?? undefined);
   if (options.quiet) {

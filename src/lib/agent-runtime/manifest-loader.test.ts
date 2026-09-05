@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ROOT } from "../runner";
 import { buildAgentDefinition } from "./manifest-loader";
-import { loadManifestRecord, parseManifestRecord } from "./manifest-readers";
+import { loadManifestRecord, parseManifestRecord, readDashboard } from "./manifest-readers";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-agent-definition-tests");
 fs.mkdirSync(TEST_PARENT, { recursive: true, mode: 0o700 });
@@ -51,6 +51,30 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(fixtureRoot, { recursive: true, force: true });
+});
+
+describe("dashboard manifest metadata", () => {
+  it("parses a bounded config token path for URL-token dashboards", () => {
+    expect(
+      readDashboard(
+        parseManifestRecord(
+          "dashboard:\n  auth: url_token\n  token_path: custom.browser.secret\n",
+          "test manifest",
+        ),
+      ).tokenPath,
+    ).toEqual(["custom", "browser", "secret"]);
+  });
+
+  it("rejects unsafe config token paths", () => {
+    expect(() =>
+      readDashboard(
+        parseManifestRecord(
+          "dashboard:\n  auth: url_token\n  token_path: gateway.auth.$token\n",
+          "test manifest",
+        ),
+      ),
+    ).toThrow(/safe dotted config path/);
+  });
 });
 
 describe("buildAgentDefinition", () => {

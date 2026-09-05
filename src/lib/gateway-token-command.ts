@@ -3,8 +3,8 @@
 
 /**
  * `nemoclaw <name> gateway-token` -- print the running sandbox agent's auth
- * token to stdout so automation can capture it. This is the OpenClaw gateway
- * token or a bearer-token agent's web-auth key, such as Hermes' API_SERVER_KEY.
+ * token to stdout so automation can capture it. The installed package declares
+ * whether that token is dashboard URL auth or bearer-token web auth.
  *
  * Output contract (intended to be pipe-friendly):
  *   stdout: the token, followed by a single newline.
@@ -13,16 +13,25 @@
  *   exit 1: token unavailable; diagnostics written to stderr.
  */
 
-import { getAgentBranding } from "./cli/branding";
+export interface GatewayTokenUnavailable {
+  readonly kind: "unavailable";
+  readonly displayName: string;
+  readonly dashboard: {
+    readonly kind: "ui" | "api";
+    readonly label: string;
+    readonly auth: "url_token" | "session" | "none";
+  };
+}
+
+export type GatewayTokenResolution =
+  | { readonly kind: "available"; readonly token: string | null }
+  | GatewayTokenUnavailable;
 
 export interface GatewayTokenCommandDeps {
-  /**
-   * Fetch the agent-appropriate auth token for the sandbox (host-side helper).
-   * The bridge wires the right fetcher based on the resolved agent: OpenClaw's
-   * gateway.auth.token, or a bearer_token agent's web-auth key (e.g. Hermes'
-   * API_SERVER_KEY).
-   */
-  fetchToken: (sandboxName: string) => string | null;
+  /** Legacy no-receipt token fetcher. */
+  fetchToken?: (sandboxName: string) => string | null;
+  /** Resolve token behavior from the exact package definition for this sandbox. */
+  resolveToken?: (sandboxName: string) => GatewayTokenResolution;
   /**
    * Resolve the agent name registered for the sandbox (e.g. "openclaw",
    * "hermes"). When omitted -- or when the lookup throws -- the OpenClaw
@@ -71,30 +80,26 @@ function gatewayTokenFail(lines: string | readonly string[], exitCode = 1): neve
 const SECURITY_WARNING = "Treat this token like a password -- do not log, share, or commit it.";
 
 /**
- * Build the agent-aware "not applicable" diagnostic for a non-OpenClaw agent.
- *
- * NCQ #5249: the bare "this command only supports OpenClaw" line (NCQ #3180)
- * leaves Hermes users following generic dashboard-token quickstart patterns
- * without a next step. For Hermes specifically, point them at the supported
- * dashboard auth path so Day0 verification is not a dead end. Other
- * non-OpenClaw agents keep the single explanatory line.
+ * Build package-metadata-driven guidance when no retrievable token is declared.
  */
-function notApplicableLines(sandboxName: string, agent: string): readonly string[] {
-  const lead = `  gateway-token is not applicable for sandbox '${sandboxName}': it uses the '${agent}' agent, which does not expose a gateway auth token. This command only supports the OpenClaw agent.`;
-  if (agent === "hermes") {
-    // Pull the invoked CLI name from branding so the hint matches whatever the
-    // user actually typed: `nemohermes` when launched through the alias,
-    // `nemoclaw` when Hermes is selected through the default binary. Resolving
-    // at call time (not import time) keeps the hint in sync with
-    // NEMOCLAW_INVOKED_AS even when the env var is set after module load.
-    const cliName = getAgentBranding().cli;
-    return [
-      lead,
-      `  For Hermes dashboard access, run: ${cliName} ${sandboxName} dashboard-url`,
-      "  Hermes dashboard auth is read from the in-sandbox config (/sandbox/.hermes/config.yaml), not a gateway token.",
-    ];
+function notApplicableLines(
+  sandboxName: string,
+  unavailable: GatewayTokenUnavailable,
+): readonly string[] {
+  const lines = [
+    `  gateway-token is not applicable for sandbox '${sandboxName}': ${unavailable.displayName} does not declare a retrievable auth token.`,
+  ];
+  if (unavailable.dashboard.kind === "ui") {
+    lines.push(
+      `  For ${unavailable.dashboard.label} access, run: nemoclaw ${sandboxName} dashboard-url`,
+    );
   }
-  return [lead];
+  if (unavailable.dashboard.auth === "session") {
+    lines.push("  The dashboard uses session authentication rather than a retrievable token.");
+  } else if (unavailable.dashboard.auth === "none") {
+    lines.push("  The dashboard does not require a token.");
+  }
+  return lines;
 }
 
 /**
@@ -110,11 +115,20 @@ export function runGatewayTokenCommand(
   const log = deps.log ?? ((m: string) => console.log(m));
   const error = deps.error ?? ((m: string) => console.error(m));
 
-  // NCQ #3180: surface an agent-aware "not applicable" message (instead of the
-  // misleading "make sure the sandbox is running" hint) for agents that have no
-  // retrievable auth token. OpenClaw exposes its gateway token; bearer_token
-  // agents like Hermes expose their web-auth key (API_SERVER_KEY). Anything
-  // else is rejected.
+  // Receipt-backed callers resolve through package metadata. The older callback
+  // pair remains only for registry rows that predate package receipts.
+  let resolution: GatewayTokenResolution | null = null;
+  if (deps.resolveToken) {
+    try {
+      resolution = deps.resolveToken(sandboxName);
+    } catch {
+      resolution = { kind: "available", token: null };
+    }
+    if (resolution.kind === "unavailable") {
+      gatewayTokenFail(notApplicableLines(sandboxName, resolution));
+    }
+  }
+
   let resolvedAgent: string | null = null;
   if (deps.getSandboxAgent) {
     try {
@@ -123,16 +137,27 @@ export function runGatewayTokenCommand(
       resolvedAgent = null;
     }
   }
-  const exposesToken = deps.agentExposesToken
-    ? deps.agentExposesToken(resolvedAgent)
-    : resolvedAgent === null || resolvedAgent === "openclaw";
+  const exposesToken = resolution
+    ? true
+    : deps.agentExposesToken
+      ? deps.agentExposesToken(resolvedAgent)
+      : resolvedAgent === null || resolvedAgent === "openclaw";
   if (!exposesToken) {
-    gatewayTokenFail(notApplicableLines(sandboxName, resolvedAgent ?? "unknown"));
+    gatewayTokenFail(
+      notApplicableLines(sandboxName, {
+        kind: "unavailable",
+        displayName: resolvedAgent ?? "Unknown agent",
+        dashboard: { kind: "api", label: "API", auth: "none" },
+      }),
+    );
   }
 
   let token: string | null;
   try {
-    token = deps.fetchToken(sandboxName);
+    token =
+      resolution?.kind === "available"
+        ? resolution.token
+        : (deps.fetchToken?.(sandboxName) ?? null);
   } catch {
     token = null;
   }

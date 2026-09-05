@@ -203,6 +203,45 @@ describe("dashboard-url command helpers", () => {
     expect(sinks.out).toEqual(["http://127.0.0.1:19001/#token=agent-token"]);
   });
 
+  it("uses package-owned presentation for an unknown session-auth harness", () => {
+    const sinks = makeSinks();
+    const fetchToken = vi.fn(() => "unused");
+
+    runDashboardUrlCommand(
+      "synthetic",
+      { quiet: true },
+      {
+        fetchToken,
+        getSandboxPresentation: () => ({
+          dashboardPort: 19002,
+          dashboard: { auth: "session", label: "Workbench" },
+          runtime: { kind: "gateway", displayName: "Synthetic Harness" },
+        }),
+        log: sinks.log,
+        error: sinks.error,
+      },
+    );
+
+    expect(fetchToken).not.toHaveBeenCalled();
+    expect(sinks.out).toEqual(["http://127.0.0.1:19002/"]);
+  });
+
+  it("uses package-owned runtime metadata for an unknown terminal harness", () => {
+    expect(() =>
+      runDashboardUrlCommand(
+        "synthetic",
+        { quiet: true },
+        {
+          fetchToken: () => "unused",
+          getSandboxPresentation: () => ({
+            dashboard: { auth: "none", label: "API" },
+            runtime: { kind: "terminal", displayName: "Synthetic Terminal" },
+          }),
+        },
+      ),
+    ).toThrow(/terminal runtime \(Synthetic Terminal\)/);
+  });
+
   it("fails when non-OpenClaw agent dashboard metadata cannot be resolved", () => {
     const sinks = makeSinks();
 

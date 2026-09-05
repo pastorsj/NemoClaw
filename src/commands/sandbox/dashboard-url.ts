@@ -5,18 +5,27 @@ import { Args } from "@oclif/core";
 import { quietFlag } from "../../lib/cli/common-flags";
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
 import { DashboardUrlCommandError, runDashboardUrlCommand } from "../../lib/dashboard-url-command";
+import type { SandboxDashboardPresentation } from "../../lib/dashboard-url-command";
 import type { SandboxEntry } from "../../lib/state/registry";
 
 type DashboardUrlRuntimeBridge = {
-  fetchGatewayAuthTokenFromSandbox: (sandboxName: string) => string | null;
+  fetchDashboardToken?: (sandboxName: string) => string | null;
+  /** Legacy test/caller bridge retained for no-receipt OpenClaw rows. */
+  fetchGatewayAuthTokenFromSandbox?: (sandboxName: string) => string | null;
   getSandbox: (sandboxName: string) => Pick<SandboxEntry, "agent" | "dashboardPort"> | null;
+  getSandboxPresentation?: (sandboxName: string) => SandboxDashboardPresentation | null;
   getAccessUrl?: (port: number) => string | null;
 };
 
 let runtimeBridgeFactory = (): DashboardUrlRuntimeBridge => {
-  const onboard = require("../../lib/onboard") as Pick<
-    DashboardUrlRuntimeBridge,
-    "fetchGatewayAuthTokenFromSandbox"
+  const agentDefs = require("../../lib/agent/defs") as typeof import("../../lib/agent/defs");
+  const commandAgent =
+    require("../../lib/sandbox/command-agent") as typeof import("../../lib/sandbox/command-agent");
+  const agentToken =
+    require("../../lib/onboard/agent-web-auth-token") as typeof import("../../lib/onboard/agent-web-auth-token");
+  const sandboxConfig = require("../../lib/sandbox/config") as Pick<
+    typeof import("../../lib/sandbox/config"),
+    "readSandboxConfig"
   >;
   const registry = require("../../lib/state/registry") as {
     getSandbox: (name: string) => SandboxEntry | null;
@@ -27,14 +36,38 @@ let runtimeBridgeFactory = (): DashboardUrlRuntimeBridge => {
     typeof import("../../lib/runner"),
     "runCapture"
   >;
+  const getEntry = (sandboxName: string): SandboxEntry | null => {
+    try {
+      return registry.getSandbox(sandboxName);
+    } catch {
+      return null;
+    }
+  };
+  const resolveDefinition = (entry: SandboxEntry) => commandAgent.resolveSandboxCommandAgent(entry);
   return {
-    fetchGatewayAuthTokenFromSandbox: onboard.fetchGatewayAuthTokenFromSandbox,
-    getSandbox: (sandboxName: string) => {
-      try {
-        return registry.getSandbox(sandboxName);
-      } catch {
-        return null;
-      }
+    fetchDashboardToken: (sandboxName: string) => {
+      const entry = getEntry(sandboxName);
+      return entry
+        ? agentToken.fetchAgentDashboardTokenFromSandbox(
+            sandboxConfig.readSandboxConfig,
+            sandboxName,
+            resolveDefinition(entry),
+          )
+        : null;
+    },
+    getSandbox: getEntry,
+    getSandboxPresentation: (sandboxName: string) => {
+      const entry = getEntry(sandboxName);
+      if (!entry) return null;
+      const definition = resolveDefinition(entry);
+      return {
+        dashboardPort: entry.dashboardPort,
+        dashboard: { auth: definition.dashboard.auth, label: definition.dashboard.label },
+        runtime: {
+          kind: agentDefs.getAgentRuntimeKind(definition),
+          displayName: definition.displayName,
+        },
+      };
     },
     getAccessUrl: (port: number) =>
       dashboardAccess.buildDashboardChain(`http://127.0.0.1:${port}`, {
@@ -90,8 +123,10 @@ export default class DashboardUrlCliCommand extends NemoClawCommand {
         args.sandboxName,
         { quiet: flags.quiet === true },
         {
-          fetchToken: runtime.fetchGatewayAuthTokenFromSandbox,
+          fetchToken:
+            runtime.fetchDashboardToken ?? runtime.fetchGatewayAuthTokenFromSandbox ?? (() => null),
           getSandbox: runtime.getSandbox,
+          getSandboxPresentation: runtime.getSandboxPresentation,
           getAccessUrl: runtime.getAccessUrl,
         },
       );

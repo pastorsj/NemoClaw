@@ -2,9 +2,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentDefinition } from "../agent/defs";
+import type { AgentConfigTarget } from "../sandbox/agent-config";
+import type { ConfigObject } from "../security/credential-filter";
 import { shellQuote } from "../runner";
 
 export type RunCaptureOpenshell = (args: string[], opts?: Record<string, unknown>) => string | null;
+export type ReadSandboxAgentConfig = (
+  sandboxName: string,
+  target: AgentConfigTarget,
+) => ConfigObject;
+
+/** Read a manifest-declared dashboard URL token from the package's own config. */
+export function fetchAgentDashboardTokenFromSandbox(
+  readSandboxConfig: ReadSandboxAgentConfig,
+  sandboxName: string,
+  agent: AgentDefinition,
+): string | null {
+  const tokenPath = agent.dashboard.auth === "url_token" ? agent.dashboard.tokenPath : null;
+  if (!tokenPath?.length) return null;
+  const config = readSandboxConfig(sandboxName, {
+    agentName: agent.name,
+    configPath: `${agent.configPaths.dir.replace(/\/+$/u, "")}/${agent.configPaths.configFile}`,
+    configDir: agent.configPaths.dir,
+    format: agent.configPaths.format,
+    configFile: agent.configPaths.configFile,
+    sensitiveFiles: [],
+  });
+  let value: unknown = config;
+  for (const segment of tokenPath) {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+    value = (value as Readonly<Record<string, unknown>>)[segment];
+  }
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
 
 /**
  * Read a bearer_token agent's web-auth token (e.g. Hermes' API_SERVER_KEY)

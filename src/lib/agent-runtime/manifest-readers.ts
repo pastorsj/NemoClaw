@@ -262,12 +262,35 @@ export function readDashboard(record: ManifestRecord): AgentDashboard {
     throw new Error("Agent manifest field 'dashboard.auth' must be url_token, session, or none");
   }
 
+  const auth = rawAuth ?? (kind === "api" ? "none" : "url_token");
+  const rawTokenPath = dashboard.token_path;
+  if (rawTokenPath !== undefined && typeof rawTokenPath !== "string") {
+    throw new Error("Agent manifest field 'dashboard.token_path' must be a dotted config path");
+  }
+  const tokenPath =
+    auth === "url_token"
+      ? String(rawTokenPath ?? "gateway.auth.token")
+          .split(".")
+          .map((segment) => segment.trim())
+      : null;
+  if (
+    tokenPath !== null &&
+    (tokenPath.length === 0 ||
+      tokenPath.length > 16 ||
+      tokenPath.some((segment) => !/^[A-Za-z0-9_-]+$/u.test(segment)))
+  ) {
+    throw new Error(
+      "Agent manifest field 'dashboard.token_path' must be a safe dotted config path",
+    );
+  }
+
   return {
     kind,
     label: normalizedLabel || defaultLabel,
     path: normalizePath("path", "/"),
     healthPath: normalizePath("health_path", "/health"),
-    auth: rawAuth ?? (kind === "api" ? "none" : "url_token"),
+    auth,
+    tokenPath,
   };
 }
 

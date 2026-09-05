@@ -63,6 +63,9 @@ health_probe:
   timeout_seconds: 30
 
 # ── Dashboard / UI ──────────────────────────────────────────────
+dashboard:
+  auth: url_token
+  token_path: gateway.auth.token
 forward_ports:
   - 18789
 

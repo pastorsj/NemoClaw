@@ -114,6 +114,8 @@ export interface AgentDashboard {
   path: string;
   healthPath: string;
   auth: "url_token" | "session" | "none";
+  /** Config-object path containing the URL fragment token when auth is url_token. */
+  tokenPath?: readonly string[] | null;
 }
 
 export interface AgentInference {
