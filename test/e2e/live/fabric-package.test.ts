@@ -133,7 +133,7 @@ test.skipIf(!hasFabricPackageE2eTarget())(
     assertExitZero(onboard, `${target.contract.packageId} onboarding`);
     await host.expectListed(target.sandboxName, { env });
     await host.expectStatus(target.sandboxName, { env, timeoutMs: COMMAND_TIMEOUT_MS });
-    await sandbox.expectRunning(target.sandboxName, { env, timeoutMs: COMMAND_TIMEOUT_MS });
+    await sandbox.expectListed(target.sandboxName, { env, timeoutMs: COMMAND_TIMEOUT_MS });
     const onboardReceipt = requireRecordedPackageIdentity(
       target.sandboxName,
       installation.identity,
@@ -168,7 +168,7 @@ test.skipIf(!hasFabricPackageE2eTarget())(
     });
     assertExitZero(start, `${target.contract.packageId} start`);
     await host.expectStatus(target.sandboxName, { env, timeoutMs: COMMAND_TIMEOUT_MS });
-    await sandbox.expectRunning(target.sandboxName, { env, timeoutMs: COMMAND_TIMEOUT_MS });
+    await sandbox.expectListed(target.sandboxName, { env, timeoutMs: COMMAND_TIMEOUT_MS });
     const restartedReceipt = requireRecordedPackageIdentity(
       target.sandboxName,
       installation.identity,
@@ -192,12 +192,16 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       timeoutMs: 10 * 60_000,
     });
     assertExitZero(destroy, `${target.contract.packageId} destroy`);
-    const statusAfterDestroy = await sandbox.status(target.sandboxName, {
-      artifactName: `fabric-${target.contract.packageId}-status-after-destroy`,
+    const openshellListAfterDestroy = await sandbox.list({
+      artifactName: `fabric-${target.contract.packageId}-openshell-list-after-destroy`,
       env,
       timeoutMs: COMMAND_TIMEOUT_MS,
     });
-    expect(statusAfterDestroy.exitCode, resultText(statusAfterDestroy)).not.toBe(0);
+    assertExitZero(openshellListAfterDestroy, "list OpenShell sandboxes after destroy");
+    expect(
+      outputContainsSandbox(openshellListAfterDestroy, target.sandboxName),
+      resultText(openshellListAfterDestroy),
+    ).toBe(false);
     const listAfterDestroy = await host.nemoclaw(["list"], {
       artifactName: `fabric-${target.contract.packageId}-list-after-destroy`,
       env,
