@@ -12,8 +12,8 @@ import {
   MANAGED_IMAGE_SOURCE_REPOSITORY,
   type ManagedImageAgent,
   type ManagedImageContractV1,
-  parsePackageManagedImageContract,
   parseManagedImageContractV1,
+  parseStockManagedImageContract,
   qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
 import { validateManagedStartupCorporateCaTransport } from "../managed-startup/application";
@@ -104,7 +104,7 @@ function contractFromReceipt(
       capabilityContractVersion: receipt.capabilityContractVersion,
     };
     return declaration
-      ? parsePackageManagedImageContract(candidate, agent, declaration)
+      ? parseStockManagedImageContract(candidate, agent, declaration)
       : parseManagedImageContractV1(candidate, agent);
   } catch (error) {
     throw new ManagedWorkloadAuthorityError("the durable image contract failed validation", {

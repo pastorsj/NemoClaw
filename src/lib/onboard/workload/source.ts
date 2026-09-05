@@ -13,7 +13,7 @@ import {
   type ManagedImageContractCatalog,
   type ManagedImageContractV1,
   type ManagedImagePlatform,
-  parsePackageManagedImageContract,
+  parseStockManagedImageContract,
   qualifiedManagedImageDeclaration,
 } from "../managed-image/contract";
 
@@ -231,7 +231,7 @@ export function resolveSandboxWorkloadSource(
   }
 
   try {
-    const contract = parsePackageManagedImageContract(
+    const contract = parseStockManagedImageContract(
       candidate,
       agentName,
       managedImage,

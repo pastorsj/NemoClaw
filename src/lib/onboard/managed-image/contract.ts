@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types";
 
 export const MANAGED_IMAGE_CONTRACT_VERSION = 1 as const;
 export const MANAGED_IMAGE_PLATFORMS = ["linux/amd64", "linux/arm64"] as const;
@@ -111,7 +113,7 @@ export interface ManagedImageSourceIdentity {
  * Other publication evidence (mutable aliases and base-image provenance) stays
  * outside this runtime identity.
  */
-export interface PackageManagedImageContract<TAgent extends string = string> {
+interface ManagedImageContractFields<TAgent extends string> {
   readonly contractVersion: typeof MANAGED_IMAGE_CONTRACT_VERSION;
   readonly agent: TAgent;
   readonly platform: ManagedImagePlatform;
@@ -123,7 +125,19 @@ export interface PackageManagedImageContract<TAgent extends string = string> {
   readonly capabilityContractVersion: typeof MANAGED_IMAGE_CAPABILITY_CONTRACT_VERSION;
 }
 
-export type ManagedImageContractV1 = PackageManagedImageContract<ManagedImageAgent>;
+/**
+ * Package-qualified image evidence binds the image to the exact package
+ * receipt that declared it. A different installed version or package tree
+ * cannot reuse qualification issued for another receipt.
+ */
+export interface PackageManagedImageContract<
+  TAgent extends string = string,
+> extends ManagedImageContractFields<TAgent> {
+  readonly harnessPackage: HarnessPackageIdentity;
+}
+
+/** Legacy product-qualified image evidence for NemoClaw's closed stock set. */
+export type ManagedImageContractV1 = ManagedImageContractFields<ManagedImageAgent>;
 
 export type ManagedImageContractCatalog = Readonly<Record<string, unknown>>;
 
@@ -180,34 +194,51 @@ function requirePattern(value: unknown, pattern: RegExp, field: string): string 
 
 const AGENT_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 
-/**
- * Validate one qualified immutable image against the selected package's
- * receipt-pinned declaration. The declaration constrains composition but is
- * not qualification evidence; callers must establish catalogue authority
- * before invoking this parser.
- */
-export function parsePackageManagedImageContract<TAgent extends string>(
-  value: unknown,
+const MANAGED_IMAGE_CONTRACT_KEYS = [
+  "agent",
+  "capabilityContractVersion",
+  "contractVersion",
+  "digest",
+  "image",
+  "platform",
+  "reference",
+  "source",
+  "startupProfileContractVersion",
+] as const;
+
+const PACKAGE_MANAGED_IMAGE_CONTRACT_KEYS = [
+  ...MANAGED_IMAGE_CONTRACT_KEYS,
+  "harnessPackage",
+] as const;
+
+function requireHarnessPackageIdentity(value: unknown, field: string): HarnessPackageIdentity {
+  try {
+    return parseHarnessPackageIdentity(value);
+  } catch {
+    throw new ManagedImageContractError(`${field} must be an exact harness package receipt`);
+  }
+}
+
+function harnessPackageIdentitiesEqual(
+  left: HarnessPackageIdentity,
+  right: HarnessPackageIdentity,
+): boolean {
+  return (
+    left.kind === right.kind &&
+    left.id === right.id &&
+    left.packageVersion === right.packageVersion &&
+    left.contentDigest === right.contentDigest
+  );
+}
+
+function parseDeclaredManagedImageContract<TAgent extends string>(
+  contract: Record<string, unknown>,
   expectedAgent: TAgent,
   declaration: HarnessManagedImageDeclaration,
+  expectedKeys: readonly string[],
   expectedPlatform?: ManagedImagePlatform,
-): PackageManagedImageContract<TAgent> {
-  const contract = requireRecord(value, "contract");
-  requireExactKeys(
-    contract,
-    [
-      "agent",
-      "capabilityContractVersion",
-      "contractVersion",
-      "digest",
-      "image",
-      "platform",
-      "reference",
-      "source",
-      "startupProfileContractVersion",
-    ],
-    "contract",
-  );
+): ManagedImageContractFields<TAgent> {
+  requireExactKeys(contract, expectedKeys, "contract");
 
   requireLiteral(
     contract.contractVersion,
@@ -281,6 +312,65 @@ export function parsePackageManagedImageContract<TAgent extends string>(
   };
 }
 
+/**
+ * Validate one qualified immutable image against the selected package's
+ * receipt-pinned declaration. The declaration constrains composition but is
+ * not qualification evidence; callers must establish catalogue authority
+ * before invoking this parser.
+ */
+export function parsePackageManagedImageContract<TAgent extends string>(
+  value: unknown,
+  expectedHarnessPackage: HarnessPackageIdentity & { readonly id: TAgent },
+  declaration: HarnessManagedImageDeclaration,
+  expectedPlatform?: ManagedImagePlatform,
+): PackageManagedImageContract<TAgent> {
+  const contract = requireRecord(value, "contract");
+  const expectedPackage = requireHarnessPackageIdentity(
+    expectedHarnessPackage,
+    "expected harness package",
+  );
+  const harnessPackage = requireHarnessPackageIdentity(
+    contract.harnessPackage,
+    "contract.harnessPackage",
+  );
+  if (!harnessPackageIdentitiesEqual(harnessPackage, expectedPackage)) {
+    throw new ManagedImageContractError(
+      "contract.harnessPackage must match the exact expected harness package receipt",
+    );
+  }
+  const parsed = parseDeclaredManagedImageContract(
+    contract,
+    expectedPackage.id as TAgent,
+    declaration,
+    PACKAGE_MANAGED_IMAGE_CONTRACT_KEYS,
+    expectedPlatform,
+  );
+
+  return {
+    ...parsed,
+    harnessPackage,
+  };
+}
+
+/**
+ * Validate legacy product-qualified evidence for NemoClaw's closed stock set.
+ * Package integrations must use parsePackageManagedImageContract instead.
+ */
+export function parseStockManagedImageContract(
+  value: unknown,
+  expectedAgent: ManagedImageAgent,
+  declaration: HarnessManagedImageDeclaration,
+  expectedPlatform?: ManagedImagePlatform,
+): ManagedImageContractV1 {
+  return parseDeclaredManagedImageContract(
+    requireRecord(value, "contract"),
+    expectedAgent,
+    declaration,
+    MANAGED_IMAGE_CONTRACT_KEYS,
+    expectedPlatform,
+  );
+}
+
 export function isShippedManagedImageAgent(value: string): value is ShippedManagedImageAgent {
   return (SHIPPED_MANAGED_IMAGE_AGENTS as readonly string[]).includes(value);
 }
@@ -321,7 +411,7 @@ export function parseManagedImageContractV1(
     throw new ManagedImageContractError(`contract.agent must be ${JSON.stringify(expectedAgent)}`);
   }
 
-  return parsePackageManagedImageContract(
+  return parseStockManagedImageContract(
     contract,
     agent,
     qualifiedManagedImageDeclaration(agent),

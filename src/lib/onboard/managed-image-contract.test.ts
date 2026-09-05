@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { HarnessManagedImageDeclaration } from "@nvidia/nemoclaw-harness-contract";
+import type { HarnessPackageIdentity } from "../agent-runtime/package/types";
 import {
   CANDIDATE_MANAGED_IMAGE_AGENTS,
   isCandidateManagedImageAgent,
@@ -34,6 +35,19 @@ const DIGESTS = {
   pi: `sha256:${"4d".repeat(32)}`,
 } as const satisfies Record<ManagedImageAgent, `sha256:${string}`>;
 
+function packageIdentity<TId extends string>(
+  id: TId,
+  packageVersion = "1.2.3",
+  contentDigest = "8e".repeat(32),
+): HarnessPackageIdentity & { readonly id: TId } {
+  return {
+    kind: "agent-runtime",
+    id,
+    packageVersion,
+    contentDigest,
+  };
+}
+
 function contractFor(agent: ManagedImageAgent): ManagedImageContractV1 {
   const image = MANAGED_IMAGE_REPOSITORIES[agent];
   const digest = DIGESTS[agent];
@@ -57,6 +71,7 @@ function contractFor(agent: ManagedImageAgent): ManagedImageContractV1 {
 
 describe("managed image contract v1", () => {
   it("composes a qualified synthetic package without adding its ID to core", () => {
+    const harnessPackage = packageIdentity("future-harness");
     const declaration: HarnessManagedImageDeclaration = {
       repository: "registry.example/team/future-harness",
       architectures: ["linux/amd64"],
@@ -66,6 +81,7 @@ describe("managed image contract v1", () => {
     };
     const digest = `sha256:${"9a".repeat(32)}` as const;
     const contract = {
+      harnessPackage,
       contractVersion: 1,
       agent: "future-harness",
       platform: "linux/amd64",
@@ -82,7 +98,7 @@ describe("managed image contract v1", () => {
       capabilityContractVersion: 1,
     };
 
-    const parsed = parsePackageManagedImageContract(contract, "future-harness", declaration);
+    const parsed = parsePackageManagedImageContract(contract, harnessPackage, declaration);
     const exactAgent: "future-harness" = parsed.agent;
 
     expect(parsed).toEqual(contract);
@@ -91,6 +107,7 @@ describe("managed image contract v1", () => {
   });
 
   it("requires qualification evidence to match the package-owned repository and platform", () => {
+    const harnessPackage = packageIdentity("future-harness");
     const declaration: HarnessManagedImageDeclaration = {
       repository: "registry.example/team/future-harness",
       architectures: ["linux/arm64"],
@@ -102,17 +119,63 @@ describe("managed image contract v1", () => {
 
     expect(() =>
       parsePackageManagedImageContract(
-        { ...base, agent: "future-harness", image: declaration.repository },
-        "future-harness",
+        {
+          ...base,
+          harnessPackage,
+          agent: "future-harness",
+          image: declaration.repository,
+        },
+        harnessPackage,
         declaration,
       ),
     ).toThrow("not declared by package");
     expect(() =>
-      parsePackageManagedImageContract({ ...base, agent: "future-harness" }, "future-harness", {
-        ...declaration,
-        architectures: ["linux/amd64"],
-      }),
+      parsePackageManagedImageContract(
+        { ...base, harnessPackage, agent: "future-harness" },
+        harnessPackage,
+        {
+          ...declaration,
+          architectures: ["linux/amd64"],
+        },
+      ),
     ).toThrow("contract.image");
+  });
+
+  it.each([
+    ["package ID", packageIdentity("ambient-harness")],
+    ["package version", packageIdentity("future-harness", "1.2.4")],
+    ["package content", packageIdentity("future-harness", "1.2.3", "9f".repeat(32))],
+  ])("rejects qualification issued for a different %s", (_label, harnessPackage) => {
+    const expectedHarnessPackage = packageIdentity("future-harness");
+    const declaration: HarnessManagedImageDeclaration = {
+      repository: "registry.example/team/future-harness",
+      architectures: ["linux/amd64"],
+      runtime_identity: { uid: 1234, gid: 1235, workdir: "/sandbox" },
+      startup_profile_contract_version: 1,
+      capability_contract_version: 1,
+    };
+    const digest = `sha256:${"9a".repeat(32)}` as const;
+    const contract = {
+      harnessPackage,
+      contractVersion: 1,
+      agent: "future-harness",
+      platform: "linux/amd64",
+      image: declaration.repository,
+      digest,
+      reference: `${declaration.repository}@${digest}`,
+      source: {
+        repository: MANAGED_IMAGE_SOURCE_REPOSITORY,
+        revision: SOURCE_REVISION,
+        release: SOURCE_RELEASE,
+        cohort: SOURCE_COHORT,
+      },
+      startupProfileContractVersion: 1,
+      capabilityContractVersion: 1,
+    };
+
+    expect(() =>
+      parsePackageManagedImageContract(contract, expectedHarnessPackage, declaration),
+    ).toThrow("contract.harnessPackage must match the exact expected harness package receipt");
   });
 
   it("advertises startup-profile contract v1 for every shipped agent (#7744)", () => {

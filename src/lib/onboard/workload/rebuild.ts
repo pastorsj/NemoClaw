@@ -17,7 +17,7 @@ import {
   qualifiedManagedImageDeclaration,
   type ManagedImageAgent,
   type ManagedImageContractV1,
-  parsePackageManagedImageContract,
+  parseStockManagedImageContract,
 } from "../managed-image/contract";
 import {
   type BuiltManagedStartupOnboardProfile,
@@ -458,7 +458,7 @@ export function buildManagedWorkloadRebuildReceipt(
   }
   let contract: ManagedImageContractV1;
   try {
-    contract = parsePackageManagedImageContract(
+    contract = parseStockManagedImageContract(
       handoff.replacement.source.contract,
       handoff.agent,
       handoff.managedImage,
