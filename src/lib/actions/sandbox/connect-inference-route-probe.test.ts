@@ -51,8 +51,11 @@ describe("sandbox connect inference route probe argv", () => {
     null,
     { name: "openclaw" },
     { name: "hermes" },
-  ])("preserves the plain sh probe for non-dcode agents (%j)", (agent) => {
-    expect(buildSandboxInferenceRouteProbeArgs("alpha", agent)).toEqual([
+    { name: "future-fabric-harness" },
+  ])("restores trusted runtime routing for non-dcode agents (%j)", (agent) => {
+    const args = buildSandboxInferenceRouteProbeArgs("alpha", agent);
+
+    expect(args.slice(0, -1)).toEqual([
       "sandbox",
       "exec",
       "--name",
@@ -60,8 +63,12 @@ describe("sandbox connect inference route probe argv", () => {
       "--",
       "sh",
       "-c",
-      INFERENCE_ROUTE_PROBE_SCRIPT,
     ]);
+    expect(args.at(-1)).toContain("proxy_env='/tmp/nemoclaw-proxy-env.sh'");
+    expect(args.at(-1)).toContain(INFERENCE_ROUTE_PROBE_SCRIPT);
+    expect(args.at(-1)?.indexOf("proxy_env=")).toBeLessThan(
+      args.at(-1)?.indexOf("https://inference.local") ?? -1,
+    );
   });
 
   it.each([
@@ -85,7 +92,7 @@ describe("sandbox connect inference route probe argv", () => {
     expect(script).not.toContain("/etc/openshell-tls");
     expect(script).not.toContain("curl -sk");
     expect(script).not.toContain("--insecure");
-    expect(script).not.toContain("/tmp/");
+    expect(script).toContain("proxy_env='/tmp/nemoclaw-proxy-env.sh'");
     expect(script).not.toContain("head -c");
   });
 

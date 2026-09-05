@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { redactSensitiveText } from "../../security/redact";
+import { buildTrustedProxyEnvSourceShell } from "./trusted-proxy-env";
 
 export type InferenceRouteProbeAgent = { name: string } | null;
 
@@ -38,6 +39,14 @@ export const INFERENCE_ROUTE_PROBE_SCRIPT = [
   INFERENCE_ROUTE_CA_VALIDATION,
   INFERENCE_ROUTE_PROBE_CORE_SCRIPT,
 ].join("; ");
+const INFERENCE_ROUTE_PROBE_WITH_RUNTIME_ENV_SCRIPT = [
+  // Package-owned runtimes persist their public proxy and CA routing here
+  // because each OpenShell exec starts a new process. The shared validator
+  // keeps this package-neutral and fails closed when the file is present but
+  // does not have the trusted cross-user ownership and mode.
+  buildTrustedProxyEnvSourceShell(),
+  INFERENCE_ROUTE_PROBE_SCRIPT,
+].join("\n");
 // Invalid state: OpenShell starts sandbox exec through a login shell before the
 // requested command (#8624; OpenShell#2668). Rebuilt DCode images reserve that
 // shell's first-match profile as a root-owned file which skips sandbox startup
@@ -114,7 +123,7 @@ export function buildSandboxInferenceRouteProbeArgs(
     ];
   }
 
-  return [...targetArgs, "--", "sh", "-c", INFERENCE_ROUTE_PROBE_SCRIPT];
+  return [...targetArgs, "--", "sh", "-c", INFERENCE_ROUTE_PROBE_WITH_RUNTIME_ENV_SCRIPT];
 }
 
 /** Parse the shared route-probe output used by connect, status, and doctor. */
