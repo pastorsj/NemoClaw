@@ -582,6 +582,33 @@ describe("E2E fixture clients", () => {
     });
   });
 
+  it("sandbox client accepts a missing sandbox or its retired dedicated gateway", async () => {
+    const listedRunner = new FakeRunner();
+    listedRunner.stdout = "NAME\nother\n";
+    await expect(new SandboxClient(listedRunner).expectAbsent("assistant")).resolves.toBeDefined();
+
+    const retiredRunner = new FakeRunner();
+    retiredRunner.enqueue({
+      exitCode: 1,
+      stderr: "Error:   × Unknown gateway 'nemoclaw-25237'.",
+    });
+    await expect(new SandboxClient(retiredRunner).expectAbsent("assistant")).resolves.toBeDefined();
+  });
+
+  it("sandbox client rejects a retained sandbox or an unexpected inventory failure", async () => {
+    const retainedRunner = new FakeRunner();
+    retainedRunner.stdout = "NAME\nassistant\n";
+    await expect(new SandboxClient(retainedRunner).expectAbsent("assistant")).rejects.toThrow(
+      "still included 'assistant'",
+    );
+
+    const failedRunner = new FakeRunner();
+    failedRunner.enqueue({ exitCode: 1, stderr: "permission denied" });
+    await expect(new SandboxClient(failedRunner).expectAbsent("assistant")).rejects.toThrow(
+      "openshell sandbox list failed: permission denied",
+    );
+  });
+
   it("sandbox client preserves caller-provided probe options", async () => {
     const runner = new FakeRunner();
     const sandbox = new SandboxClient(runner, { openshellPath: "openshell" });

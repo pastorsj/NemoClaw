@@ -192,16 +192,11 @@ test.skipIf(!hasFabricPackageE2eTarget())(
       timeoutMs: 10 * 60_000,
     });
     assertExitZero(destroy, `${target.contract.packageId} destroy`);
-    const openshellListAfterDestroy = await sandbox.list({
+    await sandbox.expectAbsent(target.sandboxName, {
       artifactName: `fabric-${target.contract.packageId}-openshell-list-after-destroy`,
       env,
       timeoutMs: COMMAND_TIMEOUT_MS,
     });
-    assertExitZero(openshellListAfterDestroy, "list OpenShell sandboxes after destroy");
-    expect(
-      outputContainsSandbox(openshellListAfterDestroy, target.sandboxName),
-      resultText(openshellListAfterDestroy),
-    ).toBe(false);
     const listAfterDestroy = await host.nemoclaw(["list"], {
       artifactName: `fabric-${target.contract.packageId}-list-after-destroy`,
       env,

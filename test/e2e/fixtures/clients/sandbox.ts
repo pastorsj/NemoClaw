@@ -22,6 +22,8 @@ const { diagnosticPreview, isValidName, NAME_ALLOWED_FORMAT } = sandboxNameContr
 
 const SANDBOX_ALREADY_ABSENT =
   /\bNotFound\b|\bNot Found\b|sandbox[^\n]*(?:not found|not present|does not exist)|no such sandbox/i;
+const GATEWAY_INVENTORY_ABSENT =
+  /\bUnknown gateway '[^'\r\n]+'|\bNo (?:active )?gateway\b|\bNo gateway metadata found\b/i;
 
 /**
  * Default env for openshell-targeted spawns. ShellProbe filters env via
@@ -162,6 +164,19 @@ export class SandboxClient {
     assertExitZero(result, "openshell sandbox list");
     if (!outputContainsSandbox(result, name)) {
       throw new Error(`openshell sandbox list did not include '${name}'.`);
+    }
+    return result;
+  }
+
+  async expectAbsent(name: string, options: ShellProbeRunOptions = {}): Promise<ShellProbeResult> {
+    validateSandboxName(name);
+    const result = await this.list({ env: openshellProbeEnv(), ...options });
+    if (result.exitCode !== 0) {
+      if (GATEWAY_INVENTORY_ABSENT.test(resultText(result))) return result;
+      assertExitZero(result, "openshell sandbox list");
+    }
+    if (outputContainsSandbox(result, name)) {
+      throw new Error(`openshell sandbox list still included '${name}'.`);
     }
     return result;
   }
