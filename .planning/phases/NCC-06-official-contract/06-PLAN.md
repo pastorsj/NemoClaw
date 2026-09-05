@@ -45,6 +45,13 @@ harness-agnostic control plane.
    operations, and unowned root tests.
 8. **Qualify the exact revision.** Run focused, aggregate, package-only, macOS, and Brev evidence.
    Keep live messaging services out of scope.
+9. **Close receipt-backed native dispatch.** Once a sandbox has a package receipt, route active
+   configuration, messaging, sessions, dashboard, restore, and process behavior through manifest
+   data, fixed commands, or finite typed package plans. Keep exact harness IDs only in product
+   qualification, display compatibility, and historical decoding.
+10. **Quarantine compatibility.** Legacy readers may identify old OpenClaw, Hermes, or Deep Agents
+    state only long enough to migrate it to package authority. They must not become the behavior
+    fallback for a receipt-backed sandbox.
 
 ## Definition of done
 
@@ -59,3 +66,5 @@ harness-agnostic control plane.
   lifecycle evidence records successful cleanup.
 - The final report lists any formal product, publisher-trust, or platform qualification decision
   that code alone cannot complete.
+- A repository check rejects new receipt-backed production dispatch that selects native behavior
+  from an exact harness ID, while explicitly allowlisting catalogue and legacy-decoder ownership.
