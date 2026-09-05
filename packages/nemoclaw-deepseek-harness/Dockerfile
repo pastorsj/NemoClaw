@@ -62,15 +62,12 @@ ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
 ARG NEMOCLAW_INFERENCE_BASE_URL=https://inference.local/v1
 ARG NEMOCLAW_INFERENCE_API=openai-completions
 
-# This is a non-secret route marker consumed by the package adapter. The real
-# credential is injected for each Fabric request and is never baked into the image.
 # hadolint ignore=DL3064
 ENV HOME=/sandbox \
     PATH="/usr/local/bin:/opt/nemoclaw-fabric-venv/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" \
     DSH_HOME=/sandbox/.deepseek-harness \
     DSH_TELEMETRY_MODE=DISABLED \
     DSH_TELEMETRY_DISABLED=1 \
-    DEEPSEEK_FABRIC_API_KEY=nemoclaw-managed-inference \
     NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
     NEMOCLAW_INFERENCE_BASE_URL=${NEMOCLAW_INFERENCE_BASE_URL} \
     NEMOCLAW_INFERENCE_API=${NEMOCLAW_INFERENCE_API}
@@ -83,7 +80,7 @@ RUN umask 077 \
     && cp -r /opt/nemoclaw-blueprint/* /sandbox/.nemoclaw/blueprints/0.1.0/ \
     && /usr/local/lib/nemoclaw/generate-config \
     && test "$(stat -c %a /sandbox/.deepseek-harness/fabric.json)" = "600" \
-    && /usr/local/bin/nemoclaw-fabric doctor \
+    && DEEPSEEK_FABRIC_API_KEY=nemoclaw-managed-inference /usr/local/bin/nemoclaw-fabric doctor \
         --config /sandbox/.deepseek-harness/fabric.json --json >/tmp/nemoclaw-deepseek-doctor.json \
     && python3 -I -c 'import json; report=json.load(open("/tmp/nemoclaw-deepseek-doctor.json", encoding="utf-8")); assert report["status"] in {"pass", "warn"}' \
     && rm -f /tmp/nemoclaw-deepseek-doctor.json

@@ -11,7 +11,7 @@ language: python
 license: MIT
 install_method: pip
 binary_path: /opt/nemoclaw-fabric-venv/bin/dsh
-version_command: "DSH_HOME=/sandbox/.deepseek-harness dsh --version"
+version_command: "DSH_HOME=/sandbox/.deepseek-harness /opt/nemoclaw-fabric-venv/bin/dsh --version"
 expected_version: "0.1.2-rc.1"
 version_scheme: semver
 runtime:
@@ -21,7 +21,7 @@ runtime:
   smoke_boundary:
     kind: login-shell
   smoke_commands:
-    - "DSH_HOME=/sandbox/.deepseek-harness dsh --version"
+    - "DSH_HOME=/sandbox/.deepseek-harness /opt/nemoclaw-fabric-venv/bin/dsh --version"
     - "nemoclaw-fabric --version"
     - "/usr/local/bin/nemoclaw-fabric-run --help >/dev/null && echo NEMOCLAW_FABRIC_RUNNER_OK"
     - "test -s /sandbox/.deepseek-harness/fabric.json && echo NEMOCLAW_DEEPSEEK_FABRIC_OK"
