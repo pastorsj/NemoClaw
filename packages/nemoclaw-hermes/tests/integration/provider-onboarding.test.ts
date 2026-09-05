@@ -7,6 +7,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { getAgentChoices } from "../../../../src/lib/agent/defs";
+
 const CHILD_TIMEOUT_MS = 30_000;
 const NEMOCLAW_ROOT = path.resolve(import.meta.dirname, "../../../..");
 
@@ -96,11 +98,16 @@ const { selectOnboardAgent } = require(${onboardPath});
 `;
     fs.writeFileSync(scriptPath, script);
 
+    const hermesChoiceIndex = getAgentChoices().findIndex((choice) => choice.name === "hermes");
+    expect(
+      hermesChoiceIndex,
+      "Hermes must be available in the agent picker",
+    ).toBeGreaterThanOrEqual(0);
+
     const result = spawnSync(process.execPath, [scriptPath], {
       cwd: repoRoot,
       encoding: "utf-8",
-      // Choose option 2 (Hermes) from the agent picker.
-      input: "2\n",
+      input: `${String(hermesChoiceIndex + 1)}\n`,
       env: buildHermeticEnv(tmpDir),
       timeout: CHILD_TIMEOUT_MS,
     });
