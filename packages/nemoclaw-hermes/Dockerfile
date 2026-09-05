@@ -603,7 +603,13 @@ RUN rm -rf /usr/local/lib/nemoclaw/preloads \
     && chmod 444 /usr/local/lib/nemoclaw/patch-hermes-langfuse-credentials.mts \
     && chmod 444 /usr/local/lib/nemoclaw/openshell-child-visible-credentials.v0.0.106.json \
     && /opt/hermes/.venv/bin/python3 -I -c 'import runpy, yaml; assert yaml.safe_load("ready: true")["ready"] is True; runpy.run_path("/usr/local/lib/nemoclaw/hermes-runtime-config-guard.py", run_name="nemoclaw_runtime_config_guard_probe")' \
-    && NEMOCLAW_MANAGED_STARTUP_REPLAY=invalid /usr/local/lib/nemoclaw/seal-config 2>&1 | grep -Fq 'NEMOCLAW_MANAGED_STARTUP_REPLAY must be 0 or 1' \
+    && { \
+      if hermes_startup_seal_probe="$(NEMOCLAW_MANAGED_STARTUP_REPLAY=invalid /usr/local/lib/nemoclaw/seal-config 2>&1)"; then \
+        false; \
+      else \
+        test "$hermes_startup_seal_probe" = '[SECURITY] NEMOCLAW_MANAGED_STARTUP_REPLAY must be 0 or 1'; \
+      fi; \
+    } \
     && chmod 444 /usr/local/lib/nemoclaw/sandbox-rlimits.sh \
     && mkdir -p /etc/profile.d \
     && printf '%s\n' \
