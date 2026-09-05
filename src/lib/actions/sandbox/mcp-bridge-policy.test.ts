@@ -53,62 +53,21 @@ const policyBinaries = {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("generated MCP policy", () => {
-  it("derives canonical policy content from MCP domain state", () => {
-    expect(getRegisteredGeneratedPolicy("alpha", entry)).toEqual(
-      expect.objectContaining({
-        name: entry.policyName,
-        content: expect.stringContaining("allowed_ips"),
-      }),
-    );
+  it("does not reconstruct package-owned policy without sandbox package authority", () => {
+    expect(getRegisteredGeneratedPolicy("alpha", entry)).toBeUndefined();
   });
 
-  it("applies directly to live OpenShell policy without a custom-policy registry row", () => {
-    const livePolicy: { network_policies: Record<string, unknown> } = { network_policies: {} };
-    const applySpy = vi.spyOn(policies, "applyPresetContent").mockImplementation(
-      (_sandboxName, _presetName, content) => {
-        Object.assign(
-          livePolicy.network_policies,
-          (YAML.parse(content) as typeof livePolicy).network_policies,
-        );
-        return true;
-      },
-    );
-    const stateSpy = vi.spyOn(policies, "getPresetContentGatewayState").mockImplementation(
-      (_sandboxName, content) => {
-        const expected = (YAML.parse(content) as typeof livePolicy).network_policies;
-        return Object.keys(expected).every((key) => key in livePolicy.network_policies)
-          ? "match"
-          : "absent";
-      },
-    );
-
-    applyGeneratedPolicy(
-      "alpha",
-      entry,
-      { addresses: ["8.8.8.8"] },
-      { runtimeSelection },
-    );
-
-    expect(livePolicy.network_policies.mcp_bridge_github).toMatchObject({
-      endpoints: [
-        expect.objectContaining({
-          allowed_ips: ["8.8.8.8"],
-          credential_binding: { provider: "mcp-github" },
-        }),
-      ],
-    });
-    expect(applySpy).toHaveBeenCalledWith(
-      "alpha",
-      entry.policyName,
-      expect.any(String),
-      expect.objectContaining({ runtimeSelection }),
-    );
-    expect(stateSpy).toHaveBeenCalledWith(
-      "alpha",
-      expect.any(String),
-      undefined,
-      runtimeSelection,
-    );
+  it("refuses live policy mutation without package authority", () => {
+    const applySpy = vi.spyOn(policies, "applyPresetContent");
+    expect(() =>
+      applyGeneratedPolicy(
+        "alpha",
+        entry,
+        { addresses: ["8.8.8.8"] },
+        { runtimeSelection },
+      ),
+    ).toThrow(/Sandbox 'alpha' not found/u);
+    expect(applySpy).not.toHaveBeenCalled();
   });
 
   it("removes generated content from the live policy", () => {

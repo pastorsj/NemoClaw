@@ -77,7 +77,7 @@ import {
 import { printGatewayWedgeDiagnostics } from "./gateway-wedge-diagnostics";
 import { enforceHermesSecretBoundaryOnRunningGateway } from "./hermes-secret-boundary-recovery";
 import {
-  inspectHermesMcpReconciliationRefusal,
+  inspectMcpRuntimeIntentRefusal,
   processRecoveryMcpReconciliationRefusal,
 } from "./mcp-bridge-recovery";
 import {
@@ -1026,8 +1026,8 @@ export function restartSandboxGateway(
               runtimeSelection,
             }),
           printGatewayWedgeDiagnostics,
-          inspectHermesMcpReconciliationRefusal: (name) =>
-            inspectHermesMcpReconciliationRefusal(name, undefined, runtimeSelection),
+          inspectMcpRuntimeIntentRefusal: (name) =>
+            inspectMcpRuntimeIntentRefusal(name, undefined, runtimeSelection),
           ...deps,
         },
       }),

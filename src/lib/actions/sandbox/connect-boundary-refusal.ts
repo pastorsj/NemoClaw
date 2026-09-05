@@ -8,9 +8,9 @@ import {
 } from "./gateway-restart";
 import type { SecretBoundaryRefusalReason } from "./hermes-secret-boundary-recovery";
 import {
-  hermesMcpReconciliationRemediationLines,
-  sanitizeHermesMcpReconciliationDetail,
-} from "./mcp-bridge-hermes-reconciliation";
+  mcpRuntimeIntentRemediationLines,
+  sanitizeMcpRuntimeIntentDetail,
+} from "./mcp-bridge-recovery";
 
 type ConnectBoundaryContext = "Probe" | "Connect";
 
@@ -86,13 +86,13 @@ export function exitOnMcpReconciliationRefusal(
   const detail =
     "mcpReconciliationReason" in processCheck
       ? String(processCheck.mcpReconciliationReason)
-      : "the effective Hermes MCP configuration does not match persisted managed intent";
-  const sanitizedDetail = sanitizeHermesMcpReconciliationDetail(detail);
+      : "the effective MCP configuration does not match persisted package-owned intent";
+  const sanitizedDetail = sanitizeMcpRuntimeIntentDetail(detail);
   console.error("");
   console.error(
     `  ${contextLabel} failed: refused to confirm ${agentName} gateway in '${sandboxName}' — ${sanitizedDetail}.`,
   );
-  for (const line of hermesMcpReconciliationRemediationLines(sandboxName)) {
+  for (const line of mcpRuntimeIntentRemediationLines(sandboxName)) {
     console.error(`  ${line}`);
   }
   process.exit(1);

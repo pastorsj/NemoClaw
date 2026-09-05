@@ -10,6 +10,7 @@ import type { McpBridgeEntry, SandboxEntry } from "../../state/registry";
 
 const mocks = vi.hoisted(() => ({
   applyGeneratedPolicy: vi.fn(),
+  assertAgentMcpRuntimeIntent: vi.fn(),
   assertMcpAdapterMutationRuntimeCapabilities: vi.fn(),
   attachProvider: vi.fn(),
   ensureMcpBridgeProviderProfile: vi.fn(),
@@ -32,12 +33,9 @@ vi.mock("../../onboard/experimental/portable-agent-lifecycle", () => ({
 }));
 
 vi.mock("./mcp-bridge-adapters", () => ({
+  assertAgentMcpRuntimeIntent: mocks.assertAgentMcpRuntimeIntent,
   registerAgentAdapterAtCurrentCredentialRevision:
     mocks.registerAgentAdapterAtCurrentCredentialRevision,
-}));
-
-vi.mock("./mcp-bridge-hermes-reconciliation", () => ({
-  assertHermesMcpRuntimeIntent: vi.fn(),
 }));
 
 vi.mock("./mcp-bridge-policy", () => ({
@@ -52,6 +50,10 @@ vi.mock("./mcp-bridge-provider", () => ({
   attachProvider: mocks.attachProvider,
   detachMissingProviderReference: vi.fn(),
   ensureMcpBridgeProviderProfile: mocks.ensureMcpBridgeProviderProfile,
+  getMcpProviderInspectionRuntimeSelection: vi.fn(() => ({
+    gatewayName: "nemoclaw-8091",
+    workspace: "default",
+  })),
   refreshMcpProviderEnvironment: mocks.refreshMcpProviderEnvironment,
   observeMcpCredentialRevision: vi.fn(),
   preflightMcpEntryTargets: mocks.preflightMcpEntryTargets,
@@ -134,7 +136,9 @@ function resolvePinnedAgentDefinition(
 describe("MCP rebuild restoration authority", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.preflightMcpEntryTargets.mockResolvedValue(new Map());
+    mocks.preflightMcpEntryTargets.mockResolvedValue(
+      new Map([["github", { addresses: ["8.8.8.8"] }]]),
+    );
     mocks.ensureSandboxGatewaySelected.mockResolvedValue(undefined);
     mocks.getSandboxOrThrow.mockReturnValue(openClawSandbox);
     mocks.getSandboxAgent.mockImplementation(resolvePinnedAgentDefinition);
@@ -143,10 +147,11 @@ describe("MCP rebuild restoration authority", () => {
     );
   });
 
-  it("rereads and rejects sandbox-agent drift after target and gateway awaits", async () => {
+  it("rereads and rejects sandbox-agent drift after target preflight", async () => {
     const driftedSandbox = { ...openClawSandbox, agent: "hermes" } as SandboxEntry;
-    mocks.ensureSandboxGatewaySelected.mockImplementation(async () => {
+    mocks.preflightMcpEntryTargets.mockImplementation(async () => {
       mocks.getSandboxOrThrow.mockReturnValue(driftedSandbox);
+      return new Map([["github", { addresses: ["8.8.8.8"] }]]);
     });
 
     await expect(
@@ -158,19 +163,20 @@ describe("MCP rebuild restoration authority", () => {
     );
 
     expect(mocks.preflightMcpEntryTargets).toHaveBeenCalledOnce();
-    expect(mocks.ensureSandboxGatewaySelected).toHaveBeenCalledOnce();
+    expect(mocks.ensureSandboxGatewaySelected).not.toHaveBeenCalled();
     expect(mocks.getSandboxOrThrow).toHaveBeenCalledTimes(2);
     expectNoRestoreMutation();
   });
 
-  it("rejects exact bridge-state drift after target and gateway awaits", async () => {
+  it("rejects exact bridge-state drift after target preflight", async () => {
     const driftedEntry = { ...entry, url: "https://example.com/replaced" };
     const driftedSandbox = {
       ...openClawSandbox,
       mcp: { bridges: { github: driftedEntry } },
     } as SandboxEntry;
-    mocks.ensureSandboxGatewaySelected.mockImplementation(async () => {
+    mocks.preflightMcpEntryTargets.mockImplementation(async () => {
       mocks.getSandboxOrThrow.mockReturnValue(driftedSandbox);
+      return new Map([["github", { addresses: ["8.8.8.8"] }]]);
     });
 
     await expect(

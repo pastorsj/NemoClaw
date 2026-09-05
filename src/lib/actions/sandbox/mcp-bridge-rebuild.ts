@@ -45,6 +45,7 @@ import {
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
+  requireSandboxHarnessPackage,
   setBridgeState,
 } from "./mcp-bridge-state";
 import { assertAuthenticatedBridgeEntry, validateSandboxName } from "./mcp-bridge-validation";
@@ -118,6 +119,7 @@ async function getCompleteMcpRebuildEntries(
   validateSandboxName(sandboxName);
   const currentSandbox = getSandboxOrThrow(sandboxName);
   assertMcpDestroyNotPending(currentSandbox);
+  if (currentSandbox.mcp) requireSandboxHarnessPackage(sandboxName);
   assertEntriesMatchPinnedAgent(
     currentSandbox,
     Object.values(bridgeState(currentSandbox)).map(cloneMcpBridgeEntry),

@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   loadAgent: vi.fn(),
   getSandboxAgent: vi.fn(),
-  getSandboxHarnessPackage: vi.fn(),
+  requireSandboxHarnessPackage: vi.fn(),
   getSandboxOrThrow: vi.fn(),
 }));
 
@@ -19,7 +19,7 @@ vi.mock("../../agent/defs", () => ({
 
 vi.mock("./mcp-bridge-state", () => ({
   getSandboxAgent: mocks.getSandboxAgent,
-  getSandboxHarnessPackage: mocks.getSandboxHarnessPackage,
+  requireSandboxHarnessPackage: mocks.requireSandboxHarnessPackage,
   getSandboxOrThrow: mocks.getSandboxOrThrow,
 }));
 
@@ -55,7 +55,7 @@ const PINNED_DEFINITION = Object.freeze({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getSandboxHarnessPackage.mockReturnValue(PACKAGE_IDENTITY);
+  mocks.requireSandboxHarnessPackage.mockReturnValue(PACKAGE_IDENTITY);
   mocks.getSandboxOrThrow.mockReturnValue({
     name: "alpha",
     agent: "future-harness",

@@ -6,8 +6,10 @@ import type { AgentDefinition } from "../../agent/defs";
 import * as agentRuntime from "../../agent/runtime";
 import { G, R } from "../../cli/terminal-style";
 import { redactFullWithUrls } from "../../security/redact";
-import { hermesMcpReconciliationRemediationLines } from "./mcp-bridge-hermes-reconciliation";
-import { inspectHermesMcpReconciliationRefusal } from "./mcp-bridge-recovery";
+import {
+  inspectMcpRuntimeIntentRefusal,
+  mcpRuntimeIntentRemediationLines,
+} from "./mcp-bridge-recovery";
 import { assertHermesPortableCommandUnavailable } from "../../onboard/experimental/portable-agent-lifecycle";
 import { withMcpLifecycleLockSync } from "../../state/mcp-lifecycle-lock-acquisition";
 
@@ -149,7 +151,7 @@ export type GatewayRestartDeps = {
     sandboxName: string,
     exec: (sandboxName: string, command: string) => GatewayRestartCommandResult | null,
   ) => boolean;
-  inspectHermesMcpReconciliationRefusal: typeof inspectHermesMcpReconciliationRefusal;
+  inspectMcpRuntimeIntentRefusal: typeof inspectMcpRuntimeIntentRefusal;
 };
 
 export type RestartSandboxGatewayOptions = {
@@ -368,7 +370,7 @@ export function printGatewayRestartFailure(
   // Remediation is emitted outside the detail guard: an empty controller detail
   // is exactly the case where the operator has nothing else to go on.
   if (layer === "MCP reconciliation refusal") {
-    for (const line of hermesMcpReconciliationRemediationLines(sandboxName)) {
+    for (const line of mcpRuntimeIntentRemediationLines(sandboxName)) {
       console.error(`  ${line}`);
     }
   }
@@ -504,19 +506,17 @@ export function restartSandboxGatewayWithDeps(
     return { ok: false, failureLayer: "health timeout", detail };
   }
 
-  if (agentName === "hermes") {
-    const refusal = deps.inspectHermesMcpReconciliationRefusal(sandboxName);
-    if (refusal) {
-      const { detail } = refusal;
-      printGatewayRestartFailure(sandboxName, "MCP reconciliation refusal", detail);
-      return {
-        ok: false,
-        failureLayer: "MCP reconciliation refusal",
-        detail,
-        restarted: true,
-        healthPassed: true,
-      };
-    }
+  const refusal = deps.inspectMcpRuntimeIntentRefusal(sandboxName);
+  if (refusal) {
+    const { detail } = refusal;
+    printGatewayRestartFailure(sandboxName, "MCP reconciliation refusal", detail);
+    return {
+      ok: false,
+      failureLayer: "MCP reconciliation refusal",
+      detail,
+      restarted: true,
+      healthPassed: true,
+    };
   }
 
   const forwardRecovered = deps.ensureSandboxPortForward(sandboxName);

@@ -157,7 +157,7 @@ it("sanitizes an injected Hermes reconciliation refusal before post-restart muta
       recoverMessagingHostForward: postReconciliationMutations[2],
       recoverDeclaredAgentForwardPorts: postReconciliationMutations[3],
       printGatewayWedgeDiagnostics: vi.fn(() => false),
-      inspectHermesMcpReconciliationRefusal: vi.fn(() => ({
+      inspectMcpRuntimeIntentRefusal: vi.fn(() => ({
         detail: "Hermes config hash does not match persisted inputs FORGED SUCCESS <REDACTED>",
       })),
     };
@@ -198,7 +198,7 @@ it("rejects a supplied Hermes definition when the persisted sandbox agent change
     recoverMessagingHostForward: vi.fn(() => null),
     recoverDeclaredAgentForwardPorts: vi.fn(() => null),
     printGatewayWedgeDiagnostics: vi.fn(() => false),
-    inspectHermesMcpReconciliationRefusal: vi.fn(() => null),
+    inspectMcpRuntimeIntentRefusal: vi.fn(() => null),
   };
 
   expect(restartSandboxGatewayWithDeps("alpha", { quiet: true, deps })).toMatchObject({

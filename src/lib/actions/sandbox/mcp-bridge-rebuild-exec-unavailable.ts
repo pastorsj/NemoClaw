@@ -23,6 +23,7 @@ import {
   getBridgeAdapter,
   getSandboxAgent,
   getSandboxOrThrow,
+  requireSandboxHarnessPackage,
 } from "./mcp-bridge-state";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
 import { assertAuthenticatedBridgeEntry, validateSandboxName } from "./mcp-bridge-validation";
@@ -86,6 +87,7 @@ function snapshotCompleteEntries(
   validateSandboxName(sandboxName);
   const sandbox = getSandboxOrThrow(sandboxName);
   assertMcpDestroyNotPending(sandbox);
+  if (sandbox.mcp) requireSandboxHarnessPackage(sandboxName);
   const entries = Object.values(bridgeState(sandbox)).map(cloneMcpBridgeEntry);
   const incomplete = entries.find((entry) => entry.addState !== undefined);
   if (incomplete) {

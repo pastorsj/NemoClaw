@@ -3,12 +3,7 @@
 
 import { isDeepStrictEqual } from "node:util";
 
-import {
-  listAgents,
-  loadAgent,
-  type AgentDefinition,
-  type AgentMcpAdapter,
-} from "../../agent/defs";
+import type { AgentDefinition, AgentMcpAdapter } from "../../agent/defs";
 import * as policies from "../../policy";
 import {
   assertTrustedPrivateEndpointCapability,
@@ -28,7 +23,11 @@ import {
 } from "./mcp-bridge-policy-render";
 import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
 import type { McpBridgeTargetValidation } from "./mcp-bridge-url-validation";
-import { getSandboxAgent, getSandboxHarnessPackage, getSandboxOrThrow } from "./mcp-bridge-state";
+import {
+  getSandboxAgent,
+  getSandboxOrThrow,
+  requireSandboxHarnessPackage,
+} from "./mcp-bridge-state";
 
 export { MCP_BRIDGE_POLICY_SOURCE } from "./mcp-bridge-contracts";
 export {
@@ -104,37 +103,19 @@ function resolveMcpPolicyBinaryPaths(
   adapter: AgentMcpAdapter,
   agentDefinition?: AgentDefinition,
 ): readonly string[] {
-  const harnessPackage = getSandboxHarnessPackage(sandboxName);
-  if (harnessPackage) {
-    const agent = getSandboxAgent(getSandboxOrThrow(sandboxName));
-    if (agentDefinition && !isDeepStrictEqual(agentDefinition, agent)) {
-      throw new McpBridgeError(
-        `Sandbox '${sandboxName}' policy owner changed after its package definition was pinned.`,
-      );
-    }
-    if (harnessPackage.id !== agent.name) {
-      throw new McpBridgeError(
-        `Sandbox '${sandboxName}' package '${harnessPackage.id}' does not match policy owner '${agent.name}'.`,
-      );
-    }
-    return policyBinariesFromDefinition(agent, entry, adapter);
-  }
-
-  const matchingAgents = listAgents()
-    .map((name) => loadAgent(name))
-    .filter(
-      (agent) =>
-        agent.mcpCapability.support === "bridge" && agent.mcpCapability.adapter === adapter,
-    );
-  if (matchingAgents.length === 0) {
-    throw new McpBridgeError(`No installed agent manifest declares MCP adapter '${adapter}'.`);
-  }
-  if (matchingAgents.length > 1) {
+  const harnessPackage = requireSandboxHarnessPackage(sandboxName);
+  const agent = getSandboxAgent(getSandboxOrThrow(sandboxName));
+  if (agentDefinition && !isDeepStrictEqual(agentDefinition, agent)) {
     throw new McpBridgeError(
-      `Multiple installed agent manifests declare MCP adapter '${adapter}'.`,
+      `Sandbox '${sandboxName}' policy owner changed after its package definition was pinned.`,
     );
   }
-  return policyBinariesFromDefinition(matchingAgents[0]!, entry, adapter);
+  if (harnessPackage.id !== agent.name) {
+    throw new McpBridgeError(
+      `Sandbox '${sandboxName}' package '${harnessPackage.id}' does not match policy owner '${agent.name}'.`,
+    );
+  }
+  return policyBinariesFromDefinition(agent, entry, adapter);
 }
 
 export function buildGeneratedMcpPolicyContent(
@@ -144,7 +125,12 @@ export function buildGeneratedMcpPolicyContent(
   options: { bindCredential?: boolean; agentDefinition?: AgentDefinition } = {},
 ): string {
   assertMcpBridgePolicyTarget(entry, target);
-  const adapter = isAgentMcpAdapter(entry.adapter) ? entry.adapter : "mcporter";
+  if (!isAgentMcpAdapter(entry.adapter)) {
+    throw new McpBridgeError(
+      `MCP server '${entry.server}' has no valid package-owned adapter identity.`,
+    );
+  }
+  const adapter = entry.adapter;
   const policyBinaries = resolveMcpPolicyBinaryPaths(
     sandboxName,
     entry,

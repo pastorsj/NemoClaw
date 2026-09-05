@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   preflightMcpEntryTargets: vi.fn(),
   removeGeneratedPolicy: vi.fn(),
   registerAgentAdapterAtCurrentCredentialRevision: vi.fn(),
+  requireSandboxHarnessPackage: vi.fn(),
   restoreExistingMcpBridgeRuntime: vi.fn(),
   unregisterAgentAdapter: vi.fn(),
 }));
@@ -92,6 +93,7 @@ vi.mock("./mcp-bridge-state", () => ({
   getSandboxAgent: mocks.getSandboxAgent,
   getSandboxOrThrow: mocks.getSandboxOrThrow,
   nowIso: vi.fn(() => new Date(0).toISOString()),
+  requireSandboxHarnessPackage: mocks.requireSandboxHarnessPackage,
   setBridgeState: vi.fn(),
 }));
 
@@ -151,6 +153,12 @@ describe("MCP adapter teardown rollback", () => {
       .mockReset()
       .mockReturnValue("version: 1\nnetwork_policies:\n  mcp_bridge_github: {}\n");
     mocks.getSandboxOrThrow.mockReset().mockReturnValue(sandbox);
+    mocks.requireSandboxHarnessPackage.mockReset().mockReturnValue({
+      kind: "agent-runtime",
+      id: "hermes",
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    });
     mocks.inspectExactMcpDestroyProvider.mockReset().mockReturnValue({
       credentialKeys: ["GITHUB_TOKEN"],
       exists: true,

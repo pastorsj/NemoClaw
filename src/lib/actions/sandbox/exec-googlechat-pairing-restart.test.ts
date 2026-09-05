@@ -254,7 +254,7 @@ describe("Google Chat pairing approval gateway activation (#8553)", () => {
                 recoverMessagingHostForward: () => null,
                 recoverDeclaredAgentForwardPorts: () => null,
                 printGatewayWedgeDiagnostics: () => false,
-                inspectHermesMcpReconciliationRefusal: () => null,
+                inspectMcpRuntimeIntentRefusal: () => null,
               },
             }),
           policyHint: {
