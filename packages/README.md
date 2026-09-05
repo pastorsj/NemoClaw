@@ -157,6 +157,11 @@ agent entrypoint first starts. NemoClaw validates the names and values, rejects 
 or core-owned keys, and forwards only the selected package's entries. Credentials, proxy settings,
 OpenShell identity, and `NEMOCLAW_*` controls remain core-owned.
 
+Use `runtime.headless_environment` for public package constants required by
+`runtime.headless_command`. NemoClaw applies those values only to that command through OpenShell's
+typed non-secret exec environment. It uses the same name and value validation as startup
+environment data. Never place a credential or a core-owned setting in either field.
+
 Use a fixed command inside the sandbox when the package can perform the native operation there.
 For managed startup, the image installs `runtime/generate-config.sh` as:
 

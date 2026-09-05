@@ -25,6 +25,7 @@ export interface AgentRuntime {
   headless_command?: string;
   command_shell?: AgentCommandShell;
   startup_environment?: Readonly<Record<string, string>>;
+  headless_environment?: Readonly<Record<string, string>>;
   smoke_commands?: string[];
   smoke_boundary?: AgentSmokeBoundary;
 }
@@ -56,21 +57,24 @@ const CORE_ENVIRONMENT_KEYS = new Set([
   "no_proxy",
 ]);
 
-/** Read public, package-owned constants needed before the agent entrypoint starts. */
-function readStartupEnvironment(
+type PublicEnvironmentField = "startup_environment" | "headless_environment";
+
+/** Read public, package-owned constants for one declared runtime boundary. */
+function readPublicEnvironment(
   record: RuntimeRecord,
+  field: PublicEnvironmentField,
 ): Readonly<Record<string, string>> | undefined {
-  const value = record.startup_environment;
+  const value = record[field];
   if (value === undefined) return undefined;
   if (!isObjectRecord(value)) {
-    throw new Error("Agent manifest field 'runtime.startup_environment' must be an object");
+    throw new Error(`Agent manifest field 'runtime.${field}' must be an object`);
   }
 
   const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
   for (const [key, rawValue] of entries) {
     if (!STARTUP_ENVIRONMENT_KEY.test(key)) {
       throw new Error(
-        `Agent manifest field 'runtime.startup_environment.${key}' must use an uppercase environment name`,
+        `Agent manifest field 'runtime.${field}.${key}' must use an uppercase environment name`,
       );
     }
     if (
@@ -80,7 +84,7 @@ function readStartupEnvironment(
       SECRET_ENVIRONMENT_KEY.test(key)
     ) {
       throw new Error(
-        `Agent manifest field 'runtime.startup_environment.${key}' cannot replace a core-owned or credential environment value`,
+        `Agent manifest field 'runtime.${field}.${key}' cannot replace a core-owned or credential environment value`,
       );
     }
     if (
@@ -90,7 +94,7 @@ function readStartupEnvironment(
       /[\0\r\n]/u.test(rawValue)
     ) {
       throw new Error(
-        `Agent manifest field 'runtime.startup_environment.${key}' must be a non-empty single-line string of at most 4096 characters`,
+        `Agent manifest field 'runtime.${field}.${key}' must be a non-empty single-line string of at most 4096 characters`,
       );
     }
   }
@@ -152,13 +156,19 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
   const interactiveCommand = readString(runtime, "interactive_command")?.trim();
   const headlessCommand = readString(runtime, "headless_command")?.trim();
   const commandShell = readCommandShell(runtime);
-  const startupEnvironment = readStartupEnvironment(runtime);
+  const startupEnvironment = readPublicEnvironment(runtime, "startup_environment");
+  const headlessEnvironment = readPublicEnvironment(runtime, "headless_environment");
   const smokeCommands = readStringArray(runtime, "smoke_commands");
   const smokeBoundary = readSmokeBoundary(runtime);
 
   if (kind === "terminal" && !interactiveCommand && !headlessCommand) {
     throw new Error(
       "Agent manifest field 'runtime' must define interactive_command or headless_command for terminal agents",
+    );
+  }
+  if (headlessEnvironment && !headlessCommand) {
+    throw new Error(
+      "Agent manifest field 'runtime.headless_environment' requires runtime.headless_command",
     );
   }
 
@@ -168,6 +178,7 @@ export function readAgentRuntime(record: RuntimeRecord): AgentRuntime {
     ...(headlessCommand ? { headless_command: headlessCommand } : {}),
     ...(commandShell ? { command_shell: commandShell } : {}),
     ...(startupEnvironment ? { startup_environment: startupEnvironment } : {}),
+    ...(headlessEnvironment ? { headless_environment: headlessEnvironment } : {}),
     ...(smokeCommands && smokeCommands.length > 0 ? { smoke_commands: smokeCommands } : {}),
     ...(smokeBoundary ? { smoke_boundary: smokeBoundary } : {}),
   };

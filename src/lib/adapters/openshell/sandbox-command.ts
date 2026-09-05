@@ -11,6 +11,8 @@ export type OpenShellSandboxCommandRequest = Readonly<{
   tty?: boolean | null;
   timeoutSeconds?: number;
   stdin?: boolean;
+  /** Public, non-secret values supplied only to this command invocation. */
+  environment?: Readonly<Record<string, string>>;
   /** Private bytes delivered over stdin without placing them in process arguments. */
   stdinInput?: string | Buffer;
 }>;

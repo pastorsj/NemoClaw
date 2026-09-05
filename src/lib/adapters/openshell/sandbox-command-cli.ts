@@ -98,6 +98,11 @@ export function buildCliOpenShellSandboxExecArgs(
   if (typeof request.timeoutSeconds === "number") {
     argv.push("--timeout", String(request.timeoutSeconds));
   }
+  for (const [name, value] of Object.entries(request.environment ?? {}).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    argv.push("--env", `${name}=${value}`);
+  }
   argv.push("--", ...request.command);
   return argv;
 }

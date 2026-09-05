@@ -275,6 +275,7 @@ type ManifestCommandResult =
 type AgentPassthroughInvocation = {
   command: string[];
   stdinInput?: string;
+  environment?: Readonly<Record<string, string>>;
 };
 type FabricArgumentResult =
   | { kind: "native" }
@@ -428,11 +429,15 @@ function buildManifestInvocation(
   agentName: string,
   headlessCommand: readonly string[],
   nativeCommand: ManifestCommandResult,
+  headlessEnvironment: Readonly<Record<string, string>> | undefined,
   extraArgs: readonly string[],
   proc: NonNullable<AgentPassthroughDeps["process"]>,
 ): AgentPassthroughInvocation {
   if (!isFabricRunCommand(headlessCommand)) {
-    return { command: [...headlessCommand, ...extraArgs] };
+    return {
+      command: [...headlessCommand, ...extraArgs],
+      ...(headlessEnvironment ? { environment: headlessEnvironment } : {}),
+    };
   }
 
   const fabricArguments = parseFabricPromptArguments(extraArgs);
@@ -447,13 +452,19 @@ function buildManifestInvocation(
         ...(fabricArguments.jsonOutput ? ["--json"] : []),
       ],
       stdinInput: fabricArguments.prompt,
+      ...(headlessEnvironment ? { environment: headlessEnvironment } : {}),
     };
   }
   if (nativeCommand.kind === "unsupported") {
     rejectAgentResolutionError(sandboxName, agentName, nativeCommand.message, proc);
   }
   const command = nativeCommand.argv.length > 0 ? nativeCommand.argv : headlessCommand;
-  return { command: [...command, ...extraArgs] };
+  return {
+    command: [...command, ...extraArgs],
+    ...(nativeCommand.argv.length === 0 && headlessEnvironment
+      ? { environment: headlessEnvironment }
+      : {}),
+  };
 }
 
 function getPassthroughCommand(
@@ -524,6 +535,7 @@ function getPassthroughCommand(
     agentName,
     manifestCommand.argv,
     getNativePassthroughCommand(agent),
+    agent.runtime?.headless_environment,
     extraArgs,
     proc,
   );
@@ -705,6 +717,7 @@ export async function runAgentPassthrough(
   const execOptions = {
     tty: false,
     ...(invocation.stdinInput !== undefined ? { stdinInput: invocation.stdinInput } : {}),
+    ...(invocation.environment ? { environment: invocation.environment } : {}),
   };
   if (deps.deferredLifecycleExit) {
     // The public command supplies a deferred process facade. Forward its exit

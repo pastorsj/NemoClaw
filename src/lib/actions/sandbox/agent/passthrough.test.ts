@@ -198,8 +198,11 @@ describe("runAgentPassthrough", () => {
           kind: "gateway",
           interactive_command: "hermes",
           headless_command: "nemoclaw-fabric run --config /sandbox/.hermes/fabric.json",
+          headless_environment: {
+            HERMES_MANAGED_INFERENCE_ROUTE: "nemoclaw-managed-inference",
+          },
         },
-      } as ResolvedSandboxAgent["definition"],
+      } as unknown as ResolvedSandboxAgent["definition"],
       harnessPackage,
       harnessPackageMigration: null,
     });
@@ -211,7 +214,11 @@ describe("runAgentPassthrough", () => {
     expect(execMock).toHaveBeenCalledWith(
       "hermes-sandbox",
       ["nemoclaw-fabric", "run", "--config", "/sandbox/.hermes/fabric.json", "--stdin"],
-      { stdinInput: "Reply with PONG", tty: false },
+      {
+        environment: { HERMES_MANAGED_INFERENCE_ROUTE: "nemoclaw-managed-inference" },
+        stdinInput: "Reply with PONG",
+        tty: false,
+      },
     );
   });
 

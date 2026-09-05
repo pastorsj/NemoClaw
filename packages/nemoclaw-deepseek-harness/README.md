@@ -18,7 +18,7 @@ The workflow is deliberately visible in the directory names:
 5. `tests/` owns deterministic package, adapter, composition, and E2E-contract
    evidence without adding a DeepSeek-specific branch to NemoClaw core.
 
-The manifest's typed `runtime.startup_environment` supplies one public,
+The manifest's typed `runtime.headless_environment` supplies one public,
 non-secret route marker to later OpenShell exec processes. The SDK requires a
 non-empty API-key-shaped value, but the real inference credential remains owned
 by OpenShell and never enters the package image, manifest, or Fabric config.

@@ -38,6 +38,8 @@ export type SandboxExecOptions = {
   tty?: boolean | null;
   timeoutSeconds?: number;
   stdin?: boolean;
+  /** Public, non-secret values supplied only to this command invocation. */
+  environment?: Readonly<Record<string, string>>;
   /** Private bytes written to OpenShell stdin without placing them in argv. */
   stdinInput?: string | Buffer;
 };
@@ -116,14 +118,16 @@ export function buildOpenshellExecArgs(
     tty: options.tty,
     timeoutSeconds: options.timeoutSeconds,
     stdin: options.stdin,
+    environment: options.environment,
   });
 }
 
 // OpenShell accepts LF/CR in command argv while retaining field-specific
 // rejection for NUL-bearing command args and NUL/LF/CR-bearing workdirs. Keep
 // the downstream check narrow so inline scripts remain byte-exact. NemoClaw's
-// public exec surface does not populate OpenShell's request-environment field,
-// whose values remain subject to OpenShell's own NUL/LF/CR validation.
+// The public general exec surface does not populate OpenShell's request
+// environment. Package headless dispatch can pass manifest-validated public
+// constants, whose values remain subject to OpenShell's own NUL/LF/CR checks.
 function execInputError(command: readonly string[], workdir: string | undefined): string | null {
   const nulIndex = command.findIndex((arg) => arg.includes("\0"));
   if (nulIndex !== -1) {
@@ -488,6 +492,7 @@ export async function execSandbox(
       timeoutSeconds: options.timeoutSeconds,
       stdin: options.stdin,
       stdinInput: options.stdinInput,
+      environment: options.environment,
     },
     deps.cleanupDeps ?? {
       getSandbox: (name) =>

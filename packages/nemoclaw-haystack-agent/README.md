@@ -21,7 +21,7 @@ manifest.yaml
 
 The package supports one OpenAI-compatible model through NemoClaw's managed `https://inference.local/v1` route, a replacement system instruction, model temperature, and a bounded agent-step count. Each invocation starts with only the caller's current message; the POC does not claim durable conversation memory.
 
-The manifest uses the typed `runtime.startup_environment` field for a public,
+The manifest uses the typed `runtime.headless_environment` field for a public,
 non-secret route marker required by Haystack's OpenAI-compatible client. The
 actual inference credential remains in OpenShell; it is not stored in the image,
 manifest, or generated Fabric configuration.

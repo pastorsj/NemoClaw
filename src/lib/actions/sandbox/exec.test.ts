@@ -257,6 +257,7 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
       onRequest?: (request: OpenShellSandboxCommandRequest) => void;
       probeError?: Error;
       stdinInput?: string;
+      environment?: Readonly<Record<string, string>>;
       cleanupDeps?: SandboxExecCleanupDeps;
       writeStderr?: (line: string) => void;
     } = {},
@@ -280,7 +281,10 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
     await execSandbox(
       "wire-sbx",
       ["curl", "-sS", "https://example.com/"],
-      options.stdinInput === undefined ? {} : { stdinInput: options.stdinInput },
+      {
+        ...(options.stdinInput === undefined ? {} : { stdinInput: options.stdinInput }),
+        ...(options.environment === undefined ? {} : { environment: options.environment }),
+      },
       {
         selectGateway: () => ({ outcome: "unregistered", gatewayName: null }),
         commandExecutor: {
@@ -333,6 +337,21 @@ describe("execSandbox policy-denial hint wiring (#5978)", () => {
     const { exitCode, stderr } = await runExec(0, DENIAL_LINE);
     expect(exitCode).toBe(0);
     expect(stderr).toHaveLength(0);
+  });
+
+  it("forwards public command environment through the typed executor", async () => {
+    const environment = { EXAMPLE_ROUTE_MARKER: "managed-route" };
+    let request: OpenShellSandboxCommandRequest | undefined;
+
+    const { exitCode } = await runExec(0, "", {
+      environment,
+      onRequest: (received) => {
+        request = received;
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(request?.environment).toEqual(environment);
   });
 
   it("preserves private stdin across the public exec boundary", async () => {

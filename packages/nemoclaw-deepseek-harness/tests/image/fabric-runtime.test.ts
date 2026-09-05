@@ -34,7 +34,7 @@ describe("DeepSeek Harness image contract", () => {
     );
     expect(manifest).toMatch(/headless_command: "nemoclaw-fabric-run\b/u);
     expect(manifest).toMatch(
-      /startup_environment:\n    DEEPSEEK_MANAGED_INFERENCE_ROUTE: nemoclaw-managed-inference/u,
+      /headless_environment:\n    DEEPSEEK_MANAGED_INFERENCE_ROUTE: nemoclaw-managed-inference/u,
     );
     expect(manifest).not.toMatch(/^managed_image:/mu);
     expect(manifest).toMatch(/mcp:\n  support: disabled/u);

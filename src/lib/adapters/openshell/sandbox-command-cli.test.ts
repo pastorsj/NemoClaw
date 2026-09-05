@@ -50,6 +50,10 @@ describe("CLI OpenShell sandbox command executor", () => {
         tty: false,
         timeoutSeconds: 30,
         stdin: true,
+        environment: {
+          SECOND_ROUTE_MARKER: "second",
+          FIRST_ROUTE_MARKER: "first",
+        },
       }),
     ).toEqual([
       "sandbox",
@@ -63,6 +67,10 @@ describe("CLI OpenShell sandbox command executor", () => {
       "--no-tty",
       "--timeout",
       "30",
+      "--env",
+      "FIRST_ROUTE_MARKER=first",
+      "--env",
+      "SECOND_ROUTE_MARKER=second",
       "--",
       ...command,
     ]);

@@ -41,3 +41,43 @@ describe("agent runtime startup environment", () => {
     },
   );
 });
+
+describe("agent runtime headless environment", () => {
+  it("reads sorted public constants for each headless command", () => {
+    const runtime = readAgentRuntime({
+      runtime: {
+        headless_command: "example-agent run",
+        headless_environment: {
+          SECOND_ROUTE_MARKER: "second",
+          FIRST_ROUTE_MARKER: "first",
+        },
+      },
+    });
+
+    expect(runtime.headless_environment).toEqual({
+      FIRST_ROUTE_MARKER: "first",
+      SECOND_ROUTE_MARKER: "second",
+    });
+    expect(Object.isFrozen(runtime.headless_environment)).toBe(true);
+  });
+
+  it.each(["NEMOCLAW_MODEL", "OPENSHELL_SANDBOX", "HTTPS_PROXY", "AGENT_API_KEY"])(
+    "rejects the core-owned or credential environment key %s",
+    (key) => {
+      expect(() =>
+        readAgentRuntime({ runtime: { headless_environment: { [key]: "unsafe" } } }),
+      ).toThrow("cannot replace a core-owned or credential environment value");
+    },
+  );
+
+  it("rejects headless environment without a headless command", () => {
+    expect(() =>
+      readAgentRuntime({
+        runtime: {
+          interactive_command: "example-agent",
+          headless_environment: { EXAMPLE_ROUTE_MARKER: "managed-route" },
+        },
+      }),
+    ).toThrow("requires runtime.headless_command");
+  });
+});
