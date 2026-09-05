@@ -19,9 +19,9 @@ const defaultDependencies: SandboxCommandAgentDependencies = {
 };
 
 export interface SandboxCommandAgentAuthority {
-  readonly agent: SandboxEntry["agent"];
-  readonly harnessPackage: SandboxEntry["harnessPackage"];
-  readonly harnessPackageMigration: SandboxEntry["harnessPackageMigration"];
+  readonly agent: NonNullable<SandboxEntry["agent"]> | null;
+  readonly harnessPackage: NonNullable<SandboxEntry["harnessPackage"]> | null;
+  readonly harnessPackageMigration: NonNullable<SandboxEntry["harnessPackageMigration"]> | null;
   readonly definition: AgentDefinition;
 }
 
