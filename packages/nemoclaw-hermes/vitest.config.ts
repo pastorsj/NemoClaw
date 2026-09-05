@@ -27,6 +27,7 @@ export default defineConfig({
     include: [
       ...hermesPackageTestMoves.map(({ destination }) => destination),
       ...hermesPackageSplitTests,
+      "tests/host/adapter-build.test.ts",
       "tests/host/config-url.test.ts",
       "tests/image/fabric-lifecycle.test.ts",
       "tests/image/fabric-runtime.test.ts",

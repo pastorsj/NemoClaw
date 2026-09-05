@@ -127,4 +127,14 @@ function main(): void {
   buildHarnessAdapterArtifacts(packageArguments[0], check);
 }
 
-if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) main();
+function isMainModule(): boolean {
+  const invokedPath = process.argv[1];
+  if (!invokedPath) return false;
+  try {
+    return fs.realpathSync(invokedPath) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) main();
