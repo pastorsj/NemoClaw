@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadAgent } from "../../agent/defs";
 import type { AgentDefinition } from "../../agent-runtime/manifest-types";
+import { DEFAULT_MANAGED_PROXY_ROUTE } from "../proxy-route";
 import {
   assertCurrentHermesPortableStoredStartupContract,
   assertCurrentHermesPortableStartupContract,
@@ -19,12 +20,18 @@ const SANDBOX = "alpha";
 const temporaryDirectories: string[] = [];
 
 function startupArgv(...extra: string[]): string[] {
+  const overriddenNames = new Set(extra.map((assignment) => assignment.split("=", 1)[0]));
+  const managedProxyAssignments = [
+    `NEMOCLAW_PROXY_HOST=${DEFAULT_MANAGED_PROXY_ROUTE.host}`,
+    `NEMOCLAW_PROXY_PORT=${String(DEFAULT_MANAGED_PROXY_ROUTE.port)}`,
+  ].filter((assignment) => !overriddenNames.has(assignment.split("=", 1)[0]));
   return [
     "env",
     "HERMES_BUNDLED_PLUGINS=/opt/hermes/plugins",
     "HERMES_HOME=/sandbox/.hermes",
     "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
     "NEMOCLAW_HERMES_API_PORT=8642",
+    ...managedProxyAssignments,
     `NEMOCLAW_SANDBOX_NAME=${SANDBOX}`,
     ...extra,
     "/usr/local/bin/nemoclaw-start",
@@ -183,6 +190,8 @@ describe("Hermes portable startup contract", () => {
         "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
         `NEMOCLAW_SANDBOX_NAME=${SANDBOX}`,
         "NEMOCLAW_HERMES_API_PORT=8642",
+        `NEMOCLAW_PROXY_HOST=${DEFAULT_MANAGED_PROXY_ROUTE.host}`,
+        `NEMOCLAW_PROXY_PORT=${String(DEFAULT_MANAGED_PROXY_ROUTE.port)}`,
         "/usr/local/bin/nemoclaw-start",
       ],
     },

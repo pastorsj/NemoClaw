@@ -13,6 +13,7 @@ import type { HermesPortableOpenShellExecutableAuthority } from "../../../adapte
 import type { PodmanExecutableAuthorityDeps, PodmanExecutableStat } from "../../../adapters/podman";
 import type { SandboxEntry } from "../../../state/registry";
 import { currentHermesPortableAgentDefinition } from "../../docker-startup-command-env";
+import { DEFAULT_MANAGED_PROXY_ROUTE } from "../../proxy-route";
 import { hermesPortableContainerInternals } from "../hermes-portable-container";
 import { resolveHermesPortableStartupContract } from "../hermes-portable-contract";
 import { hermesPortableLifecycleInternals } from "../hermes-portable-lifecycle";
@@ -65,6 +66,8 @@ function startupArgv() {
     "HERMES_HOME=/sandbox/.hermes",
     "HERMES_LAZY_INSTALL_TARGET=/sandbox/.hermes/lazy-packages",
     "NEMOCLAW_HERMES_API_PORT=8642",
+    `NEMOCLAW_PROXY_HOST=${DEFAULT_MANAGED_PROXY_ROUTE.host}`,
+    `NEMOCLAW_PROXY_PORT=${String(DEFAULT_MANAGED_PROXY_ROUTE.port)}`,
     `NEMOCLAW_SANDBOX_NAME=${SANDBOX}`,
     "/usr/local/bin/nemoclaw-start",
   ];
