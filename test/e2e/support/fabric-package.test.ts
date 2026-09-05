@@ -7,7 +7,12 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { validateFabricHarnessE2eContract } from "../../../tools/e2e/fabric-contract.mts";
+import {
+  requireInstalledFabricE2eBinding,
+  type FabricHarnessE2eContract,
+  type InstalledFabricPackageReference,
+  validateFabricHarnessE2eContract,
+} from "../../../tools/e2e/fabric-contract.mts";
 import {
   defaultFabricPackageSandboxName,
   FABRIC_PACKAGE_LIVE_SELECTOR,
@@ -50,11 +55,7 @@ function discoverBundledFabricFixtures(): readonly {
     .filter((entry) => entry.isDirectory() && entry.name.startsWith("nemoclaw-"))
     .flatMap((entry) => {
       const id = entry.name.slice("nemoclaw-".length);
-      const fixture = path.posix.join(
-        "packages",
-        entry.name,
-        "tests/fixtures/live-contract.json",
-      );
+      const fixture = path.posix.join("packages", entry.name, "tests/fixtures/live-contract.json");
       return fs.existsSync(path.resolve(fixture)) ? [{ id, fixture }] : [];
     })
     .sort((left, right) => left.id.localeCompare(right.id));
@@ -64,6 +65,96 @@ const BUNDLED_PACKAGE_CASES = discoverBundledFabricFixtures();
 
 const temporaryDirectories: string[] = [];
 
+interface InstalledPackageFixtureOptions {
+  readonly descriptorAdapterId?: string;
+  readonly descriptorFileName?: string;
+  readonly descriptorRunnerModule?: string;
+  readonly headlessCommand?: string;
+  readonly manifestId?: string;
+  readonly metadataId?: string;
+  readonly packageOwnsDescriptor?: boolean;
+}
+
+function futureFabricContract(
+  overrides: Partial<FabricHarnessE2eContract> = {},
+): FabricHarnessE2eContract {
+  return validateFabricHarnessE2eContract({
+    packageId: "future-harness",
+    adapterId: "example.future-harness",
+    artifactRoot: "/sandbox/.future-harness/fabric-artifacts",
+    configPath: "/sandbox/.future-harness/fabric.json",
+    descriptorGlob: "/usr/local/share/nemoclaw/future-harness.fabric-adapter.json",
+    descriptorPathPrefix: "/usr/local/share/nemoclaw",
+    descriptorRunnerModule: "future_harness_fabric.adapter",
+    ...overrides,
+  });
+}
+
+function writeInstalledPackageFixture(
+  contract: FabricHarnessE2eContract,
+  options: InstalledPackageFixtureOptions = {},
+): {
+  readonly descriptorPath: string | undefined;
+  readonly reference: InstalledFabricPackageReference;
+} {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-fabric-binding-"));
+  temporaryDirectories.push(temporaryRoot);
+  const contentDigest = "a".repeat(64);
+  const packageRoot = path.join(temporaryRoot, contentDigest);
+  const packageDirectory = path.join(packageRoot, "packages", `nemoclaw-${contract.packageId}`);
+  fs.mkdirSync(packageDirectory, { recursive: true });
+  fs.writeFileSync(
+    path.join(packageRoot, "nemoclaw-package.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id: options.metadataId ?? contract.packageId,
+      displayName: "Future Harness",
+      packageVersion: "1.0.0",
+      minimumNemoClawVersion: "0.0.113",
+      manifest: `packages/nemoclaw-${contract.packageId}/manifest.yaml`,
+    })}\n`,
+    "utf8",
+  );
+  fs.writeFileSync(
+    path.join(packageDirectory, "manifest.yaml"),
+    [
+      `name: ${options.manifestId ?? contract.packageId}`,
+      "runtime:",
+      `  headless_command: ${JSON.stringify(
+        options.headlessCommand ??
+          `nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config ${contract.configPath}`,
+      )}`,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  let descriptorPath: string | undefined;
+  if (options.packageOwnsDescriptor !== false) {
+    const fabricDirectory = path.join(packageDirectory, "fabric");
+    fs.mkdirSync(fabricDirectory);
+    descriptorPath = path.join(
+      fabricDirectory,
+      options.descriptorFileName ?? path.posix.basename(contract.descriptorGlob),
+    );
+    fs.writeFileSync(
+      descriptorPath,
+      `${JSON.stringify({
+        contract_version: "fabric.adapter/v1alpha2",
+        adapter_id: options.descriptorAdapterId ?? contract.adapterId,
+        adapter_kind: "python",
+        runner: { module: options.descriptorRunnerModule ?? contract.descriptorRunnerModule },
+      })}\n`,
+      "utf8",
+    );
+  }
+  return {
+    descriptorPath,
+    reference: { contentDigest, packageRoot },
+  };
+}
+
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
     fs.rmSync(directory, { force: true, recursive: true });
@@ -71,6 +162,101 @@ afterEach(() => {
 });
 
 describe("generic Fabric package E2E", () => {
+  it("binds package-owned live expectations to the receipt-pinned installed object", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract);
+
+    expect(requireInstalledFabricE2eBinding(contract, fixture.reference)).toEqual({
+      adapterId: contract.adapterId,
+      configPath: contract.configPath,
+      descriptorAuthority: "package",
+      packageId: contract.packageId,
+      runnerModule: contract.descriptorRunnerModule,
+    });
+  });
+
+  it("accepts a package without a local descriptor only through the upstream Fabric namespace", () => {
+    const contract = futureFabricContract({
+      adapterId: "nvidia.fabric.future",
+      descriptorGlob:
+        "/opt/nemoclaw-fabric-venv/share/nemo-fabric/adapters/future/future.fabric-adapter.json",
+      descriptorPathPrefix: "/opt/nemoclaw-fabric-venv/share/nemo-fabric",
+      descriptorRunnerModule: "nemo_fabric_adapters.future.adapter",
+    });
+    const fixture = writeInstalledPackageFixture(contract, { packageOwnsDescriptor: false });
+
+    expect(requireInstalledFabricE2eBinding(contract, fixture.reference)).toMatchObject({
+      descriptorAuthority: "nemo-fabric",
+      packageId: "future-harness",
+    });
+  });
+
+  it.each([
+    {
+      label: "metadata package id",
+      options: { metadataId: "another-harness" },
+    },
+    {
+      label: "manifest package id",
+      options: { manifestId: "another-harness" },
+    },
+    {
+      label: "headless config path",
+      options: {
+        headlessCommand:
+          "nemoclaw-fabric-run --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.other/fabric.json",
+      },
+    },
+    {
+      label: "headless executable",
+      options: {
+        headlessCommand:
+          "other-runner --deadline-seconds 120 --kill-grace-seconds 10 --config /sandbox/.future-harness/fabric.json",
+      },
+    },
+    {
+      label: "descriptor adapter id",
+      options: { descriptorAdapterId: "example.other" },
+    },
+    {
+      label: "descriptor runner module",
+      options: { descriptorRunnerModule: "other_fabric.adapter" },
+    },
+    {
+      label: "descriptor file name",
+      options: { descriptorFileName: "other.fabric-adapter.json" },
+    },
+  ] satisfies readonly {
+    readonly label: string;
+    readonly options: InstalledPackageFixtureOptions;
+  }[])("rejects $label drift before onboarding can mutate a sandbox", ({ options }) => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract, options);
+
+    expect(() => requireInstalledFabricE2eBinding(contract, fixture.reference)).toThrow(
+      "Installed Fabric package does not match its package-owned E2E contract",
+    );
+  });
+
+  it("rejects an unbound external descriptor namespace before onboarding", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract, { packageOwnsDescriptor: false });
+
+    expect(() => requireInstalledFabricE2eBinding(contract, fixture.reference)).toThrow(
+      "Installed Fabric package does not match its package-owned E2E contract",
+    );
+  });
+
+  it("rejects an oversized package-owned descriptor through the bounded reader", () => {
+    const contract = futureFabricContract();
+    const fixture = writeInstalledPackageFixture(contract);
+    fs.writeFileSync(fixture.descriptorPath!, "x".repeat(256 * 1024 + 1), "utf8");
+
+    expect(() => requireInstalledFabricE2eBinding(contract, fixture.reference)).toThrow(
+      "Installed Fabric package does not match its package-owned E2E contract",
+    );
+  });
+
   it.each(BUNDLED_PACKAGE_CASES)(
     "loads the conventional $id contract from its package",
     (fixture) => {

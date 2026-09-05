@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
 import path from "node:path";
+
+import { parseHarnessPackageManifest } from "../../src/lib/agent-runtime/package/manifest.ts";
+import { readPrivateRegularFile } from "./private-file.mts";
 
 const CONTRACT_VALUE_MAX_BYTES = 512;
 const PROCESS_MARKER_LIMIT = 16;
@@ -9,7 +13,11 @@ const PROCESS_MARKER_MAX_BYTES = 256;
 const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
 const ADAPTER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/u;
 const PYTHON_MODULE_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$/u;
+const SHA256_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const UNSAFE_TEXT_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const FABRIC_DESCRIPTOR_MAX_BYTES = 256 * 1024;
+const PACKAGE_DIRECTORY_ENTRY_LIMIT = 256;
+const UPSTREAM_FABRIC_DESCRIPTOR_ROOT = "/opt/nemoclaw-fabric-venv/share/nemo-fabric";
 const CONTRACT_FIELDS = new Set([
   "$comment",
   "adapterId",
@@ -53,10 +61,133 @@ export interface FabricPackageE2eTarget {
   readonly sandboxName: string;
 }
 
+export interface InstalledFabricPackageReference {
+  readonly contentDigest: string;
+  readonly packageRoot: string;
+}
+
+export interface InstalledFabricE2eBinding {
+  readonly adapterId: string;
+  readonly configPath: string;
+  readonly descriptorAuthority: "nemo-fabric" | "package";
+  readonly packageId: string;
+  readonly runnerModule: string;
+}
+
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function readBoundedRegularFile(file: string, maxBytes: number): string {
+  const source = readPrivateRegularFile(file, { maxBytes });
+  if (source === null) throw new Error("Installed Fabric package file is invalid");
+  return source;
+}
+
+function requireFabricHeadlessCommand(value: unknown, configPath: string): void {
+  if (typeof value !== "string" || value !== value.trim() || !isBoundedSafeText(value, 4096)) {
+    throw new Error("Installed Fabric package headless command is invalid");
+  }
+  const tokens = value.split(" ");
+  if (tokens[0] !== "nemoclaw-fabric-run" || tokens.length < 3 || tokens.length % 2 === 0) {
+    throw new Error("Installed Fabric package headless command is invalid");
+  }
+  const options = new Map<string, string>();
+  for (let index = 1; index < tokens.length; index += 2) {
+    const option = tokens[index];
+    const optionValue = tokens[index + 1];
+    if (
+      (option !== "--config" &&
+        option !== "--deadline-seconds" &&
+        option !== "--kill-grace-seconds") ||
+      !optionValue ||
+      options.has(option)
+    ) {
+      throw new Error("Installed Fabric package headless command is invalid");
+    }
+    options.set(option, optionValue);
+  }
+  if (options.get("--config") !== configPath) {
+    throw new Error("Installed Fabric package headless command does not select its E2E config");
+  }
+  const deadline = options.get("--deadline-seconds");
+  const killGrace = options.get("--kill-grace-seconds");
+  if (
+    (deadline !== undefined && !/^[1-9][0-9]{0,3}$/u.test(deadline)) ||
+    (killGrace !== undefined && !/^[1-9][0-9]{0,2}$/u.test(killGrace))
+  ) {
+    throw new Error("Installed Fabric package headless command limits are invalid");
+  }
+}
+
+function readPackageOwnedFabricDescriptor(
+  packageDirectory: string,
+): { readonly adapterId: string; readonly fileName: string; readonly runnerModule: string } | null {
+  const fabricDirectory = path.join(packageDirectory, "fabric");
+  let metadata: fs.BigIntStats;
+  try {
+    metadata = fs.lstatSync(fabricDirectory, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error("Installed Fabric package descriptor directory is invalid");
+  }
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+    throw new Error("Installed Fabric package descriptor directory is invalid");
+  }
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(fabricDirectory, { withFileTypes: true });
+  } catch {
+    throw new Error("Installed Fabric package descriptor directory is invalid");
+  }
+  if (entries.length > PACKAGE_DIRECTORY_ENTRY_LIMIT) {
+    throw new Error("Installed Fabric package descriptor directory is invalid");
+  }
+  const descriptors = entries.filter((entry) => entry.name.endsWith(".fabric-adapter.json"));
+  if (descriptors.length === 0) return null;
+  const descriptor = descriptors[0];
+  if (descriptors.length !== 1 || !descriptor?.isFile()) {
+    throw new Error("Installed Fabric package must own at most one regular Fabric descriptor");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      readBoundedRegularFile(
+        path.join(fabricDirectory, descriptor.name),
+        FABRIC_DESCRIPTOR_MAX_BYTES,
+      ),
+    );
+  } catch {
+    throw new Error("Installed Fabric package descriptor is invalid");
+  }
+  if (!isPlainRecord(parsed) || !isPlainRecord(parsed.runner)) {
+    throw new Error("Installed Fabric package descriptor is invalid");
+  }
+  const adapterId = parsed.adapter_id;
+  const runnerModule = parsed.runner.module;
+  if (
+    typeof adapterId !== "string" ||
+    !ADAPTER_ID_PATTERN.test(adapterId) ||
+    typeof runnerModule !== "string" ||
+    !PYTHON_MODULE_PATTERN.test(runnerModule)
+  ) {
+    throw new Error("Installed Fabric package descriptor is invalid");
+  }
+  return { adapterId, fileName: descriptor.name, runnerModule };
+}
+
+function requireUpstreamFabricDescriptor(contract: FabricHarnessE2eContract): void {
+  if (
+    contract.descriptorPathPrefix !== UPSTREAM_FABRIC_DESCRIPTOR_ROOT ||
+    !contract.descriptorGlob.startsWith(`${UPSTREAM_FABRIC_DESCRIPTOR_ROOT}/adapters/`) ||
+    !contract.descriptorGlob.endsWith(".fabric-adapter.json") ||
+    !contract.adapterId.startsWith("nvidia.fabric.") ||
+    !contract.descriptorRunnerModule.startsWith("nemo_fabric_adapters.")
+  ) {
+    throw new Error("Installed package without a descriptor must use the upstream Fabric contract");
+  }
 }
 
 function isBoundedSafeText(value: string, maxBytes = CONTRACT_VALUE_MAX_BYTES): boolean {
@@ -173,6 +304,60 @@ export function validateFabricHarnessE2eContract(value: unknown): FabricHarnessE
     descriptorRunnerModule,
     ...(processMarkers.length > 0 ? { processMarkers } : {}),
   });
+}
+
+/** Bind package-owned live expectations to the exact immutable object selected by its receipt. */
+export function requireInstalledFabricE2eBinding(
+  contractValue: FabricHarnessE2eContract,
+  reference: InstalledFabricPackageReference,
+): InstalledFabricE2eBinding {
+  try {
+    const contract = validateFabricHarnessE2eContract(contractValue);
+    if (
+      !SHA256_DIGEST_PATTERN.test(reference.contentDigest) ||
+      !path.isAbsolute(reference.packageRoot) ||
+      path.resolve(reference.packageRoot) !== reference.packageRoot ||
+      path.basename(reference.packageRoot) !== reference.contentDigest
+    ) {
+      throw new Error("Installed Fabric package receipt is invalid");
+    }
+
+    const installed = parseHarnessPackageManifest(reference.packageRoot);
+    if (installed.envelope.id !== contract.packageId) {
+      throw new Error("Installed Fabric package identity does not match its E2E contract");
+    }
+    if (installed.manifest.name !== contract.packageId) {
+      throw new Error("Installed Fabric package manifest does not match its E2E contract");
+    }
+    const runtime = installed.manifest.runtime;
+    if (!isPlainRecord(runtime)) {
+      throw new Error("Installed Fabric package runtime is invalid");
+    }
+    requireFabricHeadlessCommand(runtime.headless_command, contract.configPath);
+
+    const descriptor = readPackageOwnedFabricDescriptor(path.dirname(installed.manifestPath));
+    if (descriptor) {
+      if (
+        descriptor.adapterId !== contract.adapterId ||
+        descriptor.runnerModule !== contract.descriptorRunnerModule ||
+        path.posix.basename(contract.descriptorGlob) !== descriptor.fileName
+      ) {
+        throw new Error("Installed Fabric package descriptor does not match its E2E contract");
+      }
+    } else {
+      requireUpstreamFabricDescriptor(contract);
+    }
+    return Object.freeze({
+      adapterId: contract.adapterId,
+      configPath: contract.configPath,
+      descriptorAuthority: descriptor ? "package" : "nemo-fabric",
+      packageId: contract.packageId,
+      runnerModule: contract.descriptorRunnerModule,
+    });
+  } catch {
+    // Do not surface receipt-store host paths or parser details in shared E2E diagnostics.
+    throw new Error("Installed Fabric package does not match its package-owned E2E contract");
+  }
 }
 
 /** True only when a target selected the explicit Fabric package journey. */

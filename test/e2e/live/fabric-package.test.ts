@@ -25,6 +25,7 @@ import { readRegistrySandboxEntry } from "../fixtures/phases/index.ts";
 import {
   hasFabricPackageE2eTarget,
   readFabricPackageE2eTarget,
+  requireInstalledFabricE2eBinding,
 } from "../../../tools/e2e/fabric-contract.mts";
 import { runPublicFabricTurn } from "./public-fabric-turn.ts";
 
@@ -131,17 +132,21 @@ test.skipIf(!hasFabricPackageE2eTarget())(
     const installation = await installHarnessPackage(host, target.contract.packageId, env, {
       ...(target.packageArtifact ? { packageArtifact: target.packageArtifact } : {}),
     });
+    const installedPackageObject = path.join(
+      runtime.home,
+      ".nemoclaw",
+      "harnesses",
+      "objects",
+      "sha256",
+      installation.identity.contentDigest,
+    );
+    requireInstalledFabricE2eBinding(target.contract, {
+      contentDigest: installation.identity.contentDigest,
+      packageRoot: installedPackageObject,
+    });
     let preparedUpgrade: ReturnType<typeof prepareHarnessPackageUpgrade> | undefined;
     let upgradePackageArtifact = target.upgradePackageArtifact;
     if (upgradePackageArtifact === undefined) {
-      const installedPackageObject = path.join(
-        runtime.home,
-        ".nemoclaw",
-        "harnesses",
-        "objects",
-        "sha256",
-        installation.identity.contentDigest,
-      );
       const prepared = prepareHarnessPackageUpgrade(
         installedPackageObject,
         path.join(runtime.home, "fabric-package-upgrade"),
