@@ -8,11 +8,11 @@ import {
   type PrepareManagedStartupApplicationInput,
   prepareManagedStartupApplication,
 } from "./application";
-import { type ManagedStartupAgent, type ManagedStartupProfile } from "./profile";
+import type { ManagedStartupDurableProfile } from "./profile";
 
 export interface ManagedStartupAdapterContext {
-  readonly agent: ManagedStartupAgent;
-  readonly profile: ManagedStartupProfile;
+  readonly agent: string;
+  readonly profile: ManagedStartupDurableProfile;
   readonly fingerprint: string;
   readonly generationDirectory: string;
   readonly profilePath: string;
@@ -67,7 +67,7 @@ function validateAdapter(adapter: ManagedStartupAgentAdapter): void {
 
 function requirePreparedIdentity(
   prepared: PreparedManagedStartupApplication,
-  requestedAgent: ManagedStartupAgent,
+  requestedAgent: string,
 ): void {
   if (prepared.expectedAgent !== requestedAgent || prepared.profile.agent !== requestedAgent) {
     fail(`prepared profile targets ${prepared.profile.agent}, expected ${requestedAgent}`);

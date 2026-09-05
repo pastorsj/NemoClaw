@@ -8,13 +8,12 @@ import path from "node:path";
 import { TextDecoder } from "node:util";
 
 import {
-  decodeManagedStartupProfile,
-  fingerprintManagedStartupProfile,
+  decodeManagedStartupDurableProfile,
+  fingerprintManagedStartupDurableProfile,
   MANAGED_STARTUP_PROFILE_MAX_BYTES,
-  type ManagedStartupAgent,
-  type ManagedStartupProfile,
-  serializeManagedStartupProfile,
-  validateManagedStartupProfile,
+  type ManagedStartupDurableProfile,
+  serializeManagedStartupDurableProfile,
+  validateManagedStartupDurableProfile,
 } from "./profile";
 
 export const MANAGED_STARTUP_APPLICATION_STATE_DIR = "/var/lib/nemoclaw/startup-profile";
@@ -55,7 +54,7 @@ export interface ManagedStartupApplicationTestRuntime {
 
 export interface PrepareManagedStartupApplicationInput {
   readonly encodedProfile: string;
-  readonly expectedAgent: ManagedStartupAgent;
+  readonly expectedAgent: string;
   readonly corporateCaB64?: string;
   readonly stateDirectory?: string;
 }
@@ -67,12 +66,14 @@ export interface PreparedManagedStartupApplication {
   readonly profilePath: string;
   readonly corporateCaPath: string | null;
   readonly fingerprint: string;
-  readonly expectedAgent: ManagedStartupAgent;
-  readonly profile: ManagedStartupProfile;
+  readonly expectedAgent: string;
+  readonly profile: ManagedStartupDurableProfile;
 }
 
-export interface CommittedManagedStartupApplication
-  extends Omit<PreparedManagedStartupApplication, "status"> {
+export interface CommittedManagedStartupApplication extends Omit<
+  PreparedManagedStartupApplication,
+  "status"
+> {
   readonly status: "committed";
 }
 
@@ -86,7 +87,7 @@ interface ValidatedGeneration {
   readonly directory: string;
   readonly profilePath: string;
   readonly corporateCaPath: string | null;
-  readonly profile: ManagedStartupProfile;
+  readonly profile: ManagedStartupDurableProfile;
   readonly fingerprint: string;
 }
 
@@ -439,7 +440,7 @@ function validateCorporateCaBytes(bytes: Buffer): void {
 
 export function validateManagedStartupCorporateCaTransport(
   encoded: string | undefined,
-  profile: ManagedStartupProfile,
+  profile: ManagedStartupDurableProfile,
 ): Buffer | null {
   const expectedDigest = profile.corporateCa.bundleSha256;
   if (expectedDigest === null) {
@@ -472,7 +473,7 @@ function readCanonicalProfile(
   profilePath: string,
   runtime: ManagedStartupApplicationRuntime,
 ): {
-  profile: ManagedStartupProfile;
+  profile: ManagedStartupDurableProfile;
   fingerprint: string;
 } {
   const bytes = readSecureFile(profilePath, MANAGED_STARTUP_PROFILE_MAX_BYTES, runtime);
@@ -488,18 +489,18 @@ function readCanonicalProfile(
   } catch {
     fail(`${profilePath} is not valid JSON`);
   }
-  let profile: ManagedStartupProfile;
+  let profile: ManagedStartupDurableProfile;
   try {
-    profile = validateManagedStartupProfile(parsed);
+    profile = validateManagedStartupDurableProfile(parsed);
   } catch (error) {
     fail(`${profilePath} is invalid: ${(error as Error).message}`);
   }
-  if (serializeManagedStartupProfile(profile) !== raw) {
+  if (serializeManagedStartupDurableProfile(profile) !== raw) {
     fail(`${profilePath} is not a canonical managed startup profile`);
   }
   return {
     profile,
-    fingerprint: fingerprintManagedStartupProfile(profile),
+    fingerprint: fingerprintManagedStartupDurableProfile(profile),
   };
 }
 
@@ -507,7 +508,7 @@ function validateGeneration(
   stateDirectory: string,
   control: StateControl,
   runtime: ManagedStartupApplicationRuntime,
-  expectedAgent?: ManagedStartupAgent,
+  expectedAgent?: string,
 ): ValidatedGeneration {
   if (!GENERATION_RE.test(control.generation)) {
     fail("state control names an invalid generation");
@@ -740,7 +741,7 @@ function recoverCommittedState(
   committedControl: StateControl,
   pendingControl: StateControl | null,
   requested: StateControl,
-  expectedAgent: ManagedStartupAgent,
+  expectedAgent: string,
   runtime: ManagedStartupApplicationRuntime,
 ): ValidatedGeneration {
   const committed = validateGeneration(stateDirectory, committedControl, runtime, expectedAgent);
@@ -756,7 +757,7 @@ function recoverCommittedState(
 function recoverState(
   stateDirectory: string,
   requested: StateControl,
-  expectedAgent: ManagedStartupAgent,
+  expectedAgent: string,
   runtime: ManagedStartupApplicationRuntime,
 ): {
   committed: ValidatedGeneration | null;
@@ -861,7 +862,7 @@ function toPrepared(
   status: PreparedManagedStartupApplication["status"],
   stateDirectory: string,
   generation: ValidatedGeneration,
-  expectedAgent: ManagedStartupAgent,
+  expectedAgent: string,
 ): PreparedManagedStartupApplication {
   return {
     status,
@@ -878,7 +879,7 @@ function toPrepared(
 /**
  * Validate the secret-free envelope and atomically prepare immutable state.
  *
- * Agent-specific adapters may read the returned generation, make their own
+ * Package-owned adapters may read the returned generation, make their own
  * configuration changes, and then call commitManagedStartupApplication. A
  * prepared generation is deliberately not treated as applied.
  */
@@ -889,9 +890,9 @@ export function prepareManagedStartupApplication(
   const runtime = runtimeFor(testRuntime);
   requireContainerRoot();
 
-  let profile: ManagedStartupProfile;
+  let profile: ManagedStartupDurableProfile;
   try {
-    profile = decodeManagedStartupProfile(input.encodedProfile);
+    profile = decodeManagedStartupDurableProfile(input.encodedProfile);
   } catch (error) {
     fail((error as Error).message);
   }
@@ -899,8 +900,8 @@ export function prepareManagedStartupApplication(
     fail(`managed startup profile targets ${profile.agent}, expected ${input.expectedAgent}`);
   }
   const corporateCa = validateManagedStartupCorporateCaTransport(input.corporateCaB64, profile);
-  const profileJson = serializeManagedStartupProfile(profile);
-  const control = stateControl(fingerprintManagedStartupProfile(profile));
+  const profileJson = serializeManagedStartupDurableProfile(profile);
+  const control = stateControl(fingerprintManagedStartupDurableProfile(profile));
   const stateDirectory = ensureStateDirectory(input.stateDirectory, runtime);
   const recovered = recoverState(stateDirectory, control, input.expectedAgent, runtime);
   if (recovered.committed) {

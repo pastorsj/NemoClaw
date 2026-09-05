@@ -436,11 +436,40 @@ export interface HarnessStartupSettings {
 }
 
 export interface HarnessStartupRequest {
+  /** Legacy stock startup requests intentionally retain their existing shape. */
+  readonly profileKind?: never;
   readonly packageId: string;
   readonly settings: HarnessStartupSettings;
   /** Only core-reviewed, non-secret launch controls are exposed here. */
   readonly applicationEnvironment: Readonly<Record<string, string>>;
 }
+
+/** Exact installed package authority carried by a receipt-backed startup profile. */
+export interface HarnessStartupPackageIdentity {
+  readonly kind: "agent-runtime";
+  readonly id: string;
+  readonly packageVersion: string;
+  readonly contentDigest: string;
+}
+
+/**
+ * Generic package startup request. The package validates its own typed config;
+ * core has already bounded it, rejected credential-shaped data, and bound it
+ * to the complete installed package identity.
+ */
+export interface HarnessPackageStartupRequest<
+  PackageConfig extends HarnessStartupJsonObject = HarnessStartupJsonObject,
+> {
+  readonly profileKind: "package";
+  readonly packageId: string;
+  readonly harnessPackage: HarnessStartupPackageIdentity;
+  readonly packageConfig: PackageConfig;
+  readonly corporateCa: { readonly bundleSha256: string | null };
+  /** Only core-reviewed, non-secret launch controls are exposed here. */
+  readonly applicationEnvironment: Readonly<Record<string, string>>;
+}
+
+export type HarnessStartupAdapterRequest = HarnessStartupRequest | HarnessPackageStartupRequest;
 
 export type HarnessStartupEnvironmentValue =
   | string
@@ -506,6 +535,8 @@ export interface HarnessStartupPlan {
   readonly integrity: HarnessStartupIntegrityPlan;
 }
 
-export interface HarnessStartupAdapterModule {
-  readonly buildStartupPlan: (request: HarnessStartupRequest) => HarnessStartupPlan;
+export interface HarnessStartupAdapterModule<
+  Request extends HarnessStartupAdapterRequest = HarnessStartupRequest,
+> {
+  readonly buildStartupPlan: (request: Request) => HarnessStartupPlan;
 }

@@ -4,6 +4,8 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
+import { parseHarnessPackageIdentity } from "../../agent-runtime/package/receipt.ts";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.ts";
 import { isLoopbackDashboardUrl } from "../../dashboard/url.ts";
 import { listMessagingCredentialEnvAssignments } from "../../messaging/channels/metadata.ts";
 import { authorizeMessagingManagedStartupFields } from "../../messaging/managed-startup-placeholders.ts";
@@ -338,6 +340,24 @@ export interface ManagedStartupProfile {
   readonly tuning: ManagedStartupTuning;
   readonly corporateCa: ManagedStartupCorporateCa;
 }
+
+/**
+ * Receipt-backed package startup intent. Core owns this bounded envelope while
+ * the selected package owns the meaning of packageConfig through its typed
+ * startup adapter. This identity pins host intent; managed-image qualification
+ * must separately attest that the image contains the same package contentDigest.
+ */
+export interface ManagedStartupPackageProfile {
+  readonly schemaVersion: typeof MANAGED_STARTUP_PROFILE_SCHEMA_VERSION;
+  readonly profileKind: "package";
+  readonly agent: string;
+  readonly harnessPackage: HarnessPackageIdentity;
+  readonly packageConfig: ManagedStartupJsonObject;
+  readonly corporateCa: ManagedStartupCorporateCa;
+}
+
+/** Legacy stock profiles and generic receipt-backed package profiles share one durable boundary. */
+export type ManagedStartupDurableProfile = ManagedStartupProfile | ManagedStartupPackageProfile;
 
 export type ManagedStartupDashboardMode = "disabled" | "loopback" | "remote" | "loopback-forwarded";
 
@@ -903,6 +923,14 @@ const PROFILE_KEYS = new Set([
   "tools",
   "messaging",
   "tuning",
+  "corporateCa",
+]);
+const PACKAGE_PROFILE_KEYS = new Set([
+  "schemaVersion",
+  "profileKind",
+  "agent",
+  "harnessPackage",
+  "packageConfig",
   "corporateCa",
 ]);
 const INFERENCE_KEYS = new Set([
@@ -2272,4 +2300,126 @@ export function decodeManagedStartupProfile(encoded: string): ManagedStartupProf
 /** SHA-256 over canonical decoded JSON, independent of object key insertion order. */
 export function fingerprintManagedStartupProfile(profile: ManagedStartupProfile): string {
   return createHash("sha256").update(serializeManagedStartupProfile(profile), "utf8").digest("hex");
+}
+
+/** Identify the additive receipt-backed profile lane without consulting a harness ID catalogue. */
+export function isManagedStartupPackageProfile(
+  value: unknown,
+): value is ManagedStartupPackageProfile {
+  return isPlainObject(value) && ownDataPropertyValue(value, "profileKind") === "package";
+}
+
+/** Validate the generic package envelope without interpreting package-owned configuration. */
+export function validateManagedStartupPackageProfile(value: unknown): ManagedStartupPackageProfile {
+  assertPayloadStructureAndCredentialShapes(value);
+  const ownedValue = cloneJsonValue(value, "profile", { nullPrototypeObjects: true });
+  assertPayloadWithinByteLimit(ownedValue);
+  const profile = requireRecord(ownedValue, "profile");
+  rejectUnknownKeys(profile, PACKAGE_PROFILE_KEYS, "profile");
+  if (profile.schemaVersion !== MANAGED_STARTUP_PROFILE_SCHEMA_VERSION) {
+    invalid(`schemaVersion must be ${String(MANAGED_STARTUP_PROFILE_SCHEMA_VERSION)}`);
+  }
+  if (profile.profileKind !== "package") invalid("profileKind must be package");
+
+  let harnessPackage: HarnessPackageIdentity;
+  try {
+    harnessPackage = parseHarnessPackageIdentity(profile.harnessPackage);
+  } catch (error) {
+    invalid(`harnessPackage is invalid: ${(error as Error).message}`);
+  }
+  if (profile.agent !== harnessPackage.id) {
+    invalid("agent must match harnessPackage.id");
+  }
+
+  const corporateCa = requireRecord(profile.corporateCa, "corporateCa");
+  rejectUnknownKeys(corporateCa, CORPORATE_CA_KEYS, "corporateCa");
+  const bundleSha256 = corporateCa.bundleSha256;
+  if (
+    bundleSha256 !== null &&
+    (typeof bundleSha256 !== "string" || !SHA256_RE.test(bundleSha256))
+  ) {
+    invalid("corporateCa.bundleSha256 must be null or a lowercase SHA-256 digest");
+  }
+
+  return {
+    schemaVersion: MANAGED_STARTUP_PROFILE_SCHEMA_VERSION,
+    profileKind: "package",
+    agent: harnessPackage.id,
+    harnessPackage,
+    packageConfig: requireJsonObject(profile.packageConfig, "packageConfig"),
+    corporateCa: { bundleSha256 },
+  };
+}
+
+/** Validate either durable profile shape while leaving legacy stock validation unchanged. */
+export function validateManagedStartupDurableProfile(value: unknown): ManagedStartupDurableProfile {
+  return isManagedStartupPackageProfile(value)
+    ? validateManagedStartupPackageProfile(value)
+    : validateManagedStartupProfile(value);
+}
+
+/** Canonical JSON for both lanes; legacy profiles retain their existing byte representation. */
+export function serializeManagedStartupDurableProfile(
+  profile: ManagedStartupDurableProfile,
+): string {
+  if (!isManagedStartupPackageProfile(profile)) return serializeManagedStartupProfile(profile);
+  const validated = validateManagedStartupPackageProfile(profile);
+  const serialized = JSON.stringify(canonicalizeJson(validated));
+  if (Buffer.byteLength(serialized, "utf8") > MANAGED_STARTUP_PROFILE_MAX_BYTES) {
+    invalid(`canonical payload exceeds ${String(MANAGED_STARTUP_PROFILE_MAX_BYTES)} bytes`);
+  }
+  return serialized;
+}
+
+/** Encode either canonical durable profile for the existing base64url transport. */
+export function encodeManagedStartupDurableProfile(profile: ManagedStartupDurableProfile): string {
+  return Buffer.from(serializeManagedStartupDurableProfile(profile), "utf8").toString("base64url");
+}
+
+/** Decode only a canonical legacy or receipt-backed package profile. */
+export function decodeManagedStartupDurableProfile(encoded: string): ManagedStartupDurableProfile {
+  if (
+    typeof encoded !== "string" ||
+    encoded.length === 0 ||
+    Buffer.byteLength(encoded, "ascii") > MANAGED_STARTUP_PROFILE_MAX_ENCODED_BYTES ||
+    !BASE64URL_RE.test(encoded) ||
+    encoded.length % 4 === 1
+  ) {
+    invalid("encoded payload is malformed or exceeds the size limit");
+  }
+  const bytes = Buffer.from(encoded, "base64url");
+  if (
+    bytes.length === 0 ||
+    bytes.length > MANAGED_STARTUP_PROFILE_MAX_BYTES ||
+    bytes.toString("base64url") !== encoded
+  ) {
+    invalid("encoded payload is malformed or exceeds the size limit");
+  }
+
+  let raw: string;
+  try {
+    raw = UTF8_DECODER.decode(bytes);
+  } catch {
+    invalid("payload is not valid UTF-8");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    invalid("payload is not valid JSON");
+  }
+  const profile = validateManagedStartupDurableProfile(parsed);
+  if (serializeManagedStartupDurableProfile(profile) !== raw) {
+    invalid("payload is not in canonical form");
+  }
+  return profile;
+}
+
+/** SHA-256 over either canonical durable profile shape. */
+export function fingerprintManagedStartupDurableProfile(
+  profile: ManagedStartupDurableProfile,
+): string {
+  return createHash("sha256")
+    .update(serializeManagedStartupDurableProfile(profile), "utf8")
+    .digest("hex");
 }

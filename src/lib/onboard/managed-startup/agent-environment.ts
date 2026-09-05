@@ -7,13 +7,19 @@ import vm from "node:vm";
 
 import type {
   HarnessStartupAction,
+  HarnessStartupAdapterRequest,
   HarnessStartupApplicationRuntimePlan,
   HarnessStartupIntegrityPlan,
   HarnessStartupMaterial,
-  HarnessStartupRequest,
 } from "@nvidia/nemoclaw-harness-contract";
 
-import { type ManagedStartupProfile, validateManagedStartupProfile } from "./profile";
+import { parseHarnessPackageIdentity } from "../../agent-runtime/package/receipt.ts";
+import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.ts";
+import {
+  isManagedStartupPackageProfile,
+  type ManagedStartupDurableProfile,
+  validateManagedStartupDurableProfile,
+} from "./profile";
 
 export const HARNESS_STARTUP_ADAPTER_FILE = "/usr/local/lib/nemoclaw/startup-adapter.cjs";
 const MAX_ADAPTER_BYTES = 1024 * 1024;
@@ -56,6 +62,8 @@ export interface ManagedStartupAgentEnvironment {
 export interface HarnessStartupAdapterSource {
   readonly filename: string;
   readonly source: string;
+  /** Receipt-pinned identity for host-loaded package bytes. Required by generic profiles. */
+  readonly harnessPackage?: HarnessPackageIdentity;
 }
 
 export interface MapManagedStartupEnvironmentOptions {
@@ -360,7 +368,7 @@ function verifiedImageAdapterSource(): HarnessStartupAdapterSource {
 
 function invokeStartupAdapter(
   source: HarnessStartupAdapterSource,
-  request: HarnessStartupRequest,
+  request: HarnessStartupAdapterRequest,
 ): unknown {
   if (Buffer.byteLength(source.source, "utf8") > MAX_ADAPTER_BYTES)
     fail("startup adapter is oversized");
@@ -412,24 +420,60 @@ ${source.source}
   }
 }
 
+function requireMatchingPackageAuthority(
+  request: HarnessStartupAdapterRequest,
+  source: HarnessStartupAdapterSource,
+): void {
+  if (request.profileKind !== "package") return;
+
+  let requested: HarnessPackageIdentity;
+  let provided: HarnessPackageIdentity;
+  try {
+    requested = parseHarnessPackageIdentity(request.harnessPackage);
+    provided = parseHarnessPackageIdentity(source.harnessPackage);
+  } catch {
+    return fail("receipt-backed startup adapter source has no valid package identity");
+  }
+  if (
+    request.packageId !== requested.id ||
+    requested.kind !== provided.kind ||
+    requested.id !== provided.id ||
+    requested.packageVersion !== provided.packageVersion ||
+    requested.contentDigest !== provided.contentDigest
+  ) {
+    fail("startup adapter source does not match the receipt-backed package identity");
+  }
+}
+
 /** Evaluate one self-contained package adapter and validate its finite result. */
 export function buildHarnessStartupPlanFromSource(
-  request: HarnessStartupRequest,
+  request: HarnessStartupAdapterRequest,
   source: HarnessStartupAdapterSource,
 ): ManagedStartupAgentEnvironment {
+  requireMatchingPackageAuthority(request, source);
   return validateHarnessStartupPlan(invokeStartupAdapter(source, request), request.packageId);
 }
 
 function startupRequest(
-  profile: ManagedStartupProfile,
+  profile: ManagedStartupDurableProfile,
   environment: ApplicationEnvironment,
-): HarnessStartupRequest {
+): HarnessStartupAdapterRequest {
   const applicationEnvironment = Object.fromEntries(
     PUBLIC_APPLICATION_ENVIRONMENT.flatMap((name) => {
       const value = environment[name];
       return value === undefined ? [] : [[name, value]];
     }),
   );
+  if (isManagedStartupPackageProfile(profile)) {
+    return {
+      profileKind: "package",
+      packageId: profile.agent,
+      harnessPackage: profile.harnessPackage,
+      packageConfig: profile.packageConfig,
+      corporateCa: profile.corporateCa,
+      applicationEnvironment,
+    };
+  }
   return {
     packageId: profile.agent,
     settings: {
@@ -451,11 +495,11 @@ function startupRequest(
  * image, then reduce its output to the finite plan that core can apply.
  */
 export function mapManagedStartupProfileToAgentEnvironment(
-  profile: ManagedStartupProfile,
+  profile: ManagedStartupDurableProfile,
   environment: ApplicationEnvironment = EMPTY_APPLICATION_ENVIRONMENT,
   options: MapManagedStartupEnvironmentOptions = {},
 ): ManagedStartupAgentEnvironment {
-  const request = startupRequest(validateManagedStartupProfile(profile), environment);
+  const request = startupRequest(validateManagedStartupDurableProfile(profile), environment);
   const source = options.adapterSource ?? verifiedImageAdapterSource();
   return buildHarnessStartupPlanFromSource(request, source);
 }
