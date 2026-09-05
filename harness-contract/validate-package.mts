@@ -61,6 +61,8 @@ const CREDENTIAL_FILE_NAMES = new Set([
   "token.json",
 ]);
 const UNSAFE_MANIFEST_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const WINDOWS_RESERVED_NAME = /^(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+const WINDOWS_RESERVED_CHARACTERS = /[<>:"|?*]/u;
 
 export type HarnessPackageDiagnosticCode =
   | "adapter-artifact"
@@ -83,11 +85,19 @@ export interface HarnessPackageDiagnostic {
 
 export interface HarnessPackageConformanceReport {
   readonly harnessId: string;
+  readonly displayName: string;
   readonly packageName: string;
   readonly packageVersion: string;
   readonly manifestPath: string;
   readonly adapterArtifacts: readonly string[];
   readonly packedFiles: readonly string[];
+  readonly publishedFiles: readonly HarnessPackagePublishedFile[];
+}
+
+export interface HarnessPackagePublishedFile {
+  readonly path: string;
+  readonly size: number;
+  readonly executable: boolean;
 }
 
 export class HarnessPackageConformanceError extends Error {
@@ -215,7 +225,7 @@ function packageIdentity(packageName: string): string | null {
   }
   if (!baseName.startsWith("nemoclaw-")) return null;
   const id = baseName.slice("nemoclaw-".length);
-  return id.length <= 64 && HARNESS_ID.test(id) ? id : null;
+  return id.length <= 63 && HARNESS_ID.test(id) ? id : null;
 }
 
 function isSemverIdentifierList(value: string, allowNumericLeadingZero: boolean): boolean {
@@ -343,7 +353,7 @@ function assertBoundedManifestValue(value: unknown): void {
   visit(value, 0);
 }
 
-function readManifest(packageRoot: string, expectedHarnessId: string): void {
+function readManifest(packageRoot: string, expectedHarnessId: string): string {
   const source = readBoundedUtf8File(packageRoot, "manifest.yaml", MAX_MANIFEST_BYTES);
   const document = parseDocument(source, {
     prettyErrors: false,
@@ -373,12 +383,17 @@ function readManifest(packageRoot: string, expectedHarnessId: string): void {
       `name must exactly match package harness id ${JSON.stringify(expectedHarnessId)}`,
     );
   }
+  if (value.display_name === undefined) return expectedHarnessId;
   if (
-    value.display_name !== undefined &&
-    (typeof value.display_name !== "string" || value.display_name.trim().length === 0)
+    typeof value.display_name !== "string" ||
+    value.display_name.trim().length === 0 ||
+    value.display_name.length > 128 ||
+    Buffer.byteLength(value.display_name, "utf8") > 512 ||
+    /[\p{Cc}\p{Cf}\p{Cs}]/u.test(value.display_name)
   ) {
-    throw diagnostic("manifest", "manifest.yaml", "display_name must be a non-empty string");
+    throw diagnostic("manifest", "manifest.yaml", "display_name must be one bounded safe string");
   }
+  return value.display_name;
 }
 
 function safeRelativePath(value: unknown): string {
@@ -395,7 +410,16 @@ function safeRelativePath(value: unknown): string {
     value !== value.normalize("NFC") ||
     /[\u0000-\u001f\u007f-\u009f]/u.test(value) ||
     segments.length > MAX_RELATIVE_PATH_DEPTH ||
-    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..") ||
+    segments.some(
+      (segment) =>
+        segment.length === 0 ||
+        segment === "." ||
+        segment === ".." ||
+        segment.endsWith(".") ||
+        segment.endsWith(" ") ||
+        WINDOWS_RESERVED_NAME.test(segment) ||
+        WINDOWS_RESERVED_CHARACTERS.test(segment),
+    ) ||
     path.posix.normalize(value) !== value
   ) {
     throw diagnostic("archive", "<archive>", "npm returned an unsafe archive path");
@@ -441,6 +465,7 @@ function isAuthoringPath(relativePath: string): boolean {
   if (segments.length >= 2 && segments[0] === "host" && segments[1] === "source") return true;
   const fileName = segments.at(-1) ?? "";
   return (
+    relativePath === "nemoclaw-package.json" ||
     (segments.length === 1 && AUTHORING_ROOT_FILES.has(fileName)) ||
     /^tsconfig(?:\.[^.]+)*\.json$/u.test(fileName) ||
     /^(?:vitest|jest)(?:\.[^.]+)*\.(?:[cm]?[jt]s|json)$/u.test(fileName) ||
@@ -503,7 +528,7 @@ function inspectPackedFiles(
   packageRoot: string,
   metadata: PackageMetadata,
   expectedArtifacts: readonly string[],
-): readonly string[] {
+): readonly HarnessPackagePublishedFile[] {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(npmCommand, ["pack", "--dry-run", "--json", "--ignore-scripts", "."], {
     cwd: packageRoot,
@@ -542,6 +567,9 @@ function inspectPackedFiles(
         "npm must preserve an executable mode for the startup script",
       );
     }
+    if (((stats.mode & 0o111) !== 0) !== ((file.mode & 0o111) !== 0)) {
+      throw diagnostic("archive", file.path, "npm pack changed the executable mode class");
+    }
     totalBytes += file.size;
     if (!Number.isSafeInteger(totalBytes) || totalBytes > MAX_PACKED_BYTES) {
       throw diagnostic("archive", "<archive>", "packed package exceeds the size limit");
@@ -570,7 +598,17 @@ function inspectPackedFiles(
       );
     }
   }
-  return Object.freeze([...packedPaths].sort((left, right) => left.localeCompare(right)));
+  return Object.freeze(
+    packed.files
+      .map((file) =>
+        Object.freeze({
+          path: file.path,
+          size: file.size,
+          executable: (file.mode & 0o111) !== 0,
+        }),
+      )
+      .sort((left, right) => left.path.localeCompare(right.path)),
+  );
 }
 
 function listAdapterArtifacts(packageRoot: string): readonly string[] {
@@ -637,16 +675,18 @@ export function validateHarnessPackage(packageRootInput: string): HarnessPackage
   const packageRoot = resolvePackageRoot(packageRootInput);
   assertRequiredRootFiles(packageRoot);
   const metadata = readPackageMetadata(packageRoot);
-  readManifest(packageRoot, metadata.harnessId);
+  const displayName = readManifest(packageRoot, metadata.harnessId);
   const adapterArtifacts = listAdapterArtifacts(packageRoot);
-  const packedFiles = inspectPackedFiles(packageRoot, metadata, adapterArtifacts);
+  const publishedFiles = inspectPackedFiles(packageRoot, metadata, adapterArtifacts);
   return Object.freeze({
     harnessId: metadata.harnessId,
+    displayName,
     packageName: metadata.name,
     packageVersion: metadata.version,
     manifestPath: metadata.nemoclaw.harnessManifest,
     adapterArtifacts,
-    packedFiles,
+    packedFiles: Object.freeze(publishedFiles.map((file) => file.path)),
+    publishedFiles,
   });
 }
 
@@ -666,6 +706,7 @@ function main(): void {
   const packageArguments = arguments_.filter((argument) => argument !== "--json");
   if (
     packageArguments.length !== 1 ||
+    arguments_.filter((argument) => argument === "--json").length > 1 ||
     arguments_.some((argument) => argument.startsWith("-") && argument !== "--json")
   ) {
     process.stderr.write("Usage: nemoclaw-validate-package [--json] <package-root>\n");

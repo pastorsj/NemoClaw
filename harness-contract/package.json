@@ -2,12 +2,13 @@
   "$comment": "SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.\nSPDX-License-Identifier: Apache-2.0",
   "name": "@nvidia/nemoclaw-harness-contract",
   "version": "0.1.0",
-  "description": "Typed authoring contract and deterministic validation tools for NemoClaw harness packages",
+  "description": "Typed authoring contract and deterministic build tools for NemoClaw harness packages",
   "license": "Apache-2.0",
   "type": "commonjs",
   "scripts": {
     "check-package": "node --experimental-strip-types --no-warnings validate-package.mts",
-    "test": "tsc -p tsconfig.json && node --test --experimental-strip-types --no-warnings build-adapters.test.mts validate-package.test.mts"
+    "build-package": "node --experimental-strip-types --no-warnings build-package.mts",
+    "test": "tsc -p tsconfig.json && node --test --experimental-strip-types --no-warnings build-adapters.test.mts validate-package.test.mts build-package.test.mts"
   },
   "exports": {
     ".": {
@@ -18,16 +19,21 @@
     },
     "./validate-package": {
       "import": "./validate-package.mts"
+    },
+    "./build-package": {
+      "import": "./build-package.mts"
     }
   },
   "bin": {
     "nemoclaw-build-adapters": "./build-adapters.mts",
-    "nemoclaw-validate-package": "./validate-package.mts"
+    "nemoclaw-validate-package": "./validate-package.mts",
+    "nemoclaw-build-package": "./build-package.mts"
   },
   "files": [
     "src/index.ts",
     "build-adapters.mts",
-    "validate-package.mts"
+    "validate-package.mts",
+    "build-package.mts"
   ],
   "dependencies": {
     "yaml": "2.8.3"
