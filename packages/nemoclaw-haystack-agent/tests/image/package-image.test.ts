@@ -65,4 +65,15 @@ describe("Haystack Agent POC image", () => {
       path: "/usr/bin/curl",
     });
   });
+
+  it("provides the fixed curl executable used by the shared inference probe", () => {
+    const dockerfile = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile"), "utf8");
+    const base = fs.readFileSync(path.join(PACKAGE_ROOT, "Dockerfile.base"), "utf8");
+    const pinnedCurl = "curl=8.14.1-2+deb13u4";
+
+    expect(base).toContain(pinnedCurl);
+    expect(dockerfile).toContain("if [ ! -x /usr/bin/curl ]");
+    expect(dockerfile).toContain(pinnedCurl);
+    expect(dockerfile).toContain("test -x /usr/bin/curl");
+  });
 });

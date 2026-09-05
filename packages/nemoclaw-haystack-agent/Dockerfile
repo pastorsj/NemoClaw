@@ -15,6 +15,18 @@ ARG NEMOCLAW_MAX_TURNS=8
 
 USER root
 
+# The current immutable POC base predates the shared NemoClaw curl probe.
+# Dockerfile.base now owns this dependency; keep this conditional compatibility
+# install until every consumed base digest has been rebuilt from that source.
+# hadolint ignore=DL3008
+RUN if [ ! -x /usr/bin/curl ]; then \
+        apt-get update \
+        && apt-get install -y --no-install-recommends curl=8.14.1-2+deb13u4 \
+        && rm -rf /var/lib/apt/lists/*; \
+    fi \
+    && test -x /usr/bin/curl \
+    && test -z "$(dpkg --audit)"
+
 COPY packages/nemoclaw-fabric/pyproject.toml packages/nemoclaw-fabric/README.md /opt/nemoclaw-fabric-runner/
 COPY packages/nemoclaw-fabric/src/ /opt/nemoclaw-fabric-runner/src/
 COPY packages/nemoclaw-fabric/build-requirements.lock /tmp/fabric-build-requirements.lock
