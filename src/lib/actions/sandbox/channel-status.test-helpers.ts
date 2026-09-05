@@ -38,6 +38,9 @@ vi.mock("./process-recovery", () => ({
 }));
 
 import type { AgentDefinition } from "../../agent/defs";
+import type { SandboxMessagingProfileAuthority } from "../../messaging";
+import type { ChannelManifest } from "../../messaging/manifest";
+import type { ChannelManifestRegistry } from "../../messaging/manifest/registry";
 import type { DiagnosticSignal } from "../../messaging/channels/channel-health";
 import type { SandboxMessagingInputReference } from "../../messaging/manifest";
 import type { SandboxEntry } from "../../state/registry";
@@ -53,7 +56,7 @@ export type ExecResult = { status: number; stdout: string; stderr: string };
 
 const PROBED_AT = new Date("2026-05-28T04:00:00.000Z");
 
-function fakeAgent(name: "openclaw" | "hermes" = "openclaw"): AgentDefinition {
+export function fakeAgent(name: "openclaw" | "hermes" = "openclaw"): AgentDefinition {
   const configDir = name === "openclaw" ? "/sandbox/.openclaw" : "/sandbox/.hermes";
   const stateDirs = name === "openclaw" ? ["whatsapp"] : ["platforms"];
   return {
@@ -171,13 +174,23 @@ export function makeDeps(opts: {
   out?: (line: string) => void;
   nowMs?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
+  loadAgent?: (name: string) => AgentDefinition;
+  resolveMessagingProfileAuthority?: (
+    entry: Pick<SandboxEntry, "agent" | "harnessPackage" | "harnessPackageMigration">,
+  ) => SandboxMessagingProfileAuthority;
+  listMessagingChannelsForProfile?: (
+    authority: SandboxMessagingProfileAuthority,
+    registry: ChannelManifestRegistry,
+  ) => ChannelManifest[];
 }) {
   const calls: string[] = [];
   const out = opts.out ?? ((line: string) => calls.push(line));
   return {
     out,
     deps: {
-      loadAgent: () => fakeAgent(opts.agentName),
+      loadAgent: opts.loadAgent ?? (() => fakeAgent(opts.agentName)),
+      resolveMessagingProfileAuthority: opts.resolveMessagingProfileAuthority,
+      listMessagingChannelsForProfile: opts.listMessagingChannelsForProfile,
       getSandbox: () => opts.sandbox ?? entry(),
       getAppliedPresets: () => opts.appliedPresets ?? ["whatsapp"],
       getGatewayPresets: () =>

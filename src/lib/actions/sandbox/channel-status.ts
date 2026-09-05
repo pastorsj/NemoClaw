@@ -17,6 +17,9 @@ import { B, D, G, R, RD, YW } from "../../cli/terminal-style";
 import {
   createBuiltInChannelManifestRegistry,
   getMessagingManifestAvailabilityContext,
+  listMessagingChannelsForProfile,
+  resolveSandboxMessagingProfileAuthority,
+  type SandboxMessagingProfileAuthority,
 } from "../../messaging";
 import {
   type ChannelHealthReport,
@@ -61,6 +64,10 @@ type ExecRunner = (
 
 type StatusDeps = {
   loadAgent?: (name: string) => AgentDefinition;
+  resolveMessagingProfileAuthority?: (
+    entry: Parameters<typeof resolveSandboxMessagingProfileAuthority>[0],
+  ) => SandboxMessagingProfileAuthority;
+  listMessagingChannelsForProfile?: typeof listMessagingChannelsForProfile;
   getSandbox?: typeof registry.getSandbox;
   getAppliedPresets?: (sandboxName: string) => string[];
   getGatewayPresets?: (sandboxName: string, timeoutMs?: number) => string[] | null;
@@ -164,6 +171,10 @@ function defaultExec(
 function defaultDeps(deps: StatusDeps | undefined): Required<StatusDeps> {
   return {
     loadAgent: deps?.loadAgent ?? loadAgent,
+    resolveMessagingProfileAuthority:
+      deps?.resolveMessagingProfileAuthority ?? resolveSandboxMessagingProfileAuthority,
+    listMessagingChannelsForProfile:
+      deps?.listMessagingChannelsForProfile ?? listMessagingChannelsForProfile,
     getSandbox: deps?.getSandbox ?? registry.getSandbox,
     getAppliedPresets: deps?.getAppliedPresets ?? policies.getAppliedPresets,
     getGatewayPresets: deps?.getGatewayPresets ?? policies.getGatewayPresets,
@@ -175,6 +186,41 @@ function defaultDeps(deps: StatusDeps | undefined): Required<StatusDeps> {
       ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
     out: deps?.out ?? ((line: string) => console.log(line)),
   };
+}
+
+type ChannelStatusProfile = Readonly<{
+  agent: AgentDefinition;
+  packageAuthority: SandboxMessagingProfileAuthority | null;
+  availableChannelIds: ReadonlySet<string> | null;
+}>;
+
+function hasRecordedHarnessPackageAuthority(entry: registry.SandboxEntry): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(entry, "harnessPackage") ||
+    Object.prototype.hasOwnProperty.call(entry, "harnessPackageMigration")
+  );
+}
+
+/** Keep legacy catalogue lookup separate from receipt-backed package authority. */
+function resolveChannelStatusProfile(
+  entry: registry.SandboxEntry,
+  deps: Required<StatusDeps>,
+): ChannelStatusProfile {
+  if (!hasRecordedHarnessPackageAuthority(entry)) {
+    return Object.freeze({
+      agent: deps.loadAgent(entry.agent || "openclaw"),
+      packageAuthority: null,
+      availableChannelIds: null,
+    });
+  }
+
+  const packageAuthority = deps.resolveMessagingProfileAuthority(entry);
+  const channels = deps.listMessagingChannelsForProfile(packageAuthority, channelManifestRegistry);
+  return Object.freeze({
+    agent: packageAuthority.agent,
+    packageAuthority,
+    availableChannelIds: new Set(channels.map((channel) => channel.id)),
+  });
 }
 
 function getChannelStatusDiagnostic(channelName: string): MessagingChannelDiagnosticSpec | null {
@@ -389,6 +435,55 @@ function buildUnknownConfiguredChannelReport(
       },
     ],
   };
+}
+
+function packageMessagingSupportDetail(channelName: string, profile: ChannelStatusProfile): string {
+  const integration = profile.packageAuthority?.integration;
+  if (!integration) return `channel '${channelName}' is unavailable`;
+  if (integration.kind === "disabled") {
+    return `installed harness package '${integration.packageId}' has messaging disabled: ${integration.reason}`;
+  }
+  return `installed harness package '${integration.packageId}' does not declare channel '${channelName}'`;
+}
+
+function buildUnsupportedConfiguredChannelReport(
+  sandboxName: string,
+  channelName: string,
+  profile: ChannelStatusProfile,
+): ChannelStatusBasicReport {
+  return {
+    schemaVersion: 1,
+    sandbox: sandboxName,
+    channel: channelName,
+    verdict: "info",
+    signals: [
+      {
+        label: "Harness package support",
+        severity: "warn",
+        detail: packageMessagingSupportDetail(channelName, profile),
+      },
+    ],
+  };
+}
+
+function channelAvailableForProfile(channelName: string, profile: ChannelStatusProfile): boolean {
+  return profile.availableChannelIds === null || profile.availableChannelIds.has(channelName);
+}
+
+function exitForUnsupportedPackageChannel(
+  sandboxName: string,
+  channelName: string,
+  profile: ChannelStatusProfile,
+  asJson: boolean,
+  deps: Required<StatusDeps>,
+): never {
+  const error = packageMessagingSupportDetail(channelName, profile);
+  if (asJson) {
+    deps.out(JSON.stringify({ schemaVersion: 1, sandbox: sandboxName, error }, null, 2));
+  } else {
+    deps.out(`  Cannot inspect '${channelName}': ${error}.`);
+  }
+  process.exit(1);
 }
 
 function channelSupportedByAgent(channelName: string, agent: AgentDefinition): boolean {
@@ -624,10 +719,10 @@ async function waitForChannelReadiness(
 }
 
 /**
- * Run the WhatsApp diagnostic or a thin per-channel summary for the named
- * sandbox. The function never throws: any unexpected condition is rendered
- * as a `probe_failed` verdict so a paired-but-idle channel does not get
- * silently marked healthy because a probe step blew up.
+ * Run a deep diagnostic or a thin per-channel summary for the named sandbox.
+ * Runtime probe failures become a `probe_failed` verdict. Receipt and package
+ * profile failures remain fatal so status never observes a different harness
+ * than the one recorded for the sandbox.
  */
 export async function showSandboxChannelStatus(
   sandboxName: string,
@@ -654,7 +749,10 @@ export async function showSandboxChannelStatus(
     process.exit(1);
   }
 
-  const agent = deps.loadAgent(entry.agent || "openclaw");
+  // Package authority is validated before policy, config, or runtime status is
+  // read. Rows without a receipt deliberately retain the isolated legacy path.
+  const profile = resolveChannelStatusProfile(entry, deps);
+  const agent = profile.agent;
 
   if (!channelArg) {
     const configuredChannels = registry.getConfiguredMessagingChannelsFromEntry(entry);
@@ -663,6 +761,9 @@ export async function showSandboxChannelStatus(
       sandbox: sandboxName,
       channels: configuredChannels.map((channelName) => {
         const diagnostic = getChannelStatusDiagnostic(channelName);
+        if (diagnostic && !channelAvailableForProfile(channelName, profile)) {
+          return buildUnsupportedConfiguredChannelReport(sandboxName, channelName, profile);
+        }
         return diagnostic
           ? buildBasicChannelReport(sandboxName, channelName, agent, deps, diagnostic, {
               includeDeepDiagnostics: false,
@@ -692,6 +793,9 @@ export async function showSandboxChannelStatus(
       deps.out(`  Unknown channel '${channelName}'. Valid channels: ${known}.`);
     }
     process.exit(1);
+  }
+  if (!channelAvailableForProfile(channelName, profile)) {
+    exitForUnsupportedPackageChannel(sandboxName, channelName, profile, asJson, deps);
   }
 
   const statusHook = channelHealthStatusHook(channelName, agent);
