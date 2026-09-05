@@ -51,7 +51,7 @@
 
 import type { AgentMcpAdapter } from "../../agent/defs";
 import type { McpBridgeEntry } from "../../state/registry";
-import { authorizationValue } from "./mcp-bridge-adapter-status";
+import { authorizationValue } from "./mcp-bridge/package-headers";
 import { redactBridgeSecretsForDisplay } from "./mcp-bridge-output";
 import { observeMcpCredentialRevision } from "./mcp-bridge-provider";
 import type { McpProviderInspectionRuntimeSelection } from "./mcp-bridge-provider-inspection";
