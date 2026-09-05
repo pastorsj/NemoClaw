@@ -280,6 +280,7 @@ test("the contract archive contains executable builder binaries but no contract 
   assert.equal(modes.get("build-adapters.mts"), 0o755);
   assert.equal(modes.get("validate-package.mts"), 0o755);
   assert.equal(modes.get("build-package.mts"), 0o755);
+  assert.equal(modes.has("README.md"), true);
   assert.equal(
     files.some((file) => String(file.path).endsWith(".test.mts")),
     false,
