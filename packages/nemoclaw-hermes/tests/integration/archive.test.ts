@@ -28,6 +28,7 @@ const RUNTIME_CONTRACTS = [
   "host/managed-route.cts",
   "host/mcp-adapter.cts",
   "host/base-qualification.cts",
+  "host/startup-adapter.cts",
 ] as const;
 const PROVIDER_PROFILES = [
   "provider-profiles/langfuse-hermes-v1.yaml",

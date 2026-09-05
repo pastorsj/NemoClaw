@@ -617,6 +617,7 @@ COPY --chmod=0444 packages/nemoclaw-openclaw/config/generate-config.mts /package
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/agent-config.mts /packages/nemoclaw-openclaw/config/agent-config.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/config/model-setup.mts /packages/nemoclaw-openclaw/config/model-setup.mts
 COPY --chmod=0444 packages/nemoclaw-openclaw/host/config-runtime.cts /packages/nemoclaw-openclaw/host/config-runtime.cts
+COPY --chmod=0444 packages/nemoclaw-openclaw/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
 COPY packages/nemoclaw-openclaw/checks/tool-search.mts /scripts/validate-openclaw-tool-search.mts
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
 COPY src/lib/tool-disclosure.ts /src/lib/tool-disclosure.ts

@@ -309,3 +309,174 @@ export interface HarnessMcpAdapterModule {
   ) => HarnessMcpCapabilityProbe;
   readonly buildMcpRuntimeCommand: (request: HarnessMcpRuntimeRequest) => readonly string[];
 }
+
+export type HarnessStartupJsonScalar = string | number | boolean | null;
+export type HarnessStartupJsonValue =
+  | HarnessStartupJsonScalar
+  | HarnessStartupJsonObject
+  | readonly HarnessStartupJsonValue[];
+export interface HarnessStartupJsonObject {
+  readonly [key: string]: HarnessStartupJsonValue;
+}
+
+export type HarnessStartupInferenceApi =
+  | "openai-completions"
+  | "openai-responses"
+  | "anthropic-messages";
+
+export interface HarnessStartupInferenceSettings {
+  readonly routeProvider: string;
+  readonly upstreamProvider: string;
+  readonly model: string;
+  readonly routedBaseUrl: string;
+  readonly upstreamEndpointUrl: string | null;
+  readonly api: HarnessStartupInferenceApi;
+  readonly primaryModelRef: string | null;
+  readonly compatibility: HarnessStartupJsonObject | null;
+  readonly inputModalities: readonly ("text" | "image")[] | null;
+}
+
+export interface HarnessStartupProxySettings {
+  readonly managedHost: string;
+  readonly managedPort: number;
+  readonly hostHttpUrl: string | null;
+  readonly hostHttpsUrl: string | null;
+  readonly hostNoProxy: readonly string[];
+}
+
+/**
+ * Optional, finite settings available to a package startup adapter. Core owns
+ * their validation before this normalized request crosses the image boundary.
+ * A package checks the subset required by its native runtime.
+ */
+export interface HarnessStartupConfigSettings {
+  readonly agent?: string;
+  readonly webSearch?: { readonly enabled: boolean; readonly provider: "brave" | "tavily" };
+  readonly otel?: {
+    readonly enabled: boolean;
+    readonly endpointUrl: string;
+    readonly serviceName: string;
+    readonly sampleRate: number;
+  };
+  readonly agentTimeoutSeconds?: number;
+  readonly heartbeatEvery?: string | null;
+  readonly extraAgents?: {
+    readonly agents: readonly HarnessStartupJsonObject[];
+    readonly defaults: HarnessStartupJsonObject;
+    readonly main: HarnessStartupJsonObject;
+  };
+  readonly deviceAuth?: {
+    readonly disabled: boolean;
+    readonly optOutSource: "operator" | "managed-onboard";
+  };
+  readonly minimalBootstrap?: boolean;
+  readonly autoApprovalMode?: "disabled" | "thread-opt-in";
+  readonly observabilityEnabled?: boolean;
+}
+
+export interface HarnessStartupDashboardSettings {
+  readonly agent?: string;
+  readonly mode: "disabled" | "loopback" | "remote" | "loopback-forwarded";
+  readonly url?: string;
+  readonly browserUrl?: string;
+  readonly port?: number;
+  readonly bindAddress?: "127.0.0.1" | "0.0.0.0";
+  readonly wslExposure?: boolean;
+  readonly publicPort?: number | null;
+  readonly internalPort?: number | null;
+  readonly tuiEnabled?: boolean;
+}
+
+export interface HarnessStartupSettings {
+  readonly configuration: HarnessStartupConfigSettings;
+  readonly inference: HarnessStartupInferenceSettings;
+  readonly proxy: HarnessStartupProxySettings;
+  readonly dashboard: HarnessStartupDashboardSettings;
+  readonly tools: {
+    readonly disclosure: "progressive" | "direct";
+    readonly enabledGateways: readonly string[];
+  };
+  readonly messaging: { readonly plan: HarnessStartupJsonObject | null };
+  readonly tuning: {
+    readonly contextWindow: number | null;
+    readonly maxTokens: number | null;
+    readonly reasoning: boolean | null;
+    readonly reasoningEffort: "default" | "low" | "medium" | "high" | null;
+  };
+  readonly corporateCa: { readonly bundleSha256: string | null };
+}
+
+export interface HarnessStartupRequest {
+  readonly packageId: string;
+  readonly settings: HarnessStartupSettings;
+  /** Only core-reviewed, non-secret launch controls are exposed here. */
+  readonly applicationEnvironment: Readonly<Record<string, string>>;
+}
+
+export type HarnessStartupEnvironmentValue =
+  | string
+  | {
+      readonly kind: "canonical-json-base64";
+      readonly value: HarnessStartupJsonValue;
+    };
+
+export interface HarnessStartupApplicationRuntimePlan {
+  readonly exportEnvironment: Readonly<Record<string, string>>;
+  readonly unsetEnvironment: readonly string[];
+}
+
+export interface HarnessStartupCorporateCaMaterial {
+  readonly kind: "corporate-ca-handoff";
+  readonly legacyInput: "NEMOCLAW_CORPORATE_CA_B64";
+  readonly expectedSha256: string | null;
+}
+
+export interface HarnessStartupRootFileMaterial {
+  readonly kind: "root-owned-file";
+  readonly legacyInput: string;
+  readonly path: `/usr/local/share/nemoclaw/${string}`;
+  readonly contents: string;
+  readonly owner: "root";
+  readonly group: "root";
+  readonly mode: 0o444;
+}
+
+export type HarnessStartupMaterial =
+  | HarnessStartupCorporateCaMaterial
+  | HarnessStartupRootFileMaterial;
+
+export type HarnessStartupAction =
+  | { readonly kind: "generate-config"; readonly runAs: "sandbox" }
+  | {
+      readonly kind: "apply-messaging";
+      readonly mode: "apply" | "clear";
+      readonly phase: "runtime-setup";
+      readonly runAs: "root";
+    }
+  | {
+      readonly kind: "apply-messaging";
+      readonly mode: "apply" | "clear";
+      readonly phase: "post-agent-install";
+      readonly runAs: "sandbox";
+    };
+
+/** Finite built-in integrity workflows; adapters cannot return a command. */
+export type HarnessStartupIntegrityPlan =
+  | { readonly kind: "none" }
+  | { readonly kind: "validated-json-config" }
+  | { readonly kind: "managed-config-set" };
+
+export interface HarnessStartupPlan {
+  readonly schemaVersion: 1;
+  readonly packageId: string;
+  readonly configurationEnvironment: Readonly<Record<string, HarnessStartupEnvironmentValue>>;
+  readonly runtimeEnvironment: Readonly<Record<string, HarnessStartupEnvironmentValue>>;
+  readonly applicationRuntime: HarnessStartupApplicationRuntimePlan;
+  readonly materials: readonly HarnessStartupMaterial[];
+  readonly actions: readonly HarnessStartupAction[];
+  readonly integrity: HarnessStartupIntegrityPlan;
+}
+
+export interface HarnessStartupAdapterModule {
+  readonly buildStartupPlan: (request: HarnessStartupRequest) => HarnessStartupPlan;
+}

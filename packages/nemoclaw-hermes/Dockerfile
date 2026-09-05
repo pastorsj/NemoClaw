@@ -127,6 +127,7 @@ COPY scripts/managed-startup-hold.sh /usr/local/bin/nemoclaw-managed-startup-hol
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/bin/nemoclaw-managed-bootstrap /usr/local/bin/nemoclaw-managed-bootstrap
 COPY --from=managed-bootstrap-entrypoint-builder /out/usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
+COPY --chmod=0444 packages/nemoclaw-hermes/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
 COPY packages/nemoclaw-hermes/runtime/generate-config.sh /usr/local/lib/nemoclaw/generate-config
 COPY scripts/gateway-control.sh /usr/local/bin/nemoclaw-gateway-control
 COPY scripts/managed-gateway-control.py /usr/local/lib/nemoclaw/managed-gateway-control.py

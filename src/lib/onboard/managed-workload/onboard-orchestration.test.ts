@@ -60,7 +60,7 @@ vi.mock("../../core/version", () => ({
   getVersion: () => "v0.0.0",
 }));
 
-import { mapManagedStartupProfileToAgentEnvironment } from "../managed-startup/agent-environment";
+import { mapManagedStartupProfileToAgentEnvironment as mapManagedStartupProfileWithAdapter } from "../managed-startup/agent-environment";
 import {
   createManagedStateVolumeOnboardLifecycle,
   createManagedWorkloadOnboardRuntime,
@@ -68,6 +68,19 @@ import {
   prepareOnboardSandboxWorkloadLaunch,
   shouldActivateStockManagedRuntime,
 } from "./onboard-orchestration";
+
+function mapManagedStartupProfileToAgentEnvironment(
+  profile: Parameters<typeof mapManagedStartupProfileWithAdapter>[0],
+) {
+  const filename = path.resolve(`packages/nemoclaw-${profile.agent}/host/startup-adapter.cts`);
+  return mapManagedStartupProfileWithAdapter(
+    profile,
+    {},
+    {
+      adapterSource: { filename, source: fs.readFileSync(filename, "utf8") },
+    },
+  );
+}
 
 function createFreshOnboardingRuntime(
   environment: Readonly<Record<string, string>>,

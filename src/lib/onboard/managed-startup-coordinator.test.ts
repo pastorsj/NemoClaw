@@ -16,10 +16,7 @@ import {
 import { type ManagedStartupAgent, type ManagedStartupProfile } from "./managed-startup/profile";
 
 function inputFor(agent: ManagedStartupAgent): PrepareManagedStartupApplicationInput {
-  return {
-    encodedProfile: `encoded-${agent}`,
-    expectedAgent: agent,
-  };
+  return { encodedProfile: `encoded-${agent}`, expectedAgent: agent };
 }
 
 function preparedFor(
@@ -64,132 +61,81 @@ function dependenciesFor(
   };
 }
 
-function adaptersFor(order: string[] = []): {
-  readonly adapters: ManagedStartupAgentAdapter[];
-  readonly applyByAgent: Record<ManagedStartupAgent, ReturnType<typeof vi.fn>>;
-} {
-  const applyByAgent = {
-    openclaw: vi.fn(async () => {
-      order.push("apply:openclaw");
-    }),
-    hermes: vi.fn(async () => {
-      order.push("apply:hermes");
-    }),
-    "langchain-deepagents-code": vi.fn(async () => {
-      order.push("apply:langchain-deepagents-code");
-    }),
-    pi: vi.fn(async () => {
-      order.push("apply:pi");
-    }),
-  };
+function adapterFor(
+  packageId: string,
+  order: string[] = [],
+): ManagedStartupAgentAdapter & { readonly apply: ReturnType<typeof vi.fn> } {
   return {
-    adapters: [
-      { agent: "openclaw", apply: applyByAgent.openclaw },
-      { agent: "hermes", apply: applyByAgent.hermes },
-      {
-        agent: "langchain-deepagents-code",
-        apply: applyByAgent["langchain-deepagents-code"],
-      },
-      { agent: "pi", apply: applyByAgent.pi },
-    ],
-    applyByAgent,
+    packageId,
+    apply: vi.fn(async () => {
+      order.push(`apply:${packageId}`);
+    }),
   };
 }
 
 describe("managed startup coordinator", () => {
-  it.each([
-    "openclaw",
-    "hermes",
-    "langchain-deepagents-code",
-  ] as const)("dispatches exactly the %s adapter before commit", async (agent) => {
-    const order: string[] = [];
-    const prepared = preparedFor(agent);
-    const dependencies = dependenciesFor(prepared, order);
-    const { adapters, applyByAgent } = adaptersFor(order);
+  it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
+    "applies the selected %s package before commit",
+    async (agent) => {
+      const order: string[] = [];
+      const prepared = preparedFor(agent);
+      const dependencies = dependenciesFor(prepared, order);
+      const adapter = adapterFor(agent, order);
 
-    const result = await coordinateManagedStartupApplication(
-      inputFor(agent),
-      adapters,
-      dependencies,
-    );
+      const result = await coordinateManagedStartupApplication(
+        inputFor(agent),
+        adapter,
+        dependencies,
+      );
 
-    expect(result.adapterApplied).toBe(true);
-    expect(result.application.status).toBe("committed");
-    expect(order).toEqual(["prepare", `apply:${agent}`, "commit"]);
-    expect(applyByAgent[agent]).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        agent,
-        profile: prepared.profile,
-        fingerprint: prepared.fingerprint,
-      }),
-    );
-    (["openclaw", "hermes", "langchain-deepagents-code"] as const).forEach((otherAgent) => {
-      expect(applyByAgent[otherAgent]).toHaveBeenCalledTimes(otherAgent === agent ? 1 : 0);
-    });
-    expect(dependencies.commitApplication).toHaveBeenCalledWith(prepared);
-  });
+      expect(result.adapterApplied).toBe(true);
+      expect(result.application.status).toBe("committed");
+      expect(order).toEqual(["prepare", `apply:${agent}`, "commit"]);
+      expect(adapter.apply).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          agent,
+          profile: prepared.profile,
+          fingerprint: prepared.fingerprint,
+        }),
+      );
+    },
+  );
 
-  it("does not reapply mutable config for an already committed profile", async () => {
+  it("does not reapply mutable configuration for an already committed profile", async () => {
     const prepared = preparedFor("openclaw", "already-committed");
     const dependencies = dependenciesFor(prepared);
-    const { adapters, applyByAgent } = adaptersFor();
+    const adapter = adapterFor("openclaw");
 
     const result = await coordinateManagedStartupApplication(
       inputFor("openclaw"),
-      adapters,
+      adapter,
       dependencies,
     );
 
     expect(result.adapterApplied).toBe(false);
+    expect(adapter.apply).not.toHaveBeenCalled();
     expect(dependencies.commitApplication).toHaveBeenCalledExactlyOnceWith(prepared);
-    Object.values(applyByAgent).forEach((apply) => {
-      expect(apply).not.toHaveBeenCalled();
-    });
   });
 
-  it("rejects a missing adapter before preparing state", async () => {
-    const prepared = preparedFor("openclaw");
-    const dependencies = dependenciesFor(prepared);
-    const { adapters } = adaptersFor();
+  it("rejects a mismatched package before preparing state", async () => {
+    const dependencies = dependenciesFor(preparedFor("openclaw"));
+    await expect(
+      coordinateManagedStartupApplication(inputFor("openclaw"), adapterFor("hermes"), dependencies),
+    ).rejects.toThrow(/adapter for hermes cannot apply openclaw/u);
+    expect(dependencies.prepareApplication).not.toHaveBeenCalled();
+  });
 
+  it("accepts a syntactically valid future package without a shipped-package registry", async () => {
+    const dependencies = dependenciesFor(preparedFor("openclaw"));
+    const adapter = adapterFor("future-harness") as ManagedStartupAgentAdapter;
     await expect(
       coordinateManagedStartupApplication(
-        inputFor("openclaw"),
-        adapters.filter((adapter) => adapter.agent !== "hermes"),
+        { ...inputFor("openclaw"), expectedAgent: "future-harness" as ManagedStartupAgent },
+        adapter,
         dependencies,
       ),
-    ).rejects.toThrow(/missing adapter for hermes/u);
-    expect(dependencies.prepareApplication).not.toHaveBeenCalled();
-  });
-
-  it("rejects a duplicate adapter before preparing state", async () => {
-    const prepared = preparedFor("openclaw");
-    const dependencies = dependenciesFor(prepared);
-    const { adapters } = adaptersFor();
-
-    await expect(
-      coordinateManagedStartupApplication(
-        inputFor("openclaw"),
-        [...adapters, adapters[0] as ManagedStartupAgentAdapter],
-        dependencies,
-      ),
-    ).rejects.toThrow(/duplicate adapter registered for openclaw/u);
-    expect(dependencies.prepareApplication).not.toHaveBeenCalled();
-  });
-
-  it("rejects an adapter for an unshipped agent before preparing state", async () => {
-    const prepared = preparedFor("openclaw");
-    const dependencies = dependenciesFor(prepared);
-    const { adapters } = adaptersFor();
-    const wrong = {
-      agent: "not-a-shipped-agent",
-      apply: vi.fn(),
-    } as unknown as ManagedStartupAgentAdapter;
-
-    await expect(
-      coordinateManagedStartupApplication(inputFor("openclaw"), [...adapters, wrong], dependencies),
-    ).rejects.toThrow(/one shipped agent/u);
-    expect(dependencies.prepareApplication).not.toHaveBeenCalled();
+    ).rejects.toThrow(/targets openclaw, expected future-harness/u);
+    expect(dependencies.prepareApplication).toHaveBeenCalledOnce();
   });
 
   it("fails closed instead of cross-dispatching a mismatched prepared profile", async () => {
@@ -198,43 +144,39 @@ describe("managed startup coordinator", () => {
       profile: { agent: "hermes" } as ManagedStartupProfile,
     };
     const dependencies = dependenciesFor(prepared);
-    const { adapters, applyByAgent } = adaptersFor();
-
+    const adapter = adapterFor("openclaw");
     await expect(
-      coordinateManagedStartupApplication(inputFor("openclaw"), adapters, dependencies),
+      coordinateManagedStartupApplication(inputFor("openclaw"), adapter, dependencies),
     ).rejects.toThrow(/targets hermes, expected openclaw/u);
+    expect(adapter.apply).not.toHaveBeenCalled();
     expect(dependencies.commitApplication).not.toHaveBeenCalled();
-    Object.values(applyByAgent).forEach((apply) => {
-      expect(apply).not.toHaveBeenCalled();
-    });
   });
 
   it("does not commit an adapter failure and can retry the pending profile", async () => {
     const prepared = preparedFor("hermes");
     const dependencies = dependenciesFor(prepared);
-    const { adapters, applyByAgent } = adaptersFor();
-    applyByAgent.hermes.mockRejectedValueOnce(new Error("adapter failed"));
+    const adapter = adapterFor("hermes");
+    adapter.apply.mockRejectedValueOnce(new Error("adapter failed"));
 
     await expect(
-      coordinateManagedStartupApplication(inputFor("hermes"), adapters, dependencies),
+      coordinateManagedStartupApplication(inputFor("hermes"), adapter, dependencies),
     ).rejects.toThrow("adapter failed");
     expect(dependencies.commitApplication).not.toHaveBeenCalled();
 
     const retried = await coordinateManagedStartupApplication(
       inputFor("hermes"),
-      adapters,
+      adapter,
       dependencies,
     );
     expect(retried.application.status).toBe("committed");
-    expect(applyByAgent.hermes).toHaveBeenCalledTimes(2);
-    expect(dependencies.commitApplication).toHaveBeenCalledTimes(1);
+    expect(adapter.apply).toHaveBeenCalledTimes(2);
   });
 
   it("does not reapply after a durable commit loses its acknowledgement", async () => {
     const prepared = preparedFor("langchain-deepagents-code");
     const recovered = preparedFor("langchain-deepagents-code", "already-committed");
     const dependencies = dependenciesFor(prepared);
-    const { adapters, applyByAgent } = adaptersFor();
+    const adapter = adapterFor("langchain-deepagents-code");
     dependencies.prepareApplication
       .mockResolvedValueOnce(prepared)
       .mockResolvedValueOnce(recovered);
@@ -245,19 +187,18 @@ describe("managed startup coordinator", () => {
     await expect(
       coordinateManagedStartupApplication(
         inputFor("langchain-deepagents-code"),
-        adapters,
+        adapter,
         dependencies,
       ),
     ).rejects.toThrow("simulated lost commit acknowledgement");
 
     const retried = await coordinateManagedStartupApplication(
       inputFor("langchain-deepagents-code"),
-      adapters,
+      adapter,
       dependencies,
     );
-    expect(retried.application.status).toBe("committed");
     expect(retried.adapterApplied).toBe(false);
-    expect(applyByAgent["langchain-deepagents-code"]).toHaveBeenCalledTimes(1);
+    expect(adapter.apply).toHaveBeenCalledTimes(1);
     expect(dependencies.commitApplication).toHaveBeenCalledTimes(2);
   });
 });

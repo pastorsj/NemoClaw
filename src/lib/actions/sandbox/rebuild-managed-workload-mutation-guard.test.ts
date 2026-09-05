@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
-import { mapManagedStartupProfileToAgentEnvironment } from "../../onboard/managed-startup/agent-environment";
+import { mapManagedStartupProfileToAgentEnvironment as mapManagedStartupProfileWithAdapter } from "../../onboard/managed-startup/agent-environment";
 import * as managedWorkload from "../../onboard/workload/rebuild";
 import * as registry from "../../state/registry";
 import type { SandboxEntry } from "../../state/registry/types";
@@ -15,6 +18,16 @@ import {
 import type { RebuildRecreateOnboardOpts } from "./rebuild-gpu-opt-out";
 import { revalidateManagedWorkloadRebuildBeforeDelete } from "./rebuild-preflight-guards";
 import type { RebuildTargetConfig } from "./rebuild-target-preflight";
+
+function mapManagedStartupProfileToAgentEnvironment(
+  profile: Parameters<typeof mapManagedStartupProfileWithAdapter>[0],
+  environment: Readonly<Record<string, string | undefined>>,
+) {
+  const filename = path.resolve(`packages/nemoclaw-${profile.agent}/host/startup-adapter.cts`);
+  return mapManagedStartupProfileWithAdapter(profile, environment, {
+    adapterSource: { filename, source: fs.readFileSync(filename, "utf8") },
+  });
+}
 
 const entry = {
   name: "alpha",

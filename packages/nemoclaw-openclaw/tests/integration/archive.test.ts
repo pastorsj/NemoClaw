@@ -32,6 +32,7 @@ const RUNTIME_CONTRACTS = [
   "host/cli-grammar.cts",
   "host/restore-adapter.cts",
   "host/config-runtime.cts",
+  "host/startup-adapter.cts",
 ] as const;
 const PUBLISHED_LOCKFILES = [
   "plugin/npm-shrinkwrap.json",

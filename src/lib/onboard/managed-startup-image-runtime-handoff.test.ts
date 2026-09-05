@@ -12,7 +12,7 @@ import {
   MANAGED_STARTUP_E2E_CORPORATE_CA_PEM,
   managedStartupE2eProfile,
 } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
-import { mapManagedStartupProfileToAgentEnvironment } from "./managed-startup/agent-environment";
+import { mapManagedStartupProfileToAgentEnvironment as mapManagedStartupProfileWithAdapter } from "./managed-startup/agent-environment";
 import {
   applyManagedStartupCommandEnvironmentPlan,
   buildManagedStartupImageActionPlan,
@@ -47,6 +47,16 @@ const OPENCLAW_APPLICATION_RUNTIME_NAMES = [
   "NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS",
   "NEMOCLAW_AUTO_PAIR_SLOW_INTERVAL_SECS",
 ] as const;
+
+function mapManagedStartupProfileToAgentEnvironment(
+  profile: ManagedStartupProfile,
+  environment: Readonly<Record<string, string | undefined>> = {},
+) {
+  const filename = path.resolve(`packages/nemoclaw-${profile.agent}/host/startup-adapter.cts`);
+  return mapManagedStartupProfileWithAdapter(profile, environment, {
+    adapterSource: { filename, source: fs.readFileSync(filename, "utf8") },
+  });
+}
 
 describe("managed startup image runtime handoff and descriptor integrity", () => {
   let temporaryDirectoryPath = "";

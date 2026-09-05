@@ -91,6 +91,7 @@ RUN if [ -n "${NEMOCLAW_CORPORATE_CA_B64}" ]; then \
     fi
 
 COPY --from=managed-startup-runtime-builder /out/managed-startup-image-runtime.cjs /usr/local/lib/nemoclaw/managed-startup-image-runtime.cjs
+COPY --chmod=0444 packages/nemoclaw-pi/host/startup-adapter.cts /usr/local/lib/nemoclaw/startup-adapter.cjs
 # Keep the root-owned managed-startup handoff in this image-only layer. The
 # following permissions block is replayed on the host by regression tests.
 RUN managed_runtime_assertion_failed() { \

@@ -8,11 +8,7 @@ import {
   type PrepareManagedStartupApplicationInput,
   prepareManagedStartupApplication,
 } from "./application";
-import {
-  MANAGED_STARTUP_AGENTS,
-  type ManagedStartupAgent,
-  type ManagedStartupProfile,
-} from "./profile";
+import { type ManagedStartupAgent, type ManagedStartupProfile } from "./profile";
 
 export interface ManagedStartupAdapterContext {
   readonly agent: ManagedStartupAgent;
@@ -24,7 +20,7 @@ export interface ManagedStartupAdapterContext {
 }
 
 export interface ManagedStartupAgentAdapter {
-  readonly agent: ManagedStartupAgent;
+  readonly packageId: string;
   readonly apply: (context: ManagedStartupAdapterContext) => void | Promise<void>;
 }
 
@@ -42,10 +38,6 @@ export interface ManagedStartupCoordinationResult {
   readonly application: CommittedManagedStartupApplication;
 }
 
-type AdapterRegistry = Readonly<Record<ManagedStartupAgent, ManagedStartupAgentAdapter>>;
-
-const SHIPPED_AGENT_SET = new Set<string>(MANAGED_STARTUP_AGENTS);
-
 const DEFAULT_DEPENDENCIES: ManagedStartupCoordinatorDependencies = {
   prepareApplication: (input) => prepareManagedStartupApplication(input),
   commitApplication: (prepared) => commitManagedStartupApplication(prepared),
@@ -62,40 +54,15 @@ function fail(message: string): never {
   throw new ManagedStartupCoordinatorError(message);
 }
 
-function createAdapterRegistry(adapters: readonly ManagedStartupAgentAdapter[]): AdapterRegistry {
-  const byAgent = new Map<ManagedStartupAgent, ManagedStartupAgentAdapter>();
-  for (const adapter of adapters) {
-    if (
-      typeof adapter !== "object" ||
-      adapter === null ||
-      !SHIPPED_AGENT_SET.has(adapter.agent) ||
-      typeof adapter.apply !== "function"
-    ) {
-      fail("every adapter must identify one shipped agent and provide an apply function");
-    }
-    if (byAgent.has(adapter.agent)) {
-      fail(`duplicate adapter registered for ${adapter.agent}`);
-    }
-    byAgent.set(adapter.agent, adapter);
+function validateAdapter(adapter: ManagedStartupAgentAdapter): void {
+  if (
+    typeof adapter !== "object" ||
+    adapter === null ||
+    !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(adapter.packageId) ||
+    typeof adapter.apply !== "function"
+  ) {
+    fail("the adapter must identify one package and provide an apply function");
   }
-
-  const missing = MANAGED_STARTUP_AGENTS.filter((agent) => !byAgent.has(agent));
-  if (missing.length > 0) {
-    fail(`missing adapter for ${missing.join(", ")}`);
-  }
-  if (byAgent.size !== MANAGED_STARTUP_AGENTS.length) {
-    fail("adapter registry must contain exactly the shipped agents");
-  }
-
-  return Object.freeze(
-    Object.fromEntries(
-      MANAGED_STARTUP_AGENTS.map((agent) => {
-        const adapter = byAgent.get(agent);
-        if (!adapter) fail(`missing adapter for ${agent}`);
-        return [agent, adapter];
-      }),
-    ),
-  ) as AdapterRegistry;
 }
 
 function requirePreparedIdentity(
@@ -121,17 +88,20 @@ function adapterContext(prepared: PreparedManagedStartupApplication): ManagedSta
 /**
  * Coordinate one managed startup without depending on a host container driver.
  *
- * A complete, duplicate-free adapter registry is required before application
- * state is prepared. New pending profiles dispatch exactly their matching
- * adapter and commit only after it succeeds. An already committed profile is
- * revalidated through commit without reapplying mutable agent configuration.
+ * The package identity must match before application state is prepared. A new
+ * pending profile applies exactly that package's validated finite plan and
+ * commits only after it succeeds. An already committed profile is revalidated
+ * through commit without reapplying mutable package configuration.
  */
 export async function coordinateManagedStartupApplication(
   input: PrepareManagedStartupApplicationInput,
-  adapters: readonly ManagedStartupAgentAdapter[],
+  adapter: ManagedStartupAgentAdapter,
   dependencies: ManagedStartupCoordinatorDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<ManagedStartupCoordinationResult> {
-  const registry = createAdapterRegistry(adapters);
+  validateAdapter(adapter);
+  if (adapter.packageId !== input.expectedAgent) {
+    fail(`adapter for ${adapter.packageId} cannot apply ${input.expectedAgent}`);
+  }
   const prepared = await dependencies.prepareApplication(input);
   requirePreparedIdentity(prepared, input.expectedAgent);
 
@@ -142,10 +112,6 @@ export async function coordinateManagedStartupApplication(
     };
   }
 
-  const adapter = registry[prepared.profile.agent];
-  if (adapter.agent !== prepared.profile.agent) {
-    fail(`adapter registry cross-dispatch detected for ${prepared.profile.agent}`);
-  }
   await adapter.apply(adapterContext(prepared));
   return {
     adapterApplied: true,

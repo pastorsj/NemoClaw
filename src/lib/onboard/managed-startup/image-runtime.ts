@@ -22,10 +22,7 @@ import {
   decodeManagedStartupProfile,
   fingerprintManagedStartupProfile,
   MANAGED_STARTUP_AGENTS,
-  MANAGED_STARTUP_MESSAGING_AGENTS,
   type ManagedStartupAgent,
-  type ManagedStartupDashboard,
-  type ManagedStartupMessagingAgent,
   type ManagedStartupProfile,
 } from "./profile";
 import {
@@ -85,25 +82,21 @@ const MAX_MANAGED_STARTUP_RUNTIME_ENVIRONMENT_BYTES = 512 * 1024;
 export type ManagedStartupImageIdentity = "root" | "sandbox";
 
 export interface ManagedStartupGenerateConfigConstructionAction {
-  readonly kind: "generate-agent-config";
-  readonly agent: ManagedStartupAgent;
+  readonly kind: "generate-config";
   readonly runAs: "sandbox";
 }
 
 interface ManagedStartupApplyMessagingConstructionActionBase {
-  readonly kind: "apply-messaging-plan";
-  readonly agent: ManagedStartupMessagingAgent;
+  readonly kind: "apply-messaging";
   readonly mode: "apply" | "clear";
 }
 
-export interface ManagedStartupApplyMessagingRuntimeConstructionAction
-  extends ManagedStartupApplyMessagingConstructionActionBase {
+export interface ManagedStartupApplyMessagingRuntimeConstructionAction extends ManagedStartupApplyMessagingConstructionActionBase {
   readonly phase: "runtime-setup";
   readonly runAs: "root";
 }
 
-export interface ManagedStartupApplyMessagingConfigConstructionAction
-  extends ManagedStartupApplyMessagingConstructionActionBase {
+export interface ManagedStartupApplyMessagingConfigConstructionAction extends ManagedStartupApplyMessagingConstructionActionBase {
   readonly phase: "post-agent-install";
   readonly runAs: "sandbox";
 }
@@ -112,22 +105,16 @@ export type ManagedStartupApplyMessagingConstructionAction =
   | ManagedStartupApplyMessagingRuntimeConstructionAction
   | ManagedStartupApplyMessagingConfigConstructionAction;
 
-export interface ManagedStartupConfigureDashboardConstructionAction {
-  readonly kind: "configure-dashboard";
-  readonly dashboard: ManagedStartupDashboard;
-}
-
 export type ManagedStartupImageConstructionAction =
   | ManagedStartupGenerateConfigConstructionAction
-  | ManagedStartupApplyMessagingConstructionAction
-  | ManagedStartupConfigureDashboardConstructionAction;
+  | ManagedStartupApplyMessagingConstructionAction;
 
 /**
  * The application mapper must produce this structural handoff only after it
  * decodes and revalidates the profile and its nested messaging plan.
  */
 export interface ManagedStartupImageActionPlanInput {
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly actions: readonly ManagedStartupImageConstructionAction[];
 }
 
@@ -190,11 +177,9 @@ function failActionPlan(message: string): never {
   throw new ManagedStartupImageActionPlanError(message);
 }
 
-function exactActionPlanAgent(value: string): ManagedStartupAgent {
-  if ((MANAGED_STARTUP_AGENTS as readonly string[]).includes(value)) {
-    return value as ManagedStartupAgent;
-  }
-  return failActionPlan(`unsupported agent ${JSON.stringify(value)}`);
+function exactActionPlanAgent(value: string): string {
+  if (/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) return value;
+  return failActionPlan(`invalid package identity ${JSON.stringify(value)}`);
 }
 
 function fail(message: string): never {
@@ -525,7 +510,7 @@ function generatorCommand(): readonly string[] {
 }
 
 function messagingCommand(
-  agent: ManagedStartupMessagingAgent,
+  agent: string,
   phase: "runtime-setup" | "post-agent-install",
   mode: "apply" | "clear",
 ): readonly string[] {
@@ -543,15 +528,6 @@ function messagingCommand(
   ];
 }
 
-function assertActionAgent(
-  inputAgent: ManagedStartupAgent,
-  actionAgent: ManagedStartupAgent,
-): void {
-  if (inputAgent !== actionAgent) {
-    failActionPlan(`action for ${actionAgent} cannot be used by ${inputAgent}`);
-  }
-}
-
 /**
  * Convert the closed application-action vocabulary into immutable image
  * commands. The vocabulary cannot express agent installation, package-manager
@@ -562,24 +538,13 @@ export function buildManagedStartupImageActionPlan(
 ): readonly ManagedStartupImageActionCommand[] {
   const inputAgent = exactActionPlanAgent(input.agent);
   const commands: ManagedStartupImageActionCommand[] = [];
-  let dashboardActions = 0;
   let generateActions = 0;
   let runtimeMessagingActions = 0;
   let postMessagingActions = 0;
 
   for (const action of input.actions) {
     switch (action.kind) {
-      case "configure-dashboard": {
-        if (action.dashboard.agent !== input.agent) {
-          failActionPlan(
-            `dashboard for ${action.dashboard.agent} cannot be used by ${input.agent}`,
-          );
-        }
-        dashboardActions += 1;
-        break;
-      }
-      case "generate-agent-config": {
-        assertActionAgent(inputAgent, exactActionPlanAgent(action.agent));
+      case "generate-config": {
         if (action.runAs !== "sandbox") {
           failActionPlan("agent configuration generation must run as sandbox");
         }
@@ -591,8 +556,7 @@ export function buildManagedStartupImageActionPlan(
         });
         break;
       }
-      case "apply-messaging-plan": {
-        assertActionAgent(inputAgent, exactActionPlanAgent(action.agent));
+      case "apply-messaging": {
         if (action.mode !== "apply" && action.mode !== "clear") {
           failActionPlan("messaging intent must be apply or clear");
         }
@@ -604,7 +568,7 @@ export function buildManagedStartupImageActionPlan(
           commands.push({
             action: "messaging-runtime-setup",
             runAs: action.runAs,
-            argv: messagingCommand(action.agent, action.phase, action.mode),
+            argv: messagingCommand(inputAgent, action.phase, action.mode),
           });
         } else if (action.phase === "post-agent-install") {
           if (action.runAs !== "sandbox") {
@@ -614,7 +578,7 @@ export function buildManagedStartupImageActionPlan(
           commands.push({
             action: "messaging-post-agent-install",
             runAs: action.runAs,
-            argv: messagingCommand(action.agent, action.phase, action.mode),
+            argv: messagingCommand(inputAgent, action.phase, action.mode),
           });
         } else {
           failActionPlan("unsupported messaging construction phase");
@@ -626,15 +590,10 @@ export function buildManagedStartupImageActionPlan(
     }
   }
 
-  if (dashboardActions !== 1) {
-    failActionPlan("exactly one dashboard construction action is required");
-  }
   if (generateActions !== 1) {
     failActionPlan("exactly one agent config construction action is required");
   }
-  const supportsMessaging = (MANAGED_STARTUP_MESSAGING_AGENTS as readonly string[]).includes(
-    inputAgent,
-  );
+  const supportsMessaging = runtimeMessagingActions > 0 || postMessagingActions > 0;
   const expectedMessagingActions = supportsMessaging ? 1 : 0;
   if (
     runtimeMessagingActions !== expectedMessagingActions ||
@@ -1046,10 +1005,7 @@ function managedSystemCaAnchorNames(): readonly string[] {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
     fail("could not inspect the managed system CA anchor directory");
   }
-  requireRootOwnedDirectory(
-    MANAGED_STARTUP_SYSTEM_CA_ANCHOR_DIRECTORY,
-    ROOT_OWNED_DIRECTORY_MODE,
-  );
+  requireRootOwnedDirectory(MANAGED_STARTUP_SYSTEM_CA_ANCHOR_DIRECTORY, ROOT_OWNED_DIRECTORY_MODE);
   try {
     return (fs.readdirSync(MANAGED_STARTUP_SYSTEM_CA_ANCHOR_DIRECTORY) as string[])
       .filter((name) => MANAGED_STARTUP_SYSTEM_CA_ANCHOR_RE.test(name))
@@ -1397,11 +1353,10 @@ function applyAdapter(
   });
   let commandIndex = 0;
   for (const action of mapped.actions) {
-    if (action.kind === "configure-dashboard") continue;
     const command = commandPlan[commandIndex];
     if (!command) fail(`missing image command for ${action.kind}`);
     commandIndex += 1;
-    if (action.kind === "apply-messaging-plan") {
+    if (action.kind === "apply-messaging") {
       if (action.phase === "runtime-setup") {
         prepareMessagingRuntimeTarget(action.mode);
       }
@@ -1427,11 +1382,11 @@ function applyAdapter(
     fail("image action plan contains an unmatched command");
   }
 
-  switch (context.agent) {
-    case "openclaw":
+  switch (mapped.integrity.kind) {
+    case "validated-json-config":
       sealOpenClawConfiguration(mapped.configurationEnvironment, mapped.applicationRuntime);
       break;
-    case "hermes":
+    case "managed-config-set":
       installHermesManagedPolicy();
       sealHermesConfiguration(mapped.configurationEnvironment, mapped.applicationRuntime);
       // Normalize before the coordinator commits a newly applied profile so
@@ -1439,7 +1394,7 @@ function applyAdapter(
       // a completed mutable image contract.
       normalizeHermesManagedConfiguration();
       break;
-    case "langchain-deepagents-code":
+    case "none":
       break;
   }
   installRootOwnedMaterials(mapped.materials);
@@ -1448,11 +1403,11 @@ function applyAdapter(
   mergeCorporateCa(context.corporateCaPath);
 }
 
-function adapters(mapped: ManagedStartupAgentEnvironment): readonly ManagedStartupAgentAdapter[] {
-  return MANAGED_STARTUP_AGENTS.map((agent) => ({
-    agent,
+function startupAdapter(mapped: ManagedStartupAgentEnvironment): ManagedStartupAgentAdapter {
+  return {
+    packageId: mapped.agent,
     apply: (context: ManagedStartupAdapterContext) => applyAdapter(context, mapped),
-  }));
+  };
 }
 
 export async function applyManagedStartupImageProfile(
@@ -1488,12 +1443,12 @@ export async function applyManagedStartupImageProfile(
         ? {}
         : { corporateCaB64: env[MANAGED_STARTUP_CA_ENV] }),
     },
-    adapters(mapped),
+    startupAdapter(mapped),
   );
   if (mapped.agent !== result.application.profile.agent) {
     fail(`mapped ${mapped.agent} environment for ${result.application.profile.agent}`);
   }
-  if (expectedAgent === "hermes" && !result.adapterApplied) {
+  if (mapped.integrity.kind === "managed-config-set" && !result.adapterApplied) {
     // Committed startup replays still repair generator-created 0600 files.
     normalizeHermesManagedConfiguration();
   }

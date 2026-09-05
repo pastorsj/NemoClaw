@@ -2,127 +2,65 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Buffer } from "node:buffer";
+import fs from "node:fs";
+import vm from "node:vm";
 
-import { parseSandboxMessagingPlan } from "../../messaging/plan-validation";
-import {
-  MANAGED_STARTUP_RUNTIME_CLEANUP_OBLIGATIONS,
-  type ManagedStartupAgent,
-  type ManagedStartupDashboard,
-  type ManagedStartupMessagingAgent,
-  type ManagedStartupProfile,
-  validateManagedStartupProfile,
-} from "./profile";
+import type {
+  HarnessStartupAction,
+  HarnessStartupApplicationRuntimePlan,
+  HarnessStartupIntegrityPlan,
+  HarnessStartupMaterial,
+  HarnessStartupRequest,
+} from "@nvidia/nemoclaw-harness-contract";
 
-export type ManagedStartupConfigAgent = ManagedStartupAgent;
-export type { ManagedStartupMessagingAgent } from "./profile";
+import { type ManagedStartupProfile, validateManagedStartupProfile } from "./profile";
 
-export interface ManagedStartupCorporateCaMaterial {
-  readonly kind: "corporate-ca-handoff";
-  readonly legacyInput: "NEMOCLAW_CORPORATE_CA_B64";
-  /**
-   * The certificate bytes use a separate bounded transport. Keeping only its
-   * digest here prevents the driver-neutral profile mapper from becoming a
-   * secret or arbitrary-file transport.
-   */
-  readonly expectedSha256: string | null;
-}
+export const HARNESS_STARTUP_ADAPTER_FILE = "/usr/local/lib/nemoclaw/startup-adapter.cjs";
+const MAX_ADAPTER_BYTES = 1024 * 1024;
+const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+const MAX_PLAN_BYTES = 2 * 1024 * 1024;
+const MAX_ENVIRONMENT_ENTRIES = 256;
+const MAX_ENVIRONMENT_VALUE_BYTES = 512 * 1024;
+const MAX_ROOT_FILE_BYTES = 64 * 1024;
+const ADAPTER_TIMEOUT_MILLISECONDS = 500;
+const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const CREDENTIAL_ENVIRONMENT_NAME = /(?:^|_)(?:API_KEY|CREDENTIAL|PASSWORD|SECRET|TOKEN)(?:_|$)/iu;
+const ROOT_MATERIAL_PATH = /^\/usr\/local\/share\/nemoclaw\/[a-z0-9][a-z0-9._/-]*$/u;
+const PUBLIC_APPLICATION_ENVIRONMENT = Object.freeze([
+  "NEMOCLAW_AUTO_PAIR_DEADLINE_SECS",
+  "NEMOCLAW_AUTO_PAIR_FAST_DEADLINE_SECS",
+  "NEMOCLAW_AUTO_PAIR_FAST_REENTRY_INTERVAL_SECS",
+  "NEMOCLAW_AUTO_PAIR_FAST_REENTRY_POLLS",
+  "NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS",
+  "NEMOCLAW_AUTO_PAIR_SLOW_INTERVAL_SECS",
+]);
 
-export interface ManagedStartupRootOwnedFileMaterial {
-  readonly kind: "root-owned-file";
-  readonly legacyInput:
-    | "NEMOCLAW_DCODE_AUTO_APPROVAL"
-    | "NEMOCLAW_INFERENCE_BASE_URL"
-    | "NEMOCLAW_PROXY_HOST"
-    | "NEMOCLAW_PROXY_PORT"
-    | "NEMOCLAW_REASONING_EFFORT"
-    | "NEMOCLAW_UPSTREAM_PROVIDER";
-  readonly path:
-    | "/usr/local/share/nemoclaw/dcode-auto-approval"
-    | "/usr/local/share/nemoclaw/dcode-inference-base-url"
-    | "/usr/local/share/nemoclaw/dcode-proxy-host"
-    | "/usr/local/share/nemoclaw/dcode-proxy-port"
-    | "/usr/local/share/nemoclaw/dcode-reasoning-effort"
-    | "/usr/local/share/nemoclaw/dcode-upstream-provider"
-    | "/usr/local/share/nemoclaw/pi-proxy-host"
-    | "/usr/local/share/nemoclaw/pi-proxy-port";
-  readonly contents: string;
-  readonly owner: "root";
-  readonly group: "root";
-  readonly mode: 0o444;
-}
+type ApplicationEnvironment = Readonly<Record<string, string | undefined>>;
+const EMPTY_APPLICATION_ENVIRONMENT: ApplicationEnvironment = Object.freeze({});
 
-export type ManagedStartupAgentMaterial =
-  | ManagedStartupCorporateCaMaterial
-  | ManagedStartupRootOwnedFileMaterial;
-
-export interface ManagedStartupApplicationRuntimePlan {
-  /** Validated launch-only values that remain available to image setup and the agent runtime. */
-  readonly exportEnvironment: Readonly<Record<string, string>>;
-  /** Ambient launch values that are unsupported for the selected agent and must be removed. */
-  readonly unsetEnvironment: readonly string[];
-}
-
-export interface ManagedStartupGenerateConfigAction {
-  readonly kind: "generate-agent-config";
-  readonly agent: ManagedStartupConfigAgent;
-  readonly runAs: "sandbox";
-}
-
-interface ManagedStartupApplyMessagingActionBase {
-  readonly kind: "apply-messaging-plan";
-  readonly agent: ManagedStartupMessagingAgent;
-  readonly mode: "apply" | "clear";
-  /**
-   * Complete managed images already contain the reviewed dependency union.
-   * The runtime action vocabulary intentionally cannot express the
-   * package-install phase.
-   */
-  readonly phase: "runtime-setup" | "post-agent-install";
-}
-
-export interface ManagedStartupApplyMessagingRuntimeAction extends ManagedStartupApplyMessagingActionBase {
-  readonly phase: "runtime-setup";
-  /** Writes the reduced, root-owned messaging runtime-plan artifact. */
-  readonly runAs: "root";
-}
-
-export interface ManagedStartupApplyMessagingConfigAction extends ManagedStartupApplyMessagingActionBase {
-  readonly phase: "post-agent-install";
-  /** Renders only sandbox-owned agent configuration from preinstalled assets. */
-  readonly runAs: "sandbox";
-}
-
-export type ManagedStartupApplyMessagingAction =
-  | ManagedStartupApplyMessagingRuntimeAction
-  | ManagedStartupApplyMessagingConfigAction;
-
-export interface ManagedStartupConfigureDashboardAction {
-  readonly kind: "configure-dashboard";
-  readonly dashboard: ManagedStartupDashboard;
-}
-
-export type ManagedStartupAgentAction =
-  | ManagedStartupGenerateConfigAction
-  | ManagedStartupApplyMessagingAction
-  | ManagedStartupConfigureDashboardAction;
+export type ManagedStartupApplicationRuntimePlan = HarnessStartupApplicationRuntimePlan;
+export type ManagedStartupAgentMaterial = HarnessStartupMaterial;
+export type ManagedStartupAgentAction = HarnessStartupAction;
 
 export interface ManagedStartupAgentEnvironment {
-  readonly schemaVersion: ManagedStartupProfile["schemaVersion"];
-  readonly agent: ManagedStartupAgent;
-  /**
-   * Inputs scoped to the trusted configuration-application phase. The
-   * application boundary must not blindly retain this whole map in the agent
-   * process environment.
-   */
+  readonly schemaVersion: 1;
+  readonly agent: string;
   readonly configurationEnvironment: Readonly<Record<string, string>>;
-  /**
-   * Non-secret values intentionally retained for existing entrypoints and
-   * agent runtime adapters after generated configuration is committed.
-   */
   readonly runtimeEnvironment: Readonly<Record<string, string>>;
   readonly applicationRuntime: ManagedStartupApplicationRuntimePlan;
   readonly materials: readonly ManagedStartupAgentMaterial[];
   readonly actions: readonly ManagedStartupAgentAction[];
+  readonly integrity: HarnessStartupIntegrityPlan;
+}
+
+export interface HarnessStartupAdapterSource {
+  readonly filename: string;
+  readonly source: string;
+}
+
+export interface MapManagedStartupEnvironmentOptions {
+  /** Tests and package qualification can provide already-reviewed source bytes. */
+  readonly adapterSource?: HarnessStartupAdapterSource;
 }
 
 export class ManagedStartupAgentEnvironmentError extends Error {
@@ -132,523 +70,392 @@ export class ManagedStartupAgentEnvironmentError extends Error {
   }
 }
 
-type MutableEnvironment = Record<string, string>;
-type ApplicationEnvironment = Readonly<Record<string, string | undefined>>;
-const EMPTY_APPLICATION_ENVIRONMENT: ApplicationEnvironment = Object.freeze({});
+function fail(message: string): never {
+  throw new ManagedStartupAgentEnvironmentError(message);
+}
 
-const OPENCLAW_APPLICATION_RUNTIME_INPUTS = Object.freeze([
-  ["NEMOCLAW_AUTO_PAIR_DEADLINE_SECS", "positive-finite-seconds"],
-  ["NEMOCLAW_AUTO_PAIR_FAST_DEADLINE_SECS", "positive-finite-seconds"],
-  ["NEMOCLAW_AUTO_PAIR_FAST_REENTRY_INTERVAL_SECS", "positive-finite-seconds"],
-  ["NEMOCLAW_AUTO_PAIR_FAST_REENTRY_POLLS", "positive-safe-integer"],
-  ["NEMOCLAW_AUTO_PAIR_RUN_TIMEOUT_SECS", "positive-finite-seconds"],
-  ["NEMOCLAW_AUTO_PAIR_SLOW_INTERVAL_SECS", "positive-finite-seconds"],
-] as const);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-function booleanFlag(value: boolean): "0" | "1" {
-  return value ? "1" : "0";
+function exactKeys(value: Record<string, unknown>, names: readonly string[], label: string): void {
+  const actual = Object.keys(value).sort();
+  const expected = [...names].sort();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) fail(`${label} has unsupported fields`);
 }
 
 function canonicalizeJson(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => canonicalizeJson(item));
-  if (value === null || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return value;
   return Object.fromEntries(
-    Object.keys(record)
+    Object.keys(value)
       .sort()
-      .map((key) => [key, canonicalizeJson(record[key])]),
+      .map((key) => [key, canonicalizeJson(value[key])]),
   );
 }
 
-function encodeCanonicalJson(value: unknown): string {
-  return Buffer.from(JSON.stringify(canonicalizeJson(value)), "utf8").toString("base64");
-}
-
-function sortedEnvironment(environment: MutableEnvironment): Readonly<Record<string, string>> {
-  return Object.freeze(
-    Object.fromEntries(
-      Object.entries(environment).sort(([left], [right]) =>
-        left < right ? -1 : left > right ? 1 : 0,
-      ),
-    ),
-  );
-}
-
-function canonicalApplicationRuntimeValue(
-  name: string,
-  raw: string,
-  kind: "positive-finite-seconds" | "positive-safe-integer",
-): string {
-  if (raw.includes("\0") || /[\r\n]/u.test(raw)) {
-    throw new ManagedStartupAgentEnvironmentError(`${name} must be single-line text`);
-  }
-  const value = Number(raw.trim());
-  const valid =
-    kind === "positive-safe-integer"
-      ? Number.isSafeInteger(value) && value > 0
-      : Number.isFinite(value) && value > 0;
-  if (!valid) {
-    throw new ManagedStartupAgentEnvironmentError(
-      `${name} must be ${
-        kind === "positive-safe-integer" ? "a positive safe integer" : "finite positive seconds"
-      }`,
-    );
-  }
-  return String(value);
-}
-
-function applicationRuntimePlan(
-  profile: ManagedStartupProfile,
-  environment: ApplicationEnvironment,
-): ManagedStartupApplicationRuntimePlan {
-  const exportEnvironment: MutableEnvironment = {};
-  if (profile.agent === "openclaw") {
-    for (const [name, kind] of OPENCLAW_APPLICATION_RUNTIME_INPUTS) {
-      const raw = environment[name];
-      if (raw !== undefined) {
-        exportEnvironment[name] = canonicalApplicationRuntimeValue(name, raw, kind);
-      }
+function environmentText(value: unknown, name: string): string {
+  if (typeof value === "string") {
+    if (
+      Buffer.byteLength(value, "utf8") > MAX_ENVIRONMENT_VALUE_BYTES ||
+      value.includes("\0") ||
+      /[\r\n]/u.test(value)
+    ) {
+      fail(`environment value for ${name} must be bounded single-line text`);
     }
+    return value;
   }
-  const unsetEnvironment = new Set(
-    MANAGED_STARTUP_RUNTIME_CLEANUP_OBLIGATIONS.filter(
-      ({ supportedFor }) => !supportedFor.includes(profile.agent),
-    ).map(({ input }) => input),
-  );
-  if (profile.agent !== "openclaw") {
-    for (const [name] of OPENCLAW_APPLICATION_RUNTIME_INPUTS) {
-      unsetEnvironment.add(name);
+  if (!isRecord(value)) fail(`environment value for ${name} is invalid`);
+  exactKeys(value, ["kind", "value"], `environment value for ${name}`);
+  if (value.kind !== "canonical-json-base64") {
+    fail(`environment value for ${name} uses an unsupported encoding`);
+  }
+  const json = JSON.stringify(canonicalizeJson(value.value));
+  if (json === undefined || Buffer.byteLength(json, "utf8") > MAX_ENVIRONMENT_VALUE_BYTES) {
+    fail(`encoded environment value for ${name} is invalid or oversized`);
+  }
+  return Buffer.from(json, "utf8").toString("base64");
+}
+
+function resolvedEnvironment(value: unknown, label: string): Readonly<Record<string, string>> {
+  if (!isRecord(value)) fail(`${label} must be an object`);
+  const entries = Object.entries(value);
+  if (entries.length > MAX_ENVIRONMENT_ENTRIES) fail(`${label} has too many entries`);
+  const environment: Record<string, string> = {};
+  for (const [name, raw] of entries.sort(([left], [right]) => left.localeCompare(right))) {
+    if (!ENVIRONMENT_NAME.test(name) || CREDENTIAL_ENVIRONMENT_NAME.test(name)) {
+      fail(`${label} contains unsafe name ${JSON.stringify(name)}`);
     }
+    environment[name] = environmentText(raw, name);
+  }
+  return Object.freeze(environment);
+}
+
+function applicationRuntime(value: unknown): ManagedStartupApplicationRuntimePlan {
+  if (!isRecord(value)) fail("applicationRuntime must be an object");
+  exactKeys(value, ["exportEnvironment", "unsetEnvironment"], "applicationRuntime");
+  const exportEnvironment = resolvedEnvironment(
+    value.exportEnvironment,
+    "applicationRuntime.exportEnvironment",
+  );
+  if (!Array.isArray(value.unsetEnvironment) || value.unsetEnvironment.length > 256) {
+    fail("applicationRuntime.unsetEnvironment must be a bounded array");
+  }
+  const unsets = new Set<string>();
+  for (const raw of value.unsetEnvironment) {
+    if (
+      typeof raw !== "string" ||
+      !ENVIRONMENT_NAME.test(raw) ||
+      CREDENTIAL_ENVIRONMENT_NAME.test(raw) ||
+      unsets.has(raw) ||
+      Object.hasOwn(exportEnvironment, raw)
+    ) {
+      fail("applicationRuntime.unsetEnvironment contains an invalid entry");
+    }
+    unsets.add(raw);
   }
   return Object.freeze({
-    exportEnvironment: sortedEnvironment(exportEnvironment),
-    unsetEnvironment: Object.freeze([...unsetEnvironment].sort()),
+    exportEnvironment,
+    unsetEnvironment: Object.freeze([...unsets].sort()),
   });
 }
 
-function commonConfigurationEnvironment(profile: ManagedStartupProfile): MutableEnvironment {
-  return {
-    NEMOCLAW_INFERENCE_API: profile.inference.api,
-    NEMOCLAW_INFERENCE_BASE_URL: profile.inference.routedBaseUrl,
-    NEMOCLAW_INFERENCE_PROVIDER_ID: profile.inference.routeProvider,
-    NEMOCLAW_MODEL: profile.inference.model,
-    NEMOCLAW_TOOL_DISCLOSURE: profile.tools.disclosure,
-    NEMOCLAW_UPSTREAM_PROVIDER: profile.inference.upstreamProvider,
-  };
-}
-
-function appendHostProxyEnvironment(
-  environment: MutableEnvironment,
-  profile: ManagedStartupProfile,
-  options: { readonly preserveAmbientWhenAbsent?: boolean } = {},
-): void {
+function startupMaterial(value: unknown): ManagedStartupAgentMaterial {
+  if (!isRecord(value)) fail("startup material must be an object");
+  if (value.kind === "corporate-ca-handoff") {
+    exactKeys(value, ["kind", "legacyInput", "expectedSha256"], "corporate CA material");
+    if (
+      value.legacyInput !== "NEMOCLAW_CORPORATE_CA_B64" ||
+      (value.expectedSha256 !== null &&
+        (typeof value.expectedSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(value.expectedSha256)))
+    ) {
+      fail("corporate CA material is invalid");
+    }
+    return Object.freeze({
+      kind: "corporate-ca-handoff",
+      legacyInput: "NEMOCLAW_CORPORATE_CA_B64",
+      expectedSha256: value.expectedSha256,
+    });
+  }
+  if (value.kind !== "root-owned-file") fail("startup material kind is unsupported");
+  exactKeys(
+    value,
+    ["kind", "legacyInput", "path", "contents", "owner", "group", "mode"],
+    "root-owned material",
+  );
   if (
-    options.preserveAmbientWhenAbsent === true &&
-    profile.proxy.hostHttpUrl === null &&
-    profile.proxy.hostHttpsUrl === null &&
-    profile.proxy.hostNoProxy.length === 0
+    typeof value.legacyInput !== "string" ||
+    !ENVIRONMENT_NAME.test(value.legacyInput) ||
+    CREDENTIAL_ENVIRONMENT_NAME.test(value.legacyInput) ||
+    typeof value.path !== "string" ||
+    !ROOT_MATERIAL_PATH.test(value.path) ||
+    value.path.includes("..") ||
+    typeof value.contents !== "string" ||
+    Buffer.byteLength(value.contents, "utf8") > MAX_ROOT_FILE_BYTES ||
+    value.contents.includes("\0") ||
+    value.owner !== "root" ||
+    value.group !== "root" ||
+    value.mode !== 0o444
   ) {
-    return;
+    fail("root-owned material is invalid");
   }
-  const httpProxy = profile.proxy.hostHttpUrl ?? "";
-  const httpsProxy = profile.proxy.hostHttpsUrl ?? "";
-  const noProxy = profile.proxy.hostNoProxy.join(",");
-  environment.HTTP_PROXY = httpProxy;
-  environment.HTTPS_PROXY = httpsProxy;
-  environment.NO_PROXY = noProxy;
-  environment.http_proxy = httpProxy;
-  environment.https_proxy = httpsProxy;
-  environment.no_proxy = noProxy;
-}
-
-function messagingEnvironment(
-  profile: ManagedStartupProfile,
-  expectedAgent: ManagedStartupMessagingAgent,
-): MutableEnvironment {
-  if (profile.messaging.plan === null) return {};
-  const plan = parseSandboxMessagingPlan(profile.messaging.plan, { agent: expectedAgent });
-  if (!plan) {
-    throw new ManagedStartupAgentEnvironmentError(
-      `messaging.plan must contain a validated ${expectedAgent} messaging plan`,
-    );
-  }
-  const { workflow: _workflow, ...imageBuildPlan } = plan;
-  return {
-    NEMOCLAW_MESSAGING_PLAN_B64: encodeCanonicalJson(imageBuildPlan),
-  };
-}
-
-function corporateCaMaterial(profile: ManagedStartupProfile): ManagedStartupCorporateCaMaterial {
-  return Object.freeze({
-    kind: "corporate-ca-handoff",
-    legacyInput: "NEMOCLAW_CORPORATE_CA_B64",
-    expectedSha256: profile.corporateCa.bundleSha256,
-  });
-}
-
-function rootOwnedFile(
-  legacyInput: ManagedStartupRootOwnedFileMaterial["legacyInput"],
-  path: ManagedStartupRootOwnedFileMaterial["path"],
-  value: string,
-): ManagedStartupRootOwnedFileMaterial {
   return Object.freeze({
     kind: "root-owned-file",
-    legacyInput,
-    path,
-    contents: `${value}\n`,
+    legacyInput: value.legacyInput,
+    path: value.path as `/usr/local/share/nemoclaw/${string}`,
+    contents: value.contents,
     owner: "root",
     group: "root",
     mode: 0o444,
   });
 }
 
-function dashboardAction(
-  dashboard: ManagedStartupDashboard,
-): ManagedStartupConfigureDashboardAction {
-  return Object.freeze({
-    kind: "configure-dashboard",
-    dashboard: Object.freeze(structuredClone(dashboard)),
-  });
+function startupAction(value: unknown): ManagedStartupAgentAction {
+  if (!isRecord(value)) fail("startup action must be an object");
+  if (value.kind === "generate-config") {
+    exactKeys(value, ["kind", "runAs"], "generate-config action");
+    if (value.runAs !== "sandbox") fail("generate-config must run as sandbox");
+    return Object.freeze({ kind: "generate-config", runAs: "sandbox" });
+  }
+  if (value.kind !== "apply-messaging") fail("startup action kind is unsupported");
+  exactKeys(value, ["kind", "mode", "phase", "runAs"], "apply-messaging action");
+  if (value.mode !== "apply" && value.mode !== "clear") fail("messaging mode is invalid");
+  if (value.phase === "runtime-setup" && value.runAs === "root") {
+    return Object.freeze({
+      kind: "apply-messaging",
+      mode: value.mode,
+      phase: "runtime-setup",
+      runAs: "root",
+    });
+  }
+  if (value.phase === "post-agent-install" && value.runAs === "sandbox") {
+    return Object.freeze({
+      kind: "apply-messaging",
+      mode: value.mode,
+      phase: "post-agent-install",
+      runAs: "sandbox",
+    });
+  }
+  return fail("messaging phase and identity are inconsistent");
 }
 
-function applicationActions(
-  profile: ManagedStartupProfile,
-  messagingAgent: ManagedStartupMessagingAgent | null,
-): readonly ManagedStartupAgentAction[] {
-  const actions: ManagedStartupAgentAction[] = [];
-  if (messagingAgent !== null) {
-    actions.push(
-      Object.freeze({
-        kind: "apply-messaging-plan",
-        agent: messagingAgent,
-        mode: profile.messaging.plan === null ? "clear" : "apply",
-        phase: "runtime-setup",
-        runAs: "root",
-      }),
-    );
+function startupActions(value: unknown): readonly ManagedStartupAgentAction[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3) {
+    fail("actions must contain one bounded startup workflow");
   }
-  actions.push(
-    Object.freeze({
-      kind: "generate-agent-config",
-      agent: profile.agent,
-      runAs: "sandbox",
-    }),
+  const actions = value.map(startupAction);
+  const kinds = actions.map((action) =>
+    action.kind === "apply-messaging" ? `${action.kind}:${action.phase}` : action.kind,
   );
-  if (messagingAgent !== null) {
-    actions.push(
-      Object.freeze({
-        kind: "apply-messaging-plan",
-        agent: messagingAgent,
-        mode: profile.messaging.plan === null ? "clear" : "apply",
-        phase: "post-agent-install",
-        runAs: "sandbox",
-      }),
-    );
+  const supportedOrders = [
+    ["generate-config"],
+    ["apply-messaging:runtime-setup", "generate-config", "apply-messaging:post-agent-install"],
+  ];
+  if (!supportedOrders.some((order) => JSON.stringify(kinds) === JSON.stringify(order))) {
+    fail("actions are not in a supported transaction order");
   }
-  actions.push(dashboardAction(profile.dashboard));
+  if (
+    actions.length === 3 &&
+    actions[0]?.kind === "apply-messaging" &&
+    actions[2]?.kind === "apply-messaging" &&
+    actions[0].mode !== actions[2].mode
+  ) {
+    fail("messaging actions disagree about desired state");
+  }
   return Object.freeze(actions);
 }
 
-function mapOpenClawProfile(
-  profile: ManagedStartupProfile,
-  environment: ApplicationEnvironment,
-): ManagedStartupAgentEnvironment {
+function integrityPlan(value: unknown): HarnessStartupIntegrityPlan {
+  if (!isRecord(value)) fail("integrity must be an object");
+  exactKeys(value, ["kind"], "integrity");
   if (
-    profile.agent !== "openclaw" ||
-    profile.agentConfig.agent !== "openclaw" ||
-    profile.dashboard.agent !== "openclaw" ||
-    profile.inference.primaryModelRef === null ||
-    profile.inference.inputModalities === null ||
-    profile.tuning.contextWindow === null ||
-    profile.tuning.maxTokens === null ||
-    profile.tuning.reasoning === null ||
-    profile.tuning.reasoningEffort === null
+    value.kind !== "none" &&
+    value.kind !== "validated-json-config" &&
+    value.kind !== "managed-config-set"
   ) {
-    throw new ManagedStartupAgentEnvironmentError("OpenClaw profile state is inconsistent");
+    fail("integrity workflow is unsupported");
   }
+  return Object.freeze({ kind: value.kind });
+}
 
-  const configurationEnvironment: MutableEnvironment = {
-    ...commonConfigurationEnvironment(profile),
-    ...messagingEnvironment(profile, "openclaw"),
-    CHAT_UI_URL: profile.dashboard.url,
-    NEMOCLAW_AGENT_HEARTBEAT_EVERY: profile.agentConfig.heartbeatEvery ?? "",
-    NEMOCLAW_AGENT_TIMEOUT: String(profile.agentConfig.agentTimeoutSeconds),
-    NEMOCLAW_CONTEXT_WINDOW: String(profile.tuning.contextWindow),
-    NEMOCLAW_DASHBOARD_BIND:
-      profile.dashboard.bindAddress === "0.0.0.0" ? profile.dashboard.bindAddress : "",
-    NEMOCLAW_DISABLE_DEVICE_AUTH: booleanFlag(profile.agentConfig.deviceAuth.disabled),
-    NEMOCLAW_DEVICE_AUTH_OPT_OUT_SOURCE: profile.agentConfig.deviceAuth.optOutSource,
-    NEMOCLAW_EXTRA_AGENTS_JSON_B64: encodeCanonicalJson(profile.agentConfig.extraAgents),
-    NEMOCLAW_INFERENCE_COMPAT_B64: encodeCanonicalJson(profile.inference.compatibility),
-    NEMOCLAW_INFERENCE_INPUTS: profile.inference.inputModalities.join(","),
-    NEMOCLAW_MAX_TOKENS: String(profile.tuning.maxTokens),
-    NEMOCLAW_OPENCLAW_OTEL: booleanFlag(profile.agentConfig.otel.enabled),
-    NEMOCLAW_OPENCLAW_OTEL_ENDPOINT: profile.agentConfig.otel.endpointUrl,
-    NEMOCLAW_OPENCLAW_OTEL_SAMPLE_RATE: String(profile.agentConfig.otel.sampleRate),
-    NEMOCLAW_OPENCLAW_OTEL_SERVICE_NAME: profile.agentConfig.otel.serviceName,
-    NEMOCLAW_PRIMARY_MODEL_REF: profile.inference.primaryModelRef,
-    NEMOCLAW_PROXY_HOST: profile.proxy.managedHost,
-    NEMOCLAW_PROXY_PORT: String(profile.proxy.managedPort),
-    NEMOCLAW_REASONING: String(profile.tuning.reasoning),
-    NEMOCLAW_REASONING_EFFORT: profile.tuning.reasoningEffort,
-    NEMOCLAW_WEB_SEARCH_ENABLED: booleanFlag(profile.agentConfig.webSearch.enabled),
-    NEMOCLAW_WEB_SEARCH_PROVIDER: profile.agentConfig.webSearch.provider,
-    NEMOCLAW_WSL_DASHBOARD_EXPOSURE: booleanFlag(profile.dashboard.wslExposure),
-  };
-
-  const runtimeEnvironment: MutableEnvironment = { ...configurationEnvironment };
-  delete runtimeEnvironment.NEMOCLAW_MESSAGING_PLAN_B64;
-  runtimeEnvironment.NEMOCLAW_DASHBOARD_PORT = String(profile.dashboard.port);
-  runtimeEnvironment.NEMOCLAW_MINIMAL_BOOTSTRAP = booleanFlag(profile.agentConfig.minimalBootstrap);
-  appendHostProxyEnvironment(runtimeEnvironment, profile, { preserveAmbientWhenAbsent: true });
-
+export function validateHarnessStartupPlan(
+  value: unknown,
+  expectedPackageId: string,
+): ManagedStartupAgentEnvironment {
+  if (!isRecord(value)) fail("startup adapter result must be an object");
+  exactKeys(
+    value,
+    [
+      "schemaVersion",
+      "packageId",
+      "configurationEnvironment",
+      "runtimeEnvironment",
+      "applicationRuntime",
+      "materials",
+      "actions",
+      "integrity",
+    ],
+    "startup adapter result",
+  );
+  if (value.schemaVersion !== 1 || value.packageId !== expectedPackageId) {
+    fail("startup adapter result identity does not match its package");
+  }
+  if (
+    !Array.isArray(value.materials) ||
+    value.materials.length < 1 ||
+    value.materials.length > 32
+  ) {
+    fail("materials must be a bounded array");
+  }
+  const materials = value.materials.map(startupMaterial);
+  if (materials.filter((material) => material.kind === "corporate-ca-handoff").length !== 1) {
+    fail("exactly one corporate CA handoff is required");
+  }
   return Object.freeze({
-    schemaVersion: profile.schemaVersion,
-    agent: profile.agent,
-    configurationEnvironment: sortedEnvironment(configurationEnvironment),
-    runtimeEnvironment: sortedEnvironment(runtimeEnvironment),
-    applicationRuntime: applicationRuntimePlan(profile, environment),
-    materials: Object.freeze([corporateCaMaterial(profile)]),
-    actions: applicationActions(profile, "openclaw"),
+    schemaVersion: 1,
+    agent: expectedPackageId,
+    configurationEnvironment: resolvedEnvironment(
+      value.configurationEnvironment,
+      "configurationEnvironment",
+    ),
+    runtimeEnvironment: resolvedEnvironment(value.runtimeEnvironment, "runtimeEnvironment"),
+    applicationRuntime: applicationRuntime(value.applicationRuntime),
+    materials: Object.freeze(materials),
+    actions: startupActions(value.actions),
+    integrity: integrityPlan(value.integrity),
   });
 }
 
-function mapHermesProfile(
-  profile: ManagedStartupProfile,
-  environment: ApplicationEnvironment,
-): ManagedStartupAgentEnvironment {
-  if (
-    profile.agent !== "hermes" ||
-    profile.agentConfig.agent !== "hermes" ||
-    profile.dashboard.agent !== "hermes"
-  ) {
-    throw new ManagedStartupAgentEnvironmentError("Hermes profile state is inconsistent");
-  }
-
-  let chatUiUrl = profile.dashboard.browserUrl ?? profile.dashboard.url;
-  if (profile.dashboard.mode === "loopback-forwarded") {
-    if (profile.dashboard.browserUrl === undefined) {
-      throw new ManagedStartupAgentEnvironmentError(
-        "Cannot start the Hermes dashboard because its managed startup profile has no recorded browser URL. Rerun onboarding before starting the sandbox.",
-      );
-    }
-    chatUiUrl = profile.dashboard.browserUrl;
-  }
-
-  const configurationEnvironment: MutableEnvironment = {
-    ...commonConfigurationEnvironment(profile),
-    ...messagingEnvironment(profile, "hermes"),
-    CHAT_UI_URL: chatUiUrl,
-    NEMOCLAW_CONTEXT_WINDOW:
-      profile.tuning.contextWindow === null ? "" : String(profile.tuning.contextWindow),
-    NEMOCLAW_HERMES_TOOL_GATEWAY_BROKER: booleanFlag(profile.tools.enabledGateways.length > 0),
-    NEMOCLAW_HERMES_TOOL_GATEWAY_PRESETS_B64: encodeCanonicalJson(profile.tools.enabledGateways),
-    NEMOCLAW_WEB_SEARCH_ENABLED: booleanFlag(profile.agentConfig.webSearch.enabled),
-    NEMOCLAW_WEB_SEARCH_PROVIDER: profile.agentConfig.webSearch.provider,
-  };
-
-  const runtimeEnvironment: MutableEnvironment = {
-    ...configurationEnvironment,
-    HERMES_BUNDLED_PLUGINS: "/opt/hermes/plugins",
-    HERMES_HOME: "/sandbox/.hermes",
-    HERMES_LAZY_INSTALL_TARGET: "/sandbox/.hermes/lazy-packages",
-  };
-  delete runtimeEnvironment.NEMOCLAW_MESSAGING_PLAN_B64;
-  runtimeEnvironment.NEMOCLAW_DASHBOARD_PORT =
-    profile.dashboard.publicPort === null ? "" : String(profile.dashboard.publicPort);
-  runtimeEnvironment.NEMOCLAW_HERMES_DASHBOARD =
-    profile.dashboard.mode === "loopback-forwarded" ? "1" : "0";
-  runtimeEnvironment.NEMOCLAW_HERMES_DASHBOARD_INTERNAL_PORT =
-    profile.dashboard.internalPort === null ? "" : String(profile.dashboard.internalPort);
-  runtimeEnvironment.NEMOCLAW_HERMES_DASHBOARD_PORT =
-    profile.dashboard.publicPort === null ? "" : String(profile.dashboard.publicPort);
-  runtimeEnvironment.NEMOCLAW_HERMES_DASHBOARD_TUI = booleanFlag(profile.dashboard.tuiEnabled);
-  runtimeEnvironment.NEMOCLAW_PROXY_HOST = profile.proxy.managedHost;
-  runtimeEnvironment.NEMOCLAW_PROXY_PORT = String(profile.proxy.managedPort);
-  appendHostProxyEnvironment(runtimeEnvironment, profile, { preserveAmbientWhenAbsent: true });
-
-  return Object.freeze({
-    schemaVersion: profile.schemaVersion,
-    agent: profile.agent,
-    configurationEnvironment: sortedEnvironment(configurationEnvironment),
-    runtimeEnvironment: sortedEnvironment(runtimeEnvironment),
-    applicationRuntime: applicationRuntimePlan(profile, environment),
-    materials: Object.freeze([corporateCaMaterial(profile)]),
-    actions: applicationActions(profile, "hermes"),
-  });
-}
-
-function mapDcodeProfile(
-  profile: ManagedStartupProfile,
-  environment: ApplicationEnvironment,
-): ManagedStartupAgentEnvironment {
-  if (
-    profile.agent !== "langchain-deepagents-code" ||
-    profile.agentConfig.agent !== "langchain-deepagents-code" ||
-    profile.dashboard.agent !== "langchain-deepagents-code" ||
-    profile.messaging.plan !== null
-  ) {
-    throw new ManagedStartupAgentEnvironmentError(
-      "LangChain Deep Agents Code profile state is inconsistent",
+function verifiedImageAdapterSource(): HarnessStartupAdapterSource {
+  let descriptor: number;
+  try {
+    descriptor = fs.openSync(
+      HARNESS_STARTUP_ADAPTER_FILE,
+      fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
     );
+  } catch {
+    return fail(`managed image does not contain ${HARNESS_STARTUP_ADAPTER_FILE}`);
   }
-
-  const reasoningEffort =
-    profile.tuning.reasoningEffort === null || profile.tuning.reasoningEffort === "default"
-      ? ""
-      : profile.tuning.reasoningEffort;
-  const configurationEnvironment: MutableEnvironment = {
-    ...commonConfigurationEnvironment(profile),
-    NEMOCLAW_REASONING_EFFORT: reasoningEffort,
-    NEMOCLAW_UPSTREAM_ENDPOINT_URL: profile.inference.upstreamEndpointUrl ?? "",
-  };
-  appendHostProxyEnvironment(configurationEnvironment, profile);
-  const runtimeEnvironment: MutableEnvironment = {
-    ...configurationEnvironment,
-    NEMOCLAW_OBSERVABILITY: booleanFlag(profile.agentConfig.observabilityEnabled),
-  };
-  // The config generator needs the routed base URL and the reasoning effort,
-  // but the long-running DCode process trusts only the root-owned files
-  // consumed by managed-dcode-runtime.py.
-  delete runtimeEnvironment.NEMOCLAW_INFERENCE_BASE_URL;
-  delete runtimeEnvironment.NEMOCLAW_REASONING_EFFORT;
-  delete runtimeEnvironment.NEMOCLAW_UPSTREAM_PROVIDER;
-  for (const name of [
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-  ]) {
-    delete runtimeEnvironment[name];
+  try {
+    const stat = fs.fstatSync(descriptor);
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      stat.uid !== 0 ||
+      stat.gid !== 0 ||
+      (stat.mode & 0o777) !== 0o444 ||
+      stat.size < 1 ||
+      stat.size > MAX_ADAPTER_BYTES
+    ) {
+      fail("managed image startup adapter must be a bounded root:root mode 0444 regular file");
+    }
+    return {
+      filename: HARNESS_STARTUP_ADAPTER_FILE,
+      source: fs.readFileSync(descriptor, "utf8"),
+    };
+  } finally {
+    fs.closeSync(descriptor);
   }
-  const materials: readonly ManagedStartupAgentMaterial[] = Object.freeze([
-    corporateCaMaterial(profile),
-    rootOwnedFile(
-      "NEMOCLAW_DCODE_AUTO_APPROVAL",
-      "/usr/local/share/nemoclaw/dcode-auto-approval",
-      profile.agentConfig.autoApprovalMode,
-    ),
-    rootOwnedFile(
-      "NEMOCLAW_INFERENCE_BASE_URL",
-      "/usr/local/share/nemoclaw/dcode-inference-base-url",
-      profile.inference.routedBaseUrl,
-    ),
-    rootOwnedFile(
-      "NEMOCLAW_UPSTREAM_PROVIDER",
-      "/usr/local/share/nemoclaw/dcode-upstream-provider",
-      profile.inference.upstreamProvider,
-    ),
-    rootOwnedFile(
-      "NEMOCLAW_PROXY_HOST",
-      "/usr/local/share/nemoclaw/dcode-proxy-host",
-      profile.proxy.managedHost,
-    ),
-    rootOwnedFile(
-      "NEMOCLAW_PROXY_PORT",
-      "/usr/local/share/nemoclaw/dcode-proxy-port",
-      String(profile.proxy.managedPort),
-    ),
-    rootOwnedFile(
-      "NEMOCLAW_REASONING_EFFORT",
-      "/usr/local/share/nemoclaw/dcode-reasoning-effort",
-      reasoningEffort,
-    ),
-  ]);
-
-  return Object.freeze({
-    schemaVersion: profile.schemaVersion,
-    agent: profile.agent,
-    configurationEnvironment: sortedEnvironment(configurationEnvironment),
-    runtimeEnvironment: sortedEnvironment(runtimeEnvironment),
-    applicationRuntime: applicationRuntimePlan(profile, environment),
-    materials,
-    actions: applicationActions(profile, null),
-  });
 }
 
-function mapPiProfile(
+function invokeStartupAdapter(
+  source: HarnessStartupAdapterSource,
+  request: HarnessStartupRequest,
+): unknown {
+  if (Buffer.byteLength(source.source, "utf8") > MAX_ADAPTER_BYTES)
+    fail("startup adapter is oversized");
+  const requestJson = JSON.stringify(request);
+  if (Buffer.byteLength(requestJson, "utf8") > MAX_REQUEST_BYTES)
+    fail("startup request is oversized");
+  const context = vm.createContext(Object.create(null), {
+    codeGeneration: { strings: false, wasm: false },
+    microtaskMode: "afterEvaluate",
+  });
+  Object.defineProperty(context, "__nemoclawStartupRequestJson", {
+    value: requestJson,
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+  const wrapped = `
+"use strict";
+(() => {
+  const module = { exports: {} };
+  const unavailableRequire = () => { throw new Error("Harness startup adapter imports are unavailable"); };
+  (function (exports, require, module, __filename, __dirname) {
+${source.source}
+  })(module.exports, unavailableRequire, module, ${JSON.stringify(source.filename)}, "/usr/local/lib/nemoclaw");
+  if (module.exports === null || typeof module.exports !== "object") throw new Error("invalid exports");
+  if (typeof module.exports.buildStartupPlan !== "function") throw new Error("missing buildStartupPlan");
+  const request = JSON.parse(globalThis.__nemoclawStartupRequestJson);
+  const result = module.exports.buildStartupPlan(request);
+  if (result && typeof result.then === "function") throw new Error("async result");
+  return JSON.stringify(result);
+})()
+`;
+  let result: unknown;
+  try {
+    result = new vm.Script(wrapped, { filename: source.filename }).runInContext(context, {
+      displayErrors: false,
+      timeout: ADAPTER_TIMEOUT_MILLISECONDS,
+    });
+  } catch {
+    return fail("startup adapter could not be evaluated");
+  }
+  if (typeof result !== "string" || Buffer.byteLength(result, "utf8") > MAX_PLAN_BYTES) {
+    fail("startup adapter returned an invalid or oversized plan");
+  }
+  try {
+    return JSON.parse(result) as unknown;
+  } catch {
+    return fail("startup adapter returned a non-JSON plan");
+  }
+}
+
+/** Evaluate one self-contained package adapter and validate its finite result. */
+export function buildHarnessStartupPlanFromSource(
+  request: HarnessStartupRequest,
+  source: HarnessStartupAdapterSource,
+): ManagedStartupAgentEnvironment {
+  return validateHarnessStartupPlan(invokeStartupAdapter(source, request), request.packageId);
+}
+
+function startupRequest(
   profile: ManagedStartupProfile,
   environment: ApplicationEnvironment,
-): ManagedStartupAgentEnvironment {
-  if (
-    profile.agent !== "pi" ||
-    profile.agentConfig.agent !== "pi" ||
-    profile.dashboard.agent !== "pi" ||
-    profile.messaging.plan !== null
-  ) {
-    throw new ManagedStartupAgentEnvironmentError("Pi profile state is inconsistent");
-  }
-
-  const configurationEnvironment: MutableEnvironment = {
-    ...commonConfigurationEnvironment(profile),
-    NEMOCLAW_CONTEXT_WINDOW:
-      profile.tuning.contextWindow === null ? "" : String(profile.tuning.contextWindow),
-    NEMOCLAW_MAX_TOKENS: profile.tuning.maxTokens === null ? "" : String(profile.tuning.maxTokens),
-    NEMOCLAW_REASONING:
-      profile.tuning.reasoning === null ? "" : String(profile.tuning.reasoning),
+): HarnessStartupRequest {
+  const applicationEnvironment = Object.fromEntries(
+    PUBLIC_APPLICATION_ENVIRONMENT.flatMap((name) => {
+      const value = environment[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  );
+  return {
+    packageId: profile.agent,
+    settings: {
+      configuration: profile.agentConfig,
+      inference: profile.inference,
+      proxy: profile.proxy,
+      dashboard: profile.dashboard,
+      tools: profile.tools,
+      messaging: profile.messaging,
+      tuning: profile.tuning,
+      corporateCa: profile.corporateCa,
+    },
+    applicationEnvironment,
   };
-  appendHostProxyEnvironment(configurationEnvironment, profile);
-  const runtimeEnvironment: MutableEnvironment = { ...configurationEnvironment };
-  delete runtimeEnvironment.NEMOCLAW_INFERENCE_BASE_URL;
-  delete runtimeEnvironment.NEMOCLAW_CONTEXT_WINDOW;
-  delete runtimeEnvironment.NEMOCLAW_MAX_TOKENS;
-  delete runtimeEnvironment.NEMOCLAW_REASONING;
-  for (const name of [
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "http_proxy",
-    "https_proxy",
-    "no_proxy",
-  ]) {
-    delete runtimeEnvironment[name];
-  }
-  const materials: readonly ManagedStartupAgentMaterial[] = Object.freeze([
-    corporateCaMaterial(profile),
-    rootOwnedFile(
-      "NEMOCLAW_PROXY_HOST",
-      "/usr/local/share/nemoclaw/pi-proxy-host",
-      profile.proxy.managedHost,
-    ),
-    rootOwnedFile(
-      "NEMOCLAW_PROXY_PORT",
-      "/usr/local/share/nemoclaw/pi-proxy-port",
-      String(profile.proxy.managedPort),
-    ),
-  ]);
-
-  return Object.freeze({
-    schemaVersion: profile.schemaVersion,
-    agent: profile.agent,
-    configurationEnvironment: sortedEnvironment(configurationEnvironment),
-    runtimeEnvironment: sortedEnvironment(runtimeEnvironment),
-    applicationRuntime: applicationRuntimePlan(profile, environment),
-    materials,
-    actions: applicationActions(profile, null),
-  });
 }
 
 /**
- * Convert a secret-free validated profile into existing agent-generator and
- * entrypoint inputs without depending on Docker, Podman, or another compute
- * driver. Validation is repeated at this trust boundary so callers cannot use
- * a TypeScript assertion to bypass agent capability checks.
+ * Invoke the one package-owned startup planner installed in the selected
+ * image, then reduce its output to the finite plan that core can apply.
  */
 export function mapManagedStartupProfileToAgentEnvironment(
   profile: ManagedStartupProfile,
   environment: ApplicationEnvironment = EMPTY_APPLICATION_ENVIRONMENT,
+  options: MapManagedStartupEnvironmentOptions = {},
 ): ManagedStartupAgentEnvironment {
-  const validated = validateManagedStartupProfile(profile);
-  switch (validated.agent) {
-    case "openclaw":
-      return mapOpenClawProfile(validated, environment);
-    case "hermes":
-      return mapHermesProfile(validated, environment);
-    case "langchain-deepagents-code":
-      return mapDcodeProfile(validated, environment);
-    case "pi":
-      return mapPiProfile(validated, environment);
-  }
+  const request = startupRequest(validateManagedStartupProfile(profile), environment);
+  const source = options.adapterSource ?? verifiedImageAdapterSource();
+  return buildHarnessStartupPlanFromSource(request, source);
 }
