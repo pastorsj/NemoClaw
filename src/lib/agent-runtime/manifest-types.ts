@@ -64,6 +64,12 @@ export type AgentStateDirectory = AgentStateDirectoryPath | AgentStateDirectoryP
 
 export type AgentStateFileStrategy = "copy" | "sqlite_backup";
 
+export type StateFileBackupFallback = "privileged-copy";
+
+export interface StateFileBackupOwnership {
+  fallback: StateFileBackupFallback;
+}
+
 export type StateFileRestoreMerge = "key-allowlist" | "package-config";
 
 export type StateFileUserKeyType = "boolean" | "string" | "integer" | "number" | "enum";
@@ -103,6 +109,7 @@ export type StateFileRestoreOwnership =
 export interface AgentStateFile {
   path: string;
   strategy: AgentStateFileStrategy;
+  backup?: StateFileBackupOwnership;
   restore?: StateFileRestoreOwnership;
 }
 

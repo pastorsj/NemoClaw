@@ -180,6 +180,17 @@ function writeOpenClawRegistry(sandboxName: string): void {
 }
 
 describe("OpenClaw durable config file (#5027)", () => {
+  it("declares the core-owned privileged-copy fallback for its sealed config", () => {
+    const { agentDefinition } = createSnapshotBackupAuthorityFixture("openclaw");
+
+    expect(agentDefinition.stateFiles).toContainEqual({
+      path: "openclaw.json",
+      strategy: "copy",
+      backup: { fallback: "privileged-copy" },
+      restore: { merge: "package-config" },
+    });
+  });
+
   it("uses a supplied state-file capture when SSH cannot read openclaw.json", () => {
     const fixture = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-sealed-config-snapshot-"));
     const oldPath = process.env.PATH;

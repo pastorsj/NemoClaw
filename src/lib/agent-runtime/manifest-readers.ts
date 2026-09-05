@@ -67,7 +67,8 @@ export function readStringArray(record: ManifestRecord, key: string): string[] |
 }
 
 const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/;
-const STATE_FILE_FIELDS = new Set(["path", "strategy", "restore"]);
+const STATE_FILE_FIELDS = new Set(["path", "strategy", "backup", "restore"]);
+const STATE_FILE_BACKUP_FIELDS = new Set(["fallback"]);
 const MCP_POLICY_BINARY_PATH_RE = /^\/(?:[A-Za-z0-9._+-]+\/)*[A-Za-z0-9._+-]+\*?$/u;
 
 function assertStateFilePath(value: string, field: string): void {
@@ -164,11 +165,40 @@ export function readStateFiles(record: ManifestRecord): AgentStateFile[] | undef
     if (rawStrategy !== "copy" && rawStrategy !== "sqlite_backup") {
       throw new Error(`Agent manifest field '${field}.strategy' must be copy or sqlite_backup`);
     }
+    const backup = readStateFileBackup(entry, index, rawStrategy);
     const restore = readStateFileRestore(entry, index, rawStrategy);
-    return restore
-      ? { path: statePath, strategy: rawStrategy, restore }
-      : { path: statePath, strategy: rawStrategy };
+    return {
+      path: statePath,
+      strategy: rawStrategy,
+      ...(backup ? { backup } : {}),
+      ...(restore ? { restore } : {}),
+    };
   });
+}
+
+function readStateFileBackup(
+  entry: ManifestRecord,
+  index: number,
+  strategy: AgentStateFile["strategy"],
+): AgentStateFile["backup"] {
+  const value = entry.backup;
+  if (value === undefined) return undefined;
+  const field = `state_files[${String(index)}].backup`;
+  if (!isManifestRecord(value)) {
+    throw new Error(`Agent manifest field '${field}' must be an object`);
+  }
+  for (const key of Object.keys(value)) {
+    if (!STATE_FILE_BACKUP_FIELDS.has(key)) {
+      throw new Error(`Agent manifest field '${field}.${key}' is not allowed`);
+    }
+  }
+  if (strategy !== "copy") {
+    throw new Error(`Agent manifest field '${field}' requires strategy 'copy'`);
+  }
+  if (value.fallback !== "privileged-copy") {
+    throw new Error(`Agent manifest field '${field}.fallback' must be privileged-copy`);
+  }
+  return { fallback: "privileged-copy" };
 }
 
 function isValidPort(value: unknown, min = 1): value is number {

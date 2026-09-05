@@ -8,11 +8,11 @@ import { spawnSync } from "node:child_process";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { OPENCLAW_CONFIG_CAPTURE_SCRIPT } from "./backup-authority";
+import { PRIVILEGED_COPY_STATE_FILE_CAPTURE_SCRIPT } from "./backup-authority";
 
 const CONFIG_NAME = "openclaw.json";
 const MAX_CONFIG_BYTES = 16 * 1024 * 1024;
-const PROTOCOL_PREFIX = "nemoclaw-openclaw-config-capture:";
+const PROTOCOL_PREFIX = "nemoclaw-state-file-capture:";
 const fixtureRoots: string[] = [];
 
 interface CaptureResult {
@@ -26,10 +26,13 @@ function fixtureDirectory(): string {
   fixtureRoots.push(root);
   const directory = path.join(root, ".openclaw");
   fs.mkdirSync(directory);
-  return directory;
+  return fs.realpathSync(directory);
 }
 
-function runCapture(directory: string, script = OPENCLAW_CONFIG_CAPTURE_SCRIPT): CaptureResult {
+function runCapture(
+  directory: string,
+  script = PRIVILEGED_COPY_STATE_FILE_CAPTURE_SCRIPT,
+): CaptureResult {
   const result = spawnSync("/usr/bin/python3", ["-I", "-S", "-c", script, directory, CONFIG_NAME], {
     encoding: null,
     timeout: 30_000,
@@ -44,7 +47,7 @@ function runCapture(directory: string, script = OPENCLAW_CONFIG_CAPTURE_SCRIPT):
 
 function mutationHarness(mutation: string): string {
   return `import os, sys
-capture_script = ${JSON.stringify(OPENCLAW_CONFIG_CAPTURE_SCRIPT)}
+capture_script = ${JSON.stringify(PRIVILEGED_COPY_STATE_FILE_CAPTURE_SCRIPT)}
 directory = sys.argv[1]
 name = sys.argv[2]
 real_read = os.read
@@ -67,7 +70,7 @@ afterEach(() => {
   }
 });
 
-describe("OpenClaw privileged config capture script", () => {
+describe("privileged state-file capture script", () => {
   it("returns bytes only for a stable regular file", () => {
     const directory = fixtureDirectory();
     const expected = Buffer.from('{"models":{"default":"nvidia/test"}}\n');

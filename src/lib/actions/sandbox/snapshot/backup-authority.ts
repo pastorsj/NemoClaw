@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isDeepStrictEqual } from "node:util";
+import path from "node:path";
 
 import { dockerSpawnSync } from "../../../adapters/docker/exec";
 import type { AgentDefinition } from "../../../agent/defs";
@@ -53,7 +54,7 @@ interface SnapshotBackupAuthorityDependencies {
   readonly prepareHostLocalInference: typeof prepareSandboxHostLocalInferenceAuthority;
   readonly confirmHostLocalInference: typeof confirmHostLocalInferenceAuthority;
   readonly backup: typeof sandboxState.backupSandboxState;
-  readonly captureOpenClawStateFile: typeof captureOpenClawStateFile;
+  readonly capturePrivilegedCopyStateFile: typeof capturePrivilegedCopyStateFile;
 }
 
 interface CapturedManagedAuthority {
@@ -70,32 +71,62 @@ interface CapturedHostLocalInferenceAuthority {
   readonly validateCurrent: (current: SandboxEntry) => void;
 }
 
-const MAX_OPENCLAW_CONFIG_BYTES = 16 * 1024 * 1024;
-const OPENCLAW_CONFIG_CAPTURE_MAX_BUFFER = MAX_OPENCLAW_CONFIG_BYTES + 1024 * 1024;
-const OPENCLAW_CONFIG_CAPTURE_TIMEOUT_MS = 30_000;
-const OPENCLAW_CONFIG_CAPTURE_PROTOCOL_PREFIX = "nemoclaw-openclaw-config-capture:";
-const OPENCLAW_CONFIG_CAPTURE_PROTOCOL_MAX_BYTES = 128;
-const OPENCLAW_CONFIG_CAPTURE_DIAGNOSTIC_MAX_BYTES = 1024;
-const OPENCLAW_CONFIG_DIRECTORY = "/sandbox/.openclaw";
-const OPENCLAW_CONFIG_NAME = "openclaw.json";
-export const OPENCLAW_CONFIG_CAPTURE_SCRIPT = `import os, stat, sys
-maximum = ${MAX_OPENCLAW_CONFIG_BYTES}
+const MAX_PRIVILEGED_COPY_STATE_FILE_BYTES = 16 * 1024 * 1024;
+const PRIVILEGED_COPY_CAPTURE_MAX_BUFFER = MAX_PRIVILEGED_COPY_STATE_FILE_BYTES + 1024 * 1024;
+const PRIVILEGED_COPY_CAPTURE_TIMEOUT_MS = 30_000;
+const PRIVILEGED_COPY_CAPTURE_PROTOCOL_PREFIX = "nemoclaw-state-file-capture:";
+const PRIVILEGED_COPY_CAPTURE_PROTOCOL_MAX_BYTES = 128;
+const PRIVILEGED_COPY_CAPTURE_DIAGNOSTIC_MAX_BYTES = 1024;
+const LEGACY_OPENCLAW_CONFIG_DIRECTORY = "/sandbox/.openclaw";
+const LEGACY_OPENCLAW_CONFIG_NAME = "openclaw.json";
+const CONTROL_CHARACTER_RE = /[\x00-\x1f\x7f]/u;
+
+interface PrivilegedCopyStateFileAuthority {
+  readonly directory: string;
+  readonly spec: sandboxState.StateFileCaptureRequest["spec"];
+}
+
+export const PRIVILEGED_COPY_STATE_FILE_CAPTURE_SCRIPT = `import os, stat, sys
+maximum = ${MAX_PRIVILEGED_COPY_STATE_FILE_BYTES}
 directory = sys.argv[1]
 name = sys.argv[2]
-protocol = "${OPENCLAW_CONFIG_CAPTURE_PROTOCOL_PREFIX}"
+protocol = "${PRIVILEGED_COPY_CAPTURE_PROTOCOL_PREFIX}"
 def fail(status, reason):
     print(protocol + reason, file=sys.stderr)
     raise SystemExit(status)
 directory_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 file_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+if not directory.startswith("/") or directory.endswith("/"):
+    fail(14, "invalid-request")
+directory_parts = directory[1:].split("/")
+file_parts = name.split("/")
+if any(part in ("", ".", "..") for part in directory_parts + file_parts):
+    fail(14, "invalid-request")
+def open_directory(parts):
+    opened = []
+    try:
+        current = os.open("/", directory_flags)
+        opened.append(current)
+        for component in parts:
+            current = os.open(component, directory_flags, dir_fd=current)
+            opened.append(current)
+        return current, opened
+    except OSError:
+        for opened_fd in reversed(opened):
+            os.close(opened_fd)
+        raise
 try:
-    directory_fd = os.open(directory, directory_flags)
+    directory_fd, opened_directories = open_directory(directory_parts)
 except OSError:
     fail(10, "directory-unavailable")
 try:
     directory_before = os.fstat(directory_fd)
+    file_parent_fd = directory_fd
     try:
-        file_fd = os.open(name, file_flags, dir_fd=directory_fd)
+        for component in file_parts[:-1]:
+            file_parent_fd = os.open(component, directory_flags, dir_fd=file_parent_fd)
+            opened_directories.append(file_parent_fd)
+        file_fd = os.open(file_parts[-1], file_flags, dir_fd=file_parent_fd)
     except FileNotFoundError:
         fail(2, "missing")
     except OSError:
@@ -117,34 +148,44 @@ try:
             if total > maximum:
                 fail(12, "size-limit-exceeded")
         after = os.fstat(file_fd)
-        current = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        try:
+            verification_fd, verification_directories = open_directory(directory_parts + file_parts[:-1])
+            current = os.stat(file_parts[-1], dir_fd=verification_fd, follow_symlinks=False)
+        except OSError:
+            fail(13, "directory-changed-during-read")
+        try:
+            directory_current = os.fstat(verification_directories[len(directory_parts)])
+        finally:
+            for opened_fd in reversed(verification_directories):
+                os.close(opened_fd)
         identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns, value.st_nlink)
-        if identity(before) != identity(after) or identity(before) != identity(current) or not stat.S_ISREG(current.st_mode):
-            fail(13, "file-changed-during-read")
-        directory_current = os.stat(directory, follow_symlinks=False)
         if (directory_before.st_dev, directory_before.st_ino) != (directory_current.st_dev, directory_current.st_ino) or not stat.S_ISDIR(directory_current.st_mode):
             fail(13, "directory-changed-during-read")
+        if identity(before) != identity(after) or identity(before) != identity(current) or not stat.S_ISREG(current.st_mode):
+            fail(13, "file-changed-during-read")
         sys.stdout.buffer.write(b"".join(chunks))
     finally:
         os.close(file_fd)
 finally:
-    os.close(directory_fd)
+    for opened_fd in reversed(opened_directories):
+        os.close(opened_fd)
 `;
 
-type OpenClawConfigCaptureFailure =
+type PrivilegedCopyCaptureFailure =
   | "missing"
   | "directory-unavailable"
   | "file-unavailable"
   | "unsafe-file-metadata"
   | "size-limit-exceeded"
   | "file-changed-during-read"
-  | "directory-changed-during-read";
+  | "directory-changed-during-read"
+  | "invalid-request";
 
-function captureFailureProtocol(stderr: unknown): OpenClawConfigCaptureFailure | null {
+function captureFailureProtocol(stderr: unknown): PrivilegedCopyCaptureFailure | null {
   if (
-    (Buffer.isBuffer(stderr) && stderr.length > OPENCLAW_CONFIG_CAPTURE_PROTOCOL_MAX_BYTES) ||
+    (Buffer.isBuffer(stderr) && stderr.length > PRIVILEGED_COPY_CAPTURE_PROTOCOL_MAX_BYTES) ||
     (typeof stderr === "string" &&
-      Buffer.byteLength(stderr) > OPENCLAW_CONFIG_CAPTURE_PROTOCOL_MAX_BYTES)
+      Buffer.byteLength(stderr) > PRIVILEGED_COPY_CAPTURE_PROTOCOL_MAX_BYTES)
   ) {
     return null;
   }
@@ -154,10 +195,10 @@ function captureFailureProtocol(stderr: unknown): OpenClawConfigCaptureFailure |
       ? stderr
       : "";
   const line = value.endsWith("\n") ? value.slice(0, -1) : value;
-  if (!line.startsWith(OPENCLAW_CONFIG_CAPTURE_PROTOCOL_PREFIX) || /[\r\n]/.test(line)) {
+  if (!line.startsWith(PRIVILEGED_COPY_CAPTURE_PROTOCOL_PREFIX) || /[\r\n]/.test(line)) {
     return null;
   }
-  const reason = line.slice(OPENCLAW_CONFIG_CAPTURE_PROTOCOL_PREFIX.length);
+  const reason = line.slice(PRIVILEGED_COPY_CAPTURE_PROTOCOL_PREFIX.length);
   switch (reason) {
     case "missing":
     case "directory-unavailable":
@@ -166,6 +207,7 @@ function captureFailureProtocol(stderr: unknown): OpenClawConfigCaptureFailure |
     case "size-limit-exceeded":
     case "file-changed-during-read":
     case "directory-changed-during-read":
+    case "invalid-request":
       return reason;
     default:
       return null;
@@ -174,31 +216,60 @@ function captureFailureProtocol(stderr: unknown): OpenClawConfigCaptureFailure |
 
 function captureFailureDiagnostic(stderr: unknown): string | null {
   const value = Buffer.isBuffer(stderr)
-    ? stderr.subarray(0, OPENCLAW_CONFIG_CAPTURE_DIAGNOSTIC_MAX_BYTES).toString("utf8")
+    ? stderr.subarray(0, PRIVILEGED_COPY_CAPTURE_DIAGNOSTIC_MAX_BYTES).toString("utf8")
     : typeof stderr === "string"
       ? Buffer.from(stderr)
-          .subarray(0, OPENCLAW_CONFIG_CAPTURE_DIAGNOSTIC_MAX_BYTES)
+          .subarray(0, PRIVILEGED_COPY_CAPTURE_DIAGNOSTIC_MAX_BYTES)
           .toString("utf8")
       : "";
   const sanitized = sanitizeReadinessText(value, 240).replace(/\s+/g, " ").trim();
   return sanitized || null;
 }
 
-export function captureOpenClawStateFile(
+function isCanonicalSandboxDirectory(value: string): boolean {
+  return (
+    path.posix.isAbsolute(value) &&
+    path.posix.normalize(value) === value &&
+    value.startsWith("/sandbox/") &&
+    !value.endsWith("/") &&
+    !value.includes("\\") &&
+    !CONTROL_CHARACTER_RE.test(value)
+  );
+}
+
+function isCanonicalStateFilePath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    !path.posix.isAbsolute(value) &&
+    path.posix.normalize(value) === value &&
+    !value.includes("\\") &&
+    !CONTROL_CHARACTER_RE.test(value) &&
+    value
+      .split("/")
+      .every((component) => component !== "" && component !== "." && component !== "..")
+  );
+}
+
+export function capturePrivilegedCopyStateFile(
   sandboxName: string,
   request: sandboxState.StateFileCaptureRequest,
+  authority: PrivilegedCopyStateFileAuthority,
 ): sandboxState.StateFileCaptureResult | null {
   if (
-    request.dir !== "/sandbox/.openclaw" ||
-    request.spec.path !== "openclaw.json" ||
-    request.spec.strategy !== "copy"
+    request.sandboxName !== sandboxName ||
+    request.dir !== authority.directory ||
+    request.spec.path !== authority.spec.path ||
+    request.spec.strategy !== authority.spec.strategy ||
+    request.spec.strategy !== "copy" ||
+    !isCanonicalSandboxDirectory(authority.directory) ||
+    !isCanonicalStateFilePath(authority.spec.path)
   ) {
     return null;
   }
   try {
     return withPrivilegedSandboxExecutionLease(
       sandboxName,
-      "OpenClaw config snapshot capture",
+      "privileged state-file snapshot capture",
       () => {
         const result = executePrivilegedSandboxCommand(
           sandboxName,
@@ -207,14 +278,14 @@ export function captureOpenClawStateFile(
             "-I",
             "-S",
             "-c",
-            OPENCLAW_CONFIG_CAPTURE_SCRIPT,
-            OPENCLAW_CONFIG_DIRECTORY,
-            OPENCLAW_CONFIG_NAME,
+            PRIVILEGED_COPY_STATE_FILE_CAPTURE_SCRIPT,
+            authority.directory,
+            authority.spec.path,
           ],
           {
             sanitizeEnvironment: true,
-            timeout: OPENCLAW_CONFIG_CAPTURE_TIMEOUT_MS,
-            maxOutputBytes: OPENCLAW_CONFIG_CAPTURE_MAX_BUFFER,
+            timeout: PRIVILEGED_COPY_CAPTURE_TIMEOUT_MS,
+            maxOutputBytes: PRIVILEGED_COPY_CAPTURE_MAX_BUFFER,
           },
         );
         const protocolFailure = captureFailureProtocol(result.stderr);
@@ -239,7 +310,7 @@ export function captureOpenClawStateFile(
             ? `reason ${protocolFailure}`
             : captureFailureDiagnostic(result.stderr);
           const detail = stderrDetail ? `${primaryDetail}; ${stderrDetail}` : primaryDetail;
-          return { outcome: "failed", error: `privileged config capture failed: ${detail}` };
+          return { outcome: "failed", error: `privileged state-file capture failed: ${detail}` };
         }
         return { outcome: "backed_up", data: result.stdout };
       },
@@ -263,8 +334,56 @@ const defaultDependencies: Omit<SnapshotBackupAuthorityDependencies, "getSandbox
   // Keep the call late-bound so tests and alternative state stores can replace
   // the module export without this adapter retaining an import-time reference.
   backup: (...args) => sandboxState.backupSandboxState(...args),
-  captureOpenClawStateFile,
+  capturePrivilegedCopyStateFile,
 };
+
+function createReceiptBackedStateFileCapture(
+  sandboxName: string,
+  agentDefinition: AgentDefinition,
+  capture: SnapshotBackupAuthorityDependencies["capturePrivilegedCopyStateFile"],
+): sandboxState.StateFileCapture | null {
+  const privilegedFiles = (agentDefinition.stateFiles ?? []).filter(
+    (stateFile) => stateFile.backup?.fallback === "privileged-copy",
+  );
+  if (privilegedFiles.length === 0) return null;
+
+  const directory = agentDefinition.configPaths.dir;
+  return (request) => {
+    if (request.dir !== directory) return null;
+    const declared = privilegedFiles.find(
+      (stateFile) =>
+        stateFile.path === request.spec.path && stateFile.strategy === request.spec.strategy,
+    );
+    if (!declared) return null;
+    return capture(sandboxName, request, {
+      directory,
+      spec: { path: declared.path, strategy: declared.strategy },
+    });
+  };
+}
+
+function createLegacyOpenClawStateFileCapture(
+  sandboxName: string,
+  agentDefinition: AgentDefinition,
+  capture: SnapshotBackupAuthorityDependencies["capturePrivilegedCopyStateFile"],
+): sandboxState.StateFileCapture | null {
+  if (agentDefinition.name !== "openclaw") return null;
+  const authority: PrivilegedCopyStateFileAuthority = {
+    directory: LEGACY_OPENCLAW_CONFIG_DIRECTORY,
+    spec: { path: LEGACY_OPENCLAW_CONFIG_NAME, strategy: "copy" },
+  };
+  return (request) => capture(sandboxName, request, authority);
+}
+
+function createStateFileCapture(
+  sandboxName: string,
+  authority: SnapshotBackupAgentAuthority,
+  capture: SnapshotBackupAuthorityDependencies["capturePrivilegedCopyStateFile"],
+): sandboxState.StateFileCapture | null {
+  return authority.harnessPackage === null
+    ? createLegacyOpenClawStateFileCapture(sandboxName, authority.agentDefinition, capture)
+    : createReceiptBackedStateFileCapture(sandboxName, authority.agentDefinition, capture);
+}
 
 function failure(error: unknown): sandboxState.BackupResult {
   const detail = error instanceof Error ? error.message : String(error);
@@ -586,13 +705,14 @@ export function backupSandboxStateWithManagedAuthority(
     return failure(error);
   }
 
-  const stateFileOptions: Pick<sandboxState.BackupOptions, "captureStateFile"> =
-    agentAuthority.agentDefinition.name === "openclaw"
-      ? {
-          captureStateFile: (request) =>
-            dependencies.captureOpenClawStateFile(sandboxName, request),
-        }
-      : {};
+  const captureStateFile = createStateFileCapture(
+    sandboxName,
+    agentAuthority,
+    dependencies.capturePrivilegedCopyStateFile,
+  );
+  const stateFileOptions: Pick<sandboxState.BackupOptions, "captureStateFile"> = captureStateFile
+    ? { captureStateFile }
+    : {};
   const { registryEntry: _registryEntry, ...publicOptions } = options;
   const backupOptions = {
     ...publicOptions,

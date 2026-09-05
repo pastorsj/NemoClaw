@@ -119,6 +119,8 @@ state_dirs:
 # credentials.
 state_files:
   - path: openclaw.json
+    backup:
+      fallback: privileged-copy
     restore:
       merge: package-config
 user_managed_files:

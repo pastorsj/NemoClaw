@@ -34,10 +34,19 @@ import { createSandboxHostLocalInferenceProvenance } from "../../../state/regist
 import type { BackupOptions, BackupResult } from "../../../state/sandbox";
 import {
   backupSandboxStateWithManagedAuthority as backupSandboxStateWithManagedAuthorityImpl,
-  captureOpenClawStateFile,
+  capturePrivilegedCopyStateFile,
   confirmSnapshotBackupAgentAuthority,
   resolveSnapshotBackupAgentAuthority,
 } from "./backup-authority";
+
+const PRIVILEGED_COPY_AUTHORITY = {
+  directory: "/sandbox/.future",
+  spec: { path: "config.json", strategy: "copy" as const },
+};
+
+function captureTestStateFile(request: Parameters<typeof capturePrivilegedCopyStateFile>[1]) {
+  return capturePrivilegedCopyStateFile("alpha", request, PRIVILEGED_COPY_AUTHORITY);
+}
 
 function harnessPackage(agent: string, digest = "a".repeat(64)) {
   return {
@@ -59,6 +68,22 @@ function resolvedAgent(entry: SandboxEntry): ResolvedSandboxAgent {
       name: agent,
       packageRoot,
       manifestPath: `${packageRoot}/manifest.yaml`,
+      configPaths: {
+        dir: `/sandbox/.${agent}`,
+        configFile: agent === "openclaw" ? "openclaw.json" : "config.json",
+        envFile: null,
+        format: "json",
+      },
+      stateFiles:
+        agent === "openclaw"
+          ? [
+              {
+                path: "openclaw.json",
+                strategy: "copy",
+                backup: { fallback: "privileged-copy" },
+              },
+            ]
+          : [],
     },
     harnessPackage: identity,
     harnessPackageMigration: null,
@@ -329,7 +354,7 @@ describe("managed snapshot backup authority", () => {
     ).toThrow("registry authority changed during backup");
   });
 
-  it("captures the exact OpenClaw configuration with bounded privileged execution", () => {
+  it("captures an authorized state file with bounded privileged execution", () => {
     const data = Buffer.from('{"models":{"default":"nvidia/test"}}\n');
     privilegedCaptureMocks.executePrivilegedSandboxCommand.mockReturnValue({
       status: 0,
@@ -339,16 +364,16 @@ describe("managed snapshot backup authority", () => {
       stderr: Buffer.alloc(0),
     } as never);
 
-    const result = captureOpenClawStateFile("alpha", {
+    const result = captureTestStateFile({
       sandboxName: "alpha",
-      dir: "/sandbox/.openclaw",
-      spec: { path: "openclaw.json", strategy: "copy" },
+      dir: "/sandbox/.future",
+      spec: { path: "config.json", strategy: "copy" },
     });
 
     expect(result).toEqual({ outcome: "backed_up", data });
     expect(privilegedCaptureMocks.withPrivilegedSandboxExecutionLease).toHaveBeenCalledWith(
       "alpha",
-      "OpenClaw config snapshot capture",
+      "privileged state-file snapshot capture",
       expect.any(Function),
     );
     expect(privilegedCaptureMocks.executePrivilegedSandboxCommand).toHaveBeenCalledWith(
@@ -368,13 +393,13 @@ describe("managed snapshot backup authority", () => {
       signal: null,
       error: undefined,
       stdout: Buffer.alloc(0),
-      stderr: Buffer.from("nemoclaw-openclaw-config-capture:missing\n"),
+      stderr: Buffer.from("nemoclaw-state-file-capture:missing\n"),
     } as never);
 
-    const result = captureOpenClawStateFile("alpha", {
+    const result = captureTestStateFile({
       sandboxName: "alpha",
-      dir: "/sandbox/.openclaw",
-      spec: { path: "openclaw.json", strategy: "copy" },
+      dir: "/sandbox/.future",
+      spec: { path: "config.json", strategy: "copy" },
     });
 
     expect(result).toEqual({ outcome: "missing" });
@@ -386,18 +411,18 @@ describe("managed snapshot backup authority", () => {
       signal: null,
       error: undefined,
       stdout: Buffer.alloc(0),
-      stderr: Buffer.from("nemoclaw-openclaw-config-capture:unsafe-file-metadata\n"),
+      stderr: Buffer.from("nemoclaw-state-file-capture:unsafe-file-metadata\n"),
     } as never);
 
-    const result = captureOpenClawStateFile("alpha", {
+    const result = captureTestStateFile({
       sandboxName: "alpha",
-      dir: "/sandbox/.openclaw",
-      spec: { path: "openclaw.json", strategy: "copy" },
+      dir: "/sandbox/.future",
+      spec: { path: "config.json", strategy: "copy" },
     });
 
     expect(result).toEqual({
       outcome: "failed",
-      error: "privileged config capture failed: exit 11; reason unsafe-file-metadata",
+      error: "privileged state-file capture failed: exit 11; reason unsafe-file-metadata",
     });
   });
 
@@ -410,10 +435,10 @@ describe("managed snapshot backup authority", () => {
       stderr: Buffer.from(`permission denied apiKey=secret-value\u0000${"x".repeat(2048)}`),
     } as never);
 
-    const result = captureOpenClawStateFile("alpha", {
+    const result = captureTestStateFile({
       sandboxName: "alpha",
-      dir: "/sandbox/.openclaw",
-      spec: { path: "openclaw.json", strategy: "copy" },
+      dir: "/sandbox/.future",
+      spec: { path: "config.json", strategy: "copy" },
     });
 
     expect(result).toMatchObject({ outcome: "failed" });
@@ -434,47 +459,178 @@ describe("managed snapshot backup authority", () => {
       stderr: Buffer.from("docker exec usage error"),
     } as never);
 
-    const result = captureOpenClawStateFile("alpha", {
+    const result = captureTestStateFile({
       sandboxName: "alpha",
-      dir: "/sandbox/.openclaw",
-      spec: { path: "openclaw.json", strategy: "copy" },
+      dir: "/sandbox/.future",
+      spec: { path: "config.json", strategy: "copy" },
     });
 
     expect(result).toEqual({
       outcome: "failed",
-      error: "privileged config capture failed: exit 2; docker exec usage error",
+      error: "privileged state-file capture failed: exit 2; docker exec usage error",
     });
   });
 
   it.each([
     {
-      input: "an undeclared OpenClaw state file path",
+      input: "an undeclared state file path",
       request: {
         sandboxName: "alpha",
-        dir: "/sandbox/.openclaw",
+        dir: "/sandbox/.future",
         spec: { path: "credentials/token", strategy: "copy" },
       },
     },
     {
-      input: "an undeclared OpenClaw state file strategy",
+      input: "an undeclared state file strategy",
       request: {
         sandboxName: "alpha",
-        dir: "/sandbox/.openclaw",
-        spec: { path: "openclaw.json", strategy: "sqlite_backup" },
+        dir: "/sandbox/.future",
+        spec: { path: "config.json", strategy: "sqlite_backup" },
       },
     },
     {
-      input: "an undeclared OpenClaw state directory",
+      input: "an undeclared state directory",
       request: {
         sandboxName: "alpha",
         dir: "/sandbox/other",
-        spec: { path: "openclaw.json", strategy: "copy" },
+        spec: { path: "config.json", strategy: "copy" },
       },
     },
   ] as const)("rejects $input before privileged capture", ({ request }) => {
-    expect(captureOpenClawStateFile("alpha", request)).toBeNull();
+    expect(captureTestStateFile(request)).toBeNull();
     expect(privilegedCaptureMocks.withPrivilegedSandboxExecutionLease).not.toHaveBeenCalled();
     expect(privilegedCaptureMocks.executePrivilegedSandboxCommand).not.toHaveBeenCalled();
+  });
+
+  it("lets an unknown receipt-backed package request the finite privileged-copy fallback", () => {
+    const identity = harnessPackage("future-harness");
+    const entry = {
+      name: "alpha",
+      agent: "future-harness",
+      harnessPackage: identity,
+      fromDockerfile: "/tmp/Dockerfile.future",
+    } satisfies SandboxEntry;
+    const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+    const definition = {
+      name: identity.id,
+      packageRoot,
+      manifestPath: `${packageRoot}/manifest.yaml`,
+      configPaths: {
+        dir: "/sandbox/.future",
+        configFile: "config.json",
+        envFile: null,
+        format: "json",
+      },
+      stateFiles: [
+        {
+          path: "config.json",
+          strategy: "copy" as const,
+          backup: { fallback: "privileged-copy" as const },
+        },
+      ],
+    };
+    const selectedAgent = {
+      recordedAgent: identity.id,
+      effectiveAgentId: identity.id,
+      definition,
+      harnessPackage: identity,
+      harnessPackageMigration: null,
+    } as unknown as ResolvedSandboxAgent;
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+    const capturePrivilegedCopy = vi.fn(() => ({
+      outcome: "backed_up" as const,
+      data: Buffer.from("future"),
+    }));
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      entry.name,
+      { name: "future", agentDefinition: definition as never, harnessPackage: identity },
+      {
+        getSandbox: () => entry,
+        resolveAgent: () => selectedAgent,
+        resolvePinnedPackage: () =>
+          ({
+            identity,
+            packageRoot,
+            packageManifest: { manifestPath: definition.manifestPath },
+          }) as never,
+        capturePrivilegedCopyStateFile: capturePrivilegedCopy as never,
+        backup,
+      },
+    );
+
+    expect(result.success).toBe(true);
+    const capture = backup.mock.calls[0]?.[1]?.captureStateFile;
+    expect(capture).toBeTypeOf("function");
+    const request = {
+      sandboxName: entry.name,
+      dir: definition.configPaths.dir,
+      spec: { path: "config.json", strategy: "copy" as const },
+    };
+    expect(capture?.(request)).toEqual({ outcome: "backed_up", data: Buffer.from("future") });
+    expect(capturePrivilegedCopy).toHaveBeenCalledWith(entry.name, request, {
+      directory: definition.configPaths.dir,
+      spec: request.spec,
+    });
+
+    for (const refused of [
+      { ...request, dir: "/sandbox/.other" },
+      { ...request, spec: { path: "other.json", strategy: "copy" as const } },
+      { ...request, spec: { path: "config.json", strategy: "sqlite_backup" as const } },
+    ]) {
+      expect(capture?.(refused)).toBeNull();
+    }
+    expect(capturePrivilegedCopy).toHaveBeenCalledOnce();
+  });
+
+  it("does not infer privileged capture from an unknown receipt-backed harness ID", () => {
+    const identity = harnessPackage("future-harness");
+    const entry = {
+      name: "alpha",
+      agent: identity.id,
+      harnessPackage: identity,
+      fromDockerfile: "/tmp/Dockerfile.future",
+    } satisfies SandboxEntry;
+    const packageRoot = `/packages/${identity.id}/${identity.contentDigest}`;
+    const definition = {
+      name: identity.id,
+      packageRoot,
+      manifestPath: `${packageRoot}/manifest.yaml`,
+      configPaths: {
+        dir: "/sandbox/.future",
+        configFile: "config.json",
+        envFile: null,
+        format: "json",
+      },
+      stateFiles: [{ path: "config.json", strategy: "copy" as const }],
+    };
+    const selectedAgent = {
+      recordedAgent: identity.id,
+      effectiveAgentId: identity.id,
+      definition,
+      harnessPackage: identity,
+      harnessPackageMigration: null,
+    } as unknown as ResolvedSandboxAgent;
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      entry.name,
+      { agentDefinition: definition as never, harnessPackage: identity },
+      {
+        getSandbox: () => entry,
+        resolveAgent: () => selectedAgent,
+        resolvePinnedPackage: () =>
+          ({
+            identity,
+            packageRoot,
+            packageManifest: { manifestPath: definition.manifestPath },
+          }) as never,
+        backup,
+      },
+    );
+
+    expect(result.success).toBe(true);
+    expect(backup.mock.calls[0]?.[1]?.captureStateFile).toBeUndefined();
   });
 
   it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
@@ -647,6 +803,52 @@ describe("managed snapshot backup authority", () => {
     );
     expect(requireProvider).not.toHaveBeenCalled();
     expect(captureRuntime).not.toHaveBeenCalled();
+  });
+
+  it("keeps the fixed OpenClaw capture mapping for a legacy null-receipt sandbox", () => {
+    const entry = {
+      name: "alpha",
+      agent: "openclaw",
+      fromDockerfile: "/tmp/Dockerfile",
+    } satisfies SandboxEntry;
+    const definition = {
+      name: "openclaw",
+      packageRoot: "/repository/packages/nemoclaw-openclaw",
+      manifestPath: "/repository/packages/nemoclaw-openclaw/manifest.yaml",
+    };
+    const selectedAgent = {
+      recordedAgent: "openclaw",
+      effectiveAgentId: "openclaw",
+      definition,
+      harnessPackage: null,
+      harnessPackageMigration: null,
+    } as unknown as ResolvedSandboxAgent;
+    const backup = vi.fn((_name: string, options: BackupOptions = {}) => successfulBackup(options));
+    const capturePrivilegedCopy = vi.fn(() => ({ outcome: "missing" as const }));
+
+    const result = backupSandboxStateWithManagedAuthorityImpl(
+      entry.name,
+      { agentDefinition: definition as never, harnessPackage: null },
+      {
+        getSandbox: () => entry,
+        resolveAgent: () => selectedAgent,
+        capturePrivilegedCopyStateFile: capturePrivilegedCopy as never,
+        backup,
+      },
+    );
+
+    expect(result.success).toBe(true);
+    const capture = backup.mock.calls[0]?.[1]?.captureStateFile;
+    const request = {
+      sandboxName: entry.name,
+      dir: "/sandbox/.openclaw",
+      spec: { path: "openclaw.json", strategy: "copy" as const },
+    };
+    expect(capture?.(request)).toEqual({ outcome: "missing" });
+    expect(capturePrivilegedCopy).toHaveBeenCalledWith(entry.name, request, {
+      directory: "/sandbox/.openclaw",
+      spec: request.spec,
+    });
   });
 
   it("preserves explicit null authority for a qualified repository agent", () => {

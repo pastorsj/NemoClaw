@@ -24,6 +24,75 @@ afterEach(() => {
 });
 
 describe("state file restore ownership", () => {
+  it("parses the finite privileged-copy backup fallback", () => {
+    const agentName = `backup-privileged-copy-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Backup",
+        "state_files:",
+        "  - path: config.json",
+        "    backup:",
+        "      fallback: privileged-copy",
+      ].join("\n"),
+    );
+
+    expect(loadAgent(agentName).stateFiles).toEqual([
+      {
+        path: "config.json",
+        strategy: "copy",
+        backup: { fallback: "privileged-copy" },
+      },
+    ]);
+  });
+
+  it.each([
+    {
+      label: "an arbitrary fallback",
+      backupLines: ["      fallback: package-command"],
+      expected: /backup\.fallback.*privileged-copy/,
+    },
+    {
+      label: "an arbitrary backup field",
+      backupLines: ["      fallback: privileged-copy", "      command: capture-config"],
+      expected: /backup\.command.*not allowed/,
+    },
+  ])("rejects $label", ({ backupLines, expected }) => {
+    const agentName = `backup-invalid-${String(Date.now())}-${Math.random().toString(16).slice(2)}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Backup",
+        "state_files:",
+        "  - path: config.json",
+        "    backup:",
+        ...backupLines,
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(expected);
+  });
+
+  it("rejects privileged-copy for a sqlite backup", () => {
+    const agentName = `backup-sqlite-${String(Date.now())}`;
+    writeTempAgentManifest(
+      agentName,
+      [
+        `name: ${agentName}`,
+        "display_name: Backup",
+        "state_files:",
+        "  - path: state.db",
+        "    strategy: sqlite_backup",
+        "    backup:",
+        "      fallback: privileged-copy",
+      ].join("\n"),
+    );
+
+    expect(() => loadAgent(agentName)).toThrow(/state_files\[0\]\.backup.*strategy 'copy'/);
+  });
+
   it("parses a declarative key-allowlist restore ownership block (#6334)", () => {
     const agentName = `restore-keyallowlist-${String(Date.now())}`;
     writeTempAgentManifest(
