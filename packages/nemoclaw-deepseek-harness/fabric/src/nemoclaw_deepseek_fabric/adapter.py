@@ -13,15 +13,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from nemo_fabric_adapter_contract.models import AgentConfig
-from nemo_fabric_adapter_contract.models import AgentModelConfig
-from nemo_fabric_adapter_contract.models import AgentRunError
-from nemo_fabric_adapter_contract.models import AgentRunRequest
-from nemo_fabric_adapter_contract.models import AgentRunResult
-from nemo_fabric_adapter_contract.models import AgentRunStatus
-from nemo_fabric_adapter_contract.models import RuntimeContext
+from nemo_fabric_adapter_contract.models import (
+    AgentConfig,
+    AgentModelConfig,
+    AgentRunError,
+    AgentRunRequest,
+    AgentRunResult,
+    AgentRunStatus,
+    RuntimeContext,
+)
 from nemo_fabric_adapters.common import lifecycle
-
 
 ADAPTER_ID = "nvidia.nemoclaw.deepseek-harness"
 API_KEY_ENV = "DEEPSEEK_FABRIC_API_KEY"
@@ -207,6 +208,8 @@ def _worker_environment() -> dict[str, str]:
         "ANTHROPIC_API_KEY",
         "OPENROUTER_API_KEY",
         "DSH_SYSTEM_PROMPT",
+        "PYTHONHOME",
+        "PYTHONPATH",
     ):
         environment.pop(name, None)
     environment["DSH_TELEMETRY_MODE"] = "DISABLED"
@@ -314,6 +317,7 @@ class DeepSeekHarnessRuntime:
         try:
             process = await asyncio.create_subprocess_exec(
                 sys.executable,
+                "-I",
                 "-m",
                 PROCESS_MODULE,
                 "--parent-pid",

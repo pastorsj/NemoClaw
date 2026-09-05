@@ -16,7 +16,6 @@ import uuid
 from pathlib import Path
 from typing import IO
 
-
 PARENT_CHECK_SECONDS = 0.05
 DESCENDANT_STOP_GRACE_SECONDS = 0.25
 PR_SET_CHILD_SUBREAPER = 36
@@ -213,7 +212,7 @@ def _run_sdk_worker(input_stream: IO[str], output_stream: IO[str]) -> int:
                 "response": response,
                 "finish_reason": result.finish_reason,
             }
-    except Exception:
+    except Exception:  # noqa: BLE001
         # SDK diagnostics can contain prompts, credentials, or provider output.
         # The adapter owns stable operator-facing errors, so disclose none here.
         payload = {"status": "failed", "code": "deepseek_sdk_failed"}
@@ -255,7 +254,9 @@ def run_supervisor(values: list[str]) -> int:
         for handled_signal in handled_signals
     }
     try:
-        child = subprocess.Popen([sys.executable, "-m", PROCESS_MODULE, "--worker"])
+        child = subprocess.Popen(
+            [sys.executable, "-I", "-m", PROCESS_MODULE, "--worker"]
+        )
     except OSError:
         for handled_signal, previous_handler in previous_handlers.items():
             signal.signal(handled_signal, previous_handler)

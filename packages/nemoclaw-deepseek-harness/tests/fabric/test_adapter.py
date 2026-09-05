@@ -12,26 +12,29 @@ import os
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 FABRIC_SOURCE = PACKAGE_ROOT / "fabric" / "src"
 sys.path.insert(0, str(FABRIC_SOURCE))
 
-from nemo_fabric_adapter_contract.models import AgentConfig  # noqa: E402
-from nemo_fabric_adapter_contract.models import AgentRunRequest  # noqa: E402
-from nemo_fabric_adapter_contract.models import AgentRunStatus  # noqa: E402
-from nemo_fabric_adapter_contract.models import RuntimeContext  # noqa: E402
-from nemo_fabric_adapters.common.lifecycle import LifecycleError  # noqa: E402
-from nemoclaw_deepseek_fabric import process as deepseek_process  # noqa: E402
-from nemoclaw_deepseek_fabric.adapter import ADAPTER_ID  # noqa: E402
-from nemoclaw_deepseek_fabric.adapter import DeepSeekHarnessRuntime  # noqa: E402
-
+from nemo_fabric_adapter_contract.models import (
+    AgentConfig,
+    AgentRunRequest,
+    AgentRunStatus,
+    RuntimeContext,
+)
+from nemo_fabric_adapters.common.lifecycle import LifecycleError
+from nemoclaw_deepseek_fabric import process as deepseek_process
+from nemoclaw_deepseek_fabric.adapter import (
+    ADAPTER_ID,
+    DeepSeekHarnessRuntime,
+)
 
 CREDENTIAL_NAME = "DEEPSEEK_FABRIC_API_KEY"
 CREDENTIAL_VALUE = "nemoclaw-managed-inference"
@@ -60,6 +63,7 @@ class DeepSeekHarness:
                 "api_key_present": bool(kwargs.get("api_key")),
                 "inherited_fabric_key": "DEEPSEEK_FABRIC_API_KEY" in os.environ,
                 "inherited_provider_key": "DEEPSEEK_API_KEY" in os.environ,
+                "inherited_python_path": "PYTHONPATH" in os.environ,
                 "telemetry_mode": kwargs.get("env", {}).get("DSH_TELEMETRY_MODE"),
                 "telemetry_disabled": kwargs.get("env", {}).get("DSH_TELEMETRY_DISABLED"),
                 "system_prompt": kwargs.get("env", {}).get("DSH_SYSTEM_PROMPT"),
@@ -104,9 +108,7 @@ class DeepSeekHarness:
 
 
 def _generic_runner() -> tuple[int, int, object]:
-    from nemoclaw_fabric.command import EXIT_FAILURE
-    from nemoclaw_fabric.command import EXIT_SUCCESS
-    from nemoclaw_fabric.command import run_cli
+    from nemoclaw_fabric.command import EXIT_FAILURE, EXIT_SUCCESS, run_cli
 
     return EXIT_FAILURE, EXIT_SUCCESS, run_cli
 
@@ -213,6 +215,17 @@ class DeepSeekFixtureMixin:
         (self.fake_package / "__init__.py").write_text(
             FAKE_SDK_SOURCE, encoding="utf-8"
         )
+        # The production worker uses isolated Python. A temporary site hook in
+        # uv's disposable test environment supplies the fake SDK without
+        # weakening the subprocess command or relying on PYTHONPATH.
+        self.fake_site_hook = (
+            Path(sysconfig.get_path("purelib")) / "000_nemoclaw_fake_deepseek_sdk.pth"
+        )
+        self.fake_site_hook.write_text(
+            f"import sys; sys.path.insert(0, {str(self.fake_root)!r})\n",
+            encoding="utf-8",
+        )
+        self.addCleanup(self.fake_site_hook.unlink, missing_ok=True)
         self.config_marker = self.base_dir / "sdk-config.json"
         self.prompt_marker = self.base_dir / "sdk-prompt.txt"
         self.pid_marker = self.base_dir / "sdk-pids.json"
@@ -223,13 +236,6 @@ class DeepSeekFixtureMixin:
             "NEMOCLAW_FAKE_SDK_CONFIG": str(self.config_marker),
             "NEMOCLAW_FAKE_SDK_PROMPT": str(self.prompt_marker),
             "NEMOCLAW_FAKE_SDK_PIDS": str(self.pid_marker),
-            "PYTHONPATH": os.pathsep.join(
-                [
-                    str(self.fake_root),
-                    str(FABRIC_SOURCE),
-                    os.environ.get("PYTHONPATH", ""),
-                ]
-            ),
         }
 
     async def start_runtime(
@@ -289,6 +295,9 @@ class DeepSeekRuntimeTests(DeepSeekFixtureMixin, unittest.IsolatedAsyncioTestCas
         self.assertNotIn(
             CREDENTIAL_VALUE, " ".join(str(value) for value in spawn_arguments)
         )
+        self.assertEqual(
+            spawn_arguments[1:4], ("-I", "-m", deepseek_process.PROCESS_MODULE)
+        )
         self.assertEqual(self.prompt_marker.read_text(encoding="utf-8"), secret_prompt)
         config = json.loads(self.config_marker.read_text(encoding="utf-8"))
         self.assertEqual(
@@ -302,6 +311,7 @@ class DeepSeekRuntimeTests(DeepSeekFixtureMixin, unittest.IsolatedAsyncioTestCas
                 "api_key_present": True,
                 "inherited_fabric_key": False,
                 "inherited_provider_key": False,
+                "inherited_python_path": False,
                 "telemetry_mode": "DISABLED",
                 "telemetry_disabled": "1",
                 "system_prompt": "Use the managed workspace.",
@@ -325,9 +335,11 @@ class DeepSeekRuntimeTests(DeepSeekFixtureMixin, unittest.IsolatedAsyncioTestCas
 
         environment = dict(self.environment)
         environment.pop(CREDENTIAL_NAME)
-        with patch.dict(os.environ, environment, clear=True):
-            with self.assertRaisesRegex(LifecycleError, "credential is unavailable"):
-                await self.start_runtime()
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            self.assertRaisesRegex(LifecycleError, "credential is unavailable"),
+        ):
+            await self.start_runtime()
 
     async def test_rejects_non_text_without_starting_the_sdk(self) -> None:
         with patch.dict(os.environ, self.environment):
