@@ -18,6 +18,25 @@ function fail(message) {
 function booleanFlag(value) {
     return value ? "1" : "0";
 }
+function normalizeStartupRequest(request) {
+    if (request.profileKind !== "package")
+        return request;
+    const keys = Object.keys(request.packageConfig);
+    const settings = request.packageConfig.settings;
+    if (request.harnessPackage.id !== request.packageId ||
+        keys.length !== 1 ||
+        keys[0] !== "settings" ||
+        typeof settings !== "object" ||
+        settings === null ||
+        Array.isArray(settings)) {
+        fail("receipt-backed package config is inconsistent");
+    }
+    return {
+        packageId: request.packageId,
+        settings: { ...settings, corporateCa: request.corporateCa },
+        applicationEnvironment: request.applicationEnvironment,
+    };
+}
 function encodedJson(value) {
     return { kind: "canonical-json-base64", value };
 }
@@ -69,7 +88,8 @@ function messagingManagedFiles(plan) {
     }
     return [...files].sort();
 }
-function buildStartupPlan(request) {
+function buildStartupPlan(adapterRequest) {
+    const request = normalizeStartupRequest(adapterRequest);
     const { settings } = request;
     const config = settings.configuration;
     const dashboard = settings.dashboard;

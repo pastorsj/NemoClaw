@@ -2,14 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  HarnessPackageStartupRequest,
   HarnessStartupAdapterModule,
   HarnessStartupEnvironmentValue,
+  HarnessStartupJsonObject,
   HarnessStartupPlan,
   HarnessStartupRequest,
   HarnessStartupRootFileMaterial,
+  HarnessStartupSettings,
 } from "@nvidia/nemoclaw-harness-contract";
 
 const PACKAGE_ID = "langchain-deepagents-code";
+type StartupPackageConfig = HarnessStartupJsonObject & {
+  readonly settings: HarnessStartupSettings;
+};
+type StartupAdapterRequest =
+  | HarnessStartupRequest
+  | HarnessPackageStartupRequest<StartupPackageConfig>;
 const PROXY_ENVIRONMENT_NAMES = [
   "HTTP_PROXY",
   "HTTPS_PROXY",
@@ -35,6 +44,27 @@ function fail(message: string): never {
 
 function booleanFlag(value: boolean): "0" | "1" {
   return value ? "1" : "0";
+}
+
+function normalizeStartupRequest(request: StartupAdapterRequest): HarnessStartupRequest {
+  if (request.profileKind !== "package") return request;
+  const keys = Object.keys(request.packageConfig);
+  const settings = request.packageConfig.settings as unknown;
+  if (
+    request.harnessPackage.id !== request.packageId ||
+    keys.length !== 1 ||
+    keys[0] !== "settings" ||
+    typeof settings !== "object" ||
+    settings === null ||
+    Array.isArray(settings)
+  ) {
+    fail("receipt-backed package config is inconsistent");
+  }
+  return {
+    packageId: request.packageId,
+    settings: { ...(settings as HarnessStartupSettings), corporateCa: request.corporateCa },
+    applicationEnvironment: request.applicationEnvironment,
+  };
 }
 
 function rootFile(
@@ -69,7 +99,8 @@ function appendHostProxy(
   });
 }
 
-function buildStartupPlan(request: HarnessStartupRequest): HarnessStartupPlan {
+function buildStartupPlan(adapterRequest: StartupAdapterRequest): HarnessStartupPlan {
+  const request = normalizeStartupRequest(adapterRequest);
   const { settings } = request;
   const config = settings.configuration;
   if (
@@ -162,6 +193,6 @@ function buildStartupPlan(request: HarnessStartupRequest): HarnessStartupPlan {
   };
 }
 
-const startupAdapter: HarnessStartupAdapterModule = { buildStartupPlan };
+const startupAdapter: HarnessStartupAdapterModule<StartupAdapterRequest> = { buildStartupPlan };
 
 export = startupAdapter;

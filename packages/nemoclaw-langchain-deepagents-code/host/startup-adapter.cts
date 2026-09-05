@@ -26,6 +26,25 @@ function fail(message) {
 function booleanFlag(value) {
     return value ? "1" : "0";
 }
+function normalizeStartupRequest(request) {
+    if (request.profileKind !== "package")
+        return request;
+    const keys = Object.keys(request.packageConfig);
+    const settings = request.packageConfig.settings;
+    if (request.harnessPackage.id !== request.packageId ||
+        keys.length !== 1 ||
+        keys[0] !== "settings" ||
+        typeof settings !== "object" ||
+        settings === null ||
+        Array.isArray(settings)) {
+        fail("receipt-backed package config is inconsistent");
+    }
+    return {
+        packageId: request.packageId,
+        settings: { ...settings, corporateCa: request.corporateCa },
+        applicationEnvironment: request.applicationEnvironment,
+    };
+}
 function rootFile(legacyInput, path, value) {
     return {
         kind: "root-owned-file",
@@ -49,7 +68,8 @@ function appendHostProxy(environment, request) {
         no_proxy: noProxy,
     });
 }
-function buildStartupPlan(request) {
+function buildStartupPlan(adapterRequest) {
+    const request = normalizeStartupRequest(adapterRequest);
     const { settings } = request;
     const config = settings.configuration;
     if (request.packageId !== PACKAGE_ID ||

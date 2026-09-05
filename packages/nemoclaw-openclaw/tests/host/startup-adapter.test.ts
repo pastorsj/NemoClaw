@@ -5,15 +5,25 @@ import { createRequire } from "node:module";
 import path from "node:path";
 
 import type {
+  HarnessPackageStartupRequest,
   HarnessStartupAdapterModule,
+  HarnessStartupJsonObject,
   HarnessStartupRequest,
+  HarnessStartupSettings,
 } from "@nvidia/nemoclaw-harness-contract";
 import { describe, expect, it } from "vitest";
+
+type StartupPackageConfig = HarnessStartupJsonObject & {
+  readonly settings: HarnessStartupSettings;
+};
+type StartupAdapterRequest =
+  | HarnessStartupRequest
+  | HarnessPackageStartupRequest<StartupPackageConfig>;
 
 const requireModule = createRequire(import.meta.url);
 const adapter = requireModule(
   path.resolve("host/startup-adapter.cts"),
-) as HarnessStartupAdapterModule;
+) as HarnessStartupAdapterModule<StartupAdapterRequest>;
 
 function request(): HarnessStartupRequest {
   return {
@@ -81,7 +91,31 @@ function request(): HarnessStartupRequest {
   };
 }
 
+function receiptBackedRequest(): HarnessPackageStartupRequest<StartupPackageConfig> {
+  const legacy = request();
+  return {
+    profileKind: "package",
+    packageId: legacy.packageId,
+    harnessPackage: {
+      kind: "agent-runtime",
+      id: legacy.packageId,
+      packageVersion: "1.0.0",
+      contentDigest: "a".repeat(64),
+    },
+    packageConfig: { settings: legacy.settings } as StartupPackageConfig,
+    corporateCa: legacy.settings.corporateCa,
+    applicationEnvironment: legacy.applicationEnvironment,
+  };
+}
+
 describe("OpenClaw startup adapter", () => {
+  it("produces the same plan from receipt-backed package settings", () => {
+    const packageRequest = receiptBackedRequest();
+
+    expect(Object.keys(packageRequest.packageConfig)).toEqual(["settings"]);
+    expect(adapter.buildStartupPlan(packageRequest)).toEqual(adapter.buildStartupPlan(request()));
+  });
+
   it("maps native startup inputs into the finite NemoClaw plan", () => {
     const plan = adapter.buildStartupPlan(request());
 
