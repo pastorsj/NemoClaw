@@ -15,7 +15,7 @@ import {
   HARNESS_PACKAGE_POINTER_MAX_BYTES,
   HARNESS_PACKAGE_RECEIPT_MAX_BYTES,
   assertHarnessPackageReceiptMatchesPointer,
-  parseBundledHarnessPackageSourceIdentity,
+  parseHarnessPackageSourceIdentity,
   parseHarnessPackageActivePointer,
   parseHarnessPackageContentDigest,
   parseHarnessPackageId,
@@ -23,7 +23,7 @@ import {
   parseHarnessPackageReceipt,
   serializeHarnessPackageActivePointer,
   serializeHarnessPackageReceipt,
-  type BundledHarnessPackageSourceIdentity,
+  type HarnessPackageSourceIdentity,
   type HarnessPackageActivePointer,
   type HarnessPackageReceipt,
 } from "./receipt";
@@ -78,7 +78,7 @@ export interface HarnessPackageStoreOptions {
 export interface PublishHarnessPackageInput extends HarnessPackageStoreOptions {
   readonly validatedTree: ValidatedHarnessPackageTree;
   readonly expectedIdentity: HarnessPackageIdentity;
-  readonly sourceIdentity: BundledHarnessPackageSourceIdentity;
+  readonly sourceIdentity: HarnessPackageSourceIdentity;
   readonly dependencies?: HarnessPackageStoreDependencies;
 }
 
@@ -607,7 +607,7 @@ export function publishHarnessPackage(
   inputValue: PublishHarnessPackageInput,
 ): InstalledHarnessPackage {
   const expectedIdentity = parseHarnessPackageIdentity(inputValue.expectedIdentity);
-  const sourceIdentity = parseBundledHarnessPackageSourceIdentity(inputValue.sourceIdentity);
+  const sourceIdentity = parseHarnessPackageSourceIdentity(inputValue.sourceIdentity);
   const input = { ...inputValue, expectedIdentity, sourceIdentity };
   try {
     const sourceManifest = parseHarnessPackageManifest(input.validatedTree.rootDir);

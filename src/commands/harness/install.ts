@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Args } from "@oclif/core";
+import { Args, Flags } from "@oclif/core";
 
 import { NemoClawCommand } from "../../lib/cli/nemoclaw-oclif-command";
 import { getBuildIdentity } from "../../lib/core/version";
@@ -19,6 +19,7 @@ import {
 } from "../../lib/agent-runtime/package/catalog";
 import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
 import { promptForHarnessPackage } from "../../lib/agent-runtime/package/prompt";
+import { parseHarnessPackageId } from "../../lib/agent-runtime/package/receipt";
 
 export const harnessInstallCommandDependencies = {
   getBuildIdentity,
@@ -29,6 +30,7 @@ export const harnessInstallCommandDependencies = {
   listHarnessPackageInventory,
   prompt,
   promptForHarnessPackage,
+  parseHarnessPackageId,
   requireCandidateAgentSelectable,
   resolveHarnessPackageInstallSelection,
 };
@@ -49,25 +51,70 @@ function selectableHarnessInventory(inventory: HarnessPackageInventory): Harness
 export default class HarnessInstallCommand extends NemoClawCommand {
   static id = "harness:install";
   static strict = true;
-  static summary = "Install a reviewed harness package";
-  static description = "Install one reviewed harness package bundled with this NemoClaw build.";
-  static usage = ["harness install [id]"];
+  static summary = "Install a harness package";
+  static description =
+    "Install one reviewed bundled package, or one explicitly trusted local built package.";
+  static usage = [
+    "harness install [id]",
+    "harness install <id> --from <built-directory> --yes-i-trust-local-package",
+  ];
   static examples = [
     "<%= config.bin %> harness install",
     "<%= config.bin %> harness install openclaw",
+    "<%= config.bin %> harness install example --from ./dist/nemoclaw-example --yes-i-trust-local-package",
   ];
   static args = {
     id: Args.string({
-      description: "Exact reviewed harness package ID or current public alias",
+      description: "Bundled package ID or alias; use a canonical package ID with --from",
       ignoreStdin: true,
       required: false,
     }),
   };
-  static flags = {};
+  static flags = {
+    from: Flags.string({
+      description: "Path to one local built harness package",
+    }),
+    "yes-i-trust-local-package": Flags.boolean({
+      description: "Acknowledge that the local package is trusted code",
+      default: false,
+    }),
+  };
 
   public async run(): Promise<void> {
-    const { args } = await this.parse(HarnessInstallCommand);
+    const { args, flags } = await this.parse(HarnessInstallCommand);
     let selector = args.id;
+
+    if (flags.from !== undefined) {
+      if (selector === undefined) {
+        this.error(
+          "A canonical harness package ID is required with '--from'. Run 'nemoclaw harness install <id> --from <built-directory> --yes-i-trust-local-package'.",
+          { exit: 2 },
+        );
+      }
+      if (!flags["yes-i-trust-local-package"]) {
+        this.error(
+          "Local harness packages are trusted code. Pass '--yes-i-trust-local-package' only after reviewing the package.",
+          { exit: 2 },
+        );
+      }
+      if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(flags.from)) {
+        this.error("'--from' accepts a local filesystem directory, not a URL.", { exit: 2 });
+      }
+      const requestedId = harnessInstallCommandDependencies.parseHarnessPackageId(selector);
+      harnessInstallCommandDependencies.requireCandidateAgentSelectable(requestedId);
+      const installed = harnessInstallCommandDependencies.installHarnessPackage({
+        packageRoot: flags.from,
+        expectedId: requestedId,
+        sourceIdentity: { kind: "local" },
+      });
+      this.log(
+        `Installed trusted local harness package '${installed.identity.id}' (${installed.identity.packageVersion}, sha256:${installed.identity.contentDigest}).`,
+      );
+      return;
+    }
+    if (flags["yes-i-trust-local-package"]) {
+      this.error("'--yes-i-trust-local-package' may be used only with '--from'.", { exit: 2 });
+    }
 
     if (selector === undefined) {
       if (!harnessInstallCommandDependencies.isStdinTty()) {
@@ -101,6 +148,7 @@ export default class HarnessInstallCommand extends NemoClawCommand {
     harnessInstallCommandDependencies.requireCandidateAgentSelectable(available.id);
     const installed = harnessInstallCommandDependencies.installHarnessPackage({
       packageRoot: available.packageRoot,
+      expectedId: available.id,
       sourceIdentity: {
         kind: "bundled",
         nemoclawBuildIdentity: harnessInstallCommandDependencies.getBuildIdentity({

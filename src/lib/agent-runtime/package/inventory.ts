@@ -155,9 +155,6 @@ export function createHarnessInventoryView(
   const installed = inventory.installed
     .map(installedRow)
     .sort((left, right) => left.id.localeCompare(right.id));
-  if (installed.some(({ id }) => !availableIds.has(id))) {
-    throw new Error("Installed harness inventory contains an unreviewed id");
-  }
 
   return Object.freeze({
     schemaVersion: 1,

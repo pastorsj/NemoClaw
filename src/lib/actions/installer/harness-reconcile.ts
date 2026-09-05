@@ -160,15 +160,12 @@ function reconciliationError(message: string): InstallerHarnessReconciliationErr
   return new InstallerHarnessReconciliationError(message);
 }
 
-function effectiveAgentId(value: unknown, bundledHarnesses: BundledHarnessCatalog): string {
+function recordedAgentId(value: unknown): string {
   const agentId = value === null || value === undefined ? "openclaw" : value;
   if (typeof agentId !== "string" || agentId.length === 0) {
     throw reconciliationError("an owner has an invalid harness identifier");
   }
-  if (bundledHarnesses.has(agentId) || agentId === "nemocua") {
-    return agentId;
-  }
-  throw reconciliationError("an owner uses an unsupported harness identifier");
+  return agentId;
 }
 
 function sameMigration(
@@ -251,15 +248,12 @@ function ownsProperty(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function inspectPeerAuthority(
-  peer: DurableAuthorityPeer,
-  bundledHarnesses: BundledHarnessCatalog,
-): {
+function inspectPeerAuthority(peer: DurableAuthorityPeer): {
   readonly effectiveAgentId: string;
   readonly candidate: boolean;
   readonly state: ReturnType<typeof inspectHarnessPackageState>;
 } {
-  const agentId = effectiveAgentId(peer.value.agent, bundledHarnesses);
+  const agentId = recordedAgentId(peer.value.agent);
   const candidate = agentId === "nemocua";
   const state = inspectHarnessPackageState(
     peer.value.harnessPackage,
@@ -296,11 +290,9 @@ function inspectOwner(
     throw reconciliationError("the onboarding session has malformed harness package authority");
   }
   const peers = [
-    ...(owner.session
-      ? [inspectPeerAuthority({ kind: "session", value: owner.session }, bundledHarnesses)]
-      : []),
+    ...(owner.session ? [inspectPeerAuthority({ kind: "session", value: owner.session })] : []),
     ...(owner.registryEntry
-      ? [inspectPeerAuthority({ kind: "registry", value: owner.registryEntry }, bundledHarnesses)]
+      ? [inspectPeerAuthority({ kind: "registry", value: owner.registryEntry })]
       : []),
   ];
   const first = peers[0];
@@ -346,6 +338,9 @@ function inspectOwner(
       harnessPackageMigration: firstExact.harnessPackageMigration,
       requiresMigration,
     };
+  }
+  if (!bundledHarnesses.has(first.effectiveAgentId)) {
+    throw reconciliationError("an external harness owner is missing exact package authority");
   }
   return {
     kind: "standard",

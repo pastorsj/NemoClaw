@@ -19,7 +19,8 @@ const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}
 const UNSAFE_STRING_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const RECEIPT_FIELDS = new Set(["schemaVersion", "identity", "sourceIdentity", "installedAt"]);
 const IDENTITY_FIELDS = new Set(["kind", "id", "packageVersion", "contentDigest"]);
-const SOURCE_IDENTITY_FIELDS = new Set(["kind", "nemoclawBuildIdentity"]);
+const BUNDLED_SOURCE_IDENTITY_FIELDS = new Set(["kind", "nemoclawBuildIdentity"]);
+const LOCAL_SOURCE_IDENTITY_FIELDS = new Set(["kind"]);
 const BUILD_IDENTITY_FIELDS = new Set(["nemoclawVersion", "sourceRevision"]);
 const POINTER_FIELDS = new Set(["schemaVersion", "id", "contentDigest"]);
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -28,6 +29,14 @@ export interface BundledHarnessPackageSourceIdentity {
   readonly kind: "bundled";
   readonly nemoclawBuildIdentity: BuildIdentity;
 }
+
+export interface LocalHarnessPackageSourceIdentity {
+  readonly kind: "local";
+}
+
+export type HarnessPackageSourceIdentity =
+  | BundledHarnessPackageSourceIdentity
+  | LocalHarnessPackageSourceIdentity;
 
 /** Bind bundled package installation provenance to the exact running NemoClaw build. */
 export function getBundledHarnessPackageSourceIdentity(options: {
@@ -42,7 +51,7 @@ export function getBundledHarnessPackageSourceIdentity(options: {
 export interface HarnessPackageReceipt {
   readonly schemaVersion: 1;
   readonly identity: HarnessPackageIdentity;
-  readonly sourceIdentity: BundledHarnessPackageSourceIdentity;
+  readonly sourceIdentity: HarnessPackageSourceIdentity;
   readonly installedAt: string;
 }
 
@@ -186,7 +195,7 @@ export function parseBundledHarnessPackageSourceIdentity(
 ): BundledHarnessPackageSourceIdentity {
   const record = requireExactRecord(
     value,
-    SOURCE_IDENTITY_FIELDS,
+    BUNDLED_SOURCE_IDENTITY_FIELDS,
     "Harness package source identity",
   );
   if (record.kind !== "bundled") {
@@ -204,6 +213,34 @@ export function parseBundledHarnessPackageSourceIdentity(
   return { kind: "bundled", nemoclawBuildIdentity };
 }
 
+export function parseLocalHarnessPackageSourceIdentity(
+  value: unknown,
+): LocalHarnessPackageSourceIdentity {
+  const record = requireExactRecord(
+    value,
+    LOCAL_SOURCE_IDENTITY_FIELDS,
+    "Harness package source identity",
+  );
+  if (record.kind !== "local") {
+    throw new Error("Harness package source identity kind must be local");
+  }
+  return { kind: "local" };
+}
+
+/** Parse only the fixed provenance forms that NemoClaw knows how to establish. */
+export function parseHarnessPackageSourceIdentity(value: unknown): HarnessPackageSourceIdentity {
+  if (!isPlainRecord(value)) {
+    throw new Error("Harness package source identity must contain one JSON object");
+  }
+  const kind = Object.getOwnPropertyDescriptor(value, "kind");
+  if (!kind || kind.get !== undefined || kind.set !== undefined) {
+    throw new Error("Harness package source identity fields must contain data values");
+  }
+  if (kind.value === "bundled") return parseBundledHarnessPackageSourceIdentity(value);
+  if (kind.value === "local") return parseLocalHarnessPackageSourceIdentity(value);
+  throw new Error("Harness package source identity kind is invalid");
+}
+
 function requireHarnessPackageReceipt(value: unknown): HarnessPackageReceipt {
   const record = requireExactRecord(value, RECEIPT_FIELDS, "Harness package receipt");
   if (record.schemaVersion !== 1) {
@@ -212,7 +249,7 @@ function requireHarnessPackageReceipt(value: unknown): HarnessPackageReceipt {
   return {
     schemaVersion: 1,
     identity: parseHarnessPackageIdentity(record.identity),
-    sourceIdentity: parseBundledHarnessPackageSourceIdentity(record.sourceIdentity),
+    sourceIdentity: parseHarnessPackageSourceIdentity(record.sourceIdentity),
     installedAt: requireCanonicalTimestamp(record.installedAt),
   };
 }

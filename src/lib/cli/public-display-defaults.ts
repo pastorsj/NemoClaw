@@ -29,8 +29,8 @@ const PUBLIC_DISPLAY_LAYOUT: Record<string, readonly PublicDisplayLayout[]> = {
     {
       group: "Getting Started",
       order: 1.6,
-      description: "Install a reviewed harness package",
-      flags: "[id]",
+      description: "Install a harness package",
+      flags: "[id] [--from <directory> --yes-i-trust-local-package]",
     },
   ],
   "harness:validate": [

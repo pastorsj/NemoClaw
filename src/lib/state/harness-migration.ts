@@ -324,7 +324,7 @@ export function prepareLegacyHarnessMigration(
     bundledRoot,
     storeRoot,
     packageRoot: adoptedPinned?.packageRoot ?? selected!.packageRoot,
-    sourceIdentity: structuredClone(adoptedPinned?.receipt.sourceIdentity ?? sourceIdentity),
+    sourceIdentity: structuredClone(sourceIdentity),
     harnessPackage: cloneIdentity(harnessPackage),
     harnessPackageMigration: parsedMigration,
   });

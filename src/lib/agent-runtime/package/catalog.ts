@@ -137,17 +137,27 @@ function identitiesMatch(left: HarnessPackageIdentity, right: HarnessPackageIden
   );
 }
 
-function assertPackageSelections(packages: readonly ReadAvailableHarnessPackage[]): void {
+interface HarnessPackageSelectionMetadata {
+  readonly record: Pick<
+    AvailableHarnessPackageRecord,
+    "id" | "aliases" | "isDefaultOnboardingChoice"
+  >;
+}
+
+function assertPackageSelections(
+  packages: readonly HarnessPackageSelectionMetadata[],
+  sourceLabel: "Bundled" | "Installed",
+): void {
   try {
     createAgentAliasMap(
       packages.map(({ record }) => ({ name: record.id, aliases: record.aliases })),
     );
   } catch {
-    throw new HarnessPackageCatalogIntegrityError("Bundled harness aliases conflict");
+    throw new HarnessPackageCatalogIntegrityError(`${sourceLabel} harness aliases conflict`);
   }
   if (packages.filter(({ record }) => record.isDefaultOnboardingChoice).length > 1) {
     throw new HarnessPackageCatalogIntegrityError(
-      "More than one bundled harness declares itself as the onboarding default",
+      `More than one ${sourceLabel.toLowerCase()} harness declares itself as the onboarding default`,
     );
   }
 }
@@ -235,7 +245,7 @@ function listAvailableHarnessPackages(
   }
 
   const readPackages = [...packagesById.values()];
-  assertPackageSelections(readPackages);
+  assertPackageSelections(readPackages, "Bundled");
   const available = readPackages
     .sort((left, right) => left.record.id.localeCompare(right.record.id))
     .map(({ record }) => record);
@@ -253,35 +263,47 @@ function listAvailableHarnessPackages(
 
 function healthyInstalledRecord(
   installed: InstalledHarnessPackage,
-  available: AvailableHarnessPackageRecord,
+  available: AvailableHarnessPackageRecord | undefined,
 ): HealthyInstalledHarnessPackageRecord {
+  const definition = buildAgentDefinition({
+    manifest: installed.packageManifest.manifest,
+    manifestPath: installed.packageManifest.manifestPath,
+    packageRoot: installed.packageRoot,
+  });
+  if (definition.name !== installed.identity.id) {
+    throw new HarnessPackageCatalogIntegrityError(
+      "Installed harness package definition does not match its receipt",
+    );
+  }
   return Object.freeze({
     state: "installed",
     id: installed.identity.id,
     displayName: installed.packageManifest.envelope.displayName,
     description: manifestDescription(installed.packageManifest),
-    aliases: available.aliases,
-    aliasSummary: available.aliasSummary,
-    isDefaultOnboardingChoice: available.isDefaultOnboardingChoice,
-    defaultSandboxName: available.defaultSandboxName,
+    aliases: definition.agentAliases,
+    aliasSummary: definition.agentAliasSummary,
+    isDefaultOnboardingChoice: definition.isDefaultOnboardingChoice,
+    defaultSandboxName: definition.defaultSandboxName,
     identity: installed.identity,
     packageRoot: installed.packageRoot,
-    matchesAvailableIdentity: identitiesMatch(installed.identity, available.identity),
+    matchesAvailableIdentity:
+      available !== undefined && identitiesMatch(installed.identity, available.identity),
   });
 }
 
 function damagedInstalledRecord(
-  available: AvailableHarnessPackageRecord,
+  id: string,
+  available: AvailableHarnessPackageRecord | undefined,
 ): DamagedInstalledHarnessPackageRecord {
   return Object.freeze({
     state: "damaged",
-    id: available.id,
-    displayName: available.displayName,
-    description: available.description,
-    aliases: available.aliases,
-    aliasSummary: available.aliasSummary,
-    isDefaultOnboardingChoice: available.isDefaultOnboardingChoice,
-    defaultSandboxName: available.defaultSandboxName,
+    id,
+    displayName: available?.displayName ?? id,
+    description: available?.description ?? null,
+    aliases: available?.aliases ?? Object.freeze([]),
+    aliasSummary: available?.aliasSummary ?? null,
+    isDefaultOnboardingChoice: available?.isDefaultOnboardingChoice ?? false,
+    defaultSandboxName: available?.defaultSandboxName ?? id,
     reason: "installed-package-integrity-failed",
   });
 }
@@ -298,30 +320,31 @@ function listInstalledHarnessPackages(
   }
 
   const availableById = new Map(available.map((record) => [record.id, record]));
-  for (const id of activeIds) {
-    if (!availableById.has(id)) {
-      throw new HarnessPackageCatalogIntegrityError(`Installed harness '${id}' is not reviewed`);
-    }
-  }
-
-  const activeIdSet = new Set(activeIds);
   const installedRecords: InstalledHarnessPackageRecord[] = [];
-  for (const availableRecord of available) {
-    if (!activeIdSet.has(availableRecord.id)) continue;
+  for (const id of activeIds) {
+    const availableRecord = availableById.get(id);
     try {
       const installed = readInstalledHarnessPackage(
-        availableRecord.id,
+        id,
         storeRoot === undefined ? {} : { storeRoot },
       );
       installedRecords.push(
         installed === null
-          ? damagedInstalledRecord(availableRecord)
+          ? damagedInstalledRecord(id, availableRecord)
           : healthyInstalledRecord(installed, availableRecord),
       );
     } catch {
-      installedRecords.push(damagedInstalledRecord(availableRecord));
+      installedRecords.push(damagedInstalledRecord(id, availableRecord));
     }
   }
+  assertPackageSelections(
+    installedRecords
+      .filter(
+        (record): record is HealthyInstalledHarnessPackageRecord => record.state === "installed",
+      )
+      .map((record) => ({ record })),
+    "Installed",
+  );
   return Object.freeze(installedRecords);
 }
 

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import fs from "node:fs";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -269,6 +271,51 @@ describe("reconcileInstallerHarnesses", () => {
       standardOwnerCount: 1,
       migratedOwnerCount: 0,
     });
+  });
+
+  it("preserves an external owner pinned to an older installed local package", () => {
+    const pinned = fixture.installLocal({
+      id: "future-harness",
+      displayName: "Future Harness",
+      packageVersion: "1.0.0",
+    });
+    const active = fixture.installLocal({
+      id: "future-harness",
+      displayName: "Future Harness",
+      packageVersion: "1.1.0",
+    });
+    const harness = new InstallerStateHarness(null, [
+      {
+        ...registryEntry("future-owner", "future-harness"),
+        harnessPackage: pinned.identity,
+      },
+    ]);
+
+    const result = reconcile(harness);
+
+    expect(result).toMatchObject({
+      outcome: "ready",
+      standardOwnerCount: 1,
+      migratedOwnerCount: 0,
+    });
+    expect(active.identity).not.toEqual(pinned.identity);
+    expect(harness.registry.sandboxes["future-owner"]?.harnessPackage).toEqual(pinned.identity);
+    expect(harness.prepareCalls).toEqual([]);
+    expect(harness.reconcileCalls).toEqual([]);
+  });
+
+  it("rejects a receipt-less external owner before package-store mutation", () => {
+    const harness = new InstallerStateHarness(null, [
+      registryEntry("future-owner", "future-harness"),
+    ]);
+    const initialStore = fs.readdirSync(fixture.storeRoot);
+
+    expect(() => reconcile(harness)).toThrow(
+      "an external harness owner is missing exact package authority",
+    );
+    expect(fs.readdirSync(fixture.storeRoot)).toEqual(initialStore);
+    expect(harness.prepareCalls).toEqual([]);
+    expect(harness.reconcileCalls).toEqual([]);
   });
 
   it("migrates one same-name session and registry owner through the shared service", () => {

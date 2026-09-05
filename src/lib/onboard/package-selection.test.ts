@@ -79,6 +79,24 @@ describe("selectOnboardHarnessPackage", () => {
     expect(fs.existsSync(fixture.executionSentinel)).toBe(false);
   });
 
+  it("selects an installed-only local package by its manifest-owned alias", async () => {
+    const installed = fixture.installLocal({
+      id: "future-harness",
+      displayName: "Future Harness",
+      aliases: ["future"],
+    });
+
+    const result = await selectOnboardHarnessPackage(
+      selectionInput({ environment: { NEMOCLAW_AGENT: "future" } }),
+    );
+
+    assert.equal(result.kind, "package");
+    expect(result.recordedAgent).toBe("future-harness");
+    expect(result.harnessPackage).toEqual(installed.identity);
+    expect(result.resolvedPackage.receipt.sourceIdentity).toEqual({ kind: "local" });
+    expect(result.effectiveDefinition.name).toBe("future-harness");
+  });
+
   it("treats an installed but unqualified candidate as unavailable", async () => {
     fixture.install("pi");
     const prompt = vi.fn(async () => "1");

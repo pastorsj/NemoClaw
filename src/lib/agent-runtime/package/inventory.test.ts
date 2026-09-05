@@ -142,6 +142,25 @@ describe("harness package inventory presentation", () => {
     expect(text).not.toContain(OPENCLAW_DIGEST);
   });
 
+  it("renders an installed-only package without claiming bundled availability", () => {
+    const view = createView({
+      installed: [healthyPackage("future-harness", "Future Harness", "1.0.0", OLDER_DIGEST, false)],
+      available: [OPENCLAW_AVAILABLE],
+    });
+
+    expect(view.installed).toEqual([
+      {
+        id: "future-harness",
+        displayName: "Future Harness",
+        health: "healthy",
+        identity: packageIdentity("future-harness", "1.0.0", OLDER_DIGEST),
+      },
+    ]);
+    expect(view.available).toHaveLength(1);
+    expect(view.available[0]?.identity.id).toBe("openclaw");
+    expect(renderHarnessInventoryText(view)).toContain("future-harness | Future Harness");
+  });
+
   it("sorts multiple installed and available rows by canonical harness id", () => {
     const view = createView({
       installed: [

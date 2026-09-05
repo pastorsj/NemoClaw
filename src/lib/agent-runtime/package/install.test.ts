@@ -78,6 +78,13 @@ function install(sourceIdentity: BundledHarnessPackageSourceIdentity = FIRST_SOU
   return installHarnessPackage({ packageRoot: sourceRoot, sourceIdentity }, { storeRoot });
 }
 
+function installLocal(expectedId = "openclaw") {
+  return installHarnessPackage(
+    { packageRoot: sourceRoot, expectedId, sourceIdentity: { kind: "local" } },
+    { storeRoot },
+  );
+}
+
 function receiptPath(identity: HarnessPackageIdentity): string {
   return path.join(storeRoot, "receipts", identity.id, "sha256", `${identity.contentDigest}.json`);
 }
@@ -125,6 +132,20 @@ describe("installHarnessPackage", () => {
     expect(result).not.toHaveProperty("supported");
   });
 
+  it("records only bounded local provenance for an explicitly matched package id", () => {
+    const result = installLocal();
+
+    expect(result.receipt.sourceIdentity).toEqual({ kind: "local" });
+    expect(JSON.stringify(result.receipt)).not.toContain(sourceRoot);
+  });
+
+  it("rejects a local package id mismatch before creating package-store state", () => {
+    expect(() => installLocal("hermes")).toThrow(
+      "Harness package id does not match the requested installation id",
+    );
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
   it("reuses immutable object and receipt bytes during an exact reinstall", () => {
     const first = install();
     const immutableReceipt = receiptPath(first.identity);
@@ -161,6 +182,20 @@ describe("installHarnessPackage", () => {
 
     expect(second.identity.packageVersion).toBe("1.1.0");
     expect(second.identity.contentDigest).not.toBe(first.identity.contentDigest);
+    expect(readActivePackage().identity).toEqual(second.identity);
+    expect(resolvePinnedHarnessPackage(first.identity, { storeRoot }).identity).toEqual(
+      first.identity,
+    );
+  });
+
+  it("upgrades a local package by reinstall while retaining its prior pinned identity", () => {
+    const first = installLocal();
+    writePackage("1.1.0", "changed local payload\n");
+
+    const second = installLocal();
+
+    expect(second.identity.packageVersion).toBe("1.1.0");
+    expect(second.receipt.sourceIdentity).toEqual({ kind: "local" });
     expect(readActivePackage().identity).toEqual(second.identity);
     expect(resolvePinnedHarnessPackage(first.identity, { storeRoot }).identity).toEqual(
       first.identity,

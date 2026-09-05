@@ -13,6 +13,7 @@ import {
 } from "../../lib/agent-runtime/package/catalog";
 import { installHarnessPackage } from "../../lib/agent-runtime/package/install";
 import type { BundledHarnessPackageSourceIdentity } from "../../lib/agent-runtime/package/receipt";
+import { readInstalledHarnessPackage } from "../../lib/agent-runtime/package/store";
 import HarnessInstallCommand, { harnessInstallCommandDependencies } from "./install";
 
 const TEST_PARENT = path.join(process.cwd(), "node_modules/.cache/nemoclaw-harness-command-tests");
@@ -114,6 +115,45 @@ function writePiBundle(): void {
   writeFixtureFile(packageRoot, "runtime/payload.txt", "pi\n");
 }
 
+function writeLocalPackage(id = "future-harness"): string {
+  const packageRoot = path.join(fixtureRoot, "local", `nemoclaw-${id}`);
+  const manifestPath = `packages/nemoclaw-${id}/manifest.yaml`;
+  fs.mkdirSync(packageRoot, { recursive: true, mode: 0o700 });
+  writeFixtureFile(
+    packageRoot,
+    "nemoclaw-package.json",
+    `${JSON.stringify({
+      schemaVersion: 1,
+      kind: "agent-runtime",
+      id,
+      displayName: "Future Harness",
+      packageVersion: "1.0.0",
+      manifest: manifestPath,
+    })}\n`,
+  );
+  writeFixtureFile(
+    packageRoot,
+    manifestPath,
+    [
+      `name: ${id}`,
+      "display_name: Future Harness",
+      "description: Locally built adapter",
+      "aliases:",
+      "  - future",
+      "runtime:",
+      "  kind: gateway",
+      "",
+    ].join("\n"),
+  );
+  writeFixtureFile(packageRoot, "runtime/payload.txt", "local package\n");
+  writeFixtureFile(
+    packageRoot,
+    "runtime/entry.mjs",
+    `import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(packageCodeMarker)}, "ran");\n`,
+  );
+  return packageRoot;
+}
+
 function catalogueOptions() {
   return { bundledRoot, storeRoot } as const;
 }
@@ -184,6 +224,137 @@ describe("harness install oclif command", () => {
     expect(log).toHaveBeenCalledWith(
       expect.stringMatching(/^Installed harness package 'openclaw'/),
     );
+  });
+
+  it("installs one explicitly trusted local built package without executing its code", async () => {
+    const localRoot = writeLocalPackage();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    wirePrivateDependencies();
+
+    await HarnessInstallCommand.run(
+      ["future-harness", "--from", localRoot, "--yes-i-trust-local-package"],
+      process.cwd(),
+    );
+
+    expect(installedIds()).toEqual(["future-harness"]);
+    expect(
+      readInstalledHarnessPackage("future-harness", { storeRoot })?.receipt.sourceIdentity,
+    ).toEqual({ kind: "local" });
+    expect(fs.existsSync(packageCodeMarker)).toBe(false);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/^Installed trusted local harness package 'future-harness'/),
+    );
+  });
+
+  it("requires an exact id and explicit trust before reading a local package", async () => {
+    const localRoot = writeLocalPackage();
+    const dependencies = wirePrivateDependencies();
+
+    await expect(
+      HarnessInstallCommand.run(
+        ["--from", localRoot, "--yes-i-trust-local-package"],
+        process.cwd(),
+      ),
+    ).rejects.toThrow("canonical harness package ID is required");
+    await expect(
+      HarnessInstallCommand.run(["future-harness", "--from", localRoot], process.cwd()),
+    ).rejects.toThrow("Local harness packages are trusted code");
+
+    expect(dependencies.installPackage).not.toHaveBeenCalled();
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
+  it("rejects the local trust acknowledgement without a local source", async () => {
+    const dependencies = wirePrivateDependencies();
+
+    await expect(
+      HarnessInstallCommand.run(["openclaw", "--yes-i-trust-local-package"], process.cwd()),
+    ).rejects.toThrow("may be used only with '--from'");
+
+    expect(dependencies.installPackage).not.toHaveBeenCalled();
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
+  it("rejects a local package whose declared id differs from the requested id", async () => {
+    const localRoot = writeLocalPackage();
+    wirePrivateDependencies();
+
+    await expect(
+      HarnessInstallCommand.run(
+        ["other-harness", "--from", localRoot, "--yes-i-trust-local-package"],
+        process.cwd(),
+      ),
+    ).rejects.toThrow("does not match the requested installation id");
+
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
+  it("does not treat a URL as a local package source", async () => {
+    const dependencies = wirePrivateDependencies();
+
+    await expect(
+      HarnessInstallCommand.run(
+        [
+          "future-harness",
+          "--from",
+          "https://example.invalid/package",
+          "--yes-i-trust-local-package",
+        ],
+        process.cwd(),
+      ),
+    ).rejects.toThrow("accepts a local filesystem directory, not a URL");
+
+    expect(dependencies.installPackage).not.toHaveBeenCalled();
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
+  });
+
+  it.each(["unsafe-mode", "symbolic-link", "authoring-path"])(
+    "rejects a local package with %s without changing the store",
+    async (caseName) => {
+      const localRoot = writeLocalPackage();
+      switch (caseName) {
+        case "unsafe-mode":
+          fs.chmodSync(path.join(localRoot, "runtime/payload.txt"), 0o666);
+          break;
+        case "symbolic-link":
+          fs.symlinkSync("payload.txt", path.join(localRoot, "runtime/link"));
+          break;
+        case "authoring-path":
+          writeFixtureFile(
+            localRoot,
+            "tests/adapter.test.ts",
+            "throw new Error('must not run');\n",
+          );
+          break;
+      }
+      wirePrivateDependencies();
+
+      await expect(
+        HarnessInstallCommand.run(
+          ["future-harness", "--from", localRoot, "--yes-i-trust-local-package"],
+          process.cwd(),
+        ),
+      ).rejects.toThrow();
+
+      expect(fs.readdirSync(storeRoot)).toEqual([]);
+      expect(fs.existsSync(packageCodeMarker)).toBe(false);
+    },
+  );
+
+  it("rejects a mutable local source owned by another user", async () => {
+    const localRoot = writeLocalPackage();
+    const actualUid = process.geteuid?.() ?? 1;
+    vi.spyOn(process, "geteuid").mockReturnValue(actualUid + 10_000);
+    wirePrivateDependencies();
+
+    await expect(
+      HarnessInstallCommand.run(
+        ["future-harness", "--from", localRoot, "--yes-i-trust-local-package"],
+        process.cwd(),
+      ),
+    ).rejects.toThrow(/untrusted owner/u);
+
+    expect(fs.readdirSync(storeRoot)).toEqual([]);
   });
 
   it("resolves an exact current public alias to its canonical package", async () => {

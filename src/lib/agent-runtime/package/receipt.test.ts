@@ -12,6 +12,8 @@ import {
   parseHarnessPackageId,
   parseHarnessPackageIdentity,
   parseHarnessPackageReceipt,
+  parseHarnessPackageSourceIdentity,
+  parseLocalHarnessPackageSourceIdentity,
   serializeHarnessPackageActivePointer,
   serializeHarnessPackageReceipt,
 } from "./receipt";
@@ -37,6 +39,10 @@ const RECEIPT = {
   sourceIdentity: SOURCE_IDENTITY,
   installedAt: "2026-08-27T19:04:05.006Z",
 } as const;
+const LOCAL_RECEIPT = {
+  ...RECEIPT,
+  sourceIdentity: { kind: "local" as const },
+};
 const POINTER = {
   schemaVersion: 1,
   id: IDENTITY.id,
@@ -62,6 +68,14 @@ function pointerWith(overrides: Record<string, unknown>): Record<string, unknown
 describe("harness package receipt records", () => {
   it("parses one exact installation receipt", () => {
     expect(parseHarnessPackageReceipt(JSON.stringify(RECEIPT))).toEqual(RECEIPT);
+  });
+
+  it("parses and serializes local provenance without retaining its source path", () => {
+    expect(parseHarnessPackageReceipt(JSON.stringify(LOCAL_RECEIPT))).toEqual(LOCAL_RECEIPT);
+    expect(serializeHarnessPackageReceipt(LOCAL_RECEIPT)).toBe(
+      `${JSON.stringify(LOCAL_RECEIPT, null, 2)}\n`,
+    );
+    expect(serializeHarnessPackageReceipt(LOCAL_RECEIPT)).not.toContain("sourcePath");
   });
 
   it("serializes a receipt with stable field order and a final newline", () => {
@@ -236,6 +250,17 @@ describe("harness package receipt records", () => {
     ],
   ])("rejects a bundled source identity with %s", (_case, sourceIdentity) => {
     expect(() => parseBundledHarnessPackageSourceIdentity(sourceIdentity)).toThrow();
+  });
+
+  it("accepts only the closed local source identity", () => {
+    expect(parseLocalHarnessPackageSourceIdentity({ kind: "local" })).toEqual({ kind: "local" });
+    expect(parseHarnessPackageSourceIdentity({ kind: "local" })).toEqual({ kind: "local" });
+    expect(() =>
+      parseHarnessPackageSourceIdentity({ kind: "local", path: "/private/package" }),
+    ).toThrow("source identity fields do not match");
+    expect(() => parseHarnessPackageSourceIdentity({ kind: "remote" })).toThrow(
+      "source identity kind is invalid",
+    );
   });
 
   it.each([

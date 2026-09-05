@@ -217,6 +217,37 @@ describe("harness package catalogue", () => {
     );
   });
 
+  it("lists a receipt-pinned local package that is not in the bundled catalogue", () => {
+    writeReviewedBundle();
+    const localRoot = writePackageFixture(path.join(fixtureRoot, "local"), {
+      id: "future-harness",
+      displayName: "Future Harness",
+      packageVersion: "1.0.0",
+      aliases: ["future"],
+    });
+    const installedPackage = installHarnessPackage(
+      {
+        packageRoot: localRoot,
+        expectedId: "future-harness",
+        sourceIdentity: { kind: "local" },
+      },
+      { storeRoot },
+    );
+
+    const inventory = listHarnessPackageInventory(catalogueOptions());
+    const installed = inventory.installed.find(({ id }) => id === "future-harness");
+
+    expect(inventory.available.some(({ id }) => id === "future-harness")).toBe(false);
+    expect(installed).toMatchObject({
+      state: "installed",
+      id: "future-harness",
+      displayName: "Future Harness",
+      aliases: ["future"],
+      matchesAvailableIdentity: false,
+      identity: installedPackage.identity,
+    });
+  });
+
   it("keeps an older installed identity eligible for the current bundled install", () => {
     writeReviewedBundle();
     const olderRoot = writePackageFixture(path.join(fixtureRoot, "older"), {

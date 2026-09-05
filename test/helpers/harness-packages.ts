@@ -46,9 +46,14 @@ const HARNESS_PACKAGE_FIXTURES = Object.freeze([
   },
 ] as const);
 
-type HarnessPackageFixtureDeclaration = (typeof HARNESS_PACKAGE_FIXTURES)[number] & {
+interface HarnessPackageFixtureDeclaration {
+  readonly id: string;
+  readonly displayName: string;
+  readonly packageVersion: string;
+  readonly aliases: readonly string[];
+  readonly defaultChoice: boolean;
   readonly manifestPath: string;
-};
+}
 
 export type HarnessPackageFixtureId = (typeof HARNESS_PACKAGE_FIXTURES)[number]["id"];
 
@@ -68,6 +73,13 @@ export interface HarnessPackageFixture {
   readonly executionSentinel: string;
   readonly packageRoots: ReadonlyMap<HarnessPackageFixtureId, string>;
   install(id: HarnessPackageFixtureId): InstalledHarnessPackage;
+  installLocal(input: {
+    readonly id: string;
+    readonly displayName?: string;
+    readonly packageVersion?: string;
+    readonly aliases?: readonly string[];
+    readonly defaultChoice?: boolean;
+  }): InstalledHarnessPackage;
   installMany(ids: readonly HarnessPackageFixtureId[]): readonly InstalledHarnessPackage[];
   advanceActivePointer(
     id: HarnessPackageFixtureId,
@@ -244,6 +256,7 @@ export function createHarnessPackageFixture(
     }),
   );
   let advancedVersionSequence = 0;
+  let localPackageSequence = 0;
 
   function install(id: HarnessPackageFixtureId): InstalledHarnessPackage {
     const packageRoot = packageRoots.get(id);
@@ -274,6 +287,42 @@ export function createHarnessPackageFixture(
     return installHarnessPackage({ packageRoot, sourceIdentity: SOURCE_IDENTITY }, { storeRoot });
   }
 
+  function installLocal(input: {
+    readonly id: string;
+    readonly displayName?: string;
+    readonly packageVersion?: string;
+    readonly aliases?: readonly string[];
+    readonly defaultChoice?: boolean;
+  }): InstalledHarnessPackage {
+    localPackageSequence += 1;
+    const packageVersion = input.packageVersion ?? "1.0.0";
+    const declaration: HarnessPackageFixtureDeclaration = {
+      id: input.id,
+      displayName: input.displayName ?? input.id,
+      packageVersion,
+      aliases: input.aliases ?? [],
+      defaultChoice: input.defaultChoice ?? false,
+      manifestPath: `packages/nemoclaw-${input.id}/manifest.yaml`,
+    };
+    const packageRoot = path.join(
+      versionRoot,
+      `local-${input.id}-${packageVersion}-${String(localPackageSequence)}`,
+    );
+    writePackageArtifact({
+      agentPolicyAdditionsContent: options.agentPolicyAdditionsContent,
+      declaration,
+      executionSentinel,
+      agentExpectedVersion: options.agentExpectedVersion,
+      packageRoot,
+      packageVersion,
+      payload: `${input.id} local fixture ${String(localPackageSequence)}\n`,
+    });
+    return installHarnessPackage(
+      { packageRoot, expectedId: input.id, sourceIdentity: { kind: "local" } },
+      { storeRoot },
+    );
+  }
+
   return Object.freeze({
     fixtureRoot,
     bundledRoot,
@@ -281,6 +330,7 @@ export function createHarnessPackageFixture(
     executionSentinel,
     packageRoots,
     install,
+    installLocal,
     installMany: (ids: readonly HarnessPackageFixtureId[]) => ids.map(install),
     advanceActivePointer,
     damageActivePointer(id: HarnessPackageFixtureId): void {

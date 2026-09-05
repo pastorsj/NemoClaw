@@ -123,8 +123,9 @@ function orderInstalledPackages(
   records: readonly HealthyInstalledHarnessPackageRecord[],
 ): HealthyInstalledHarnessPackageRecord[] {
   return [...records].sort((left, right) => {
-    if (left.isDefaultOnboardingChoice) return -1;
-    if (right.isDefaultOnboardingChoice) return 1;
+    if (left.isDefaultOnboardingChoice !== right.isDefaultOnboardingChoice) {
+      return left.isDefaultOnboardingChoice ? -1 : 1;
+    }
     return left.id.localeCompare(right.id);
   });
 }
@@ -181,17 +182,21 @@ function explicitInstalledPackage(
   installed: readonly HealthyInstalledHarnessPackageRecord[],
   environment: NodeJS.ProcessEnv,
 ): HealthyInstalledHarnessPackageRecord {
-  const availableIds = inventory.available.map(({ id }) => id);
-  const aliases = createAgentAliasMap(
-    inventory.available.map(({ id, aliases: packageAliases }) => ({
-      name: id,
-      aliases: packageAliases,
-    })),
+  const selectablePackages = new Map(
+    inventory.available.map(({ id, aliases }) => [id, { name: id, aliases }] as const),
   );
-  const resolvedId = resolveAgentNameAlias(selector, availableIds, aliases);
+  for (const record of inventory.installed) {
+    selectablePackages.set(record.id, {
+      name: record.id,
+      aliases: record.state === "installed" ? record.aliases : [],
+    });
+  }
+  const selectableIds = [...selectablePackages.keys()].sort();
+  const aliases = createAgentAliasMap([...selectablePackages.values()]);
+  const resolvedId = resolveAgentNameAlias(selector, selectableIds, aliases);
   if (!resolvedId) {
     throw new Error(
-      `Unknown harness package '${selector}'. Reviewed harnesses: ${availableIds.join(", ")}.`,
+      `Unknown harness package '${selector}'. Known harnesses: ${selectableIds.join(", ")}.`,
     );
   }
   requireCandidateAgentSelectable(resolvedId, environment);
