@@ -56,11 +56,13 @@ interface BundledAgentRuntimeSource {
 }
 
 const OMITTED_DIRECTORY_NAMES = new Set([
+  ".e2e",
   ".git",
   ".cache",
   ".mypy_cache",
   ".npm",
   ".pytest_cache",
+  ".ruff_cache",
   ".tox",
   "__pycache__",
   "coverage",
@@ -501,7 +503,6 @@ function copyStableTree(
     if (before.isSymbolicLink() || !before.isDirectory()) {
       throw new Error(`Bundled harness source '${sourceDirectory}' must be one regular directory`);
     }
-    ensureDirectory(destinationDirectory);
     const entries = fs
       .readdirSync(sourceDirectory, { withFileTypes: true })
       .sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));

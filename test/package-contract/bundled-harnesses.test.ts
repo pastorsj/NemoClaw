@@ -291,6 +291,46 @@ describe("bundled harness package artifacts", () => {
     }
   }, 120_000);
 
+  it("keeps authoring caches and empty source directories out of package artifacts", () => {
+    const temporaryRoot = fs.mkdtempSync(
+      path.join(fs.realpathSync.native(path.dirname(REPOSITORY_ROOT)), ".nemoclaw-authoring-"),
+    );
+    const fixtureRepositoryRoot = path.join(temporaryRoot, "repository");
+    const baselineRoot = path.join(temporaryRoot, "baseline");
+    const contaminatedRoot = path.join(temporaryRoot, "contaminated");
+    try {
+      fs.mkdirSync(path.join(fixtureRepositoryRoot, "packages"), { recursive: true });
+      writeFutureHarnessPackage(fixtureRepositoryRoot);
+      runPrivateBundledBuild(baselineRoot, fixtureRepositoryRoot);
+      const baseline = validateHarnessPackageTree(artifactRoot("future-harness", baselineRoot));
+
+      const packageRoot = path.join(fixtureRepositoryRoot, "packages", "nemoclaw-future-harness");
+      fs.mkdirSync(path.join(packageRoot, ".e2e"), { recursive: true });
+      fs.writeFileSync(path.join(packageRoot, ".e2e", "run.json"), '{"local":true}\n');
+      fs.mkdirSync(path.join(packageRoot, ".ruff_cache"), { recursive: true });
+      fs.writeFileSync(path.join(packageRoot, ".ruff_cache", "cache.db"), "local cache\n");
+      fs.mkdirSync(path.join(packageRoot, "runtime", "state"), { recursive: true });
+
+      runPrivateBundledBuild(contaminatedRoot, fixtureRepositoryRoot);
+      const contaminated = validateHarnessPackageTree(
+        artifactRoot("future-harness", contaminatedRoot),
+      );
+
+      expect(contaminated.contentDigest).toBe(baseline.contentDigest);
+      expect(contaminated.entries).toEqual(baseline.entries);
+      expect(contaminated.entries.map(({ relativePath }) => relativePath)).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("/.e2e"),
+          expect.stringContaining("/.ruff_cache"),
+          expect.stringContaining("/runtime/state"),
+        ]),
+      );
+    } finally {
+      makeTreeWritable(temporaryRoot);
+      fs.rmSync(temporaryRoot, { recursive: true, force: true });
+    }
+  });
+
   it("publishes every accepted artifact and locally referenced build asset", () => {
     const packed = packedFileList();
     const missingArtifacts = listBundledAgentRuntimeSources().flatMap((source) => {
