@@ -190,6 +190,15 @@ sessions:
     - delete
     - export
 
+# ── Skill installation ───────────────────────────────────────────
+skills:
+  support: managed
+  install_root: /sandbox/.hermes/skills
+  collision: replace
+  removal: remove
+  activation:
+    kind: new-session
+
 # ── Messaging integration ───────────────────────────────────────
 messaging:
   support: channels

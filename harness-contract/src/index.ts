@@ -25,6 +25,31 @@ export type HarnessMessagingCapability =
   | { readonly support: "channels"; readonly channels: readonly string[] }
   | { readonly support: "disabled"; readonly channels?: never };
 
+export type HarnessSkillActivation =
+  | { readonly kind: "new-session"; readonly path?: never }
+  | { readonly kind: "gateway-restart-required"; readonly path?: never }
+  | { readonly kind: "reset-session-index"; readonly path: `/sandbox/${string}` };
+
+export type HarnessSkillCapability =
+  | {
+      readonly support: "managed";
+      readonly install_root: `/sandbox/${string}`;
+      readonly mirror_root?: `$HOME/${string}`;
+      readonly collision: "replace" | "refuse";
+      readonly removal: "remove" | "refuse";
+      readonly activation: HarnessSkillActivation;
+      readonly reason?: never;
+    }
+  | {
+      readonly support: "disabled";
+      readonly reason: string;
+      readonly install_root?: never;
+      readonly mirror_root?: never;
+      readonly collision?: never;
+      readonly removal?: never;
+      readonly activation?: never;
+    };
+
 export type HarnessManagedImagePlatform = "linux/amd64" | "linux/arm64";
 
 export interface HarnessManagedImageRuntimeIdentity {
@@ -89,6 +114,7 @@ export type HarnessAgentManifest = HarnessManifestRecord & {
   readonly mcp?: HarnessMcpCapability;
   readonly messaging: HarnessMessagingCapability;
   readonly sessions?: HarnessSessionCapability;
+  readonly skills: HarnessSkillCapability;
   readonly managed_image?: HarnessManagedImageDeclaration;
 };
 

@@ -54,6 +54,7 @@ function makeAgent(overrides: Partial<AgentDefinition> = {}): AgentDefinition {
       support: "disabled",
       reason: "test fixture",
     },
+    skillCapability: { support: "disabled", reason: "test fixture" },
     managedImage: null,
     stateDirectories: [],
     stateDirs: [],

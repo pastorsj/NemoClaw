@@ -44,6 +44,8 @@ export type {
   AgentMcpAdapter,
   AgentMcpCapability,
   AgentMcpSupport,
+  HarnessSkillActivation,
+  HarnessSkillCapability,
   AgentStateDirectory,
   AgentStateDirectoryPath,
   AgentStateDirectoryPrefix,

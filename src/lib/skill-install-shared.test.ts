@@ -18,15 +18,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import {
-  computeSkillContentDigest,
-  installFreshSharedSkill,
-  resolveSkillPaths,
-} from "./skill-install";
+import { computeSkillContentDigest, installFreshSkill } from "./skill-install";
 import type { SshResult } from "./skill-remote";
 
 const CTX = { configFile: "/tmp/ssh-config", sandboxName: "alpha" };
-const AGENT_NAME = "langchain-deepagents-code";
 
 function makeSkill(): string {
   const dir = mkdtempSync(join(tmpdir(), "nemoclaw-shared-skill-"));
@@ -38,7 +33,14 @@ function makeSkill(): string {
 }
 
 function pathsFor(stateDir: string) {
-  return resolveSkillPaths({ name: AGENT_NAME, configPaths: { dir: stateDir } }, "note-summarizer");
+  return {
+    stateDir,
+    uploadDir: `${stateDir}/agent/skills/note-summarizer`,
+    mirrorDir: null,
+    collision: "refuse" as const,
+    removal: "refuse" as const,
+    activation: { kind: "new-session" as const },
+  };
 }
 
 const COLLISION_CASES = [
@@ -82,13 +84,13 @@ function executeShell(
   };
 }
 
-describe("fresh shared-agent skill install", () => {
+describe("fresh skill install", () => {
   it("streams one host-attested archive to an atomic no-clobber activation", () => {
     const skillDir = makeSkill();
     const paths = pathsFor("/sandbox/.deepagents");
     const expected = computeSkillContentDigest(skillDir);
     try {
-      const result = installFreshSharedSkill(CTX, skillDir, paths, {
+      const result = installFreshSkill(CTX, skillDir, paths, {
         sshExecImpl: (_ctx, _command, opts) => {
           expect(Buffer.isBuffer(opts?.input)).toBe(true);
           return { status: 0, stdout: `INSTALLED ${expected}`, stderr: "" };
@@ -102,7 +104,7 @@ describe("fresh shared-agent skill install", () => {
       });
       expect(paths.uploadDir).toBe("/sandbox/.deepagents/agent/skills/note-summarizer");
       expect(paths.mirrorDir).toBeNull();
-      expect(paths.uploadDirSharedWithAgent).toBe(true);
+      expect(paths.collision).toBe("refuse");
     } finally {
       rmSync(skillDir, { recursive: true, force: true });
     }
@@ -126,7 +128,7 @@ describe("fresh shared-agent skill install", () => {
     writeFileSync(join(skillDir, "SKILL.md"), "---\nname: different-skill\n---\n# Notes\n");
     let called = false;
     try {
-      const result = installFreshSharedSkill(CTX, skillDir, paths, {
+      const result = installFreshSkill(CTX, skillDir, paths, {
         sshExecImpl: () => {
           called = true;
           return { status: 0, stdout: "", stderr: "" };
@@ -150,7 +152,7 @@ describe("fresh shared-agent skill install", () => {
     rmSync(join(skillDir, "SKILL.md"));
     let called = false;
     try {
-      const result = installFreshSharedSkill(CTX, skillDir, paths, {
+      const result = installFreshSkill(CTX, skillDir, paths, {
         sshExecImpl: () => {
           called = true;
           return { status: 0, stdout: "", stderr: "" };
@@ -184,7 +186,7 @@ describe("fresh shared-agent skill install", () => {
       ],
     ]);
     try {
-      const result = installFreshSharedSkill(CTX, skillDir, paths, {
+      const result = installFreshSkill(CTX, skillDir, paths, {
         beforeSnapshotFileRead: (relativePath) => beforeSnapshotFileRead.get(relativePath)?.(),
         sshExecImpl: () => {
           sshCalled = true;
@@ -211,7 +213,7 @@ describe("fresh shared-agent skill install", () => {
     const paths = pathsFor("/sandbox/.deepagents");
     let sshCalled = false;
     try {
-      const result = installFreshSharedSkill(CTX, skillDir, paths, {
+      const result = installFreshSkill(CTX, skillDir, paths, {
         expectedRootIdentity: { dev: originalRoot.dev, ino: originalRoot.ino },
         beforeSnapshotRootRead: () => {
           rmSync(skillDir, { recursive: true, force: true });
@@ -245,7 +247,7 @@ describe("fresh shared-agent skill install", () => {
       mkdirSync(legacy, { recursive: true });
       writeFileSync(join(legacy, "legacy.txt"), "preserve me\n");
       try {
-        const result = installFreshSharedSkill(CTX, skillDir, paths, {
+        const result = installFreshSkill(CTX, skillDir, paths, {
           sshExecImpl: (_ctx, command, opts) => executeShell(command, opts?.input),
         });
 
@@ -278,7 +280,7 @@ describe("fresh shared-agent skill install", () => {
       prepare(paths.uploadDir, outside);
       const before = lstatSync(paths.uploadDir);
       try {
-        const result = installFreshSharedSkill(CTX, skillDir, paths, {
+        const result = installFreshSkill(CTX, skillDir, paths, {
           sshExecImpl: (_ctx, command, opts) => executeShell(command, opts?.input),
         });
 
@@ -307,7 +309,7 @@ describe("fresh shared-agent skill install", () => {
       writeFileSync(fakeMv, '#!/bin/sh\nmkdir -- "$RACE_DEST"\nexec /usr/bin/mv "$@"\n');
       chmodSync(fakeMv, 0o755);
       try {
-        const result = installFreshSharedSkill(CTX, skillDir, paths, {
+        const result = installFreshSkill(CTX, skillDir, paths, {
           sshExecImpl: (_ctx, command, opts) =>
             executeShell(command, opts?.input, {
               ...process.env,
@@ -339,7 +341,7 @@ describe("fresh shared-agent skill install", () => {
       const stateDir = mkdtempSync(join(tmpdir(), "nemoclaw-shared-corrupt-"));
       const paths = pathsFor(stateDir);
       try {
-        const result = installFreshSharedSkill(CTX, skillDir, paths, {
+        const result = installFreshSkill(CTX, skillDir, paths, {
           sshExecImpl: (_ctx, command) => executeShell(command, Buffer.from("not a tar archive")),
         });
 
@@ -368,7 +370,7 @@ describe("fresh shared-agent skill install", () => {
       writeFileSync(fakeMv, "#!/bin/sh\nexit 1\n");
       chmodSync(fakeMv, 0o755);
       try {
-        const result = installFreshSharedSkill(CTX, skillDir, paths, {
+        const result = installFreshSkill(CTX, skillDir, paths, {
           sshExecImpl: (_ctx, command, opts) =>
             executeShell(command, opts?.input, {
               ...process.env,

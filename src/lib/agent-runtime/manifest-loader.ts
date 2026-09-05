@@ -13,6 +13,7 @@ import type {
   AgentHealthProbe,
   AgentLegacyPaths,
   AgentMcpCapability,
+  HarnessSkillCapability,
   AgentStateDirectory,
   AgentStateFile,
   AgentVersionScheme,
@@ -35,6 +36,7 @@ import {
 } from "./manifest-readers";
 import { readAgentRuntime } from "./runtime/manifest";
 import { readManagedImageDeclaration } from "./managed-image";
+import { readSkillCapability } from "./skill-capability";
 import {
   readStateDirectories,
   stateDirectoryPaths,
@@ -247,6 +249,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
   const config = readObject(raw, "config");
   const inference = readInference(raw);
   const mcp = readMcpCapability(raw);
+  const skills = readSkillCapability(raw);
   const managedImage = readManagedImageDeclaration(raw);
   if (raw.runtime_auth_state_dirs !== undefined) {
     throw new Error(
@@ -317,6 +320,7 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
     config,
     inference,
     mcp,
+    skills,
     managed_image: managedImage ?? undefined,
     state_files: stateFiles,
     user_managed_files: userManagedFiles,
@@ -388,6 +392,10 @@ export function buildAgentDefinition(input: BuildAgentDefinitionInput): AgentDef
 
     get mcpCapability(): AgentMcpCapability {
       return mcp;
+    },
+
+    get skillCapability(): HarnessSkillCapability {
+      return skills;
     },
 
     get managedImage() {

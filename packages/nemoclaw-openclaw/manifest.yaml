@@ -162,6 +162,17 @@ sessions:
     - reset
     - export
 
+# ── Skill installation ───────────────────────────────────────────
+skills:
+  support: managed
+  install_root: /sandbox/.openclaw/skills
+  mirror_root: $HOME/.openclaw/skills
+  collision: replace
+  removal: remove
+  activation:
+    kind: reset-session-index
+    path: /sandbox/.openclaw/agents/main/sessions/sessions.json
+
 # ── Messaging integration ───────────────────────────────────────
 messaging:
   support: channels

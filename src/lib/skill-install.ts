@@ -4,15 +4,19 @@
 // Skill install/remove logic for `nemoclaw <sandbox> skill install <path>`
 // and `nemoclaw <sandbox> skill remove <name>`.
 // Validates a local SKILL.md, uploads it to the sandbox via SSH, and
-// performs agent-specific post-install steps (session refresh for
-// OpenClaw). Non-OpenClaw agents get a "restart gateway" hint until a
-// generic refresh contract is defined in the manifest schema.
+// applies the finite mirror, collision, removal, and activation semantics
+// declared by the selected harness package.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+import type {
+  HarnessSkillActivation,
+  HarnessSkillCapability,
+} from "@nvidia/nemoclaw-harness-contract";
 
 // yaml is a production dependency (used by policies.ts, onboard.ts)
 import YAML from "yaml";
@@ -97,77 +101,39 @@ export function parseFrontmatter(content: string): SkillFrontmatter {
 // ── Path resolution ──────────────────────────────────────────────
 
 export interface SkillPaths {
-  /** Agent state root that contains the resolved skill paths. */
+  /** Core-owned authority root used to confine atomic remote writes. */
   stateDir: string;
   /** Upload target directory for the skill */
   uploadDir: string;
   /** Directory the agent actually loads skills from, or null when it equals uploadDir */
   mirrorDir: string | null;
-  /**
-   * Whether the agent's own tooling also writes into uploadDir. Shared
-   * destinations support only atomic fresh installs because their existing
-   * content is not proof that NemoClaw owns it.
-   */
-  uploadDirSharedWithAgent: boolean;
-  /** OpenClaw-only: session index to clear, or null */
-  sessionFile: string | null;
-  /** Whether a fresh agent session reloads skills without a gateway restart */
-  reloadsSkillsOnSessionStart: boolean;
-  /** Whether the agent is OpenClaw (drives refresh behavior) */
-  isOpenClaw: boolean;
+  /** Whether core may replace an existing destination. */
+  collision: "replace" | "refuse";
+  /** Whether core may remove the destination. */
+  removal: "remove" | "refuse";
+  /** Finite activation step applied after install or removal. */
+  activation: HarnessSkillActivation;
 }
 
 /**
- * Agents whose loader reads skills from somewhere other than `uploadDir`.
- *
- * NemoClaw uploads to `uploadDir`, which the agent manifest declares as durable
- * `state_dirs`, but the agent scans its own directory at session start. Where
- * those diverge, an upload without a mirror leaves the skill on disk and
- * unregistered — absent from the agent's skill list (#4819 for OpenClaw, #7634
- * for Deep Agents Code, whose user skill dir is `~/.deepagents/{agent}/skills`).
- *
- * Remove an entry when its agent starts loading skills from `uploadDir`.
- */
-const AGENT_SKILL_MIRRORS: Record<string, (dir: string, skillName: string) => string> = {
-  openclaw: (_dir, skillName) => `$HOME/.openclaw/skills/${skillName}`,
-};
-
-/**
- * Agent-owned skill directories that are also the loader's canonical source.
- *
- * Deep Agents Code's built-in skill creator writes directly to
- * `agent/skills` (#5753). NemoClaw therefore installs there only when the
- * destination is absent and never treats an existing directory as managed.
- */
-const AGENT_SHARED_SKILL_DIRS: Record<string, (dir: string, skillName: string) => string> = {
-  "langchain-deepagents-code": (dir, skillName) => `${dir}/agent/skills/${skillName}`,
-};
-
-/**
- * Resolve skill install paths from the agent definition.
- * Uses a single directory for skill uploads (no immutable/writable split).
- * @param agent - AgentDefinition from getSessionAgent(), or null for OpenClaw
- * @param skillName - validated skill name from frontmatter
+ * Resolve a package declaration without consulting a harness-name catalogue.
  */
 export function resolveSkillPaths(
-  agent: { name: string; configPaths: { dir: string } } | null,
+  capability: HarnessSkillCapability,
   skillName: string,
 ): SkillPaths {
-  const isOpenClaw = !agent || agent.name === "openclaw";
-
-  const dir = agent ? agent.configPaths.dir : "/sandbox/.openclaw";
-  const agentName = agent ? agent.name : "openclaw";
-  const sharedDir = AGENT_SHARED_SKILL_DIRS[agentName];
-  const mirror = AGENT_SKILL_MIRRORS[agentName];
+  if (capability.support !== "managed") {
+    throw new Error(capability.reason);
+  }
+  const [stateRootName] = capability.install_root.slice("/sandbox/".length).split("/");
 
   return {
-    stateDir: dir,
-    uploadDir: sharedDir ? sharedDir(dir, skillName) : `${dir}/skills/${skillName}`,
-    mirrorDir: mirror ? mirror(dir, skillName) : null,
-    uploadDirSharedWithAgent: Boolean(sharedDir),
-    sessionFile: isOpenClaw ? `${dir}/agents/main/sessions/sessions.json` : null,
-    reloadsSkillsOnSessionStart: agentName === "hermes",
-    isOpenClaw,
+    stateDir: `/sandbox/${stateRootName}`,
+    uploadDir: `${capability.install_root}/${skillName}`,
+    mirrorDir: capability.mirror_root ? `${capability.mirror_root}/${skillName}` : null,
+    collision: capability.collision,
+    removal: capability.removal,
+    activation: capability.activation,
   };
 }
 
@@ -454,7 +420,7 @@ function createSkillArchiveSnapshot(
   }
 }
 
-function buildFreshSharedInstallScript(paths: SkillPaths, expectedDigest: string): string {
+function buildFreshInstallScript(paths: SkillPaths, expectedDigest: string): string {
   const relativeUpload = path.posix.relative(paths.stateDir, paths.uploadDir);
   const parentParts = path.posix.dirname(relativeUpload).split("/");
   const leaf = path.posix.basename(relativeUpload);
@@ -463,7 +429,7 @@ function buildFreshSharedInstallScript(paths: SkillPaths, expectedDigest: string
     parentParts.some((part) => !validateRelativePath(part)) ||
     !validateRelativePath(leaf)
   ) {
-    throw new Error("Shared agent skill path is not a safe relative destination");
+    throw new Error("Skill path is not a safe relative destination");
   }
 
   const lines = [
@@ -517,7 +483,7 @@ function buildFreshSharedInstallScript(paths: SkillPaths, expectedDigest: string
   return lines.join("; ");
 }
 
-export interface FreshSharedSkillInstallResult {
+export interface FreshSkillInstallResult {
   success: boolean;
   uploaded: number;
   contentDigest?: string;
@@ -525,10 +491,10 @@ export interface FreshSharedSkillInstallResult {
 }
 
 /**
- * Install into an agent-owned loader directory only when the destination is
- * absent. Existing content is never renamed, deleted, or replaced.
+ * Install a skill atomically when the package refuses destination replacement.
+ * Existing content is never renamed, deleted, or replaced.
  */
-export function installFreshSharedSkill(
+export function installFreshSkill(
   ctx: SshContext,
   localDir: string,
   paths: SkillPaths,
@@ -538,8 +504,8 @@ export function installFreshSharedSkill(
     expectedRootIdentity?: SkillRootIdentity;
     sshExecImpl?: typeof sshExec;
   } = {},
-): FreshSharedSkillInstallResult {
-  if (!paths.uploadDirSharedWithAgent || paths.mirrorDir) {
+): FreshSkillInstallResult {
+  if (paths.collision !== "refuse" || paths.mirrorDir) {
     return { success: false, uploaded: 0, reason: "remote_state_unknown" };
   }
   let expectedRootIdentity = opts.expectedRootIdentity;
@@ -574,7 +540,7 @@ export function installFreshSharedSkill(
     return { success: false, uploaded: 0, reason: "snapshot_failed" };
   }
   const runSsh = opts.sshExecImpl ?? sshExec;
-  const result = runSsh(ctx, buildFreshSharedInstallScript(paths, snapshot.contentDigest), {
+  const result = runSsh(ctx, buildFreshInstallScript(paths, snapshot.contentDigest), {
     input: snapshot.archive,
   });
   if (
@@ -599,8 +565,7 @@ export function installFreshSharedSkill(
 }
 
 /**
- * Run post-install steps: skill-load mirror for every agent that needs one,
- * session refresh for OpenClaw, and agent-specific activation guidance.
+ * Run the package-declared mirror and finite activation steps.
  */
 export function postInstall(
   ctx: SshContext,
@@ -614,12 +579,8 @@ export function postInstall(
   const messages: string[] = [];
   const runSsh = opts.sshExecImpl ?? sshExec;
 
-  // Copy the skill into the directory the agent's loader actually reads; see
-  // AGENT_SKILL_MIRRORS for which agents need this and why. Without it the
-  // upload never registers as a skill. `skill remove` deletes the mirror, so
-  // install must create it to stay symmetric. The copy is skipped when both
-  // paths resolve to the same directory, so it is a no-op for agents whose
-  // loader reads uploadDir directly.
+  // The package declares a mirror only when its loader does not read the
+  // durable install root. Removal uses the same resolved path.
   if (paths.mirrorDir) {
     const src = shellQuote(paths.uploadDir);
     // mirrorDir may contain $HOME, which must expand on the remote shell, so we
@@ -638,18 +599,16 @@ export function postInstall(
     }
   }
 
-  // Clear sessions.json so OpenClaw re-discovers skills on the next
-  // session even after an in-place skill update.
-  if (paths.sessionFile && !opts.skipRefresh) {
-    const refreshResult = runSsh(ctx, `printf '{}' > ${shellQuote(paths.sessionFile)}`);
+  if (paths.activation.kind === "reset-session-index" && !opts.skipRefresh) {
+    const refreshResult = runSsh(ctx, `printf '{}' > ${shellQuote(paths.activation.path)}`);
     if (!refreshResult || refreshResult.status !== 0) {
-      messages.push("Warning: failed to clear sessions (agent may need manual restart)");
+      messages.push("Warning: failed to reset the session index (the agent may need a restart)");
     }
   }
 
-  if (!paths.mirrorDir && !paths.sessionFile) {
+  if (paths.activation.kind !== "reset-session-index") {
     messages.push(
-      paths.reloadsSkillsOnSessionStart
+      paths.activation.kind === "new-session"
         ? "Start a new chat session to load the skill; a gateway restart is not required."
         : "Restart the agent gateway to pick up the new skill.",
     );
@@ -661,12 +620,9 @@ export function postInstall(
 /**
  * Verify the SKILL.md file exists on the sandbox.
  *
- * When the agent has a mirror directory it must also exist: that is the path
- * the agent loads skills from at session start (#4819 for OpenClaw, #7634 for
- * Deep Agents Code), so a successful upload whose mirror copy failed must NOT
- * verify as installed — otherwise the CLI reports success while the skill stays
- * invisible to the agent. This mirrors verifyRemove(), which already checks
- * both paths.
+ * When the package declares a mirror directory, its SKILL.md must also exist.
+ * A successful upload with a failed mirror must not verify as installed because
+ * the harness loader cannot see the skill. Removal checks both paths too.
  */
 export function verifyInstall(
   ctx: SshContext,

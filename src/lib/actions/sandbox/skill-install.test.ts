@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const captureSandboxSshConfig = vi.hoisted(() => vi.fn());
 const getSessionAgent = vi.hoisted(() => vi.fn());
+const getSandbox = vi.hoisted(() => vi.fn());
+const captureSandboxCommandAgentAuthority = vi.hoisted(() => vi.fn());
+const requireCurrentSandboxCommandAgentAuthority = vi.hoisted(() => vi.fn());
+const resolveLegacySkillPaths = vi.hoisted(() => vi.fn());
 const ensureLiveSandboxOrExit = vi.hoisted(() => vi.fn());
 const skillInstall = vi.hoisted(() => ({
   validateSkillName: vi.fn(),
@@ -18,7 +22,7 @@ const skillInstall = vi.hoisted(() => ({
   parseFrontmatter: vi.fn(),
   collectFiles: vi.fn(),
   uploadDirectory: vi.fn(),
-  installFreshSharedSkill: vi.fn(),
+  installFreshSkill: vi.fn(),
   postInstall: vi.fn(),
   verifyInstall: vi.fn(),
 }));
@@ -29,6 +33,19 @@ vi.mock("../../adapters/openshell/runtime", () => ({
 
 vi.mock("../../agent/runtime", () => ({
   getSessionAgent,
+}));
+
+vi.mock("../../state/registry", () => ({
+  getSandbox,
+}));
+
+vi.mock("../../sandbox/command-agent", () => ({
+  captureSandboxCommandAgentAuthority,
+  requireCurrentSandboxCommandAgentAuthority,
+}));
+
+vi.mock("../../legacy-skills", () => ({
+  resolveLegacySkillPaths,
 }));
 
 vi.mock("../../skill-install", () => skillInstall);
@@ -43,10 +60,12 @@ const paths = {
   stateDir: "/sandbox/.openclaw",
   uploadDir: "/sandbox/.openclaw/skills/demo-skill",
   mirrorDir: "$HOME/.openclaw/skills/demo-skill",
-  uploadDirSharedWithAgent: false,
-  sessionFile: "/sandbox/.openclaw/agents/main/sessions/sessions.json",
-  reloadsSkillsOnSessionStart: false,
-  isOpenClaw: true,
+  collision: "replace",
+  removal: "remove",
+  activation: {
+    kind: "reset-session-index",
+    path: "/sandbox/.openclaw/agents/main/sessions/sessions.json",
+  },
 };
 
 const agent = { name: "openclaw", configPaths: { dir: "/sandbox/.openclaw" } };
@@ -58,10 +77,32 @@ const sharedPaths = {
   stateDir: "/sandbox/.deepagents",
   uploadDir: "/sandbox/.deepagents/agent/skills/demo-skill",
   mirrorDir: null,
-  uploadDirSharedWithAgent: true,
-  sessionFile: null,
-  reloadsSkillsOnSessionStart: false,
-  isOpenClaw: false,
+  collision: "refuse",
+  removal: "refuse",
+  activation: { kind: "new-session" },
+};
+const packageEntry = {
+  name: "alpha",
+  agent: "future-harness",
+  harnessPackage: {
+    kind: "agent-runtime",
+    id: "future-harness",
+    packageVersion: "3.0.0",
+    contentDigest: "a".repeat(64),
+  },
+};
+const packageCapability = {
+  support: "managed",
+  install_root: "/sandbox/.future/skills",
+  collision: "replace",
+  removal: "remove",
+  activation: { kind: "new-session" },
+};
+const packageAuthority = {
+  agent: "future-harness",
+  harnessPackage: packageEntry.harnessPackage,
+  harnessPackageMigration: null,
+  definition: { name: "future-harness", skillCapability: packageCapability },
 };
 
 function makeSkillDir(): string {
@@ -92,7 +133,10 @@ describe("sandbox skill action orchestration", () => {
 
     captureSandboxSshConfig.mockReturnValue({ status: 0, output: "Host openshell-alpha\n" });
     ensureLiveSandboxOrExit.mockResolvedValue(undefined);
+    getSandbox.mockReturnValue({ name: "alpha", agent: "openclaw" });
     getSessionAgent.mockReturnValue(agent);
+    resolveLegacySkillPaths.mockReturnValue(paths);
+    captureSandboxCommandAgentAuthority.mockReturnValue(packageAuthority);
     skillInstall.validateSkillName.mockReturnValue(true);
     skillInstall.resolveSkillPaths.mockReturnValue(paths);
     skillInstall.checkExisting.mockReturnValue(true);
@@ -117,7 +161,7 @@ describe("sandbox skill action orchestration", () => {
       skippedDotfiles: [],
       unsafePaths: [],
     });
-    skillInstall.installFreshSharedSkill.mockReturnValue({
+    skillInstall.installFreshSkill.mockReturnValue({
       success: true,
       uploaded: 1,
       contentDigest: "a".repeat(64),
@@ -201,7 +245,7 @@ describe("sandbox skill action orchestration", () => {
 
     expect(ensureLiveSandboxOrExit).toHaveBeenCalledWith("alpha");
     expect(getSessionAgent).toHaveBeenCalledWith("alpha");
-    expect(skillInstall.resolveSkillPaths).toHaveBeenCalledWith(agent, "demo-skill");
+    expect(resolveLegacySkillPaths).toHaveBeenCalledWith(agent, "demo-skill");
     expect(skillInstall.removeSkill).toHaveBeenCalledWith(
       expect.objectContaining({ configFile: tempConfig, sandboxName: "alpha" }),
       paths,
@@ -216,16 +260,16 @@ describe("sandbox skill action orchestration", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("refuses Deep Agents removal before obtaining SSH configuration", async () => {
+  it("honors legacy removal refusal before obtaining SSH configuration", async () => {
     getSessionAgent.mockReturnValue(deepAgent);
-    skillInstall.resolveSkillPaths.mockReturnValue(sharedPaths);
+    resolveLegacySkillPaths.mockReturnValue(sharedPaths);
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await removeSandboxSkill("alpha", { name: "demo-skill" });
 
     expect(process.exitCode).toBe(1);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("Automatic removal is unavailable for Deep Agents skills"),
+      expect.stringContaining("this harness package refuses skill removal"),
     );
     expect(captureSandboxSshConfig).not.toHaveBeenCalled();
     expect(skillInstall.checkExisting).not.toHaveBeenCalled();
@@ -246,6 +290,82 @@ describe("sandbox skill action orchestration", () => {
     }
 
     expect(ensureLiveSandboxOrExit).toHaveBeenCalledWith("alpha");
+    expect(captureSandboxSshConfig).not.toHaveBeenCalled();
+    expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
+  });
+
+  it("uses and revalidates an unknown package receipt before skill mutations", async () => {
+    const skillDir = makeSkillDir();
+    getSandbox.mockReturnValue(packageEntry);
+    skillInstall.resolveSkillPaths.mockReturnValue(paths);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await installSandboxSkill("alpha", { command: "install", path: skillDir });
+    } finally {
+      fs.rmSync(skillDir, { recursive: true, force: true });
+    }
+
+    expect(captureSandboxCommandAgentAuthority).toHaveBeenCalledWith(packageEntry);
+    expect(skillInstall.resolveSkillPaths).toHaveBeenCalledWith(packageCapability, "demo-skill");
+    expect(getSessionAgent).not.toHaveBeenCalled();
+    expect(requireCurrentSandboxCommandAgentAuthority).toHaveBeenCalledTimes(2);
+    expect(requireCurrentSandboxCommandAgentAuthority).toHaveBeenNthCalledWith(
+      1,
+      packageAuthority,
+      packageEntry,
+    );
+    expect(skillInstall.uploadDirectory).toHaveBeenCalled();
+    expect(skillInstall.postInstall).toHaveBeenCalled();
+  });
+
+  it("stops before upload when the package receipt changes", async () => {
+    const skillDir = makeSkillDir();
+    getSandbox.mockReturnValue(packageEntry);
+    skillInstall.resolveSkillPaths.mockReturnValue(paths);
+    requireCurrentSandboxCommandAgentAuthority.mockImplementation(() => {
+      throw new Error("Sandbox command agent authority changed before mutation");
+    });
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await expect(
+        installSandboxSkill("alpha", { command: "install", path: skillDir }),
+      ).rejects.toThrow("authority changed before mutation");
+    } finally {
+      fs.rmSync(skillDir, { recursive: true, force: true });
+    }
+
+    expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
+    expect(skillInstall.postInstall).not.toHaveBeenCalled();
+  });
+
+  it("rejects a receipt-backed package that disables skill installation", async () => {
+    const skillDir = makeSkillDir();
+    const disabledAuthority = {
+      ...packageAuthority,
+      definition: {
+        name: "future-harness",
+        skillCapability: { support: "disabled", reason: "No native skill loader." },
+      },
+    };
+    getSandbox.mockReturnValue(packageEntry);
+    captureSandboxCommandAgentAuthority.mockReturnValue(disabledAuthority);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await installSandboxSkill("alpha", { command: "install", path: skillDir });
+    } finally {
+      fs.rmSync(skillDir, { recursive: true, force: true });
+    }
+
+    expect(process.exitCode).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "does not support NemoClaw skill installation: No native skill loader.",
+      ),
+    );
     expect(captureSandboxSshConfig).not.toHaveBeenCalled();
     expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
   });
@@ -343,12 +463,16 @@ describe("sandbox skill action orchestration", () => {
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("fresh-installs and verifies Deep Agents content without generic upload mutation", async () => {
+  it("uses the atomic fresh-install path when collision replacement is refused", async () => {
     const skillDir = makeSkillDir();
     getSessionAgent.mockReturnValue(deepAgent);
-    skillInstall.resolveSkillPaths.mockReturnValue(sharedPaths);
+    resolveLegacySkillPaths.mockReturnValue(sharedPaths);
+    skillInstall.postInstall.mockReturnValue({
+      success: true,
+      messages: ["Start a new chat session to load the skill; a gateway restart is not required."],
+    });
     let tempConfig = "";
-    skillInstall.installFreshSharedSkill.mockImplementation((ctx) => {
+    skillInstall.installFreshSkill.mockImplementation((ctx) => {
       tempConfig = ctx.configFile;
       return { success: true, uploaded: 1, contentDigest: "a".repeat(64) };
     });
@@ -360,7 +484,7 @@ describe("sandbox skill action orchestration", () => {
       fs.rmSync(skillDir, { recursive: true, force: true });
     }
 
-    expect(skillInstall.installFreshSharedSkill).toHaveBeenCalledWith(
+    expect(skillInstall.installFreshSkill).toHaveBeenCalledWith(
       expect.objectContaining({ configFile: tempConfig, sandboxName: "alpha" }),
       skillDir,
       sharedPaths,
@@ -373,23 +497,27 @@ describe("sandbox skill action orchestration", () => {
     );
     expect(skillInstall.checkExisting).not.toHaveBeenCalled();
     expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
-    expect(skillInstall.postInstall).not.toHaveBeenCalled();
+    expect(skillInstall.postInstall).toHaveBeenCalledWith(
+      expect.objectContaining({ configFile: tempConfig, sandboxName: "alpha" }),
+      sharedPaths,
+      skillDir,
+    );
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Skill 'demo-skill' installed"));
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining(`Content digest (SHA-256): ${"a".repeat(64)}`),
     );
     expect(log).toHaveBeenCalledWith(
-      expect.stringContaining("Start a new Deep Agents session to load the skill."),
+      expect.stringContaining("Start a new chat session to load the skill"),
     );
     expectTempSshConfigCleanedUp(tempConfig);
     expect(process.exitCode).toBeUndefined();
   });
 
-  it("refuses a colliding Deep Agents destination without generic mutation", async () => {
+  it("refuses a collision without using the replace path", async () => {
     const skillDir = makeSkillDir();
     getSessionAgent.mockReturnValue(deepAgent);
-    skillInstall.resolveSkillPaths.mockReturnValue(sharedPaths);
-    skillInstall.installFreshSharedSkill.mockReturnValue({
+    resolveLegacySkillPaths.mockReturnValue(sharedPaths);
+    skillInstall.installFreshSkill.mockReturnValue({
       success: false,
       uploaded: 0,
       reason: "destination_exists",
@@ -404,18 +532,18 @@ describe("sandbox skill action orchestration", () => {
 
     expect(process.exitCode).toBe(1);
     expect(error).toHaveBeenCalledWith(
-      expect.stringContaining("the Deep Agents skill destination already exists"),
+      expect.stringContaining("the harness skill destination already exists"),
     );
     expect(skillInstall.checkExisting).not.toHaveBeenCalled();
     expect(skillInstall.uploadDirectory).not.toHaveBeenCalled();
     expect(skillInstall.postInstall).not.toHaveBeenCalled();
   });
 
-  it("reports unknown Deep Agents commit state with inspect-before-retry guidance", async () => {
+  it("reports an unknown atomic commit state with inspect-before-retry guidance", async () => {
     const skillDir = makeSkillDir();
     getSessionAgent.mockReturnValue(deepAgent);
-    skillInstall.resolveSkillPaths.mockReturnValue(sharedPaths);
-    skillInstall.installFreshSharedSkill.mockReturnValue({
+    resolveLegacySkillPaths.mockReturnValue(sharedPaths);
+    skillInstall.installFreshSkill.mockReturnValue({
       success: false,
       uploaded: 0,
       reason: "remote_state_unknown",
@@ -430,7 +558,7 @@ describe("sandbox skill action orchestration", () => {
 
     const output = error.mock.calls.map((args) => args.join(" ")).join("\n");
     expect(process.exitCode).toBe(1);
-    expect(output).toContain("did not confirm whether the Deep Agents skill was committed");
+    expect(output).toContain("did not confirm whether the skill was committed");
     expect(output).toContain(
       "Inspect /sandbox/.deepagents/agent/skills/demo-skill before retrying",
     );

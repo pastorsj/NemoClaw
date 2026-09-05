@@ -165,6 +165,7 @@ export default defineConfig({
       ...deepAgentsNemoclawTestMoves.map(({ destination }) => destination),
       ...deepAgentsNemoclawSplitTests,
       ...deepAgentsNemoclawExtractedTests,
+      "tests/integration/skill-capability.test.ts",
     ],
   },
 });

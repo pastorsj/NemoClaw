@@ -56,6 +56,7 @@ state_dirs:
   - path: sessions
   - path: prompts
   - path: themes
+  - path: skills
   - path: tools
     backup: false
   - path: bin
@@ -104,6 +105,13 @@ mcp:
   support: disabled
 sessions:
   operations: []
+skills:
+  support: managed
+  install_root: /sandbox/.pi/agent/skills
+  collision: replace
+  removal: remove
+  activation:
+    kind: new-session
 messaging:
   support: disabled
 package_registry:

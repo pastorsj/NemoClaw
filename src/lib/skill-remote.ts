@@ -65,7 +65,7 @@ export function sshExec(
 
 /**
  * Check whether a skill directory already exists on the sandbox at the upload
- * path or (for OpenClaw) the mirror path. Probing directories instead of only
+ * path or the declared mirror path. Probing directories instead of only
  * SKILL.md lets `skill remove` clean up partial uploads whose manifest write
  * failed after the directory was created.
  *
@@ -79,9 +79,8 @@ export function checkExisting(
   paths: SkillPaths,
   opts: { sshExecImpl?: typeof sshExec } = {},
 ): boolean | null {
-  // Existence gate for `skill remove`. Shared agent destinations are probed
-  // only for user-facing diagnostics; removeSkill() still refuses to mutate
-  // them because their presence is not proof of NemoClaw ownership (#5753).
+  // Existence is only an observation. The package's removal policy controls
+  // whether core may mutate the destination.
   const checks = [`test -e ${shellQuote(paths.uploadDir)}`];
   if (paths.mirrorDir) {
     checks.push(`test -e "${paths.mirrorDir}"`);
@@ -106,9 +105,8 @@ export interface RemoveResult {
 
 /**
  * Remove a skill from the sandbox by name.
- * Deletes the immutable upload directory, the agent's skill-load mirror
- * directory (if applicable), and clears sessions.json so the agent
- * re-discovers the remaining skills on the next session.
+ * Deletes the upload directory and the declared skill-load mirror. It then
+ * applies the package's finite activation step.
  *
  * Only the named skill directory is deleted — other skills are untouched.
  */
@@ -120,19 +118,19 @@ export function removeSkill(
   const messages: string[] = [];
   const runSsh = opts.sshExecImpl ?? sshExec;
 
-  if (paths.uploadDirSharedWithAgent) {
+  if (paths.removal === "refuse") {
     return {
       success: false,
       removedUploadDir: false,
       removedMirrorDir: false,
       clearedSessions: false,
       messages: [
-        `Error: automatic removal is unavailable for the agent-owned skill directory ${paths.uploadDir}.`,
+        `Error: automatic removal is unavailable for the package-declared skill directory ${paths.uploadDir}.`,
       ],
     };
   }
 
-  // 1. Remove the immutable upload directory (/sandbox/.openclaw/skills/<name>/)
+  // 1. Remove the declared install directory.
   const uploadDir = shellQuote(paths.uploadDir);
   const removeUpload = runSsh(ctx, `rm -rf ${uploadDir}`);
   const removedUploadDir = removeUpload !== null && removeUpload.status === 0;
@@ -140,8 +138,8 @@ export function removeSkill(
     messages.push(`Warning: failed to remove upload directory ${paths.uploadDir}`);
   }
 
-  // 2. Remove the agent's skill-load mirror (see AGENT_SKILL_MIRRORS); leaving
-  //    it behind keeps the removed skill loadable even though uploadDir is gone.
+  // 2. Remove the declared skill-load mirror. Leaving it behind keeps the
+  //    removed skill loadable even though uploadDir is gone.
   //    mirrorDir may contain $HOME which must expand on the remote shell, so we
   //    use double quotes (not shellQuote). This is safe because skill names
   //    are restricted to [A-Za-z0-9._-] by parseFrontmatter / the name
@@ -155,19 +153,19 @@ export function removeSkill(
     }
   }
 
-  // 3. Clear sessions.json so the agent re-discovers the remaining skills.
+  // 3. Apply the package's finite activation step.
   let clearedSessions = false;
-  if (paths.sessionFile) {
-    const clearResult = runSsh(ctx, `printf '{}' > ${shellQuote(paths.sessionFile)}`);
+  if (paths.activation.kind === "reset-session-index") {
+    const clearResult = runSsh(ctx, `printf '{}' > ${shellQuote(paths.activation.path)}`);
     clearedSessions = clearResult !== null && clearResult.status === 0;
     if (!clearedSessions) {
-      messages.push("Warning: failed to clear sessions (agent may need manual restart)");
+      messages.push("Warning: failed to reset the session index (the agent may need a restart)");
     }
   }
 
-  if (!paths.mirrorDir && !paths.sessionFile) {
+  if (paths.activation.kind !== "reset-session-index") {
     messages.push(
-      paths.reloadsSkillsOnSessionStart
+      paths.activation.kind === "new-session"
         ? "Start a new chat session for the removal to take effect; a gateway restart is not required."
         : "Restart the agent gateway for the removal to take effect.",
     );
@@ -192,7 +190,7 @@ export function verifyRemove(
   paths: SkillPaths,
   opts: { sshExecImpl?: typeof sshExec } = {},
 ): boolean {
-  if (paths.uploadDirSharedWithAgent) return false;
+  if (paths.removal === "refuse") return false;
   const checks = [`test ! -e ${shellQuote(paths.uploadDir)}`];
   if (paths.mirrorDir) {
     checks.push(`test ! -e "${paths.mirrorDir}"`);

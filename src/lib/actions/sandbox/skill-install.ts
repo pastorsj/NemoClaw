@@ -8,9 +8,61 @@ import { OPENSHELL_PROBE_TIMEOUT_MS } from "../../adapters/openshell/timeouts";
 import * as agentRuntime from "../../agent/runtime";
 import { CLI_NAME } from "../../cli/branding";
 import { D, G, R, YW } from "../../cli/terminal-style";
+import { resolveLegacySkillPaths } from "../../legacy-skills";
+import {
+  captureSandboxCommandAgentAuthority,
+  requireCurrentSandboxCommandAgentAuthority,
+  type SandboxCommandAgentAuthority,
+} from "../../sandbox/command-agent";
 import { createTempSshConfig } from "../../sandbox/temp-ssh-config";
 import * as skillInstall from "../../skill-install";
+import * as registry from "../../state/registry";
 import { ensureLiveSandboxOrExit } from "./gateway-state";
+
+type SandboxSkillTarget =
+  | {
+      readonly support: "managed";
+      readonly authority: SandboxCommandAgentAuthority | null;
+      readonly paths: skillInstall.SkillPaths;
+    }
+  | { readonly support: "disabled"; readonly reason: string };
+
+function resolveSandboxSkillTarget(sandboxName: string, skillName: string): SandboxSkillTarget {
+  const entry = registry.getSandbox(sandboxName);
+  if (entry?.harnessPackage) {
+    const authority = captureSandboxCommandAgentAuthority(entry);
+    const capability = authority.definition.skillCapability;
+    if (capability.support === "disabled") {
+      return { support: "disabled", reason: capability.reason };
+    }
+    return {
+      support: "managed",
+      authority,
+      paths: skillInstall.resolveSkillPaths(capability, skillName),
+    };
+  }
+
+  // Rows without an installed package receipt retain the pre-contract layout.
+  return {
+    support: "managed",
+    authority: null,
+    paths: resolveLegacySkillPaths(agentRuntime.getSessionAgent(sandboxName), skillName),
+  };
+}
+
+function requireCurrentSkillTarget(
+  sandboxName: string,
+  authority: SandboxCommandAgentAuthority | null,
+): void {
+  if (authority) {
+    requireCurrentSandboxCommandAgentAuthority(authority, registry.getSandbox(sandboxName));
+  }
+}
+
+function reportDisabledSkillCapability(reason: string): void {
+  console.error(`  This harness package does not support NemoClaw skill installation: ${reason}`);
+  process.exitCode = 1;
+}
 
 export function printSkillInstallUsage(): void {
   console.log("");
@@ -148,14 +200,18 @@ export async function removeSandboxSkill(
 
   await ensureLiveSandboxOrExit(sandboxName);
 
-  const agent = agentRuntime.getSessionAgent(sandboxName);
-  const paths = skillInstall.resolveSkillPaths(agent, skillName);
-  if (paths.uploadDirSharedWithAgent) {
+  const target = resolveSandboxSkillTarget(sandboxName, skillName);
+  if (target.support === "disabled") {
+    reportDisabledSkillCapability(target.reason);
+    return;
+  }
+  const { authority, paths } = target;
+  if (paths.removal === "refuse") {
     console.error(
-      "  Automatic removal is unavailable for Deep Agents skills because the destination is shared with agent-authored content.",
+      "  Automatic removal is unavailable because this harness package refuses skill removal.",
     );
     console.error(
-      "  Inspect and remove the skill with the agent's native or manual workflow after confirming ownership.",
+      "  Inspect and remove the skill with the harness's native or manual workflow after confirming ownership.",
     );
     process.exitCode = 1;
     return;
@@ -189,6 +245,7 @@ export async function removeSandboxSkill(
       return;
     }
 
+    requireCurrentSkillTarget(sandboxName, authority);
     const result = skillInstall.removeSkill(ctx, paths);
     for (const msg of result.messages) {
       if (msg.startsWith("Warning:")) {
@@ -339,8 +396,12 @@ export async function installSandboxSkill(
   await ensureLiveSandboxOrExit(sandboxName);
 
   // 3. Resolve agent and paths
-  const agent = agentRuntime.getSessionAgent(sandboxName);
-  const paths = skillInstall.resolveSkillPaths(agent, frontmatter.name);
+  const target = resolveSandboxSkillTarget(sandboxName, frontmatter.name);
+  if (target.support === "disabled") {
+    reportDisabledSkillCapability(target.reason);
+    return;
+  }
+  const { authority, paths } = target;
 
   // 4. Get SSH config
   const sshConfigResult = captureSandboxSshConfig(sandboxName, {
@@ -357,35 +418,39 @@ export async function installSandboxSkill(
   try {
     const ctx = { configFile: tmpSshConfig.file, sandboxName };
 
-    if (paths.uploadDirSharedWithAgent) {
-      const fresh = skillInstall.installFreshSharedSkill(ctx, skillDir, paths, {
+    if (paths.collision === "refuse") {
+      requireCurrentSkillTarget(sandboxName, authority);
+      const fresh = skillInstall.installFreshSkill(ctx, skillDir, paths, {
         expectedRootIdentity,
       });
       if (!fresh.success || !fresh.contentDigest) {
         if (fresh.reason === "destination_exists") {
           console.error(
-            `  Refusing to replace '${frontmatter.name}': the Deep Agents skill destination already exists.`,
+            `  Refusing to replace '${frontmatter.name}': the harness skill destination already exists.`,
           );
-          console.error(
-            "  Deep Agents skill install supports fresh names only because that directory also contains agent-authored skills.",
-          );
+          console.error("  This harness package permits fresh skill names only.");
         } else if (fresh.reason === "snapshot_failed") {
           console.error("  Failed to create an exact regular-file snapshot of the local skill.");
         } else {
+          console.error("  The remote install did not confirm whether the skill was committed.");
           console.error(
-            "  The remote install did not confirm whether the Deep Agents skill was committed.",
-          );
-          console.error(
-            `  Inspect ${paths.uploadDir} before retrying; NemoClaw will not replace or delete shared agent content.`,
+            `  Inspect ${paths.uploadDir} before retrying; NemoClaw will not replace or delete content at this destination.`,
           );
         }
         process.exitCode = 1;
         return;
       }
-      console.log(`  ${G}✓${R} Installed ${fresh.uploaded} file(s) into the agent skill directory`);
+      requireCurrentSkillTarget(sandboxName, authority);
+      const post = skillInstall.postInstall(ctx, paths, skillDir);
+      for (const msg of post.messages) {
+        if (msg.startsWith("Warning:")) console.error(`  ${YW}${msg}${R}`);
+        else console.log(`  ${D}${msg}${R}`);
+      }
+      console.log(
+        `  ${G}✓${R} Installed ${fresh.uploaded} file(s) into the harness skill directory`,
+      );
       console.log(`  ${G}✓${R} Skill '${frontmatter.name}' installed`);
       console.log(`  ${D}Content digest (SHA-256): ${fresh.contentDigest}${R}`);
-      console.log(`  ${D}Start a new Deep Agents session to load the skill.${R}`);
       return;
     }
 
@@ -406,6 +471,7 @@ export async function installSandboxSkill(
     const isUpdate = existingCheck === true;
 
     // 6. Upload skill directory
+    requireCurrentSkillTarget(sandboxName, authority);
     const { uploaded, failed } = skillInstall.uploadDirectory(ctx, skillDir, paths.uploadDir);
     if (failed.length > 0) {
       console.error(`  Failed to upload ${failed.length} file(s): ${failed.join(", ")}`);
@@ -414,9 +480,8 @@ export async function installSandboxSkill(
     }
     console.log(`  ${G}✓${R} Uploaded ${uploaded} file(s) to sandbox`);
 
-    // 7. Post-install (OpenClaw mirror + refresh, or agent-specific activation guidance).
-    //    OpenClaw caches skill content per session, so always refresh the
-    //    session index after an install/update to avoid stale SKILL.md data.
+    // 7. Apply the package's mirror and activation declaration.
+    requireCurrentSkillTarget(sandboxName, authority);
     const post = skillInstall.postInstall(ctx, paths, skillDir);
     for (const msg of post.messages) {
       if (msg.startsWith("Warning:")) {

@@ -170,6 +170,14 @@ mcp:
 sessions:
   operations: []
 
+skills:
+  support: managed
+  install_root: /sandbox/.deepagents/agent/skills
+  collision: refuse
+  removal: refuse
+  activation:
+    kind: new-session
+
 messaging:
   support: disabled
 

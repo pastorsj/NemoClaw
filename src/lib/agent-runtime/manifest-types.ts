@@ -9,6 +9,7 @@ import type {
   HarnessMcpAdapter,
   HarnessMcpCapability,
   HarnessMcpSupport,
+  HarnessSkillCapability,
 } from "@nvidia/nemoclaw-harness-contract";
 
 import type { AgentDashboardUi } from "./dashboard-ui";
@@ -26,6 +27,8 @@ export type {
   HarnessMcpAdapter,
   HarnessMcpCapability,
   HarnessMcpSupport,
+  HarnessSkillActivation,
+  HarnessSkillCapability,
 } from "@nvidia/nemoclaw-harness-contract";
 
 export type ManifestScalar = HarnessManifestScalar;
@@ -172,6 +175,7 @@ export interface AgentDefinition {
   config?: ManifestRecord;
   inference?: AgentInference;
   mcp?: AgentMcpCapability;
+  skills?: HarnessSkillCapability;
   managed_image?: HarnessManagedImageDeclaration;
   state_files?: AgentStateFile[];
   user_managed_files?: string[];
@@ -193,6 +197,7 @@ export interface AgentDefinition {
   readonly configPaths: AgentConfigPaths;
   readonly inferenceProviderOptions: string[];
   readonly mcpCapability: AgentMcpCapability;
+  readonly skillCapability: HarnessSkillCapability;
   readonly managedImage: HarnessManagedImageDeclaration | null;
   readonly stateDirectories: AgentStateDirectory[];
   readonly stateDirs: string[];

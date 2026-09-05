@@ -63,6 +63,7 @@ export default defineConfig({
       ...openclawNemoclawTestMoves.map(({ destination }) => destination),
       ...openclawNemoclawSplitTests,
       "tests/image/fabric-policy.test.ts",
+      "tests/integration/skill-capability.test.ts",
     ],
   },
 });

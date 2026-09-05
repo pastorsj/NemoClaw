@@ -6,6 +6,32 @@ import { resolveSkillPaths } from "./skill-install";
 import { validateSkillName } from "./skill-name";
 import { checkExisting, removeSkill, verifyRemove } from "./skill-remote";
 
+const MIRRORED_SKILLS = {
+  support: "managed",
+  install_root: "/sandbox/.future/skills",
+  mirror_root: "$HOME/.future/skills",
+  collision: "replace",
+  removal: "remove",
+  activation: {
+    kind: "reset-session-index",
+    path: "/sandbox/.future/sessions/index.json",
+  },
+} as const;
+const SESSION_SKILLS = {
+  support: "managed",
+  install_root: "/sandbox/.future/skills",
+  collision: "replace",
+  removal: "remove",
+  activation: { kind: "new-session" },
+} as const;
+const REFUSED_SKILLS = {
+  support: "managed",
+  install_root: "/sandbox/.future/agent/skills",
+  collision: "refuse",
+  removal: "refuse",
+  activation: { kind: "new-session" },
+} as const;
+
 describe("validateSkillName", () => {
   it("accepts valid skill names", () => {
     expect(validateSkillName("my-skill")).toBe(true);
@@ -39,7 +65,7 @@ describe("validateSkillName", () => {
 
 describe("removeSkill (unit — no SSH)", () => {
   it("returns success=false and a warning when sshExec returns null (sandbox unreachable)", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
 
     const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
     const result = removeSkill(ctx, paths);
@@ -49,12 +75,12 @@ describe("removeSkill (unit — no SSH)", () => {
     expect(result.messages.some((m) => m.startsWith("Warning:"))).toBe(true);
   });
 
-  it("success is false for OpenClaw when mirrorDir removal fails even if uploadDir was removed", () => {
+  it("reports failure when mirror removal fails after removing the install directory", () => {
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(null, "test-skill");
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
     const result = removeSkill(ctx, paths, {
       sshExecImpl: (_ctx, command) => ({
-        status: command.includes("$HOME/.openclaw/skills") ? 1 : 0,
+        status: command.includes("$HOME/.future/skills") ? 1 : 0,
         stdout: "",
         stderr: "",
       }),
@@ -65,9 +91,9 @@ describe("removeSkill (unit — no SSH)", () => {
     expect(result.success).toBe(false);
   });
 
-  it("removes OpenClaw upload and mirror dirs, then clears sessions", () => {
+  it("removes declared install and mirror directories before resetting the session index", () => {
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(null, "test-skill");
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
     const commands: string[] = [];
     const result = removeSkill(ctx, paths, {
       sshExecImpl: (_ctx, command) => {
@@ -79,18 +105,15 @@ describe("removeSkill (unit — no SSH)", () => {
     expect(result.success).toBe(true);
     expect(result.clearedSessions).toBe(true);
     expect(commands).toEqual([
-      "rm -rf '/sandbox/.openclaw/skills/test-skill'",
-      'rm -rf "$HOME/.openclaw/skills/test-skill"',
-      "printf '{}' > '/sandbox/.openclaw/agents/main/sessions/sessions.json'",
+      "rm -rf '/sandbox/.future/skills/test-skill'",
+      'rm -rf "$HOME/.future/skills/test-skill"',
+      "printf '{}' > '/sandbox/.future/sessions/index.json'",
     ]);
   });
 
-  it("tells Hermes users to start a fresh session after removal", () => {
+  it("tells users to start a fresh session when the package declares new-session activation", () => {
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(
-      { name: "hermes", configPaths: { dir: "/sandbox/.hermes" } },
-      "test-skill",
-    );
+    const paths = resolveSkillPaths(SESSION_SKILLS, "test-skill");
     const commands: string[] = [];
     const result = removeSkill(ctx, paths, {
       sshExecImpl: (_ctx, command) => {
@@ -103,15 +126,12 @@ describe("removeSkill (unit — no SSH)", () => {
     expect(result.messages).toEqual([
       "Start a new chat session for the removal to take effect; a gateway restart is not required.",
     ]);
-    expect(commands).toEqual(["rm -rf '/sandbox/.hermes/skills/test-skill'"]);
+    expect(commands).toEqual(["rm -rf '/sandbox/.future/skills/test-skill'"]);
   });
 
-  it("probes the canonical Deep Agents directory for diagnostics (#7634)", () => {
+  it("probes a removal-refused destination for diagnostics", () => {
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(
-      { name: "langchain-deepagents-code", configPaths: { dir: "/sandbox/.deepagents" } },
-      "user-authored",
-    );
+    const paths = resolveSkillPaths(REFUSED_SKILLS, "user-authored");
     const commands: string[] = [];
     checkExisting(ctx, paths, {
       sshExecImpl: (_ctx, command) => {
@@ -120,18 +140,15 @@ describe("removeSkill (unit — no SSH)", () => {
       },
     });
 
-    expect(paths.uploadDirSharedWithAgent).toBe(true);
+    expect(paths.removal).toBe("refuse");
     expect(commands).toEqual([
-      "{ test -e '/sandbox/.deepagents/agent/skills/user-authored'; } && echo EXISTS || echo ABSENT",
+      "{ test -e '/sandbox/.future/agent/skills/user-authored'; } && echo EXISTS || echo ABSENT",
     ]);
   });
 
-  it("refuses to remove from the agent-owned Deep Agents directory (#7634)", () => {
+  it("refuses removal when the package declares removal refusal", () => {
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
-    const paths = resolveSkillPaths(
-      { name: "langchain-deepagents-code", configPaths: { dir: "/sandbox/.deepagents" } },
-      "test-skill",
-    );
+    const paths = resolveSkillPaths(REFUSED_SKILLS, "test-skill");
     const commands: string[] = [];
     const result = removeSkill(ctx, paths, {
       sshExecImpl: (_ctx, command) => {
@@ -145,7 +162,7 @@ describe("removeSkill (unit — no SSH)", () => {
     expect(result.removedMirrorDir).toBe(false);
     expect(result.clearedSessions).toBe(false);
     expect(result.messages).toEqual([
-      "Error: automatic removal is unavailable for the agent-owned skill directory /sandbox/.deepagents/agent/skills/test-skill.",
+      "Error: automatic removal is unavailable for the package-declared skill directory /sandbox/.future/agent/skills/test-skill.",
     ]);
     expect(commands).toEqual([]);
   });
@@ -153,25 +170,19 @@ describe("removeSkill (unit — no SSH)", () => {
 
 describe("verifyRemove (unit — no SSH)", () => {
   it("returns false when SSH is unreachable (conservative — treat failure as not-gone)", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
     const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
     expect(verifyRemove(ctx, paths)).toBe(false);
   });
 
-  it("returns false for non-OpenClaw paths when SSH is unreachable", () => {
-    const paths = resolveSkillPaths(
-      { name: "hermes", configPaths: { dir: "/sandbox/.hermes" } },
-      "test-skill",
-    );
+  it("returns false for non-mirrored paths when SSH is unreachable", () => {
+    const paths = resolveSkillPaths(SESSION_SKILLS, "test-skill");
     const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
     expect(verifyRemove(ctx, paths)).toBe(false);
   });
 
-  it("refuses shared Deep Agents verification without an SSH call", () => {
-    const paths = resolveSkillPaths(
-      { name: "langchain-deepagents-code", configPaths: { dir: "/sandbox/.deepagents" } },
-      "test-skill",
-    );
+  it("refuses removal verification without SSH when removal is refused", () => {
+    const paths = resolveSkillPaths(REFUSED_SKILLS, "test-skill");
     const commands: string[] = [];
     const gone = verifyRemove({ configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" }, paths, {
       sshExecImpl: (_ctx, command) => {
@@ -184,8 +195,8 @@ describe("verifyRemove (unit — no SSH)", () => {
     expect(commands).toEqual([]);
   });
 
-  it("verifies both OpenClaw skill directories are gone", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
+  it("verifies both declared skill directories are gone", () => {
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
     const commands: string[] = [];
     const gone = verifyRemove(ctx, paths, {
@@ -197,29 +208,26 @@ describe("verifyRemove (unit — no SSH)", () => {
 
     expect(gone).toBe(true);
     expect(commands).toEqual([
-      "test ! -e '/sandbox/.openclaw/skills/test-skill' && test ! -e \"$HOME/.openclaw/skills/test-skill\" && echo GONE || echo EXISTS",
+      "test ! -e '/sandbox/.future/skills/test-skill' && test ! -e \"$HOME/.future/skills/test-skill\" && echo GONE || echo EXISTS",
     ]);
   });
 });
 
 describe("checkExisting (unit — no SSH)", () => {
-  it("returns null when SSH is unreachable for OpenClaw paths", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
+  it("returns null when SSH is unreachable for mirrored paths", () => {
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
     const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
     expect(checkExisting(ctx, paths)).toBeNull();
   });
 
-  it("returns null when SSH is unreachable for non-OpenClaw paths", () => {
-    const paths = resolveSkillPaths(
-      { name: "hermes", configPaths: { dir: "/sandbox/.hermes" } },
-      "test-skill",
-    );
+  it("returns null when SSH is unreachable for non-mirrored paths", () => {
+    const paths = resolveSkillPaths(SESSION_SKILLS, "test-skill");
     const ctx = { configFile: "/nonexistent/ssh.conf", sandboxName: "test-sandbox" };
     expect(checkExisting(ctx, paths)).toBeNull();
   });
 
   it("probes skill directories so removal can clean partial uploads", () => {
-    const paths = resolveSkillPaths(null, "test-skill");
+    const paths = resolveSkillPaths(MIRRORED_SKILLS, "test-skill");
     const ctx = { configFile: "/tmp/ssh.conf", sandboxName: "test-sandbox" };
     const commands: string[] = [];
     const exists = checkExisting(ctx, paths, {
@@ -230,8 +238,8 @@ describe("checkExisting (unit — no SSH)", () => {
     });
 
     expect(exists).toBe(true);
-    expect(commands[0]).toContain("test -e '/sandbox/.openclaw/skills/test-skill'");
-    expect(commands[0]).toContain('test -e "$HOME/.openclaw/skills/test-skill"');
+    expect(commands[0]).toContain("test -e '/sandbox/.future/skills/test-skill'");
+    expect(commands[0]).toContain('test -e "$HOME/.future/skills/test-skill"');
     expect(commands[0]).not.toContain("SKILL.md");
   });
 });
