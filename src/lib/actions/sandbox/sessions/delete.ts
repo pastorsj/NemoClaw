@@ -1,194 +1,178 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
+import { isDeepStrictEqual } from "node:util";
+
+import type {
+  HarnessSessionMutationOutput,
+  HarnessSessionMutationPlan,
+  HarnessSessionMutationPlanRequest,
+} from "../../../agent-runtime/session-module";
 import {
   deferSandboxLifecycleExit,
   runWithDeferredSandboxLifecycleExit,
 } from "../../../core/process-exit";
+import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
 import { withMcpLifecycleLock } from "../../../state/mcp-lifecycle-lock-acquisition";
 import { execSandbox } from "../exec";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
-import { callOpenclawGateway, sandboxUsesHermesAgent } from "./gateway-rpc";
+import { callOpenclawGateway } from "./gateway-rpc";
+import { deleteLegacySandboxSession } from "./legacy-delete";
 import {
-  buildCanonicalSessionKey,
-  DEFAULT_AGENT_ID,
-  parseAgentIdFromSessionKey,
-  validateAgentId,
-  validateSessionKey,
-} from "./paths";
+  confirmSessionPackageAuthority,
+  resolveSessionPackageAuthority,
+  type SessionPackageAuthority,
+} from "./package-authority";
 
 export interface SessionsDeleteOptions {
-  key: string;
-  agent?: string;
-  keepTranscript?: boolean;
-  json?: boolean;
-  verbose?: boolean;
-}
-
-export interface SessionsDeletePayload {
-  ok?: boolean;
-  key?: string;
-  removedTranscript?: boolean;
-  entry?: unknown;
-  error?: { code?: string | number; message?: string };
+  readonly key: string;
+  readonly agent?: string;
+  readonly keepTranscript?: boolean;
+  readonly json?: boolean;
+  readonly verbose?: boolean;
 }
 
 export interface SessionsDeleteResult {
-  key: string;
-  removedTranscript: boolean;
-  entry?: unknown;
+  readonly key: string;
+  readonly removedTranscript: boolean;
+  readonly entry?: unknown;
+}
+
+function stopSessionDelete(message: string): never {
+  console.error(`  ${message}`);
+  deferSandboxLifecycleExit(1);
+}
+
+function buildDeleteRequest(
+  options: SessionsDeleteOptions,
+): Extract<HarnessSessionMutationPlanRequest, { readonly operation: "delete" }> {
+  return {
+    operation: "delete",
+    key: options.key,
+    agent: options.agent ?? null,
+    keepTranscript: options.keepTranscript === true,
+    jsonOutput: options.json === true,
+    verboseOutput: options.verbose === true,
+  };
+}
+
+function buildSessionDeletePlan(
+  authority: SessionPackageAuthority,
+  request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "delete" }>,
+): HarnessSessionMutationPlan {
+  try {
+    return authority.adapter.buildSessionMutationPlan(request);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return stopSessionDelete(
+      `The installed harness could not build a session-delete plan: ${detail}`,
+    );
+  }
+}
+
+function confirmSessionDeletePlan(
+  sandboxName: string,
+  authority: SessionPackageAuthority,
+  request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "delete" }>,
+  expectedPlan: HarnessSessionMutationPlan,
+) {
+  const currentAdapter = confirmSessionPackageAuthority(sandboxName, authority.identity);
+  let currentPlan: HarnessSessionMutationPlan;
+  try {
+    currentPlan = currentAdapter.buildSessionMutationPlan(request);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return stopSessionDelete(`The installed harness session-delete plan changed: ${detail}`);
+  }
+  if (!isDeepStrictEqual(currentPlan, expectedPlan)) {
+    stopSessionDelete("The installed harness session-delete plan changed before mutation.");
+  }
+  return currentAdapter;
+}
+
+function renderSessionDeleteResult(
+  result: Extract<
+    HarnessSessionMutationOutput,
+    { readonly kind: "completed"; readonly operation: "delete" }
+  >,
+  options: SessionsDeleteOptions,
+): SessionsDeleteResult {
+  if (options.json) {
+    console.log(
+      JSON.stringify({
+        key: result.key,
+        removedTranscript: result.removedTranscript,
+        entry: result.entry,
+      }),
+    );
+  } else {
+    const transcriptNote = result.removedTranscript
+      ? "(transcript removed)"
+      : "(transcript preserved)";
+    console.error(`  Deleted session '${result.key}' via the installed harness ${transcriptNote}.`);
+    if (options.verbose && result.entry !== null) {
+      console.error(`  entry: ${JSON.stringify(result.entry)}`);
+    }
+  }
+  return {
+    key: result.key,
+    removedTranscript: result.removedTranscript,
+    ...(result.entry === null ? {} : { entry: result.entry }),
+  };
 }
 
 export async function deleteSandboxSession(
   sandboxName: string,
-  opts: SessionsDeleteOptions,
+  options: SessionsDeleteOptions,
 ): Promise<SessionsDeleteResult> {
+  const authority = resolveSessionPackageAuthority(sandboxName);
+  if (authority === null) return deleteLegacySandboxSession(sandboxName, options);
+
   return runWithDeferredSandboxLifecycleExit(() =>
-    withMcpLifecycleLock(sandboxName, () => {
+    withMcpLifecycleLock(sandboxName, async () => {
       assertHermesPortableCommandUnavailable(sandboxName, "sandbox:sessions:delete");
-      return deleteSandboxSessionUnlocked(sandboxName, opts);
+      const request = buildDeleteRequest(options);
+      const plan = buildSessionDeletePlan(authority, request);
+      if (plan.kind === "unsupported" || plan.kind === "refused") {
+        return stopSessionDelete(plan.reason);
+      }
+
+      // Capability refusal happens before liveness can issue any OpenShell call.
+      await ensureLiveSandboxOrExit(sandboxName, {
+        allowNonReadyPhase: true,
+        exit: deferSandboxLifecycleExit,
+      });
+      const currentAdapter = confirmSessionDeletePlan(sandboxName, authority, request, plan);
+
+      if (plan.kind === "stream") {
+        await execSandbox(sandboxName, plan.command, {}, { exit: deferSandboxLifecycleExit });
+        throw new Error("unreachable: streamed session deletion terminated the process");
+      }
+
+      const { payload } = callOpenclawGateway({
+        sandboxName,
+        method: plan.method,
+        params: plan.params,
+        exit: deferSandboxLifecycleExit,
+      });
+      let interpreted: HarnessSessionMutationOutput;
+      try {
+        interpreted = currentAdapter.interpretSessionMutationOutput({
+          request,
+          plan,
+          payload: payload as unknown as Record<string, never>,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return stopSessionDelete(
+          `The installed harness could not interpret session-delete output: ${detail}`,
+        );
+      }
+      if (interpreted.kind === "refused") stopSessionDelete(interpreted.reason);
+      if (interpreted.operation !== "delete") {
+        return stopSessionDelete("The installed harness returned a non-delete session result.");
+      }
+      return renderSessionDeleteResult(interpreted, options);
     }),
   );
-}
-
-async function deleteSandboxSessionUnlocked(
-  sandboxName: string,
-  opts: SessionsDeleteOptions,
-): Promise<SessionsDeleteResult> {
-  // Route by the sandbox's registered agent before OpenClaw key validation,
-  // the same dispatch `sessions export` uses (#5526). Hermes ships a native
-  // `hermes sessions delete` over its own SQLite store and neither exposes the
-  // OpenClaw gateway admin RPC nor accepts OpenClaw canonical `agent:<id>:<rest>`
-  // session keys.
-  //
-  // Trust boundary: the routing helper reads the host-side, user-owned sandbox
-  // registry; a sandbox process cannot change this agent selection. A sandbox
-  // with no registry entry, or with an `agent` other than `hermes`, keeps the
-  // OpenClaw path below.
-  if (sandboxUsesHermesAgent(sandboxName)) {
-    return deleteHermesSession(sandboxName, opts);
-  }
-
-  const requestedAgent = opts.agent ? validateAgentId(opts.agent) : null;
-  const rawKey = validateSessionKey(opts.key);
-  const keyAgent = parseAgentIdFromSessionKey(rawKey);
-
-  if (requestedAgent && keyAgent && requestedAgent !== keyAgent) {
-    console.error(
-      `  Refusing to invoke sessions.delete: session key '${rawKey}' is scoped to agent '${keyAgent}', not '${requestedAgent}'.`,
-    );
-    console.error(
-      `  Drop --agent or pass a key under that agent (e.g. agent:${requestedAgent}:...).`,
-    );
-    deferSandboxLifecycleExit(1);
-  }
-
-  const resolvedAgent = keyAgent ?? requestedAgent ?? DEFAULT_AGENT_ID;
-  const canonicalKey = buildCanonicalSessionKey(resolvedAgent, rawKey);
-  const deleteTranscript = opts.keepTranscript !== true;
-
-  await ensureLiveSandboxOrExit(sandboxName, {
-    allowNonReadyPhase: true,
-    exit: deferSandboxLifecycleExit,
-  });
-
-  const { payload, rawOutput } = callOpenclawGateway<SessionsDeletePayload>({
-    sandboxName,
-    method: "sessions.delete",
-    params: { key: canonicalKey, deleteTranscript },
-    exit: deferSandboxLifecycleExit,
-  });
-
-  if (payload.ok === false || payload.error) {
-    const code = payload.error?.code ?? "unknown";
-    const message = payload.error?.message ?? "no message";
-    console.error(`  Gateway refused sessions.delete for '${canonicalKey}': [${code}] ${message}`);
-    deferSandboxLifecycleExit(1);
-  }
-  if (payload.ok !== true || typeof payload.key !== "string") {
-    console.error("  Gateway returned an unexpected sessions.delete payload.");
-    console.error(`  ${rawOutput.trim()}`);
-    deferSandboxLifecycleExit(1);
-  }
-
-  const removedTranscript = payload.removedTranscript ?? deleteTranscript;
-
-  if (opts.json) {
-    console.log(
-      JSON.stringify({
-        key: payload.key,
-        removedTranscript,
-        entry: payload.entry ?? null,
-      }),
-    );
-  } else {
-    const transcriptNote = removedTranscript ? "(transcript removed)" : "(transcript preserved)";
-    console.error(
-      `  Deleted session '${payload.key}' on agent '${resolvedAgent}' via the OpenClaw gateway ${transcriptNote}.`,
-    );
-    if (opts.verbose && payload.entry !== undefined) {
-      console.error(`  entry: ${JSON.stringify(payload.entry)}`);
-    }
-  }
-
-  return { key: payload.key, removedTranscript, entry: payload.entry };
-}
-
-// OpenClaw-only flags are refused rather than silently ignored.
-function rejectOpenClawOnlyDeleteOptions(opts: SessionsDeleteOptions): void {
-  if (opts.agent) {
-    console.error(
-      `  Refusing to delete: --agent ${opts.agent} is OpenClaw-only and is not supported on a Hermes sandbox. Omit the flag.`,
-    );
-    deferSandboxLifecycleExit(1);
-  }
-  if (opts.keepTranscript === true) {
-    console.error(
-      "  Refusing to delete: --keep-transcript is OpenClaw-only and is not supported on a Hermes sandbox. Hermes removes the session entry directly; omit the flag.",
-    );
-    deferSandboxLifecycleExit(1);
-  }
-  if (opts.json || opts.verbose) {
-    console.error(
-      "  Refusing to delete: --json and --verbose print the OpenClaw gateway result and are OpenClaw-only; a Hermes sandbox streams the native command output. Omit the flags.",
-    );
-    deferSandboxLifecycleExit(1);
-  }
-}
-
-// Reject a leading dash so Hermes cannot parse the id as a flag. Reject
-// whitespace because native Hermes ids contain none.
-function validateHermesSessionId(rawKey: string): string {
-  const sessionId = rawKey.trim();
-  if (sessionId === "" || sessionId.startsWith("-") || /\s/.test(sessionId)) {
-    console.error(
-      `  Refusing to delete: '${rawKey}' is not a valid Hermes session id. Pass a native id from \`sessions list\` (for example 20260727_130357_cb2b61).`,
-    );
-    deferSandboxLifecycleExit(1);
-  }
-  return sessionId;
-}
-
-async function deleteHermesSession(
-  sandboxName: string,
-  opts: SessionsDeleteOptions,
-): Promise<never> {
-  rejectOpenClawOnlyDeleteOptions(opts);
-  const sessionId = validateHermesSessionId(opts.key);
-
-  await ensureLiveSandboxOrExit(sandboxName, {
-    allowNonReadyPhase: true,
-    exit: deferSandboxLifecycleExit,
-  });
-  // execSandbox streams the native command output and exits the process with
-  // its exit code, so control never returns here and there is no NemoClaw-side
-  // result envelope to build (unlike the OpenClaw gateway path above).
-  await execSandbox(
-    sandboxName,
-    ["hermes", "sessions", "delete", sessionId, "--yes"],
-    {},
-    { exit: deferSandboxLifecycleExit },
-  );
-  throw new Error("unreachable: execSandbox terminates the process");
 }

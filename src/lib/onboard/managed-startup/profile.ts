@@ -4,7 +4,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
-import { parseHarnessPackageIdentity } from "../../agent-runtime/package/receipt.ts";
+import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation.ts";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.ts";
 import { isLoopbackDashboardUrl } from "../../dashboard/url.ts";
 import { listMessagingCredentialEnvAssignments } from "../../messaging/channels/metadata.ts";

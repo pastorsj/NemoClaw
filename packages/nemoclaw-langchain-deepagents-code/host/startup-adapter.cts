@@ -93,6 +93,11 @@ function buildStartupPlan(request) {
             exportEnvironment: {},
             unsetEnvironment: [...UNSUPPORTED_RUNTIME_INPUTS],
         },
+        managedState: {
+            root: "/sandbox/.deepagents",
+            files: ["config.toml", "fabric.json"],
+            directories: [".state", "skills"],
+        },
         materials: [
             {
                 kind: "corporate-ca-handoff",

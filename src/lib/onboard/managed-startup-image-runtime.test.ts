@@ -411,7 +411,13 @@ describe("managed startup image runtime", () => {
   });
 
   it.each([
-    ["unknown live agent", "unknown-agent", "openclaw", /unsupported agent "unknown-agent"/u],
+    [
+      "unknown live package/profile mismatch",
+      "unknown-agent",
+      "openclaw",
+      /managed startup profile targets openclaw, expected unknown-agent/u,
+    ],
+    ["malformed live package identity", "Invalid", "openclaw", /invalid package identity/u],
     [
       "configured and live agent mismatch",
       "hermes",
@@ -541,7 +547,14 @@ describe("managed startup image runtime", () => {
     expect(filesystem.hasFile(requestFile)).toBe(false);
     expect(beginTransaction).toHaveBeenCalledWith(
       expect.objectContaining({ agent: profile.agent }),
-      { bootstrapIdentity },
+      {
+        bootstrapIdentity,
+        managedState: {
+          root: "/sandbox/.openclaw",
+          files: [".config-hash", "fabric.json", "openclaw.json"],
+          directories: [],
+        },
+      },
     );
     expect(
       fingerprintManagedStartupProfile(

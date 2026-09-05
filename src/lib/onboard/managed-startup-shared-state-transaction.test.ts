@@ -9,8 +9,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { managedStartupE2eProfile } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
 import type { SandboxMessagingPlan } from "../messaging/manifest";
-import type { ManagedStartupAgent, ManagedStartupProfile } from "./managed-startup/profile";
-import { fingerprintManagedStartupProfile } from "./managed-startup/profile";
+import type {
+  ManagedStartupAgent,
+  ManagedStartupPackageProfile,
+  ManagedStartupProfile,
+} from "./managed-startup/profile";
+import {
+  fingerprintManagedStartupDurableProfile,
+  fingerprintManagedStartupProfile,
+} from "./managed-startup/profile";
 import {
   beginManagedStartupSharedStateTransaction,
   clearManagedStartupSharedStateCommitReceipt,
@@ -82,6 +89,22 @@ describe("managed startup shared-state transaction", () => {
       path.dirname(transactionDirectory),
       path.basename(MANAGED_STARTUP_SHARED_COMMIT_RECEIPT_DIRECTORY),
     );
+  }
+
+  function futurePackageProfile(): ManagedStartupPackageProfile {
+    return {
+      schemaVersion: 1,
+      profileKind: "package",
+      agent: "future-harness",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "2.3.4",
+        contentDigest: "a".repeat(64),
+      },
+      packageConfig: { model: "nvidia/future-model" },
+      corporateCa: { bundleSha256: null },
+    };
   }
 
   function simulateMountedStateRoot(root: string, ...nestedMounts: readonly string[]): void {
@@ -224,6 +247,46 @@ describe("managed startup shared-state transaction", () => {
       expect(fs.existsSync(transactionDirectory)).toBe(false);
     },
   );
+
+  it("uses an unknown receipt-backed package's declared state boundary for rollback", () => {
+    const profile = futurePackageProfile();
+    const root = path.join(sandboxRoot, ".future-harness");
+    const config = path.join(root, "config.json");
+    const cache = path.join(root, "cache");
+    const outside = path.join(sandboxRoot, "outside.txt");
+    fs.mkdirSync(root);
+    fs.writeFileSync(config, "before\n");
+    fs.writeFileSync(outside, "outside-before\n");
+    const managedState = {
+      root: "/sandbox/.future-harness",
+      files: ["config.json", "cache/index.json"],
+      directories: ["cache"],
+    } as const;
+
+    expect(beginManagedStartupSharedStateTransaction(profile, { ...options, managedState })).toBe(
+      true,
+    );
+    fs.writeFileSync(config, "after\n");
+    fs.mkdirSync(cache);
+    fs.writeFileSync(path.join(cache, "index.json"), "created\n");
+    fs.writeFileSync(outside, "outside-after\n");
+
+    expect(rollbackManagedStartupSharedStateTransaction("future-harness", options)).toBe(true);
+    expect(fs.readFileSync(config, "utf8")).toBe("before\n");
+    expect(fs.existsSync(cache)).toBe(false);
+    expect(fs.readFileSync(outside, "utf8")).toBe("outside-after\n");
+    expect(fs.existsSync(transactionDirectory)).toBe(false);
+  });
+
+  it("refuses an unknown receipt-backed package without a validated state declaration", () => {
+    const profile = futurePackageProfile();
+
+    expect(() => beginManagedStartupSharedStateTransaction(profile, options)).toThrow(
+      /has no validated managed-state declaration/u,
+    );
+    expect(fs.existsSync(transactionDirectory)).toBe(false);
+    expect(fingerprintManagedStartupDurableProfile(profile)).toMatch(/^[a-f0-9]{64}$/u);
+  });
 
   it.each(["openclaw", "hermes", "langchain-deepagents-code", "pi"] as const)(
     "restores the preexisting %s Fabric sidecar after startup rollback",

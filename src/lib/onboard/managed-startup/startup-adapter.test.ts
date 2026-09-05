@@ -63,6 +63,11 @@ function futurePlan(): Record<string, unknown> {
     },
     runtimeEnvironment: { FUTURE_MODE: "managed" },
     applicationRuntime: { exportEnvironment: {}, unsetEnvironment: [] },
+    managedState: {
+      root: "/sandbox/.future-harness",
+      files: ["config.json"],
+      directories: ["cache"],
+    },
     materials: [
       {
         kind: "corporate-ca-handoff",
@@ -124,5 +129,34 @@ describe("harness startup adapter boundary", () => {
     expect(() => validateHarnessStartupPlan(futurePlan(), "another-harness")).toThrow(
       /identity does not match/u,
     );
+  });
+
+  it("rejects managed-state effects that escape or alias the package root", () => {
+    expect(() =>
+      validateHarnessStartupPlan(
+        {
+          ...futurePlan(),
+          managedState: {
+            root: "/sandbox/.future-harness",
+            files: ["../outside"],
+            directories: [],
+          },
+        },
+        "future-harness",
+      ),
+    ).toThrow(/normalized relative path/u);
+    expect(() =>
+      validateHarnessStartupPlan(
+        {
+          ...futurePlan(),
+          managedState: {
+            root: "/tmp/future-harness",
+            files: [],
+            directories: [],
+          },
+        },
+        "future-harness",
+      ),
+    ).toThrow(/below \/sandbox/u);
   });
 });

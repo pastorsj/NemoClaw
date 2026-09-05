@@ -139,6 +139,7 @@ describe("session-list package orchestration", () => {
     }
 
     expect(consoleErrorSpy).toHaveBeenCalledWith("  listing is unavailable");
+    expect(mocks.ensureLive).not.toHaveBeenCalled();
     expect(mocks.capture).not.toHaveBeenCalled();
     expect(mocks.exec).not.toHaveBeenCalled();
   });

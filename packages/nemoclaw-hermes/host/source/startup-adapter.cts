@@ -4,6 +4,7 @@
 import type {
   HarnessStartupAdapterModule,
   HarnessStartupEnvironmentValue,
+  HarnessStartupJsonObject,
   HarnessStartupJsonValue,
   HarnessStartupPlan,
   HarnessStartupRequest,
@@ -33,6 +34,10 @@ function encodedJson(value: HarnessStartupJsonValue): HarnessStartupEnvironmentV
   return { kind: "canonical-json-base64", value };
 }
 
+function jsonObject(value: HarnessStartupJsonValue): value is HarnessStartupJsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function appendHostProxy(
   environment: Record<string, HarnessStartupEnvironmentValue>,
   request: HarnessStartupRequest,
@@ -50,6 +55,31 @@ function appendHostProxy(
     https_proxy: proxy.hostHttpsUrl ?? "",
     no_proxy: noProxy,
   });
+}
+
+function messagingManagedFiles(plan: HarnessStartupJsonValue | null): string[] {
+  if (plan === null || !jsonObject(plan)) return [];
+  const files = new Set<string>();
+  const addTarget = (target: unknown): void => {
+    if (typeof target !== "string") return;
+    if (target.startsWith("~/.hermes/")) files.add(target.slice("~/.hermes/".length));
+    else if (target.startsWith("/sandbox/.hermes/")) {
+      files.add(target.slice("/sandbox/.hermes/".length));
+    }
+  };
+  if (Array.isArray(plan.agentRender)) {
+    for (const entry of plan.agentRender) {
+      if (jsonObject(entry)) addTarget(entry.target);
+    }
+  }
+  if (Array.isArray(plan.buildSteps)) {
+    for (const step of plan.buildSteps) {
+      if (!jsonObject(step)) continue;
+      const value = step.value;
+      if (jsonObject(value)) addTarget(value.path);
+    }
+  }
+  return [...files].sort();
 }
 
 function buildStartupPlan(request: HarnessStartupRequest): HarnessStartupPlan {
@@ -129,6 +159,19 @@ function buildStartupPlan(request: HarnessStartupRequest): HarnessStartupPlan {
     applicationRuntime: {
       exportEnvironment: {},
       unsetEnvironment: [...UNSUPPORTED_RUNTIME_INPUTS],
+    },
+    managedState: {
+      root: "/sandbox/.hermes",
+      files: [
+        ...new Set([
+          ".config-hash",
+          ".env",
+          "config.yaml",
+          "fabric.json",
+          ...messagingManagedFiles(settings.messaging.plan),
+        ]),
+      ].sort(),
+      directories: [],
     },
     materials: [
       {

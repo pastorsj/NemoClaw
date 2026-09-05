@@ -3,7 +3,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { MANAGED_STARTUP_AGENTS, type ManagedStartupAgent } from "../managed-startup/profile";
 import type {
   ManagedBootstrapCompletionReceipt,
   ManagedBootstrapDurablePreparationReceipt,
@@ -37,7 +36,7 @@ export interface DockerManagedBootstrapJournal {
   readonly phase: DockerManagedBootstrapJournalPhase;
   readonly bootstrapIdentity: string;
   readonly providerId: string;
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly sandbox: ManagedBootstrapSandboxIdentity;
   readonly planFingerprint: string;
   readonly profileFingerprint: string;
@@ -61,7 +60,7 @@ export interface DockerManagedBootstrapFinalizationRecord {
   readonly phase: "committed" | "rolled-back";
   readonly bootstrapIdentity: string;
   readonly providerId: string;
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly sandbox: ManagedBootstrapSandboxIdentity;
   readonly planFingerprint: string;
   readonly profileFingerprint: string;
@@ -249,11 +248,11 @@ function exactLegacyPhase(
   return value as Exclude<DockerManagedBootstrapJournalPhase, "owner-cleanup-required">;
 }
 
-function exactAgent(value: unknown): ManagedStartupAgent {
-  if (!MANAGED_STARTUP_AGENTS.includes(value as ManagedStartupAgent)) {
-    fail("agent is unsupported");
+function exactAgent(value: unknown): string {
+  if (typeof value !== "string" || !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) {
+    fail("agent is not a valid package identifier");
   }
-  return value as ManagedStartupAgent;
+  return value;
 }
 
 function exactSandbox(value: unknown): ManagedBootstrapSandboxIdentity {

@@ -174,7 +174,7 @@ describe("managed bootstrap envelope", () => {
       serializeManagedBootstrapImageCompletion({ ...completion, bootstrapIdentity: "invalid" }),
     ).toThrow(/identity is invalid/u);
     expect(() =>
-      serializeManagedBootstrapImageCompletion({ ...completion, agent: "invalid" as never }),
+      serializeManagedBootstrapImageCompletion({ ...completion, agent: "Invalid" as never }),
     ).toThrow(/agent is invalid/u);
     expect(() =>
       serializeManagedBootstrapImageCompletion({

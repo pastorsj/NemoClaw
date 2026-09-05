@@ -71,6 +71,8 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
       "  prompt_transport: stdin",
       "mcp:",
       "  support: disabled",
+      "messaging:",
+      "  support: disabled",
       "",
     ].join("\n"),
   );
@@ -79,6 +81,11 @@ function createPackageFixture(additionalFiles: readonly string[] = []): PackageF
   writeFile(
     packageRoot,
     "host/config-adapter.cts",
+    '"use strict";\nmodule.exports = Object.freeze({});\n',
+  );
+  writeFile(
+    packageRoot,
+    "host/messaging-adapter.cts",
     '"use strict";\nmodule.exports = Object.freeze({});\n',
   );
   writeFile(packageRoot, "tests/should-not-publish.txt", "authoring only\n");
@@ -116,7 +123,7 @@ test("materializes a synthetic publish set as one read-only NemoClaw artifact", 
       packageVersion: "4.5.6",
       minimumNemoClawVersion: "0.0.113",
       manifestPath: "manifest.yaml",
-      fileCount: 8,
+      fileCount: 9,
       readOnly: true,
     });
     assert.deepEqual(
@@ -167,7 +174,7 @@ test("the package builder binary writes one absent output and reports JSON", () 
       packageVersion: "4.5.6",
       minimumNemoClawVersion: "0.0.113",
       manifestPath: "manifest.yaml",
-      fileCount: 8,
+      fileCount: 9,
       readOnly: true,
     });
     assert.equal(fs.existsSync(path.join(fixture.outputRoot, "nemoclaw-package.json")), true);

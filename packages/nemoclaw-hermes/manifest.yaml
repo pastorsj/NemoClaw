@@ -181,6 +181,8 @@ web_auth_env: API_SERVER_KEY
 sessions:
   operations:
     - list
+    - delete
+    - export
 
 # ── Messaging integration ───────────────────────────────────────
 messaging:

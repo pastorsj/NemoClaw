@@ -7,7 +7,11 @@ import {
   MANAGED_STARTUP_E2E_CORPORATE_CA_PEM,
   managedStartupE2eProfile,
 } from "../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
-import { encodeManagedStartupProfile } from "./managed-startup/profile";
+import {
+  encodeManagedStartupDurableProfile,
+  encodeManagedStartupProfile,
+  type ManagedStartupPackageProfile,
+} from "./managed-startup/profile";
 import {
   createManagedStartupRootApplyRequest,
   MANAGED_STARTUP_ROOT_APPLY_MAX_BYTES,
@@ -31,18 +35,41 @@ function requestFor(
 }
 
 describe("managed startup root-application envelope", () => {
-  it.each([
-    "openclaw",
-    "hermes",
-    "langchain-deepagents-code",
-  ] as const)("round-trips one canonical bounded %s request", (agent) => {
-    const request = requestFor(agent, true);
-    const serialized = serializeManagedStartupRootApplyRequest(request);
+  it.each(["openclaw", "hermes", "langchain-deepagents-code"] as const)(
+    "round-trips one canonical bounded %s request",
+    (agent) => {
+      const request = requestFor(agent, true);
+      const serialized = serializeManagedStartupRootApplyRequest(request);
 
-    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThan(
-      MANAGED_STARTUP_ROOT_APPLY_MAX_BYTES,
-    );
-    expect(parseManagedStartupRootApplyRequest(serialized)).toEqual(request);
+      expect(Buffer.byteLength(serialized, "utf8")).toBeLessThan(
+        MANAGED_STARTUP_ROOT_APPLY_MAX_BYTES,
+      );
+      expect(parseManagedStartupRootApplyRequest(serialized)).toEqual(request);
+    },
+  );
+
+  it("round-trips an unknown receipt-backed package without adding it to a core catalogue", () => {
+    const profile: ManagedStartupPackageProfile = {
+      schemaVersion: 1,
+      profileKind: "package",
+      agent: "future-harness",
+      harnessPackage: {
+        kind: "agent-runtime",
+        id: "future-harness",
+        packageVersion: "2.3.4",
+        contentDigest: "a".repeat(64),
+      },
+      packageConfig: { model: "nvidia/future-model" },
+      corporateCa: { bundleSha256: null },
+    };
+    const request = createManagedStartupRootApplyRequest({
+      agent: profile.agent,
+      encodedProfile: encodeManagedStartupDurableProfile(profile),
+    });
+
+    expect(
+      parseManagedStartupRootApplyRequest(serializeManagedStartupRootApplyRequest(request)),
+    ).toEqual(request);
   });
 
   it("rejects non-canonical JSON and unknown fields", () => {

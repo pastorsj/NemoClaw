@@ -19,11 +19,9 @@ import {
   type ManagedStartupAgentAdapter,
 } from "./coordinator";
 import {
-  decodeManagedStartupProfile,
-  fingerprintManagedStartupProfile,
-  MANAGED_STARTUP_AGENTS,
-  type ManagedStartupAgent,
-  type ManagedStartupProfile,
+  decodeManagedStartupDurableProfile,
+  fingerprintManagedStartupDurableProfile,
+  type ManagedStartupDurableProfile,
 } from "./profile";
 import {
   MANAGED_STARTUP_ROOT_APPLY_MAX_BYTES,
@@ -130,7 +128,7 @@ export interface ManagedStartupImageActionCommand {
 }
 
 export interface ManagedStartupImageApplyResult {
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly adapterApplied: boolean;
   readonly fingerprint: string;
   readonly runtimeEnvironmentFile: string;
@@ -147,7 +145,7 @@ export interface ManagedStartupRootApplyOptions {
 
 export interface ManagedStartupCompletionMarker {
   readonly schemaVersion: typeof MANAGED_STARTUP_COMPLETION_SCHEMA_VERSION;
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly profileFingerprint: string;
   readonly runtimeEnvironmentSha256: string;
   readonly corporateCaMerged: boolean;
@@ -249,17 +247,15 @@ export function applyManagedStartupCommandEnvironmentPlan(
   return applied;
 }
 
-function exactAgent(value: string): ManagedStartupAgent {
-  if ((MANAGED_STARTUP_AGENTS as readonly string[]).includes(value)) {
-    return value as ManagedStartupAgent;
-  }
-  return fail(`unsupported agent ${JSON.stringify(value)}`);
+function exactAgent(value: string): string {
+  if (/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) return value;
+  return fail(`invalid package identity ${JSON.stringify(value)}`);
 }
 
 function managedTransactionProfile(
   expectedAgentInput: string,
   env: Environment = process.env,
-): ManagedStartupProfile {
+): ManagedStartupDurableProfile {
   requireRoot();
   const expectedAgent = exactAgent(expectedAgentInput);
   if (env.NEMOCLAW_MANAGED_IMAGE_CAPABILITY_UNION !== "1") {
@@ -267,7 +263,7 @@ function managedTransactionProfile(
   }
   const encodedProfile = env[MANAGED_STARTUP_PROFILE_ENV];
   if (!encodedProfile) fail(`${MANAGED_STARTUP_PROFILE_ENV} is required`);
-  const profile = decodeManagedStartupProfile(encodedProfile);
+  const profile = decodeManagedStartupDurableProfile(encodedProfile);
   if (profile.agent !== expectedAgent) {
     fail(`shared-state transaction profile targets ${profile.agent}, expected ${expectedAgent}`);
   }
@@ -1017,7 +1013,7 @@ export function serializeManagedStartupCompletionMarker(
 ): string {
   if (
     marker.schemaVersion !== MANAGED_STARTUP_COMPLETION_SCHEMA_VERSION ||
-    !(MANAGED_STARTUP_AGENTS as readonly string[]).includes(marker.agent) ||
+    !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(marker.agent) ||
     !SHA256_RE.test(marker.profileFingerprint) ||
     !SHA256_RE.test(marker.runtimeEnvironmentSha256) ||
     typeof marker.corporateCaMerged !== "boolean"
@@ -1055,7 +1051,7 @@ function parseManagedStartupCompletionMarker(text: string): ManagedStartupComple
     Object.keys(record).sort().join(",") !== expectedKeys.sort().join(",") ||
     record.schemaVersion !== MANAGED_STARTUP_COMPLETION_SCHEMA_VERSION ||
     typeof record.agent !== "string" ||
-    !(MANAGED_STARTUP_AGENTS as readonly string[]).includes(record.agent) ||
+    !/^[a-z0-9][a-z0-9-]{0,63}$/u.test(record.agent) ||
     typeof record.profileFingerprint !== "string" ||
     !SHA256_RE.test(record.profileFingerprint) ||
     typeof record.runtimeEnvironmentSha256 !== "string" ||
@@ -1066,7 +1062,7 @@ function parseManagedStartupCompletionMarker(text: string): ManagedStartupComple
   }
   const marker = {
     schemaVersion: MANAGED_STARTUP_COMPLETION_SCHEMA_VERSION,
-    agent: record.agent as ManagedStartupAgent,
+    agent: record.agent,
     profileFingerprint: record.profileFingerprint,
     runtimeEnvironmentSha256: record.runtimeEnvironmentSha256,
     corporateCaMerged: record.corporateCaMerged,
@@ -1082,7 +1078,7 @@ export function verifyManagedStartupImageCompletion(
   expectedFingerprint: string,
   completionFile: string = MANAGED_STARTUP_COMPLETION_FILE,
   runtimeEnvironmentFile: string = MANAGED_STARTUP_RUNTIME_ENV_FILE,
-): { readonly agent: ManagedStartupAgent; readonly fingerprint: string } {
+): { readonly agent: string; readonly fingerprint: string } {
   const expectedAgent = exactAgent(expectedAgentInput);
   if (!SHA256_RE.test(expectedFingerprint)) {
     fail("startup completion expected profile fingerprint is invalid");
@@ -1128,7 +1124,7 @@ export function waitForManagedStartupImageCompletion(
   expectedAgentInput: string,
   expectedFingerprint: string,
   timeoutSeconds = 600,
-): { readonly agent: ManagedStartupAgent; readonly fingerprint: string } {
+): { readonly agent: string; readonly fingerprint: string } {
   if (!Number.isSafeInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 3600) {
     fail("startup completion wait timeout must be an integer from 1 to 3600 seconds");
   }
@@ -1242,7 +1238,7 @@ export async function applyManagedStartupImageProfile(
   if (!encodedProfile) fail(`${MANAGED_STARTUP_PROFILE_ENV} is required`);
   let profile;
   try {
-    profile = decodeManagedStartupProfile(encodedProfile);
+    profile = decodeManagedStartupDurableProfile(encodedProfile);
   } catch (error) {
     fail((error as Error).message);
   }
@@ -1335,10 +1331,10 @@ export async function applyManagedStartupRootRequest(
   options: ManagedStartupRootApplyOptions = {},
 ): Promise<ManagedStartupRootApplyResult> {
   requireRoot();
-  const profile = decodeManagedStartupProfile(request.encodedProfile);
+  const profile = decodeManagedStartupDurableProfile(request.encodedProfile);
   if (
     profile.agent !== request.agent ||
-    fingerprintManagedStartupProfile(profile) !== request.profileFingerprint
+    fingerprintManagedStartupDurableProfile(profile) !== request.profileFingerprint
   ) {
     fail("root application request identity does not match its profile");
   }
@@ -1355,7 +1351,7 @@ export async function applyManagedStartupRootRequest(
   // Validate launch controls before completion inspection or transaction
   // mutation. A completed same-profile replay must still be allowed to refresh
   // these non-fingerprinted application-runtime values.
-  mapManagedStartupProfileToAgentEnvironment(profile, imageEnvironment);
+  const mapped = mapManagedStartupProfileToAgentEnvironment(profile, imageEnvironment);
   const alreadyPublished = completionAlreadyPublished(request);
   const bootstrapIdentity = options.bootstrapIdentity ?? null;
   const transactionStatus =
@@ -1371,7 +1367,10 @@ export async function applyManagedStartupRootRequest(
   }
   if (!alreadyPublished) {
     ensureRootOwnedDirectory(ROOT_STATE_PARENT);
-    beginManagedStartupSharedStateTransaction(profile, { bootstrapIdentity });
+    beginManagedStartupSharedStateTransaction(profile, {
+      bootstrapIdentity,
+      managedState: mapped.managedState,
+    });
   }
   const result = await applyManagedStartupImageProfile(request.agent, imageEnvironment);
   return {
@@ -1459,8 +1458,11 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
   if (argv.length === 3 && argv[0] === "--begin-shared-state-transaction") {
     const profile = managedTransactionProfile(readCliAgent(argv, 3));
+    const mapped = mapManagedStartupProfileToAgentEnvironment(profile, process.env);
     ensureRootOwnedDirectory(ROOT_STATE_PARENT);
-    const created = beginManagedStartupSharedStateTransaction(profile);
+    const created = beginManagedStartupSharedStateTransaction(profile, {
+      managedState: mapped.managedState,
+    });
     process.stdout.write(created ? "created\n" : "pending\n");
     return;
   }

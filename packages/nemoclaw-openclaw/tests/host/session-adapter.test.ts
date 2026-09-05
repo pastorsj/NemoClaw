@@ -112,4 +112,111 @@ describe("OpenClaw session adapter", () => {
     const output = JSON.stringify({ records: [{ sid: "sid-real" }] });
     expect(interpret(output, true)).toEqual({ kind: "output", output });
   });
+
+  it("builds canonical delete and reset gateway plans", () => {
+    const deletion = adapter.buildSessionMutationPlan({
+      operation: "delete",
+      key: "telegram:t-1",
+      agent: "work",
+      keepTranscript: true,
+      jsonOutput: false,
+      verboseOutput: false,
+    });
+    expect(deletion).toEqual({
+      kind: "admin-rpc",
+      method: "sessions.delete",
+      params: { key: "agent:work:telegram:t-1", deleteTranscript: false },
+    });
+    expect(
+      adapter.buildSessionMutationPlan({
+        operation: "reset",
+        key: "agent:main:main",
+        agent: null,
+        reason: "new",
+        jsonOutput: false,
+        verboseOutput: false,
+      }),
+    ).toEqual({
+      kind: "admin-rpc",
+      method: "sessions.reset",
+      params: { key: "agent:main:main", reason: "new" },
+    });
+  });
+
+  it("refuses a mismatched canonical mutation key before execution", () => {
+    expect(
+      adapter.buildSessionMutationPlan({
+        operation: "delete",
+        key: "agent:main:slot",
+        agent: "work",
+        keepTranscript: false,
+        jsonOutput: false,
+        verboseOutput: false,
+      }),
+    ).toMatchObject({ kind: "refused", reason: expect.stringContaining("not 'work'") });
+  });
+
+  it("interprets bounded gateway mutation results", () => {
+    const request = {
+      operation: "delete" as const,
+      key: "slot",
+      agent: null,
+      keepTranscript: false,
+      jsonOutput: true,
+      verboseOutput: false,
+    };
+    const plan = adapter.buildSessionMutationPlan(request);
+    expect(plan.kind).toBe("admin-rpc");
+    if (plan.kind !== "admin-rpc") return;
+    expect(
+      adapter.interpretSessionMutationOutput({
+        request,
+        plan,
+        payload: { ok: true, key: "agent:main:slot", entry: { id: "sid-1" } },
+      }),
+    ).toEqual({
+      kind: "completed",
+      operation: "delete",
+      key: "agent:main:slot",
+      removedTranscript: true,
+      entry: { id: "sid-1" },
+    });
+  });
+
+  it("builds and interprets an indexed export plan", () => {
+    const plan = adapter.buildSessionExportPlan({
+      agent: "main",
+      keys: ["main"],
+      format: "tar",
+      includeTrajectory: true,
+      stagingFiles: {
+        tar: "/sandbox/.nemoclaw-staging/export.tgz",
+        jsonl: "/sandbox/.nemoclaw-staging/export.jsonl",
+      },
+    });
+    expect(plan).toMatchObject({
+      kind: "indexed-files",
+      agent: "main",
+      format: "tar",
+      selectedKeys: ["main"],
+      sourceDirectory: "/sandbox/.openclaw/agents/main/sessions",
+      indexCommand: ["openclaw", "sessions", "list", "--agent", "main", "--json"],
+    });
+    expect(
+      adapter.interpretSessionExportIndex({
+        output: JSON.stringify([
+          { key: "agent:main:main", sessionId: "sid-1" },
+          { key: "agent:main:warm", sessionId: `${HIDDEN_PREFIX}1` },
+        ]),
+        agent: "main",
+        selectedKeys: ["main"],
+        includeTrajectory: true,
+        hiddenSessionIdPrefix: HIDDEN_PREFIX,
+      }),
+    ).toEqual({
+      kind: "selection",
+      sessions: [{ key: "main", sessionId: "sid-1" }],
+      relativeFiles: ["sid-1.jsonl", "sid-1.trajectory.jsonl"],
+    });
+  });
 });

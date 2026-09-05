@@ -5,20 +5,24 @@ import { TextDecoder } from "node:util";
 import { parseDocument } from "yaml";
 import { getBuildIdentity, type BuildIdentity, validateBuildIdentity } from "../../core/version";
 import type { HarnessPackageIdentity } from "./types";
+import {
+  parseHarnessPackageContentDigest,
+  parseHarnessPackageId,
+  parseHarnessPackageIdentity,
+} from "./identity-validation";
+
+export {
+  parseHarnessPackageContentDigest,
+  parseHarnessPackageId,
+  parseHarnessPackageIdentity,
+} from "./identity-validation";
 
 export const HARNESS_PACKAGE_RECEIPT_MAX_BYTES = 16 * 1024;
 export const HARNESS_PACKAGE_POINTER_MAX_BYTES = 4 * 1024;
 
-const HARNESS_ID_MAX_LENGTH = 63;
-const PACKAGE_VERSION_MAX_LENGTH = 128;
-const HARNESS_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
-const PACKAGE_VERSION_PATTERN =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
-const SHA256_DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const CANONICAL_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UNSAFE_STRING_PATTERN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const RECEIPT_FIELDS = new Set(["schemaVersion", "identity", "sourceIdentity", "installedAt"]);
-const IDENTITY_FIELDS = new Set(["kind", "id", "packageVersion", "contentDigest"]);
 const BUNDLED_SOURCE_IDENTITY_FIELDS = new Set(["kind", "nemoclawBuildIdentity"]);
 const LOCAL_SOURCE_IDENTITY_FIELDS = new Set(["kind"]);
 const BUILD_IDENTITY_FIELDS = new Set(["nemoclawVersion", "sourceRevision"]);
@@ -88,35 +92,6 @@ function requireExactRecord(
   return value;
 }
 
-export function parseHarnessPackageId(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.length > HARNESS_ID_MAX_LENGTH ||
-    !HARNESS_ID_PATTERN.test(value)
-  ) {
-    throw new Error("Harness package id must be a lowercase hyphen-separated identifier");
-  }
-  return value;
-}
-
-function requirePackageVersion(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.length > PACKAGE_VERSION_MAX_LENGTH ||
-    !PACKAGE_VERSION_PATTERN.test(value)
-  ) {
-    throw new Error("Harness package packageVersion must be a canonical SemVer version");
-  }
-  return value;
-}
-
-export function parseHarnessPackageContentDigest(value: unknown): string {
-  if (typeof value !== "string" || !SHA256_DIGEST_PATTERN.test(value)) {
-    throw new Error("Harness package contentDigest must be a lowercase SHA-256 digest");
-  }
-  return value;
-}
-
 function requireCanonicalTimestamp(value: unknown): string {
   if (
     typeof value !== "string" ||
@@ -175,19 +150,6 @@ function parseStrictJson(source: string | Uint8Array, maxBytes: number, label: s
     throw new Error(`${label} must not contain duplicate fields`);
   }
   return parsed;
-}
-
-export function parseHarnessPackageIdentity(value: unknown): HarnessPackageIdentity {
-  const record = requireExactRecord(value, IDENTITY_FIELDS, "Harness package identity");
-  if (record.kind !== "agent-runtime") {
-    throw new Error("Harness package identity kind must be agent-runtime");
-  }
-  return {
-    kind: "agent-runtime",
-    id: parseHarnessPackageId(record.id),
-    packageVersion: requirePackageVersion(record.packageVersion),
-    contentDigest: parseHarnessPackageContentDigest(record.contentDigest),
-  };
 }
 
 export function parseBundledHarnessPackageSourceIdentity(

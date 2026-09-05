@@ -27,6 +27,18 @@ module.exports = {
   interpretSessionListOutput(request) {
     return { kind: "output", output: request.output.toUpperCase() };
   },
+  buildSessionMutationPlan(request) {
+    return { kind: "unsupported", reason: "future " + request.operation + " unavailable" };
+  },
+  interpretSessionMutationOutput() {
+    return { kind: "refused", reason: "mutation unavailable" };
+  },
+  buildSessionExportPlan() {
+    return { kind: "unsupported", reason: "future export unavailable" };
+  },
+  interpretSessionExportIndex() {
+    return { kind: "refused", reason: "export unavailable" };
+  },
 };
 `;
 
@@ -137,6 +149,66 @@ describe("installed harness session adapter", () => {
     expect(() => adapter.buildSessionListPlan({ arguments: [], useListSubcommand: true })).toThrow(
       /returned an invalid session list plan/u,
     );
+  });
+
+  it("loads typed delete behavior for a synthetic unknown package", () => {
+    const installed = installFuturePackage(
+      ["list", "delete"],
+      SESSION_MODULE.replace(
+        'return { kind: "unsupported", reason: "future " + request.operation + " unavailable" };',
+        'return request.operation === "delete" ? { kind: "stream", command: ["future-sessions", "delete", request.key] } : { kind: "unsupported", reason: "reset unavailable" };',
+      ),
+    );
+    const adapter = loadHarnessSessionAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(
+      adapter.buildSessionMutationPlan({
+        operation: "delete",
+        key: "session-1",
+        agent: null,
+        keepTranscript: false,
+        jsonOutput: false,
+        verboseOutput: false,
+      }),
+    ).toEqual({ kind: "stream", command: ["future-sessions", "delete", "session-1"] });
+  });
+
+  it("rejects manifest and delete-plan disagreement before execution", () => {
+    const installed = installFuturePackage(["list", "delete"]);
+    const adapter = loadHarnessSessionAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      adapter.buildSessionMutationPlan({
+        operation: "delete",
+        key: "session-1",
+        agent: null,
+        keepTranscript: false,
+        jsonOutput: false,
+        verboseOutput: false,
+      }),
+    ).toThrow(/does not match its declared delete capability/u);
+  });
+
+  it("rejects an admin RPC for the wrong declared mutation", () => {
+    const installed = installFuturePackage(
+      ["list", "delete"],
+      SESSION_MODULE.replace(
+        'return { kind: "unsupported", reason: "future " + request.operation + " unavailable" };',
+        'return { kind: "admin-rpc", method: "sessions.reset", params: { key: request.key, reason: "reset" } };',
+      ),
+    );
+    const adapter = loadHarnessSessionAdapterHostModule(installed.identity, { storeRoot });
+
+    expect(() =>
+      adapter.buildSessionMutationPlan({
+        operation: "delete",
+        key: "session-1",
+        agent: null,
+        keepTranscript: false,
+        jsonOutput: false,
+        verboseOutput: false,
+      }),
+    ).toThrow(/admin RPC for the wrong delete operation/u);
   });
 
   it("classifies a missing fixed adapter module", () => {

@@ -69,6 +69,11 @@ module.exports = {
         FUTURE_DEADLINE: request.applicationEnvironment.NEMOCLAW_AUTO_PAIR_DEADLINE_SECS,
       },
       applicationRuntime: { exportEnvironment: {}, unsetEnvironment: [] },
+      managedState: {
+        root: "/sandbox/.future-harness",
+        files: ["config.json"],
+        directories: [],
+      },
       materials: [{
         kind: "corporate-ca-handoff",
         legacyInput: "NEMOCLAW_CORPORATE_CA_B64",

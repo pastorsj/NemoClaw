@@ -140,12 +140,12 @@ async function runSessionsPassthroughUnlocked(
   sandboxName: string,
   { verb, extraArgs = [] }: SessionsPassthroughOptions,
 ): Promise<void> {
-  await ensureLiveSandboxOrExit(sandboxName, {
-    allowNonReadyPhase: true,
-    exit: deferSandboxLifecycleExit,
-  });
   const sandbox = registry.getSandbox(sandboxName);
   if (!sandbox?.harnessPackage) {
+    await ensureLiveSandboxOrExit(sandboxName, {
+      allowNonReadyPhase: true,
+      exit: deferSandboxLifecycleExit,
+    });
     return runLegacySessionList(sandboxName, sandbox?.agent, {
       useListSubcommand: verb === "list",
       arguments: extraArgs,
@@ -165,6 +165,12 @@ async function runSessionsPassthroughUnlocked(
   }
 
   if (plan.kind === "unsupported") stopSessionList(plan.reason);
+  // A package capability refusal must happen before a liveness probe can issue
+  // any OpenShell command. Supported plans cross that boundary only here.
+  await ensureLiveSandboxOrExit(sandboxName, {
+    allowNonReadyPhase: true,
+    exit: deferSandboxLifecycleExit,
+  });
   if (plan.kind === "stream") {
     await execSandbox(sandboxName, plan.command, {}, { exit: deferSandboxLifecycleExit });
     return;

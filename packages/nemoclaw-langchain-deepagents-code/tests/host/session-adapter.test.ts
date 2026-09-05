@@ -13,4 +13,26 @@ it("returns typed unsupported session listing for Deep Agents Code", () => {
     kind: "unsupported",
     reason: expect.stringContaining("does not expose session listing"),
   });
+  expect(
+    adapter.buildSessionMutationPlan({
+      operation: "delete",
+      key: "session",
+      agent: null,
+      keepTranscript: false,
+      jsonOutput: false,
+      verboseOutput: false,
+    }),
+  ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("delete") });
+  expect(
+    adapter.buildSessionExportPlan({
+      agent: null,
+      keys: [],
+      format: "dir",
+      includeTrajectory: false,
+      stagingFiles: {
+        tar: "/sandbox/.nemoclaw-staging/export.tgz",
+        jsonl: "/sandbox/.nemoclaw-staging/export.jsonl",
+      },
+    }),
+  ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("export") });
 });

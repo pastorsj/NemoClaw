@@ -8,7 +8,6 @@ import {
   MANAGED_STARTUP_EXECUTABLE,
   MANAGED_STARTUP_HOLD_EXECUTABLE,
 } from "../managed-startup/hold";
-import type { ManagedStartupAgent } from "../managed-startup/profile";
 import type { ManagedStartupStateRoot } from "../managed-startup/state-roots";
 import {
   type ManagedStartupRootApplyRequest,
@@ -62,7 +61,7 @@ export interface ManagedBootstrapExpectedPlan {
   readonly driverId: string;
   readonly image: ManagedBootstrapImageIdentity;
   readonly profile: {
-    readonly agent: ManagedStartupAgent;
+    readonly agent: string;
     readonly fingerprint: string;
   };
   readonly agentIdentity: ManagedBootstrapAgentIdentity;

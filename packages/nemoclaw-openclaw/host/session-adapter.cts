@@ -222,8 +222,213 @@ function interpretSessionListOutput(request) {
         reason: "Could not parse OpenClaw session-list JSON without exposing an internal onboarding session. Check the OpenClaw version declared by this package.",
     };
 }
+const AGENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const SESSION_KEY_PATTERN = /^[\x20-\x7E]{1,256}$/;
+const SESSION_KEY_REJECT_PATTERN = /["'`$\\\n\r\t]/;
+const CANONICAL_SESSION_KEY_PATTERN = /^agent:([A-Za-z0-9][A-Za-z0-9._-]{0,63}):/;
+function normalizedAgentId(value) {
+    const trimmed = value.trim();
+    return AGENT_ID_PATTERN.test(trimmed) ? trimmed : null;
+}
+function normalizedSessionKey(value) {
+    const trimmed = value.trim();
+    if (trimmed.length === 0 ||
+        !SESSION_KEY_PATTERN.test(trimmed) ||
+        SESSION_KEY_REJECT_PATTERN.test(trimmed)) {
+        return null;
+    }
+    return trimmed;
+}
+function sessionKeyAgent(key) {
+    return CANONICAL_SESSION_KEY_PATTERN.exec(key)?.[1] ?? null;
+}
+function canonicalSessionKey(agent, key) {
+    if (key.startsWith("agent:"))
+        return sessionKeyAgent(key) === null ? null : key;
+    return `agent:${agent}:${key}`;
+}
+function buildSessionMutationPlan(request) {
+    const rawKey = normalizedSessionKey(request.key);
+    if (rawKey === null) {
+        return {
+            kind: "refused",
+            reason: `Invalid session key '${request.key}'. Pass a printable key without quotes, control characters, '$', or backslashes.`,
+        };
+    }
+    const requestedAgent = request.agent === null ? null : normalizedAgentId(request.agent);
+    if (request.agent !== null && requestedAgent === null) {
+        return { kind: "refused", reason: `Invalid agent id '${request.agent}'.` };
+    }
+    const keyAgent = sessionKeyAgent(rawKey);
+    if (rawKey.startsWith("agent:") && keyAgent === null) {
+        return {
+            kind: "refused",
+            reason: `Invalid canonical session key '${request.key}'. Expected 'agent:<id>:<rest>'.`,
+        };
+    }
+    if (requestedAgent !== null && keyAgent !== null && requestedAgent !== keyAgent) {
+        return {
+            kind: "refused",
+            reason: `Refusing sessions.${request.operation}: session key '${rawKey}' is scoped to agent '${keyAgent}', not '${requestedAgent}'.`,
+        };
+    }
+    const resolvedAgent = keyAgent ?? requestedAgent ?? "main";
+    const key = canonicalSessionKey(resolvedAgent, rawKey);
+    if (key === null) {
+        return { kind: "refused", reason: `Invalid canonical session key '${request.key}'.` };
+    }
+    return request.operation === "delete"
+        ? {
+            kind: "admin-rpc",
+            method: "sessions.delete",
+            params: { key, deleteTranscript: !request.keepTranscript },
+        }
+        : {
+            kind: "admin-rpc",
+            method: "sessions.reset",
+            params: { key, reason: request.reason },
+        };
+}
+function gatewayFailureReason(operation, key, payload) {
+    const error = isRecord(payload.error) ? payload.error : null;
+    if (payload.ok !== false && error === null)
+        return null;
+    const code = error?.code ?? "unknown";
+    const message = error?.message ?? "no message";
+    return `Gateway refused sessions.${operation} for '${key}': [${String(code)}] ${String(message)}`;
+}
+function interpretSessionMutationOutput(input) {
+    if (!isRecord(input.payload)) {
+        return {
+            kind: "refused",
+            reason: `Gateway returned an unexpected sessions.${input.request.operation} payload.`,
+        };
+    }
+    const plannedKey = typeof input.plan.params.key === "string" ? input.plan.params.key : input.request.key;
+    const failure = gatewayFailureReason(input.request.operation, plannedKey, input.payload);
+    if (failure !== null)
+        return { kind: "refused", reason: failure };
+    if (input.payload.ok !== true || typeof input.payload.key !== "string") {
+        return {
+            kind: "refused",
+            reason: `Gateway returned an unexpected sessions.${input.request.operation} payload.`,
+        };
+    }
+    if (input.request.operation === "delete") {
+        return {
+            kind: "completed",
+            operation: "delete",
+            key: input.payload.key,
+            removedTranscript: typeof input.payload.removedTranscript === "boolean"
+                ? input.payload.removedTranscript
+                : !input.request.keepTranscript,
+            entry: input.payload.entry ?? null,
+        };
+    }
+    return {
+        kind: "completed",
+        operation: "reset",
+        key: input.payload.key,
+        reason: input.request.reason,
+        entry: input.payload.entry ?? null,
+    };
+}
+function buildSessionExportPlan(request) {
+    const normalizedKeys = [];
+    for (const candidate of request.keys) {
+        const key = normalizedSessionKey(candidate);
+        if (key === null) {
+            return { kind: "refused", reason: `Invalid session key '${candidate}'.` };
+        }
+        normalizedKeys.push(key);
+    }
+    let agent = request.agent === null ? null : normalizedAgentId(request.agent);
+    if (request.agent !== null && agent === null) {
+        return { kind: "refused", reason: `Invalid agent id '${request.agent}'.` };
+    }
+    if (agent === null) {
+        for (const key of normalizedKeys) {
+            const parsed = sessionKeyAgent(key);
+            if (parsed !== null) {
+                agent = parsed;
+                break;
+            }
+        }
+    }
+    agent ??= "main";
+    for (const key of normalizedKeys) {
+        const parsed = sessionKeyAgent(key);
+        if (parsed !== null && parsed !== agent) {
+            return {
+                kind: "refused",
+                reason: `Refusing to export: session key '${key}' is scoped to agent '${parsed}', not '${agent}'.`,
+            };
+        }
+    }
+    return {
+        kind: "indexed-files",
+        agent,
+        format: request.format,
+        selectedKeys: normalizedKeys.length === 0 ? "all" : normalizedKeys,
+        sourceDirectory: `/sandbox/.openclaw/agents/${agent}/sessions`,
+        indexCommand: ["openclaw", "sessions", "list", "--agent", agent, "--json"],
+    };
+}
+function interpretSessionExportIndex(request) {
+    const index = parseSessionIndex(request.output);
+    if (index === null) {
+        return {
+            kind: "refused",
+            reason: "Could not parse the native session list output as a session index. Check the OpenClaw version declared by this package.",
+        };
+    }
+    const byKey = new Map();
+    for (const entry of index)
+        byKey.set(entry.key, entry.sessionId);
+    const candidates = [];
+    if (request.selectedKeys === "all") {
+        for (const entry of index) {
+            if (!entry.sessionId.startsWith(request.hiddenSessionIdPrefix))
+                candidates.push(entry);
+        }
+    }
+    else {
+        const missing = [];
+        for (const key of request.selectedKeys) {
+            const canonical = key.startsWith("agent:") ? key : `agent:${request.agent}:${key}`;
+            const sessionId = byKey.get(key) ?? byKey.get(canonical);
+            if (sessionId === undefined)
+                missing.push(key);
+            else
+                candidates.push({ key, sessionId });
+        }
+        if (missing.length > 0) {
+            return {
+                kind: "refused",
+                reason: `Refusing to export: no entries found in agent '${request.agent}' for key(s): ${missing.join(", ")}.`,
+            };
+        }
+    }
+    const seen = new Set();
+    const sessions = [];
+    const relativeFiles = [];
+    for (const entry of candidates) {
+        if (seen.has(entry.sessionId))
+            continue;
+        seen.add(entry.sessionId);
+        sessions.push(entry);
+        relativeFiles.push(`${entry.sessionId}.jsonl`);
+        if (request.includeTrajectory)
+            relativeFiles.push(`${entry.sessionId}.trajectory.jsonl`);
+    }
+    return { kind: "selection", sessions, relativeFiles };
+}
 const sessionAdapter = {
     buildSessionListPlan,
     interpretSessionListOutput,
+    buildSessionMutationPlan,
+    interpretSessionMutationOutput,
+    buildSessionExportPlan,
+    interpretSessionExportIndex,
 };
 module.exports = sessionAdapter;

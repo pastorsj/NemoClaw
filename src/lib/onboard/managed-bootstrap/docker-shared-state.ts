@@ -15,7 +15,6 @@ import {
 } from "../docker-gpu-patch-constants";
 import type { DockerGpuPatchDeps, DockerGpuPatchResult } from "../docker-gpu-patch-types";
 import { MANAGED_STARTUP_RUNTIME_EXECUTABLE } from "../managed-startup/image-runtime";
-import { MANAGED_STARTUP_AGENTS, type ManagedStartupAgent } from "../managed-startup/profile";
 import {
   MANAGED_STARTUP_SHARED_COMMIT_RECEIPT_DIRECTORY,
   MANAGED_STARTUP_SHARED_ROLLBACK_RECEIPT_DIRECTORY,
@@ -70,7 +69,7 @@ const CLEAN_NODE_ARGV = [
 ] as const;
 
 export interface DockerManagedBootstrapSharedStateTransaction {
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly bootstrapIdentity: string;
   readonly containerId: string;
   readonly image: string;
@@ -250,7 +249,7 @@ function assertValidManagedStartupTransaction(
   readonly bootstrapIdentity: string;
   readonly profileFingerprint: string;
 } {
-  if (!(MANAGED_STARTUP_AGENTS as readonly string[]).includes(transaction.agent)) {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(transaction.agent)) {
     throw new Error("Managed bootstrap shared-state transaction agent is invalid.");
   }
   if (!FULL_CONTAINER_ID_RE.test(transaction.containerId)) {

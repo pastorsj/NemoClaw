@@ -15,7 +15,6 @@ import {
   readStableRegularFileSnapshot,
   verifyManagedStartupImageCompletion,
 } from "../managed-startup/image-runtime";
-import { MANAGED_STARTUP_AGENTS, type ManagedStartupAgent } from "../managed-startup/profile";
 import type { ManagedStartupRootApplyRequest } from "../managed-startup/root-apply";
 import {
   MANAGED_BOOTSTRAP_COMPLETION_FILE,
@@ -32,7 +31,7 @@ const SHA256_RE = /^[a-f0-9]{64}$/u;
 type Environment = Record<string, string | undefined>;
 
 export interface ManagedBootstrapImageRuntimeExpected {
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly profileFingerprint: string;
   readonly bootstrapIdentity: string;
 }
@@ -66,11 +65,11 @@ function requireRoot(): void {
   }
 }
 
-function exactAgent(value: string): ManagedStartupAgent {
-  if (!MANAGED_STARTUP_AGENTS.includes(value as ManagedStartupAgent)) {
-    fail(`unsupported agent ${JSON.stringify(value)}`);
+function exactAgent(value: string): string {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/u.test(value)) {
+    fail(`invalid package identity ${JSON.stringify(value)}`);
   }
-  return value as ManagedStartupAgent;
+  return value;
 }
 
 function readExpected(argv: readonly string[]): ManagedBootstrapImageRuntimeExpected {

@@ -13,4 +13,26 @@ it("returns typed unsupported session listing for Pi", () => {
     kind: "unsupported",
     reason: expect.stringContaining("does not expose session listing"),
   });
+  expect(
+    adapter.buildSessionMutationPlan({
+      operation: "reset",
+      key: "session",
+      agent: null,
+      reason: "reset",
+      jsonOutput: false,
+      verboseOutput: false,
+    }),
+  ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("reset") });
+  expect(
+    adapter.buildSessionExportPlan({
+      agent: null,
+      keys: [],
+      format: "dir",
+      includeTrajectory: false,
+      stagingFiles: {
+        tar: "/sandbox/.nemoclaw-staging/export.tgz",
+        jsonl: "/sandbox/.nemoclaw-staging/export.jsonl",
+      },
+    }),
+  ).toMatchObject({ kind: "unsupported", reason: expect.stringContaining("export") });
 });

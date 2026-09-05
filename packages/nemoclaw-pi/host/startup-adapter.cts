@@ -83,6 +83,11 @@ function buildStartupPlan(request) {
             exportEnvironment: {},
             unsetEnvironment: [...UNSUPPORTED_RUNTIME_INPUTS],
         },
+        managedState: {
+            root: "/sandbox/.pi",
+            files: ["agent/fabric.json", "agent/models.json"],
+            directories: ["agent"],
+        },
         materials: [
             {
                 kind: "corporate-ca-handoff",

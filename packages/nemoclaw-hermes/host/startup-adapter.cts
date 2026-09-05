@@ -21,6 +21,9 @@ function booleanFlag(value) {
 function encodedJson(value) {
     return { kind: "canonical-json-base64", value };
 }
+function jsonObject(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function appendHostProxy(environment, request) {
     const proxy = request.settings.proxy;
     if (proxy.hostHttpUrl === null && proxy.hostHttpsUrl === null && proxy.hostNoProxy.length === 0) {
@@ -35,6 +38,36 @@ function appendHostProxy(environment, request) {
         https_proxy: proxy.hostHttpsUrl ?? "",
         no_proxy: noProxy,
     });
+}
+function messagingManagedFiles(plan) {
+    if (plan === null || !jsonObject(plan))
+        return [];
+    const files = new Set();
+    const addTarget = (target) => {
+        if (typeof target !== "string")
+            return;
+        if (target.startsWith("~/.hermes/"))
+            files.add(target.slice("~/.hermes/".length));
+        else if (target.startsWith("/sandbox/.hermes/")) {
+            files.add(target.slice("/sandbox/.hermes/".length));
+        }
+    };
+    if (Array.isArray(plan.agentRender)) {
+        for (const entry of plan.agentRender) {
+            if (jsonObject(entry))
+                addTarget(entry.target);
+        }
+    }
+    if (Array.isArray(plan.buildSteps)) {
+        for (const step of plan.buildSteps) {
+            if (!jsonObject(step))
+                continue;
+            const value = step.value;
+            if (jsonObject(value))
+                addTarget(value.path);
+        }
+    }
+    return [...files].sort();
 }
 function buildStartupPlan(request) {
     const { settings } = request;
@@ -103,6 +136,19 @@ function buildStartupPlan(request) {
         applicationRuntime: {
             exportEnvironment: {},
             unsetEnvironment: [...UNSUPPORTED_RUNTIME_INPUTS],
+        },
+        managedState: {
+            root: "/sandbox/.hermes",
+            files: [
+                ...new Set([
+                    ".config-hash",
+                    ".env",
+                    "config.yaml",
+                    "fabric.json",
+                    ...messagingManagedFiles(settings.messaging.plan),
+                ]),
+            ].sort(),
+            directories: [],
         },
         materials: [
             {

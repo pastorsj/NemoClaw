@@ -152,6 +152,9 @@ mcp:
 sessions:
   operations:
     - list
+    - delete
+    - reset
+    - export
 
 # ── Messaging integration ───────────────────────────────────────
 messaging:

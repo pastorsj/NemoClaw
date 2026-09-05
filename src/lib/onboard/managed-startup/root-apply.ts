@@ -4,12 +4,10 @@
 import { createHash } from "node:crypto";
 
 import {
-  decodeManagedStartupProfile,
-  fingerprintManagedStartupProfile,
-  MANAGED_STARTUP_AGENTS,
+  decodeManagedStartupDurableProfile,
+  fingerprintManagedStartupDurableProfile,
   MANAGED_STARTUP_PROFILE_DEFERRED_RUNTIME_INPUTS,
   MANAGED_STARTUP_PROFILE_MAX_ENCODED_BYTES,
-  type ManagedStartupAgent,
 } from "./profile";
 
 export const MANAGED_STARTUP_ROOT_APPLY_SCHEMA_VERSION = 1 as const;
@@ -49,7 +47,7 @@ export function selectManagedStartupApplicationRuntimeEnvironment(
 
 export interface ManagedStartupRootApplyRequest {
   readonly schemaVersion: typeof MANAGED_STARTUP_ROOT_APPLY_SCHEMA_VERSION;
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly encodedProfile: string;
   readonly profileFingerprint: string;
   readonly corporateCaB64: string | null;
@@ -59,17 +57,17 @@ function fail(message: string): never {
   throw new Error(`Managed startup root application request is invalid: ${message}`);
 }
 
-export function isManagedStartupRootApplyAgent(value: unknown): value is ManagedStartupAgent {
-  return typeof value === "string" && (MANAGED_STARTUP_AGENTS as readonly string[]).includes(value);
+export function isManagedStartupRootApplyAgent(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/u.test(value);
 }
 
-function exactAgent(value: unknown): ManagedStartupAgent {
+function exactAgent(value: unknown): string {
   if (isManagedStartupRootApplyAgent(value)) return value;
-  return fail("agent is unsupported");
+  return fail("agent is not a valid package identifier");
 }
 
 export function createManagedStartupRootApplyRequest(input: {
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly encodedProfile: string;
   readonly corporateCaB64?: string;
 }): ManagedStartupRootApplyRequest {
@@ -80,7 +78,7 @@ export function createManagedStartupRootApplyRequest(input: {
   ) {
     fail("encoded profile exceeds its bounded transport");
   }
-  const profile = decodeManagedStartupProfile(input.encodedProfile);
+  const profile = decodeManagedStartupDurableProfile(input.encodedProfile);
   if (profile.agent !== agent) {
     fail(`profile targets ${profile.agent}, expected ${agent}`);
   }
@@ -108,7 +106,7 @@ export function createManagedStartupRootApplyRequest(input: {
     schemaVersion: MANAGED_STARTUP_ROOT_APPLY_SCHEMA_VERSION,
     agent,
     encodedProfile: input.encodedProfile,
-    profileFingerprint: fingerprintManagedStartupProfile(profile),
+    profileFingerprint: fingerprintManagedStartupDurableProfile(profile),
     corporateCaB64,
   });
 }

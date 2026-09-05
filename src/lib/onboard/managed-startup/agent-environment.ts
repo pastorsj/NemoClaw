@@ -3,16 +3,18 @@
 
 import { Buffer } from "node:buffer";
 import fs from "node:fs";
+import path from "node:path";
 import vm from "node:vm";
 
 import type {
   HarnessStartupAction,
   HarnessStartupAdapterRequest,
   HarnessStartupApplicationRuntimePlan,
+  HarnessStartupManagedStatePlan,
   HarnessStartupMaterial,
 } from "@nvidia/nemoclaw-harness-contract";
 
-import { parseHarnessPackageIdentity } from "../../agent-runtime/package/receipt.ts";
+import { parseHarnessPackageIdentity } from "../../agent-runtime/package/identity-validation.ts";
 import type { HarnessPackageIdentity } from "../../agent-runtime/package/types.ts";
 import {
   isManagedStartupPackageProfile,
@@ -44,6 +46,7 @@ type ApplicationEnvironment = Readonly<Record<string, string | undefined>>;
 const EMPTY_APPLICATION_ENVIRONMENT: ApplicationEnvironment = Object.freeze({});
 
 export type ManagedStartupApplicationRuntimePlan = HarnessStartupApplicationRuntimePlan;
+export type ManagedStartupManagedStatePlan = HarnessStartupManagedStatePlan;
 export type ManagedStartupAgentMaterial = HarnessStartupMaterial;
 export type ManagedStartupAgentAction = HarnessStartupAction;
 
@@ -53,6 +56,7 @@ export interface ManagedStartupAgentEnvironment {
   readonly configurationEnvironment: Readonly<Record<string, string>>;
   readonly runtimeEnvironment: Readonly<Record<string, string>>;
   readonly applicationRuntime: ManagedStartupApplicationRuntimePlan;
+  readonly managedState: ManagedStartupManagedStatePlan;
   readonly materials: readonly ManagedStartupAgentMaterial[];
   readonly actions: readonly ManagedStartupAgentAction[];
 }
@@ -163,6 +167,56 @@ function applicationRuntime(value: unknown): ManagedStartupApplicationRuntimePla
   return Object.freeze({
     exportEnvironment,
     unsetEnvironment: Object.freeze([...unsets].sort()),
+  });
+}
+
+function managedStatePath(value: unknown, label: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 512 ||
+    value.includes("\0") ||
+    path.posix.isAbsolute(value) ||
+    path.posix.normalize(value) !== value ||
+    value === "." ||
+    value.split("/").some((segment) => segment === "..")
+  ) {
+    fail(`${label} must be a normalized relative path`);
+  }
+  return value;
+}
+
+function managedStatePaths(value: unknown, label: string): readonly string[] {
+  if (!Array.isArray(value) || value.length > 128) {
+    fail(`${label} must be a bounded array`);
+  }
+  const paths = value.map((entry, index) => managedStatePath(entry, `${label}[${index}]`));
+  if (new Set(paths).size !== paths.length) fail(`${label} contains duplicate paths`);
+  return Object.freeze([...paths].sort());
+}
+
+function managedState(value: unknown): ManagedStartupManagedStatePlan {
+  if (!isRecord(value)) fail("managedState must be an object");
+  exactKeys(value, ["root", "files", "directories"], "managedState");
+  if (
+    typeof value.root !== "string" ||
+    value.root.length > 512 ||
+    !/^\/sandbox\/[^/]+$/u.test(value.root) ||
+    path.posix.normalize(value.root) !== value.root ||
+    value.root.includes("\0") ||
+    value.root === "/sandbox/"
+  ) {
+    fail("managedState.root must be a normalized path below /sandbox");
+  }
+  const files = managedStatePaths(value.files, "managedState.files");
+  const directories = managedStatePaths(value.directories, "managedState.directories");
+  if (files.some((file) => directories.includes(file))) {
+    fail("managedState paths cannot be both files and directories");
+  }
+  return Object.freeze({
+    root: value.root as `/sandbox/${string}`,
+    files,
+    directories,
   });
 }
 
@@ -305,6 +359,7 @@ export function validateHarnessStartupPlan(
       "configurationEnvironment",
       "runtimeEnvironment",
       "applicationRuntime",
+      "managedState",
       "materials",
       "actions",
     ],
@@ -333,6 +388,7 @@ export function validateHarnessStartupPlan(
     ),
     runtimeEnvironment: resolvedEnvironment(value.runtimeEnvironment, "runtimeEnvironment"),
     applicationRuntime: applicationRuntime(value.applicationRuntime),
+    managedState: managedState(value.managedState),
     materials: Object.freeze(materials),
     actions: startupActions(value.actions),
   });
@@ -429,6 +485,15 @@ function requireMatchingPackageAuthority(
   source: HarnessStartupAdapterSource,
 ): void {
   if (request.profileKind !== "package") return;
+
+  // The fixed image-local path is selected only after the runtime verifies the
+  // qualified immutable image. Host-loaded adapter bytes must additionally
+  // carry the exact package receipt. Binding that receipt to signed image
+  // publication metadata remains the release attestation gate; it must not be
+  // approximated by trusting an arbitrary host source path here.
+  if (source.harnessPackage === undefined && source.filename === HARNESS_STARTUP_ADAPTER_FILE) {
+    return;
+  }
 
   let requested: HarnessPackageIdentity;
   let provided: HarnessPackageIdentity;

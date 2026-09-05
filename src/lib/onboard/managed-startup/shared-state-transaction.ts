@@ -4,18 +4,17 @@
 import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { HarnessStartupManagedStatePlan } from "@nvidia/nemoclaw-harness-contract";
 import { parseSandboxMessagingPlan } from "../../messaging/plan-validation";
 import {
   selectEnabledMessagingAgentRender,
   selectEnabledPostAgentInstallBuildFiles,
 } from "../../messaging/post-agent-install-selection";
 import {
-  fingerprintManagedStartupProfile,
-  MANAGED_STARTUP_AGENTS,
-  type ManagedStartupAgent,
-  type ManagedStartupProfile,
+  fingerprintManagedStartupDurableProfile,
+  isManagedStartupPackageProfile,
+  type ManagedStartupDurableProfile,
 } from "./profile";
-import { managedStartupStateRootMountTargets } from "./state-roots";
 
 const TRANSACTION_SCHEMA_VERSION = 1;
 const MAX_TRANSACTION_FILES = 128;
@@ -27,6 +26,7 @@ const TRANSACTION_PARENT_DIRECTORY_MODE = 0o755;
 const TRANSACTION_DIRECTORY_MODE = 0o700;
 const TRANSACTION_FILE_MODE = 0o400;
 const ATOMIC_TEMPORARY_FILE_MODE = 0o600;
+const PACKAGE_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 
 export const MANAGED_STARTUP_SHARED_TRANSACTION_DIRECTORY =
   "/var/lib/nemoclaw/managed-startup-shared-state-transaction-v1";
@@ -71,7 +71,7 @@ type DirectoryReceipt = DirectoryPresentReceipt | DirectoryAbsentReceipt;
 
 interface TransactionManifest {
   readonly schemaVersion: typeof TRANSACTION_SCHEMA_VERSION;
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly profileFingerprint: string;
   readonly bootstrapIdentity: string | null;
   readonly files: readonly FileReceipt[];
@@ -80,7 +80,7 @@ interface TransactionManifest {
 
 interface CommitReceipt {
   readonly schemaVersion: typeof TRANSACTION_SCHEMA_VERSION;
-  readonly agent: ManagedStartupAgent;
+  readonly agent: string;
   readonly profileFingerprint: string;
   readonly bootstrapIdentity: string;
 }
@@ -102,6 +102,8 @@ export interface ManagedStartupSharedTransactionOptions {
   readonly readOnlyReceipt?: boolean;
   /** One-attempt identity for managed bootstrap; null for legacy root application. */
   readonly bootstrapIdentity?: string | null;
+  /** Validated effects returned by the package's fixed startup adapter. */
+  readonly managedState?: HarnessStartupManagedStatePlan;
 }
 
 interface ResolvedOptions {
@@ -324,26 +326,15 @@ function relativeTarget(target: string, options: ResolvedOptions): string {
  * removalCondition: remove this adoption when managed roots no longer arrive as distinct
  *   filesystem mounts, or when transaction storage moves wholly inside each declared root.
  */
-function isDeclaredAgentStateRoot(
-  expectedAgent: ManagedStartupAgent,
-  outputRoot: string,
-  options: ResolvedOptions,
-): boolean {
-  const relative = path.relative(options.sandboxRoot, outputRoot).split(path.sep).join("/");
-  const canonicalTarget = path.posix.join("/sandbox", relative);
-  return managedStartupStateRootMountTargets(expectedAgent).includes(canonicalTarget);
-}
-
 function validateExistingAncestors(
   target: string,
-  expectedAgent: ManagedStartupAgent,
+  outputRoot: string,
   options: ResolvedOptions,
 ): void {
   const relative = relativeTarget(target, options);
   const sandboxStat = requireDirectory(options.sandboxRoot, options);
-  const outputRoot = agentRoot(expectedAgent, options.sandboxRoot);
   if (target !== outputRoot && !target.startsWith(`${outputRoot}${path.sep}`)) {
-    fail(`transaction target escapes the ${expectedAgent} state root: ${target}`);
+    fail(`transaction target escapes its declared managed-state root: ${target}`);
   }
   let current = options.sandboxRoot;
   let expectedDevice = sandboxStat.dev;
@@ -362,7 +353,7 @@ function validateExistingAncestors(
     }
     // An exact agent-declared state root may cross from /sandbox onto its
     // managed volume. Every descendant must remain on that adopted device.
-    if (current === outputRoot && isDeclaredAgentStateRoot(expectedAgent, outputRoot, options)) {
+    if (current === outputRoot) {
       expectedDevice = stat.dev;
     } else if (stat.dev !== expectedDevice) {
       fail(`transaction path crosses a nested filesystem mount: ${current}`);
@@ -370,9 +361,8 @@ function validateExistingAncestors(
   }
 }
 
-function managedOutputDevice(expectedAgent: ManagedStartupAgent, options: ResolvedOptions): number {
+function managedOutputDevice(outputRoot: string, options: ResolvedOptions): number {
   const sandboxStat = requireDirectory(options.sandboxRoot, options);
-  const outputRoot = agentRoot(expectedAgent, options.sandboxRoot);
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(outputRoot);
@@ -383,13 +373,12 @@ function managedOutputDevice(expectedAgent: ManagedStartupAgent, options: Resolv
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     fail(`managed output root is unsafe: ${outputRoot}`);
   }
-  if (!isDeclaredAgentStateRoot(expectedAgent, outputRoot, options) && stat.dev !== sandboxStat.dev) {
-    fail(`managed output root crosses a nested filesystem mount: ${outputRoot}`);
-  }
+  // A package's exact top-level state root may be a core-provisioned volume.
+  // Descendant device changes remain forbidden by validateExistingAncestors.
   return stat.dev;
 }
 
-function agentRoot(agent: ManagedStartupAgent, sandboxRoot: string): string {
+function agentRoot(agent: string, sandboxRoot: string): string {
   switch (agent) {
     case "openclaw":
       return path.join(sandboxRoot, ".openclaw");
@@ -399,6 +388,8 @@ function agentRoot(agent: ManagedStartupAgent, sandboxRoot: string): string {
       return path.join(sandboxRoot, ".deepagents");
     case "pi":
       return path.join(sandboxRoot, ".pi");
+    default:
+      return fail(`receipt-backed package ${agent} has no validated managed-state root`);
   }
 }
 
@@ -411,7 +402,7 @@ function resolveUnderAgentRoot(root: string, relativePath: string): string {
   return target;
 }
 
-function renderTarget(root: string, agent: ManagedStartupAgent, target: string): string {
+function renderTarget(root: string, agent: string, target: string): string {
   if (agent === "openclaw" && target === "openclaw.json") {
     return path.join(root, "openclaw.json");
   }
@@ -423,9 +414,40 @@ function renderTarget(root: string, agent: ManagedStartupAgent, target: string):
 }
 
 function managedOutputTargets(
-  profile: ManagedStartupProfile,
+  profile: ManagedStartupDurableProfile,
   options: ResolvedOptions,
-): { readonly files: string[]; readonly directories: string[] } {
+  declared?: HarnessStartupManagedStatePlan,
+): { readonly root: string; readonly files: string[]; readonly directories: string[] } {
+  if (declared) {
+    const relativeRoot = safeRelativePath(declared.root.slice("/sandbox/".length));
+    if (relativeRoot.includes("/")) {
+      fail("managed-state root must be one directory directly below /sandbox");
+    }
+    const root = absoluteTarget(relativeRoot, options);
+    const files = new Set(declared.files.map((entry) => resolveUnderAgentRoot(root, entry)));
+    const directories = new Set<string>([
+      root,
+      ...declared.directories.map((entry) => resolveUnderAgentRoot(root, entry)),
+    ]);
+    for (const file of files) {
+      let parent = path.dirname(file);
+      while (parent !== options.sandboxRoot && parent.startsWith(`${root}${path.sep}`)) {
+        directories.add(parent);
+        if (parent === root) break;
+        parent = path.dirname(parent);
+      }
+    }
+    return {
+      root,
+      files: [...files].sort(),
+      directories: [...directories].sort(
+        (left, right) => left.split(path.sep).length - right.split(path.sep).length,
+      ),
+    };
+  }
+  if (isManagedStartupPackageProfile(profile)) {
+    fail("receipt-backed package profile has no validated managed-state declaration");
+  }
   const root = agentRoot(profile.agent, options.sandboxRoot);
   const files = new Set<string>();
   const directories = new Set<string>([root]);
@@ -481,6 +503,7 @@ function managedOutputTargets(
     }
   }
   return {
+    root,
     files: [...files].sort(),
     directories: [...directories].sort(
       (left, right) => left.split(path.sep).length - right.split(path.sep).length,
@@ -491,10 +514,10 @@ function managedOutputTargets(
 function snapshotFile(
   target: string,
   index: number,
-  expectedAgent: ManagedStartupAgent,
+  outputRoot: string,
   options: ResolvedOptions,
 ): { readonly receipt: FileReceipt; readonly bytes: Buffer | null } {
-  validateExistingAncestors(target, expectedAgent, options);
+  validateExistingAncestors(target, outputRoot, options);
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(target);
@@ -510,7 +533,7 @@ function snapshotFile(
   if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) {
     fail(`managed output is not a safe regular file: ${target}`);
   }
-  if (stat.dev !== managedOutputDevice(expectedAgent, options)) {
+  if (stat.dev !== managedOutputDevice(outputRoot, options)) {
     fail(`managed output crosses a nested filesystem mount: ${target}`);
   }
   const stable = readStableFile(target, MAX_TRANSACTION_FILE_BYTES);
@@ -533,10 +556,10 @@ function snapshotFile(
 
 function snapshotDirectory(
   target: string,
-  expectedAgent: ManagedStartupAgent,
+  outputRoot: string,
   options: ResolvedOptions,
 ): DirectoryReceipt {
-  validateExistingAncestors(path.join(target, ".receipt"), expectedAgent, options);
+  validateExistingAncestors(path.join(target, ".receipt"), outputRoot, options);
   let stat: fs.Stats;
   try {
     stat = fs.lstatSync(target);
@@ -549,7 +572,7 @@ function snapshotDirectory(
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     fail(`managed output directory is unsafe: ${target}`);
   }
-  if (stat.dev !== managedOutputDevice(expectedAgent, options)) {
+  if (stat.dev !== managedOutputDevice(outputRoot, options)) {
     fail(`managed output directory crosses a nested filesystem mount: ${target}`);
   }
   return {
@@ -649,7 +672,8 @@ function parseCommitReceipt(text: string): CommitReceipt {
   requireExactKeys(record, ["agent", "bootstrapIdentity", "profileFingerprint", "schemaVersion"]);
   if (
     record.schemaVersion !== TRANSACTION_SCHEMA_VERSION ||
-    !(MANAGED_STARTUP_AGENTS as readonly string[]).includes(String(record.agent)) ||
+    typeof record.agent !== "string" ||
+    !PACKAGE_ID_RE.test(record.agent) ||
     typeof record.profileFingerprint !== "string" ||
     !/^[a-f0-9]{64}$/u.test(record.profileFingerprint) ||
     typeof record.bootstrapIdentity !== "string" ||
@@ -659,7 +683,7 @@ function parseCommitReceipt(text: string): CommitReceipt {
   }
   const receipt: CommitReceipt = {
     schemaVersion: TRANSACTION_SCHEMA_VERSION,
-    agent: record.agent as ManagedStartupAgent,
+    agent: record.agent,
     profileFingerprint: record.profileFingerprint,
     bootstrapIdentity: record.bootstrapIdentity,
   };
@@ -701,7 +725,8 @@ function parseManifest(text: string): TransactionManifest {
   const bootstrapIdentity = hasBootstrapIdentity ? record.bootstrapIdentity : null;
   if (
     record.schemaVersion !== TRANSACTION_SCHEMA_VERSION ||
-    !(MANAGED_STARTUP_AGENTS as readonly string[]).includes(String(record.agent)) ||
+    typeof record.agent !== "string" ||
+    !PACKAGE_ID_RE.test(record.agent) ||
     typeof record.profileFingerprint !== "string" ||
     !/^[a-f0-9]{64}$/u.test(record.profileFingerprint) ||
     !(
@@ -800,7 +825,7 @@ function parseManifest(text: string): TransactionManifest {
   }
   const manifest: TransactionManifest = {
     schemaVersion: TRANSACTION_SCHEMA_VERSION,
-    agent: record.agent as ManagedStartupAgent,
+    agent: record.agent,
     profileFingerprint: record.profileFingerprint,
     bootstrapIdentity,
     files,
@@ -997,7 +1022,7 @@ function removeTransactionDirectory(options: ResolvedOptions): void {
 function assertCommitReceiptMatches(
   receipt: CommitReceipt,
   expected: {
-    readonly agent: ManagedStartupAgent;
+    readonly agent: string;
     readonly profileFingerprint?: string;
     readonly bootstrapIdentity: string;
   },
@@ -1145,7 +1170,7 @@ function compactDurableCommitReceipt(
 }
 
 export function beginManagedStartupSharedStateTransaction(
-  profile: ManagedStartupProfile,
+  profile: ManagedStartupDurableProfile,
   inputOptions: ManagedStartupSharedTransactionOptions = {},
 ): boolean {
   const options = resolveOptions(inputOptions);
@@ -1154,7 +1179,7 @@ export function beginManagedStartupSharedStateTransaction(
     fail("cannot begin a transaction from a read-only rollback receipt");
   }
   requireTransactionBoundaries(options);
-  const profileFingerprint = fingerprintManagedStartupProfile(profile);
+  const profileFingerprint = fingerprintManagedStartupDurableProfile(profile);
   const committed = loadCommitReceipt(options);
   if (committed) {
     if (options.bootstrapIdentity === null) {
@@ -1181,19 +1206,19 @@ export function beginManagedStartupSharedStateTransaction(
     verifyAllBackups(pending.files, options);
     return false;
   }
-  const targets = managedOutputTargets(profile, options);
+  const targets = managedOutputTargets(profile, options, inputOptions.managedState);
   if (targets.files.length > MAX_TRANSACTION_FILES) {
     fail("managed startup transaction has too many file targets");
   }
   const snapshots = targets.files.map((target, index) =>
-    snapshotFile(target, index, profile.agent, options),
+    snapshotFile(target, index, targets.root, options),
   );
   const totalBytes = snapshots.reduce((sum, snapshot) => sum + (snapshot.bytes?.length ?? 0), 0);
   if (totalBytes > MAX_TRANSACTION_TOTAL_BYTES) {
     fail("managed startup transaction backup exceeds the total size limit");
   }
   const directories = targets.directories.map((target) =>
-    snapshotDirectory(target, profile.agent, options),
+    snapshotDirectory(target, targets.root, options),
   );
   const manifest: TransactionManifest = {
     schemaVersion: TRANSACTION_SCHEMA_VERSION,
@@ -1276,15 +1301,27 @@ export function beginManagedStartupSharedStateTransaction(
   return true;
 }
 
+function managedRootFromManifest(manifest: TransactionManifest, options: ResolvedOptions): string {
+  const paths = [...manifest.files, ...manifest.directories].map(({ path: entry }) =>
+    safeRelativePath(entry),
+  );
+  if (paths.length === 0) fail("transaction manifest has no managed-state boundary");
+  const roots = new Set(paths.map((entry) => entry.split("/")[0]));
+  if (roots.size !== 1) fail("transaction manifest crosses managed-state roots");
+  const [root] = [...roots];
+  if (!root) fail("transaction manifest managed-state root is invalid");
+  return absoluteTarget(root, options);
+}
+
 function ensureOriginalDirectories(
   receipts: readonly DirectoryReceipt[],
-  expectedAgent: ManagedStartupAgent,
+  outputRoot: string,
   options: ResolvedOptions,
 ): void {
   for (const receipt of receipts) {
     if (receipt.state !== "directory") continue;
     const target = absoluteTarget(receipt.path, options);
-    validateExistingAncestors(path.join(target, ".restore"), expectedAgent, options);
+    validateExistingAncestors(path.join(target, ".restore"), outputRoot, options);
     let stat: fs.Stats | null = null;
     try {
       stat = fs.lstatSync(target);
@@ -1306,12 +1343,12 @@ function ensureOriginalDirectories(
 function restoreFiles(
   receipts: readonly FileReceipt[],
   backups: ReadonlyMap<string, Buffer>,
-  expectedAgent: ManagedStartupAgent,
+  outputRoot: string,
   options: ResolvedOptions,
 ): void {
   for (const receipt of receipts) {
     const target = absoluteTarget(receipt.path, options);
-    validateExistingAncestors(target, expectedAgent, options);
+    validateExistingAncestors(target, outputRoot, options);
     if (receipt.state === "absent") {
       let stat: fs.Stats;
       try {
@@ -1411,7 +1448,7 @@ function verifyRestoration(manifest: TransactionManifest, options: ResolvedOptio
 }
 
 export function rollbackManagedStartupSharedStateTransaction(
-  expectedAgent: ManagedStartupAgent,
+  expectedAgent: string,
   inputOptions: ManagedStartupSharedTransactionOptions = {},
 ): boolean {
   const options = resolveOptions(inputOptions);
@@ -1436,8 +1473,9 @@ export function rollbackManagedStartupSharedStateTransaction(
     fail("pending transaction belongs to a different bootstrap attempt");
   }
   const backups = verifyAllBackups(manifest.files, options);
-  ensureOriginalDirectories(manifest.directories, expectedAgent, options);
-  restoreFiles(manifest.files, backups, expectedAgent, options);
+  const outputRoot = managedRootFromManifest(manifest, options);
+  ensureOriginalDirectories(manifest.directories, outputRoot, options);
+  restoreFiles(manifest.files, backups, outputRoot, options);
   restoreDirectoryMetadata(manifest.directories, options);
   verifyRestoration(manifest, options);
   if (!options.readOnlyReceipt) {
@@ -1447,7 +1485,7 @@ export function rollbackManagedStartupSharedStateTransaction(
 }
 
 export function commitManagedStartupSharedStateTransaction(
-  expectedAgent: ManagedStartupAgent,
+  expectedAgent: string,
   inputOptions: ManagedStartupSharedTransactionOptions = {},
 ): boolean {
   const options = resolveOptions(inputOptions);
@@ -1507,7 +1545,7 @@ export function commitManagedStartupSharedStateTransaction(
  * different identity in the same persisted workload.
  */
 export function clearManagedStartupSharedStateCommitReceipt(
-  expectedAgent: ManagedStartupAgent,
+  expectedAgent: string,
   inputOptions: ManagedStartupSharedTransactionOptions = {},
 ): boolean {
   const options = resolveOptions(inputOptions);
@@ -1545,7 +1583,7 @@ export function clearManagedStartupSharedStateCommitReceipt(
 
 export function getManagedStartupSharedStateTransactionStatus(
   expected: {
-    readonly agent: ManagedStartupAgent;
+    readonly agent: string;
     readonly profileFingerprint: string;
     readonly bootstrapIdentity: string;
   },

@@ -1,173 +1,169 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Scope boundary for `nemoclaw <name> sessions reset`:
-//
-//   - Invalid state addressed by this code path: a user wants to drop the
-//     current conversation for a given session key (in canonical
-//     `agent:<agent>:<slot>` form) so the next message starts on a clean entry.
-//   - Source boundary:
-//       * NemoClaw side (this file): validate the requested key/agent, put
-//         the session key in canonical form, dispatch the `sessions.reset`
-//         JSON-RPC to the in-sandbox OpenClaw gateway, and surface the
-//         response to the user.
-//       * OpenClaw side (upstream `openclaw` npm package, pinned at
-//         `packages/nemoclaw-openclaw/manifest.yaml` -> `expected_version`): owns the
-//         actual reset semantics — clearing the session entry, releasing
-//         stale `.jsonl.lock` files, recovering from a corrupt
-//         `sessions.json`, and guaranteeing the next message lands on a
-//         clean entry. The on-disk session store under
-//         `/sandbox/.openclaw/sessions/` is never touched by NemoClaw.
-//   - Source-fix constraint: NemoClaw cannot patch lock-file or session-store
-//     recovery without reaching into the sandbox file system, which would
-//     violate the sandbox boundary and race with OpenClaw's own writes.
-//     Recovery must stay upstream.
-//   - Regression-test coverage:
-//       * NemoClaw host-side (here, intentionally routing-only): the
-//         host wrapper provably can't `cat`, mutate, or repair files
-//         inside the sandbox, so host-side tests deliberately cover only
-//         the routing/dispatch surface that lives on this side of the
-//         boundary. Concretely: `src/lib/actions/sandbox/sessions/`
-//         covers canonical-key construction, agent-key cross-check, gateway
-//         RPC dispatch, envelope parsing, and the adapter wire contract
-//         (method name, params, error envelopes, unexpected payloads,
-//         `--keep-transcript` mapping, `--agent` mismatch refusal) —
-//         see `paths.test.ts`, `gateway-rpc.test.ts`, `reset.test.ts`,
-//         and `delete.test.ts`. The host-side E2E in
-//         `test/e2e/live/sessions-agents-cli.test.ts` proves the wrapper
-//         routes and that the gateway envelope round-trips.
-//         Adding stale-lock or corrupt-store seeding here would force
-//         NemoClaw to write into `/sandbox/.openclaw/sessions/` from the
-//         host, which the sandbox isolation guards specifically forbid.
-//       * Upstream stale-lock / corrupt-store / clean-followup coverage
-//         lives in the `openclaw` npm package. At merge time the pinned
-//         version is the literal value in
-//         `packages/nemoclaw-openclaw/manifest.yaml -> expected_version` (currently
-//         `2026.5.22`); the manifest cite is the durable anchor — this
-//         comment intentionally avoids hard-coding the literal so it
-//         does not silently rot. The `sessions.reset` JSON-RPC handler
-//         in that package owns the recovery contract; its test suite
-//         (shipped with the package tarball under
-//         `test/sessions/reset.test.*`) is the authoritative source for
-//         stale `.jsonl.lock` cleanup, corrupt `sessions.json` recovery,
-//         transcript clearing on reset, and the clean-next-message
-//         contract. To audit the upstream contract for a given release:
-//         `npm view openclaw@<expected_version> dist` then inspect the
-//         package contents.
-//   - Removal condition: this scope-boundary comment can be removed once
-//     OpenClaw exposes a stable, documented `sessions.reset` contract whose
-//     recovery semantics are referenced from the NemoClaw docs site; the
-//     comment exists to keep the NemoClaw/OpenClaw responsibility split
-//     explicit while the contract is still informal.
+import { isDeepStrictEqual } from "node:util";
 
-import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
+import type {
+  HarnessSessionMutationOutput,
+  HarnessSessionMutationPlan,
+  HarnessSessionMutationPlanRequest,
+} from "../../../agent-runtime/session-module";
 import {
   deferSandboxLifecycleExit,
   runWithDeferredSandboxLifecycleExit,
 } from "../../../core/process-exit";
+import { assertHermesPortableCommandUnavailable } from "../../../onboard/experimental/portable-agent-lifecycle";
 import { withMcpLifecycleLock } from "../../../state/mcp-lifecycle-lock-acquisition";
+import { execSandbox } from "../exec";
 import { ensureLiveSandboxOrExit } from "../gateway-state";
 import { callOpenclawGateway } from "./gateway-rpc";
+import { resetLegacySandboxSession } from "./legacy-reset";
 import {
-  buildCanonicalSessionKey,
-  DEFAULT_AGENT_ID,
-  parseAgentIdFromSessionKey,
-  validateAgentId,
-  validateSessionKey,
-} from "./paths";
+  confirmSessionPackageAuthority,
+  resolveSessionPackageAuthority,
+  type SessionPackageAuthority,
+} from "./package-authority";
 
 export type SessionsResetReason = "reset" | "new";
 
 export interface SessionsResetOptions {
-  key: string;
-  agent?: string;
-  reason?: SessionsResetReason;
-  json?: boolean;
-  verbose?: boolean;
-}
-
-export interface SessionsResetPayload {
-  ok?: boolean;
-  key?: string;
-  entry?: unknown;
-  error?: { code?: string | number; message?: string };
+  readonly key: string;
+  readonly agent?: string;
+  readonly reason?: SessionsResetReason;
+  readonly json?: boolean;
+  readonly verbose?: boolean;
 }
 
 export interface SessionsResetResult {
-  key: string;
-  reason: SessionsResetReason;
-  entry?: unknown;
+  readonly key: string;
+  readonly reason: SessionsResetReason;
+  readonly entry?: unknown;
+}
+
+function stopSessionReset(message: string): never {
+  console.error(`  ${message}`);
+  deferSandboxLifecycleExit(1);
+}
+
+function buildResetRequest(
+  options: SessionsResetOptions,
+): Extract<HarnessSessionMutationPlanRequest, { readonly operation: "reset" }> {
+  return {
+    operation: "reset",
+    key: options.key,
+    agent: options.agent ?? null,
+    reason: options.reason === "new" ? "new" : "reset",
+    jsonOutput: options.json === true,
+    verboseOutput: options.verbose === true,
+  };
+}
+
+function buildSessionResetPlan(
+  authority: SessionPackageAuthority,
+  request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "reset" }>,
+): HarnessSessionMutationPlan {
+  try {
+    return authority.adapter.buildSessionMutationPlan(request);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return stopSessionReset(
+      `The installed harness could not build a session-reset plan: ${detail}`,
+    );
+  }
+}
+
+function confirmSessionResetPlan(
+  sandboxName: string,
+  authority: SessionPackageAuthority,
+  request: Extract<HarnessSessionMutationPlanRequest, { readonly operation: "reset" }>,
+  expectedPlan: HarnessSessionMutationPlan,
+) {
+  const currentAdapter = confirmSessionPackageAuthority(sandboxName, authority.identity);
+  let currentPlan: HarnessSessionMutationPlan;
+  try {
+    currentPlan = currentAdapter.buildSessionMutationPlan(request);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return stopSessionReset(`The installed harness session-reset plan changed: ${detail}`);
+  }
+  if (!isDeepStrictEqual(currentPlan, expectedPlan)) {
+    stopSessionReset("The installed harness session-reset plan changed before mutation.");
+  }
+  return currentAdapter;
+}
+
+function renderSessionResetResult(
+  result: Extract<
+    HarnessSessionMutationOutput,
+    { readonly kind: "completed"; readonly operation: "reset" }
+  >,
+  options: SessionsResetOptions,
+): SessionsResetResult {
+  if (options.json) {
+    console.log(JSON.stringify({ key: result.key, reason: result.reason, entry: result.entry }));
+  } else {
+    const verb = result.reason === "new" ? "Replaced" : "Reset";
+    console.error(`  ${verb} session '${result.key}' via the installed harness.`);
+    if (options.verbose && result.entry !== null) {
+      console.error(`  entry: ${JSON.stringify(result.entry)}`);
+    }
+  }
+  return {
+    key: result.key,
+    reason: result.reason,
+    ...(result.entry === null ? {} : { entry: result.entry }),
+  };
 }
 
 export async function resetSandboxSession(
   sandboxName: string,
-  opts: SessionsResetOptions,
+  options: SessionsResetOptions,
 ): Promise<SessionsResetResult> {
+  const authority = resolveSessionPackageAuthority(sandboxName);
+  if (authority === null) return resetLegacySandboxSession(sandboxName, options);
+
   return runWithDeferredSandboxLifecycleExit(() =>
-    withMcpLifecycleLock(sandboxName, () => {
+    withMcpLifecycleLock(sandboxName, async () => {
       assertHermesPortableCommandUnavailable(sandboxName, "sandbox:sessions:reset");
-      return resetSandboxSessionUnlocked(sandboxName, opts);
+      const request = buildResetRequest(options);
+      const plan = buildSessionResetPlan(authority, request);
+      if (plan.kind === "unsupported" || plan.kind === "refused") {
+        return stopSessionReset(plan.reason);
+      }
+
+      await ensureLiveSandboxOrExit(sandboxName, {
+        allowNonReadyPhase: true,
+        exit: deferSandboxLifecycleExit,
+      });
+      const currentAdapter = confirmSessionResetPlan(sandboxName, authority, request, plan);
+      if (plan.kind === "stream") {
+        await execSandbox(sandboxName, plan.command, {}, { exit: deferSandboxLifecycleExit });
+        throw new Error("unreachable: streamed session reset terminated the process");
+      }
+      const { payload } = callOpenclawGateway({
+        sandboxName,
+        method: plan.method,
+        params: plan.params,
+        exit: deferSandboxLifecycleExit,
+      });
+      let interpreted: HarnessSessionMutationOutput;
+      try {
+        interpreted = currentAdapter.interpretSessionMutationOutput({
+          request,
+          plan,
+          payload: payload as unknown as Record<string, never>,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        return stopSessionReset(
+          `The installed harness could not interpret session-reset output: ${detail}`,
+        );
+      }
+      if (interpreted.kind === "refused") stopSessionReset(interpreted.reason);
+      if (interpreted.operation !== "reset") {
+        return stopSessionReset("The installed harness returned a non-reset session result.");
+      }
+      return renderSessionResetResult(interpreted, options);
     }),
   );
-}
-
-async function resetSandboxSessionUnlocked(
-  sandboxName: string,
-  opts: SessionsResetOptions,
-): Promise<SessionsResetResult> {
-  const reason: SessionsResetReason = opts.reason === "new" ? "new" : "reset";
-  const requestedAgent = opts.agent ? validateAgentId(opts.agent) : null;
-  const rawKey = validateSessionKey(opts.key);
-  const keyAgent = parseAgentIdFromSessionKey(rawKey);
-
-  if (requestedAgent && keyAgent && requestedAgent !== keyAgent) {
-    console.error(
-      `  Refusing to invoke sessions.reset: session key '${rawKey}' is scoped to agent '${keyAgent}', not '${requestedAgent}'.`,
-    );
-    console.error(
-      `  Drop --agent or pass a key under that agent (e.g. agent:${requestedAgent}:...).`,
-    );
-    deferSandboxLifecycleExit(1);
-  }
-
-  const resolvedAgent = keyAgent ?? requestedAgent ?? DEFAULT_AGENT_ID;
-  const canonicalKey = buildCanonicalSessionKey(resolvedAgent, rawKey);
-
-  await ensureLiveSandboxOrExit(sandboxName, {
-    allowNonReadyPhase: true,
-    exit: deferSandboxLifecycleExit,
-  });
-
-  const { payload, rawOutput } = callOpenclawGateway<SessionsResetPayload>({
-    sandboxName,
-    method: "sessions.reset",
-    params: { key: canonicalKey, reason },
-    exit: deferSandboxLifecycleExit,
-  });
-
-  if (payload.ok === false || payload.error) {
-    const code = payload.error?.code ?? "unknown";
-    const message = payload.error?.message ?? "no message";
-    console.error(`  Gateway refused sessions.reset for '${canonicalKey}': [${code}] ${message}`);
-    deferSandboxLifecycleExit(1);
-  }
-  if (payload.ok !== true || typeof payload.key !== "string") {
-    console.error("  Gateway returned an unexpected sessions.reset payload.");
-    console.error(`  ${rawOutput.trim()}`);
-    deferSandboxLifecycleExit(1);
-  }
-
-  if (opts.json) {
-    console.log(JSON.stringify({ key: payload.key, reason, entry: payload.entry ?? null }));
-  } else {
-    const verb = reason === "new" ? "Replaced" : "Reset";
-    console.error(
-      `  ${verb} session '${payload.key}' on agent '${resolvedAgent}' via the OpenClaw gateway.`,
-    );
-    if (opts.verbose && payload.entry !== undefined) {
-      console.error(`  entry: ${JSON.stringify(payload.entry)}`);
-    }
-  }
-
-  return { key: payload.key, reason, entry: payload.entry };
 }
