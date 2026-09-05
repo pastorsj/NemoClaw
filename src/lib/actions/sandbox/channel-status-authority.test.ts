@@ -13,28 +13,38 @@ import {
   showSandboxChannelStatus,
 } from "./channel-status.test-helpers";
 
-const PACKAGE_IDENTITY = Object.freeze({
-  kind: "agent-runtime" as const,
-  id: "openclaw",
-  packageVersion: "1.0.0",
-  contentDigest: "a".repeat(64),
-});
+function packageIdentity(id = "openclaw") {
+  return Object.freeze({
+    kind: "agent-runtime" as const,
+    id,
+    packageVersion: "1.0.0",
+    contentDigest: "a".repeat(64),
+  });
+}
 
-function receiptBackedEntry(channels: string[] = ["whatsapp"]): SandboxEntry {
-  return { ...entry(channels), harnessPackage: PACKAGE_IDENTITY };
+function receiptBackedEntry(
+  channels: string[] = ["whatsapp"],
+  packageId = "openclaw",
+): SandboxEntry {
+  return { ...entry(channels), agent: packageId, harnessPackage: packageIdentity(packageId) };
 }
 
 function packageProfile(
-  integration: SandboxMessagingProfileAuthority["integration"],
+  integration: NonNullable<SandboxMessagingProfileAuthority["integration"]>,
 ): SandboxMessagingProfileAuthority {
-  const agent = fakeAgent("openclaw");
+  const packageId = integration.packageId;
+  const agent = Object.freeze({
+    ...fakeAgent("openclaw"),
+    name: packageId,
+    displayName: packageId,
+  }) as SandboxMessagingProfileAuthority["agent"];
   return Object.freeze({
     agent,
     packageAuthority: Object.freeze({
-      recordedAgent: "openclaw",
-      effectiveAgentId: "openclaw",
+      recordedAgent: packageId,
+      effectiveAgentId: packageId,
       definition: agent,
-      harnessPackage: PACKAGE_IDENTITY,
+      harnessPackage: packageIdentity(packageId),
       harnessPackageMigration: null,
     }),
     integration,
@@ -157,6 +167,36 @@ describe("channel status package authority", () => {
       ],
     });
     expect(getAppliedPresets).not.toHaveBeenCalled();
+    expect(deps.execSandbox).not.toHaveBeenCalled();
+  });
+
+  it("does not route a receipt-backed future package through built-in channel hooks", async () => {
+    const packageId = "future-harness";
+    const authority = packageProfile({
+      kind: "channels",
+      packageId,
+      channelIds: ["telegram"],
+    });
+    const { deps } = makeDeps({
+      exec: () => ({ status: 0, stdout: "", stderr: "" }),
+      sandbox: receiptBackedEntry([], packageId),
+      resolveMessagingProfileAuthority: () => authority,
+      listMessagingChannelsForProfile: (_authority, registry) => [
+        channelFromRegistry(registry, "telegram"),
+      ],
+    });
+
+    const result = await showSandboxChannelStatus("alpha", { deps, channel: "telegram" });
+    const { resolveChannelHookAgent } = await import("./channel-status");
+
+    expect(resolveChannelHookAgent("openclaw")).toBe("openclaw");
+    expect(resolveChannelHookAgent("hermes")).toBe("hermes");
+    expect(resolveChannelHookAgent(packageId)).toBeNull();
+    expect(result).toMatchObject({
+      sandbox: "alpha",
+      channel: "telegram",
+      verdict: "info",
+    });
     expect(deps.execSandbox).not.toHaveBeenCalled();
   });
 

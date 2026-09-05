@@ -30,6 +30,7 @@ import {
   type DiagnosticSeverity,
   type DiagnosticSignal,
 } from "../../messaging/channels/channel-health";
+import type { MessagingAgentId } from "../../messaging/manifest";
 import {
   collectBuiltInMessagingChannelDiagnostics,
   type MessagingChannelDiagnosticSpec,
@@ -492,17 +493,29 @@ function channelSupportedByAgent(channelName: string, agent: AgentDefinition): b
     .some((manifest) => manifest.id === channelName);
 }
 
+export function resolveChannelHookAgent(agentName: string): MessagingAgentId | null {
+  switch (agentName) {
+    case "openclaw":
+    case "hermes":
+      return agentName;
+    default:
+      return null;
+  }
+}
+
 function channelHealthStatusHook(channelName: string, agent: AgentDefinition) {
-  const agentId = agent.name === "hermes" ? "hermes" : "openclaw";
+  const agentId = resolveChannelHookAgent(agent.name);
+  if (agentId === null) return undefined;
   const manifest = channelManifestRegistry
     .listAvailable(getMessagingManifestAvailabilityContext(agent, channelManifestRegistry.list()))
     .find((candidate) => candidate.id === channelName);
-  return manifest?.hooks.find(
+  const hook = manifest?.hooks.find(
     (hook) =>
       hook.phase === "status" &&
       (!hook.agents || hook.agents.includes(agentId)) &&
       hook.outputs?.some((output) => output.id === "channelHealth") === true,
   );
+  return hook ? { agentId, hook } : undefined;
 }
 
 // Runs a deep-probe channel's `phase:"status"` health hook through the
@@ -516,7 +529,7 @@ function channelHealthStatusHook(channelName: string, agent: AgentDefinition) {
 function runChannelHealthHook(
   sandboxName: string,
   channelName: string,
-  agent: AgentDefinition,
+  agentId: MessagingAgentId,
   deps: Required<StatusDeps>,
   diagnostic: MessagingChannelDiagnosticSpec,
   probeTimeoutMs?: number,
@@ -541,7 +554,7 @@ function runChannelHealthHook(
   }
 
   const results = runMessagingStatusHooks({
-    agent: agent.name === "hermes" ? "hermes" : "openclaw",
+    agent: agentId,
     channels: new Set([channelName]),
     currentSandbox: sandboxName,
     hookRegistry: createBuiltInMessagingHookRegistry({
@@ -552,7 +565,7 @@ function runChannelHealthHook(
     }),
     extraInputs: channelHealthProbeInputs({
       currentSandbox: sandboxName,
-      agent: agent.name,
+      agent: agentId,
       probedAt: deps.now().toISOString(),
       channelEnabledInRegistry,
       presetApplied,
@@ -568,7 +581,7 @@ function collectChannelReport(
   agent: AgentDefinition,
   deps: Required<StatusDeps>,
   diagnostic: MessagingChannelDiagnosticSpec,
-  hasHealthHook: boolean,
+  healthHookAgentId: MessagingAgentId | null,
   deadlineMs?: number,
 ): ChannelStatusSingleReport {
   const collectionDeps = deadlineMs === undefined ? deps : withStatusDeadline(deps, deadlineMs);
@@ -581,11 +594,11 @@ function collectChannelReport(
   );
   const channelIsPaused = disabledChannels.has(channelName);
   const healthReport =
-    hasHealthHook && !channelIsPaused
+    healthHookAgentId !== null && !channelIsPaused
       ? runChannelHealthHook(
           sandboxName,
           channelName,
-          agent,
+          healthHookAgentId,
           collectionDeps,
           diagnostic,
           probeTimeoutMs,
@@ -600,7 +613,7 @@ function collectChannelReport(
       diagnostic,
       { channelPaused: channelIsPaused },
     );
-    if (!hasHealthHook) return basicReport;
+    if (healthHookAgentId === null) return basicReport;
     return {
       schemaVersion: 1,
       sandbox: sandboxName,
@@ -806,14 +819,14 @@ export async function showSandboxChannelStatus(
       agent,
       deps,
       diagnostic,
-      Boolean(statusHook),
+      statusHook?.agentId ?? null,
       deadlineMs,
     );
   const report: ChannelStatusReport = options.wait
     ? await waitForChannelReadiness(
         sandboxName,
         channelName,
-        statusHook?.providesReadiness === true,
+        statusHook?.hook.providesReadiness === true,
         collect,
         options,
         deps,
