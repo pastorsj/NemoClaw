@@ -11,7 +11,7 @@ interface HermesToolGatewayBroker {
 type LoadHermesToolGatewayBroker = () => HermesToolGatewayBroker;
 
 function loadHermesToolGatewayBroker(): HermesToolGatewayBroker {
-  return require("./legacy-hermes-tool-gateway-broker") as HermesToolGatewayBroker;
+  return require("./legacy/hermes-broker") as HermesToolGatewayBroker;
 }
 
 /**

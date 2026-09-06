@@ -1237,7 +1237,7 @@ describe("connectSandbox flow", () => {
     vi.stubEnv("OPENSHELL_GATEWAY", "ambient");
     const sandboxVersion = requireDist("../../src/lib/sandbox/version.js");
     const broker = requireDist(
-      "../../src/lib/actions/sandbox/legacy-hermes-tool-gateway-broker.js",
+      "../../src/lib/actions/sandbox/legacy/hermes-broker.js",
     );
     const brokerSpy = vi
       .spyOn(broker, "ensureHermesToolGatewayBrokerForSandboxEntry")

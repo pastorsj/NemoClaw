@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 
 import { describe, expect, it, type Mock, vi } from "vitest";
 import { managedStartupE2eProfile } from "../../../../../scripts/checks/generate-managed-startup-profile-fixture.mts";
-import type { HermesToolGatewayCloneBroker } from "../legacy-hermes-tool-gateway-clone-broker";
+import type { HermesToolGatewayCloneBroker } from "../legacy/clone-broker";
 import {
   encodeManagedStartupProfile,
   type ManagedStartupProfile,

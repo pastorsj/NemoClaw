@@ -53,7 +53,8 @@ const BROKER_WRAPPER = path.join(
   "lib",
   "actions",
   "sandbox",
-  "legacy-hermes-tool-gateway-broker.ts",
+  "legacy",
+  "hermes-broker.ts",
 );
 const HERMES_CONTROL_CONTRACT = path.join(HERMES_PACKAGE_ROOT, "host", "tool-contract.ts");
 const SOURCE_REQUIRE_HOOK = path.join(REPO_ROOT, "test", "helpers", "onboard-script-mocks.cjs");

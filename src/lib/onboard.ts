@@ -243,8 +243,6 @@ const onboardProviders = require("./onboard/providers");
 const credentialProviderRegistration: typeof import("./onboard/credential-provider-registration") = require("./onboard/credential-provider-registration");
 const setupInferenceFactory: typeof import("./onboard/setup-inference") = require("./onboard/setup-inference");
 const hermesProviderAuth = require("./hermes-provider-auth");
-const { describeHarnessProviderBroker } =
-  require("./agent-runtime/provider-broker") as typeof import("./agent-runtime/provider-broker");
 const onboardHermesDashboard: typeof import("./onboard/hermes-dashboard") = require("./onboard/hermes-dashboard");
 const hermesAuth: typeof import("./onboard/hermes-auth") = require("./onboard/hermes-auth");
 const {
@@ -257,7 +255,7 @@ const {
 
 type HermesAuthMethod = import("./onboard/hermes-auth").HermesAuthMethod;
 function getHermesToolGatewayBroker(): any {
-  return require("./actions/sandbox/legacy-hermes-tool-gateway-broker");
+  return require("./actions/sandbox/legacy/hermes-broker");
 }
 
 type RemoteProviderConfigEntry = {
@@ -1518,7 +1516,7 @@ const sandboxCreateOrchestrationRuntime = {
   getDefaultSandboxNameForAgent,
   getDockerDriverGatewayStateDir,
   getHermesToolGatewayBroker,
-  describeHarnessProviderBroker,
+  describeHarnessProviderBroker: onboardPackageBoundary.describeHarnessProviderBroker,
   getRequestedSandboxAgentName,
   getSandboxAgentDrift,
   getSandboxRecreateObservation,
@@ -2374,7 +2372,7 @@ function getSetupInferenceDeps(): SetupInferenceDeps {
     listSandboxes: registry.listSandboxes,
     unloadOllamaModels,
     hermesProviderAuth,
-    describeHarnessProviderBroker,
+    describeHarnessProviderBroker: onboardPackageBoundary.describeHarnessProviderBroker,
     providerExistsInGateway,
     normalizeHermesAuthMethod,
     resolveHermesNousApiKey,

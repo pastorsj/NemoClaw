@@ -8,7 +8,7 @@ import { cloneAndDeepFreeze } from "../../../core/immutable";
 import {
   getHermesToolGatewayCloneBroker,
   type HermesToolGatewayCloneBroker,
-} from "../legacy-hermes-tool-gateway-clone-broker";
+} from "../legacy/clone-broker";
 import type { PreparedLegacyManagedWorkloadCloneHandoff } from "../../../onboard/workload/legacy-clone";
 import type { SandboxEntry } from "../../../state/registry/types";
 import * as sandboxState from "../../../state/sandbox";

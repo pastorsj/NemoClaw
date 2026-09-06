@@ -51,5 +51,5 @@ export type HermesToolGatewayCloneBroker = {
 
 /** Lazy CommonJS bridge, kept injectable so tests never start a host broker. */
 export function getHermesToolGatewayCloneBroker(): HermesToolGatewayCloneBroker {
-  return require("./legacy-hermes-tool-gateway-broker") as HermesToolGatewayCloneBroker;
+  return require("./hermes-broker") as HermesToolGatewayCloneBroker;
 }

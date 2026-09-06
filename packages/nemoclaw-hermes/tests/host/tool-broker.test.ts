@@ -34,7 +34,7 @@ const BROKER_WRAPPER = path.join(
   "../../../..",
   "src",
   "lib",
-  "actions/sandbox/legacy-hermes-tool-gateway-broker.ts",
+  "actions/sandbox/legacy/hermes-broker.ts",
 );
 const CONTROL_CONTRACT = path.join(import.meta.dirname, "../..", "host", "tool-contract.ts");
 

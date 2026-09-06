@@ -41,7 +41,7 @@ type HermesToolGatewayBroker = {
 };
 
 function getHermesToolGatewayBroker(): HermesToolGatewayBroker {
-  return require("./actions/sandbox/legacy-hermes-tool-gateway-broker") as HermesToolGatewayBroker;
+  return require("./actions/sandbox/legacy/hermes-broker") as HermesToolGatewayBroker;
 }
 
 export const HERMES_INFERENCE_CREDENTIAL_ENV = "OPENAI_API_KEY";

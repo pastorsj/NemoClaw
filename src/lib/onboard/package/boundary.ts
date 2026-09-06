@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from "node:util";
 import { createAgentAliasMap, resolveAgentNameAlias } from "../../agent/aliases";
 import type { AgentDefinition } from "../../agent/defs";
 import { readAgentAliasTargets } from "../../agent/manifest-inventory";
+import { describeHarnessProviderBroker } from "../../agent-runtime/provider-broker";
 import { getBundledHarnessPackageRoot } from "../../agent-runtime/package/catalog";
 import {
   inspectHarnessPackageState,
@@ -49,7 +50,7 @@ import {
   requireCurrentSessionHarnessPackageAuthority,
 } from "./package-authority";
 
-export { requireCurrentSessionHarnessPackageAuthority };
+export { describeHarnessProviderBroker, requireCurrentSessionHarnessPackageAuthority };
 
 type SelectedOnboardHarness = Exclude<
   OnboardHarnessPackageSelection,

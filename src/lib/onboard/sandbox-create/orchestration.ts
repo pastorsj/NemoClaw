@@ -11,7 +11,6 @@ import { HERMES_PORTABLE_OPENSHELL_VERSION } from "../../adapters/openshell/reso
 import { createCliOpenShellSandboxObserverFromRunner } from "../../adapters/openshell/sandbox-observer-cli";
 import { NEMOCLAW_CREATE_ATTEMPT_LABEL } from "../../adapters/openshell/sandbox-identity";
 import type { AgentDefinition } from "../../agent/defs";
-import { describeHarnessProviderBroker } from "../../agent-runtime/provider-broker";
 import type { WebSearchConfig } from "../../inference/web-search";
 import {
   getMessagingPolicyKeysByChannel,
@@ -1524,6 +1523,7 @@ export function createSandboxWithBaseImageResolution(runtime: SandboxCreateOrche
       getDefaultSandboxNameForAgent,
       getDockerDriverGatewayStateDir,
       getHermesToolGatewayBroker,
+      describeHarnessProviderBroker,
       getRequestedSandboxAgentName,
       getSandboxAgentDrift,
       getSandboxRecreateObservation,

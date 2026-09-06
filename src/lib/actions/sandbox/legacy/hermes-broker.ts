@@ -10,12 +10,12 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
-const { parseHarnessPackageManifest } = require("../../agent-runtime/package/manifest");
-const { ROOT, run, runCapture, runCaptureEx, validateName } = require("../../runner");
-const { buildSubprocessEnv } = require("../../subprocess-env");
-const { getCredsDir } = require("../../credentials/store");
-const oauth = require("../../oauth-device-code");
-const onboardProviders = require("../../onboard/providers");
+const { parseHarnessPackageManifest } = require("../../../agent-runtime/package/manifest");
+const { ROOT, run, runCapture, runCaptureEx, validateName } = require("../../../runner");
+const { buildSubprocessEnv } = require("../../../subprocess-env");
+const { getCredsDir } = require("../../../credentials/store");
+const oauth = require("../../../oauth-device-code");
+const onboardProviders = require("../../../onboard/providers");
 
 const HERMES_HOST_RUNTIME_FILE_NAMES = Object.freeze([
   "tool-broker.ts",
