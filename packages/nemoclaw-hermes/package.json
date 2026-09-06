@@ -7,7 +7,7 @@
   "scripts": {
     "build:adapters": "nemoclaw-build-adapters .",
     "build:runtime": "nemoclaw-materialize-runtime managed-gateway runtime/managed-gateway-control.py && nemoclaw-materialize-runtime messaging-build messaging/messaging-build.mts",
-    "build:package": "npm run build:runtime && nemoclaw-build-package . ./dist/nemoclaw-hermes",
+    "build:package": "npm run build:runtime && nemoclaw-build-package --create-output-parent . ../dist/hermes",
     "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
     "check:runtime": "nemoclaw-materialize-runtime managed-gateway runtime/managed-gateway-control.py --check && nemoclaw-materialize-runtime messaging-build messaging/messaging-build.mts --check",
     "check:package": "nemoclaw-validate-package .",

@@ -751,7 +751,10 @@ describe("package checkout installed digest", () => {
       `${JSON.stringify({
         name: "@nvidia/nemoclaw-example",
         nemoclaw: { harnessManifest: "manifest.yaml" },
-        scripts: { "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts" },
+        scripts: {
+          "build:package": "nemoclaw-build-package --create-output-parent . ../dist/example",
+          "test:nemoclaw": "vitest run --config vitest.nemoclaw.ts",
+        },
         devDependencies: { "@nvidia/nemoclaw-harness-contract": "^0.1.0" },
       })}\n`,
     );
@@ -773,7 +776,11 @@ describe("package checkout installed digest", () => {
         return { stdout: '[{"filename":"nvidia-nemoclaw-harness-contract-0.1.0.tgz"}]' };
       },
       "build candidate package artifact": (command) => {
-        fs.mkdirSync(path.join(command.cwd, "dist", "nemoclaw-example"), { recursive: true });
+        const artifact = path.join(command.cwd, "..", "dist", "example");
+        fs.mkdirSync(artifact, { recursive: true });
+        fs.writeFileSync(path.join(artifact, "nemoclaw-package.json"), "{}\n");
+        fs.chmodSync(path.join(artifact, "nemoclaw-package.json"), 0o444);
+        fs.chmodSync(artifact, 0o555);
         return { stdout: "" };
       },
       "list installed harnesses": () => ({
@@ -821,24 +828,41 @@ describe("package checkout installed digest", () => {
         "read installed harness digest",
       ]);
       expect(commandPurposes).toContain("run candidate NemoClaw integration tests");
-      expect(
-        commands.find(({ purpose }) => purpose === "run candidate NemoClaw integration tests")?.cwd,
-      ).toMatch(/nemoclaw\/packages\/nemoclaw-example$/u);
+      const buildCommand = commands.find(
+        ({ purpose }) => purpose === "build candidate package artifact",
+      );
+      expect(buildCommand).toMatchObject({
+        args: ["run", "build:package"],
+      });
+      if (!buildCommand) throw new Error("Expected the candidate package build command");
+      expect(path.basename(buildCommand.cwd)).toBe("candidate-package");
+      const expectedPackageArtifact = path.join(path.dirname(buildCommand.cwd), "dist", "example");
+      const integrationTestCommand = commands.find(
+        ({ purpose }) => purpose === "run candidate NemoClaw integration tests",
+      );
+      if (!integrationTestCommand)
+        throw new Error("Expected the candidate integration test command");
+      expect(path.basename(integrationTestCommand.cwd)).toBe("nemoclaw-example");
+      expect(path.basename(path.dirname(integrationTestCommand.cwd))).toBe("packages");
       const installCommand = commands.find(
         ({ purpose }) => purpose === "install candidate harness",
       );
+      if (!installCommand) throw new Error("Expected the candidate harness install command");
+      const cliPath = installCommand.args[0];
+      expect(cliPath.endsWith(path.join("bin", "nemoclaw.js"))).toBe(true);
       expect(installCommand?.args).toEqual([
-        expect.stringMatching(/bin\/nemoclaw\.js$/u),
+        cliPath,
         "harness",
         "install",
         "example",
         "--from",
-        expect.stringMatching(/candidate-package\/dist\/nemoclaw-example$/u),
+        expectedPackageArtifact,
         "--yes-i-trust-local-package",
       ]);
-      expect(installCommand?.args.join(" ")).not.toContain(
+      expect(installCommand.args.join(" ")).not.toContain(
         `${path.sep}packages${path.sep}nemoclaw-example`,
       );
+      expect(fs.readdirSync(parent).filter((entry) => entry.startsWith("nc-"))).toEqual([]);
     } finally {
       fs.rmSync(parent, { recursive: true, force: true });
     }

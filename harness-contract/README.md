@@ -175,7 +175,7 @@ package:
     "build:adapters": "nemoclaw-build-adapters .",
     "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
     "check:package": "nemoclaw-validate-package .",
-    "build:package": "nemoclaw-build-package . ./dist/nemoclaw-example"
+    "build:package": "nemoclaw-build-package --create-output-parent . ../dist/example"
   }
 }
 ```
@@ -187,9 +187,9 @@ npm run check:adapters
 npm run check:package
 npm run build:package
 
-nemoclaw harness validate ./dist/nemoclaw-example
+nemoclaw harness validate ../dist/example
 nemoclaw harness install example \
-  --from ./dist/nemoclaw-example \
+  --from ../dist/example \
   --yes-i-trust-local-package
 ```
 
@@ -202,8 +202,11 @@ freshness, file types and modes, credential-shaped paths, and the npm publish se
 `npm pack` with lifecycle scripts disabled.
 
 `nemoclaw-build-package` copies that validated publish set into a new read-only directory and adds
-`nemoclaw-package.json`. It does not replace an existing output. Source files, tests, lockfiles,
-and development dependencies do not enter the runtime artifact.
+`nemoclaw-package.json`. The example writes to the sibling `../dist` directory because an artifact
+cannot be inside its source package. The CLI creates that one parent when it is absent. It does not
+replace an existing output. Source files, tests, lockfiles, and development dependencies do not
+enter the runtime artifact. The exported builder API still requires an existing, caller-owned
+output parent.
 
 ## Receipt and lifecycle boundary
 

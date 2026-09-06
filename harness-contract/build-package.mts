@@ -480,22 +480,55 @@ function isMainModule(): boolean {
   }
 }
 
+/** Create only the immediate artifact parent requested by the package CLI. */
+function prepareCliOutputParent(packageRootInput: string, outputDirectoryInput: string): void {
+  const packageRoot = resolveBoundedPath(packageRootInput, "package");
+  const outputDirectory = resolveBoundedPath(outputDirectoryInput, "output");
+  assertSeparateOutput(packageRoot, outputDirectory);
+  const outputParent = path.dirname(outputDirectory);
+  try {
+    fs.lstatSync(outputParent);
+    return;
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) {
+      throw buildError("output-path", "<output-parent>", "could not be inspected safely");
+    }
+  }
+
+  try {
+    fs.mkdirSync(outputParent, { mode: 0o700 });
+  } catch (error) {
+    // A concurrent creator is safe only if the builder validates its result.
+    if (!isErrno(error, "EEXIST")) {
+      throw buildError("output-path", "<output-parent>", "could not be created safely");
+    }
+  }
+}
+
 function main(): void {
   const arguments_ = process.argv.slice(2);
   const json = arguments_.includes("--json");
-  const positional = arguments_.filter((argument) => argument !== "--json");
+  const createOutputParent = arguments_.includes("--create-output-parent");
+  const positional = arguments_.filter(
+    (argument) => argument !== "--json" && argument !== "--create-output-parent",
+  );
   if (
     positional.length !== 2 ||
     arguments_.filter((argument) => argument === "--json").length > 1 ||
-    arguments_.some((argument) => argument.startsWith("-") && argument !== "--json")
+    arguments_.filter((argument) => argument === "--create-output-parent").length > 1 ||
+    arguments_.some(
+      (argument) =>
+        argument.startsWith("-") && argument !== "--json" && argument !== "--create-output-parent",
+    )
   ) {
     process.stderr.write(
-      "Usage: nemoclaw-build-package [--json] <package-root> <output-directory>\n",
+      "Usage: nemoclaw-build-package [--json] [--create-output-parent] <package-root> <output-directory>\n",
     );
     process.exitCode = 2;
     return;
   }
   try {
+    if (createOutputParent) prepareCliOutputParent(positional[0], positional[1]);
     const result = materializeHarnessPackageArtifact(positional[0], positional[1]);
     process.stdout.write(
       json

@@ -137,7 +137,8 @@ function createExternalPackage(packageRoot: string, archives: readonly string[])
           "build:adapters": "nemoclaw-build-adapters .",
           "check:adapters": "tsc -p tsconfig.adapters.json && nemoclaw-build-adapters . --check",
           "check:package": "nemoclaw-validate-package --json .",
-          "build:package": "nemoclaw-build-package --json . ../runtime-artifact",
+          "build:package":
+            "nemoclaw-build-package --json --create-output-parent . ../dist/future-terminal",
           "test:fabric": "node fabric-check.cjs",
         },
         files: [
@@ -621,7 +622,7 @@ test("an independent package consumes the packed typed contract with normal npm 
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-external-contract-"));
   const archiveRoot = path.join(fixtureRoot, "archives");
   const packageRoot = path.join(fixtureRoot, "nemoclaw-future-terminal");
-  const artifactRoot = path.join(fixtureRoot, "runtime-artifact");
+  const artifactRoot = path.join(fixtureRoot, "dist", "future-terminal");
   fs.mkdirSync(archiveRoot);
   fs.mkdirSync(packageRoot);
 

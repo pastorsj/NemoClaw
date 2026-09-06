@@ -207,6 +207,64 @@ test("the package builder binary writes one absent output and reports JSON", () 
   }
 });
 
+test("the package builder CLI creates one requested parent without weakening the API", () => {
+  const fixture = createPackageFixture();
+  const outputRoot = path.join(fixture.root, "dist", "future-shell");
+  try {
+    assert.throws(
+      () => materializeHarnessPackageArtifact(fixture.packageRoot, outputRoot),
+      (error) =>
+        error instanceof HarnessPackageBuildError && error.diagnostic.code === "output-path",
+    );
+    assert.equal(fs.existsSync(path.dirname(outputRoot)), false);
+
+    const nestedOutputRoot = path.join(fixture.root, "nested", "dist", "future-shell");
+    const nested = spawnSync(
+      process.execPath,
+      [
+        path.join(CONTRACT_ROOT, "build-package.mts"),
+        "--create-output-parent",
+        fixture.packageRoot,
+        nestedOutputRoot,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(nested.status, 1);
+    assert.match(nested.stderr, /could not be created safely/u);
+    assert.equal(fs.existsSync(path.join(fixture.root, "nested")), false);
+
+    const first = spawnSync(
+      process.execPath,
+      [
+        path.join(CONTRACT_ROOT, "build-package.mts"),
+        "--create-output-parent",
+        fixture.packageRoot,
+        outputRoot,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(first.status, 0, first.stderr);
+    const envelope = fs.readFileSync(path.join(outputRoot, "nemoclaw-package.json"), "utf8");
+
+    const second = spawnSync(
+      process.execPath,
+      [
+        path.join(CONTRACT_ROOT, "build-package.mts"),
+        "--create-output-parent",
+        fixture.packageRoot,
+        outputRoot,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(second.status, 1);
+    assert.match(second.stderr, /must not already exist/u);
+    assert.equal(fs.readFileSync(path.join(outputRoot, "nemoclaw-package.json"), "utf8"), envelope);
+  } finally {
+    makeTreeWritable(outputRoot);
+    removeFixture(fixture);
+  }
+});
+
 test("refuses an existing output without changing its files", async (t) => {
   await t.test("an existing directory", () => {
     const fixture = createPackageFixture();
@@ -377,6 +435,6 @@ test("rejects unsupported builder options without reading package files", () => 
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "Usage: nemoclaw-build-package [--json] <package-root> <output-directory>\n",
+    "Usage: nemoclaw-build-package [--json] [--create-output-parent] <package-root> <output-directory>\n",
   );
 });

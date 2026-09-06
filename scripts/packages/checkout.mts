@@ -836,10 +836,10 @@ function runComposedRehearsal(
     harnessContractArchive,
   );
   runCommand(npmCommand(coreRoot, env, "build NemoClaw CLI", ["run", "build:cli"]));
+  const packageArtifact = path.join(rehearsalRoot, "dist", options.packageId);
   runCommand(
     npmCommand(packageRoot, env, "build candidate package artifact", ["run", "build:package"]),
   );
-  const packageArtifact = path.join(packageRoot, "dist", `nemoclaw-${options.packageId}`);
   assertRegularDirectory(packageArtifact, "Candidate package artifact");
 
   if (packageMetadata.hasNemoclawTestScript) {
@@ -981,7 +981,7 @@ export function runPackageCheckoutRehearsal(
     return runComposedRehearsal(options, rehearsalRoot, env, runCommand);
   } finally {
     prepareCheckoutRootRemoval(rehearsalRoot);
-    makeManagedOutputWritable(path.join(rehearsalRoot, "candidate-package", "dist"));
+    makeManagedOutputWritable(path.join(rehearsalRoot, "dist"));
     fs.rmSync(rehearsalRoot, { recursive: true, force: true });
   }
 }

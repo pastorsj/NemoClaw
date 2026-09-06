@@ -261,11 +261,15 @@ npm run check:adapters
 npm run check:package
 npm run build:package
 
-nemoclaw harness validate ./dist/nemoclaw-example
+nemoclaw harness validate ../dist/example
 nemoclaw harness install example \
-  --from ./dist/nemoclaw-example \
+  --from ../dist/example \
   --yes-i-trust-local-package
 ```
+
+`build:package` writes the read-only artifact to `../dist/<package-id>`. The artifact stays outside
+the package source and the command creates the sibling `dist` directory when needed. Move an earlier
+artifact before another build. The builder never replaces an existing output.
 
 The lifecycle is receipt-based:
 

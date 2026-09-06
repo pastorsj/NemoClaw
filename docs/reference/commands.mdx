@@ -261,14 +261,47 @@ Pass the exact ID shown by `nemoclaw harness list` for scripts and other non-int
 
 ```bash
 nemoclaw harness install openclaw
+nemoclaw harness install example \
+  --from /path/to/nemoclaw-example \
+  --yes-i-trust-local-package
 ```
 
 In an interactive terminal, omit `[id]` to choose from reviewed packages that are not already installed.
 The command copies and verifies the selected package, then records its exact identity in the current user's NemoClaw state.
 Installing the same exact package again is safe and keeps that identity active.
 
-The install command does not accept a filesystem path, URL, remote package source, or catalog-refresh option.
-It installs only the reviewed artifacts carried by the installed NemoClaw build, and it does not run package lifecycle scripts or package tests.
+The normal install path accepts only reviewed artifacts carried by the installed NemoClaw build.
+It does not accept a URL, remote package source, or catalog-refresh option.
+
+The experimental `--from` path accepts one local built package directory and requires its canonical package ID.
+Review the package before you pass `--yes-i-trust-local-package` because package adapters run as trusted code during later operations.
+The install command validates and stores the artifact, but it does not run package lifecycle scripts or package tests.
+
+### `nemoclaw harness activate <id>`
+
+Activate an installed package revision for new sandboxes.
+This experimental development command moves the package's active pointer to an immutable receipt that is already in the local package store.
+
+```bash
+nemoclaw harness activate openclaw --digest sha256:<content-digest>
+nemoclaw harness activate openclaw --digest sha256:<content-digest> --json
+```
+
+The command verifies the package ID, digest, receipt, and stored content before it changes the active pointer.
+Existing sandboxes remain bound to their recorded package receipt.
+
+### `nemoclaw harness remove <id>`
+
+Deactivate a harness package for new sandboxes without deleting its immutable package history.
+
+```bash
+nemoclaw harness remove openclaw --yes
+nemoclaw harness remove openclaw --yes --json
+```
+
+Omit `--yes` in an interactive terminal to confirm the change at the prompt.
+Non-interactive and JSON invocations require `--yes` when the package is active.
+Use `nemoclaw harness activate` with a retained digest to activate that revision again.
 
 ### `nemoclaw harness validate <artifact-directory>`
 

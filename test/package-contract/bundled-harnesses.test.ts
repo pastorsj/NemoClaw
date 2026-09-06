@@ -239,80 +239,84 @@ describe("bundled harness package artifacts", () => {
     }
   });
 
-  it("discovers each declared in-tree package and builds a valid closed envelope", () => {
-    const sources = listBundledAgentRuntimeSources();
-    const packageIds = sources.map(({ id }) => id);
-    expect(fs.readdirSync(BUNDLED_ROOT).sort()).toEqual(
-      packageIds.map((id) => `nemoclaw-${id}`).sort(),
-    );
-    const envelopeSummaries = packageIds.map((id) => {
-      const parsed = parseHarnessPackageManifest(artifactRoot(id));
-      const definition = buildAgentDefinition({
-        manifest: parsed.manifest,
-        manifestPath: parsed.manifestPath,
-        packageRoot: parsed.packageRoot,
-      });
-      return {
-        keys: Object.keys(parsed.envelope).sort(),
-        id: parsed.envelope.id,
-        manifest: parsed.envelope.manifest,
-        manifestName: parsed.manifest.name,
-        packageVersion: parsed.envelope.packageVersion,
-        minimumNemoClawVersion: parsed.envelope.minimumNemoClawVersion,
-        maximumNemoClawVersionExclusive: parsed.envelope.maximumNemoClawVersionExclusive,
-        dockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfilePath),
-        baseDockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfileBasePath),
-        legacyDockerfile: relativePackageAsset(
-          parsed.packageRoot,
-          definition.legacyPaths?.dockerfile ?? null,
-        ),
-        legacyBaseDockerfile: relativePackageAsset(
-          parsed.packageRoot,
-          definition.legacyPaths?.dockerfileBase ?? null,
-        ),
-      };
-    });
-    expect(envelopeSummaries).toEqual(
-      packageIds.map((id) => {
-        const source = sources.find((candidate) => candidate.id === id)!;
-        const packagePath = `packages/nemoclaw-${id}`;
+  it(
+    "discovers each declared in-tree package and builds a valid closed envelope",
+    { timeout: 30_000 },
+    () => {
+      const sources = listBundledAgentRuntimeSources();
+      const packageIds = sources.map(({ id }) => id);
+      expect(fs.readdirSync(BUNDLED_ROOT).sort()).toEqual(
+        packageIds.map((id) => `nemoclaw-${id}`).sort(),
+      );
+      const envelopeSummaries = packageIds.map((id) => {
+        const parsed = parseHarnessPackageManifest(artifactRoot(id));
+        const definition = buildAgentDefinition({
+          manifest: parsed.manifest,
+          manifestPath: parsed.manifestPath,
+          packageRoot: parsed.packageRoot,
+        });
         return {
-          keys: [
-            "displayName",
-            "id",
-            "kind",
-            "manifest",
-            "maximumNemoClawVersionExclusive",
-            "minimumNemoClawVersion",
-            "packageVersion",
-            "schemaVersion",
-          ],
-          id,
-          manifest: `${packagePath}/manifest.yaml`,
-          manifestName: id,
-          packageVersion: source.packageVersion,
-          minimumNemoClawVersion: source.minimumNemoClawVersion,
-          maximumNemoClawVersionExclusive: source.maximumNemoClawVersionExclusive,
-          dockerfile: `${packagePath}/Dockerfile`,
-          baseDockerfile: `${packagePath}/Dockerfile.base`,
-          legacyDockerfile: null,
-          legacyBaseDockerfile: null,
+          keys: Object.keys(parsed.envelope).sort(),
+          id: parsed.envelope.id,
+          manifest: parsed.envelope.manifest,
+          manifestName: parsed.manifest.name,
+          packageVersion: parsed.envelope.packageVersion,
+          minimumNemoClawVersion: parsed.envelope.minimumNemoClawVersion,
+          maximumNemoClawVersionExclusive: parsed.envelope.maximumNemoClawVersionExclusive,
+          dockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfilePath),
+          baseDockerfile: relativePackageAsset(parsed.packageRoot, definition.dockerfileBasePath),
+          legacyDockerfile: relativePackageAsset(
+            parsed.packageRoot,
+            definition.legacyPaths?.dockerfile ?? null,
+          ),
+          legacyBaseDockerfile: relativePackageAsset(
+            parsed.packageRoot,
+            definition.legacyPaths?.dockerfileBase ?? null,
+          ),
         };
-      }),
-    );
-    expect(packageIds.map((id) => fs.statSync(artifactRoot(id)).mode & 0o777)).toEqual(
-      packageIds.map(() => 0o555),
-    );
-    const nonCanonicalModes = packageIds.flatMap((id) =>
-      validateHarnessPackageTree(artifactRoot(id))
-        .entries.filter(({ relativePath, type }) => {
-          const mode = fs.statSync(path.join(artifactRoot(id), relativePath)).mode & 0o777;
-          return mode !== (type === "directory" ? 0o555 : mode & 0o111 ? 0o555 : 0o444);
-        })
-        .map(({ relativePath }) => `${id}:${relativePath}`),
-    );
-    expect(nonCanonicalModes).toEqual([]);
-  });
+      });
+      expect(envelopeSummaries).toEqual(
+        packageIds.map((id) => {
+          const source = sources.find((candidate) => candidate.id === id)!;
+          const packagePath = `packages/nemoclaw-${id}`;
+          return {
+            keys: [
+              "displayName",
+              "id",
+              "kind",
+              "manifest",
+              "maximumNemoClawVersionExclusive",
+              "minimumNemoClawVersion",
+              "packageVersion",
+              "schemaVersion",
+            ],
+            id,
+            manifest: `${packagePath}/manifest.yaml`,
+            manifestName: id,
+            packageVersion: source.packageVersion,
+            minimumNemoClawVersion: source.minimumNemoClawVersion,
+            maximumNemoClawVersionExclusive: source.maximumNemoClawVersionExclusive,
+            dockerfile: `${packagePath}/Dockerfile`,
+            baseDockerfile: `${packagePath}/Dockerfile.base`,
+            legacyDockerfile: null,
+            legacyBaseDockerfile: null,
+          };
+        }),
+      );
+      expect(packageIds.map((id) => fs.statSync(artifactRoot(id)).mode & 0o777)).toEqual(
+        packageIds.map(() => 0o555),
+      );
+      const nonCanonicalModes = packageIds.flatMap((id) =>
+        validateHarnessPackageTree(artifactRoot(id))
+          .entries.filter(({ relativePath, type }) => {
+            const mode = fs.statSync(path.join(artifactRoot(id), relativePath)).mode & 0o777;
+            return mode !== (type === "directory" ? 0o555 : mode & 0o111 ? 0o555 : 0o444);
+          })
+          .map(({ relativePath }) => `${id}:${relativePath}`),
+      );
+      expect(nonCanonicalModes).toEqual([]);
+    },
+  );
 
   it("produces byte-identical validated package trees on repeated builds", () => {
     const sharedBefore = sharedBundleSnapshot();

@@ -37,6 +37,35 @@ type HarnessPackageValidationReport = {
   totalBytes: number;
 };
 
+const BUILT_HARNESS_MANIFEST = [
+  "name: example-runtime",
+  "runtime:",
+  "  kind: terminal",
+  "  headless_command: example-runtime run",
+  "config:",
+  "  dir: /sandbox/.example-runtime",
+  "  config_file: config.json",
+  "  format: json",
+  "inference:",
+  "  config_update:",
+  "    support: unsupported",
+  "    reason: This fixture has fixed inference configuration.",
+  "messaging:",
+  "  support: disabled",
+  "state_lifecycle:",
+  "  backup_quiescence:",
+  "    kind: not-required",
+  "  snapshot_restore: []",
+  "  rebuild:",
+  "    image_plugin_provenance: not-required",
+  "    scheduled_work:",
+  "      support: disabled",
+  "      reason: This fixture does not run scheduled work.",
+  "    post_restore:",
+  "      kind: not-required",
+  "",
+].join("\n");
+
 function writeArtifactFile(
   artifactDirectory: string,
   relativePath: string,
@@ -69,7 +98,7 @@ function createBuiltHarnessArtifact(fixtureRoot: string): string {
   writeArtifactFile(
     artifactDirectory,
     "agents/example-runtime/manifest.yaml",
-    "name: example-runtime\nruntime:\n  kind: terminal\n  headless_command: example-runtime run\n",
+    BUILT_HARNESS_MANIFEST,
   );
   writeArtifactFile(artifactDirectory, "runtime/payload.txt", "first payload\n");
   return artifactDirectory;
@@ -369,7 +398,7 @@ describe("public compiled CLI contracts", () => {
         writeArtifactFile(
           artifactDirectory,
           "agents/example-runtime/manifest.yaml",
-          "name: example-runtime\nruntime:\n  kind: terminal\n",
+          BUILT_HARNESS_MANIFEST.replace("  headless_command: example-runtime run\n", ""),
         );
         const malformed = runInstalledCli(fixture, ["harness", "validate", artifactDirectory]);
         expect(malformed.status).not.toBe(0);

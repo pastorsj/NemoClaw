@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "build:adapters": "nemoclaw-build-adapters .",
-    "build:package": "nemoclaw-build-package . ./dist/nemoclaw-pi",
+    "build:package": "nemoclaw-build-package --create-output-parent . ../dist/pi",
     "check:adapters": "tsc -p tsconfig.adapters.json && npm run build:adapters -- --check",
     "check:package": "nemoclaw-validate-package .",
     "test:fabric": "bash tests/fabric/run-tests.sh",
