@@ -36,6 +36,7 @@ export const oxcIgnorePatterns = [
   "**/auto-generated",
   "**/codegen",
   "**/__generated__",
+  "packages/nemoclaw-*/host/*-adapter.cts",
   "**/graphql-types.*",
   "**/schema.d.ts",
   "**/schema.graphql.d.ts",

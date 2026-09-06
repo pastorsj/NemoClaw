@@ -9,115 +9,115 @@ const RESTART_STATE = "/run/nemoclaw/hermes-restart-seal.json";
 const HEADER_VALUE_MAX_LENGTH = 128;
 const PROXY_REWRITE_SENTINEL = "sk-OPENSHELL-PROXY-REWRITE";
 function requireTarget(target) {
-  if (
-    target.directory !== CONFIG_DIRECTORY ||
-    target.file !== CONFIG_FILE ||
-    target.format !== "yaml"
-  ) {
-    throw new Error("Hermes configuration target does not match its package manifest");
-  }
+    if (target.directory !== CONFIG_DIRECTORY ||
+        target.file !== CONFIG_FILE ||
+        target.format !== "yaml") {
+        throw new Error("Hermes configuration target does not match its package manifest");
+    }
 }
 function isObject(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function cloneConfig(config) {
-  return JSON.parse(JSON.stringify(config));
+    return JSON.parse(JSON.stringify(config));
 }
 function inferenceApiMode(api) {
-  switch (api) {
-    case "openai-completions":
-      return null;
-    case "anthropic-messages":
-      return "anthropic_messages";
-    case "openai-responses":
-      return "codex_responses";
-    default:
-      throw new Error("Hermes received an unsupported inference API");
-  }
+    switch (api) {
+        case "openai-completions":
+            return null;
+        case "anthropic-messages":
+            return "anthropic_messages";
+        case "openai-responses":
+            return "codex_responses";
+        default:
+            throw new Error("Hermes received an unsupported inference API");
+    }
 }
 function providerKey(provider) {
-  const normalized = provider
-    .trim()
-    .toLowerCase()
-    .replaceAll(" ", "-")
-    .replace(/[()]/gu, "")
-    .replace(/-+/gu, "-")
-    .replace(/^-|-$/gu, "");
-  return normalized || "nemoclaw-inference";
+    const normalized = provider
+        .trim()
+        .toLowerCase()
+        .replaceAll(" ", "-")
+        .replace(/[()]/gu, "")
+        .replace(/-+/gu, "-")
+        .replace(/^-|-$/gu, "");
+    return normalized || "nemoclaw-inference";
 }
 function applyInferenceRoute(config, request) {
-  const providerName = request.route.upstreamProvider || "nemoclaw-inference";
-  const nextProviderKey = providerKey(providerName);
-  const apiMode = inferenceApiMode(request.route.api);
-  const previousUpstream = isObject(config._nemoclaw_upstream) ? config._nemoclaw_upstream : {};
-  const previousProviderKey =
-    typeof previousUpstream.provider_key === "string" ? previousUpstream.provider_key : "";
-  const modelConfig = {
-    default: request.route.model,
-    provider: "custom",
-    base_url: request.route.baseUrl,
-    api_key: PROXY_REWRITE_SENTINEL,
-  };
-  if (apiMode) modelConfig.api_mode = apiMode;
-  if (request.contextWindow !== null) modelConfig.context_length = request.contextWindow;
-  const providerConfig = {
-    name: providerName,
-    api: request.route.baseUrl,
-    api_key: PROXY_REWRITE_SENTINEL,
-    default_model: request.route.model,
-    discover_models: true,
-  };
-  if (apiMode) providerConfig.transport = apiMode;
-  const customProvider = {
-    name: providerName,
-    base_url: request.route.baseUrl,
-    api_key: PROXY_REWRITE_SENTINEL,
-    discover_models: true,
-  };
-  if (apiMode) customProvider.api_mode = apiMode;
-  const providers = isObject(config.providers) ? { ...config.providers } : {};
-  if (previousProviderKey && previousProviderKey !== nextProviderKey) {
-    delete providers[previousProviderKey];
-  }
-  providers[nextProviderKey] = providerConfig;
-  const customProviders = Array.isArray(config.custom_providers)
-    ? config.custom_providers.filter(
-        (entry) =>
-          !isObject(entry) ||
-          (entry.name !== previousUpstream.provider && entry.name !== providerName),
-      )
-    : [];
-  customProviders.push(customProvider);
-  config._nemoclaw_upstream = {
-    provider: providerName,
-    provider_key: nextProviderKey,
-    model: request.route.model,
-  };
-  config.model = modelConfig;
-  config.providers = providers;
-  config.custom_providers = customProviders;
+    const providerName = request.route.upstreamProvider || "nemoclaw-inference";
+    const nextProviderKey = providerKey(providerName);
+    const apiMode = inferenceApiMode(request.route.api);
+    const previousUpstream = isObject(config._nemoclaw_upstream) ? config._nemoclaw_upstream : {};
+    const previousProviderKey = typeof previousUpstream.provider_key === "string" ? previousUpstream.provider_key : "";
+    const modelConfig = {
+        default: request.route.model,
+        provider: "custom",
+        base_url: request.route.baseUrl,
+        api_key: PROXY_REWRITE_SENTINEL,
+    };
+    if (apiMode)
+        modelConfig.api_mode = apiMode;
+    if (request.contextWindow !== null)
+        modelConfig.context_length = request.contextWindow;
+    const providerConfig = {
+        name: providerName,
+        api: request.route.baseUrl,
+        api_key: PROXY_REWRITE_SENTINEL,
+        default_model: request.route.model,
+        discover_models: true,
+    };
+    if (apiMode)
+        providerConfig.transport = apiMode;
+    const customProvider = {
+        name: providerName,
+        base_url: request.route.baseUrl,
+        api_key: PROXY_REWRITE_SENTINEL,
+        discover_models: true,
+    };
+    if (apiMode)
+        customProvider.api_mode = apiMode;
+    const providers = isObject(config.providers) ? { ...config.providers } : {};
+    if (previousProviderKey && previousProviderKey !== nextProviderKey) {
+        delete providers[previousProviderKey];
+    }
+    providers[nextProviderKey] = providerConfig;
+    const customProviders = Array.isArray(config.custom_providers)
+        ? config.custom_providers.filter((entry) => !isObject(entry) ||
+            (entry.name !== previousUpstream.provider && entry.name !== providerName))
+        : [];
+    customProviders.push(customProvider);
+    config._nemoclaw_upstream = {
+        provider: providerName,
+        provider_key: nextProviderKey,
+        model: request.route.model,
+    };
+    config.model = modelConfig;
+    config.providers = providers;
+    config.custom_providers = customProviders;
 }
 function sanitizeHeaderValue(value) {
-  const stripped = value.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
-  return stripped.length > HEADER_VALUE_MAX_LENGTH
-    ? stripped.slice(0, HEADER_VALUE_MAX_LENGTH)
-    : stripped;
+    const stripped = value.replace(/[\x00-\x1F\x7F-\x9F]/g, "");
+    return stripped.length > HEADER_VALUE_MAX_LENGTH
+        ? stripped.slice(0, HEADER_VALUE_MAX_LENGTH)
+        : stripped;
 }
 function buildUpstreamHeader(config) {
-  const upstream = config._nemoclaw_upstream;
-  if (!isObject(upstream)) return "";
-  const provider = sanitizeHeaderValue(
-    typeof upstream.provider === "string" ? upstream.provider : "",
-  );
-  const model = sanitizeHeaderValue(typeof upstream.model === "string" ? upstream.model : "");
-  if (!provider && !model) return "";
-  const lines = ["# Managed by NemoClaw — Hermes configuration"];
-  if (provider) lines.push(`# Upstream provider: ${provider}`);
-  if (model) lines.push(`# Upstream model: ${model}`);
-  lines.push("# OpenShell rewrites model.base_url to the upstream endpoint at request time.");
-  return `${lines.join("\n")}\n`;
+    const upstream = config._nemoclaw_upstream;
+    if (!isObject(upstream))
+        return "";
+    const provider = sanitizeHeaderValue(typeof upstream.provider === "string" ? upstream.provider : "");
+    const model = sanitizeHeaderValue(typeof upstream.model === "string" ? upstream.model : "");
+    if (!provider && !model)
+        return "";
+    const lines = ["# Managed by NemoClaw — Hermes configuration"];
+    if (provider)
+        lines.push(`# Upstream provider: ${provider}`);
+    if (model)
+        lines.push(`# Upstream model: ${model}`);
+    lines.push("# OpenShell rewrites model.base_url to the upstream endpoint at request time.");
+    return `${lines.join("\n")}\n`;
 }
-const MUTABLE_CONFIG_PROBE = String.raw`
+const MUTABLE_CONFIG_PROBE = String.raw `
 import os
 import stat
 import sys
@@ -167,110 +167,107 @@ finally:
     os.close(directory_fd)
 `;
 const configAdapter = {
-  describeInferenceConfig(request) {
-    requireTarget(request.target);
-    return {
-      kind: "mutable",
-      providerApiOverrides: [
-        { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
-      ],
-    };
-  },
-  prepareInferenceConfig(request) {
-    requireTarget(request.target);
-    const config = cloneConfig(request.config);
-    const before = JSON.stringify(config);
-    applyInferenceRoute(config, request);
-    return {
-      kind: "mutation",
-      config,
-      changed: before !== JSON.stringify(config),
-      postCommit: {
-        configSync: "required",
-        gatewayRestart: { kind: "not-required" },
-        sandboxReconcile: {
-          kind: "command",
-          trigger: "after-config-sync",
-          command: ["/usr/bin/python3", "-I", "/usr/local/lib/nemoclaw/inference-reconcile.py"],
-          timeoutSeconds: 30,
-        },
-      },
-    };
-  },
-  prepareConfigUpdate(request) {
-    requireTarget(request.target);
-    return {
-      kind: "transaction",
-      content: `${buildUpstreamHeader(request.config)}${request.serializedConfig}`,
-      validation: null,
-      write: {
-        command: [
-          "timeout",
-          "--signal=TERM",
-          "--kill-after=5s",
-          "2m",
-          "/opt/hermes/.venv/bin/python",
-          "-I",
-          CONFIG_GUARD,
-          "write-config",
-          "--hermes-dir",
-          request.target.directory,
-          "--hash-file",
-          CONFIG_HASH,
-          "--state-file",
-          RESTART_STATE,
-          "--expected-config-sha256",
-          request.expectedConfigSha256,
-        ],
-        timeoutSeconds: 150,
-        failureMessage: "Hermes could not commit the configuration transaction.",
-        recoveryGuidance: [
-          "If Hermes reports an integrity metadata mismatch, run the sandbox recovery command before retrying.",
-        ],
-        success: { kind: "exit-zero" },
-      },
-      restart: {
-        kind: "managed",
-        guidance: ["Hermes may restart its gateway when it applies this configuration."],
-      },
-    };
-  },
-  classifyConfigUrl(request) {
-    const security = isObject(request.config.security) ? request.config.security : {};
-    const segments = [...request.key.split("."), ...request.relativePath];
-    const safe = !segments.some((segment) =>
-      ["__proto__", "constructor", "prototype", "toString", "hasOwnProperty"].includes(segment),
-    );
-    return {
-      allowPrivateUrls: security.allow_private_urls === true,
-      allowOpenShellBridge:
-        safe && segments.length === 2 && segments[0] === "model" && segments[1] === "base_url",
-    };
-  },
-  describeMutableConfig(request) {
-    requireTarget(request.target);
-    return {
-      kind: "probe",
-      probe: {
-        command: [
-          "/usr/bin/setpriv",
-          "--reuid=sandbox",
-          "--regid=sandbox",
-          "--init-groups",
-          "--",
-          "/usr/bin/python3",
-          "-I",
-          "-c",
-          MUTABLE_CONFIG_PROBE,
-          request.target.directory,
-          `${request.target.directory}/${request.target.file}`,
-          ...request.target.sensitiveFiles,
-        ],
-        timeoutSeconds: 20,
-        failureMessage: "Hermes mutable configuration posture could not be verified.",
-        success: { kind: "exit-zero" },
-      },
-    };
-  },
+    describeInferenceConfig(request) {
+        requireTarget(request.target);
+        return {
+            kind: "mutable",
+            providerApiOverrides: [
+                { provider: "compatible-anthropic-endpoint", api: "openai-completions" },
+            ],
+        };
+    },
+    prepareInferenceConfig(request) {
+        requireTarget(request.target);
+        const config = cloneConfig(request.config);
+        const before = JSON.stringify(config);
+        applyInferenceRoute(config, request);
+        return {
+            kind: "mutation",
+            config,
+            changed: before !== JSON.stringify(config),
+            postCommit: {
+                configSync: "required",
+                gatewayRestart: { kind: "not-required" },
+                sandboxReconcile: {
+                    kind: "command",
+                    trigger: "after-config-sync",
+                    command: ["/usr/bin/python3", "-I", "/usr/local/lib/nemoclaw/inference-reconcile.py"],
+                    timeoutSeconds: 30,
+                },
+            },
+        };
+    },
+    prepareConfigUpdate(request) {
+        requireTarget(request.target);
+        return {
+            kind: "transaction",
+            content: `${buildUpstreamHeader(request.config)}${request.serializedConfig}`,
+            validation: null,
+            write: {
+                command: [
+                    "timeout",
+                    "--signal=TERM",
+                    "--kill-after=5s",
+                    "2m",
+                    "/opt/hermes/.venv/bin/python",
+                    "-I",
+                    CONFIG_GUARD,
+                    "write-config",
+                    "--hermes-dir",
+                    request.target.directory,
+                    "--hash-file",
+                    CONFIG_HASH,
+                    "--state-file",
+                    RESTART_STATE,
+                    "--expected-config-sha256",
+                    request.expectedConfigSha256,
+                ],
+                timeoutSeconds: 150,
+                failureMessage: "Hermes could not commit the configuration transaction.",
+                recoveryGuidance: [
+                    "If Hermes reports an integrity metadata mismatch, run the sandbox recovery command before retrying.",
+                ],
+                success: { kind: "exit-zero" },
+            },
+            restart: {
+                kind: "managed",
+                guidance: ["Hermes may restart its gateway when it applies this configuration."],
+            },
+        };
+    },
+    classifyConfigUrl(request) {
+        const security = isObject(request.config.security) ? request.config.security : {};
+        const segments = [...request.key.split("."), ...request.relativePath];
+        const safe = !segments.some((segment) => ["__proto__", "constructor", "prototype", "toString", "hasOwnProperty"].includes(segment));
+        return {
+            allowPrivateUrls: security.allow_private_urls === true,
+            allowOpenShellBridge: safe && segments.length === 2 && segments[0] === "model" && segments[1] === "base_url",
+        };
+    },
+    describeMutableConfig(request) {
+        requireTarget(request.target);
+        return {
+            kind: "probe",
+            probe: {
+                command: [
+                    "/usr/bin/setpriv",
+                    "--reuid=sandbox",
+                    "--regid=sandbox",
+                    "--init-groups",
+                    "--",
+                    "/usr/bin/python3",
+                    "-I",
+                    "-c",
+                    MUTABLE_CONFIG_PROBE,
+                    request.target.directory,
+                    `${request.target.directory}/${request.target.file}`,
+                    ...request.target.sensitiveFiles,
+                ],
+                timeoutSeconds: 20,
+                failureMessage: "Hermes mutable configuration posture could not be verified.",
+                success: { kind: "exit-zero" },
+            },
+        };
+    },
 };
 module.exports = configAdapter;
